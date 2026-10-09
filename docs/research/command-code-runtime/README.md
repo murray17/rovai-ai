@@ -12,6 +12,10 @@ last_updated: 2026-09-24
 
 # Command Code Runtime 接入研究
 
+2026-10-09 User 101：[headless 同 Session 换模型与权限验证](headless-resume-2026-10-09.md)已证明
+实际 1.66.0 的 A→B→A、System Mod 和真实续接；普通写入审批仍被原生 print gate 阻断，故保持 ACP 生产入口。
+1.79.1 的模型恢复对照也显示不传 `--model` 时采用全局默认，未按文档描述保持上轮 B。
+
 2026-10-09：[BYOK 模型选择与跨 Runtime 对照](model-selection-2026-10-09.md)复现 1.74.1/1.79.1
 官方 ACP 拒绝自定义模型，而原生默认、CLI 显式选择和真实 first/warm/cold 可用；核对上游 #993，
 并以 OpenCode ACP、Pi RPC 和同源双 Provider 做路由对照。下文早期 headless 判断为历史。

@@ -1,0 +1,1970 @@
+{
+  "schemaVersion": 1,
+  "observedDate": "2026-10-09",
+  "platform": "macos-arm64",
+  "productionBackendChanged": false,
+  "productAdoption": "not adopted: ordinary approval-mode writes require a native bypass flag",
+  "selectedInstallation": {
+    "path": "/opt/homebrew/bin/command-code",
+    "packageVersion": "1.66.0",
+    "savedRovaiProgramOverride": false,
+    "bundleSha256": "adf05d4e64358d631e4627e7cfaee23ac7903690ca44fe5b0e715f8b814b95ca"
+  },
+  "comparisonInstallation": {
+    "packageVersion": "1.79.1",
+    "bundleSha256": "3193c12205bc9c03ae33b7676e7b840dd9d4ae1af955558470d147da50e7705a",
+    "dailyInstallationChanged": false
+  },
+  "runs": {
+    "selected166": {
+      "program": "/opt/homebrew/bin/command-code",
+      "syntheticProvider": true,
+      "noHistoryFilesReadOrWritten": true,
+      "catalogExitCode": 0,
+      "catalogCustomIds": [
+        "rovai-a/model-a",
+        "rovai-a/vendor/shared",
+        "rovai-b/model-a",
+        "rovai-b/vendor/shared"
+      ],
+      "cases": [
+        {
+          "case": "first_a",
+          "requestedModel": "rovai-a/model-a",
+          "resume": null,
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 604,
+          "pid": 63827,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 103
+          },
+          "requests": [
+            {
+              "case": "first_a",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 2,
+              "at": 1791547034.365809
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547034288
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547034315
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547034353
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "resume_b",
+          "requestedModel": "rovai-b/vendor/shared",
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 623,
+          "pid": 63833,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 117
+          },
+          "requests": [
+            {
+              "case": "resume_b",
+              "provider": "b",
+              "model": "vendor/shared",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 4,
+              "at": 1791547034.988893
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-b/vendor/shared"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547034911
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547034939
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547034976
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "resume_a",
+          "requestedModel": "rovai-a/model-a",
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 616,
+          "pid": 63843,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 123
+          },
+          "requests": [
+            {
+              "case": "resume_a",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 6,
+              "at": 1791547035.613805
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547035536
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547035564
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547035601
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "invalid",
+          "requestedModel": "rovai-missing/not-configured",
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 1,
+          "durationMs": 507,
+          "pid": 63853,
+          "result": null,
+          "requests": [],
+          "events": [],
+          "hooks": [],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": true,
+          "stderrBytes": 105,
+          "stderrSha256": "a0817a0a346e7f206fc29dd448b3e141f284f3c8f1bc5e215178e1b9d301cb60"
+        },
+        {
+          "case": "after_invalid",
+          "requestedModel": "rovai-a/model-a",
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 594,
+          "pid": 63856,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 121
+          },
+          "requests": [
+            {
+              "case": "after_invalid",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 8,
+              "at": 1791547036.7334
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547036654
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547036684
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547036720
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "saved_b",
+          "requestedModel": "rovai-b/vendor/shared",
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 624,
+          "pid": 63866,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 127
+          },
+          "requests": [
+            {
+              "case": "saved_b",
+              "provider": "b",
+              "model": "vendor/shared",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 10,
+              "at": 1791547037.365349
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-b/vendor/shared"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547037282
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547037313
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547037351
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "default_resume",
+          "requestedModel": null,
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 623,
+          "pid": 63875,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 105
+          },
+          "requests": [
+            {
+              "case": "default_resume",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 12,
+              "at": 1791547038.0021682
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547037929
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547037954
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547037989
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "read_denied",
+          "requestedModel": null,
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 615,
+          "pid": 63885,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 80,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 121
+          },
+          "requests": [
+            {
+              "case": "read_denied",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 14,
+              "at": 1791547038.610445,
+              "requestedToolAdvertised": true
+            },
+            {
+              "case": "read_denied",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 16,
+              "at": 1791547038.628242
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            },
+            {
+              "type": "tool_hook_blocked",
+              "toolCallId": "call_read_denied",
+              "toolName": "read_file"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547038538
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547038563
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547038597
+            },
+            {
+              "kind": "before_tool",
+              "toolCallId": "call_read_denied",
+              "toolName": "read_file",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "policy": "deny",
+              "at": 1791547038619
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547038622
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "write_full",
+          "requestedModel": null,
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [
+            "--yolo"
+          ],
+          "exitCode": 0,
+          "durationMs": 1619,
+          "pid": 63897,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 80,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 128
+          },
+          "requests": [
+            {
+              "case": "write_full",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 18,
+              "at": 1791547040.231076,
+              "requestedToolAdvertised": true
+            },
+            {
+              "case": "write_full",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 20,
+              "at": 1791547040.251276
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            },
+            {
+              "type": "tool_running",
+              "toolCallId": "call_write_full",
+              "toolName": "write_file"
+            },
+            {
+              "type": "tool_completed",
+              "toolCallId": "call_write_full",
+              "toolName": "write_file"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547040155
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547040182
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547040217
+            },
+            {
+              "kind": "before_tool",
+              "toolCallId": "call_write_full",
+              "toolName": "write_file",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "policy": "allow",
+              "at": 1791547040240
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547040245
+            }
+          ],
+          "fileCreated": true,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "write_preapproved",
+          "requestedModel": null,
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [
+            "--permission-mode",
+            "dont-ask"
+          ],
+          "exitCode": 0,
+          "durationMs": 640,
+          "pid": 63910,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 80,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 121
+          },
+          "requests": [
+            {
+              "case": "write_preapproved",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 22,
+              "at": 1791547040.880065,
+              "requestedToolAdvertised": true
+            },
+            {
+              "case": "write_preapproved",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 24,
+              "at": 1791547040.8947709
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            },
+            {
+              "type": "tool_hook_blocked",
+              "toolCallId": "call_write_preapproved",
+              "toolName": "write_file"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547040802
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547040829
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547040866
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547040891
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "write_wait_allow",
+          "requestedModel": null,
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [
+            "--yolo"
+          ],
+          "exitCode": 0,
+          "durationMs": 917,
+          "pid": 63922,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 80,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 417
+          },
+          "requests": [
+            {
+              "case": "write_wait_allow",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 26,
+              "at": 1791547041.5047119,
+              "requestedToolAdvertised": true
+            },
+            {
+              "case": "write_wait_allow",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 28,
+              "at": 1791547041.816421
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            },
+            {
+              "type": "tool_running",
+              "toolCallId": "call_write_wait_allow",
+              "toolName": "write_file"
+            },
+            {
+              "type": "tool_completed",
+              "toolCallId": "call_write_wait_allow",
+              "toolName": "write_file"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547041429
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547041454
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547041490
+            },
+            {
+              "kind": "before_tool",
+              "toolCallId": "call_write_wait_allow",
+              "toolName": "write_file",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "policy": "wait",
+              "at": 1791547041514
+            },
+            {
+              "kind": "decision",
+              "allow": true,
+              "toolCallId": "call_write_wait_allow",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "at": 1791547041806
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547041810
+            }
+          ],
+          "fileCreated": true,
+          "heldBeforeDecision": true,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "write_wait_deny",
+          "requestedModel": null,
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [
+            "--yolo"
+          ],
+          "exitCode": 0,
+          "durationMs": 1380,
+          "pid": 63930,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 80,
+              "outputTokens": 10,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 444
+          },
+          "requests": [
+            {
+              "case": "write_wait_deny",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 30,
+              "at": 1791547042.865576,
+              "requestedToolAdvertised": true
+            },
+            {
+              "case": "write_wait_deny",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 32,
+              "at": 1791547043.200649
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            },
+            {
+              "type": "tool_hook_blocked",
+              "toolCallId": "call_write_wait_deny",
+              "toolName": "write_file"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547042786
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547042811
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547042850
+            },
+            {
+              "kind": "before_tool",
+              "toolCallId": "call_write_wait_deny",
+              "toolName": "write_file",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "policy": "wait",
+              "at": 1791547042876
+            },
+            {
+              "kind": "decision",
+              "allow": false,
+              "toolCallId": "call_write_wait_deny",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "at": 1791547043192
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547043194
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": true,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "cancel_shell",
+          "requestedModel": null,
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [
+            "--yolo"
+          ],
+          "exitCode": 130,
+          "durationMs": 731,
+          "pid": 63955,
+          "result": null,
+          "requests": [
+            {
+              "case": "cancel_shell",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 34,
+              "at": 1791547043.8538811,
+              "requestedToolAdvertised": true
+            },
+            {
+              "case": "cancel_shell",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 36,
+              "at": 1791547043.935356
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            },
+            {
+              "type": "tool_running",
+              "toolCallId": "call_cancel_shell",
+              "toolName": "shell_command"
+            },
+            {
+              "type": "tool_completed",
+              "toolCallId": "call_cancel_shell",
+              "toolName": "shell_command"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547043766
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547043795
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547043835
+            },
+            {
+              "kind": "before_tool",
+              "toolCallId": "call_cancel_shell",
+              "toolName": "shell_command",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "policy": "allow",
+              "at": 1791547043864
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547043929
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": true,
+          "observedToolChildPid": 63963,
+          "toolChildAliveAfterCancel": false,
+          "unknownModelStderr": false,
+          "stderrBytes": 13,
+          "stderrSha256": "8c75329f8518449bfbd2903f004d5bb311490df1317ab4d3e858a7242db01db7"
+        },
+        {
+          "case": "after_cancel",
+          "requestedModel": "rovai-a/model-a",
+          "resume": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 669,
+          "pid": 63966,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 123
+          },
+          "requests": [
+            {
+              "case": "after_cancel",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 38,
+              "at": 1791547044.6020212
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547044521
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547044547
+            },
+            {
+              "kind": "system",
+              "sessionId": "1e8539d6-ff97-4f94-ad80-5153ca94530a",
+              "bound": true,
+              "at": 1791547044586
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "scriptSha256": "6c24a1c5a0f05260dcf90eb879d0066836d234414bf8fe26d85463d192b4235b",
+      "authSourceUnchanged": true,
+      "verifiedObservations": {
+        "sameSessionAtoBtoA": true,
+        "routesAtoBtoA": true,
+        "authenticationMatched": true,
+        "systemOnlyExactlyOnce": true,
+        "earlyMemoryPreserved": true,
+        "eachCurrentInputOnce": true,
+        "invalidRejectedWithoutProviderRequest": true,
+        "afterInvalidSameSession": true,
+        "unqualifiedRestoreUsesGlobalA": true,
+        "newProcessPerCase": true,
+        "nativePreapprovedWriteStillBlocked": true,
+        "fullModeApprovalAwaitPreventsEarlyMutation": true,
+        "cancelObservedToolChildExited": true,
+        "cancelFollowupSameSession": true
+      },
+      "providerRequestCount": 19,
+      "textCaseElapsedMs": {
+        "min": 594,
+        "median": 619.5,
+        "max": 624,
+        "scope": "local synthetic provider; includes native startup and resume"
+      }
+    },
+    "comparison1791": {
+      "program": "previous official npm command-code@1.79.1 acceptance install/dist/cli.mjs",
+      "syntheticProvider": true,
+      "noHistoryFilesReadOrWritten": true,
+      "catalogExitCode": 0,
+      "catalogCustomIds": [
+        "rovai-a/model-a",
+        "rovai-a/vendor/shared",
+        "rovai-b/model-a",
+        "rovai-b/vendor/shared"
+      ],
+      "cases": [
+        {
+          "case": "first_a",
+          "requestedModel": "rovai-a/model-a",
+          "resume": null,
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 791,
+          "pid": 64059,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 214
+          },
+          "requests": [
+            {
+              "case": "first_a",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 2,
+              "at": 1791547054.4216378
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547054245
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547054290
+            },
+            {
+              "kind": "system",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+              "bound": true,
+              "at": 1791547054326
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "resume_b",
+          "requestedModel": "rovai-b/vendor/shared",
+          "resume": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 694,
+          "pid": 64067,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 106
+          },
+          "requests": [
+            {
+              "case": "resume_b",
+              "provider": "b",
+              "model": "vendor/shared",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 4,
+              "at": 1791547055.113992
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-b/vendor/shared"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547055042
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547055067
+            },
+            {
+              "kind": "system",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+              "bound": true,
+              "at": 1791547055101
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "resume_a",
+          "requestedModel": "rovai-a/model-a",
+          "resume": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 691,
+          "pid": 64079,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 112
+          },
+          "requests": [
+            {
+              "case": "resume_a",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 6,
+              "at": 1791547055.808956
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547055731
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547055756
+            },
+            {
+              "kind": "system",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+              "bound": true,
+              "at": 1791547055794
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "invalid",
+          "requestedModel": "rovai-missing/not-configured",
+          "resume": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+          "flags": [],
+          "exitCode": 1,
+          "durationMs": 586,
+          "pid": 64089,
+          "result": null,
+          "requests": [],
+          "events": [],
+          "hooks": [],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": true,
+          "stderrBytes": 105,
+          "stderrSha256": "a0817a0a346e7f206fc29dd448b3e141f284f3c8f1bc5e215178e1b9d301cb60"
+        },
+        {
+          "case": "after_invalid",
+          "requestedModel": "rovai-a/model-a",
+          "resume": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 726,
+          "pid": 64094,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 106
+          },
+          "requests": [
+            {
+              "case": "after_invalid",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 8,
+              "at": 1791547057.128052
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547057057
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547057082
+            },
+            {
+              "kind": "system",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+              "bound": true,
+              "at": 1791547057115
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "saved_b",
+          "requestedModel": "rovai-b/vendor/shared",
+          "resume": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 723,
+          "pid": 64106,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 118
+          },
+          "requests": [
+            {
+              "case": "saved_b",
+              "provider": "b",
+              "model": "vendor/shared",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 10,
+              "at": 1791547057.852263
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-b/vendor/shared"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547057775
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547057803
+            },
+            {
+              "kind": "system",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+              "bound": true,
+              "at": 1791547057839
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "case": "default_resume",
+          "requestedModel": null,
+          "resume": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+          "flags": [],
+          "exitCode": 0,
+          "durationMs": 677,
+          "pid": 64116,
+          "result": {
+            "type": "result",
+            "subtype": "success",
+            "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 40,
+              "outputTokens": 5,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 118
+          },
+          "requests": [
+            {
+              "case": "default_resume",
+              "provider": "a",
+              "model": "model-a",
+              "authMatched": true,
+              "systemBootstrapCount": 1,
+              "userBootstrapCount": 0,
+              "earlyMemoryPresent": true,
+              "currentInputCount": 1,
+              "messageCount": 12,
+              "at": 1791547058.5396779
+            }
+          ],
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57"
+            },
+            {
+              "type": "model_request_start",
+              "model": "rovai-a/model-a"
+            }
+          ],
+          "hooks": [
+            {
+              "kind": "factory",
+              "bound": false,
+              "at": 1791547058466
+            },
+            {
+              "kind": "session_start",
+              "bound": true,
+              "at": 1791547058493
+            },
+            {
+              "kind": "system",
+              "sessionId": "c9abf5ce-4bd1-4151-9745-2d4c54aa7c57",
+              "bound": true,
+              "at": 1791547058527
+            }
+          ],
+          "fileCreated": false,
+          "heldBeforeDecision": null,
+          "cancelSent": false,
+          "observedToolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "unknownModelStderr": false,
+          "stderrBytes": 0,
+          "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "scriptSha256": "6c24a1c5a0f05260dcf90eb879d0066836d234414bf8fe26d85463d192b4235b",
+      "authSourceUnchanged": true,
+      "verifiedObservations": {
+        "sameSessionAtoBtoA": true,
+        "routesAtoBtoA": true,
+        "authenticationMatched": true,
+        "systemOnlyExactlyOnce": true,
+        "earlyMemoryPreserved": true,
+        "eachCurrentInputOnce": true,
+        "invalidRejectedWithoutProviderRequest": true,
+        "afterInvalidSameSession": true,
+        "unqualifiedRestoreUsesGlobalA": true,
+        "newProcessPerCase": true
+      },
+      "providerRequestCount": 6,
+      "textCaseElapsedMs": {
+        "min": 677,
+        "median": 708.5,
+        "max": 791,
+        "scope": "local synthetic provider; includes native startup and resume"
+      }
+    },
+    "real166": {
+      "program": "/opt/homebrew/bin/command-code",
+      "version": "1.66.0",
+      "provider": "sub2api",
+      "model": "gpt-6-sol",
+      "realModel": true,
+      "historyFilesReadOrWrittenByProbe": false,
+      "cases": [
+        {
+          "case": "first",
+          "pid": 64528,
+          "durationMs": 3732,
+          "exitCode": 0,
+          "resume": null,
+          "requestedModel": "sub2api/gpt-6-sol",
+          "fullPermissionFixture": false,
+          "result": {
+            "subtype": "success",
+            "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 13385,
+              "outputTokens": 18,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 3261
+          },
+          "observedRunStartSessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901"
+            },
+            {
+              "type": "model_request_start",
+              "model": "sub2api/gpt-6-sol"
+            }
+          ],
+          "earlyMemoryObserved": false,
+          "systemIdentityObserved": true,
+          "expectedFirstAck": true,
+          "fileContentExact": false,
+          "cancelSentAfterToolSpawn": false,
+          "toolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "stderrBytes": 0
+        },
+        {
+          "case": "write",
+          "pid": 64551,
+          "durationMs": 7391,
+          "exitCode": 0,
+          "resume": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "requestedModel": "sub2api/gpt-6-sol",
+          "fullPermissionFixture": true,
+          "result": {
+            "subtype": "success",
+            "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 27235,
+              "outputTokens": 216,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 6636
+          },
+          "observedRunStartSessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901"
+            },
+            {
+              "type": "model_request_start",
+              "model": "sub2api/gpt-6-sol"
+            },
+            {
+              "type": "tool_running",
+              "toolName": "write_file",
+              "toolCallId": "call_f07290ec4e1f46019e9e74d2547fb194"
+            },
+            {
+              "type": "tool_completed",
+              "toolName": "write_file",
+              "toolCallId": "call_f07290ec4e1f46019e9e74d2547fb194"
+            },
+            {
+              "type": "model_request_start",
+              "model": "sub2api/gpt-6-sol"
+            }
+          ],
+          "earlyMemoryObserved": true,
+          "systemIdentityObserved": true,
+          "expectedFirstAck": false,
+          "fileContentExact": true,
+          "cancelSentAfterToolSpawn": false,
+          "toolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "stderrBytes": 0
+        },
+        {
+          "case": "cancel",
+          "pid": 64583,
+          "durationMs": 4771,
+          "exitCode": 130,
+          "resume": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "requestedModel": "sub2api/gpt-6-sol",
+          "fullPermissionFixture": true,
+          "result": null,
+          "observedRunStartSessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901"
+            },
+            {
+              "type": "model_request_start",
+              "model": "sub2api/gpt-6-sol"
+            },
+            {
+              "type": "tool_running",
+              "toolName": "shell_command",
+              "toolCallId": "call_fea670c76dff45d5bec5476e8e4b2024"
+            }
+          ],
+          "earlyMemoryObserved": false,
+          "systemIdentityObserved": false,
+          "expectedFirstAck": false,
+          "fileContentExact": true,
+          "cancelSentAfterToolSpawn": true,
+          "toolChildPid": 64611,
+          "toolChildAliveAfterCancel": false,
+          "stderrBytes": 13
+        },
+        {
+          "case": "after_cancel",
+          "pid": 64612,
+          "durationMs": 3414,
+          "exitCode": 0,
+          "resume": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "requestedModel": "sub2api/gpt-6-sol",
+          "fullPermissionFixture": false,
+          "result": {
+            "subtype": "success",
+            "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 13814,
+              "outputTokens": 38,
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 2927
+          },
+          "observedRunStartSessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901"
+            },
+            {
+              "type": "model_request_start",
+              "model": "sub2api/gpt-6-sol"
+            }
+          ],
+          "earlyMemoryObserved": true,
+          "systemIdentityObserved": true,
+          "expectedFirstAck": false,
+          "fileContentExact": true,
+          "cancelSentAfterToolSpawn": false,
+          "toolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "stderrBytes": 0
+        },
+        {
+          "case": "default_resume",
+          "pid": 64632,
+          "durationMs": 3408,
+          "exitCode": 0,
+          "resume": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "requestedModel": null,
+          "fullPermissionFixture": false,
+          "result": {
+            "subtype": "success",
+            "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+            "stopReason": "end_turn",
+            "usage": {
+              "inputTokens": 13878,
+              "outputTokens": 38,
+              "cacheReadTokens": 5248,
+              "cacheWriteTokens": 0
+            },
+            "durationMs": 2912
+          },
+          "observedRunStartSessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901",
+          "events": [
+            {
+              "type": "run_start",
+              "sessionId": "94ae0ecd-a718-480d-ae71-4e6be3914901"
+            },
+            {
+              "type": "model_request_start",
+              "model": "sub2api/gpt-6-sol"
+            }
+          ],
+          "earlyMemoryObserved": true,
+          "systemIdentityObserved": true,
+          "expectedFirstAck": false,
+          "fileContentExact": true,
+          "cancelSentAfterToolSpawn": false,
+          "toolChildPid": null,
+          "toolChildAliveAfterCancel": null,
+          "stderrBytes": 0
+        }
+      ],
+      "sourceFilesUnchanged": {
+        "auth.json": true,
+        "providers.json": true
+      }
+    }
+  },
+  "limitations": [
+    "No production headless Adapter or shared Approval UI was installed.",
+    "Cross-entry ACP to headless resume not qualified.",
+    "No same-process warm; every case spawned a new CLI.",
+    "Real BYOK has one configured model; paid A/B switching not claimed.",
+    "Cancellation observes the CLI and a recorded tool child, not a full product restart/recovery matrix.",
+    "MCP and automatic compaction were not retested."
+  ]
+}
