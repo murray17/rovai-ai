@@ -297,6 +297,14 @@ pub async fn refresh_model_catalog(
     path: &Path,
     kind: AdapterKind,
 ) -> Result<RefreshedModelCatalog> {
+    refresh_model_catalog_for_selection(path, kind, None).await
+}
+
+pub async fn refresh_model_catalog_for_selection(
+    path: &Path,
+    kind: AdapterKind,
+    target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
+) -> Result<RefreshedModelCatalog> {
     let purpose = RuntimeLaunchPurpose::AvailabilityCheck;
     if !runtime_launch_allowed(kind, purpose) {
         bail!(runtime_launch_disallowed_detail(purpose));
@@ -324,7 +332,8 @@ pub async fn refresh_model_catalog(
             Ok(rovai_core::agent_runtime_adapter::antigravity_models(ids))
         }
         _ => {
-            let (_, session, _) = run_acp_probe_with_scope(path, kind, true, purpose, true).await?;
+            let (_, session, _) =
+                run_acp_probe_with_scope(path, kind, true, purpose, true, target).await?;
             if kind == AdapterKind::DeepseekHarness {
                 dsh_preparation = session
                     .as_ref()
@@ -1850,7 +1859,7 @@ async fn run_acp_probe(
     include_session: bool,
     purpose: RuntimeLaunchPurpose,
 ) -> Result<(Value, Option<Value>, bool)> {
-    run_acp_probe_with_scope(path, kind, include_session, purpose, false).await
+    run_acp_probe_with_scope(path, kind, include_session, purpose, false, None).await
 }
 
 async fn run_acp_probe_with_scope(
@@ -1859,6 +1868,7 @@ async fn run_acp_probe_with_scope(
     include_session: bool,
     purpose: RuntimeLaunchPurpose,
     catalog_only: bool,
+    target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
 ) -> Result<(Value, Option<Value>, bool)> {
     if !runtime_launch_allowed(kind, purpose) {
         bail!(runtime_launch_disallowed_detail(purpose));
@@ -2026,6 +2036,41 @@ async fn run_acp_probe_with_scope(
                     bail!("dsh_model_configuration_changed_during_preparation");
                 }
                 crate::dsh::annotate_session(&mut session, preparation);
+            }
+            if let Some((model_id, source)) = target {
+                if kind != AdapterKind::DeepseekHarness {
+                    bail!("Target-model option discovery is only supported for DSH");
+                }
+                let preparation = model_preparation
+                    .as_ref()
+                    .context("DSH model preparation missing")?;
+                if !crate::dsh::selected_route_available(preparation, model_id, source) {
+                    bail!("所选 DSH 模型来源不可用；未切换到同名的其他来源");
+                }
+                let models =
+                    crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
+                crate::agent_runtime_adapter::validate_live_model_selection(
+                    &models,
+                    model_id,
+                    &json!({}),
+                )?;
+                let default_model =
+                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
+                write_json_line(stdin, &json!({
+                    "jsonrpc": "2.0", "id": session_request_id + 1,
+                    "method": "session/set_config_option",
+                    "params": {"sessionId": session["sessionId"], "configId": "model", "value": model_id}
+                })).await?;
+                let selected = read_rpc_result(lines, session_request_id + 1).await?;
+                session = crate::agent_runtime_adapter::dsh_model_config_after_selection(
+                    &session, &selected, model_id,
+                )?;
+                if let Some(default_model) = default_model {
+                    session["_meta"]["rovaiDshDefaultModel"] = json!(default_model);
+                }
+                if !crate::dsh::model_inputs_unchanged(preparation) {
+                    bail!("dsh_model_configuration_changed_during_preparation");
+                }
             }
             let session_id = session
                 .get("sessionId")

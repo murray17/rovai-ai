@@ -128,12 +128,18 @@ export interface RuntimeModelCatalogCache {
   expiresAt: string | null
 }
 
+export interface RuntimeModelCatalogTarget {
+  modelId: string
+  dshSource?: 'native' | 'web'
+}
+
 export interface RuntimeModelCatalogView {
   runtimeKind: AdapterKind
   cache: RuntimeModelCatalogCache
   models: ModelDescriptor[]
   refreshStatus: 'not_required' | 'scheduled' | 'joined' | 'completed' | 'failed' | 'deferred'
   diagnosticCode: string | null
+  selectedModelId?: string
 }
 
 export type RuntimeProbeFailureClass =

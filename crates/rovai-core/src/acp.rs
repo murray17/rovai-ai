@@ -4422,11 +4422,30 @@ impl AcpRuntime {
                         detail: error.to_string(),
                     })
                 })?;
-            rovai_core::agent_runtime_adapter::validate_live_model_selection(
-                &models,
-                model,
-                model_options,
-            )?;
+            if self.host.adapter_kind == AdapterKind::DeepseekHarness {
+                if !model_options
+                    .as_object()
+                    .is_some_and(|options| options.values().all(Value::is_string))
+                {
+                    return Err(anyhow::Error::new(AcpLiveModelValidationError {
+                        code: "runtime_model_options_invalid",
+                        model_id: model.to_string(),
+                        detail: "DSH model options must be an object of native string values"
+                            .to_string(),
+                    }));
+                }
+                rovai_core::agent_runtime_adapter::validate_live_model_selection(
+                    &models,
+                    model,
+                    &json!({}),
+                )?;
+            } else {
+                rovai_core::agent_runtime_adapter::validate_live_model_selection(
+                    &models,
+                    model,
+                    model_options,
+                )?;
+            }
             if self.host.adapter_kind == AdapterKind::CodebuddyCli
                 && model.starts_with("custom-local:")
                 && acp_runtime_model_id_from_session(session_result).as_deref() == Some(model)
@@ -4440,6 +4459,19 @@ impl AcpRuntime {
                 self.set_model(&session_id, model).await?;
             } else {
                 self.set_config_option(&session_id, "model", model).await?;
+            }
+            if self.host.adapter_kind == AdapterKind::DeepseekHarness {
+                let selected = self
+                    .session_result
+                    .read()
+                    .await
+                    .clone()
+                    .context("DSH model selection has no option state")?;
+                crate::agent_runtime_adapter::validate_dsh_model_options(
+                    &selected,
+                    model,
+                    model_options,
+                )?;
             }
             if self.host.adapter_kind == AdapterKind::CodebuddyCli {
                 // Freeze the acknowledged selection, not session/new's old
@@ -4602,7 +4634,8 @@ impl AcpRuntime {
         config_id: &str,
         value: &str,
     ) -> Result<()> {
-        self.host
+        let result = self
+            .host
             .rpc(
                 "session/set_config_option",
                 json!({
@@ -4613,6 +4646,27 @@ impl AcpRuntime {
                 }),
             )
             .await?;
+        if self.host.adapter_kind == AdapterKind::DeepseekHarness {
+            let previous = self
+                .session_result
+                .read()
+                .await
+                .clone()
+                .context("DSH Session has no option state")?;
+            let model = if config_id == "model" {
+                value.to_string()
+            } else {
+                acp_runtime_model_id_from_session(&previous)
+                    .context("DSH Session has no selected model")?
+            };
+            let selected = crate::agent_runtime_adapter::dsh_model_config_after_selection(
+                &previous, &result, &model,
+            )?;
+            *self.session_result.write().await = Some(selected.clone());
+            self.host
+                .remember_session(session_id, Some(&selected))
+                .await;
+        }
         Ok(())
     }
 

@@ -1,4 +1,4 @@
-import type { AdapterKind, RuntimeModelCatalogView, RovaiApi } from '@contracts'
+import type { AdapterKind, RuntimeModelCatalogTarget, RuntimeModelCatalogView, RovaiApi } from '@contracts'
 import { desktopThreadClient } from './desktop-camp-client'
 
 export type ProductRuntimeCheckResult = {
@@ -15,9 +15,10 @@ export async function requestProductRuntimeCheck(runtimeKind: AdapterKind, reque
   return request<ProductRuntimeCheckResult>('runtime.product.check', { runtimeKind })
 }
 
-export function openRuntimeModelCatalog(runtimeKind: AdapterKind, request: RovaiApi['request'] = desktopThreadClient.request, waitForRefresh = false): Promise<RuntimeModelCatalogView> {
+export function openRuntimeModelCatalog(runtimeKind: AdapterKind, request: RovaiApi['request'] = desktopThreadClient.request, waitForRefresh = false, target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> {
   return request<RuntimeModelCatalogView>('runtime.modelCatalog.open', {
     runtimeKind,
-    ...(waitForRefresh ? { waitForRefresh: true } : {})
+    ...(waitForRefresh ? { waitForRefresh: true } : {}),
+    ...(runtimeKind === 'deepseek-harness' && target ? target : {})
   })
 }

@@ -1323,7 +1323,7 @@ Probe 与 Host 注入相同插件，在原生初始化后准备完整配置并�
 扩展既有 JS Provider 冲突、Rust DSH 摘要/路由、grouped ACP 目录、成员无健康证据配置/冻结及 Renderer 选择 owner：
 同名不透明 Web、显式禁用、非 pi 原生身份、同 ID 不同来源、主题变化与过期准备结果均在原矩阵中验证，
 没有新增或删除 Rust owner。新增 smoke 入口
-`node scripts/smoke-dsh-model-availability.mjs` 使用隔离 Core/DSH 与本地 Responses/Messages 接收服务，
+`node scripts/smoke-dsh-model-availability.mjs <DSH 安装包目录>` 使用隔离 Core/DSH 与本地 Responses/Messages 接收服务，
 验证实际端点、合成凭据、来源保存与冻结、复用 Host 以及失效 Web 选择的零业务请求。
 纯配置函数无法证明这些跨 Run 行为，因此由真实进程 smoke 单独拥有。
 定向入口：`cargo test -p rovai-core --lib dsh::`；
@@ -1332,6 +1332,25 @@ Probe 与 Host 注入相同插件，在原生初始化后准备完整配置并�
 目录迟到结果的共享代次门禁沿用并运行
 `cargo test -p rovai-core --features slow-tests --lib codex_catalog_waiters_share_refresh_without_satisfying_full_validation`；
 DSH 输入在准备期间变化的检查由其摘要 owner 验证，两者不互相替代。
+
+#### 按目标模型读取思考强度
+
+目录只把当前 ACP 模型的选项绑定给该模型；目标选项通过既有目录入口按需读取。执行选中目标后
+替换完整选项状态并校验显式值；DSH 未保存强度时冻结配置保持缺省，复用 Session 交由原生选模
+恢复默认。Renderer 支持模型默认、读取中、无档位与失败重试，迟到响应不覆盖当前目标；主动换模
+只修改草稿，刷新目录不删除保存值。最低版本、Web 配置准备、来源核验和 Cleanup 均保持。
+
+扩展现有 grouped ACP 与 `model_option_validation_rejects_preserved_effort_after_catalog_refresh`
+Rust owner，不新增或删除测试函数。真实协议与 HTTP 断言扩展上述两个 DSH smoke 入口；
+`pnpm test:runtime-model-picker` 的生产组件夹具覆盖目标切换、迟到结果、失败重试与默认选择。
+
+macOS arm64 隔离验证：`0.1.5-rc.2`、`0.1.5-rc.3` 和 `0.2.1-alpha.1` 均通过原生选项与
+同 Session 默认恢复，分别接收 7、7、15 次本地 HTTP 请求。当前 Core + alpha.1 的 11 次本地
+请求验证目标读取零正文、B 不继承 A 的 max、先选模再设置 xhigh、冻结配置缺省、未改配置时
+Session 复用、无可选档位正常执行、无效 max 零正文及 Web reasoningEfforts 刷新保留保存值；
+既有原生/失败 Web 路由与非模型设置 Host 复用场景仍通过。成员配置变更可能按既有 Binding
+规则创建 Session，未新增重建路径；原生同 Session 的旧强度复位由三版本协议 smoke 直接验证。
+这些证据不覆盖 Windows/Linux 实机、打包日常 App 或真实中转；付费请求为零。
 
 ## 2026-10-09 headless 候选与最新主干合流（User 101）
 
@@ -1358,3 +1377,6 @@ Claude 34、DSH 5 与模型目录 owner 通过。前端类型、239 文件／261
 - 已知缺口分别记录于兼容性清单与两份研究索引。已删代码链接固定到 `2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e`，失败证据未删除。
 - 本轮不发送真实模型请求，不升级 Runtime、不运行 headless、不恢复 Hub，不触碰用户凭据或原生历史。
 - 首轮验证：Rust workspace 462 passed / 1 个人工 Smoke ignored；相关 Renderer 5 文件 213 项、TypeScript、两个 System Hook Node 测试、文档 10 项及版本/治理门禁、格式检查通过。
+- 合流 `3a83b2b7`（DSH 目标模型思考选项）时保留两套独立语义：Cline/Command 原生默认哨兵与 DSH 目标选项；没有扩大 headless 范围或恢复公开入口。
+- 合流后前端 239 文件 / 2615 项、typecheck、共享 ACP 69 passed / 2 个真实 Smoke ignored、Command 专属 1 项、Cline 专属 3 项、Adapter 25 项通过；桌面/Web 构建和隔离 Electron Runtime Picker（实际菜单隐藏、键盘、IME、双主题/尺寸、DSH 目标选项）通过。
+- 扩展平台证据 owner 首次发现兼容清单新增说明后摘要未同步；按原合同更新当前 register digest，不增加任何 Runtime 的资格，随后复验。用户凭据、原生历史与日常安装没有改动。

@@ -4472,6 +4472,16 @@ fn resolve_model_selection(
                     json!({ "modelId": model_id }),
                 )));
             };
+            if adapter_kind == AdapterKind::DeepseekHarness {
+                // Preserve explicit intent, including a now unsupported value;
+                // the selected live model validates it before any prompt.
+                return Ok(Ok(ResolvedModelSelection {
+                    dsh_source,
+                    source: "explicit".to_string(),
+                    model_id: model_id.clone(),
+                    options: Value::Object(configured_options.clone()),
+                }));
+            }
             let model = models
                 .iter()
                 .find(|model| model.id == *model_id && !model.hidden && !model.deprecated);
@@ -5072,6 +5082,37 @@ fn model_option_validation_rejects_preserved_effort_after_catalog_refresh() {
             .expect("the refreshed model does not support the preserved value");
     assert_eq!(issue.code, "runtime_model_option_invalid");
     assert_eq!(issue.payload["value"], "high");
+    let default = ModelSelection::Explicit {
+        model_id: "gpt-next".into(),
+        options: json!({}),
+        dsh_source: Some(DshModelSource::Web),
+    };
+    assert_eq!(
+        resolve_model_selection(AdapterKind::CodexCli, &models, &default)
+            .unwrap()
+            .unwrap()
+            .options,
+        json!({"reasoning_effort":"low"})
+    );
+    let native_default = resolve_model_selection(AdapterKind::DeepseekHarness, &models, &default)
+        .unwrap()
+        .unwrap();
+    assert_eq!(native_default.options, json!({}));
+    assert_eq!(native_default.dsh_source, Some(DshModelSource::Web));
+    let unsupported = ModelSelection::Explicit {
+        model_id: "gpt-next".into(),
+        options: json!({"reasoning_effort":"max"}),
+        dsh_source: Some(DshModelSource::Web),
+    };
+    for catalog in [models.as_slice(), &[]] {
+        assert_eq!(
+            resolve_model_selection(AdapterKind::DeepseekHarness, catalog, &unsupported)
+                .unwrap()
+                .unwrap()
+                .options,
+            json!({"reasoning_effort":"max"})
+        );
+    }
 }
 
 fn member_runtime_defaults(adapter_kind: AdapterKind) -> MemberRuntimeConfiguration {

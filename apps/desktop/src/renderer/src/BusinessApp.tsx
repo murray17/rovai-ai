@@ -4243,8 +4243,8 @@ export function BusinessApp({
             () => desktop.onboarding.completeMemberSelection()
           )}
           onRefreshRuntime={() => void refreshOnboardingRuntime()}
-          onOpenModelCatalog={async (runtimeKind) => {
-            const catalog = await openRuntimeModelCatalog(runtimeKind)
+          onOpenModelCatalog={async (runtimeKind, target) => {
+            const catalog = await openRuntimeModelCatalog(runtimeKind, client.request, false, target)
             const nextInstallations = await client.request<AdapterInstallation[]>(
               'runtime.installations.list'
             )

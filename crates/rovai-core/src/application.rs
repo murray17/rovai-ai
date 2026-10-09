@@ -2009,6 +2009,8 @@ struct CheckProductRuntimeParams {
     runtime_kind: rovai_core::agent_profile::AdapterKind,
     #[serde(default)]
     wait_for_refresh: bool,
+    model_id: Option<String>,
+    dsh_source: Option<crate::agent_profile::DshModelSource>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3873,6 +3875,74 @@ impl Core {
         }))
     }
 
+    async fn open_dsh_model_options(
+        &self,
+        model_id: &str,
+        source: Option<crate::agent_profile::DshModelSource>,
+    ) -> Result<Value> {
+        let kind = AdapterKind::DeepseekHarness;
+        if let Some(blocker) = current_runtime_platform_blocker(kind) {
+            anyhow::bail!("{}: {}", blocker.code, blocker.payload);
+        }
+        anyhow::ensure!(
+            !model_id.trim().is_empty(),
+            "DSH target model must not be empty"
+        );
+        let cached = self
+            .runtime_model_catalog_payload(kind, "not_required")
+            .await?;
+        let resolved = cached["cache"]["status"] == "fresh"
+            && cached["models"].as_array().is_some_and(|models| {
+                models.iter().any(|model| {
+                    model["id"] == model_id
+                        && model["runtimeMetadata"]["dshOptionsResolved"] == true
+                        && model["runtimeMetadata"]["dshSource"]
+                            == json!(source.unwrap_or(crate::agent_profile::DshModelSource::Native))
+                })
+            });
+        let status = if resolved {
+            "not_required"
+        } else {
+            let search = self.runtime_search_environment.read().await.clone();
+            let mut outcome = self
+                .refresh_verified_runtime_catalog_for_selection(
+                    kind,
+                    search,
+                    Some((model_id, source)),
+                )
+                .await?;
+            if outcome.is_none() {
+                let checked = self
+                    .await_runtime_check(
+                        kind,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        RuntimeCheckTrigger::CatalogOpen,
+                    )
+                    .await?;
+                outcome = Some(if checked == RuntimeCheckOutcome::Ready {
+                    let search = self.runtime_search_environment.read().await.clone();
+                    self.refresh_verified_runtime_catalog_for_selection(
+                        kind,
+                        search,
+                        Some((model_id, source)),
+                    )
+                    .await?
+                    .unwrap_or(RuntimeCheckOutcome::Superseded)
+                } else {
+                    checked
+                });
+            }
+            match outcome {
+                Some(RuntimeCheckOutcome::Ready) => "completed",
+                Some(RuntimeCheckOutcome::StableFailure) => "failed",
+                _ => "deferred",
+            }
+        };
+        let mut payload = self.runtime_model_catalog_payload(kind, status).await?;
+        payload["selectedModelId"] = json!(model_id);
+        Ok(payload)
+    }
+
     async fn record_runtime_check_manager_failure(
         &self,
         kind: AdapterKind,
@@ -4328,6 +4398,16 @@ impl Core {
         kind: AdapterKind,
         search: Arc<RuntimeSearchEnvironment>,
     ) -> Result<Option<RuntimeCheckOutcome>> {
+        self.refresh_verified_runtime_catalog_for_selection(kind, search, None)
+            .await
+    }
+
+    async fn refresh_verified_runtime_catalog_for_selection(
+        &self,
+        kind: AdapterKind,
+        search: Arc<RuntimeSearchEnvironment>,
+        target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
+    ) -> Result<Option<RuntimeCheckOutcome>> {
         let service = AgentProfileService::default();
         let (installation, verified_identity) = {
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
@@ -4403,9 +4483,14 @@ impl Core {
             "[model-catalog] probe runtime={} mode=catalog full_probe_count=0",
             kind.as_str()
         );
-        let catalog =
-            with_runtime_configuration(kind, &search, health::refresh_model_catalog(path, kind))
-                .await;
+        let catalog = with_runtime_configuration(kind, &search, async {
+            if target.is_some() {
+                health::refresh_model_catalog_for_selection(path, kind, target).await
+            } else {
+                health::refresh_model_catalog(path, kind).await
+            }
+        })
+        .await;
         let Some(_update) = self.runtime_check_update_guard(&search).await else {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         };
@@ -4457,6 +4542,11 @@ impl Core {
                 }))
             }
             Err(error) => {
+                // A failed optional model read is not a failed Runtime check.
+                // Keep the usable catalog and all saved member selections.
+                if target.is_some() {
+                    return Ok(Some(RuntimeCheckOutcome::StableFailure));
+                }
                 let failure = health::model_catalog_failure(kind, &error, path);
                 service.record_managed_probe_failure(
                     &mut database,
@@ -10964,8 +11054,17 @@ impl Core {
             "runtime.modelCatalog.open" => {
                 let params: CheckProductRuntimeParams =
                     serde_json::from_value(request.params.clone())?;
-                self.open_runtime_model_catalog(params.runtime_kind, params.wait_for_refresh)
-                    .await
+                if let Some(model_id) = params.model_id {
+                    anyhow::ensure!(
+                        params.runtime_kind == AdapterKind::DeepseekHarness,
+                        "Target-model option discovery is only supported for DSH"
+                    );
+                    self.open_dsh_model_options(&model_id, params.dsh_source)
+                        .await
+                } else {
+                    self.open_runtime_model_catalog(params.runtime_kind, params.wait_for_refresh)
+                        .await
+                }
             }
             "health.check" => {
                 let git_path = self

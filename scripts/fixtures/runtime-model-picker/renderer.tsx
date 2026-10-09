@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import type { AdapterInstallation, AdapterKind, RuntimeModelCatalogView } from '@contracts'
+import type { AdapterInstallation, AdapterKind, RuntimeModelCatalogTarget, RuntimeModelCatalogView } from '@contracts'
 import { MemberRuntimeParameters, MemberModelParameters, draftFromDefaults, type MemberRuntimeDraft } from '../../../apps/desktop/src/renderer/src/MemberRuntimeParameters'
 import { onboardingRuntimeSelectionFor } from '../../../apps/desktop/src/renderer/src/OnboardingFlow'
 import { MemberRuntimePicker } from '../../../apps/desktop/src/renderer/src/MemberRuntimePicker'
@@ -9,7 +9,7 @@ import '../../../apps/desktop/src/renderer/src/member-editor.css'
 
 const observedAt = '2026-09-13T00:00:00Z'
 function fixture(kind: AdapterKind, empty: boolean, generation: number, expired = false): AdapterInstallation {
-  return {
+  const installation = {
     id: `fixture-${kind}`, adapterKind: kind, generation, installationClass: 'managed_default', authScope: 'default',
     modelCatalog: { status: empty ? 'unavailable' : expired ? 'expired' : 'fresh', observedAt, revalidateAfter: observedAt, expiresAt: observedAt },
     snapshot: { probeStatus: 'ready', staleAt: null, models: empty ? [] : Array.from({ length: 24 }, (_, i) => ({ id: `vendor/model-${i}`, displayName: `${kind} 模型 ${i}`, description: i === 0 ? '模型说明' : undefined, hidden: false, deprecated: false, isDefault: i === 0,
@@ -20,6 +20,11 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
     memberRuntimeDefaults: { adapterKind: kind, model: { mode: 'runtime_default' }, permissions: { adapterKind: kind, schemaVersion: 1, values: kind === 'codex-cli' ? { sandbox_mode: 'safe', approval_policy: 'never' } : { permission_mode: 'safe' } } },
     lastProbeAttempt: null
   } as AdapterInstallation
+  if (kind === 'deepseek-harness') for (const model of installation.snapshot!.models) {
+    model.runtimeMetadata = { dshSource: 'native', ...(model.isDefault ? { dshOptionsResolved: true } : {}) }
+    model.options = model.isDefault ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', values: [{ value: 'max', label: 'max' }], scope: 'run', defaultValue: null }] : []
+  }
+  return installation
 }
 
 function Fixture(): React.JSX.Element {
@@ -29,13 +34,18 @@ function Fixture(): React.JSX.Element {
   const [generation, setGeneration] = useState(1)
   const [catalogExpired, setCatalogExpired] = useState(false)
   const [disabled, setDisabled] = useState(false)
+  const [dshReadMode, setDshReadMode] = useState('normal')
+  const [observation, setObservation] = useState(0)
   const installation = fixture(kind, mode === 'empty' || mode === 'pending', generation,
     mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
+  if (kind === 'deepseek-harness' && observation) installation.modelCatalog.observedAt = `2026-09-${15 + observation}T00:00:00Z`
   Object.assign(window, { runtimeTest: Object.assign(state, {
     draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled,
     expireCatalog: () => setCatalogExpired(true),
+    setDshReadMode,
+    refreshDshCatalog: () => { state.dshPublished = null; setObservation(value => value + 1) },
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
     switchKind: (next: AdapterKind) => { setKind(next); setDraft(draftFromDefaults(fixture(next, false, generation).memberRuntimeDefaults!)) },
     reset: (nextPage = 'member', nextMode = 'normal') => {
@@ -46,8 +56,25 @@ function Fixture(): React.JSX.Element {
     },
     settle: () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 100))))
   }) })
-  const catalog = (): Promise<RuntimeModelCatalogView> => {
+  const catalog = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
     state.calls++
+    if (kind === 'deepseek-harness' && target) {
+      state.dshReads ??= []
+      const model = installation.snapshot!.models.find(item => item.id === target.modelId)!
+      const values = state.dshValues?.[target.modelId] ?? (target.modelId.endsWith('-2') ? [] : ['high', 'xhigh'])
+      const selected = { ...model, runtimeMetadata: { dshSource: 'native', dshOptionsResolved: true },
+        options: values.length ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
+          values: values.map((value: string) => ({ value, label: value })) }] : [] }
+      const result = { runtimeKind: kind, selectedModelId: target.modelId, cache: { ...installation.modelCatalog },
+        models: installation.snapshot!.models.map(item => item.id === target.modelId ? selected : item), refreshStatus: 'completed' as const, diagnosticCode: null } as RuntimeModelCatalogView
+      return new Promise((resolve, reject) => {
+        const done = () => { state.dshPublished = result; resolve(result) }
+        state.dshReads.push({ modelId: target.modelId, resolve: done, reject: () => reject(new Error('fixture unavailable')) })
+        if (dshReadMode === 'failed') reject(new Error('fixture unavailable'))
+        else if (dshReadMode !== 'pending') done()
+      })
+    }
+    if (kind === 'deepseek-harness' && state.dshPublished) return Promise.resolve(state.dshPublished)
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))
     const modelsWithLowOnlyTarget = installation.snapshot!.models.map(model => model.id === 'vendor/model-1'
       ? { ...model, options: [{ ...model.options[0], values: [{ value: 'low', label: 'Low' }] }] }

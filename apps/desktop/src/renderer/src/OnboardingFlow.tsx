@@ -12,6 +12,7 @@ import type {
   ProductRuntimeAvailability,
   RuntimePlatformAdmission,
   RuntimeModelCatalogView,
+  RuntimeModelCatalogTarget,
   ThemePreference
 } from '@contracts'
 import {
@@ -157,7 +158,7 @@ export function OnboardingFlow({
   onShowMemberSelection(): void
   onCompleteMemberSelection(): void
   onRefreshRuntime(): void
-  onOpenModelCatalog(runtimeKind: AdapterKind): Promise<RuntimeModelCatalogView>
+  onOpenModelCatalog(runtimeKind: AdapterKind, target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView>
   onRuntimeSelectionChange(selection: OnboardingRuntimeSelection | null): void
   onDeferRuntime(): void
   onComplete(): void
@@ -381,7 +382,7 @@ function RuntimeStep({
   busy: boolean
   error: string | null
   onRefresh(): void
-  onOpenModelCatalog(runtimeKind: AdapterKind): Promise<RuntimeModelCatalogView>
+  onOpenModelCatalog(runtimeKind: AdapterKind, target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView>
   onSelectionChange(selection: OnboardingRuntimeSelection | null): void
   onDefer(): void
   onComplete(): void
@@ -526,7 +527,7 @@ function RuntimeStep({
                         installation={selectedInstallation}
                         model={selection.model}
                         disabled={busy || provisioning || selectedStatus.status !== 'available'}
-                        onOpenModelCatalog={() => onOpenModelCatalog(selection.adapterKind)}
+                        onOpenModelCatalog={(target) => onOpenModelCatalog(selection.adapterKind, target)}
                         onChange={(model) => onSelectionChange({ ...selection, model })}
                       />
                     )

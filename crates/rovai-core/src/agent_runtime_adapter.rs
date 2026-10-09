@@ -2703,6 +2703,49 @@ pub fn acp_model_catalog_for_adapter(
             },
         );
     }
+    if adapter_kind == AdapterKind::DeepseekHarness {
+        if let Some(option) = session_result
+            .get("configOptions")
+            .and_then(Value::as_array)
+            .and_then(|options| {
+                options
+                    .iter()
+                    .find(|option| option["id"] == "reasoning_effort")
+            })
+        {
+            anyhow::ensure!(
+                option
+                    .get("options")
+                    .and_then(Value::as_array)
+                    .is_some_and(|choices| choices
+                        .iter()
+                        .all(|choice| choice.get("value").and_then(Value::as_str).is_some())),
+                "DSH returned malformed reasoning options"
+            );
+        }
+        let current = acp_runtime_model_id_from_session(session_result);
+        for model in &mut models {
+            // ACP configOptions describe the selected model, not the catalog.
+            if current.as_deref() != Some(&model.id) {
+                model.options.clear();
+            } else {
+                model.runtime_metadata = Some(json!({"dshOptionsResolved": true}));
+                for option in &mut model.options {
+                    // Empty is DSH's provider-default sentinel. Rovai represents
+                    // model default by omitting the override altogether.
+                    option.values.retain(|choice| !choice.value.is_empty());
+                    option.default_value = None;
+                }
+                model.options.retain(|option| !option.values.is_empty());
+            }
+            if let Some(default) = session_result
+                .pointer("/_meta/rovaiDshDefaultModel")
+                .and_then(Value::as_str)
+            {
+                model.is_default = model.id == default;
+            }
+        }
+    }
     if adapter_kind == AdapterKind::DeepseekHarness
         && let Some(preparation) = session_result.pointer("/_meta/rovaiDshModels")
     {
@@ -2715,7 +2758,7 @@ pub fn acp_model_catalog_for_adapter(
         });
         for model in &mut models {
             let origin = crate::dsh::model_source(preparation, &model.id);
-            model.runtime_metadata = Some(json!({"dshSource": origin}));
+            model.runtime_metadata.get_or_insert_with(|| json!({}))["dshSource"] = json!(origin);
             model.description = crate::dsh::preparation_diagnostic(preparation).map(str::to_owned);
         }
     }
@@ -2743,6 +2786,71 @@ pub fn acp_model_catalog_for_adapter(
         });
     }
     Ok(models)
+}
+
+/// A model switch returns the complete option state. Never retain the previous
+/// model's reasoning option when the response omits it.
+pub fn dsh_model_config_after_selection(
+    previous: &Value,
+    response: &Value,
+    requested_model: &str,
+) -> Result<Value> {
+    let options = response
+        .get("configOptions")
+        .filter(|value| value.is_array())
+        .context("DSH model selection did not return configOptions")?;
+    if acp_runtime_model_id_from_session(&json!({"configOptions": options})).as_deref()
+        != Some(requested_model)
+    {
+        anyhow::bail!("DSH did not confirm the requested model {requested_model}");
+    }
+    let mut session = previous.clone();
+    session["configOptions"] = options.clone();
+    if session.get("models").is_some() {
+        session["models"]["currentModelId"] = json!(requested_model);
+    }
+    Ok(session)
+}
+
+pub fn validate_dsh_model_options(session: &Value, model_id: &str, options: &Value) -> Result<()> {
+    let models = acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, session)?;
+    validate_live_model_selection(&models, model_id, options).map_err(|mut error| {
+        let reasoning = models
+            .iter()
+            .find(|model| model.id == model_id)
+            .and_then(|model| {
+                model
+                    .options
+                    .iter()
+                    .find(|option| option.key == "reasoning_effort")
+            })
+            .map(|option| option.values.as_slice())
+            .unwrap_or_default();
+        if let Some(value) = options.get("reasoning_effort")
+            && !reasoning
+                .iter()
+                .any(|choice| value.as_str() == Some(choice.value.as_str()))
+            && matches!(
+                error.code,
+                "runtime_model_option_unknown" | "runtime_model_option_invalid"
+            )
+        {
+            let choices = reasoning
+                .iter()
+                .map(|choice| choice.value.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ");
+            let choices = if choices.is_empty() {
+                "无可选档位"
+            } else {
+                choices.as_str()
+            };
+            error.detail = format!(
+                "{model_id} 不支持当前设置的 {value}。可选档位：{choices}；也可使用“模型默认”。"
+            );
+        }
+        anyhow::Error::new(error)
+    })
 }
 
 fn acp_model_option(option: &Value) -> Option<ModelOptionDescriptor> {
@@ -3687,6 +3795,76 @@ mod tests {
         );
         let native_id = r#"["native","same-model"]"#;
         let web_id = r#"["web","same-model"]"#;
+        let initial = json!({"configOptions":[
+            {"id":"model","currentValue":native_id,"options":[{"value":native_id},{"value":web_id}]},
+            {"id":"reasoning_effort","currentValue":"max","options":[{"value":"max"},{"value":"high"}]}
+        ]});
+        let scoped = acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &initial).unwrap();
+        let target = scoped.iter().find(|model| model.id == web_id).unwrap();
+        assert!(target.options.is_empty());
+        assert!(target.runtime_metadata.is_none());
+        let current = scoped.iter().find(|model| model.id == native_id).unwrap();
+        assert_eq!(
+            current.runtime_metadata.as_ref().unwrap()["dshOptionsResolved"],
+            true
+        );
+        assert_eq!(current.options[0].default_value, None);
+        // Other ACP adapters retain their existing option projection.
+        assert!(
+            acp_model_catalog_for_adapter(AdapterKind::QwenCode, &initial)
+                .unwrap()
+                .iter()
+                .all(|model| model.options[0].default_value.as_deref() == Some("max"))
+        );
+        let selected = json!({"configOptions":[
+            {"id":"model","currentValue":web_id,"options":[{"value":native_id},{"value":web_id}]},
+            {"id":"reasoning_effort","currentValue":"","options":[{"value":""},{"value":"high"},{"value":"xhigh"}]}
+        ]});
+        assert!(dsh_model_config_after_selection(&initial, &selected, native_id).is_err());
+        let selected = dsh_model_config_after_selection(&initial, &selected, web_id).unwrap();
+        validate_dsh_model_options(&selected, web_id, &json!({"reasoning_effort":"xhigh"}))
+            .unwrap();
+        validate_dsh_model_options(&selected, web_id, &json!({})).unwrap();
+        let error =
+            validate_dsh_model_options(&selected, web_id, &json!({"reasoning_effort":"max"}))
+                .unwrap_err()
+                .to_string();
+        assert!(
+            error.contains(web_id) && error.contains("max") && error.contains("high / xhigh"),
+            "{error}"
+        );
+        let no_effort = dsh_model_config_after_selection(
+            &selected,
+            &json!({"configOptions":[selected["configOptions"][0].clone()]}),
+            web_id,
+        )
+        .unwrap();
+        let no_effort_models =
+            acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &no_effort).unwrap();
+        assert!(
+            no_effort_models
+                .iter()
+                .find(|model| model.id == web_id)
+                .unwrap()
+                .options
+                .is_empty()
+        );
+        assert!(
+            validate_dsh_model_options(&no_effort, web_id, &json!({"reasoning_effort":"high"}))
+                .is_err()
+        );
+        validate_dsh_model_options(&no_effort, web_id, &json!({})).unwrap();
+        let malformed = json!({"configOptions":[selected["configOptions"][0].clone(),
+            {"id":"reasoning_effort","options":[{"value":false}]}]});
+        assert!(acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &malformed).is_err());
+        let unrelated = validate_dsh_model_options(
+            &selected,
+            web_id,
+            &json!({"reasoning_effort":"high","unknown":"value"}),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(unrelated.contains("unknown") && !unrelated.contains("不支持当前设置"));
         let session = json!({"configOptions":[{"id":"model","options":[
             {"group":"native","options":[{"value":native_id,"name":"Same"}]},
             {"group":"web","options":[{"value":web_id,"name":"Same"}]}

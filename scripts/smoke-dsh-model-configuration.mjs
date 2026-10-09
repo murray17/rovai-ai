@@ -17,7 +17,7 @@ const root = await mkdtemp(join(tmpdir(), 'rovai-dsh-model-config-'))
 const workspace = join(root, 'workspace')
 await mkdir(workspace)
 const plugin = resolve(import.meta.dirname, '../crates/rovai-core/src/dsh/models.mjs')
-const requests = [], results = []
+const requests = [], results = [], requestEfforts = []
 let wireFailure, sequence = 0
 const server = createServer(async (request, response) => {
   try {
@@ -28,6 +28,7 @@ const server = createServer(async (request, response) => {
     assert(request.url.endsWith('/responses'))
     requests.push({ path: request.url, key: request.headers.authorization, model: body.model,
       strict: body.tools.find(tool => tool.name === 'bash' || tool.name === 'pwsh')?.strict })
+    requestEfforts.push(body.reasoning?.effort)
     const id = `fixture-${requests.length}`, text = 'LOCAL_FIXTURE_OK'
     const item = { id: `msg-${id}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }
     response.writeHead(200, { 'content-type': 'text/event-stream' })
@@ -50,6 +51,9 @@ const route = (path, key = 'NATIVE_FIXTURE_KEY', compat) => ({ api: 'openai-resp
   ...(compat ? { compat } : {}), models: [
     { id: 'same-model', contextWindow: 32768, maxTokens: 4096 },
     { id: 'model-off', contextWindow: 32768, maxTokens: 4096, compat: { supportsStrictMode: false } },
+    { id: 'effort-a', contextWindow: 32768, maxTokens: 4096, reasoningEfforts: { max: 'high' } },
+    { id: 'effort-b', contextWindow: 32768, maxTokens: 4096, reasoningEfforts: { high: 'high', xhigh: 'xhigh' } },
+    { id: 'effort-none', contextWindow: 32768, maxTokens: 4096 },
   ] })
 const nativeProviders = { relay: route('native'), 'provider-off': route('native-off', undefined, { supportsStrictMode: false }) }
 const webProviders = { relay: route('wrong', 'WEB_FIXTURE_KEY'), extra: route('web', 'WEB_FIXTURE_KEY') }
@@ -108,7 +112,10 @@ async function start(home) {
     await rpc('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'isolated-model-config-smoke', version: '1' } })
     const session = await rpc('session/new', { cwd: workspace, mcpServers: [] })
     const models = session.configOptions.find(option => option.id === 'model').options.flatMap(group => group.options ?? [group]).map(model => model.value)
-    return { prepared, models, stop, async prompt(provider, model = 'same-model') {
+    const select = model => rpc('session/set_config_option', { sessionId: session.sessionId, configId: 'model', value: JSON.stringify(['relay', model]) })
+    const effort = value => rpc('session/set_config_option', { sessionId: session.sessionId, configId: 'reasoning_effort', value })
+    const submit = () => rpc('session/prompt', { sessionId: session.sessionId, prompt: [{ type: 'text', text: 'Reply with the fixture marker.' }] })
+    return { prepared, models, stop, select, effort, submit, async prompt(provider, model = 'same-model') {
       const before = requests.length
       await rpc('session/set_config_option', { sessionId: session.sessionId, configId: 'model', value: JSON.stringify([provider, model]) })
       await rpc('session/prompt', { sessionId: session.sessionId, prompt: [{ type: 'text', text: 'Reply with the fixture marker.' }] })
@@ -158,6 +165,27 @@ try {
     if (supplements) assert.deepEqual(await runtime.prompt('extra'), { path: '/web/responses', key: 'Bearer web-synthetic', model: 'same-model', strict: false })
     const nativePatch = parse(await readFile(join(home, 'profiles/acp/cordis.patch.yml'), 'utf8').catch(() => '[]'))
     assert(!nativePatch.some(row => Object.hasOwn(row.config?.providers ?? {}, 'extra')), 'Temporary Web route persisted in ACP')
+  })
+  await check(home, 'per-model-reasoning-and-native-session-default', async runtime => {
+    const choices = response => response.configOptions.find(option => option.id === 'reasoning_effort')?.options
+      .map(choice => choice.value).filter(Boolean) ?? []
+    assert.deepEqual(choices(await runtime.select('effort-a')), ['max'])
+    await runtime.effort('max')
+    assert.deepEqual(choices(await runtime.select('effort-b')), ['high', 'xhigh'])
+    await runtime.submit()
+    const nativeDefault = requestEfforts.at(-1)
+    await runtime.effort('xhigh')
+    await runtime.submit()
+    assert.equal(requestEfforts.at(-1), 'xhigh')
+    await runtime.select('effort-b')
+    await runtime.submit()
+    assert.equal(requestEfforts.at(-1), nativeDefault, 'Same-model selection resets native reasoning state')
+    const count = requests.length
+    await assert.rejects(runtime.effort('max'), /unknown reasoning effort/)
+    assert.equal(requests.length, count)
+    assert.deepEqual(choices(await runtime.select('effort-none')), [])
+    await runtime.submit()
+    if (wireFailure) throw wireFailure
   })
   if (supplements) {
     assert((await readdir(join(home, 'backups'))).some(name => name.startsWith('rovai-settings-')))

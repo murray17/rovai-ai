@@ -584,6 +584,21 @@ ACP composition 的 provider/model 是该入口自己的 native default，独立
 agent-default-model settings。BYOK 仍通过原生 llm-pi-ai providers 与 ACP profile patch 配置，
 Rovai 显式选模使用真实 catalog ID；产品不读取其他 Runtime 的凭据。
 
+DSH 的 `reasoning_effort` 只属于响应中当前选中的 Provider + Model，不向整个目录复制档位或
+`currentValue`。其余条目保留“尚未读取”，不等同于“已确认无选项”。现有
+`runtime.modelCatalog.open` 可附带 DSH 的 `modelId` 与 `dshSource`，在无业务输入的 Probe Session
+选中目标并核对响应身份；返回 `selectedModelId`，通过现有 metadata 的 `dshOptionsResolved` 标注
+该模型的选项已读取。仍共用模型准备与目录发布栅栏，不切换业务 Session、不逐个探测全部模型。
+目标读取失败保留 Runtime 与上次目录，不将失败解释为无档位；Renderer 隔离迟到的其他目标响应。
+
+执行先核验模型/来源及参数结构，选中目标，替换 Session 的完整 `configOptions`，再以该响应
+校验用户显式强度，最后提交正文。明确但不受支持的强度在正文前报错，说明模型、所选值与可选值，
+不降级、不换路由或创建 Session 重试。切换响应省略强度选项时清除旧缓存。DSH 冻结配置不从目录
+填入默认值；“模型默认”表示删除 override，且不发送额外强度设置。复用 Session 仍执行原生选模，
+由 DSH 恢复目标模型的原生默认。其他 ACP Adapter 的参数语义保持。
+用户主动切换模型可在确认能力后清除不适用的草稿值，目录刷新不改写已保存选择；读取失败保留
+已有选择并支持重试。映射和模型配置表达式继续由 DSH 解释，不新增 YAML 档位解析或固定映射表。
+
 Probe 与执行 Host 共用 `dsh/models.mjs` 模型配置准备插件。最终目录仍来自 ACP 的
 `session/new.configOptions`；原生共享 settings、ACP Profile、Home Patch、环境变量与凭据引用由 DSH
 按自身规则加载。标准 Web Profile（base + web-app bundles）的 `llm-pi-ai` Provider 配置作为补充，不要求用户先开 Web 或升级旧版。
