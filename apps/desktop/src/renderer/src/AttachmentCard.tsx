@@ -1,6 +1,7 @@
 import { AttachmentLocationItems, useAttachmentLocation } from './attachment-location'
 import { useThreadClient } from './camp-client'
-import { useEffect, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type JSX, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { ThreadMessageAttachmentView, LocalAttachmentAvailability, LocalAttachmentOwnerLocator } from '@contracts'
@@ -11,6 +12,8 @@ import {
   attachmentBaseName, attachmentFormatLabel, classifyAttachmentDisplay
 } from './attachment-presentation'
 import { UiText, uiAttribute } from './interface-language'
+import { ImageContextMenu, type ImageAction, type ImageMenuPosition } from './ImageContextMenu'
+import { writeClipboardImage } from './clipboard'
 
 type AttachmentKind = 'file' | 'directory'
 
@@ -85,14 +88,19 @@ export function AttachmentCard({
   const [availability, setAvailability] = useState<LocalAttachmentAvailability>(attachment.availability)
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [contextAnchor, setContextAnchor] = useState({ x: 0, y: 0 })
+  const [imageMenu, setImageMenu] = useState<ImageMenuPosition | null>(null)
+  const [imageReady, setImageReady] = useState(false)
+  const [imageAction, setImageAction] = useState<ImageAction | null>(null)
+  const [imageNotice, setImageNotice] = useState<string | null>(null)
+  const imageActionPending = useRef(false)
   const attachmentButtonRef = useRef<HTMLButtonElement>(null)
   const locatorRef = useRef(locator)
   locatorRef.current = locator
   const timeline = presentation !== 'composer'
-  const contextMenuAvailable = timeline || locator.owner === 'composer' || Boolean(menuItems)
+  const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
+  const contextMenuAvailable = composerImage || timeline || locator.owner === 'composer' || Boolean(menuItems)
   const primaryActionAvailable = contextMenuAvailable || attachment.previewKind !== 'image'
   const agentPresentation = presentation === 'agent-timeline'
-  const composerImage = presentation === 'composer' && attachment.previewKind === 'image'
   const displayClassification = classifyAttachmentDisplay(attachment)
   const baseName = attachmentBaseName(attachment.displayName, attachment.kind)
   const formatLabel = attachmentFormatLabel(attachment.displayName, attachment.kind)
@@ -104,6 +112,11 @@ export function AttachmentCard({
     if (timeline && attachment.availability === 'unknown') return
     let active = true
     let objectUrl: string | null = null
+    setPreviewUrl(null)
+    setPreviewFailed(false)
+    setImageReady(false)
+    setPreviewOpen(false)
+    setImageMenu(null)
     void client.composerAttachments.preview(locatorRef.current)
       .then((result) => {
         if (active) setAvailability(result.availability)
@@ -126,6 +139,58 @@ export function AttachmentCard({
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [client, attachment.availability, attachment.id, attachment.previewKind, locatorKey, timeline])
+
+  useEffect(() => {
+    if (!imageNotice || imageAction || imageMenu) return
+    const timer = window.setTimeout(() => setImageNotice(null), 3200)
+    return () => window.clearTimeout(timer)
+  }, [imageNotice, imageAction, imageMenu])
+
+  const showImageMenu = (event: MouseEvent<HTMLElement> | ReactKeyboardEvent<HTMLElement>): void => {
+    if (disabled) return
+    const keyboard = event.type === 'keydown'
+    if (keyboard && !('key' in event && (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')))) return
+    event.preventDefault()
+    event.stopPropagation()
+    const origin = event.currentTarget.classList.contains('attachment-card')
+      ? attachmentButtonRef.current! : event.currentTarget
+    const bounds = origin.getBoundingClientRect()
+    const pointer = 'clientX' in event && (event.clientX !== 0 || event.clientY !== 0)
+    setImageMenu({ x: pointer ? event.clientX : bounds.left, y: pointer ? event.clientY : bounds.bottom, origin })
+  }
+
+  const runImageAction = async (action: ImageAction): Promise<void> => {
+    if (disabled || !imageReady || !previewUrl || imageActionPending.current) return
+    if (action !== 'copy' && action !== 'save') return
+    imageActionPending.current = true
+    setImageAction(action)
+    setImageNotice(action === 'copy' ? uiAttribute('正在复制图片…') : null)
+    try {
+      if (action === 'copy') {
+        const image = attachmentButtonRef.current?.querySelector('img')
+        if (!image) throw new Error('image_unavailable')
+        await writeClipboardImage(image)
+        setImageNotice(uiAttribute('已复制图片'))
+      } else {
+        const link = document.createElement('a')
+        link.href = previewUrl
+        link.download = attachment.displayName.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim() || 'image'
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+      }
+    } catch {
+      setImageNotice(action === 'copy' ? uiAttribute('未能复制图片，请重试或保存图片。') : uiAttribute('未能保存图片，请重试。'))
+    } finally {
+      imageActionPending.current = false
+      setImageAction(null)
+    }
+  }
+
+  const imageContextMenu = composerImage && <ImageContextMenu position={imageMenu}
+    onClose={() => setImageMenu(null)} displayName={attachment.displayName}
+    ready={imageReady && !disabled} busy={imageAction} hasPath={false}
+    onAction={action => { void runImageAction(action) }} />
 
   const runAttachmentAction = async (
     action: 'open' | 'reveal',
@@ -180,7 +245,7 @@ export function AttachmentCard({
   const systemOpenLabel = client.attachments.kind === 'download' ? uiAttribute('下载文件') : attachment.kind === 'directory'
     ? uiAttribute('打开文件夹')
     : uiAttribute('使用系统应用打开')
-  const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null
+  const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null && !previewFailed
   const showAttachmentContextMenu = (x: number, y: number): void => {
     fileLocation.inspect()
     setContextAnchor({ x, y })
@@ -208,8 +273,9 @@ export function AttachmentCard({
   const content = composerImage
     ? (
         <span className="attachment-visual composer-image-preview" aria-hidden="true">
-          {previewUrl
-            ? <img src={previewUrl} alt="" />
+          {previewUrl && !previewFailed
+            ? <img src={previewUrl} alt="" onLoad={() => setImageReady(true)}
+                onError={() => { setImageReady(false); setPreviewFailed(true) }} />
             : !previewFailed ? <i className="attachment-loading" /> : <b>!</b>}
         </span>
       )
@@ -250,9 +316,9 @@ export function AttachmentCard({
       onMouseEnter={fileLocation.inspect}
       onFocus={fileLocation.inspect}
       title={fileLocation.label}
-      data-context-open={contextMenuOpen ? 'true' : undefined}
+      data-context-open={contextMenuOpen || imageMenu ? 'true' : undefined}
       onContextMenu={contextMenuAvailable && !disabled
-        ? (event) => {
+        ? composerImage ? showImageMenu : (event) => {
             event.preventDefault()
             if (event.clientX === 0 && event.clientY === 0) showAttachmentKeyboardMenu()
             else showAttachmentContextMenu(event.clientX, event.clientY)
@@ -265,20 +331,25 @@ export function AttachmentCard({
               <button
                 className={`attachment-open ${hasImagePreview ? 'is-preview' : ''}`}
                 type="button"
-                aria-busy={attachmentAction !== null}
-                aria-label={hasImagePreview
+                aria-busy={attachmentAction !== null || imageAction !== null || (composerImage && !imageReady && !previewFailed)}
+                aria-disabled={composerImage && !imageReady ? true : undefined}
+                aria-label={composerImage && previewFailed ? uiAttribute('图片已不可用') : composerImage || hasImagePreview
                   ? uiAttribute("预览附件 {0}", String(attachment.displayName))
                   : attachment.kind === 'file' && filePreview
                     ? uiAttribute("打开文件预览 {0}", String(attachment.displayName))
                     : `${systemOpenLabel} ${attachment.displayName}`}
                 disabled={disabled || attachmentAction !== null}
                 onClick={() => {
+                  if (composerImage) {
+                    if (imageReady) { setImageMenu(null); setPreviewOpen(true) }
+                    return
+                  }
                   if (!timeline && hasImagePreview) setPreviewOpen(true)
                   else if (attachment.kind === 'file' && filePreview) void runAttachmentAction('open')
                   else if (hasImagePreview) setPreviewOpen(true)
                   else void runAttachmentAction('open')
                 }}
-                onKeyDown={contextMenuAvailable
+                onKeyDown={composerImage ? showImageMenu : contextMenuAvailable
                   ? (event) => {
                       if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
                       event.preventDefault()
@@ -290,7 +361,7 @@ export function AttachmentCard({
                 {content}
                 {attachmentAction && <i className="attachment-action-loading" aria-hidden="true" />}
               </button>
-              {contextMenuAvailable && (
+              {contextMenuAvailable && !composerImage && (
                 <DropdownMenu.Root open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
                   <DropdownMenu.Trigger asChild>
                     <span
@@ -358,14 +429,21 @@ export function AttachmentCard({
               </button>
             )
           : <div className="attachment-open">{content}</div>}
+      {!previewOpen && imageContextMenu}
+      {imageNotice && createPortal(<div className="image-action-notice" role="status" aria-hidden={previewOpen || undefined}>{imageNotice}</div>, document.body)}
       {hasImagePreview && (
-            <Dialog.Root open={previewOpen} onOpenChange={setPreviewOpen}>
+            <Dialog.Root open={previewOpen} onOpenChange={open => { setPreviewOpen(open); if (!open) setImageMenu(null) }}>
               <Dialog.Portal>
                 <Dialog.Overlay className="attachment-lightbox-overlay" />
-                <Dialog.Content className="attachment-lightbox" aria-describedby={undefined}>
+                <Dialog.Content className={`attachment-lightbox ${composerImage ? 'composer-image-lightbox' : ''}`} aria-describedby={undefined}>
                   <Dialog.Title>{attachment.displayName}</Dialog.Title>
-                  <img src={previewUrl} alt={attachment.displayName} />
+                  {composerImage && <span className="sr-only" role="status">{imageNotice}</span>}
+                  <img src={previewUrl} alt={attachment.displayName}
+                    tabIndex={composerImage ? 0 : undefined}
+                    onContextMenu={composerImage ? showImageMenu : undefined}
+                    onKeyDown={composerImage ? showImageMenu : undefined} />
                   <Dialog.Close className="attachment-lightbox-close" aria-label={uiAttribute("关闭附件预览")}>×</Dialog.Close>
+                  {previewOpen && imageContextMenu}
                 </Dialog.Content>
               </Dialog.Portal>
             </Dialog.Root>

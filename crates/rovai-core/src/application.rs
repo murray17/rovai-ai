@@ -2010,6 +2010,8 @@ struct CheckProductRuntimeParams {
     #[serde(default)]
     wait_for_refresh: bool,
     model_id: Option<String>,
+    #[serde(default)]
+    cache_only: bool,
     dsh_source: Option<crate::agent_profile::DshModelSource>,
 }
 
@@ -2189,9 +2191,17 @@ struct RuntimeCheckActivity {
     running: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DshOptionsTarget {
+    model_id: String,
+    source: Option<crate::agent_profile::DshModelSource>,
+    context: String,
+}
+
 struct RuntimeCheckRequest {
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
+    model_target: Option<DshOptionsTarget>,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
     trigger: RuntimeCheckTrigger,
@@ -2202,6 +2212,7 @@ struct RuntimeCheckRequest {
 struct RuntimeCheckAttempt {
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
+    model_target: Option<DshOptionsTarget>,
     attempt_id: String,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
@@ -2224,6 +2235,7 @@ impl RuntimeCheckAttempt {
     fn accepts(&self, request: &RuntimeCheckRequest) -> bool {
         request.startup_preview.is_none()
             && self.startup_preview.is_none()
+            && self.model_target == request.model_target
             && self.runtime_kind == request.runtime_kind
             && self.search.generation() == request.search.generation()
     }
@@ -3875,10 +3887,67 @@ impl Core {
         }))
     }
 
+    async fn dsh_model_options_payload(
+        &self,
+        model_id: &str,
+        source: Option<crate::agent_profile::DshModelSource>,
+    ) -> Result<(Value, String, bool)> {
+        let kind = AdapterKind::DeepseekHarness;
+        let search = self.runtime_search_environment.read().await.clone();
+        let path = {
+            let database = self.database.lock().await;
+            AgentProfileService::default()
+                .managed_installation(&database, kind, "default")?
+                .context("DSH installation is unavailable")?
+                .executable_path
+        };
+        // Configuration and executable identity are local observations, never a probe.
+        let context = with_runtime_configuration(kind, &search, async {
+            crate::dsh::model_options_context(Path::new(&path))
+        })
+        .await?;
+        let _update = self
+            .runtime_check_update_guard(&search)
+            .await
+            .context("DSH configuration changed during cache validation")?;
+        let mut payload = self
+            .runtime_model_catalog_payload(kind, "not_required")
+            .await?;
+        let catalog_valid = matches!(payload["cache"]["status"].as_str(), Some("fresh" | "stale"));
+        let mut fresh = false;
+        if let Some(models) = payload["models"].as_array_mut() {
+            for model in models {
+                let identity_matches =
+                    catalog_valid && model["runtimeMetadata"]["dshOptionsContext"] == context;
+                if !identity_matches {
+                    // Retain history, but never describe a previous context as confirmed.
+                    model["runtimeMetadata"]["dshOptionsResolved"] = json!(false);
+                }
+                if model["id"] == model_id
+                    && model["runtimeMetadata"]["dshSource"]
+                        == json!(source.unwrap_or(crate::agent_profile::DshModelSource::Native))
+                    && model["runtimeMetadata"]["dshOptionsResolved"] == true
+                {
+                    fresh = model["runtimeMetadata"]["dshOptionsObservedAt"]
+                        .as_str()
+                        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                        .is_some_and(|at| {
+                            let age = chrono::Utc::now().signed_duration_since(at);
+                            age >= chrono::Duration::zero() && age < chrono::Duration::seconds(60)
+                        });
+                }
+            }
+        }
+        payload["selectedModelId"] = json!(model_id);
+        payload["refreshStatus"] = json!(if fresh { "not_required" } else { "deferred" });
+        Ok((payload, context, fresh))
+    }
+
     async fn open_dsh_model_options(
         &self,
         model_id: &str,
         source: Option<crate::agent_profile::DshModelSource>,
+        cache_only: bool,
     ) -> Result<Value> {
         let kind = AdapterKind::DeepseekHarness;
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
@@ -3888,59 +3957,68 @@ impl Core {
             !model_id.trim().is_empty(),
             "DSH target model must not be empty"
         );
-        let cached = self
-            .runtime_model_catalog_payload(kind, "not_required")
-            .await?;
-        let resolved = cached["cache"]["status"] == "fresh"
-            && cached["models"].as_array().is_some_and(|models| {
-                models.iter().any(|model| {
-                    model["id"] == model_id
-                        && model["runtimeMetadata"]["dshOptionsResolved"] == true
-                        && model["runtimeMetadata"]["dshSource"]
-                            == json!(source.unwrap_or(crate::agent_profile::DshModelSource::Native))
-                })
-            });
-        let status = if resolved {
-            "not_required"
-        } else {
-            let search = self.runtime_search_environment.read().await.clone();
-            let mut outcome = self
-                .refresh_verified_runtime_catalog_for_selection(
-                    kind,
-                    search,
-                    Some((model_id, source)),
-                )
-                .await?;
-            if outcome.is_none() {
-                let checked = self
-                    .await_runtime_check(
-                        kind,
-                        RuntimeLaunchPurpose::AvailabilityCheck,
-                        RuntimeCheckTrigger::CatalogOpen,
-                    )
-                    .await?;
-                outcome = Some(if checked == RuntimeCheckOutcome::Ready {
-                    let search = self.runtime_search_environment.read().await.clone();
-                    self.refresh_verified_runtime_catalog_for_selection(
-                        kind,
-                        search,
-                        Some((model_id, source)),
-                    )
-                    .await?
-                    .unwrap_or(RuntimeCheckOutcome::Superseded)
-                } else {
-                    checked
-                });
-            }
-            match outcome {
-                Some(RuntimeCheckOutcome::Ready) => "completed",
-                Some(RuntimeCheckOutcome::StableFailure) => "failed",
-                _ => "deferred",
-            }
-        };
-        let mut payload = self.runtime_model_catalog_payload(kind, status).await?;
-        payload["selectedModelId"] = json!(model_id);
+        let (cached, context, fresh) = self.dsh_model_options_payload(model_id, source).await?;
+        if fresh || cache_only {
+            return Ok(cached);
+        }
+        let result = self
+            .await_runtime_check_target(
+                kind,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                RuntimeCheckTrigger::CatalogOpen,
+                Some(DshOptionsTarget {
+                    model_id: model_id.to_owned(),
+                    source,
+                    context,
+                }),
+            )
+            .await;
+        let (mut payload, _, _) = self.dsh_model_options_payload(model_id, source).await?;
+        payload["refreshStatus"] = json!(match result {
+            Ok(RuntimeCheckOutcome::Ready) => "completed",
+            Ok(RuntimeCheckOutcome::Superseded) => "deferred",
+            _ => "failed",
+        });
         Ok(payload)
+    }
+
+    async fn refresh_dsh_model_options(
+        &self,
+        search: Arc<RuntimeSearchEnvironment>,
+        target: DshOptionsTarget,
+    ) -> Result<RuntimeCheckOutcome> {
+        let (_, context, fresh) = self
+            .dsh_model_options_payload(&target.model_id, target.source)
+            .await?;
+        if context != target.context {
+            return Ok(RuntimeCheckOutcome::Superseded);
+        }
+        if fresh {
+            return Ok(RuntimeCheckOutcome::Ready);
+        }
+        let kind = AdapterKind::DeepseekHarness;
+        let selection = Some((target.model_id.as_str(), target.source));
+        if let Some(outcome) = self
+            .refresh_verified_runtime_catalog_for_selection(kind, search.clone(), selection)
+            .await?
+        {
+            return Ok(outcome);
+        }
+        // Reuse the existing readiness fallback only when no verified installation exists.
+        let outcome = self
+            .run_product_runtime_resolution_in_environment(
+                kind,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE,
+                search.clone(),
+            )
+            .await?;
+        if outcome != RuntimeCheckOutcome::Ready {
+            return Ok(outcome);
+        }
+        self.refresh_verified_runtime_catalog_for_selection(kind, search, selection)
+            .await
+            .map(|outcome| outcome.unwrap_or(RuntimeCheckOutcome::Superseded))
     }
 
     async fn record_runtime_check_manager_failure(
@@ -3996,6 +4074,7 @@ impl Core {
             .send(RuntimeCheckRequest {
                 search: self.runtime_search_environment.read().await.clone(),
                 startup_preview: None,
+                model_target: None,
                 runtime_kind: kind,
                 purpose,
                 trigger,
@@ -4015,6 +4094,17 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
     ) -> Result<RuntimeCheckOutcome> {
+        self.await_runtime_check_target(kind, purpose, trigger, None)
+            .await
+    }
+
+    async fn await_runtime_check_target(
+        &self,
+        kind: AdapterKind,
+        purpose: RuntimeLaunchPurpose,
+        trigger: RuntimeCheckTrigger,
+        model_target: Option<DshOptionsTarget>,
+    ) -> Result<RuntimeCheckOutcome> {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
         }
@@ -4029,6 +4119,7 @@ impl Core {
             .send(RuntimeCheckRequest {
                 search,
                 startup_preview: None,
+                model_target,
                 runtime_kind: kind,
                 purpose,
                 trigger,
@@ -4491,6 +4582,16 @@ impl Core {
             }
         })
         .await;
+        let dsh_context = if kind == AdapterKind::DeepseekHarness {
+            Some(
+                with_runtime_configuration(kind, &search, async {
+                    crate::dsh::model_options_context(path)
+                })
+                .await?,
+            )
+        } else {
+            None
+        };
         let Some(_update) = self.runtime_check_update_guard(&search).await else {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         };
@@ -4515,13 +4616,37 @@ impl Core {
         if !current.as_ref().is_some_and(|current| {
             current.id == installation.id
                 && current.generation == installation.generation
-                && current.snapshot == installation.snapshot
+                && if kind == AdapterKind::DeepseekHarness {
+                    current
+                        .snapshot
+                        .as_ref()
+                        .zip(installation.snapshot.as_ref())
+                        .is_some_and(|(current, expected)| {
+                            // Another model's capability write is not an identity change.
+                            // The transaction merges against the latest persisted catalog.
+                            let mut current = current.clone();
+                            current.models.clone_from(&expected.models);
+                            current == *expected
+                        })
+                } else {
+                    current.snapshot == installation.snapshot
+                }
         }) || self.runtime_search_environment.read().await.generation() != search_generation
         {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         }
         match catalog {
             Ok(catalog) => {
+                if let Some(context) = dsh_context
+                    && catalog.models.iter().any(|model| {
+                        model
+                            .runtime_metadata
+                            .as_ref()
+                            .is_none_or(|meta| meta["dshOptionsContext"] != context)
+                    })
+                {
+                    return Ok(Some(RuntimeCheckOutcome::Superseded));
+                }
                 if catalog
                     .dsh_preparation
                     .as_ref()
@@ -5077,6 +5202,20 @@ impl Core {
             latest_observation.reported_version = snapshot.reported_version.clone();
             latest_observation.version_probe_succeeded = Some(snapshot.reported_version.is_some());
             if snapshot.probe_status == "ready" {
+                if kind == AdapterKind::DeepseekHarness {
+                    let context = with_runtime_configuration(kind, &search, async {
+                        crate::dsh::model_options_context(&canonical)
+                    })
+                    .await?;
+                    if snapshot.models.iter().any(|model| {
+                        model
+                            .runtime_metadata
+                            .as_ref()
+                            .is_none_or(|meta| meta["dshOptionsContext"] != context)
+                    }) {
+                        return Ok(RuntimeCheckOutcome::Superseded);
+                    }
+                }
                 let executable_path = canonical.to_string_lossy().to_string();
                 let mut database = self.database.lock().await;
                 AgentProfileService::default().commit_verified_managed_installation(
@@ -11059,7 +11198,7 @@ impl Core {
                         params.runtime_kind == AdapterKind::DeepseekHarness,
                         "Target-model option discovery is only supported for DSH"
                     );
-                    self.open_dsh_model_options(&model_id, params.dsh_source)
+                    self.open_dsh_model_options(&model_id, params.dsh_source, params.cache_only)
                         .await
                 } else {
                     self.open_runtime_model_catalog(params.runtime_kind, params.wait_for_refresh)
@@ -24589,7 +24728,7 @@ async fn process_runtime_check_manager(
         tokio::select! {
             request = requests.recv() => {
                 let Some(request) = request else { break };
-                if execution_deferrals.should_defer(request.runtime_kind, request.trigger) {
+                if request.model_target.is_none() && execution_deferrals.should_defer(request.runtime_kind, request.trigger) {
                     if let Some(completion) = request.completion {
                         let _ = completion.send(Ok(RuntimeCheckOutcome::Superseded));
                     }
@@ -24638,10 +24777,11 @@ async fn process_runtime_check_manager(
                 if let Some(completion) = request.completion {
                     waiters.push(completion);
                 }
-                let is_private_check = request.startup_preview.is_some();
+                let is_private_check = request.startup_preview.is_some() || request.model_target.is_some();
                 let attempt = RuntimeCheckAttempt {
                     search: request.search,
                     startup_preview: request.startup_preview,
+                    model_target: request.model_target,
                     attempt_id: attempt_id.clone(),
                     runtime_kind: request.runtime_kind,
                     purpose: request.purpose,
@@ -24743,7 +24883,7 @@ async fn process_runtime_check_manager(
                 .map(|(index, _)| index);
             let Some(next) = next else { break };
             let attempt = pending.swap_remove(next);
-            if attempt.startup_preview.is_none() {
+            if attempt.startup_preview.is_none() && attempt.model_target.is_none() {
                 core.runtime_check_activity.write().await.insert(
                     attempt.runtime_kind,
                     RuntimeCheckActivity {
@@ -24768,10 +24908,15 @@ async fn process_runtime_check_manager(
             let worker_startup_preview = attempt.startup_preview.clone();
             let worker_search = attempt.search.clone();
             let worker_catalog_only = attempt.catalog_only;
+            let worker_model_target = attempt.model_target.clone();
             let abort_handle = checks.spawn(async move {
                 let mut catalog_only = worker_catalog_only;
                 let (result, finalization) = match tokio::time::timeout_at(worker_deadline, async {
-                    if let Some(preview) = worker_startup_preview {
+                    if let Some(target) = worker_model_target {
+                        check_core
+                            .refresh_dsh_model_options(worker_search, target)
+                            .await
+                    } else if let Some(preview) = worker_startup_preview {
                         let result = check_core
                             .inspect_runtime_startup(
                                 worker_kind,
@@ -24860,7 +25005,7 @@ async fn finalize_runtime_check(
     mut result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 ) {
-    if attempt.startup_preview.is_some() {
+    if attempt.startup_preview.is_some() || attempt.model_target.is_some() {
         for waiter in attempt.waiters {
             let _ = waiter.send(result.clone());
         }
@@ -26758,6 +26903,7 @@ done
             .send(RuntimeCheckRequest {
                 search: core.runtime_search_environment.read().await.clone(),
                 startup_preview: None,
+                model_target: None,
                 runtime_kind: AdapterKind::CodexCli,
                 purpose: RuntimeLaunchPurpose::AvailabilityCheck,
                 trigger: RuntimeCheckTrigger::CatalogOpen,
@@ -26788,6 +26934,7 @@ done
             .send(RuntimeCheckRequest {
                 search: core.runtime_search_environment.read().await.clone(),
                 startup_preview: None,
+                model_target: None,
                 runtime_kind: AdapterKind::CodexCli,
                 purpose: RuntimeLaunchPurpose::AvailabilityCheck,
                 trigger: RuntimeCheckTrigger::UserCheck,

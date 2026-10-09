@@ -162,11 +162,11 @@ try {
   await writeFile(wirePath, '')
   await writeFile(executable, `#!${process.execPath}
 import { spawn } from 'node:child_process'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync, writeFileSync } from 'node:fs'
 import { Transform } from 'node:stream'
 const child = spawn(process.execPath, [${JSON.stringify(join(resolve(dshPackage), 'lib/bin.js'))}, ...process.argv.slice(2)], { stdio: ['pipe', 'pipe', 'inherit'] })
 let pending = ''
-process.stdin.pipe(new Transform({ transform(chunk, encoding, done) {
+process.stdin.pipe(new Transform({ async transform(chunk, encoding, done) {
   pending += chunk.toString()
   let newline
   while ((newline = pending.indexOf('\\n')) >= 0) {
@@ -175,6 +175,16 @@ process.stdin.pipe(new Transform({ transform(chunk, encoding, done) {
       if (message.method?.startsWith('session/')) {
         const { sessionId, configId, value } = message.params ?? {}
         appendFileSync(${JSON.stringify(wirePath)}, JSON.stringify({ pid: process.pid, method: message.method, sessionId, configId, value }) + '\\n')
+        if (message.method === 'session/set_config_option' && configId === 'model') {
+          if (existsSync(${JSON.stringify(join(root, 'fail-options'))})) {
+            process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: 'isolated option failure' } }) + '\\n')
+            done(); return
+          }
+          if (existsSync(${JSON.stringify(join(root, 'hold-options'))})) {
+            writeFileSync(${JSON.stringify(join(root, 'options-held'))}, '')
+            while (existsSync(${JSON.stringify(join(root, 'hold-options'))})) await new Promise(resolve => setTimeout(resolve, 10))
+          }
+        }
       }
     } catch {}
   }
@@ -214,8 +224,80 @@ child.on('close', code => process.exit(code ?? 1))
     assert.equal(read.models.find(row => row.isDefault)?.id, initial.id, 'A targeted read must not change the catalog default')
     return selected.options.find(option => option.key === 'reasoning_effort')?.values.map(choice => choice.value) ?? []
   }
+  const modelReads = async model => (await readFile(wirePath, 'utf8')).trim().split('\n').filter(Boolean)
+    .map(line => JSON.parse(line)).filter(row => row.method === 'session/set_config_option'
+      && row.configId === 'model' && row.value === modelId('thinking', model)).length
+  const cachedTarget = model => core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness',
+    modelId: modelId('thinking', model), dshSource: 'web', cacheOnly: true })
+  const successfulAt = (catalog, model) => catalog.models.find(row => row.id === modelId('thinking', model))
+    .runtimeMetadata.dshOptionsObservedAt
+  const aTime = initial.runtimeMetadata.dshOptionsObservedAt
+  assert(aTime)
+  const bReads = await modelReads('effort-b')
+  assert.equal((await cachedTarget('effort-b')).refreshStatus, 'deferred')
+  assert.equal(await modelReads('effort-b'), bReads, 'Local cache validation must not spawn DSH')
+  await Promise.all(Array.from({ length: 3 }, async () => assert.deepEqual(await target('effort-b'), ['high', 'xhigh'])))
+  assert.equal(await modelReads('effort-b'), bReads + 1, 'Concurrent B requests share one native target read')
+  const afterB = await cachedTarget('effort-a')
+  assert.equal(successfulAt(afterB, 'effort-a'), aTime, 'B must not refresh A success time')
+  assert.equal(afterB.refreshStatus, 'not_required')
+  assert.deepEqual(await target('effort-a'), ['max'])
   assert.deepEqual(await target('effort-b'), ['high', 'xhigh'])
+  assert.equal(await modelReads('effort-b'), bReads + 1, 'A to B to A uses per-model cache')
   assert.deepEqual(await target('effort-none'), [])
+  assert.deepEqual(await target('effort-none'), [])
+  assert.equal(await modelReads('effort-none'), 1, 'Empty capability results must be cached')
+  const bTime = successfulAt(await cachedTarget('effort-b'), 'effort-b')
+  await refresh()
+  assert.equal(successfulAt(await cachedTarget('effort-b'), 'effort-b'), bTime, 'Full refresh must preserve B without retimestamping it')
+  // Age only the successful timestamp in this isolated fixture instead of sleeping.
+  const ageB = () => {
+    const cacheDb = new DatabaseSync(join(data, 'rovai.sqlite'))
+    try {
+      const row = cacheDb.prepare('SELECT installation_id, model_catalog_json FROM adapter_capability_snapshot WHERE installation_id = ?').get(installation.id)
+      const cached = JSON.parse(row.model_catalog_json)
+      cached.find(model => model.id === modelId('thinking', 'effort-b')).runtimeMetadata.dshOptionsObservedAt = new Date(Date.now() - 61000).toISOString()
+      cacheDb.prepare('UPDATE adapter_capability_snapshot SET model_catalog_json = ? WHERE installation_id = ?').run(JSON.stringify(cached), installation.id)
+    } finally { cacheDb.close() }
+  }
+  ageB()
+  const staleB = await cachedTarget('effort-b')
+  assert.equal(staleB.refreshStatus, 'deferred')
+  assert(staleB.models.find(model => model.id === modelId('thinking', 'effort-b')).runtimeMetadata.dshOptionsResolved)
+  assert.equal(await modelReads('effort-b'), bReads + 1, 'Stale history is readable before refresh')
+  await Promise.all([target('effort-b'), target('effort-b')])
+  assert.equal(await modelReads('effort-b'), bReads + 2, 'Expired concurrent visits share one revalidation')
+  results.push({ case: 'per-model-cache', concurrentB: 1, cachedEmpty: 1, expiredB: 1, paidRequests: 0 })
+  ageB()
+  const failedTime = successfulAt(await cachedTarget('effort-b'), 'effort-b')
+  await writeFile(join(root, 'fail-options'), '')
+  const failedRead = await core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness',
+    modelId: modelId('thinking', 'effort-b'), dshSource: 'web' })
+  assert.equal(failedRead.refreshStatus, 'failed')
+  assert.equal(successfulAt(failedRead, 'effort-b'), failedTime, 'Failure cannot refresh the success timestamp')
+  assert(failedRead.models.find(model => model.id === modelId('thinking', 'effort-b')).options.length)
+  await rm(join(root, 'fail-options'))
+  await writeFile(join(root, 'hold-options'), '')
+  const changingRead = core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness',
+    modelId: modelId('thinking', 'effort-b'), dshSource: 'web' })
+  let held = false
+  for (let attempt = 0; attempt < 1500; attempt++) {
+    if (await readFile(join(root, 'options-held')).then(() => true, () => false)) { held = true; break }
+    await new Promise(done => setTimeout(done, 10))
+  }
+  assert(held, 'Target probe must reach the controlled barrier')
+  web[0].config.providers.thinking.models[1].reasoningEfforts = { low: 'low' }
+  await json(webPath, web)
+  await rm(join(root, 'hold-options'))
+  const rejectedRead = await changingRead
+  assert(['failed', 'deferred'].includes(rejectedRead.refreshStatus))
+  assert.equal(successfulAt(rejectedRead, 'effort-b'), failedTime, 'Old-context result must not be published')
+  assert.equal(rejectedRead.models.find(model => model.id === modelId('thinking', 'effort-b')).runtimeMetadata.dshOptionsResolved, false)
+  assert.deepEqual(await target('effort-b'), ['low'])
+  web[0].config.providers.thinking.models[1].reasoningEfforts = { high: 'high', xhigh: 'xhigh' }
+  await json(webPath, web)
+  assert.deepEqual(await target('effort-b'), ['high', 'xhigh'])
+  results.push('failed read preserves history and successful time; configuration change during native target read is not published')
   assert.equal(requests.length, 0, 'Capability discovery must never submit a business prompt')
   await select('thinking', 'web', 'effort-a', { reasoning_effort: 'max' })
   const a = await run()
@@ -230,6 +312,11 @@ child.on('close', code => process.exit(code ?? 1))
   const unchanged = await run(a.threadId)
   assert.equal(unchanged.session, b.session)
   assert(!unchanged.wire.some(message => message.configId === 'reasoning_effort'))
+  ageB()
+  await target('effort-b')
+  const afterCacheRefresh = await run(a.threadId)
+  assert.equal(afterCacheRefresh.pid, b.pid, 'Capability freshness must not rebuild the business Host')
+  assert(!afterCacheRefresh.wire.some(message => message.configId === 'reasoning_effort'))
   await select('thinking', 'web', 'effort-b', { reasoning_effort: 'xhigh' })
   const explicit = await run(a.threadId)
   assert.equal(requests.at(-1).effort, 'xhigh', 'Select target before validating its native options')
@@ -256,7 +343,9 @@ child.on('close', code => process.exit(code ?? 1))
   assert.match(invalid.failure.public_runtime_failure_json, /xhigh/)
   web[0].config.providers.thinking.models[1].reasoningEfforts = { low: 'low' }
   await json(webPath, web)
-  await refresh()
+  const changedCache = await cachedTarget('effort-b')
+  assert.equal(changedCache.refreshStatus, 'deferred', 'Configuration changes invalidate even young caches')
+  assert.equal(changedCache.models.find(model => model.id === modelId('thinking', 'effort-b')).runtimeMetadata.dshOptionsResolved, false)
   assert.deepEqual(await target('effort-b'), ['low'])
   assert.equal((await core.request('members.get', { agentId: 'agent_2' })).runtimeConfiguration.model.options.reasoning_effort, 'max')
   results.push('per-model native options; default freeze/Session reuse; explicit validation before prompt; Web option refresh preserves saved intent')

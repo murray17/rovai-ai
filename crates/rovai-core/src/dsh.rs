@@ -61,8 +61,12 @@ fn native_home() -> Result<std::path::PathBuf> {
 }
 
 fn configuration_digest(home: &Path, cwd: &Path) -> Result<String> {
+    configuration_digest_for_workdir(home, Some(cwd))
+}
+
+fn configuration_digest_for_workdir(home: &Path, cwd: Option<&Path>) -> Result<String> {
     let mut entries = Vec::new();
-    for path in [
+    let mut paths = vec![
         home.join("settings.yaml"),
         home.join(".credentials.yaml"),
         home.join(".env"),
@@ -72,8 +76,11 @@ fn configuration_digest(home: &Path, cwd: &Path) -> Result<String> {
         home.join("profiles/acp/cordis.patch.yml"),
         home.join("profiles/web/package.json"),
         home.join("profiles/web/cordis.patch.yml"),
-        cwd.join(".env"),
-    ] {
+    ];
+    if let Some(cwd) = cwd {
+        paths.push(cwd.join(".env"));
+    }
+    for path in paths {
         let digest = match fs::read(&path) {
             Ok(bytes) => Some(if path == home.join("profiles/web/cordis.patch.yml") {
                 web_model_digest(&bytes)?
@@ -87,6 +94,31 @@ fn configuration_digest(home: &Path, cwd: &Path) -> Result<String> {
         entries.push((path, digest));
     }
     canonical_json_digest(&json!({"revision": BOOTSTRAP_REVISION, "home": home, "files": entries}))
+}
+
+/// Capability probes always have an empty, isolated working directory. Reuse
+/// the native digest without including that randomly named directory. This is
+/// local observation only; it neither starts DSH nor changes Host reuse rules.
+pub fn model_options_context(executable: &Path) -> Result<String> {
+    let mut command = Command::new(executable);
+    crate::runtime_discovery::configure_runtime_command(AdapterKind::DeepseekHarness, &mut command);
+    let mut environment =
+        crate::runtime_discovery::runtime_environment(AdapterKind::DeepseekHarness);
+    for (name, value) in command.as_std().get_envs() {
+        if let Some(value) = value {
+            environment.insert(
+                name.to_string_lossy().into_owned(),
+                value.to_string_lossy().into_owned(),
+            );
+        }
+    }
+    let identity = crate::agent_runtime_adapter::observe_executable_file_identity(executable)?;
+    canonical_json_digest(&json!({
+        "configuration": configuration_digest_for_workdir(&native_home()?, None)?,
+        "executable": executable,
+        "identity": [identity.byte_size.to_string(), identity.modified_at_unix_nanos.to_string(), identity.file_id.unwrap_or_default()],
+        "environment": environment,
+    }))
 }
 
 fn web_model_digest(bytes: &[u8]) -> Result<String> {

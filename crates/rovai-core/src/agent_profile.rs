@@ -1890,6 +1890,7 @@ impl AgentProfileService {
             return Ok(false);
         };
         let transaction = database.connection_mut().transaction()?;
+        let models = merge_persisted_dsh_options(&transaction, &expected.id, models)?;
         let updated = transaction.execute(
             "UPDATE adapter_capability_snapshot SET model_catalog_json = ?2, model_catalog_succeeded_at = ?3
              WHERE installation_id = ?1 AND probe_status = 'ready'
@@ -1901,7 +1902,7 @@ impl AgentProfileService {
                    AND installation.executable_path = ?8 AND installation.enabled = 1
                    AND installation.path_state = 'valid' AND installation.auth_scope = ?9
                    AND installation.adapter_kind = ?10)",
-            params![expected.id, serde_json::to_string(models)?, succeeded_at,
+            params![expected.id, serde_json::to_string(&models)?, succeeded_at,
                 snapshot.executable_fingerprint, snapshot.permission_schema_digest,
                 snapshot.last_successful_probe_at, expected.generation, expected.executable_path,
                 expected.auth_scope, expected.adapter_kind.as_str()],
@@ -3799,6 +3800,7 @@ fn upsert_successful_capability_snapshot(
     if snapshot.probe_status != "ready" {
         anyhow::bail!("only a successful probe can replace the capability snapshot");
     }
+    let models = merge_persisted_dsh_options(transaction, installation_id, &snapshot.models)?;
     transaction.execute(
         r#"
         INSERT INTO adapter_capability_snapshot(
@@ -3841,7 +3843,7 @@ fn upsert_successful_capability_snapshot(
             snapshot.permission_schema_digest,
             serde_json::to_string(&snapshot.capabilities)?,
             serde_json::to_string(&snapshot.protocols)?,
-            serde_json::to_string(&snapshot.models)?,
+            serde_json::to_string(&models)?,
             serde_json::to_string(&snapshot.permission_options)?,
             snapshot.observed_at,
             snapshot.last_attempted_at,
@@ -3853,6 +3855,67 @@ fn upsert_successful_capability_snapshot(
         params![installation_id, snapshot.last_attempted_at],
     )?;
     Ok(())
+}
+
+/// One transaction-owned merge for full checks and targeted catalog reads.
+/// Never resurrect removed models or carry capabilities across routes/configs.
+fn merge_persisted_dsh_options(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    incoming: &[ModelDescriptor],
+) -> Result<Vec<ModelDescriptor>> {
+    let mut models = incoming.to_vec();
+    if !models.iter().any(|model| {
+        model
+            .runtime_metadata
+            .as_ref()
+            .is_some_and(|meta| meta["dshOptionsContext"].is_string())
+    }) {
+        return Ok(models);
+    }
+    let previous: Option<String> = transaction
+        .query_row(
+            "SELECT snapshot.model_catalog_json FROM adapter_capability_snapshot snapshot
+             JOIN adapter_installation installation ON installation.id = snapshot.installation_id
+             WHERE installation.id = ?1 AND installation.adapter_kind = 'deepseek-harness'",
+            [installation_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let previous: Vec<ModelDescriptor> = previous
+        .map(|json| serde_json::from_str(&json))
+        .transpose()?
+        .unwrap_or_default();
+    for model in &mut models {
+        let Some(meta) = model.runtime_metadata.as_mut() else {
+            continue;
+        };
+        let Some(old) = previous.iter().find(|old| old.id == model.id) else {
+            continue;
+        };
+        let Some(old_meta) = old.runtime_metadata.as_ref() else {
+            continue;
+        };
+        if !meta["dshOptionsContext"].is_string()
+            || meta["dshOptionsContext"] != old_meta["dshOptionsContext"]
+            || meta["dshSource"] != old_meta["dshSource"]
+            || old_meta["dshOptionsResolved"] != true
+        {
+            continue;
+        }
+        let old_at = old_meta["dshOptionsObservedAt"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+        let new_at = meta["dshOptionsObservedAt"]
+            .as_str()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+        if old_at.is_some() && (meta["dshOptionsResolved"] != true || old_at > new_at) {
+            model.options = old.options.clone();
+            meta["dshOptionsResolved"] = json!(true);
+            meta["dshOptionsObservedAt"] = old_meta["dshOptionsObservedAt"].clone();
+        }
+    }
+    Ok(models)
 }
 
 fn upsert_static_capability_snapshot(
@@ -5784,6 +5847,143 @@ mod slow_tests {
                 },
             )
             .unwrap()
+    }
+
+    #[test]
+    fn dsh_catalog_updates_accumulate_capabilities_without_reviving_removed_routes() {
+        // Owns the persisted merge across full checks and interleaved target reads;
+        // parser tests cannot detect a stale whole-catalog SQL writeback.
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let executable = test_executable_path(&directory, "dsh-cache");
+        let mut snapshot = ready_codex_snapshot();
+        snapshot.reported_version = Some("0.2.1-alpha.1".into());
+        snapshot.permission_options =
+            AgentRuntimeAdapterRegistry::default().permission_options(AdapterKind::DeepseekHarness);
+        snapshot.capabilities = [
+            "acp.initialize",
+            "session.new",
+            "session.resume",
+            "dsh.model_catalog",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let mut a = snapshot.models[0].clone();
+        a.id = "[\"relay\",\"a\"]".into();
+        a.runtime_metadata = Some(json!({"dshSource":"web", "dshOptionsContext":"config-1",
+            "dshOptionsResolved":true, "dshOptionsObservedAt":"2026-10-09T10:00:00Z"}));
+        let mut b = a.clone();
+        b.id = "[\"relay\",\"b\"]".into();
+        b.is_default = false;
+        b.runtime_metadata.as_mut().unwrap()["dshOptionsResolved"] = json!(false);
+        b.runtime_metadata.as_mut().unwrap()["dshOptionsObservedAt"] = Value::Null;
+        snapshot.models = vec![a.clone(), b.clone()];
+        let verified = |snapshot| VerifiedManagedInstallation {
+            adapter_kind: AdapterKind::DeepseekHarness,
+            executable_path: executable.to_string_lossy().into_owned(),
+            command_name: "dsh".into(),
+            source: InstallationSource::Manual,
+            auth_scope: "default".into(),
+            snapshot,
+            entrypoint_locator_identity: None,
+        };
+        service
+            .commit_verified_managed_installation(&mut database, verified(snapshot.clone()))
+            .unwrap();
+        let read = |db: &Database| {
+            service
+                .managed_installation(db, AdapterKind::DeepseekHarness, "default")
+                .unwrap()
+                .unwrap()
+        };
+        let original = read(&database);
+        let mut unobserved_a = a.clone();
+        unobserved_a.runtime_metadata.as_mut().unwrap()["dshOptionsResolved"] = json!(false);
+        unobserved_a.runtime_metadata.as_mut().unwrap()["dshOptionsObservedAt"] = Value::Null;
+        b.runtime_metadata.as_mut().unwrap()["dshOptionsResolved"] = json!(true);
+        b.runtime_metadata.as_mut().unwrap()["dshOptionsObservedAt"] =
+            json!("2026-10-09T10:00:10Z");
+        assert!(
+            service
+                .commit_runtime_model_catalog(
+                    &mut database,
+                    &original,
+                    &[unobserved_a.clone(), b.clone()],
+                    "2026-10-09T10:00:10Z"
+                )
+                .unwrap()
+        );
+        let models = read(&database).snapshot.unwrap().models;
+        assert_eq!(
+            models[0].runtime_metadata, a.runtime_metadata,
+            "B must not reset A's success time"
+        );
+        assert_eq!(
+            models[1].runtime_metadata, b.runtime_metadata,
+            "confirmed empty is a cached result"
+        );
+        // An older A response carrying an unobserved B must retain the newer B.
+        let mut older_a = a.clone();
+        older_a.runtime_metadata.as_mut().unwrap()["dshOptionsObservedAt"] =
+            json!("2026-10-09T09:59:00Z");
+        assert!(
+            service
+                .commit_runtime_model_catalog(
+                    &mut database,
+                    &original,
+                    &[older_a, snapshot.models[1].clone()],
+                    "2026-10-09T10:00:11Z"
+                )
+                .unwrap()
+        );
+        assert_eq!(read(&database).snapshot.unwrap().models, models);
+        snapshot.models = vec![unobserved_a.clone(), snapshot.models[1].clone()];
+        service
+            .commit_verified_managed_installation(&mut database, verified(snapshot.clone()))
+            .unwrap();
+        assert_eq!(
+            read(&database).snapshot.unwrap().models,
+            models,
+            "ordinary refresh retains matching capabilities"
+        );
+        let expected = read(&database);
+        let mut changed_route = unobserved_a.clone();
+        changed_route.runtime_metadata.as_mut().unwrap()["dshSource"] = json!("native");
+        assert!(
+            service
+                .commit_runtime_model_catalog(
+                    &mut database,
+                    &expected,
+                    &[changed_route.clone()],
+                    "2026-10-09T10:00:12Z"
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            read(&database).snapshot.unwrap().models,
+            vec![changed_route],
+            "removed B must not be resurrected"
+        );
+        let mut changed_config = unobserved_a;
+        changed_config.runtime_metadata.as_mut().unwrap()["dshOptionsContext"] = json!("config-2");
+        let expected = read(&database);
+        assert!(
+            service
+                .commit_runtime_model_catalog(
+                    &mut database,
+                    &expected,
+                    &[changed_config.clone()],
+                    "2026-10-09T10:00:13Z"
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            read(&database).snapshot.unwrap().models,
+            vec![changed_config]
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

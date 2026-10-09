@@ -815,6 +815,7 @@ const MemberEditor = forwardRef<
             {selectedAgent ? (
               <MemberRuntimeForm
                 ref={runtimeRef}
+                active={active}
                 agent={selectedAgent}
                 installations={installations}
                 runtimeAvailability={runtimeAvailability}
@@ -1089,6 +1090,7 @@ type MemberRuntimeEditorState = {
 export const MemberRuntimeForm = forwardRef<
   MemberRuntimeFormHandle,
   {
+    active?: boolean
     agent: AgentProfile
     installations: AdapterInstallation[]
     runtimeAvailability: ProductRuntimeAvailability[]
@@ -1108,6 +1110,7 @@ export const MemberRuntimeForm = forwardRef<
   }
 >(function MemberRuntimeForm(
   {
+    active = true,
     agent,
     installations,
     runtimeAvailability,
@@ -1367,6 +1370,7 @@ export const MemberRuntimeForm = forwardRef<
         {selectedKind && (
           <MemberRuntimeParameters
             inline
+            active={active}
             adapterKind={selectedKind}
             installation={installation}
             draft={draft}

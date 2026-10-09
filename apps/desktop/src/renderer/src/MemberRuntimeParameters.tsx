@@ -22,6 +22,7 @@ export type MemberRuntimeDraft = {
 }
 
 type RuntimeParameterProps = {
+  active?: boolean
   adapterKind: AdapterKind
   installation: AdapterInstallation
   permissionOptions: PermissionOptionDescriptor[]
@@ -105,6 +106,7 @@ function cloneRuntimeDraft(draft: MemberRuntimeDraft): MemberRuntimeDraft {
 
 export function MemberRuntimeParameters({
   inline = false,
+  active = true,
   adapterKind,
   installation,
   draft,
@@ -113,6 +115,7 @@ export function MemberRuntimeParameters({
   onChange
 }: {
   inline?: boolean
+  active?: boolean
   adapterKind: AdapterKind
   installation: AdapterInstallation | null
   draft: MemberRuntimeDraft | null
@@ -125,6 +128,7 @@ export function MemberRuntimeParameters({
   const permissionOptions = installation?.permissionOptions ?? installation?.snapshot?.permissionOptions ?? []
   const content = installation && draft
     ? runtimeParametersFor(adapterKind, {
+        active,
         adapterKind,
         installation,
         permissionOptions,
@@ -430,6 +434,7 @@ function modelFieldsFor(
 }
 
 function ModelFields({
+  active: pageActive = true,
   adapterKind,
   installation,
   draft,
@@ -451,18 +456,21 @@ function ModelFields({
     : null
   const isDsh = adapterKind === 'deepseek-harness'
   const optionsKnown = !isDsh || dshModelOptionsResolved(selectedModel, explicit?.dshSource)
-  const option = optionKey && selectedModel && optionsKnown
+  const option = optionKey && selectedModel
     ? selectedModel.options.find((candidate) => candidate.key === optionKey) ?? null
     : null
   const targetKey = dshOptionReadKey(identity, draft.model)
   const [optionRead, setOptionRead] = useState<{ key: string; status: 'loading' | 'ready' | 'failed' } | null>(null)
   const [optionRetry, setOptionRetry] = useState(0)
-  const pendingModelSwitch = useRef<string | null>(null)
+  const pendingModelSwitch = useRef<{ key: string; model: string } | null>(null)
   const latest = useRef({ draft, onChange, onOpenModelCatalog, selectedModel })
   latest.current = { draft, onChange, onOpenModelCatalog, selectedModel }
 
   useEffect(() => {
-    if (!isDsh || draft.model.mode !== 'explicit' || disabled) return
+    // Saving freezes the submitted draft. A later capability result may update
+    // the menu, but must no longer clean up that now-saved selection.
+    if (disabled) pendingModelSwitch.current = null
+    if (!isDsh || draft.model.mode !== 'explicit' || disabled || !pageActive) return
     let active = true
     const target = { modelId: draft.model.modelId, dshSource: draft.model.dshSource }
     const accept = (model: ModelDescriptor): void => {
@@ -470,18 +478,15 @@ function ModelFields({
       setOptionRead({ key: targetKey, status: 'ready' })
       // Only a deliberate model change can discard incompatible draft options.
       // Refreshing a saved selection never rewrites it.
-      if (pendingModelSwitch.current === targetKey) {
+      if (pendingModelSwitch.current?.key === targetKey) {
+        const pending = pendingModelSwitch.current
         pendingModelSwitch.current = null
         const current = latest.current.draft
-        if (dshOptionReadKey(identity, current.model) !== targetKey) return
+        if (dshOptionReadKey(identity, current.model) !== targetKey
+          || JSON.stringify(current.model) !== pending.model) return
         const next = explicitSelection(model, current.model, true)
         if (JSON.stringify(next) !== JSON.stringify(current.model)) latest.current.onChange({ ...current, model: next })
       }
-    }
-    const cached = latest.current.selectedModel
-    if (installation.modelCatalog.status === 'fresh' && dshModelOptionsResolved(cached, target.dshSource)) {
-      accept(cached!)
-      return () => { active = false }
     }
     setOptionRead({ key: targetKey, status: 'loading' })
     const read = latest.current.onOpenModelCatalog
@@ -489,30 +494,54 @@ function ModelFields({
       setOptionRead({ key: targetKey, status: 'failed' })
       return () => { active = false }
     }
-    void read(target).then((catalog) => {
-      if (!active) return
+    const publish = (catalog: RuntimeModelCatalogView): ModelDescriptor => {
+      if (catalog.runtimeKind !== 'deepseek-harness' || catalog.selectedModelId !== target.modelId) {
+        throw new Error('Model options identity changed')
+      }
       const model = catalog.models.find((candidate) => candidate.id === target.modelId)
-      if (catalog.runtimeKind !== 'deepseek-harness' || catalog.selectedModelId !== target.modelId
-        || !['completed', 'not_required'].includes(catalog.refreshStatus)
-        || !dshModelOptionsResolved(model ?? null, target.dshSource)) throw new Error('Model options unavailable')
-      setLive({ identity, catalog })
-      accept(model!)
+      if (!model) throw new Error('Model options unavailable')
+      if (active) setLive({ identity, catalog })
+      return model
+    }
+    // Every visit checks local configuration, even inside the freshness window.
+    // Core owns persisted per-model timestamps, merging and in-flight deduplication.
+    void read({ ...target, cacheOnly: true }).then(async (cached) => {
+      if (!active) return
+      const cachedModel = publish(cached)
+      if (cached.refreshStatus === 'not_required' && dshModelOptionsResolved(cachedModel, target.dshSource)) {
+        accept(cachedModel)
+        return
+      }
+      const catalog = await read(target)
+      if (!active) return
+      const model = publish(catalog)
+      if (!['completed', 'not_required'].includes(catalog.refreshStatus)
+        || !dshModelOptionsResolved(model, target.dshSource)) throw new Error('Model options unavailable')
+      accept(model)
     }).catch(() => {
       if (active) setOptionRead({ key: targetKey, status: 'failed' })
     })
     return () => { active = false }
-  }, [isDsh, targetKey, installation.modelCatalog.observedAt, optionRetry, disabled])
+  }, [isDsh, targetKey, installation.modelCatalog.observedAt, optionRetry, disabled, pageActive])
+
+  useEffect(() => {
+    if (!isDsh || !explicit || !pageActive) return
+    const revisit = (): void => setOptionRetry(value => value + 1)
+    window.addEventListener('focus', revisit)
+    return () => window.removeEventListener('focus', revisit)
+  }, [isDsh, targetKey, pageActive])
 
   const readStatus = optionRead?.key === targetKey ? optionRead.status : 'loading'
   const changeModel = (next: MemberRuntimeDraft): void => {
     if (isDsh && dshOptionReadKey(identity, next.model) !== targetKey) {
-      pendingModelSwitch.current = dshOptionReadKey(identity, next.model)
+      pendingModelSwitch.current = { key: dshOptionReadKey(identity, next.model), model: JSON.stringify(next.model) }
     }
     onChange(next)
   }
 
   const setOption = (value: string): void => {
     if (!explicit || !optionKey) return
+    pendingModelSwitch.current = null
     const options = { ...explicit.options }
     if (value) options[optionKey] = value
     else delete options[optionKey]
@@ -542,7 +571,7 @@ function ModelFields({
         onCatalogChange={(catalog) => setLive({ identity, catalog })}
       />
 
-      {explicit && optionKey && (isDsh || option || optionValue) && (
+      {explicit && optionKey && (isDsh ? !optionsKnown || option || optionValue : option || optionValue) && (
         <RuntimeParameterSelect
           label={optionLabel ?? option?.label ?? optionKey}
           value={optionValue}
@@ -553,21 +582,15 @@ function ModelFields({
             ...(optionInvalid ? [{ value: optionValue, label: optionsKnown
               ? uiAttribute("当前目录未提供 · {0}", String(optionValue))
               : uiAttribute('尚未核对 · {0}', optionValue), disabled: true }] : []),
-            ...(option?.values ?? [])
+            ...(option?.values ?? []).map(choice => ({ ...choice, disabled: isDsh && !optionsKnown }))
           ]}
         />
-      )}
-      {isDsh && explicit && !disabled && readStatus === 'loading' && (
-        <p className="runtime-parameter-empty" role="status"><UiText zh="正在读取思考强度…" /></p>
       )}
       {isDsh && explicit && !disabled && readStatus === 'failed' && (
         <div className="runtime-parameter-unavailable" role="status">
           <UiText zh="暂时无法读取思考强度，已保留当前选择。" />
           <button type="button" className="quiet-button" onClick={() => setOptionRetry((value) => value + 1)}><UiText zh="重试" /></button>
         </div>
-      )}
-      {isDsh && explicit && optionsKnown && !option && readStatus === 'ready' && (
-        <p className="runtime-parameter-empty" role="status"><UiText zh="该模型未提供可选思考档位。" /></p>
       )}
     </>
   )
@@ -659,7 +682,7 @@ function RuntimeModelPicker({
     }
     const model = models.find((candidate) => candidate.id === value)
     if (model) onChange({ ...draft, model: explicitSelection(model, draft.model,
-      canFilterOptions && (adapterKind !== 'deepseek-harness' || dshModelOptionsResolved(model, model.runtimeMetadata?.dshSource as 'native' | 'web' | undefined))) })
+      canFilterOptions && adapterKind !== 'deepseek-harness') })
   }
 
   const statusCopy = modelCatalogStatusCopy(cache, {

@@ -2759,6 +2759,13 @@ pub fn acp_model_catalog_for_adapter(
         for model in &mut models {
             let origin = crate::dsh::model_source(preparation, &model.id);
             model.runtime_metadata.get_or_insert_with(|| json!({}))["dshSource"] = json!(origin);
+            let metadata = model.runtime_metadata.as_mut().unwrap();
+            metadata["dshOptionsContext"] =
+                session_result["_meta"]["rovaiDshOptionsContext"].clone();
+            if metadata["dshOptionsResolved"] == true {
+                metadata["dshOptionsObservedAt"] =
+                    session_result["_meta"]["rovaiDshOptionsObservedAt"].clone();
+            }
             model.description = crate::dsh::preparation_diagnostic(preparation).map(str::to_owned);
         }
     }

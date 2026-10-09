@@ -302,6 +302,7 @@ impl Core {
         let (completed, completion) = oneshot::channel();
         self.runtime_check_requests
             .send(RuntimeCheckRequest {
+                model_target: None,
                 search: self.runtime_search_environment.read().await.clone(),
                 startup_preview: Some(preview.clone()),
                 runtime_kind: kind,

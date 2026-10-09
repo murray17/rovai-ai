@@ -131,6 +131,8 @@ export interface RuntimeModelCatalogCache {
 export interface RuntimeModelCatalogTarget {
   modelId: string
   dshSource?: 'native' | 'web'
+  /** Validate cached DSH capability context without starting a Runtime. */
+  cacheOnly?: boolean
 }
 
 export interface RuntimeModelCatalogView {

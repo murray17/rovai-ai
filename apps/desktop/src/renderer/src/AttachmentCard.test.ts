@@ -71,7 +71,7 @@ describe('AttachmentCard composer actions', () => {
     expect(markup).toContain('attachment-context-anchor')
   })
 
-  it('keeps a composer image openable while its thumbnail is loading', () => {
+  it.each(composerLocators)('keeps a loading image focusable without falling back to a file action in the %s', (_name, locator) => {
     const imageAttachment: ThreadMessageAttachmentView = {
       ...fileAttachment,
       id: 'attachment-image',
@@ -81,16 +81,14 @@ describe('AttachmentCard composer actions', () => {
     }
     const markup = renderToStaticMarkup(createElement(AttachmentCard, {
       attachment: imageAttachment,
-      locator: {
-        owner: 'composer',
-        threadId: 'camp-1',
-        attachmentRefId: imageAttachment.id
-      },
+      locator: { ...locator, attachmentRefId: imageAttachment.id },
       presentation: 'composer'
     }))
 
     expect(markup).toMatch(/<button class="attachment-open(?: [^"]*)?"/)
-    expect(markup).toContain('aria-label="打开文件预览 diagram.png"')
-    expect(markup).toContain('attachment-context-anchor')
+    expect(markup).toContain('aria-label="预览附件 diagram.png"')
+    expect(markup).toContain('aria-disabled="true"')
+    expect(markup).toContain('aria-busy="true"')
+    expect(markup).not.toContain('attachment-context-anchor')
   })
 })

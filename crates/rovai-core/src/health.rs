@@ -1930,6 +1930,9 @@ async fn run_acp_probe_with_scope(
             } else {
                 None
             };
+            let dsh_options_context = (kind == AdapterKind::DeepseekHarness)
+                .then(|| crate::dsh::model_options_context(path))
+                .transpose()?;
             write_json_line(
                 stdin,
                 &json!({
@@ -2071,6 +2074,15 @@ async fn run_acp_probe_with_scope(
                 if !crate::dsh::model_inputs_unchanged(preparation) {
                     bail!("dsh_model_configuration_changed_during_preparation");
                 }
+            }
+            if let Some(context) = dsh_options_context {
+                anyhow::ensure!(
+                    crate::dsh::model_options_context(path)? == context,
+                    "dsh_model_configuration_changed_during_preparation"
+                );
+                session["_meta"]["rovaiDshOptionsContext"] = json!(context);
+                session["_meta"]["rovaiDshOptionsObservedAt"] =
+                    json!(chrono::Utc::now().to_rfc3339());
             }
             let session_id = session
                 .get("sessionId")

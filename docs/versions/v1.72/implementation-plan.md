@@ -1250,6 +1250,37 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
 - 无凭据诊断返回原生 authentication_required，未自动登录。3.0.3 load 广告与实际不符仍是明确 native cold 缺口，ACP compact 不宣称修复。
 - 最终边界、负例、真实/模拟验证区分和公开证据见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)。PR #662 更新后保留未合并。
 
+## 2026-10-09 headless 候选与最新主干合流（User 101）
+
+- headless 显式 A→B→A 同 Session 与 System Mod 已由实际 1.66.0 和官方 1.79.1 对照验证；
+  普通写入仍受原生 print permission gate 阻断，生产保持 ACP，不把全权限 Mod 实验冒充普通审批。
+  真实 BYOK 四次成功、一次预期取消及无模型覆盖的差异见[专门报告](../../research/command-code-runtime/headless-resume-2026-10-09.md)。
+- 合流 main `81f8b1fc`，保留 Mention v33、DSH 原生/Web 模型来源与 Windows Job 当前活跃数清理。
+  共享 ACP 同时保留本分支 Session permissions 和 DSH 来源字段，Cline 保持隐藏。
+- 保留主干 D19–D21；本分支当前版本决定顺延 D22–D31，仅调整追溯链接，不改变已接受的语义。
+- 两种 receipt 187 按真实格式识别，189/schema 139 收敛；原有 184–188 兼容与收据保留，
+  既有 Mention 迁移 owner 扩展两种来源、部分结构、失败回滚及冻结证据保留。
+
+本地合流验证：默认 Rust workspace 465 通过／2 人工 Smoke 忽略，共享 ACP 69 通过／2 人工 Smoke 忽略，
+Claude 34、DSH 5 与模型目录 owner 通过。前端类型、239 文件／2615 Vitest、339 Node 测试、文档门禁
+及桌面构建通过。Mention 两来源／回滚／旧收据保留与修正后的 v104/v105 fixture 定向通过。
+这些检查不新增 headless 产品准入，也不代替 Windows runner 或真实打包模型验收。
+
+
+## 2026-10-09 headless 退役与两个 ACP 暂缓公开（User 105）
+
+- 删除 Command Code headless Rust transport/activity、五个专属 Rust owner、两份 Python 探针及模型对照中的 print 请求；ACP/RPC 探针继续保留。
+- Cline 与 Command Code 官方 ACP、System Rule/Mod、权限、工具、恢复、共享 Fleet/进程及历史身份保留；Command 撤回 macOS arm64 Preview，与 Cline 一样全平台 NotQualified。
+- 可见目录统一隐藏两者，覆盖设置、新手引导、队员/Skill 选择、安装引导和监控筛选；保留既有 Run/用量标签与配置，无数据库迁移。
+- 已知缺口分别记录于兼容性清单与两份研究索引。已删代码链接固定到 `2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e`，失败证据未删除。
+- 本轮不发送真实模型请求，不升级 Runtime、不运行 headless、不恢复 Hub，不触碰用户凭据或原生历史。
+- 首轮验证：Rust workspace 462 passed / 1 个人工 Smoke ignored；相关 Renderer 5 文件 213 项、TypeScript、两个 System Hook Node 测试、文档 10 项及版本/治理门禁、格式检查通过。
+- 合流 `3a83b2b7`（DSH 目标模型思考选项）时保留两套独立语义：Cline/Command 原生默认哨兵与 DSH 目标选项；没有扩大 headless 范围或恢复公开入口。
+- 合流后前端 239 文件 / 2615 项、typecheck、共享 ACP 69 passed / 2 个真实 Smoke ignored、Command 专属 1 项、Cline 专属 3 项、Adapter 25 项通过；桌面/Web 构建和隔离 Electron Runtime Picker（实际菜单隐藏、键盘、IME、双主题/尺寸、DSH 目标选项）通过。
+- 扩展平台证据 owner 首次发现兼容清单新增说明后摘要未同步；按原合同更新当前 register digest，不增加任何 Runtime 的资格，随后复验。用户凭据、原生历史与日常安装没有改动。
+- `562e1bb4` 的默认 workspace 462/1、平台 5 项、CI 与 Windows all-targets 编译通过。检查期间再次合流 main `2256db53`，保留后续 DSH 能力缓存与图片菜单修复；最新合流的默认 workspace 462 passed / 1 ignored、前端 239 文件 / 2616 项、typecheck、文档门禁、桌面构建及隔离 Electron Runtime Picker 复验通过。最终 CI 与 Windows 编译以 PR 当前提交回执为准。
+
+
 ## 2026-10-09 消息 Mention 元数据
 
 按[确认稿 r1](model-context-change-message-mentions.md)实施公开 batch/read 的公共目标投影，
@@ -1352,31 +1383,30 @@ Session 复用、无可选档位正常执行、无效 max 零正文及 Web reaso
 规则创建 Session，未新增重建路径；原生同 Session 的旧强度复位由三版本协议 smoke 直接验证。
 这些证据不覆盖 Windows/Linux 实机、打包日常 App 或真实中转；付费请求为零。
 
-## 2026-10-09 headless 候选与最新主干合流（User 101）
+#### 思考强度缓存与静默读取
 
-- headless 显式 A→B→A 同 Session 与 System Mod 已由实际 1.66.0 和官方 1.79.1 对照验证；
-  普通写入仍受原生 print permission gate 阻断，生产保持 ACP，不把全权限 Mod 实验冒充普通审批。
-  真实 BYOK 四次成功、一次预期取消及无模型覆盖的差异见[专门报告](../../research/command-code-runtime/headless-resume-2026-10-09.md)。
-- 合流 main `81f8b1fc`，保留 Mention v33、DSH 原生/Web 模型来源与 Windows Job 当前活跃数清理。
-  共享 ACP 同时保留本分支 Session permissions 和 DSH 来源字段，Cline 保持隐藏。
-- 保留主干 D19–D21；本分支当前版本决定顺延 D22–D31，仅调整追溯链接，不改变已接受的语义。
-- 两种 receipt 187 按真实格式识别，189/schema 139 收敛；原有 184–188 兼容与收据保留，
-  既有 Mention 迁移 owner 扩展两种来源、部分结构、失败回滚及冻结证据保留。
+能力继续存入现有模型目录 metadata，以安装/环境、模型/来源及复用的 DSH 配置摘要为有效性边界。
+每个模型保存自己的成功时间和已确认状态（包括无档位）；60 秒内直接复用，过期时展示历史并按需刷新。
+本地 `cacheOnly` 校验不启动 Runtime，同目标请求共用现有检查队列，完整刷新与目标读取在同一事务入口
+累计能力。配置改变时旧结果不再确认有效；失败不改成功时间，删除模型不被历史能力重新加入。
 
-本地合流验证：默认 Rust workspace 465 通过／2 人工 Smoke 忽略，共享 ACP 69 通过／2 人工 Smoke 忽略，
-Claude 34、DSH 5 与模型目录 owner 通过。前端类型、239 文件／2615 Vitest、339 Node 测试、文档门禁
-及桌面构建通过。Mention 两来源／回滚／旧收据保留与修正后的 v104/v105 fixture 定向通过。
-这些检查不新增 headless 产品准入，也不代替 Windows runner 或真实打包模型验收。
+默认模型不查询；具体模型立即选中，静默读取不阻塞保存。移除独立加载和无档位提示，确认无档位且无
+显式旧值时隐藏控件。失败保留历史并提供重试；用户已修改或保存的选择不受迟到结果清理。
+执行前原生校验、缺省强度、最低版本、模型准备、Host 兼容性与 Cleanup 保持原行为。
 
+macOS arm64 验证结果：
 
-## 2026-10-09 headless 退役与两个 ACP 暂缓公开（User 105）
+| 验收 | 证据与边界 |
+| --- | --- |
+| 原生请求计数 | Core + `0.2.1-alpha.1` 的既有 availability smoke：本地缓存校验零探测，三个并发 B 请求只选模一次；A/B 返回命中缓存，确认空档位重复选择只探测一次；将隔离数据库中 B 的时间调旧 61 秒，并发重访只重新探测一次 |
+| 失败及发布门禁 | 原生协议故障保留选项和成功时间；选模屏障期间修改 Web 配置，旧结果未发布；60 秒内配置变更也重新读取；普通目录刷新保留其他模型的能力与时间 |
+| 执行保持 | 12 次本地 HTTP 请求核对端点与合成凭据；TTL 重新验证后复用业务 Host，默认强度不追加 ACP 设置，无效显式强度零正文；原生与失败 Web 路由回归继续通过 |
+| Renderer | 生产组件夹具覆盖默认模型零查询、A/B 乱序、过期历史、空结果隐藏、失败重试、用户后续选值/保存不被迟到响应改写；Day/Night、1040/1440/2560 宽度、200% 缩放与键盘交互通过 |
+| 兼容基线 | `0.1.5-rc.2`、`0.1.5-rc.3`、`0.2.1-alpha.1` 的既有原生协议 smoke 分别通过 7/7/15 次本地 HTTP 请求；Core 缓存端到端实测使用 alpha.1，不冒充三个版本完整 Core 矩阵 |
+| 代码门禁 | 默认 Rust workspace 459 通过、1 个既有 ignore；新增事务 owner 与既有检查队列 owner 各 1 通过；Vitest 239 文件/2612 测试、类型检查、Desktop 构建、DSH JS owner 5 项通过 |
 
-- 删除 Command Code headless Rust transport/activity、五个专属 Rust owner、两份 Python 探针及模型对照中的 print 请求；ACP/RPC 探针继续保留。
-- Cline 与 Command Code 官方 ACP、System Rule/Mod、权限、工具、恢复、共享 Fleet/进程及历史身份保留；Command 撤回 macOS arm64 Preview，与 Cline 一样全平台 NotQualified。
-- 可见目录统一隐藏两者，覆盖设置、新手引导、队员/Skill 选择、安装引导和监控筛选；保留既有 Run/用量标签与配置，无数据库迁移。
-- 已知缺口分别记录于兼容性清单与两份研究索引。已删代码链接固定到 `2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e`，失败证据未删除。
-- 本轮不发送真实模型请求，不升级 Runtime、不运行 headless、不恢复 Hub，不触碰用户凭据或原生历史。
-- 首轮验证：Rust workspace 462 passed / 1 个人工 Smoke ignored；相关 Renderer 5 文件 213 项、TypeScript、两个 System Hook Node 测试、文档 10 项及版本/治理门禁、格式检查通过。
-- 合流 `3a83b2b7`（DSH 目标模型思考选项）时保留两套独立语义：Cline/Command 原生默认哨兵与 DSH 目标选项；没有扩大 headless 范围或恢复公开入口。
-- 合流后前端 239 文件 / 2615 项、typecheck、共享 ACP 69 passed / 2 个真实 Smoke ignored、Command 专属 1 项、Cline 专属 3 项、Adapter 25 项通过；桌面/Web 构建和隔离 Electron Runtime Picker（实际菜单隐藏、键盘、IME、双主题/尺寸、DSH 目标选项）通过。
-- 扩展平台证据 owner 首次发现兼容清单新增说明后摘要未同步；按原合同更新当前 register digest，不增加任何 Runtime 的资格，随后复验。用户凭据、原生历史与日常安装没有改动。
+事务 owner 的准入理由与命令见[测试指南](../../development/testing.md#dsh-逐模型能力缓存)。
+版本与决策治理门在当前受版本控制文件副本通过，比较基线 `3a83b2b7`；原工作目录中既有、未跟踪的
+`docs/prototypes/` 原型断链使直接文档检查失败，未修改这些原型。没有新增缓存表、服务或定时扫描。
+未实测 Windows、Linux、macOS x64、打包 App 及真实中转；付费请求为零。本轮只提交并推送
+`rovai/dsh-web-models`，不创建 PR、合并、安装或修改日常 DSH 配置。

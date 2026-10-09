@@ -1351,3 +1351,17 @@ version/auth 零调用及一次正文/零重放。Codex 既有真实 Host owner 
 最小命令为 `cargo test -p rovai-core --lib model_mention_tests`、
 `cargo test -p rovai-core --features slow-tests --lib claimed_legacy_batch_keeps_its_format_after_mention_upgrade`、
 `cargo test -p rovai-core --features extended-tests --lib db::message_mentions::`。
+
+## DSH 逐模型能力缓存
+
+新增 `agent_profile::slow_tests::dsh_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`
+拥有目录事务的逐模型累积、乱序成功时间、普通刷新、来源切换与删除边界。修复前读取 B 会覆盖 A；
+已有 parser 与失败快照 owner 不经过目标目录和完整检查的共同写入位置，因此复用现有 SQLite fixture
+新增这一独立 owner，保持 `slow-tests` 层。没有新增表或迁移测试。最小命令：
+`cargo test -p rovai-core --features slow-tests --lib dsh_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`。
+
+现有 Core 检查队列 owner `codex_catalog_waiters_share_refresh_without_satisfying_full_validation` 验证其他
+Runtime 的合并与检查强度不变；DSH 原生计数和配置变更屏障进入既有
+`scripts/smoke-dsh-model-availability.mjs`，使用合成凭据和本地接收服务。60 秒过期场景仅在隔离数据库
+将对应成功时间调旧，不通过睡眠拖慢验收，不修改日常数据库。生产参数控件继续由
+`node --test scripts/lib/runtime-model-picker.test.mjs` 验证默认模型零查询、历史显示及迟到结果保护。

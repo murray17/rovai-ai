@@ -41,6 +41,7 @@ export function ImageContextMenu({ position, onClose, displayName, ready, busy,
     <DropdownMenu.Portal>
       <DropdownMenu.Content className="attachment-context-menu image-context-menu"
         aria-label={uiAttribute('图片操作：{0}', displayName)} align="start" side="right" sideOffset={4}
+        onKeyDown={event => event.stopPropagation()}
         collisionPadding={8} loop onEscapeKeyDown={() => { returnFocus.current = true }}
         onCloseAutoFocus={event => {
           event.preventDefault()
