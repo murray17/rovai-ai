@@ -1343,3 +1343,15 @@ macOS arm64 验证结果：
 `docs/prototypes/` 原型断链使直接文档检查失败，未修改这些原型。没有新增缓存表、服务或定时扫描。
 未实测 Windows、Linux、macOS x64、打包 App 及真实中转；付费请求为零。本轮只提交并推送
 `rovai/dsh-web-models`，不创建 PR、合并、安装或修改日常 DSH 配置。
+
+#### Windows DSH 能力指纹路径归一修复
+
+Windows 探测路径经 `canonicalize()` 带有长路径前缀，提交目录使用去前缀路径；同一程序的两种写法
+不能被当作配置变化。`model_options_context()` 在共同入口复用 `runtime_visible_path()` 归一真实路径，
+命令环境观察、文件身份观察和指纹计算使用同一路径；真实文件、模型配置或环境变化仍使能力失效。
+不修改首次检查状态机、Host 复用、权限、会话恢复或 Cleanup，不包含同 ID 模型来源切换的 UI 修复。
+
+默认层回归 `cargo test -p rovai-core --lib dsh` 使用隔离 Home 与 task-local 环境，覆盖普通/长路径
+指纹相等及程序、配置、环境变化失效。`scripts/smoke-dsh-model-availability.mjs` 为 Windows 使用
+`.cmd` 记录入口，`ROVAI_DSH_SMOKE_CORE` 可指定本次构建 Core；既有隔离协议、合成凭据与本地
+HTTP 场景验证首次完整检查、重复刷新和投递，无真实中转请求，不改日常 DSH 配置。
