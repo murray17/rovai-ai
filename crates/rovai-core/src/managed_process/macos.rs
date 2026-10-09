@@ -40,6 +40,8 @@ fn info(pid: i32) -> io::Result<Option<ProcessInfo>> {
     if read == 0 && error.raw_os_error() == Some(libc::ESRCH) {
         return Ok(None);
     }
+    #[cfg(test)]
+    eprintln!("managed identity query failed: pid={pid} read={read} expected={size} error={error}");
     Err(if read == 0 {
         error
     } else {
@@ -101,6 +103,11 @@ impl Process {
         if error == 0 || error == libc::ESRCH {
             Ok(())
         } else {
+            #[cfg(test)]
+            eprintln!(
+                "managed audit-token signal failed: pid={} error={error}",
+                self.pid
+            );
             Err(io::Error::from_raw_os_error(error))
         }
     }
@@ -148,6 +155,12 @@ impl ProcessTree {
                 )
             };
             if count < 0 || (count == 0 && io::Error::last_os_error().raw_os_error() != Some(0)) {
+                #[cfg(test)]
+                eprintln!(
+                    "managed child query failed: pid={} count={count} error={}",
+                    parent.pid,
+                    io::Error::last_os_error()
+                );
                 return Err(io::Error::last_os_error());
             }
             if count as usize >= children.len() {

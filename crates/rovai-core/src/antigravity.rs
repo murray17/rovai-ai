@@ -2483,6 +2483,7 @@ mod tests {
         // The stream parser owns output mapping; this owner proves the native
         // initialization/input boundary with real pipes, including cancellation.
         for mode in ["missing", "foreign", "fenced", "aborted", "released"] {
+            eprintln!("input gate diagnostic mode {mode}");
             let root =
                 std::env::temp_dir().join(format!("rovai-agy-gate-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&root).unwrap();
