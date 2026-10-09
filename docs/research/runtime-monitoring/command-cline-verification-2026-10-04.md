@@ -78,6 +78,10 @@ JSON 中 `CLINE_METRICS` 对应这 5 个不同 prompt，不能把它们加在一
 
 ## 可重复验证
 
+2026-10-09 User 105 已退役 Command headless 代码。下面 Command 专属命令仅适用于
+[退役前固定提交](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/crates/rovai-core/src/command_code.rs)，
+不再是当前树的测试入口；保留的 ACP owner 见[测试路由](../../development/testing.md)。
+
 真实模型 Smoke 为显式 ignored owner，需要准备独立 Home 和该 Runtime 自己的有效原生配置，
 按[本地隔离流程](../../development/local-workflow.md)运行。Cline 需官方 wrapper、
 `openai-compatible` provider 和包含 `gpt-6-sol` 的原生 models catalog；本次没有配置猜测窗口或价格。

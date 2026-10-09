@@ -269,20 +269,6 @@ async def probe(args):
                 catalog_bytes = b''
             summary['cliListedCustomModels'] = {model: model.encode() in catalog_bytes for model in [
                 'rovai-a/model-a', 'rovai-a/vendor/shared', 'rovai-b/vendor/shared']}
-            for model in ['rovai-a/model-a', 'rovai-b/vendor/shared', 'rovai-a/vendor/shared']:
-                before = len(Provider.records)
-                process = await asyncio.create_subprocess_exec(*command[:-1], '--model', model,
-                    '--print', 'Reply briefly. Do not call tools.', '--output-format', 'json',
-                    cwd=workspace, env=env, stdin=asyncio.subprocess.DEVNULL,
-                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-                    start_new_session=True)
-                try:
-                    await asyncio.wait_for(process.wait(), 60)
-                except asyncio.TimeoutError:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    await process.wait()
-                summary['cases'].append({'case': 'native-cli-model', 'model': model,
-                    'exitCode': process.returncode, 'requests': Provider.records[before:]})
             if args.auth_file:
                 summary['nativeAuthSourceUnchanged'] = hashlib.sha256(source.read_bytes()).digest() == original_auth
         server.shutdown()

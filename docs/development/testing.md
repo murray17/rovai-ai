@@ -90,6 +90,28 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+## Command Code headless 测试退役（2026-10-09，User 105）
+
+User 已停止 headless 候选；删除唯一消费者 `command_code.rs`、其专属 `command_code_activity.rs`、
+`local_headless_probe.py`、`headless_resume_probe.py`，并移除跨 Runtime 模型探针中的 print 正向对照。
+ACP 的 `command_code_acp.rs`、System Mod、Cline、共享 ACP、文件证据、Usage 与 ManagedProcess 仍保留。
+删除的 Rust owner 共五个（三个默认单元、一个扩展进程、一个人工 ignored Smoke）：
+
+- `command_code::tests::usage_counts_root_calls_once_and_keeps_context_separate`
+- `command_code::tests::headless_decoder_fences_session_and_terminal_outcome`
+- `command_code::tests::isolated_command_code_reports_live_calls_and_exact_resume_usage`
+- `command_code::tests::managed_headless_process_delivers_stdin_and_exact_resume`
+- `command_code_activity::tests::command_code_activity_separates_public_text_tool_outcomes_and_private_state`
+
+这些 owner 的私有 NDJSON/print 合同随唯一执行入口退出，没有迁移给 ACP，也不保留永久停用代码。
+当前后端继续由 `acp::tests`、`command_code_acp::tests`、`cline::tests` 及
+`scripts/lib/command-code-bootstrap.test.mjs` / `scripts/lib/cline-observer.test.mjs` 负责。
+平台与 Renderer 既有 owner 补充不公开两个产品的断言；历史身份和用量标签保留，未新增独立 Rust 测试。
+最低验证：`cargo test --workspace`、`cargo test -p rovai-core --features extended-tests --lib acp::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib command_code_acp::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib cline::tests::`，以及相关 Renderer/Node 测试、typecheck 与文档门禁。
+以下 2026-10-04 的 headless owner/命令是退役前历史，不能作为当前测试入口。
+
 ## 主干 / Preview Migration 合流（2026-10-08）
 
 扩展既有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，保留 schema 133

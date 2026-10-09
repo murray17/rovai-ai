@@ -30,9 +30,9 @@ Product Runtime Catalog 当前包含十八种已实现 Adapter。Preview 与它�
 Renderer 当前不展示 Settings Preview row。DeepSeek Harness 通过官方 ACP profile 接入；macOS arm64、macOS x64、
 Windows x64 与 Linux x64 分别绑定平台专属证据并取得 qualified。
 产品目录的机器可判数量、全量检查、诊断分母和
-普通执行仍只来自逐平台 Admission。Cursor 与暂缓公开的 Cline 保留 closed identity 和历史 reader，但不进入
+普通执行仍只来自逐平台 Admission。Cursor 与暂缓公开的 Cline、Command Code 保留 closed identity 和历史 reader，但不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
-selector 同样不展示 Cursor 与 Cline；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
+selector 同样不展示 Cursor、Cline 与 Command Code；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
 `qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 保留缺失资格证据，检查详情说明记录未齐备。
 `qualified` 行只在有实际 reported version 时显示版本副文案，否则仅显示居中的产品名，不再回退到静态
@@ -47,8 +47,10 @@ selector 同样不展示 Cursor 与 Cline；其他成员选项来自 `AdapterKin
 `command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
 Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
 原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
-[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)仅在 macOS arm64 开放开发 Preview，其余平台
-NotQualified；没有 qualification evidence，不声称 First-Class。旧 headless 传输只保留研究/兼容测试。
+[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)曾仅在 macOS arm64 开放开发 Preview。
+2026-10-09 按 User 105 撤回 Preview，所有平台为 NotQualified；Settings、新手引导、成员/Skill 选择、
+安装引导与监控筛选不提供 Command Code。ACP 实现、既有配置和历史 reader 保留；没有 qualification
+evidence，不声称 First-Class。headless 传输、事件归约器、专属测试及探针已删除，历史报告指向退役前固定提交。
 
 Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
 Host 私有 Home 保留原生 auth/provider/Skill/Mod/Session 路径，仅覆盖私有 settings 的 `mods.paths` 与原生 `mcp.json`，通过
@@ -65,10 +67,16 @@ External MCP 合入 Host 私有 Home 的原生 `mcp.json`，session mcpServers �
 发现有效名称并冻结冲突结果。发现失败/格式漂移阻断投影；不把被原生遮蔽的 Assignment 标为可用。
 原生连接失败可能继续建立 Session，因此握手和配置可见性不是 MCP 调用成功证明。
 
-1.74.1 共享 Core Host 门禁和同 PID A→B→A 控制面已过；以原生默认 sub2api/gpt-6-sol 真实完成模型
-A→B→A、exact cold、文件工具、原生 allow/deny/cancel、手动及自动压缩后连续性。隔离 App 的首次/warm/
+此前 1.74.1 共享 Core Host 门禁和同 PID 成员 A→B→A 控制面已过；以原生默认 sub2api/gpt-6-sol 完成
+真实生成、exact cold、文件工具、原生 allow/deny/cancel、手动及自动压缩后连续性。这不是跨模型切换证据。隔离 App 的首次/warm/
 Core 重启、CLI 公开发送、文件 +/− 与 272000 Context 窗口通过。费用与非零命令状态等未取得结构化字段的
 边界保持未知，不提升 First-Class；详见[完整 Checklist 对照](../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
+
+未完成项：1.74.1/1.79.1 ACP 模型目录不包含自定义 BYOK，`session/set_model` 和
+`session/set_config_option` 拒绝这些 ID；1.79.1 `acp --model` 接受参数但未用于会话，不能绕过此缺口。
+已测 BYOK 的 MCP 发现成功但实际调用未通过；费用、部分命令状态等原生缺失字段仍未知。
+[模型选择调查](../research/command-code-runtime/model-selection-2026-10-09.md)与
+[兼容性清单](../runtime-compatibility.md)分别保存原生失败和验收范围。
 
 ## Cline 实施边界
 
@@ -86,7 +94,7 @@ warm 使用正常 Fleet，cold 按广告能力 session/load/resume，重放进�
 通用进程账本仍可回收退役后端的已确认自有进程，但不保留可启动 Hub 的兼容实现。
 
 2026-10-09 按 User 99 暂缓公开：撤回 macOS arm64 Preview，所有平台为 NotQualified；Settings、
-新手引导、成员选择与安装引导均不提供 Cline。既有身份、配置、公开历史及证据可读，不迁移或删除用户数据。
+新手引导、成员/Skill 选择、安装引导与监控筛选均不提供 Cline。既有身份、配置、公开历史及证据可读，不迁移或删除用户数据。
 保留官方 ACP 实现供后续补齐原生能力，普通发现、检查和执行仍服从共享 Admission。
 原因是已安装 3.0.70 的 ACP 仍未交付原生 compaction 配置；普通 CLI 的自动压缩不能当作 ACP 能力。
 方法、Rule、认证、模型请求与冷恢复的既有证据按实际安装保留。当前范围见

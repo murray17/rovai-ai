@@ -502,25 +502,15 @@ mod tests {
                 AdapterKind::CommandCodeCli,
             ] {
                 let admission = registry.platform_admission(kind, platform);
-                let preview =
-                    kind == AdapterKind::CommandCodeCli && platform == HostPlatformKey::MacosArm64;
                 assert_eq!(
                     admission.status(),
-                    if preview {
-                        RuntimePlatformAdmissionStatus::Preview
-                    } else {
-                        RuntimePlatformAdmissionStatus::NotQualified
-                    }
+                    RuntimePlatformAdmissionStatus::NotQualified
                 );
-                assert_eq!(admission.allows_runtime_use(), preview);
+                assert!(!admission.allows_runtime_use());
                 assert!(!admission.is_qualified());
                 assert_eq!(
                     admission.blocker_code(),
-                    if preview {
-                        None
-                    } else {
-                        Some("runtime_platform_not_qualified")
-                    }
+                    Some("runtime_platform_not_qualified")
                 );
                 assert_eq!(
                     admission.reason_code(),

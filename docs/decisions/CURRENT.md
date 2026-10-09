@@ -253,9 +253,10 @@ Command Code 的旧 headless `first_payload` 差异由 [V1.72-D22](../versions/v
 
 Cline 的旧 macOS arm64 开发预览由 [V1.72-D23](../versions/v1.72/decisions.md#v1-72-d23) 记录；因 ACP 自动压缩缺口暂缓公开的理由见 [V1.72-D31](../versions/v1.72/decisions.md#v1-72-d31)。当前范围由 [Cline 实施边界](../architecture/runtime-catalog-boundaries.md#cline-实施边界)与 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有。
 
-Command Code 官方 ACP、System 门禁及 macOS arm64 Preview 由 [V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)
+Command Code 官方 ACP、System 门禁及此前的 macOS arm64 Preview 由 [V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)
 记录；当前范围由 [Command Code ACP 边界](../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)
-及 [revision 5 输入说明](../versions/v1.72/model-context-change-command-code-acp.md)拥有。
+及 [revision 5 输入说明](../versions/v1.72/model-context-change-command-code-acp.md)拥有。User 105 已暂停公开，
+与 Cline 一样保留 ACP、撤回 Preview，并删除 headless 实验代码；范围见[当前版本](../versions/v1.72/README.md)。
 
 
 macOS ACP detached 后代与 Core 重启回收当前规范见

@@ -3,14 +3,20 @@ document_type: runtime-research
 runtime: command-code
 upstream: CommandCodeAI/command-code
 authority: research-evidence-only
-status: implementation-in-progress
-admission: research
+status: deferred
+admission: not-qualified
 observed_version: 1.64.0, 1.65.2
 observed_platform: macos-arm64
-last_updated: 2026-09-24
+last_updated: 2026-10-09
 ---
 
 # Command Code Runtime 接入研究
+
+2026-10-09 User 105：**停止 headless 候选，保留官方 ACP 实现但不公开入口**。所有平台为 NotQualified。
+ACP 的自定义 BYOK 目录/切换、启动 `--model` 和已测 BYOK MCP 调用缺口见
+[模型选择报告](model-selection-2026-10-09.md)、[MCP 调查](mcp-delivery-ab-2026-10-06.md)及
+[兼容性清单](../../runtime-compatibility.md)。headless Rust 传输、事件归约器、专属测试及探针已删除；
+以下为按时间保留的历史研究，旧“当前判断”不再是待实施方案。
 
 2026-10-09 User 101：[headless 同 Session 换模型与权限验证](headless-resume-2026-10-09.md)已证明
 实际 1.66.0 的 A→B→A、System Mod 和真实续接；普通写入审批仍被原生 print gate 阻断，故保持 ACP 生产入口。
@@ -32,7 +38,7 @@ last_updated: 2026-09-24
 四组在搜索后均缺少目标 callable tool，保持原生交付并提供上游最小复现；独立 Provider 正向对照成功不能冒充 Command ACP 通过。
 当前会话、System、warm/cold 与 Cline 全面对照见[追加验收](../runtime-monitoring/command-cline-native-system-2026-10-06.md)，下文早期 headless 方案不再代表当前实现。
 
-## 当前判断
+## 历史判断（headless，已退役）
 
 候选路线是独立的 `command-code-cli` Adapter，采用 `one_shot_resumable` 进程策略，读取 Command Code 原生 `-p --output-format json` NDJSON，并按完整原生 Session ID 恢复。进程与输入收敛最接近 Claude Code；两者的协议、权限和配置结论不能直接沿用。
 
@@ -56,7 +62,7 @@ Tool fixture 还观察到：默认 headless 的 `shell_command` 产生 `tool_que
 
 补充试验：隔离 Home 下的 `~/.commandcode/AGENTS.md` 也会进入模型的 system prompt，恢复后重新读取；删除该文件再恢复同一 Session 时，CLI 仍成功发送缺少该内容的请求。每 Run 私有 Home 因而是隔离上下文、MCP 配置的候选架构，但单独使用 Memory 文件仍没有失败关闭保证，并会引入官方认证配置、Session 存储、原生用户设置与多平台路径的迁移问题，当前不能替代正式方案。
 
-可复现实验脚本为 [`fixtures/local_headless_probe.py`](fixtures/local_headless_probe.py)。传入已安装的 1.64.0 `command-code` bin 绝对路径：
+历史实验脚本（仅在上述固定提交中保留）为 [退役前 fixtures/local_headless_probe.py](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/docs/research/command-code-runtime/fixtures/local_headless_probe.py)。传入已安装的 1.64.0 `command-code` bin 绝对路径：
 
 ```sh
 python3 docs/research/command-code-runtime/fixtures/local_headless_probe.py --cli /absolute/path/to/command-code
@@ -68,7 +74,7 @@ python3 docs/research/command-code-runtime/fixtures/local_headless_probe.py --cl
 
 同一 workspace 下，仅复制静态 fixture Provider/Settings 到第二个隔离 Home：第二个 Home 按第一个 Home 的完整 UUID 恢复被拒且无事件，自己新建 Session 的 ID 独立。这证明本机 1.64.0 的原生 Session 发现受 Home 边界约束；它尚未证明生产认证、MCP/Skills/Taste 投影或从用户原生配置安全建立/刷新私有 Home 的完整方案。
 
-已在 [`command_code.rs`](../../../crates/rovai-core/src/command_code.rs) 建立内部 headless 传输层：受管 one-shot 进程、stdin 投递、逐行 NDJSON、完整 Session ID fence、最终 `result` 裁定以及取消后的进程树清理。传输输入改为共享 Context owner 产出的 `PreparedContext.runtime_payload`，且要求 `first_payload` mode；不再接受任意字符串作为正式请求字段。[`command_code_activity.rs`](../../../crates/rovai-core/src/command_code_activity.rs) 只将公开文本、模型和 Tool 生命周期投影成 Core 事件，并剔除私有 thinking 与含完整会话的 `run_end`。Parser、事件归约和假 CLI 进程边界测试已通过；1.65.2 真实试验发现非零 Shell 退出仍是 `tool_completed`，现按终态文本中的非零退出码单独归为失败。正式 AgentRun 仍未连接 Context materialization、Native Binding/Input Delivery、Skills、MCP、权限审批和 Product Catalog；真实原生 CLI Smoke 不能充当 App Camp 验收，各平台准入仍在后续阶段。
+已在 [`command_code.rs`](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/crates/rovai-core/src/command_code.rs) 建立内部 headless 传输层：受管 one-shot 进程、stdin 投递、逐行 NDJSON、完整 Session ID fence、最终 `result` 裁定以及取消后的进程树清理。传输输入改为共享 Context owner 产出的 `PreparedContext.runtime_payload`，且要求 `first_payload` mode；不再接受任意字符串作为正式请求字段。[`command_code_activity.rs`](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/crates/rovai-core/src/command_code_activity.rs) 只将公开文本、模型和 Tool 生命周期投影成 Core 事件，并剔除私有 thinking 与含完整会话的 `run_end`。Parser、事件归约和假 CLI 进程边界测试已通过；1.65.2 真实试验发现非零 Shell 退出仍是 `tool_completed`，现按终态文本中的非零退出码单独归为失败。正式 AgentRun 仍未连接 Context materialization、Native Binding/Input Delivery、Skills、MCP、权限审批和 Product Catalog；真实原生 CLI Smoke 不能充当 App Camp 验收，各平台准入仍在后续阶段。
 
 | 本地证据 | 观察 | 能证明的范围 |
 | --- | --- | --- |

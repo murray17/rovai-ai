@@ -10,6 +10,8 @@ last_updated: 2026-10-09
 
 # Command Code headless：同 Session 换模型与权限验证
 
+> 2026-10-09 User 105 已停止此候选。实验代码及 headless transport 已从当前树删除；本文与脱敏结果仅作历史证据，下面的复现命令须对应退役前固定提交。生产仍保留官方 ACP 实现，现暂缓公开。
+
 **同一原生 Session 的 A→B→A 已成立；普通审批模式尚不能等价替换 ACP。**
 本轮保持现有 ACP 生产入口，只提交可重复实验与证据。没有按模型分叉后端、修改用户安装、
 迁移 Session、重放旧输入、修改原生历史或新增账户／审批服务。Cline 继续隐藏。
@@ -109,7 +111,7 @@ Mod 内容按本次进程冻结，没有全局 active Bootstrap，也没有把�
 677–791 ms（中位 708.5 ms）；这是本机合成 Provider 的启动＋恢复＋请求总时长，不是纯启动基准。
 真实成功 case 为 3.4–7.4 秒，含网络、生成及工具。本方案没有同进程 IdleWarm，不能继续写作 warm 通过。
 
-[可重复控制夹具](fixtures/headless_resume_probe.py)：
+[退役前控制夹具](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/docs/research/command-code-runtime/fixtures/headless_resume_probe.py)：
 
 ```sh
 python3 docs/research/command-code-runtime/fixtures/headless_resume_probe.py \

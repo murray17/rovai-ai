@@ -1,10 +1,26 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-09 Cline / Command Code 暂缓公开（User 105）
+
+两者保留官方 ACP Client/Host/Fleet 接线及原生身份、配置、历史数据，但全部平台为 NotQualified，
+不在设置、新手引导、成员/Skill 选择、安装引导和监控筛选中展示。历史 Run 和已有用量仍可读。
+Command Code headless 候选已停止，专属传输、事件归约、测试和探针退出当前树；不保留备用执行后端。
+
+| Runtime | 当前已知缺口与未完成范围 |
+| --- | --- |
+| Cline 官方 ACP | 已安装 3.0.70 的 ACP 未交付原生 `compaction` 配置，普通 CLI 的自动压缩不等于 ACP 可用；旧版本已有真实 overflow 负例。账号/BYOK first/warm/cold 有通过证据，但当前 ACP 的自动压缩及压缩后恢复未通过，真实刷新和完整多平台矩阵未验收。 |
+| Command Code 官方 ACP | 1.74.1/1.79.1 的 ACP 目录缺少自定义 BYOK，`session/set_model` 与 `session/set_config_option` 拒绝。1.79.1 的 `acp --model` 参数被忽略，不能实现启动选模。已测 sub2api/gpt-6-sol 的 MCP 可发现但实际调用仍失败；费用、非零命令结构化退出码及完整平台资格未齐备。原生默认 BYOK first/warm/cold 已通过，不能外推为任意模型可切换。 |
+
+Cline 的[当前版本报告](research/cline-runtime/latest-acp-2026-10-08.md)、Command 的
+[模型选择报告](research/command-code-runtime/model-selection-2026-10-09.md)与
+[MCP 调查](research/command-code-runtime/mcp-delivery-ab-2026-10-06.md)保留各自证据。
+以下按时间记录的是历史实测，曾经的 Preview 或 headless 不代表当前产品公开范围。
 
 ### v1.70 Skills 来源切换的证据边界（2026-09-24）
 
@@ -51,10 +67,10 @@ User 97 明确授权升级后，日常命令改用官方 npm 3.0.70，原 Homebr
 
 
 Command Code 1.74.1 改用 Host 私有原生 MCP 配置：真实 stdio/HTTP 发现、cwd、字面 env/headers、
-同名优先和更新/撤销边界通过；当前 sub2api/gpt-6-sol 实际调用仍未通过。相同服务器经 Cline 真实调用成功。
+同名优先和更新/撤销边界通过；该轮 sub2api/gpt-6-sol 实际调用仍未通过。相同服务器经 Cline 真实调用成功。
 Cline 3.0.65 改用 managed System Rule；真实 System B 恰好一次/user B 为零，A/B/A、App first/warm/cold
 和正确记忆通过。原生 ACP compaction 仍未启用。最新事实以[本轮完整对照](research/runtime-monitoring/command-cline-native-system-2026-10-06.md)
-及证据为准；下面按时间保留的旧 first_payload/ACP MCP 交付描述不再是当前实现。两者仍为 macOS arm64 Preview。
+及证据为准；下面按时间保留的旧 first_payload/ACP MCP 交付描述不再是当前实现。两者当时为 macOS arm64 Preview，现已撤回。
 
 ## Command Code 接入实施状态
 
@@ -107,7 +123,7 @@ AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 F
 
 当前 closed `AdapterKind` 包含十八种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
-Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。Command Code 只有 macOS arm64 Preview；Cline 暂不公开，所有平台 NotQualified。identity 不代表 First-Class。
+Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。Cline 与 Command Code 均暂不公开，所有平台 NotQualified。identity 不代表 First-Class。
 Cursor 在三个目标平台均为 `not_qualified`；Pi、Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。Pi 三个平台分别绑定自己的 adapter-scoped evidence，不继承通用 macOS/Windows、
 Kimi 或 Grok 的平台结论。

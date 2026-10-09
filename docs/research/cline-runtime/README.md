@@ -2,14 +2,16 @@
 document_type: runtime-research
 runtime: cline-cli
 authority: research-evidence-only
-status: implementation-in-progress
-admission: preview
+status: deferred
+admission: not-qualified
 observed_version: 3.0.70
 observed_platform: macos-arm64
-last_updated: 2026-10-08
+last_updated: 2026-10-09
 ---
 
 # Cline 官方 Runtime 接入
+
+2026-10-09 User 99/105：**保留官方 ACP 实现，暂缓公开，所有平台 NotQualified**。已安装 3.0.70 ACP 未交付原生自动压缩配置，压缩及压缩后恢复未通过；首次完整授权、真实刷新和完整多平台矩阵仍未验收。设置、队员选择等不再提供入口，历史报告和用户数据保留。当前边界见[兼容性清单](../../runtime-compatibility.md)。
 
 当前方向以 User 95 为准：Cline 唯一入口是用户实际安装的 `cline --acp`，接回共享 ACP Client/Host/Fleet，
 完整删除 Native Hub 和 shim 测试入口。认证交还原生，不恢复版本或账号字段门槛；旧 Hub 隐含历史不迁移。

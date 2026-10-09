@@ -11,6 +11,8 @@ last_updated: 2026-10-05
 
 # Command Code Parity Matrix（1.64.0 fixture；1.65.2 真实 BYOK）
 
+> 2026-10-09 User 105：headless 候选与专属代码已退役。下表保留早期研究证据，不是当前待实施清单；保留的官方 ACP 实现与未完成项见 [Runtime 兼容性清单](../../runtime-compatibility.md)。
+
 本矩阵按 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md) 建立，先于正式 Adapter 实现。最接近的生产 Adapter 是 `claude-code-cli`；公共控制流可参考它，Command Code 的 wire 与能力证据必须独立取得。`DocumentationOnly` 仅指 [官方 CLI/Headless/Mods/MCP 文档](https://commandcode.ai/docs)或发布包帮助，未替代真实账号、模型、Tool 或 Session Smoke。开发者已在 Camp 消息 `f70e9798-8f5c-4428-821f-bd51ec0b99f6` 确认当前 [first_payload revision 4](prompt-guidance-v1.70-proposal.md)；此确认不提升其他能力轴或平台资格。
 
 2026-10-05 新调查的 **1.74.1 已有官方 ACP**；真实握手和无模型的同 PID A→B→A 通过，BYOK 模型选择和原生余额出现阻碍。下表的旧版本 headless 证据不代表新 ACP；以[最新 14 轴对照](../runtime-monitoring/command-cline-checklist-2026-10-05.md)区分上游更新、实际修复和未闭合产品链路。

@@ -1,0 +1,251 @@
+{
+  "cli": "official npm command-code@1.79.1/dist/cli.mjs (isolated comparison installation)",
+  "version": "1.79.1",
+  "cliSha256": "3193c12205bc9c03ae33b7676e7b840dd9d4ae1af955558470d147da50e7705a",
+  "authUnchanged": true,
+  "results": [
+    {
+      "name": "baseline",
+      "argv": [
+        "acp"
+      ],
+      "configuredDefault": "rovai-a/model-a",
+      "realModelService": false,
+      "pid": 15043,
+      "initialize": {
+        "ok": true
+      },
+      "agentInfo": {
+        "name": "Command Code",
+        "version": "1.79.1"
+      },
+      "new": {
+        "ok": true
+      },
+      "sessionId": "7d4fe0e3-dfd0-4277-9a7a-60a952515ea3",
+      "currentModelId": "rovai-a/model-a",
+      "prompt": {
+        "ok": true
+      },
+      "stopReason": "end_turn",
+      "exitCode": 0,
+      "stderrModelErrors": [],
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        }
+      ],
+      "fixtureConfigUnchanged": false,
+      "processExited": true,
+      "credentialLinkRemoved": true,
+      "fixtureSavedDefaultAfter": "rovai-a/model-a"
+    },
+    {
+      "name": "exact-after",
+      "argv": [
+        "acp",
+        "--model",
+        "sub2api/gpt-6-sol"
+      ],
+      "configuredDefault": "rovai-a/model-a",
+      "realModelService": false,
+      "pid": 15225,
+      "initialize": {
+        "ok": true
+      },
+      "agentInfo": {
+        "name": "Command Code",
+        "version": "1.79.1"
+      },
+      "new": {
+        "ok": true
+      },
+      "sessionId": "b3da9039-a221-47cc-b6f9-a07bebf19e62",
+      "currentModelId": "rovai-a/model-a",
+      "prompt": {
+        "ok": true
+      },
+      "stopReason": "end_turn",
+      "exitCode": 0,
+      "stderrModelErrors": [],
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        }
+      ],
+      "fixtureConfigUnchanged": false,
+      "processExited": true,
+      "credentialLinkRemoved": true,
+      "fixtureSavedDefaultAfter": "rovai-a/model-a"
+    },
+    {
+      "name": "before",
+      "argv": [
+        "--model",
+        "sub2api/gpt-6-sol",
+        "acp"
+      ],
+      "configuredDefault": "rovai-a/model-a",
+      "realModelService": false,
+      "pid": 15234,
+      "initialize": {
+        "ok": true
+      },
+      "agentInfo": {
+        "name": "Command Code",
+        "version": "1.79.1"
+      },
+      "new": {
+        "ok": true
+      },
+      "sessionId": "96cdacd7-2924-4c59-a417-6df4bf7ad1f5",
+      "currentModelId": "rovai-a/model-a",
+      "prompt": {
+        "ok": true
+      },
+      "stopReason": "end_turn",
+      "exitCode": 0,
+      "stderrModelErrors": [],
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        }
+      ],
+      "fixtureConfigUnchanged": false,
+      "processExited": true,
+      "credentialLinkRemoved": true,
+      "fixtureSavedDefaultAfter": "rovai-a/model-a"
+    },
+    {
+      "name": "invalid",
+      "argv": [
+        "acp",
+        "--model",
+        "missing-provider/missing-model"
+      ],
+      "configuredDefault": "rovai-a/model-a",
+      "realModelService": false,
+      "pid": 15243,
+      "initialize": {
+        "ok": true
+      },
+      "agentInfo": {
+        "name": "Command Code",
+        "version": "1.79.1"
+      },
+      "new": {
+        "ok": true
+      },
+      "sessionId": "ee2cc353-48e1-4624-89a3-a01394981294",
+      "currentModelId": "rovai-a/model-a",
+      "prompt": {
+        "ok": true
+      },
+      "stopReason": "end_turn",
+      "exitCode": 0,
+      "stderrModelErrors": [],
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        }
+      ],
+      "fixtureConfigUnchanged": false,
+      "processExited": true,
+      "credentialLinkRemoved": true,
+      "fixtureSavedDefaultAfter": "rovai-a/model-a"
+    },
+    {
+      "name": "reverse",
+      "argv": [
+        "acp",
+        "--model",
+        "rovai-a/model-a"
+      ],
+      "configuredDefault": "sub2api/gpt-6-sol",
+      "realModelService": false,
+      "pid": 15249,
+      "initialize": {
+        "ok": true
+      },
+      "agentInfo": {
+        "name": "Command Code",
+        "version": "1.79.1"
+      },
+      "new": {
+        "ok": true
+      },
+      "sessionId": "b79a71ce-7750-4a24-9fe5-0b8ef5c4a31d",
+      "currentModelId": "sub2api/gpt-6-sol",
+      "prompt": {
+        "ok": true
+      },
+      "stopReason": "end_turn",
+      "exitCode": 0,
+      "stderrModelErrors": [],
+      "requests": [
+        {
+          "provider": "b",
+          "path": "/b/v1/chat/completions",
+          "model": "gpt-6-sol",
+          "authMatched": true
+        }
+      ],
+      "fixtureConfigUnchanged": false,
+      "processExited": true,
+      "credentialLinkRemoved": true,
+      "fixtureSavedDefaultAfter": "sub2api/gpt-6-sol"
+    },
+    {
+      "name": "headless-control",
+      "argv": [
+        "--print",
+        "--output-format",
+        "json",
+        "--model",
+        "sub2api/gpt-6-sol"
+      ],
+      "configuredDefault": "rovai-a/model-a",
+      "realModelService": false,
+      "pid": 15258,
+      "exitCode": 0,
+      "results": [
+        {
+          "type": "result",
+          "subtype": "success",
+          "sessionId": null,
+          "isError": null
+        }
+      ],
+      "requests": [
+        {
+          "provider": "b",
+          "path": "/b/v1/chat/completions",
+          "model": "gpt-6-sol",
+          "authMatched": true
+        }
+      ],
+      "fixtureConfigUnchanged": false,
+      "processExited": true,
+      "credentialLinkRemoved": true,
+      "fixtureSavedDefaultAfter": "rovai-a/model-a"
+    }
+  ],
+  "verificationMethod": "Unmodified official CLI with loopback synthetic BYOK providers. Actual request endpoint, model and Authorization match observed; not a paid model test.",
+  "invocationTool": "Native CLI via the same installed package entry, Node process with argument array; no SDK or shim.",
+  "cleanup": {
+    "allProcessesExited": true,
+    "allCredentialLinksRemoved": true
+  }
+}

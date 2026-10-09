@@ -14,6 +14,7 @@ import type {
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { revealInFileManagerLabel } from './renderer-platform'
 import { UiText, uiAttribute } from './interface-language'
+import { VISIBLE_PRODUCT_RUNTIMES } from './runtime-products'
 
 export const MONITORING_POLL_INTERVAL_MS = 12_000
 export const MONITORING_EVENT_DEBOUNCE_MS = 300
@@ -348,7 +349,7 @@ function MonitoringFilters({
         </Filter>
         <Filter label={uiAttribute("智能体")} value={filter.runtimeKind ?? ''} disabled={disabled} onChange={(value) => onChange('runtimeKind', value ? value as AdapterKind : undefined)}>
           <option value=""><UiText zh={"全部"} /></option>
-          {ADAPTERS.map((adapter) => <option key={adapter.value} value={adapter.value}>{adapter.label}</option>)}
+          {ADAPTERS.filter((adapter) => VISIBLE_PRODUCT_RUNTIMES.includes(adapter.value)).map((adapter) => <option key={adapter.value} value={adapter.value}>{adapter.label}</option>)}
         </Filter>
         <Filter label="Provider" value={filter.providerKey ?? ''} disabled={disabled} onChange={(value) => onChange('providerKey', value || undefined)}>
           <option value=""><UiText zh={"全部"} /></option>

@@ -132,3 +132,8 @@ brief 只拥有具体 surface 的信息优先级和构图；它不能覆盖全�
 Fast 直接保存三态偏好，运行时传递原生参数；页面、浮层及切换不启动资格检查。
 行为由 [Runtime Launch v48](../contracts/runtime-launch-and-verification-v48.md)与
 [Camp Member Fast v3](../contracts/camp-member-fast-v3.md)拥有。
+
+
+Cline 与 Command Code 暂缓公开：设置、新手引导、队员/Skill 选择、安装引导和监控筛选均不提供新入口。
+既有配置、历史 Run 和用量标签保持可读，不用隐藏策略改写历史名称。Renderer 共用可见产品目录，
+Core 沿共享平台准入处理未公开 Runtime；范围与未完成项见[Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)。

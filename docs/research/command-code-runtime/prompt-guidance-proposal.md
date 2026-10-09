@@ -21,7 +21,7 @@ revision 2 将基线更新到已合入的 v1.68：v1.67 删除 Core 生成模型
 
 ## 变更前
 
-仓库只有内部 [`command_code.rs`](../../../crates/rovai-core/src/command_code.rs) headless 传输：`request.prompt` 原样写入 `--print --output-format json` 的 stdin，没有 Command Code Product Adapter、ContextManifest、Native Binding 或正式 Bootstrap 投递。隔离 fixture 中的 `--mod` 仅用于验证 1.64.0 能以 `appendSystemPrompt` 注入，以及 Mod 缺失或回调抛错后仍会请求模型；正式执行路径没有生成或传递 Mod。
+仓库只有内部 [`command_code.rs`](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/crates/rovai-core/src/command_code.rs) headless 传输：`request.prompt` 原样写入 `--print --output-format json` 的 stdin，没有 Command Code Product Adapter、ContextManifest、Native Binding 或正式 Bootstrap 投递。隔离 fixture 中的 `--mod` 仅用于验证 1.64.0 能以 `appendSystemPrompt` 注入，以及 Mod 缺失或回调抛错后仍会请求模型；正式执行路径没有生成或传递 Mod。
 
 此前研究候选的输入等价于：
 

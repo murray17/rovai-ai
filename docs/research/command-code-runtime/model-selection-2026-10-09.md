@@ -10,6 +10,8 @@ last_updated: 2026-10-09
 
 # Command Code BYOK 模型选择：原生 CLI、ACP 与跨 Runtime 对照
 
+User 105 后仅保留 ACP/RPC 与原生目录探针；下文 CLI headless 对照是历史结果，对应完整夹具见[退役前提交](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/docs/research/command-code-runtime/fixtures/model_selection_probe.py)。
+
 Command Code **1.74.1 和 1.79.1 均复现上游 ACP 缺口**：原生 CLI 能列出和选择自定义 BYOK 模型，
 ACP 的 `availableModels` 与 `configOptions` 没有它们，`session/set_model` 和
 `session/set_config_option` 都返回 `-32602 Unknown model`。即使提交当前正在成功使用的 BYOK ID，也会拒绝。
@@ -126,3 +128,14 @@ macOS 通用进程树保留身份核验和可选持久账本，取消前使用�
 
 打包 Core SHA-256：`e70c592113efa10d903e8e5abe8011087c8ae384ede96409687ebe0cf764db40`。
 PR #662 保持未合并；Command Code 继续 Preview，Cline 当前不向用户开放。
+
+
+## 2026-10-09 ACP 启动参数复核（User 103）
+
+同一官方 1.79.1 发布包配合本机合成 Provider，默认 A、指定 B=`sub2api/gpt-6-sol`：
+`acp --model B` 与 `--model B acp` 均 initialize/new/prompt 成功，但实际 HTTP 请求仍到 A；
+不存在的模型参数也被忽略。反向设置默认 B、参数 A 时仍请求 B。普通 `--print --model B` 正向对照到 B。
+六个进程均退出，原生授权源摘要不变，测试授权引用清理。依据是端点、model 字段及认证匹配，不是模型自述。
+`createAcpCommand()` 直接调用 `runAcp()`，未交付普通 CLI 的模型 override；不能把默认恰好相同当作参数生效。
+该轮没有收费模型请求，不修改日常 1.66.0 安装；完整脱敏记录见
+[启动参数证据](acp-startup-model-2026-10-09.evidence.json)。User 105 后不保留该 headless 正向对照代码。

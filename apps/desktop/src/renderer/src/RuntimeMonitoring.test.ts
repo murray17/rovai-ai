@@ -112,6 +112,8 @@ describe('RuntimeMonitoring', () => {
     expect(markup).not.toContain('Session 延续率')
     expect(markup).not.toContain('Tool 耗时')
     expect(markup).not.toContain('Clean break')
+    expect(markup).not.toContain('value="cline-cli"')
+    expect(markup).not.toContain('value="command-code-cli"')
   })
 
   it('renders a full Usage snapshot with explicit zero and coverage', () => {
@@ -125,6 +127,11 @@ describe('RuntimeMonitoring', () => {
     expect(markup).toContain('<td>2/2</td>')
     expect(markup).toContain('USD 1.25')
     expect(markup).toContain('Codex')
+    // Hiding new-use selectors must not erase persisted usage labels.
+    for (const [kind, label] of [['cline-cli', 'Cline'], ['command-code-cli', 'Command Code']] as const) {
+      value.byRuntime[0].runtimeKind = kind
+      expect(renderToStaticMarkup(createElement(RuntimeUsageView, { snapshot: value }))).toContain(label)
+    }
   })
 
   it('keeps missing fields unknown in a partial snapshot', () => {

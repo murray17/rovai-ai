@@ -1348,3 +1348,13 @@ DSH 输入在准备期间变化的检查由其摘要 owner 验证，两者不互
 Claude 34、DSH 5 与模型目录 owner 通过。前端类型、239 文件／2615 Vitest、339 Node 测试、文档门禁
 及桌面构建通过。Mention 两来源／回滚／旧收据保留与修正后的 v104/v105 fixture 定向通过。
 这些检查不新增 headless 产品准入，也不代替 Windows runner 或真实打包模型验收。
+
+
+## 2026-10-09 headless 退役与两个 ACP 暂缓公开（User 105）
+
+- 删除 Command Code headless Rust transport/activity、五个专属 Rust owner、两份 Python 探针及模型对照中的 print 请求；ACP/RPC 探针继续保留。
+- Cline 与 Command Code 官方 ACP、System Rule/Mod、权限、工具、恢复、共享 Fleet/进程及历史身份保留；Command 撤回 macOS arm64 Preview，与 Cline 一样全平台 NotQualified。
+- 可见目录统一隐藏两者，覆盖设置、新手引导、队员/Skill 选择、安装引导和监控筛选；保留既有 Run/用量标签与配置，无数据库迁移。
+- 已知缺口分别记录于兼容性清单与两份研究索引。已删代码链接固定到 `2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e`，失败证据未删除。
+- 本轮不发送真实模型请求，不升级 Runtime、不运行 headless、不恢复 Hub，不触碰用户凭据或原生历史。
+- 首轮验证：Rust workspace 462 passed / 1 个人工 Smoke ignored；相关 Renderer 5 文件 213 项、TypeScript、两个 System Hook Node 测试、文档 10 项及版本/治理门禁、格式检查通过。

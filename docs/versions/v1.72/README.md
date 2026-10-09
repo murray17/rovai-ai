@@ -11,6 +11,17 @@ last_updated: 2026-10-09
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Cline / Command Code 保留 ACP，暂缓公开（2026-10-09，User 105）
+
+停止 headless 候选并删除专属 Rust transport/activity、测试和 Python 探针；原始报告与脱敏证据保留，
+复现代码改指向退役前提交。两个官方 ACP 实现及 System、权限、工具、恢复和共享进程能力继续保留。
+Command Code 与 Cline 一样撤回 Preview，所有平台 NotQualified；设置、新手引导、队员/Skill 选择、
+安装引导和监控筛选不再展示。旧身份、配置与公开历史不删除、不迁移，隐藏不改变旧 Run 事实。
+
+Cline ACP 自动压缩仍未接通；Command ACP 自定义 BYOK 目录/切换、`acp --model` 启动选择及已测 BYOK
+MCP 实际调用仍有缺口。精确版本、通过范围与未知项见[兼容性清单](../../runtime-compatibility.md)。
+这是公开范围收敛，没有更换 Runtime 或新增后备链路；下文 Preview/headless 是实施历史。
+
 ## Cline 暂缓公开（2026-10-09）
 
 User 99 因原生 ACP 自动 compaction 缺口要求暂不对外暴露 Cline。所有平台回到 NotQualified，

@@ -39,7 +39,8 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
 ]
 
 export const VISIBLE_PRODUCT_RUNTIMES: AdapterKind[] = PRODUCT_RUNTIMES.filter(
-  (runtimeKind) => runtimeKind !== 'cursor-agent' && runtimeKind !== 'cline-cli'
+  // Keep deferred ACP identities readable without advertising them for new use.
+  (runtimeKind) => !['cursor-agent', 'cline-cli', 'command-code-cli'].includes(runtimeKind)
 )
 
 export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {

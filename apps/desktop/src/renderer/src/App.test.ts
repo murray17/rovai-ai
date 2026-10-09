@@ -7882,7 +7882,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi'])
+    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'grok-build', 'deepseek-harness', 'zcode-app', 'antigravity-app', 'pi'])
     expect(markup).toContain('member-runtime-picker')
     expect(markup).toContain('aria-label="智能体类型，暂不配置"')
     expect(markup).toContain('aria-haspopup="menu"')
@@ -8105,6 +8105,7 @@ describe('task event projections', () => {
     expect(markup).toContain('DeepSeek Harness')
     expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('Cline')
+    expect(markup).not.toContain('Command Code')
     expect(markup).not.toContain('待支持')
     expect(markup).not.toContain('尚未开放')
     expect(markup).toContain(`当前平台：${platformLabel}`)
@@ -8344,7 +8345,7 @@ function runtimeAdmissionRows(
     'antigravity-app'
   ]
   return runtimeKinds.map((runtimeKind) => {
-    const effectiveStatus = ['cursor-agent', 'cline-cli'].includes(runtimeKind) && status === 'qualified'
+    const effectiveStatus = ['cursor-agent', 'cline-cli', 'command-code-cli'].includes(runtimeKind) && status === 'qualified'
         ? 'not_qualified'
         : status
     return {

@@ -811,16 +811,8 @@ impl AgentRuntimeAdapterRegistry {
                 ),
             };
         }
-        if kind == AdapterKind::CommandCodeCli && platform == HostPlatformKey::MacosArm64 {
-            // Development use is explicit and platform-scoped. The real
-            // Installation probe still owns authentication and readiness;
-            // Preview carries no First-Class qualification evidence.
-            return RuntimePlatformAdmission::preview(
-                kind,
-                platform,
-                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-            );
-        }
+        // Deferred products retain their ACP implementation and persisted identity.
+        // Cline ACP compaction and Command Code BYOK selection remain incomplete.
         if matches!(
             kind,
             AdapterKind::CursorAgent | AdapterKind::ClineCli | AdapterKind::CommandCodeCli

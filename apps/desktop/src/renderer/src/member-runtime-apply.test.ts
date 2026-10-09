@@ -54,7 +54,7 @@ describe('applying a saved member Runtime configuration', () => {
   it('protects pending Runtime drafts, ongoing edits and platform-frozen configurations', () => {
     expect(runtimeApplyEligibility(member, configuration, { runtimeDirty: true, busy: false }, environment)).toBe('draft')
     expect(runtimeApplyEligibility(member, configuration, { runtimeDirty: false, busy: true }, environment)).toBe('busy')
-    for (const adapterKind of ['cursor-agent', 'cline-cli'] as const) {
+    for (const adapterKind of ['cursor-agent', 'cline-cli', 'command-code-cli'] as const) {
       expect(runtimeApplyEligibility({ ...member, runtimeConfiguration: { ...configuration, adapterKind } }, configuration, undefined, environment)).toBe('locked')
     }
     const target = { ...member, runtimeConfiguration: configuration }
