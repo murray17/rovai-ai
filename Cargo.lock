@@ -1485,7 +1485,7 @@ dependencies = [
 
 [[package]]
 name = "rovai-core"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "anyhow",
  "base64",
@@ -1516,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "rovai-host"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "rovai-web"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "anyhow",
  "async-stream",
