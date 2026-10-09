@@ -657,10 +657,11 @@ impl AntigravityAppRuntimeAdapter {
             Ok(())
         }.await;
         if let Err(error) = dispatch {
-            if reap_antigravity_process(&mut child, Instant::now() + Duration::from_secs(3))
-                .await
-                .is_err()
+            if let Err(cleanup_error) =
+                reap_antigravity_process(&mut child, Instant::now() + Duration::from_secs(3)).await
             {
+                #[cfg(test)]
+                eprintln!("Antigravity input cleanup failed: {cleanup_error:#}");
                 *control.pending_cleanup.lock().await = Some(child);
             }
             stderr_task.abort();
@@ -2592,7 +2593,8 @@ printf '%s\n' '{{"event":"result","result":{{"conversation_id":"{session}","stat
             assert!(
                 adapter
                     .wait_for_agent_run_quiescence(&run_id, 1, Duration::from_secs(3))
-                    .await
+                    .await,
+                "input gate mode {mode} did not finish process cleanup"
             );
             std::fs::remove_dir_all(root).unwrap();
         }

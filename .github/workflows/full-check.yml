@@ -255,6 +255,9 @@ jobs:
       - name: Verify credentials and content versions
         id: web_check
         run: cargo test --locked -p rovai-web
+      - name: Diagnose native input-gate cleanup
+        if: matrix.target == 'macos-arm64'
+        run: cargo test --locked -p rovai-core --lib antigravity::tests::stream_input_waits_for_exact_session_and_dispatch_authority -- --exact --nocapture
       - name: Verify updater and process handoff
         if: ${{ !cancelled() && (steps.web_check.conclusion == 'success' || steps.web_check.conclusion == 'failure') }}
         run: cargo test --locked -p rovai-host --lib server_updates
