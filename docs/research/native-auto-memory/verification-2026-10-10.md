@@ -113,6 +113,11 @@ Fleet **23 passed**，另有 Windows 进程所有权、私有文件和 MCP 配�
 `cargo fmt --all --check`、`git diff --check`、`pnpm docs:test`（10 项）、`pnpm docs:check` 与
 `DOCS_BASE_REF=d1dd5cce299b6896b6ea88495aa06d02f6ea91d6 pnpm docs:check:ci` 通过。
 
+审查收尾仅为手动 `fixtures/probe.py` 补充退出期限：EOF 等待 10 秒、TERM 后 5 秒、KILL 后 5 秒，
+stderr 读完等待 5 秒；Claude 执行超时后强制退出的回收也限于 5 秒。超过期限明确报错，不无界等待。
+合成子进程验证正常 EOF、TERM、忽略 TERM 后 KILL、后代持有 stderr、无法确认强制退出、Claude 执行超时六类路径通过；
+未改生产进程管理，也未扩大原生记忆行为的验收结论。
+
 ## 未验证边界
 
 本轮真实 Runtime 行为证据限于 macOS arm64 和上述版本；没有 Windows/Linux/macOS x64 官方 CLI、真实账号模型或

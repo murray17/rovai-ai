@@ -1,7 +1,7 @@
 """Manual isolated native CLI A/B probe. Loopback provider; no real credentials."""
 import argparse, asyncio, json, os, threading, uuid, sqlite3, hashlib, re, subprocess, platform
 from pathlib import Path
-from contextlib import closing
+from contextlib import closing, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = None
@@ -97,6 +97,19 @@ def configure(managed=False):
     put(ROOT/'metadata.json',json.dumps(metadata,indent=2))
     return args
 
+async def stop_process(process):
+    """Bounded cleanup for these manual probes only."""
+    process.stdin.close()
+    for signal, timeout in [(None, 10), (process.terminate, 5), (process.kill, 5)]:
+        if signal is not None:
+            with suppress(ProcessLookupError): signal()
+        try:
+            await asyncio.wait_for(process.wait(), timeout)
+            return
+        except asyncio.TimeoutError:
+            pass
+    raise RuntimeError('Fixture process did not exit after forced termination')
+
 class RPC:
     async def start(self, args, env, cwd, initialize=True):
         self.p=await asyncio.create_subprocess_exec(*args,env=env,cwd=cwd,stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE,limit=16*1024*1024)
@@ -129,10 +142,13 @@ class RPC:
             if done: return done['params']['turn']['status']
             self.notes.append(await self.read())
     async def close(self):
-        self.p.stdin.close()
-        try: await asyncio.wait_for(self.p.wait(),10)
-        except asyncio.TimeoutError: self.p.terminate(); await self.p.wait()
-        self.stderr_text=(await self.errors).decode(errors="replace")
+        try:
+            await stop_process(self.p)
+            try: self.stderr_text=(await asyncio.wait_for(self.errors,5)).decode(errors="replace")
+            except asyncio.TimeoutError:
+                raise RuntimeError('Fixture stderr did not reach EOF during cleanup') from None
+        finally:
+            if not self.errors.done(): self.errors.cancel()
 
 def put(path, value):
     path.parent.mkdir(parents=True,exist_ok=True)
@@ -224,7 +240,9 @@ async def claude(disabled):
         p=await asyncio.create_subprocess_exec(*args,env=env,cwd=cwd,stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         try: out,err=await asyncio.wait_for(p.communicate(body.encode()),45)
         except asyncio.TimeoutError:
-            p.kill(); await p.wait(); raise
+            with suppress(ProcessLookupError): p.kill()
+            await asyncio.wait_for(p.wait(),5)
+            raise
         events=[json.loads(l) for l in out.decode().splitlines() if l.startswith('{')]
         result=next((e for e in reversed(events) if e.get('type')=='result'),{})
         return {'exitCode':p.returncode,'error':result.get('is_error'),'sameSession':result.get('session_id')==sid,'subtype':result.get('subtype')}
