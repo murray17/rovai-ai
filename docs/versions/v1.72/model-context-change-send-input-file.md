@@ -169,7 +169,7 @@ Rovai Built-in CLI Contract
 [/SESSION_CHARTER]
 ````
 
-上一条既有指令已经要求读取命令精确帮助，因此无需增加第二个帮助指针。删除过时的通用断言即可，不在常驻上下文新增正文文件、JSON 自动识别、临时目录或写入教程。旧 Session 的冻结句不会被回写，旧 JSON 调用仍符合其原指引。
+**变更介绍：** 只删除“所有命令只能选择一种输入源、不得混用”这一句，沿用已有的 `--help` 指引，不增加正文文件或临时目录教程。旧 Session 的冻结文本保持原样，旧 JSON 调用仍可使用。
 
 ### Send help 整页
 
@@ -266,7 +266,7 @@ JSON compatibility:
   rovai send --input-file request.json
 ````
 
-保留三个主示例各自的目的：公开记录、Agent 工作请求、User 注意力。首例直接显示真实换行和 Markdown，并在发送前要求写入成功；兼容示例单独示范完整 JSON。
+**变更介绍：** 输入说明增加“正文文件可配合发送参数，完整 JSON 请求须单独使用”，并说明裸请求 JSON 示例要放进代码块。多行正文教学和首个示例由“写 JSON 请求”改为“直接写正文文件，写入成功后发送”；旧 JSON 示例移到兼容说明，另外两个主示例不变。
 
 `--body` 的字面 `\n` 规则、寻址帮助、附件帮助和回执判断不变。新文案不禁止工具调用自身的 JSON 编码，也不要求特定临时路径。
 
@@ -374,6 +374,8 @@ A successful operation proves its own commit, not downstream execution, validati
 - [Recovery](references/recovery.md): follow `error.recovery`, especially uncertain outcomes.
 ````
 
+**变更介绍：** 只改 `Coordinate operations` 第 2 步：将“每次只用一种输入源”改为“按所选命令的帮助使用输入形式和允许的组合”。其余内容不变。
+
 ### cli-operations Send reference 全文
 
 来源：[references/send.md](../../../skills/cli-operations/references/send.md)。只改入口句；不在 reference 再复制一份易漂移的识别算法或长示例。
@@ -437,6 +439,8 @@ A successful Send proves publication and its frozen effects, not that a recipien
 
 Use `--file <path>` to publish a file or directory with the message; repeat it to preserve attachment order. No separate upload is required. At least one file can form a message without a body.
 ````
+
+**变更介绍：** 只扩展开头的帮助指引，明确 `send --help` 包含正文文件、JSON 兼容和参数组合规则；具体教程仍集中在 help，其余内容不变。
 
 ## 其他可能进入上下文的部分
 
