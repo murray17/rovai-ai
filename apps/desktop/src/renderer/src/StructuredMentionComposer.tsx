@@ -687,7 +687,7 @@ function renderMentionMenu(
     <div className="mention-menu-heading"><strong>{inviteLayer
       ? <UiText zh={'邀请队员'} />
       : query.trim() ? <UiText zh={'搜索队员'} /> : mission ? <UiText zh={'本使命'} /> : <UiText zh={'本会话'} />}</strong><span><UiText zh={"↑↓ 选择 · Enter 确认"} /></span></div>
-    <div className={`mention-menu-columns${hasRuntime ? ' has-runtime' : ''}`}>
+    <div className="mention-menu-candidates">
     <div id={menuId} role="listbox" aria-label={inviteLayer ? uiAttribute('可邀请队员') : mission ? uiAttribute('提及队员') : uiAttribute('选择接收队员')}>
     {options.length === 0
       ? <p className="structured-mention-empty"><UiText zh={"没有匹配的队员"} /></p>
@@ -703,6 +703,7 @@ function renderMentionMenu(
             : option.kind === 'all_members' ? uiAttribute('所有队员，仅本会话')
               : option.kind === 'invite_other' ? uiAttribute('邀请其他队员') : mission ? uiAttribute('返回本使命') : uiAttribute('返回本会话')}
           className={[selectedIndex === index ? 'active' : '',
+            option.kind === 'member' && option.member.runtimeLabel ? 'has-runtime' : '',
             option.kind === 'member' && option.member.inThread === false ? 'is-invitable' : '',
             option.kind === 'invite_other' || option.kind === 'back_to_camp' ? 'is-mention-action' : ''
           ].filter(Boolean).join(' ')}
@@ -711,20 +712,18 @@ function renderMentionMenu(
           onClick={() => selectIndex(index)}>
           <StructuredMentionOptionAvatar option={option} />
           <span>
-            <span className="mention-option-name"><strong>{option.kind === 'all_members' ? uiAttribute('所有队员')
+            <strong>{option.kind === 'all_members' ? uiAttribute('所有队员')
               : option.kind === 'invite_other' ? uiAttribute('邀请其他队员')
                 : option.kind === 'back_to_camp' ? mission ? uiAttribute('返回本使命') : uiAttribute('返回本会话')
                   : option.member.displayName}</strong>
-              {option.kind === 'member' && option.member.inThread === false
-                && <span className="mention-option-state">{pendingInviteIds.includes(option.member.agentId)
-                  ? <UiText zh={'待邀请'} /> : <UiText zh={'邀请'} />}</span>}
-            </span>
             <small>{option.kind === 'all_members'
               ? uiAttribute('广播给当前全部队员')
               : option.kind === 'invite_other' ? uiAttribute('浏览其他可用队员')
                 : option.kind === 'back_to_camp' ? mission ? uiAttribute('查看当前使命队员') : uiAttribute('查看当前会话队员')
                   : structuredMentionMemberDescription(option.member)}</small>
           </span>
+          {option.kind === 'member' && option.member.inThread === false && <span className="mention-option-state">{pendingInviteIds.includes(option.member.agentId)
+            ? <UiText zh={'待邀请'} /> : <UiText zh={'邀请'} />}</span>}
           {option.kind === 'invite_other'
               ? <svg className="mention-action-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2.5 3.5 3.5L4 9.5" /></svg>
               : null}
@@ -734,7 +733,7 @@ function renderMentionMenu(
       {options.map((option, index) => option.kind === 'member' && option.member.runtimeLabel
         ? <MentionRuntimeButton key={option.member.agentId} kind={option.member.runtimeKind}
             label={option.member.runtimeLabel} model={option.member.modelLabel} memberName={option.member.displayName}
-            active={selectedIndex === index} onHighlight={() => setHighlightedIndex(index)} onSelect={() => selectIndex(index)} />
+            onHighlight={() => setHighlightedIndex(index)} onSelect={() => selectIndex(index)} />
         : <span key={option.kind === 'member' ? option.member.agentId : option.kind} className={`mention-runtime-placeholder${option.kind === 'invite_other' || option.kind === 'back_to_camp' ? ' is-mention-action' : ''}`} aria-hidden="true" />)}
     </div>}
     </div>

@@ -203,8 +203,7 @@ html[data-mobile-web="true"] :is(.single-chat-heading, .camp-detail-heading) > b
 html[data-mobile-web="true"] :is(.single-chat-heading, .camp-detail-heading) > button > svg { width: 17px; height: 17px; }
 html[data-mobile-web="true"] .structured-mention-menu { max-width: calc(100vw - 32px); max-height: 40dvh; overflow-y: auto; }
 html[data-mobile-web="true"] .structured-mention-menu [role="option"] { min-height: 44px; }
-html[data-mobile-web="true"] .mention-menu-columns.has-runtime { grid-template-columns: minmax(0, 1fr) 44px; }
-html[data-mobile-web="true"] .mention-menu .mention-runtime-trigger { width: 44px; }
+html[data-mobile-web="true"] .mention-menu-candidates { --mention-runtime-width: 44px; }
 html[data-mobile-web="true"] .mention-runtime-heading > button { flex-basis: 44px; width: 44px; height: 44px; }
 html[data-mobile-web="true"] .mention-runtime-select { min-height: 44px; }
 html[data-mobile-web="true"] .mention-menu-heading > span { display: none; }

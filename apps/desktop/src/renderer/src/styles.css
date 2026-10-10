@@ -4509,14 +4509,16 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .structured-mention-menu { right: auto; width: min(360px, 100%); max-height: min(360px, 46vh); }
 .mention-menu.composer-caret-menu { position: relative; inset: auto; width: 360px; max-width: calc(100vw - 24px); max-height: min(360px, 46vh, var(--radix-popover-content-available-height)); overscroll-behavior: contain; }
 .structured-mention-menu button { grid-template-columns: 28px minmax(0, 1fr) auto; }
-.mention-menu-columns { display: grid; grid-template-columns: minmax(0, 1fr); }
-.mention-menu-columns.has-runtime { grid-template-columns: minmax(0, 1fr) 36px; }
-.mention-menu-columns > [role="listbox"] { min-width: 0; }
-.mention-menu-columns > [role="listbox"] > button, .mention-runtime-placeholder { height: 44px; }
-.mention-menu-columns.has-runtime > [role="listbox"] > button { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-.mention-runtime-column { min-width: 0; }
+.mention-menu-candidates { --mention-runtime-width: 36px; position: relative; }
+.mention-menu-candidates > [role="listbox"] { display: grid; grid-template-columns: minmax(0, 1fr); }
+.structured-mention-menu button[role="option"] { height: 44px; background: transparent; }
+.structured-mention-menu button[role="option"].active { background: var(--brand-soft); }
+.structured-mention-menu button[role="option"].has-runtime { padding-right: calc(var(--mention-runtime-width) + 4px); }
+/* Keep details outside listbox semantics while the full-width option owns the row background. */
+.mention-runtime-column { position: absolute; top: 0; right: 0; width: var(--mention-runtime-width); pointer-events: none; }
 .mention-runtime-placeholder { display: block; }
-.mention-menu .mention-runtime-trigger { display: grid; width: 36px; height: 44px; grid-template-columns: none; place-items: center; padding: 0; border-radius: 0 6px 6px 0; color: var(--muted); }
+.mention-runtime-placeholder, .mention-menu button.mention-runtime-trigger { height: 44px; }
+.mention-menu button.mention-runtime-trigger { display: grid; width: var(--mention-runtime-width); grid-template-columns: none; place-items: center; padding: 0; border-radius: 6px; color: var(--muted); background: transparent; pointer-events: auto; }
 .mention-runtime-trigger .member-runtime-glyph, .mention-runtime-product .member-runtime-glyph { display: grid; width: 22px; height: 22px; place-items: center; }
 .mention-runtime-trigger .member-runtime-glyph :is(img, svg), .mention-runtime-product .member-runtime-glyph :is(img, svg) { display: block; width: 18px; height: 18px; object-fit: contain; }
 .mention-runtime-trigger .member-runtime-logo-mask, .mention-runtime-product .member-runtime-logo-mask { --runtime-logo: none; display: block; width: 18px; height: 18px; background: var(--ink); mask: var(--runtime-logo) center / contain no-repeat; }
@@ -4531,12 +4533,11 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .mention-runtime-popover dd { margin: 0; overflow-wrap: anywhere; }
 .mention-runtime-select { width: 100%; min-height: 32px; margin-top: 8px; padding: 6px 10px; border: 0; border-radius: 6px; background: var(--neutral-selected); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
 .mention-runtime-select:hover { background: var(--neutral-hover); }
-.mention-option-name { display: flex; min-width: 0; align-items: center; gap: 6px; }
-.mention-option-name .mention-option-state { flex: 0 0 auto; }
-.structured-mention-menu .is-mention-action { margin-top: 3px; border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
+.structured-mention-menu .is-mention-action { margin-top: 3px; }
+.structured-mention-menu button.is-mention-action { border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .structured-mention-menu .mention-action-avatar { border-color: var(--line); color: var(--muted); background: var(--surface-subtle); }
 .structured-mention-menu .mention-action-avatar svg { width: 16px; height: 16px; }
-.structured-mention-menu .mention-action-chevron { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.structured-mention-menu .mention-action-chevron { width: 12px; height: 12px; margin-inline: calc((var(--mention-runtime-width) - 28px) / 2); fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .mention-option-state { color: var(--muted); font-size: 10px; white-space: nowrap; }
 .structured-mention-menu .is-invitable .mention-option-state { color: var(--mention-ink); }
 .mention-avatar { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent); border-radius: 7px; color: var(--brand); background: var(--surface); font-size: 11px; font-weight: 750; }

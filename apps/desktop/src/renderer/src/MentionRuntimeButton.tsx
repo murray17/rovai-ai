@@ -6,12 +6,11 @@ import type { AdapterKind } from '@contracts'
 import { RuntimeGlyph } from './MemberRuntimePicker'
 import { UiText, uiAttribute } from './interface-language'
 
-export function MentionRuntimeButton({ kind, label, model, memberName, active, onHighlight, onSelect }: {
+export function MentionRuntimeButton({ kind, label, model, memberName, onHighlight, onSelect }: {
   kind?: AdapterKind
   label: string
   model?: string
   memberName: string
-  active: boolean
   onHighlight(): void
   onSelect(): void
 }): React.JSX.Element {
@@ -38,9 +37,9 @@ export function MentionRuntimeButton({ kind, label, model, memberName, active, o
     }
     setOpen(next)
   }}>
-    <Popover.Trigger asChild><button type="button" className={`mention-runtime-trigger${active ? ' active' : ''}`}
+    <Popover.Trigger asChild><button type="button" className="mention-runtime-trigger"
       aria-label={uiAttribute('查看 {0} 的智能体与模型', memberName)} title={[label, model].filter(Boolean).join(' · ')}
-      onMouseMove={onHighlight} onMouseDown={event => event.preventDefault()}>
+      onMouseMove={onHighlight} onFocus={onHighlight} onMouseDown={event => event.preventDefault()}>
       <RuntimeGlyph kind={kind ?? null} />
     </button></Popover.Trigger>
     <Popover.Portal container={editor.getRootElement()?.closest<HTMLElement>('[role="dialog"]') ?? undefined}>
