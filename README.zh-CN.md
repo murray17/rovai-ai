@@ -127,13 +127,13 @@ pnpm dev
 
 欢迎提交 [Issue](https://github.com/murray17/rovai-ai/issues) 或 [Pull Request](https://github.com/murray17/rovai-ai/pulls)。反馈问题时，请附上 Rovai 版本、主机平台和复现步骤。
 
+Rovai 通过原生协议和 ACP 连接不同的编程智能体。已有适配、实现方式与待完善项见[智能体接入](contributing/agent-integrations.zh-CN.md)。
+
 ## 许可证
 
 [MIT](https://github.com/murray17/rovai-ai/blob/main/LICENSE) — 允许自由使用、修改、分发和商业使用。
 
 ## 社区
-
-欢迎加入微信群，交流使用方式、分享工作流，一起讨论 Rovai。
 
 <p align="center">
   <a href="docs/assets/readme/wechat-group.png"><img src="docs/assets/readme/wechat-group.png" alt="Rovai 交流微信群二维码" width="320"></a><br>

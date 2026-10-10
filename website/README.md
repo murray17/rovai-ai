@@ -1,6 +1,6 @@
 # Rovai website
 
-The public English and Chinese website is built with VitePress and deployed from this directory only. The homepage, download page, and 36 guide topics each have an English and Chinese URL. Public routes start at `/` and `/zh/`; VitePress uses `base: '/'` for `rovai.dev`.
+The public English and Chinese website is built with VitePress and deployed from this directory only. The homepage, download page, and 37 guide topics each have an English and Chinese URL. Public routes start at `/` and `/zh/`; VitePress uses `base: '/'` for `rovai.dev`.
 
 ## Local build
 
@@ -10,7 +10,9 @@ npm run build --prefix website
 npm run preview --prefix website
 ```
 
-`scripts/source/` contains the bilingual content and the approved homepage renderer from the local prototype. `scripts/generate.mjs` turns that content into 78 static VitePress pages before the build. Generated Markdown, build output, and caches are ignored. The deployment workflow uploads only `website/site/.vitepress/dist`.
+`scripts/source/` contains the bilingual content and the approved homepage renderer from the local prototype. `scripts/generate.mjs` turns that content into 80 static VitePress pages before the build. Generated Markdown, build output, and caches are ignored. The deployment workflow uploads only `website/site/.vitepress/dist`.
+
+The agent setup guide is maintained in `scripts/source/guides/agent-setup.en.md` and `agent-setup.zh.md`. The build renders these Markdown sources inside the existing documentation layout, with the shared code-copy interaction and language switch. The original `agents.html` guide retains its interface instructions, field reference and screenshots; `agent-setup.html` covers product-specific configuration and links to the contributor integration reference.
 
 `site/public/` contains the selected product images, diagrams, and Orbit teaching example. The prototype's review evidence, capture scripts, and local test data are not published. Existing core tutorial screenshots were captured with the local v0.4.0 app; download links and upgrade wording follow the published v0.4.7 release. Screenshots illustrate the documented workflow and are not a separate v0.4.7 visual acceptance result.
 
