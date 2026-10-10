@@ -16,6 +16,8 @@ last_updated: 2026-10-10
 按 User 的可用性优先、最小必要改动意见，单一 OpenCode Adapter 在配置冻结前识别所选程序，
 分流原生权限、旧压缩插件与用量来源，复用既有 Host、Session、Bootstrap 和工具授权。
 范围、必要决定与逐版本验证见 [OpenCode V1/V2 实施记录](opencode-v1-v2-implementation.md)。
+V1 `--pure` 阻止压缩监听插件加载的缺口已由真实自动压缩复现；隔离移除参数后补发通过，
+但会同时启用用户外部插件，生产策略尚未修改，不能据普通协作样本宣称 V1 压缩连续性正常。
 不增加版本资格门禁或安装管理，不变更数据库 schema、版本指针或模型上下文格式。
 
 ## Cline / Command Code 保留 ACP，暂缓公开（2026-10-09，User 105）

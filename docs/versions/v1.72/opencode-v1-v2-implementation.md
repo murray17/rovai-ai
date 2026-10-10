@@ -22,7 +22,7 @@ last_updated: 2026-10-10
 | 旧 Session 与原生委派 | 旧 Binding 缺 compatibility key 时走现有 controlled restore，保留精确 Session ID。V2 订阅原生 child-session-updates；根轮结束时仍有活动子会话的 Host 不满足既有 quiescence 条件，由 Fleet 回收，避免旧 Run 继续执行。子会话文本、用量、压缩不混入根会话证据。 |
 | 权限 | V1 保留 permission 与 build/plan 覆盖。V2 使用末项优先的 permissions：一般 allow/ask/deny 在前，shell/skill allow 在后，覆盖 build/plan。自定义／子 agent 保留原生规则，V2 原生残余请求进入既有审批，根 allow 不替其自动批准。ask/deny 不是全局询问／拒绝或只读沙箱。 |
 | 原生配置 | 保留 OPENCODE_CONFIG_CONTENT 的模型、provider、MCP、自定义 agent 等内容，只覆盖已有权限意图及更新字段；非法配置明确报错。 |
-| 压缩 | V1 保留 session.compacted 插件。V2 在插件生成／注入之前分流，接入原生 ACP session_info_update 的 opencode/compaction 完成标记。根 Session 的 completed＋messageId 驱动既有 Observer／Requirement；started、failed、child、历史 replay 不补发。原生 occurrence 去重、quarantine 与下一输入的 Bootstrap 补发继续复用。 |
+| 压缩 | V1 生成 session.compacted 插件，但当前 `--pure` 会阻止加载；真实自动压缩的补发缺口已复现，见下方复核。V2 在插件生成／注入之前分流，接入原生 ACP session_info_update 的 opencode/compaction 完成标记。根 Session 的 completed＋messageId 驱动既有 Observer／Requirement；started、failed、child、历史 replay 不补发。原生 occurrence 去重、quarantine 与下一输入的 Bootstrap 补发继续复用。 |
 | 可选交互 | 不声明未实现的 elicitation.form 或带 summary/patch 的 session.compaction capability；权限交互继续原生 ACP options。V2 压缩完成标记承接协作连续性，不关闭自动压缩。 |
 | 用量 | V1 保留只读原生根 Session reader；V2 停用该 reader，接 prompt response 当前根会话本轮已报告用量，按 V2 缓存／reasoning 语义归一。复用 scope、checkpoint 和部分统计；未覆盖原生子会话／委派，不标完整 Run 总量。缺响应／字段保持未知，Session 累计成本不算本轮成本。 |
 
@@ -36,7 +36,7 @@ macOS V2 启动及代际尚未知的模型目录读取在用户未设置该变�
 
 | 样本 | 平台 | 已有证据 |
 | --- | --- | --- |
-| V1 `1.18.32` | macOS arm64 | 原 `acp --pure --log-level ERROR` 保持。协作、审批、取消、冷恢复、MCP 三服务器与配置生命周期实测通过。 |
+| V1 `1.18.32` | macOS arm64 | 原 `acp --pure --log-level ERROR` 保持。协作、审批、取消、冷恢复、MCP 三服务器与配置生命周期实测通过；这些样本没有覆盖压缩后的 Bootstrap 补发，不能据此宣称该链路正常。 |
 | V2 `2.0.26` | macOS arm64 | 官方 @opencode/cli-darwin-arm64 包，npm sha512 验证通过；二进制 SHA-256 为 `1b6418a3bd4211344d8a2b75d7d4367b24283ae548bd6b896cf717f6f8858f26`。拒绝 --pure，使用 acp --log-level error。隔离 initialize/session/new 确认 env 配置高于项目文件；下述基础链路、压缩和 MCP 实测通过。 |
 
 真实协作复用 `scripts/probe-runtime-execution-metrics.mjs`，独立 Core data-dir、Skill Library、MCP、
@@ -70,6 +70,62 @@ V1 初始协作样本使用 `b3a8ab57c458796df92e3ab6ad79cba3ea608d05c5675ccf869
 Windows x64、macOS x64 没有本次真实执行证据。原平台限制不变，本机样本不外推为所有版本完整保证。
 本次不声明可选 elicitation.form／summary-patch 交互或所有原生子 agent 权限组合已经验收；
 原生委派取消样本限于上述 general 子 agent。发布前保留这些覆盖边界。
+
+## V1 `--pure` 与真实自动压缩复核
+
+2026-10-10 按 User 的专项测试要求，对同一个 V1 `1.18.32` 二进制和上述合流后 Core 做隔离 A/B。
+本轮只在验收启动器中移除 `--pure`，没有修改生产启动策略。选用现有 `sub2api/gpt-6.1-sol`
+配置的私有副本，独立 Core、Skill Library、MCP 和原生存储；没有使用免费模型额度，也没有写日常配置。
+V1 二进制 SHA-256：`a3c45d4e1d6620b436851f1ef6b25c71befcf06a382e279a1eb1c2196424395e`。
+
+复用 `probe-runtime-execution-metrics.mjs` 的两轮真实协作和冷恢复链路：读取 Skill、调用 bundled CLI、
+读取受控大文件、原生自动压缩、公开发送／final 去重、冷恢复后的下一输入。测试模型声明
+`limit.context=200000, input=200000, output=8192`，仅在隔离配置设置
+`compaction={auto:true,reserved:176000,preserve_recent_tokens:1500,tail_turns:0}`，使实际工具结果触发
+24000 token 阈值。原生数据库的 `compaction.auto=true`、成功 summary 和真实 `session.compacted`
+分别核对；没有手动 compact、伪造 usage、注入完成事件或修改 Core 数据库。
+
+| 检查 | 带 `--pure` | 仅移除 `--pure` |
+| --- | --- | --- |
+| 原生自动压缩／成功 summary | 1／1 | 1／1 |
+| Core `session.compacted` observation | 0 | 1 |
+| requested／acknowledged revision | 无 Requirement | 1／1 |
+| 冷恢复后下一输入的 Bootstrap redelivery | 无；原生输入也没有补发 marker | 有；Core accepted 且原生输入包含补发 marker |
+| 两轮真实 Run、精确 Native Session 恢复、公开去重 | 通过，但不能弥补漏补发 | 通过；每轮各 1 条公开消息 |
+| 全局、项目、显式 config 三处测试插件 | 全部未加载 | 三处均加载并收到真实完成事件 |
+| 插件 `shell.env` 对实际命令的影响 | 三个 canary 环境值为空 | 三个 canary 环境值均为 `active` |
+
+测试插件使用原生 Plugin loader 和 hooks 执行，记录真实模型调用／事件，并向 Shell 注入无害 canary；
+不是在测试客户端模拟插件或压缩通知。它们是受控功能插件，该结果不保证任意第三方插件的行为。
+
+进一步复用 `smoke-acp-runtime.mjs`，给同一 inline 测试插件增加原生 `config` hook，只在运行内把
+`cfg.permission.edit` 和 `cfg.agent.build.permission.edit` 设为 `allow`，不写用户配置。插件记录确认
+hook 执行前 Core 注入的 root／build 默认均为 `ask`。带 `--pure` 时插件不运行，实际文件写入经过
+审批；移除参数后，原生文件工具不再申请审批，连验收脚本准备拒绝的第二个文件也被创建，既有
+denial 断言因此正确失败。这里的失败是实测插件覆盖配置的证据，不能记成兼容性通过。
+这证明影响不限于插件日志或通知；保持启动 JSON 不变，并不足以保证启用用户插件后的实际权限不变。
+
+同一权限 hook 的 pure 对照完整 smoke 通过，包括 1 次文件审批、1 次拒绝和运行中取消后 35 秒无延迟文件。
+只含事件／Shell canary、没有权限 hook 的 no-pure 样本中，文件审批和拒绝仍通过；取消步骤的模型拒绝
+执行 Bash 文件创建命令，未启动目标工具，脚本等待取消条件后超时。该样本保留为“取消未覆盖”，
+不记为 Runtime 取消通过，也不把模型拒绝归因于删除参数。
+
+根因由精确上游提交 `545f51d26cc39a907d2867492d498d9607ea5fa4` 交叉验证：
+[CLI](https://github.com/anomalyco/opencode/blob/545f51d26cc39a907d2867492d498d9607ea5fa4/packages/opencode/src/index.ts)
+把 `--pure` 写为 `OPENCODE_PURE=1`；
+[Plugin loader](https://github.com/anomalyco/opencode/blob/545f51d26cc39a907d2867492d498d9607ea5fa4/packages/opencode/src/plugin/index.ts)
+在 pure 模式把全部外部来源置空，包含 Rovai 注入的插件。
+[配置合并](https://github.com/anomalyco/opencode/blob/545f51d26cc39a907d2867492d498d9607ea5fa4/packages/opencode/src/config/config.ts)
+按原生规则合并全局、项目和 inline 插件；追加 Rovai 插件并不替换其他来源。
+V1 ACP event 路由也没有转发 `session.compacted`，不能从普通回复成功推断另有可靠完成信号。
+
+结论：这是既有 V1 启动路径的正确性缺口，普通协作和 V2 压缩成功不覆盖它。去掉 Core 强制的
+`--pure` 已证明能恢复现有监听／补发链路，但会同时恢复用户外部插件的原生执行，甚至让插件覆盖
+既有审批意图。不能把单独删除参数作为已完成的兼容修复提交，也不能把“允许外部插件”的行为变更
+混入无影响修复。后续修复需要选定一条既能取得真实完成信号、又不默默扩大插件／权限行为的监听路径；
+本轮没有把未经实现及验证的替代路径写成完成，不改写全部用户配置、不关闭原生自动压缩，也不建立
+新的压缩管理系统。在生产修复前，V1 压缩后协作连续性保持未修复状态，不宣称完整支持；
+这不是补丁版本执行白名单。
 
 ## 回归 owner
 
