@@ -1,18 +1,20 @@
 ---
 document_type: model-context-change
 version: v1.72
-revision: 1
+revision: 2
 confirmation_status: pending
 implementation_status: not_started
 source_commit: 70c9214bf47a677d018a7f2448583d6ec3422d22
 last_updated: 2026-10-10
 ---
 
-# Send 正文文件方案与模型上下文对照 r1
+# Send 正文文件方案与模型上下文对照 r2
 
 `rovai send --input-file` 同时支持正文文件和既有 JSON 请求文件：严格通过现有封闭 Send Schema 的 JSON 对象作为完整请求，其余合法文本作为正文。新教学默认演示正文文件；已有合法 JSON 调用和冻结 Session 继续可用。
 
 本稿供 User 审阅完整行为与精确文案。Bootstrap 和 Skill 主文只保留输入规则的帮助入口，具体用法集中在 `send --help`；不新增 TMP 目录教学。本文是待确认方案，不是现行合同或已交付能力。
+
+r2 删除 help 中单独的旧 JSON 请求示例，并取消 Send reference 的拟议改动；新教学集中演示正文文件。旧 JSON 的识别和兼容行为不变，help 只保留必要的格式识别、参数冲突与 JSON 示例展示规则。
 
 ## 范围与依据
 
@@ -89,9 +91,9 @@ Schema 的长度、数组数量、唯一性和类型限制同样参与识别。�
 | 入口 | 模型何时可见 | 本次处理 |
 | --- | --- | --- |
 | 公共 Bootstrap 的 CLI Contract | 新 Session Bootstrap；旧 Session 使用冻结版本 | 删除绝对互斥句；保留已有 exact-help 入口，不增加新句 |
-| `rovai send --help` | Agent 主动查询 | 修改输入说明、正文帮助、首个示例；旧 JSON 移至兼容示例 |
+| `rovai send --help` | Agent 主动查询 | 修改输入说明、正文帮助、首个示例；不再演示旧 JSON 请求写法 |
 | `cli-operations/SKILL.md` | 按需加载 Skill | 仅替换操作步骤 2，指向命令自己的组合规则 |
-| `cli-operations/references/send.md` | 按需读取 Send reference | 仅改首句，明确帮助包含正文文件与 JSON 兼容 |
+| `cli-operations/references/send.md` | 按需读取 Send reference | 不变；沿用已有 help 指引 |
 | Skill description、平台索引、UI 默认提示 | Bootstrap/Run 索引、原生发现或用户选取 | 不变；不增加常驻文件教程 |
 | 根 help、其他命令 help | 按需查询 | 不变；只有 Send 的输入页头使用特定规则 |
 | Catalog summary、Schema descriptions | help 或已有目录投影消费 | 不变；不增加文件业务字段 |
@@ -104,7 +106,7 @@ Schema 的长度、数组数量、唯一性和类型限制同样参与识别。�
 
 当前 CLI 只把 `--input-file` 解析为 JSON 对象，所有命令均禁止和直接参数混用。帮助首例要求创建 JSON 请求文件。Bootstrap 和 Skill 主文重述输入来源互斥。
 
-下节按每个实际表面提供完整前后文本。通用公共 Charter 展示全部共用文本；条件追加段另行列出，成员身份、Memory 等动态内容不伪造固定样本。文档中的“变更后”均为 r1 提案，不是当前程序输出。
+下节按每个实际表面提供完整前后文本。通用公共 Charter 展示全部共用文本；条件追加段另行列出，成员身份、Memory 等动态内容不伪造固定样本。文档中的“变更后”均为 r2 提案，不是当前程序输出。
 
 ## 变更后
 
@@ -259,14 +261,9 @@ Examples:
     rovai send --public-only --input-file reply.md
   rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'
   rovai send --public-only --to-user --body 'Please choose whether to roll back the client or continue the token investigation.'
-
-JSON compatibility:
-  Write request.json:
-    {"publicOnly":true,"body":"Result:\n\nUpdated `src/example.rs`."}
-  rovai send --input-file request.json
 ````
 
-**变更介绍：** 输入说明增加“正文文件可配合发送参数，完整 JSON 请求须单独使用”，并说明裸请求 JSON 示例要放进代码块。多行正文教学和首个示例由“写 JSON 请求”改为“直接写正文文件，写入成功后发送”；旧 JSON 示例移到兼容说明，另外两个主示例不变。
+**变更介绍：** 多行正文教学和首个示例由“写 JSON 请求”改为“直接写正文文件，写入成功后发送”，另外两个主示例不变。r2 删除了单独的旧 JSON 请求示例；输入说明仍交代文件识别、参数组合和 JSON 示例展示规则，避免误解析或参数冲突。
 
 `--body` 的字面 `\n` 规则、寻址帮助、附件帮助和回执判断不变。新文案不禁止工具调用自身的 JSON 编码，也不要求特定临时路径。
 
@@ -378,7 +375,7 @@ A successful operation proves its own commit, not downstream execution, validati
 
 ### cli-operations Send reference 全文
 
-来源：[references/send.md](../../../skills/cli-operations/references/send.md)。只改入口句；不在 reference 再复制一份易漂移的识别算法或长示例。
+来源：[references/send.md](../../../skills/cli-operations/references/send.md)。r2 保持全文不变，沿用已有 help 指引；不增加格式清单或兼容教程。
 
 **变更前**
 
@@ -415,7 +412,7 @@ Use `--file <path>` to publish a file or directory with the message; repeat it t
 ````markdown
 # Send
 
-Read `rovai send --help` for body files, JSON compatibility and parameter combinations. A Send can independently:
+Read `rovai send --help` for current inputs. A Send can independently:
 
 - publish a message visible to everyone in the current Thread;
 - route concrete work to Agents through frozen Deliveries;
@@ -440,7 +437,7 @@ A successful Send proves publication and its frozen effects, not that a recipien
 Use `--file <path>` to publish a file or directory with the message; repeat it to preserve attachment order. No separate upload is required. At least one file can form a message without a body.
 ````
 
-**变更介绍：** 只扩展开头的帮助指引，明确 `send --help` 包含正文文件、JSON 兼容和参数组合规则；具体教程仍集中在 help，其余内容不变。
+**变更介绍：** r2 取消此处的拟议改动，变更前后完全相同。原文已经引导读取 `send --help`，无需再列出正文文件、JSON 兼容等主题。
 
 ## 其他可能进入上下文的部分
 
@@ -562,7 +559,7 @@ interface:
 
 以下数值以本稿源码基线为准；当前 Transport v36 文档仍写 Agent Output 9，而源码已为 10。本方案采用源码现状 10，不把旧文档文字当成降级授权。实施时沿用最新已交付输出版本。
 
-| 版本轴 | 基线 | r1 拟实施 |
+| 版本轴 | 基线 | r2 拟实施 |
 | --- | --- | --- |
 | Built-in Contract / CLI / capability | 36 / 36 / `builtin_cli.transport.v36` | 37 / 37 / `builtin_cli.transport.v37`，标识输入语义扩展 |
 | Session Charter revision | 20 | 21，仅新 Bootstrap 删除通用互斥句 |
@@ -586,16 +583,16 @@ interface:
 
 1. 在 CLI 内把 Send 文件输入单独分流：先解析参数并处理重复文件与双正文冲突，再读取和分类文件；完整请求与直接业务参数冲突，正文模式合成请求。
 2. 合成后的请求复用 `parse_and_validate_operation_input` 及现有 Core 发送链。其他 operation 保持当前解析路径；显式来源不读 stdin。
-3. 保持 `camp_message_send_teaching.rs` 为 Send 文案真源；让 Send 专用输入说明、正文帮助、示例与兼容例子由同一模块提供，`rovai.rs` 负责渲染。Schema descriptions 与 summary 不改。
-4. 只删除本文列出的 Bootstrap 互斥句、替换 Skill 主文一句和 Send reference 一句；更新对应 snapshot/owner tests。根 help、其他 Skill 和各 Runtime 提示不作机械批量替换。
+3. 保持 `camp_message_send_teaching.rs` 为 Send 文案真源；让 Send 专用输入说明、正文帮助与示例由同一模块提供，`rovai.rs` 负责渲染。不增加旧 JSON 写法示例；Schema descriptions 与 summary 不改。
+4. 只删除本文列出的 Bootstrap 互斥句、替换 Skill 主文一句；更新对应 snapshot/owner tests。Send reference 保持原样，根 help、其他 Skill 和各 Runtime 提示不作机械批量替换。
 5. 确认后同步版本概览、实施计划、当前 Transport/Send 合同与 Built-in 输入不变量，记录请求优先的歧义和有效旧调用兼容边界。按通用文档治理判断版本决定准入，不新增数字 ADR 或功能专属 checker 例外。
-6. 完成确定性验证和真实上下文 Gate，再交付新能力与新教学。全部变更限于已确认 r1；语义调整应更新 revision。
+6. 完成确定性验证和真实上下文 Gate，再交付新能力与新教学。实施时以最终确认的 revision 为准；语义调整应更新 revision。
 
 本轮只新增方案与版本入口链接。下一阶段才更新当前规范和产品代码，避免将提案当成已生效规则。
 
 ## 二次确认
 
-`revision: 1`、`confirmation_status: pending`。User 已要求重新出方案与完整对照；尚未阅读本稿后的明确实施确认不能提前填入。
+`revision: 2`、`confirmation_status: pending`。User 已要求重新出方案与完整对照，并对重复的 JSON 兼容教学提出疑问；本次只精简提案，未取得实施确认。
 
 [核心模型上下文变更治理](../../development/model-context-change-governance.md#二次确认门槛)要求：
 
@@ -608,7 +605,7 @@ interface:
 ### 本稿的文档与文本验证
 
 - 逐字核对“变更前”的公共 Charter、实际 Send help、完整 Skill 与 reference；记录基线 SHA。
-- 验证 Bootstrap 只删除一句，Skill 主文与 Send reference 各只替换一句；help 只改已列出的三处并追加 JSON 兼容示例。
+- 验证 Bootstrap 只删除一句，Skill 主文只替换一句，Send reference 全文不变；help 只改输入说明、正文帮助和首个示例，不保留旧 JSON 请求写法示例。
 - 检查新增教学没有 `ROVAI_RUN_TMP`、目录限制、其他命令文件输入扩展或强制 Session 更新。
 - 核对根 help、description、Schema、summary、条件追加段和其他 Skill 保持原样。
 - 运行 `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=70c9214bf47a677d018a7f2448583d6ec3422d22 pnpm docs:check:ci`，并独立运行 diff-aware 文档治理检查。
@@ -651,12 +648,12 @@ interface:
 | 表面 | 前字节 | 后字节 | 字节变化 | 前分词 | 后分词 |
 | --- | --- | --- | --- | --- | --- |
 | 公共 Charter 共用文本（含 section 标记） | 2581 | 2439 | -142 | 374 | 353 |
-| Send help 整页（按需） | 3202 | 3513 | +311 | 409 | 456 |
+| Send help 整页（按需） | 3202 | 3361 | +159 | 409 | 446 |
 | cli-operations 完整主文（按需） | 2653 | 2656 | +3 | 371 | 371 |
-| Send reference 全文（按需） | 1731 | 1774 | +43 | 265 | 270 |
+| Send reference 全文（按需） | 1731 | 1731 | +0 | 265 | 265 |
 | 根 help（按需） | 464 | 464 | +0 | 48 | 48 |
 
-常驻 Bootstrap 删除一个过时句子，不增加新指令；新增识别细节留在按需帮助。Skill 不复制帮助正文。以上四个拟修改表面的 `ROVAI_RUN_TMP` 出现次数前后均为 0，既有头像 Skill 的目录建议不变。
+常驻 Bootstrap 删除一个过时句子，不增加新指令；新增识别细节留在按需帮助。Skill 不复制帮助正文，Send reference 不变。以上四组前后对照的 `ROVAI_RUN_TMP` 出现次数均为 0，既有头像 Skill 的目录建议不变。
 
 ## 来源快照
 
@@ -674,7 +671,7 @@ interface:
 
 ## 文档交付验证记录
 
-- 15 个完整 fenced block 核对通过：前文与源码/当前只读帮助一致；Bootstrap 只删除一句，Skill 主文和 Send reference 各只替换一句；拟修改表面没有新增 TMP 目录教学。
+- 15 个完整 fenced block 核对通过：前文与源码/当前只读帮助一致；Bootstrap 只删除一句，Skill 主文只替换一句，Send reference 保持原样；help 未保留旧 JSON 请求写法示例，拟修改表面没有新增 TMP 目录教学。
 - `pnpm docs:test`：10/10 通过。
 - `DOCS_BASE_REF=70c9214bf47a677d018a7f2448583d6ec3422d22 node scripts/check-doc-decisions.mjs --require-base`：在仅含 Git 跟踪内容及本次两份文档的临时副本中通过，包含链接与通用治理校验。主工作区同项检查受已忽略的本机 `docs/prototypes` 旧原型失效链接影响；未修改这些原型或 checker。临时副本已清理。
 - `pnpm docs:check` 与 `DOCS_BASE_REF=70c9214bf47a677d018a7f2448583d6ec3422d22 pnpm docs:check:ci`：确认门禁未通过，四项均属于本稿尚无真实实施确认：confirmation_status、confirmed_revision、confirmed_by、confirmed_at。保持 pending，不伪造确认。
