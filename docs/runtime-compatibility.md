@@ -1,10 +1,25 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-10 关闭原生自动记忆
+
+macOS arm64 的 Claude Code **2.1.280** 与 Codex CLI **0.159.2**，使用所选原生 executable、合成配置及
+loopback Provider 完成开启／关闭对照：开启组向实际模型请求注入唯一原生记忆标记，关闭组不注入，
+项目规则仍在。用户与项目配置保持原字节；Claude 的项目 env 和 Codex 的受信任项目层均证实已加载。
+Codex `config/read` 三项 false 与执行请求和新 Thread 的 `memory_mode=disabled` 相互印证。
+有意提供 Thread 级 true 覆盖时，读回仍为 false，但该 Thread 恢复注入，证明不能把 `config/read` 当作通用执行快照。
+Rovai 的 Thread 请求没有这些反向覆盖。
+
+隔离 Core 下首次、多轮与重启恢复保持原 Native ID / Binding / generation，内置 Memory 写入、读取和搜索仍有效。
+Claude 新会话的保存指引随关闭消失；旧会话恢复仍可能保留缓存中的旧指引和内容，不追溯清理。
+本轮没有真实模型自主生成记忆的正向触发，不以未生成文件宣称该行为验收通过。
+完整方法、MCP/Windows 结果与未验证项见[验收记录](research/native-auto-memory/verification-2026-10-10.md)。
+固定产品策略见[当前架构边界](architecture/runtime-catalog-boundaries.md#受管执行的原生自动记忆)，不增加版本或配置读取门禁。
 
 ## 2026-10-09 Cline / Command Code 暂缓公开（User 105）
 

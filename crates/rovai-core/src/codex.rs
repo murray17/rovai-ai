@@ -374,7 +374,17 @@ impl CodexHost {
             config.configure_command(&mut command)?;
         }
         command
-            .args(["app-server", "--listen", "stdio://"])
+            .args([
+                "-c",
+                "features.memories=false",
+                "-c",
+                "memories.generate_memories=false",
+                "-c",
+                "memories.use_memories=false",
+                "app-server",
+                "--listen",
+                "stdio://",
+            ])
             .current_dir(cwd);
         let spec = ManagedProcessLaunchSpec::capture(
             &command,
@@ -1610,6 +1620,9 @@ pub(crate) fn runtime_compatibility_digest(
         .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
     canonical_json_digest(&json!({
         "schemaVersion": 3,
+        // Retire Hosts launched without this policy, without rotating the
+        // independent Native Session binding or discarding its history.
+        "nativeAutoMemoryPolicy": "disabled-v1",
         "adapterKind": frozen_runtime.adapter_kind,
         // The full Run digest includes model, reasoning and Fast audit data.
         // Codex receives those on thread/turn requests, not Host startup.
@@ -2345,6 +2358,20 @@ mod tests {
         let frozen = process_compatibility_runtime(&executable);
         let first_digest =
             runtime_compatibility_digest(&frozen, &root, &attachment_authorization).unwrap();
+        let legacy_digest = canonical_json_digest(&json!({
+            "schemaVersion": 3,
+            "adapterKind": frozen.adapter_kind,
+            "hostConfigDigest": frozen.host_config_digest,
+            "executionRoot": root.canonicalize().unwrap(),
+            "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
+            "builtinToolCatalogDigest": builtin_tool_catalog_digest().unwrap(),
+            "attachmentOutputRoot": attachment_authorization.output_root,
+        }))
+        .unwrap();
+        assert_ne!(
+            first_digest, legacy_digest,
+            "pre-policy Hosts cannot be reused"
+        );
         let mut next = frozen.clone();
         next.model.model_id = "gpt-next".to_string();
         next.model.options = json!({"reasoning_effort": "high", "serviceTier": "default"});
@@ -2366,6 +2393,22 @@ mod tests {
         };
         let builtin_tools =
             BuiltinToolProcessConfig::create(&executable, &endpoint, &root).unwrap();
+        let legacy = adapter
+            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
+                agent_run_id: "legacy-run",
+                execution_epoch: 1,
+                camp_id: "camp-process-compatibility",
+                agent_id: "agent-1",
+                cwd: &root,
+                frozen_runtime: &frozen,
+                runtime_compatibility_digest: &legacy_digest,
+                builtin_tools: &builtin_tools,
+            })
+            .await
+            .unwrap();
+        adapter
+            .complete_agent_run("legacy-run", 1, FleetReleaseDisposition::Reusable)
+            .await;
         let first = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-1",
@@ -2380,6 +2423,11 @@ mod tests {
             .await
             .unwrap();
         let first_host_id = first.host_instance_id().to_string();
+        assert_ne!(first_host_id, legacy.host_instance_id());
+        assert!(
+            !legacy.host.is_alive(),
+            "legacy Host must be reaped before replacement"
+        );
         adapter
             .complete_agent_run("run-1", 1, FleetReleaseDisposition::Reusable)
             .await;
@@ -2450,6 +2498,7 @@ mod tests {
             make_test_executable(&executable, &r#"#!/usr/bin/python3
 import json, os, sys
 root = os.path.dirname(__file__)
+assert sys.argv[1:] == ['-c', 'features.memories=false', '-c', 'memories.generate_memories=false', '-c', 'memories.use_memories=false', 'app-server', '--listen', 'stdio://']
 credential = open(os.path.join(root, 'credentials')).read()
 turn = 0
 for line in sys.stdin:
@@ -2724,6 +2773,32 @@ for line in sys.stdin:
         assert_eq!(resume_method, "thread/resume");
         assert_eq!(resume["threadId"], "thread-existing");
         assert_eq!(resume["developerInstructions"], "bootstrap-latest");
+        for existing in [None, Some("thread-existing")] {
+            for with_mcp in [false, true] {
+                let config = with_mcp.then(|| {
+                    codex_mcp_session_config(&BTreeMap::from([(
+                        "rovai_docs".into(),
+                        McpServerDefinition::StreamableHttp {
+                            url: "https://example.test/mcp".into(),
+                            headers: BTreeMap::new(),
+                        },
+                    )]))
+                    .unwrap()
+                });
+                let mut options = bootstrap_thread_options("bootstrap");
+                options.config = config.clone();
+                let (_, request) = thread_start_or_resume_request(
+                    Path::new("/tmp/rovai-codex-test"),
+                    existing,
+                    options,
+                )
+                .unwrap();
+                assert_eq!(request.get("config"), config.as_ref());
+                assert!(request.pointer("/config/features").is_none());
+                assert!(request.pointer("/config/memories").is_none());
+                assert!(request.get("ephemeral").is_none());
+            }
+        }
     }
 
     #[test]
@@ -2848,6 +2923,7 @@ for line in sys.stdin:
             "unknown_option",
             "auth_required",
             "init_failure",
+            "memory_rejected",
             "fast_rejected",
         ] {
             let root = std::env::temp_dir()
@@ -2859,6 +2935,11 @@ import json, os, sys, time
 root = os.path.dirname(__file__)
 scenario = '__SCENARIO__'
 with open(os.path.join(root, 'starts'), 'a') as log: log.write('start\n')
+open(os.path.join(root, 'requests'), 'a').close()
+assert sys.argv[1:] == ['-c', 'features.memories=false', '-c', 'memories.generate_memories=false', '-c', 'memories.use_memories=false', 'app-server', '--listen', 'stdio://']
+if scenario == 'memory_rejected':
+    print('memory configuration rejected', file=sys.stderr, flush=True)
+    sys.exit(2)
 if '--version' in sys.argv or 'generate-json-schema' in sys.argv:
     time.sleep(30)
     sys.exit(1)
@@ -2911,7 +2992,7 @@ for line in sys.stdin:
                         builtin_tools: &tools,
                     })
                     .await;
-                if scenario == "init_failure" {
+                if matches!(scenario, "init_failure" | "memory_rejected") {
                     assert!(result.is_err());
                 } else {
                     let runtime = result.unwrap();
