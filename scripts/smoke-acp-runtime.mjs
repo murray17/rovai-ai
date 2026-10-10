@@ -820,18 +820,29 @@ try {
       if (cancelRunningTool) {
         const nativeChildCase = cancelNativeChild && specification.adapterKind === 'opencode-cli'
         const cancelPath = join(projectRoot, `ACP_CANCELLED_${adapterFileStem}.txt`)
-        const childStartedPath = nativeChildCase ? join(projectRoot, `ACP_CHILD_STARTED_${adapterFileStem}.txt`) : null
+        const toolStartedPath = specification.adapterKind === 'opencode-cli'
+          ? join(projectRoot, `ACP_TOOL_STARTED_${adapterFileStem}.txt`)
+          : null
         const delayedCommand = process.platform === 'win32'
           ? `Start-Sleep -Seconds 30; Set-Content -LiteralPath '${cancelPath.replaceAll("'", "''")}' -Value 'SHOULD_NOT_EXIST'`
           : `sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'`
-        const cancelCommand = childStartedPath
-          ? process.platform === 'win32'
-            ? `Set-Content -LiteralPath '${childStartedPath.replaceAll("'", "''")}' -Value 'STARTED'; ${delayedCommand}`
-            : `printf 'STARTED\\n' > '${childStartedPath}'; ${delayedCommand}`
-          : delayedCommand
+        let cancelCommand = delayedCommand
+        if (toolStartedPath) {
+          // Execute an existing fixture, like a build/test command. Some native
+          // models correctly refuse direct Shell file creation in favour of
+          // their file-editing tool, before cancellation can be exercised.
+          const fixturePath = join(projectRoot, 'acp-cancellation-fixture.cjs')
+          await writeFile(fixturePath, `const fs = require('node:fs');\nfs.writeFileSync(${JSON.stringify(toolStartedPath)}, 'STARTED');\nsetTimeout(() => fs.writeFileSync(${JSON.stringify(cancelPath)}, 'SHOULD_NOT_EXIST'), 30000);\n`)
+          const quote = process.platform === 'win32'
+            ? value => `'${value.replaceAll("'", "''")}'`
+            : value => `'${value.replaceAll("'", "'\\''")}'`
+          cancelCommand = `${process.platform === 'win32' ? '& ' : ''}${quote(process.execPath)} ${quote(fixturePath)}`
+        }
         const cancelPrompt = nativeChildCase
           ? `Use one native OpenCode subagent to execute this command with its shell tool: ${cancelCommand}. Do not run shell yourself. Wait for the child to finish before replying; do not start any other child.`
-          : `Use the Bash or terminal tool exactly once to run: ${cancelCommand}. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`
+          : toolStartedPath
+            ? `Use the Bash or terminal tool to execute this existing cancellation test fixture: ${cancelCommand}. Read-only inspection is allowed if required. Run it in the foreground and wait for it to finish; do not modify or simulate the fixture. After it completes, reply exactly CANCEL_TOOL_FINISHED.`
+            : `Use the Bash or terminal tool exactly once to run: ${cancelCommand}. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`
         const cancelRequest = await sendExistingCampMessage(
           request,
           camp.id,
@@ -845,7 +856,7 @@ try {
         const cancelRunId = cancelRequest.commandResult?.payload?.agentRunIds?.[0]
           ?? await waitForMessageRun(request, camp.id, cancelRequest.commandResult?.payload?.threadMessageId)
         if (!cancelRunId) throw new Error(`ACP cancel AgentRun was not accepted: ${JSON.stringify(cancelRequest)}`)
-        const cancelled = await cancelAgentRun(request, camp.id, cancelRunId, events, childStartedPath)
+        const cancelled = await cancelAgentRun(request, camp.id, cancelRunId, events, toolStartedPath)
         if (['zcode-app', 'opencode-cli'].includes(specification.adapterKind)) {
           if (cancelled.run.status !== 'cancelled') throw new Error(`${specification.adapterKind} cancel must reach cancelled`)
           await new Promise((done) => setTimeout(done, 35_000))
@@ -863,6 +874,7 @@ try {
         results.at(-1).cancellation = {
           status: cancelled.run.status,
           fileCreated: false,
+          ...(toolStartedPath ? { toolStartedBeforeCancel: true } : {}),
           ...(nativeChildCase ? { nativeChildRequested: true, childStartedBeforeCancel: true } : {}),
           approvalCount: cancelled.resolvedApprovals.size
         }
@@ -1233,7 +1245,7 @@ async function waitForFileOperationRun({ request, threadId, agentRunId, adapterK
   throw new Error(`${adapterKind} ${name} file-operation Run timed out: ${JSON.stringify(run)}`)
 }
 
-async function cancelAgentRun(request, threadId, agentRunId, events = [], childStartedPath = null) {
+async function cancelAgentRun(request, threadId, agentRunId, events = [], toolStartedPath = null) {
   const resolvedApprovals = new Set()
   const deadline = Date.now() + 180_000
   let cancellationRequested = false
@@ -1265,8 +1277,8 @@ async function cancelAgentRun(request, threadId, agentRunId, events = [], childS
       && event.params?.agentRunId === agentRunId
       && event.params?.payload?.status === 'in_progress'
       && String(event.params?.payload?.input ?? '').includes('sleep 30'))
-    const readyToCancel = childStartedPath
-      ? await readFile(childStartedPath, 'utf8').then(value => value.trim() === 'STARTED').catch(error => {
+    const readyToCancel = toolStartedPath
+      ? await readFile(toolStartedPath, 'utf8').then(value => value.trim() === 'STARTED').catch(error => {
           if (error.code === 'ENOENT') return false
           throw error
         })

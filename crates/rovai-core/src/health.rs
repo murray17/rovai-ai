@@ -4072,10 +4072,30 @@ while IFS= read -r ignored; do :; done
                 .map(|a| a.to_string_lossy().to_string())
                 .collect::<Vec<_>>();
             if v1 {
-                assert_eq!(args, ["acp", "--pure", "--log-level", "ERROR"]);
+                assert_eq!(args, ["acp", "--log-level", "ERROR"]);
             } else {
                 assert_eq!(args, ["acp", "--log-level", "error"]);
             }
+        }
+        for pure in ["0", "1"] {
+            let mut command = Command::new("/selected/opencode");
+            command.env("OPENCODE_PURE", pure);
+            configure_acp_command(
+                &mut command,
+                AdapterKind::OpencodeCli,
+                false,
+                Some("1.18.32"),
+            )
+            .unwrap();
+            assert!(!command.as_std().get_args().any(|arg| arg == "--pure"));
+            assert_eq!(
+                command
+                    .as_std()
+                    .get_envs()
+                    .find(|(key, _)| *key == "OPENCODE_PURE")
+                    .and_then(|(_, value)| value),
+                Some(std::ffi::OsStr::new(pure))
+            );
         }
         for version in [
             None,

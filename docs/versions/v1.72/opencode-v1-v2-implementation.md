@@ -22,7 +22,7 @@ last_updated: 2026-10-10
 | 旧 Session 与原生委派 | 旧 Binding 缺 compatibility key 时走现有 controlled restore，保留精确 Session ID。V2 订阅原生 child-session-updates；根轮结束时仍有活动子会话的 Host 不满足既有 quiescence 条件，由 Fleet 回收，避免旧 Run 继续执行。子会话文本、用量、压缩不混入根会话证据。 |
 | 权限 | V1 保留 permission 与 build/plan 覆盖。V2 使用末项优先的 permissions：一般 allow/ask/deny 在前，shell/skill allow 在后，覆盖 build/plan。自定义／子 agent 保留原生规则，V2 原生残余请求进入既有审批，根 allow 不替其自动批准。ask/deny 不是全局询问／拒绝或只读沙箱。 |
 | 原生配置 | 保留 OPENCODE_CONFIG_CONTENT 的模型、provider、MCP、自定义 agent 等内容，只覆盖已有权限意图及更新字段；非法配置明确报错。 |
-| 压缩 | V1 生成 session.compacted 插件，但当前 `--pure` 会阻止加载；真实自动压缩的补发缺口已复现，见下方复核。V2 在插件生成／注入之前分流，接入原生 ACP session_info_update 的 opencode/compaction 完成标记。根 Session 的 completed＋messageId 驱动既有 Observer／Requirement；started、failed、child、历史 replay 不补发。原生 occurrence 去重、quarantine 与下一输入的 Bootstrap 补发继续复用。 |
+| 压缩 | V1 移除 Rovai 强加的 `--pure`，使现有 session.compacted 插件可以加载；保留用户显式 OPENCODE_PURE 设置。V2 在插件生成／注入之前分流，接入原生 ACP session_info_update 的 opencode/compaction 完成标记。根 Session 的 completed＋messageId 驱动既有 Observer／Requirement；started、failed、child、历史 replay 不补发。原生 occurrence 去重、quarantine 与下一输入的 Bootstrap 补发继续复用。 |
 | 可选交互 | 不声明未实现的 elicitation.form 或带 summary/patch 的 session.compaction capability；权限交互继续原生 ACP options。V2 压缩完成标记承接协作连续性，不关闭自动压缩。 |
 | 用量 | V1 保留只读原生根 Session reader；V2 停用该 reader，接 prompt response 当前根会话本轮已报告用量，按 V2 缓存／reasoning 语义归一。复用 scope、checkpoint 和部分统计；未覆盖原生子会话／委派，不标完整 Run 总量。缺响应／字段保持未知，Session 累计成本不算本轮成本。 |
 
@@ -30,13 +30,16 @@ macOS 的 V2 `2.0.26` 包尝试从构建机 `/home/runner/...` 路径加载可�
 本机 autofs 因此阻塞。隔离 syscall 追踪定位后，包已有的
 `MSGPACKR_NATIVE_ACCELERATION_DISABLED=true` 可恢复正常 ACP 启动。
 macOS V2 启动及代际尚未知的模型目录读取在用户未设置该变量时补充此环境值，
-不修改原生全局配置。模型目录复用两代共有的 `acp` 入口，不增加版本子进程；普通 V1 执行仍保留 `--pure`。
+不修改原生全局配置。模型目录复用两代共有的 `acp` 入口，不增加版本子进程；V1 普通执行使用
+`acp --log-level ERROR`，不强制关闭原生外部插件。
 
 ## 发布包与验证
 
+本节保存初始适配与合流时的样本；后续修复后的本机开发构建另见下方验收记录。
+
 | 样本 | 平台 | 已有证据 |
 | --- | --- | --- |
-| V1 `1.18.32` | macOS arm64 | 原 `acp --pure --log-level ERROR` 保持。协作、审批、取消、冷恢复、MCP 三服务器与配置生命周期实测通过；这些样本没有覆盖压缩后的 Bootstrap 补发，不能据此宣称该链路正常。 |
+| V1 `1.18.32` | macOS arm64 | 原 `acp --pure --log-level ERROR` 路径的修复前样本。协作、审批、取消、冷恢复、MCP 三服务器与配置生命周期实测通过；这些样本没有覆盖压缩后的 Bootstrap 补发，不能据此宣称该链路正常。 |
 | V2 `2.0.26` | macOS arm64 | 官方 @opencode/cli-darwin-arm64 包，npm sha512 验证通过；二进制 SHA-256 为 `1b6418a3bd4211344d8a2b75d7d4367b24283ae548bd6b896cf717f6f8858f26`。拒绝 --pure，使用 acp --log-level error。隔离 initialize/session/new 确认 env 配置高于项目文件；下述基础链路、压缩和 MCP 实测通过。 |
 
 真实协作复用 `scripts/probe-runtime-execution-metrics.mjs`，独立 Core data-dir、Skill Library、MCP、
@@ -119,13 +122,65 @@ denial 断言因此正确失败。这里的失败是实测插件覆盖配置的�
 按原生规则合并全局、项目和 inline 插件；追加 Rovai 插件并不替换其他来源。
 V1 ACP event 路由也没有转发 `session.compacted`，不能从普通回复成功推断另有可靠完成信号。
 
-结论：这是既有 V1 启动路径的正确性缺口，普通协作和 V2 压缩成功不覆盖它。去掉 Core 强制的
-`--pure` 已证明能恢复现有监听／补发链路，但会同时恢复用户外部插件的原生执行，甚至让插件覆盖
-既有审批意图。不能把单独删除参数作为已完成的兼容修复提交，也不能把“允许外部插件”的行为变更
-混入无影响修复。后续修复需要选定一条既能取得真实完成信号、又不默默扩大插件／权限行为的监听路径；
-本轮没有把未经实现及验证的替代路径写成完成，不改写全部用户配置、不关闭原生自动压缩，也不建立
-新的压缩管理系统。在生产修复前，V1 压缩后协作连续性保持未修复状态，不宣称完整支持；
-这不是补丁版本执行白名单。
+上述调查确实复现了既有 V1 启动路径的缺口；但将“原生插件可改权限”作为禁止删除参数的理由，
+超出了原生信任边界。按 User 随后的澄清，插件是 OpenCode 内部执行的受信任代码，工具 ask/deny
+不是针对插件的沙箱；故意改写配置的样本不等于 Rovai 丢失配置或原生审批引擎失效。
+
+当前最小修复移除 Core 强加的 `--pure`，复用已测通的 plugin／Observer／Bootstrap 路径，不建立另一套
+插件隔离或权限引擎。全局、项目及 inline 外部插件恢复按原生规则运行，这是需要明确的行为变化。
+Rovai 继续传入已保存的权限值，并保留用户显式 `OPENCODE_PURE`；如果用户主动禁用插件，V1 的插件
+监听也受该原生选择影响，不能宣称仍能通过它观察压缩。之前的 A/B 数据保留为修复前证据，
+修复后开发构建及本机 V1 → Brew V2 的验收见下节，不用旧样本代替新构建的验证。
+
+## 本机开发构建 V1 → Brew V2 验收
+
+2026-10-10 按 User 要求先测本机 V1，再移除其独立可执行入口并执行 `brew install opencode`。
+Brew 的 `2.0.25` 原先已经安装，只是被 PATH 前面的 V1 `1.18.32` 遮蔽；安装命令确认其已是当前版本。
+切换后默认 `opencode` 命中 `/opt/homebrew/bin/opencode`，实际文件位于 `Cellar/opencode/2.0.25/bin/opencode`，
+SHA-256 为 `e0c5d500b2b3d97d30f57f52a3a9a058098eb76116d1c9fd095951572318f808`。
+只删除核对版本与指纹的 V1 可执行文件和空 bin 目录，保留 Shell 配置、原生配置及 Session 数据；
+没有执行会连带删除共用 cache/state 的原生卸载流程。原 provider 配置前后 SHA-256 相同。
+
+本轮 Core `0.4.7` 的 SHA-256 为
+`a3de76de4d90718ccc34fd6e23dca947a9dbdc04edc50c6c2b307446963765d9`。
+两代使用同一开发构建与 `sub2api/gpt-6.1-sol`，分别隔离 Core data-dir、Skill Library、MCP 和原生存储。
+真实 Desktop 使用 `pnpm dev`，不覆盖日常 App；默认程序发现、Renderer/Main/Core 的真实调用与
+协议脚本验收分别记录，不能用无模型 UI fixture 代替真实 Runtime。
+
+去掉强制 `--pure` 后，全新 V1 环境稳定复现另一个冷启动问题：主动检查／模型目录进程启动后台
+插件依赖安装，短进程退出后留下原生安装锁；下一 Host 必须等其 60 秒 heartbeat 过期，旧的 45 秒
+ACP initialize 期限会先到。失败样本没有发送正文，串行仍可复现，不能归因于并发负载。
+上游 [EffectFlock](https://github.com/anomalyco/opencode/blob/545f51d26cc39a907d2867492d498d9607ea5fa4/packages/core/src/util/effect-flock.ts)
+及 [Npm 安装](https://github.com/anomalyco/opencode/blob/545f51d26cc39a907d2867492d498d9607ea5fa4/packages/core/src/npm.ts)
+与隔离目录中的锁 owner、heartbeat 相互印证。
+当前仅给 V1 initialize 90 秒有界窗口；其他 RPC 与 V2 保持原期限，不删锁、不新增缓存、不重发任务。
+修复后全新 smoke 在 Run 启动约 72.6 秒后准备首份输入，随后实际回复、审批、拒绝及取消全部通过。
+
+取消用例复用原 smoke：预置一个真实 Node fixture，启动后写 STARTED，再等待 30 秒准备写结果。
+确认 STARTED 后才取消，35 秒后检查结果文件不存在；这避免模型在启动工具前拒绝 Shell 直接创建
+文件而导致“取消尚未覆盖”，没有把模型拒绝或虚构的工具事件当成取消成功。
+
+| 本轮检查 | V1 `1.18.32` | Brew V2 `2.0.25` |
+| --- | --- | --- |
+| 开发版默认发现、真实回复、版本页面 | 通过；命中原 V1 路径，真实回复及界面截图核对 | 通过；未指定路径时命中 Brew，真实回复及界面截图核对 |
+| Bootstrap、实际读取 Skill、bundled CLI、公开/final 去重 | 两轮通过，每轮 1 条公开消息 | 两轮通过，每轮 1 条公开消息 |
+| 自动压缩 → 冷恢复 → 下一轮补发 | 原生 auto/summary 1 次，Core observation 1 次，revision 1/1 | 原生 auto completed 1 次，Core observation 1 次，revision 1/1；未生成旧插件 |
+| 热续接、冷恢复、用量去重 | 精确 Native Session/Binding 保持，旧用量快照一致 | 精确 Native Session/Binding 保持，旧用量快照一致；根轮统计为 partial，cache write 为 null |
+| 写入审批、拒绝、运行中取消 | 实际审批和拒绝各 1 次；取消后 35 秒无延迟文件 | 实际审批和拒绝各 1 次；取消后 35 秒无延迟文件 |
+| MCP 更换、相邻队员、撤销、重新分配、删除 | 6 Run、8 次服务端真实调用，旧 Host 隔离且 Session 保持 | 6 Run、8 次服务端真实调用，旧 Host 隔离且 Session 保持 |
+| 已结束 Run 的旧 CLI context | 活跃 exit 0、过期 exit 2 | 活跃 exit 0、过期 exit 2 |
+| 原生子会话取消 | 本轮未新增该样本 | 独立 general 子会话的 Shell 已启动；取消后 root subagent 与 child shell 均终止，35 秒无延迟文件 |
+
+两次开发 App 均正常退出；验收结束没有本轮 Core/Runtime 进程残留，私有 provider 副本已清理，
+日常 App 未退出或替换。CLI 取消租约语义另由现有 Core owner 覆盖，不把结束后的实测扩写成全部授权组合。
+脱敏 JSON、失败样本和四张界面截图随任务交付；SQLite、原生完整正文和认证配置不进入附件或仓库。
+
+本轮门禁：Debug Core 与 Desktop build、typecheck、Rust PR 层、OpenCode 定向 6、ACP 70 passed/2 ignored、
+health 启动参数 owner 1、Runtime picker 与 Approval dock 独立 Electron 用例均通过。
+`pnpm test` 初次有 3 个时间相关失败，未改测试超时；原命令复跑为 239 文件/2616 Vitest 用例全部通过，
+后续 Node 339 passed/2 skipped，文档和 Skill 门禁通过。Desktop 一次性驱动修正了 Core-ready 等待、
+当前导航 selector 和 Renderer/Core-only 方法边界；已接受的真实请求只验证读回及实际界面，没有重发。
+这些是本机 macOS arm64、指定发行包与当前构建的证据，不替代其他发布平台或任意第三方插件的验收。
 
 ## 回归 owner
 

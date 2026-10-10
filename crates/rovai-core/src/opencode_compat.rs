@@ -43,7 +43,10 @@ impl Generation {
     pub(crate) fn configure_command(self, command: &mut Command) {
         match self {
             Self::V1 => {
-                command.args(["acp", "--pure", "--log-level", "ERROR"]);
+                // The native compaction observer is an external plugin. Forcing
+                // --pure prevents it from loading along with user plugins.
+                // Leave an explicit OPENCODE_PURE choice in the environment intact.
+                command.args(["acp", "--log-level", "ERROR"]);
             }
             Self::V2 => {
                 command.args(["acp", "--log-level", "error"]);

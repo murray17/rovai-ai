@@ -1699,7 +1699,21 @@ impl AcpHost {
             initialize_params["clientCapabilities"]["_meta"] =
                 json!({"opencode/child-session-updates": true});
         }
-        let initialized = host.rpc("initialize", initialize_params).await;
+        // V1 installs plugin dependencies in the background during catalog
+        // discovery. If that short-lived process exits first, its native lock
+        // expires after 60 seconds. Allow that bounded cold-start recovery;
+        // never delete native locks or resend an accepted prompt to recover.
+        let initialize_timeout = if host.adapter_kind == AdapterKind::OpencodeCli
+            && crate::opencode_compat::Generation::from_version(host.reported_version.as_deref())
+                == Some(crate::opencode_compat::Generation::V1)
+        {
+            Duration::from_secs(90)
+        } else {
+            Duration::from_secs(45)
+        };
+        let initialized = host
+            .rpc_with_timeout("initialize", initialize_params, initialize_timeout)
+            .await;
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
                 if host.adapter_kind == AdapterKind::OpencodeCli
