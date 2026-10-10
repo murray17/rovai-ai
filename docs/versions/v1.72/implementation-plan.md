@@ -22,7 +22,23 @@ last_updated: 2026-10-10
 这些 owner 需要隔离子进程证明环境继承，使用假凭据且不调用模型；修复前旧文件会触发拒绝或注入错误 Provider。
 `warm_compatibility_matches_process_inputs_across_acp_adapters` 保留 MCP、Host 配置与 Session mode 边界。
 
-验证结果待本轮命令完成后记录。
+验证：`pnpm test:rust:pr` 通过（463 passed、1 ignored）；`pnpm typecheck`、`pnpm test`
+（239 个 Vitest 文件、2616 tests）、`pnpm docs:check:ci`、`cargo fmt --all --check` 与脚本语法检查通过。
+Kimi、原生 Home Probe 与 Host compatibility 定向扩展 owner 通过；冷恢复 owner 移到
+`acp/tests/native_home.rs`，在测试子进程中隔离环境，不放宽生产源码检查。
+本机真实 Kimi 2.1.1 在隔离 Home 中读取官方 TOML 并完成新建、停止后精确恢复；配置保持不变，
+未发送 Prompt 或使用真实凭据，结果不外推为模型生成验收。
+
+扩展层的两个既有失败已在未修改的 `main`（`0baa26ebb018298156241d7cf0c86ad94fad4d77`）独立复现：
+
+- `authority_migration::tests::macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data`：
+  `authority_contract_changed`，与 Kimi 修改无关。
+- `channel::tests::pending_picker_upgrade_keeps_history_rolls_back_failure_and_reuses_the_old_card`：
+  fixture 缺少 `last_delivery_sequence` 列，与 Kimi 修改无关。
+
+`pnpm test:rust:extended` 执行中发现上述失败，完成主干对照后停止其余无关模块的扩展探索。
+本次受影响的 Kimi、原生 Home 与 Host compatibility owner 均完成验证；完整扩展套件未跑完，
+不报告全套通过。未修改或跳过两个失败 owner，也未放宽仓库门禁。
 
 ## 2026-10-10 受管原生自动记忆
 
