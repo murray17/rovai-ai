@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Runtime Catalog Boundaries
@@ -14,7 +14,7 @@ last_updated: 2026-10-09
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)。实测版本和能力只由
+[Runtime Launch and Verification v55](../contracts/runtime-launch-and-verification-v55.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -135,7 +135,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 显式程序路径失效时保持缺失，不能换用自动候选；用户恢复自动后再使用原有发现来源。
 草稿浅检不写安装，草稿深检复用 Check Manager 的并发、deadline 与清理 owner，结果只回到编辑器。
 环境只传入对应 Runtime 进程与原生配置读取，既不修改系统环境，也不投影到公共上下文。
-字段、CAS、迁移和错误边界由 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)拥有。
+字段、CAS、迁移和错误边界由 [Runtime Launch v55](../contracts/runtime-launch-and-verification-v55.md)拥有。
 
 主动正式检查在后端先读取最新基础环境、加载已保存启动设置，再将不可变环境快照交给 Check Manager。
 刷新后的请求不与旧搜索代数合并；结果写回与保存/刷新共用更新锁并重验代数和程序身份。
@@ -155,7 +155,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 
 执行仍保留只读连接摘要、凭据来源引用和输出脱敏，以保持旧快照与 Host/binding 兼容隔离；
 内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
-推理强度 fallback。边界由 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)拥有。
+推理强度 fallback。边界由 [Runtime Launch v55](../contracts/runtime-launch-and-verification-v55.md)拥有。
 
 <a id="浅检测与按需深检"></a>
 ## 安装发现与真实 Host 验证
@@ -264,7 +264,7 @@ ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)。
+[Runtime Launch and Verification v55](../contracts/runtime-launch-and-verification-v55.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -314,7 +314,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)，
+字段级行为见 [Runtime Launch and Verification v55](../contracts/runtime-launch-and-verification-v55.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## ACP Client Terminal 边界
@@ -395,7 +395,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)，证据状态见
+[Runtime Launch and Verification v55](../contracts/runtime-launch-and-verification-v55.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -433,9 +433,19 @@ adapter-scoped qualification evidence；macOS x64 仍保持
 
 ## Pi Coding Agent 当前边界
 
+Pi 目录只是一轮有效观察。Picker 经既有 Check Manager 合并同环境请求，始终使用临时目录探测；
+首次无健康快照或共享健康证据失效都不回退完整检查。沿用现有目录 JSON/时间字段，以 sentinel metadata
+记录独立安装、程序指纹和环境代次；只按该归属读取，不清除健康 stale_at、失败或推进完整检查成功时间。
+原生可归属的 Provider 注册错误使本轮刷新失败，保留旧目录；内部未暴露错误保持未知。fresh 不表示完整性。
+缺席条目不删除配置，Pi 刷新或切模不自动过滤已填强度。协议与枚举规则由
+[Runtime Launch v55](../contracts/runtime-launch-and-verification-v55.md)拥有。
+
 Pi 是独立 `pi-jsonl-rpc-v1` Product Runtime，不进入 ACP initialize/storage。正式 Host 继承用户 Pi 官方
 `PI_CODING_AGENT_DIR`、认证、provider 与 default model；Core 不读取 Claude Home，也不生成 Pi provider 配置。
-显式模型来自 `get_available_models`，经 `set_model` 后由 `get_state` 精确核对。Pi 0.84.4 是当前最低兼容版本；
+显式模型来自 `get_available_models`；先完成并核对目标 Session 激活，再用 `get_state` 比较 Provider 与原生模型 ID。
+只有真正切模才调用 `set_model`；显式 thinking_level 在必要选模后设置并严格回读，收窄档位视为配置失败。
+未指定时保留同模型 Session 激活后的原生值，真正切模接受原生默认行为。没有默认值回滚或额外重启。
+Pi 0.84.4 是当前最低兼容版本；
 这只定义 identity/version gate，不构成平台资格。
 
 正式 Pi Host 只能以 `pi --mode rpc --no-themes --approve --extension <rovai-pi-host-v7>` 保留 Pi 原生 Built-in tools、Extensions、
@@ -494,7 +504,7 @@ Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp F
 macOS x64 和 Windows x64 各自绑定 Pi 专属 immutable evidence revision，均为 `qualified / reasonCode=null`；普通
 discovery、检查、成员选择、Diagnostics 与 AgentRun 对三平台开放，UI 走正式 Runtime 展示且不再标记实验性。
 平台晋升不新增 Pi 已明确 unsupported/hidden 的能力。字段级行为见
-[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)，
+[Runtime Launch and Verification v55](../contracts/runtime-launch-and-verification-v55.md)，
 证据状态见[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -521,7 +531,7 @@ Runtime-managed AgentRun 通过标准 ACP `session/set_config_option` 投递冻�
 `CoreEnforcedV1 + read_only Workspace` 恢复路径仍强制 `plan`。descriptor 的 `recommendedValue=default` 只是
 保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v49](../contracts/runtime-launch-and-verification-v49.md)。
+[Runtime Launch and Verification v55](../contracts/runtime-launch-and-verification-v55.md)。
 复用 Kimi Host 时从当前 AgentRun 的冻结配置设置 Session 模式，不继承原 Host 创建时的模式；注入 Host 的
 Provider 环境按生效键值计算私有兼容摘要，注释或无关文件格式变化不触发替换，环境值变化则替换 Host。
 CodeBuddy 的显式模型通过 Host 启动参数 `--model` 选择，因此它参与进程兼容；Runtime-default

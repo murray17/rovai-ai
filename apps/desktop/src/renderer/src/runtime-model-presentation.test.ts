@@ -27,5 +27,8 @@ describe('message model identity', () => {
     expect(messageRuntimeModelPresentation({ ...record, reasoningEffort: null }, installation))
       .toEqual({ model: 'Old Model', effort: null })
     expect(messageRuntimeModelPresentation({ ...record, adapterKind: 'claude-code-cli' }, null)?.effort?.label).toBe('思考强度')
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind: 'pi', reasoningEffort: 'max' }, null)?.effort)
+      .toEqual({ label: '思考强度', value: 'max' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind: 'pi', reasoningEffort: null }, installation)?.effort).toBeNull()
   })
 })

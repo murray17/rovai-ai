@@ -311,6 +311,7 @@ pub(crate) struct PiHost {
     incoming: mpsc::UnboundedSender<PiIncoming>,
     alive: AtomicBool,
     poisoned: AtomicBool,
+    provider_registration_failed: AtomicBool,
     streaming: AtomicBool,
     sequence: AtomicU64,
     executable_path: PathBuf,
@@ -570,6 +571,7 @@ impl PiHost {
             incoming: launch.incoming.clone(),
             alive: AtomicBool::new(true),
             poisoned: AtomicBool::new(false),
+            provider_registration_failed: AtomicBool::new(false),
             streaming: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             executable_path: launch.executable.to_path_buf(),
@@ -766,6 +768,16 @@ impl PiHost {
     }
 
     async fn route_message(&self, message: Value) {
+        // Native RPC exposes extension registration failures separately from a
+        // successful get_available_models response. Only this typed event is
+        // catalog evidence; generic stderr and unrelated extension errors aren't.
+        if message.get("type").and_then(Value::as_str) == Some("extension_error")
+            && message.get("event").and_then(Value::as_str) == Some("register_provider")
+            && message.get("error").and_then(Value::as_str).is_some()
+        {
+            self.provider_registration_failed
+                .store(true, Ordering::Release);
+        }
         if message.get("type").and_then(Value::as_str) == Some("extension_ui_request")
             && message.get("method").and_then(Value::as_str) == Some("setStatus")
             && message.get("statusKey").and_then(Value::as_str)
@@ -994,6 +1006,49 @@ impl PiHost {
                 activation_failure(PiActivationFailureKind::ActivationFailed, error)
             })?;
         }
+        // A restored Session may have a different thinking level from the global
+        // default. Pi's set_model resets it even when selecting the same model.
+        // Read the activated Session, never the previous Host's cached identity.
+        let activated_state = self
+            .command("get_state", json!({}))
+            .await
+            .map_err(|error| {
+                activation_failure(PiActivationFailureKind::ActivationFailed, error)
+            })?;
+        let exact_resume = seed.expected_native_session_id.is_some();
+        let (activated_session_id, activated_session_file) = validate_host_session_state(
+            &activated_state,
+            seed.expected_native_session_id.as_deref(),
+            locator_root,
+            &self.cwd,
+        )
+        .map_err(|error| {
+            activation_failure(
+                if exact_resume {
+                    PiActivationFailureKind::ResumeContinuityLost
+                } else {
+                    PiActivationFailureKind::ActivationFailed
+                },
+                error,
+            )
+        })?;
+        let managed_session_state = self
+            .managed_session_state
+            .read()
+            .await
+            .clone()
+            .context("Pi managed Extension did not report Session state")
+            .map_err(|error| {
+                activation_failure(PiActivationFailureKind::ActivationFailed, error)
+            })?;
+        validate_managed_session_state(
+            &managed_session_state,
+            &document,
+            &activated_session_id,
+            &activated_session_file,
+            &self.cwd,
+        )
+        .map_err(|error| activation_failure(PiActivationFailureKind::ActivationFailed, error))?;
         let options = frozen_runtime.model.options.as_object().ok_or_else(|| {
             activation_failure(
                 PiActivationFailureKind::ConfigurationFailed,
@@ -1008,6 +1063,7 @@ impl PiHost {
                 ));
             }
         }
+        let mut available_thinking_levels = None;
         if frozen_runtime.model.model_id != PI_RUNTIME_DEFAULT_MODEL_ID {
             let available_models = self
                 .command("get_available_models", json!({}))
@@ -1019,29 +1075,41 @@ impl PiHost {
                 .map_err(|error| {
                     activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
                 })?;
-            let found = available_models
+            let selected_model = available_models
                 .pointer("/data/models")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .any(|model| {
+                .find(|model| {
                     model.get("provider").and_then(Value::as_str) == Some(provider.as_str())
                         && model.get("id").and_then(Value::as_str) == Some(model_id.as_str())
                 });
-            if !found {
+            let Some(selected_model) = selected_model else {
                 return Err(activation_failure(
                     PiActivationFailureKind::ConfigurationFailed,
-                    "Pi explicit provider/model is unavailable",
+                    format!("Pi explicit provider={provider} model={model_id} is unavailable"),
                 ));
+            };
+            available_thinking_levels =
+                crate::agent_runtime_adapter::pi_thinking_levels(selected_model);
+            if activated_state
+                .pointer("/data/model/provider")
+                .and_then(Value::as_str)
+                != Some(provider.as_str())
+                || activated_state
+                    .pointer("/data/model/id")
+                    .and_then(Value::as_str)
+                    != Some(model_id.as_str())
+            {
+                self.command(
+                    "set_model",
+                    json!({"provider": provider, "modelId": model_id}),
+                )
+                .await
+                .map_err(|error| {
+                    activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+                })?;
             }
-            self.command(
-                "set_model",
-                json!({"provider": provider, "modelId": model_id}),
-            )
-            .await
-            .map_err(|error| {
-                activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
-            })?;
         }
         if let Some(thinking_level) = frozen_runtime
             .model
@@ -1052,7 +1120,13 @@ impl PiHost {
             self.command("set_thinking_level", json!({"level": thinking_level}))
                 .await
                 .map_err(|error| {
-                    activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
+                    activation_failure(
+                        PiActivationFailureKind::ConfigurationFailed,
+                        format!(
+                            "Pi model {} rejected thinking_level={thinking_level}: {error:#}",
+                            frozen_runtime.model.model_id
+                        ),
+                    )
                 })?;
         }
         let state = self
@@ -1061,7 +1135,6 @@ impl PiHost {
             .map_err(|error| {
                 activation_failure(PiActivationFailureKind::ActivationFailed, error)
             })?;
-        let exact_resume = seed.expected_native_session_id.is_some();
         let (session_id, session_file) = validate_host_session_state(
             &state,
             seed.expected_native_session_id.as_deref(),
@@ -1078,18 +1151,30 @@ impl PiHost {
                 error,
             )
         })?;
+        if session_id != activated_session_id || session_file != activated_session_file {
+            return Err(activation_failure(
+                PiActivationFailureKind::ActivationFailed,
+                "Pi Session identity changed while applying model configuration",
+            ));
+        }
         let (provider, model_id, thinking_level, model_supports_images) =
             validate_host_model_state(&state, &frozen_runtime.model.model_id).map_err(|error| {
                 activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
             })?;
-        if options
+        if let Some(requested) = options
             .get("thinking_level")
             .and_then(Value::as_str)
-            .is_some_and(|requested| requested != thinking_level)
+            .filter(|requested| *requested != thinking_level)
         {
+            let available = available_thinking_levels
+                .as_ref()
+                .map(|levels| format!(", available={}", levels.join(",")))
+                .unwrap_or_default();
             return Err(activation_failure(
                 PiActivationFailureKind::ConfigurationFailed,
-                "Pi did not apply the selected thinking level",
+                format!(
+                    "Pi provider={provider} model={model_id} did not apply thinking_level: requested={requested}, observed={thinking_level}{available}"
+                ),
             ));
         }
         let managed_session_state = self
@@ -1949,6 +2034,9 @@ pub(crate) async fn model_catalog_probe(executable: &Path) -> Result<Value> {
     if !host.shutdown_and_reap_with_status().await {
         bail!("Pi catalog Host did not shutdown and reap within the grace period");
     }
+    if host.provider_registration_failed.load(Ordering::Acquire) {
+        bail!("Pi catalog observation included a native Provider registration failure");
+    }
     result
 }
 
@@ -1960,8 +2048,7 @@ async fn read_probe_model_catalog(host: &PiHost) -> Result<Value> {
         .context("Pi probe model catalog is unavailable")?;
     let models = catalog
         .as_array()
-        .filter(|models| !models.is_empty())
-        .context("Pi probe model catalog is empty or malformed")?;
+        .context("Pi probe model catalog is malformed")?;
     if models.iter().any(|model| {
         ["provider", "id"].iter().any(|key| {
             model
@@ -2756,15 +2843,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[tokio::test]
-    async fn machine_ready_probe_never_sends_a_prompt_or_waits_for_agent_events() {
+    fn write_pi_host_fixture(root: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
-
-        let root = std::env::temp_dir().join(format!(
-            "rovai-pi-machine-ready-fixture-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
         let executable = root.join("pi");
         std::fs::write(
             &executable,
@@ -2779,6 +2859,9 @@ printf '%s\n' "$PWD" > "$probe_root_log"
 session_dir="$PWD/sessions"
 /bin/mkdir -p "$session_dir"
 session_number=1
+provider=minimax
+model_id=MiniMax-M3
+thinking_level=high
 session_id="00000000-0000-4000-8000-000000000001"
 session_file=""
 while [ "$#" -gt 0 ]; do
@@ -2817,10 +2900,16 @@ while IFS= read -r request; do
   case "$request_type" in
     get_state)
       emit_managed_session_state
-      printf '{"type":"response","id":"%s","success":true,"command":"get_state","data":{"sessionId":"%s","sessionFile":"%s","model":{"provider":"minimax","id":"MiniMax-M3"},"thinkingLevel":"off"}}\n' "$request_id" "$session_id" "$session_file"
+      printf '{"type":"response","id":"%s","success":true,"command":"get_state","data":{"sessionId":"%s","sessionFile":"%s","model":{"provider":"%s","id":"%s"},"thinkingLevel":"%s"}}\n' "$request_id" "$session_id" "$session_file" "$provider" "$model_id" "$thinking_level"
       ;;
     get_available_models)
-      printf '{"type":"response","id":"%s","success":true,"command":"get_available_models","data":{"models":[{"provider":"minimax","id":"MiniMax-M3","name":"MiniMax M3"}]}}\n' "$request_id"
+      if [ -f "$fixture_dir/provider-error" ]; then
+        printf '%s\n' '{"type":"extension_error","extensionPath":"fixture.ts","event":"register_provider","error":"invalid provider configuration"}'
+      fi
+      if [ -f "$fixture_dir/stderr-only" ]; then
+        printf '%s\n' 'provider warning text without structured evidence' >&2
+      fi
+      printf '{"type":"response","id":"%s","success":true,"command":"get_available_models","data":{"models":[{"provider":"minimax","id":"MiniMax-M3","name":"MiniMax M3"},{"provider":"other","id":"MiniMax-M3"},{"provider":"minimax","id":"next"}]}}\n' "$request_id"
       ;;
     new_session)
       session_number=$((session_number + 1))
@@ -2831,10 +2920,24 @@ while IFS= read -r request; do
       printf '{"type":"response","id":"%s","success":true,"command":"new_session","data":{"cancelled":false}}\n' "$request_id"
       ;;
     switch_session)
+      provider=minimax
+      model_id=MiniMax-M3
+      thinking_level=high
       session_id="00000000-0000-4000-8000-000000000001"
       session_file="$initial_session_file"
       emit_managed_session_state
       printf '{"type":"response","id":"%s","success":true,"command":"switch_session","data":{"cancelled":false}}\n' "$request_id"
+      ;;
+    set_model)
+      provider=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"provider":"\([^"]*\)".*/\1/p')
+      model_id=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"modelId":"\([^"]*\)".*/\1/p')
+      thinking_level=medium
+      printf '{"type":"response","id":"%s","success":true,"command":"set_model","data":{}}\n' "$request_id"
+      ;;
+    set_thinking_level)
+      thinking_level=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"level":"\([^"]*\)".*/\1/p')
+      if [ "$thinking_level" = max ]; then thinking_level=high; fi
+      printf '{"type":"response","id":"%s","success":true,"command":"set_thinking_level","data":{"level":"%s"}}\n' "$request_id" "$thinking_level"
       ;;
     prompt)
       event='{"type":"agent_settled"}'
@@ -2851,6 +2954,19 @@ done
         )
         .unwrap();
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        executable
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn machine_ready_probe_never_sends_a_prompt_or_waits_for_agent_events() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-pi-machine-ready-fixture-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = write_pi_host_fixture(&root);
 
         let observation = machine_ready_probe(&executable)
             .await
@@ -2934,6 +3050,140 @@ done
             "catalog-only private root must also be cleaned"
         );
 
+        // Native RPC's register_provider event is observable even when the
+        // catalog response succeeds. No completeness field is added to the RPC.
+        std::fs::write(root.join("provider-error"), "").unwrap();
+        assert!(
+            model_catalog_probe(&executable)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("registration failure")
+        );
+        std::fs::remove_file(root.join("provider-error")).unwrap();
+        // Internal ModelRuntime.getError() has no RPC representation. A valid
+        // partial-looking list, with only arbitrary stderr, remains an observation.
+        std::fs::write(root.join("stderr-only"), "").unwrap();
+        assert_eq!(model_catalog_probe(&executable).await.unwrap(), catalog);
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    // Activation owns restored native state and side-effectful RPC order, which
+    // pure model validators and the no-Session catalog probe cannot demonstrate.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn activation_preserves_same_model_thinking_and_strictly_verifies_overrides() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-pi-activation-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = write_pi_host_fixture(&root);
+        let (host, _probe_root) = spawn_probe_host(&executable).await.unwrap();
+        let state = host.command("get_state", json!({})).await.unwrap();
+        let session_id = state["data"]["sessionId"].as_str().unwrap();
+        let session_file = PathBuf::from(state["data"]["sessionFile"].as_str().unwrap());
+        let locators = root.join("locators");
+        write_session_locator(&locators, session_id, &session_file, &host.cwd, false).unwrap();
+        let seed = PiBindingSeed {
+            agent_run_id: "run".into(),
+            execution_epoch: 1,
+            native_binding_id: "binding".into(),
+            native_binding_generation: 1,
+            expected_native_session_id: Some(session_id.into()),
+            bootstrap: "fixture".into(),
+            bootstrap_payload_digest: "fixture".into(),
+        };
+        for (restore, provider, model, requested, observed, switches) in [
+            (true, "minimax", "MiniMax-M3", None, "high", 0),
+            (true, "minimax", "MiniMax-M3", Some("low"), "low", 0),
+            (true, "minimax", "next", None, "medium", 1),
+            (true, "other", "MiniMax-M3", None, "medium", 1),
+            (true, "minimax", "next", Some("low"), "low", 1),
+            (true, "minimax", "MiniMax-M3", Some("max"), "high", 0),
+            (false, "minimax", "MiniMax-M3", None, "high", 0),
+        ] {
+            let frozen: FrozenAgentRuntimeConfig = serde_json::from_value(json!({
+                "adapterKind":"pi", "installationId":"fixture", "installationGeneration":1,
+                "searchEnvironmentGeneration":0, "executablePath":executable, "authScope":"default",
+                "reportedVersion":null, "executableFingerprint":"fixture", "capabilities":[],
+                "protocolVersion":"pi-rpc", "model": {"source":"explicit",
+                    "modelId":format!("pi://model?provider={provider}&id={model}"),
+                    "options":requested.map(|value| json!({"thinking_level":value})).unwrap_or(json!({}))},
+                "permissions":{"adapterKind":"pi","schemaVersion":1,"values":{}},
+                "nativeSessionCompatibilityKey":null,"bindingCompatibilityDigest":"fixture",
+                "hostConfigDigest":"fixture","configDigest":"fixture"
+            })).unwrap();
+            std::fs::write(root.join("requests.jsonl"), "").unwrap();
+            // Deliberately poison only the old cached identity; activation must
+            // decide from the restored native Session's state instead.
+            *host.model_identity.write().await =
+                Some((provider.into(), model.into(), "off".into()));
+            let activation_seed = PiBindingSeed {
+                expected_native_session_id: restore.then(|| session_id.to_string()),
+                ..seed.clone()
+            };
+            let result = host.activate(&activation_seed, &locators, &frozen).await;
+            if requested == Some("max") {
+                let error = result.err().expect("clamped override must fail");
+                assert_eq!(
+                    activation_failure_kind(&error),
+                    Some(PiActivationFailureKind::ConfigurationFailed)
+                );
+                assert!(error.to_string().contains("requested=max, observed=high"));
+            } else {
+                result.unwrap();
+                assert_eq!(
+                    host.model_identity.read().await.as_ref().unwrap().2,
+                    observed
+                );
+            }
+            let requests = std::fs::read_to_string(root.join("requests.jsonl")).unwrap();
+            let commands = requests
+                .lines()
+                .map(|line| {
+                    serde_json::from_str::<Value>(line).unwrap()["type"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                &commands[..3],
+                [
+                    if restore {
+                        "switch_session"
+                    } else {
+                        "new_session"
+                    },
+                    "get_state",
+                    "get_available_models"
+                ]
+            );
+            assert_eq!(
+                commands
+                    .iter()
+                    .filter(|command| *command == "set_model")
+                    .count(),
+                switches
+            );
+            assert_eq!(
+                commands
+                    .iter()
+                    .filter(|command| *command == "set_thinking_level")
+                    .count(),
+                usize::from(requested.is_some())
+            );
+            assert_eq!(commands.last().unwrap(), "get_state");
+            assert_eq!(
+                commands
+                    .iter()
+                    .filter(|command| *command == "new_session")
+                    .count(),
+                usize::from(!restore)
+            );
+            assert!(!commands.iter().any(|command| command == "prompt"));
+        }
+        host.shutdown_and_reap().await;
         std::fs::remove_dir_all(root).unwrap();
     }
 

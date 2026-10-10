@@ -191,6 +191,14 @@ shipped platform keys 全部开放。该结论绑定
 maintainer-target-host-acceptance 准入形式；归档不伪称本次提交重跑私密模型会话，也不推断未提供的 OS build、
 executable fingerprint 或原始日志。每台机器的安装、认证、模型、版本、Probe 与 Ready 继续独立 fail closed。
 
+### 2026-10-10 Pi 0.84.4 思考强度与续接
+
+macOS arm64 隔离原生 RPC 通过显式 off/low/high、不覆盖、真正切模、新 Session、warm/cold exact resume
+与清除 override 对照；同模型重复 set_model 会从恢复的 high 回到全局 medium，跳过则保留 high。
+本次模型 max 被原生收窄为 high，Core 回读不一致按配置失败。测试无生成请求，使用合成历史与测试 Key；
+不证明模型生成、凭据有效性、Provider 完整性或其他平台。复现与脱敏证据见
+[Pi 思考强度验收](research/pi-thinking-level-2026-10-10/README.md)。现有平台准入范围不变。
+
 ### 2026-09-07 Pi 0.84.4 edit patch 文件变化证据
 
 对已有 Pi 0.84.4 Native Session 的原始 JSONL 做只读核验：成功 `edit` 的
