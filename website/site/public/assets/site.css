@@ -142,3 +142,19 @@
 }
 .server-package-issue { padding: 16px 20px; border-left: 3px solid var(--ember); background: var(--canvas); font-size: 14px; }
 .doc-visual img[src*="desktop-web-login"], .doc-visual img[src*="desktop-web-conversation"] { max-width: 420px; width: 100%; margin-inline: auto; }
+
+/* Agent setup article: retain the shared documentation layout and controls. */
+.doc-article-body .doc-markdown { padding-top: 0; overflow-wrap: anywhere; }
+.doc-article-body .doc-markdown > h2 { margin: 48px 0 18px; scroll-margin-top: 92px; }
+.doc-markdown > h3 { margin: 30px 0 12px; font-size: 20px; line-height: 1.5; font-weight: 550; }
+.doc-markdown a, .doc-lead a { color: var(--steel); text-decoration: underline; text-underline-offset: 3px; }
+.doc-markdown strong { color: var(--ink); font-weight: 600; }
+.doc-markdown ul { padding-left: 24px; margin: 18px 0; font-size: 16px; line-height: 1.9; color: var(--muted); }
+.doc-markdown li + li { margin-top: 10px; }
+.doc-markdown :not(pre) > code { font: .88em ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px; }
+.doc-markdown .guide-version { font-size: 13px; }
+.doc-markdown .doc-table-wrap { margin: 22px 0; }
+@media (max-width: 800px) {
+  .doc-markdown ul { font-size: 14px; }
+  .doc-markdown > h3 { font-size: 19px; }
+}
