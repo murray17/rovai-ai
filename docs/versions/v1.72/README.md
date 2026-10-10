@@ -11,6 +11,15 @@ last_updated: 2026-10-10
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Claude Code / Codex 原生自动记忆（2026-10-10）
+
+受管执行固定关闭 Runtime 原生自动记忆，保留 Rovai Memory、项目规则、原生持久化与原 ID Resume。
+Claude 继续使用既有私有 settings 文件与子进程 env 双重覆盖，Fast 三态和 Bootstrap 不变；Codex 在 App-Server
+启动时传入三个配置覆盖，仅修订 Host 进程兼容摘要，不使 Native Binding 换代。不修改用户原生配置或已有记忆，
+不控制外部 Runtime，不热替换正在运行的旧 Core/Run，不新增检测门禁。
+当前边界见[受管原生自动记忆](../../architecture/runtime-catalog-boundaries.md#受管执行的原生自动记忆)，
+实测版本、测试与限制见[验收记录](../../research/native-auto-memory/verification-2026-10-10.md)。
+
 ## Pi 思考强度与目录观察（2026-10-10）
 
 按 User 批复收紧为目录准入/提交/读取解耦、同模型续接避免重复选模、目录观察非破坏性使用。
