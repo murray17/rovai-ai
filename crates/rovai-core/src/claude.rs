@@ -646,7 +646,11 @@ impl ClaudeCodeCliRuntimeAdapter {
         if let Some(api) = &request.runtime.custom_api {
             api.assert_current()?;
         }
-        let mut inline_settings = serde_json::json!({});
+        // Settings env can replace inherited env. Keep this override in the
+        // existing private file as well as the child environment below.
+        let mut inline_settings = serde_json::json!({
+            "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
+        });
         rovai_core::camp_fast::merge_claude_inline_settings(&mut inline_settings, fast_override)?;
         let effort = claude_model_effort(&request.runtime.model.options)?;
         let mut command = Command::new(executable);
@@ -722,6 +726,8 @@ impl ClaudeCodeCliRuntimeAdapter {
             Some(config)
         };
         command.current_dir(execution_root);
+        // Apply the fixed managed policy after all Runtime/Built-in env merges.
+        command.env("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1");
         if !matches!(
             interrupted.try_recv(),
             Err(oneshot::error::TryRecvError::Empty)
@@ -2880,6 +2886,7 @@ mod tests {
         #[cfg(windows)]
         let body = {
             let script = root.join(format!("{name}.ps1"));
+            let settings = "$settingsIndex = [Array]::IndexOf($args, '--settings')\nif ($settingsIndex -lt 0) { exit 8 }\n$settings = Get-Content -Raw -LiteralPath $args[$settingsIndex + 1] | ConvertFrom-Json\nif ($settings.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY -ne '1' -or $env:CLAUDE_CODE_DISABLE_AUTO_MEMORY -ne '1') { exit 9 }\n";
             let handshake = "$init = [Console]::ReadLine() | ConvertFrom-Json\n[Console]::WriteLine((@{type='control_response';response=@{subtype='success';request_id=$init.request_id;response=@{}}} | ConvertTo-Json -Compress -Depth 5))\n";
             let normal = format!(
                 "$prompt = [Console]::ReadLine()\n[Console]::WriteLine('{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"{session_id}\",\"result\":\"ok\"}}')\n[Console]::WriteLine('{{\"type\":\"system\",\"subtype\":\"session_state_changed\",\"state\":\"idle\",\"session_id\":\"{session_id}\"}}')\n$null = [Console]::In.ReadToEnd()\n"
@@ -2900,12 +2907,12 @@ mod tests {
                 "spawn-error" => String::new(),
                 _ => unreachable!(),
             };
-            std::fs::write(&script, contents).unwrap();
+            std::fs::write(&script, format!("{settings}{contents}")).unwrap();
             if mode == "spawn-error" {
                 "x".repeat(129 * 1024)
             } else {
                 format!(
-                    "@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\"\r\n",
+                    "@echo off\r\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File \"{}\" %*\r\n",
                     script.display()
                 )
             }
@@ -3038,13 +3045,13 @@ mod tests {
                 for fast in [None, Some(true), Some(false)] {
                     let bootstrap_file =
                         ClaudeLaunchFile::write(&root, bootstrap.as_bytes()).unwrap();
-                    let mut settings = json!({});
+                    let mut settings = json!({"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}});
                     rovai_core::camp_fast::merge_claude_inline_settings(&mut settings, fast)
                         .unwrap();
-                    let settings_file = fast.map(|_| {
+                    let settings_file = Some(
                         ClaudeLaunchFile::write(&root, &serde_json::to_vec(&settings).unwrap())
-                            .unwrap()
-                    });
+                            .unwrap(),
+                    );
                     let args = launch_session_arguments(
                         resume,
                         "new-id",
@@ -3089,14 +3096,11 @@ mod tests {
                             );
                         }
                     }
-                    if let Some(fast) = fast {
-                        assert_eq!(args[4], "--settings");
-                        let value: Value =
-                            serde_json::from_slice(&std::fs::read(&args[5]).unwrap()).unwrap();
-                        assert_eq!(value["fastMode"], fast);
-                    } else {
-                        assert_eq!(args.len(), 4);
-                    }
+                    assert_eq!(args[4], "--settings");
+                    let value: Value =
+                        serde_json::from_slice(&std::fs::read(&args[5]).unwrap()).unwrap();
+                    assert_eq!(value["fastMode"].as_bool(), fast);
+                    assert_eq!(value["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1");
                     let bootstrap_path = bootstrap_file.0.clone();
                     let settings_path = settings_file.as_ref().map(|file| file.0.clone());
                     drop(bootstrap_file);
@@ -3255,7 +3259,7 @@ mod tests {
             let running = adapter.clone();
             let task = tokio::spawn(async move { running.run(request).await });
             wait_for_claude_fixture(|| {
-                root.join("blocked.started").exists() && claude_launch_files(&root).len() == 1
+                root.join("blocked.started").exists() && claude_launch_files(&root).len() == 2
             })
             .await;
             let release = if before_dispatch {
@@ -3314,8 +3318,17 @@ mod tests {
         second.session_bootstrap = Some("second completed".to_string());
         assert_eq!(adapter.run(second).await.unwrap().final_output, "ok");
         let remaining = claude_launch_files(&root);
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].1, b"first still running");
+        assert_eq!(remaining.len(), 2);
+        assert!(
+            remaining
+                .iter()
+                .any(|(_, bytes)| bytes == b"first still running")
+        );
+        assert!(remaining.iter().any(|(_, bytes)| {
+            serde_json::from_slice::<Value>(bytes)
+                .ok()
+                .is_some_and(|value| value["env"]["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1")
+        }));
         assert!(adapter.interrupt(&first_id, 1).await);
         assert!(first_task.await.unwrap().is_err());
         assert!(claude_launch_files(&root).is_empty());
@@ -3545,7 +3558,7 @@ mod tests {
         let running_adapter = adapter.clone();
         let task = tokio::spawn(async move { running_adapter.run(request).await });
         wait_for_claude_fixture(|| {
-            root.join("blocked.started").exists() && claude_launch_files(&root).len() == 1
+            root.join("blocked.started").exists() && claude_launch_files(&root).len() == 2
         })
         .await;
 
@@ -3555,7 +3568,11 @@ mod tests {
                 .expect_err("run task should be aborted")
                 .is_cancelled()
         );
-        assert_eq!(claude_launch_files(&root)[0].1, b"owned after caller abort");
+        assert!(
+            claude_launch_files(&root)
+                .iter()
+                .any(|(_, bytes)| bytes == b"owned after caller abort")
+        );
         assert!(adapter.active.lock().unwrap().contains_key(&(run_id, 1)));
         tokio::time::timeout(Duration::from_secs(5), adapter.shutdown_all())
             .await
@@ -3656,7 +3673,28 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn nonzero_exit_with_empty_stderr_preserves_structured_provider_failure() {
+        use rovai_core::agent_profile::AdapterKind;
+        use rovai_core::runtime_discovery::{RuntimeSearchEnvironment, with_runtime_configuration};
+        use rovai_core::runtime_startup::{
+            RuntimeEnvironmentVariable, RuntimeStartupConfiguration,
+        };
         use std::os::unix::fs::PermissionsExt;
+
+        let parent_memory_env = std::env::var_os("CLAUDE_CODE_DISABLE_AUTO_MEMORY");
+        let search = RuntimeSearchEnvironment::for_test_paths(
+            1,
+            vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+        )
+        .with_startup_configuration(
+            AdapterKind::ClaudeCodeCli,
+            RuntimeStartupConfiguration {
+                environment: vec![RuntimeEnvironmentVariable {
+                    name: "CLAUDE_CODE_DISABLE_AUTO_MEMORY".into(),
+                    value: "0".into(),
+                }],
+                ..Default::default()
+            },
+        );
 
         // This process-boundary fixture owns the exit-status ordering regression;
         // the pure terminal validator cannot prove that run_process reaches it.
@@ -3695,6 +3733,7 @@ mod tests {
                     r#"#!/bin/sh
     printf 'start\n' >> "$0.starts"
     printf '%s\n' "$@" > "$0.argv"
+    printf '%s' "$CLAUDE_CODE_DISABLE_AUTO_MEMORY" > "$0.memory-env"
     case "$1" in --version|auth) sleep 30; exit 1;; esac
     previous=''
     for arg in "$@"; do
@@ -3742,10 +3781,13 @@ mod tests {
             let (events, mut event_receiver) = mpsc::unbounded_channel();
             request.runtime_events = Some(events);
 
-            let error = adapter
-                .run(request)
-                .await
-                .expect_err("structured Provider failure must remain visible on exit 1");
+            let error = with_runtime_configuration(
+                AdapterKind::ClaudeCodeCli,
+                &search,
+                adapter.run(request),
+            )
+            .await
+            .expect_err("structured Provider failure must remain visible on exit 1");
             let diagnostic = format!("{error:#}");
             let initialized = event_receiver
                 .try_recv()
@@ -3795,20 +3837,26 @@ mod tests {
             } else {
                 "--session-id\n"
             }));
+            let settings: Value =
+                serde_json::from_slice(&std::fs::read(root.join("fake-claude.settings")).unwrap())
+                    .unwrap();
+            let mut expected = json!({"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}});
             if let Some(fast) = fast {
-                let settings: Value = serde_json::from_slice(
-                    &std::fs::read(root.join("fake-claude.settings")).unwrap(),
-                )
-                .unwrap();
-                assert_eq!(
-                    settings,
-                    json!({"fastMode": fast}),
-                    "temporary Fast settings contain no permission overrides"
-                );
-                assert_eq!(argv.lines().filter(|arg| *arg == "--settings").count(), 1);
-            } else {
-                assert!(!argv.lines().any(|arg| arg == "--settings"));
+                expected["fastMode"] = json!(fast);
             }
+            assert_eq!(
+                settings, expected,
+                "no permission or unrelated environment overrides"
+            );
+            assert_eq!(argv.lines().filter(|arg| *arg == "--settings").count(), 1);
+            assert_eq!(
+                std::fs::read_to_string(root.join("fake-claude.memory-env")).unwrap(),
+                "1"
+            );
+            assert_eq!(
+                std::env::var_os("CLAUDE_CODE_DISABLE_AUTO_MEMORY"),
+                parent_memory_env
+            );
             assert!(claude_launch_files(&root).is_empty());
             std::fs::remove_dir_all(&root).expect("temporary root should be removed");
 

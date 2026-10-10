@@ -198,6 +198,11 @@ jobs:
           cargo test -p rovai-core --lib --features extended-tests
           --target x86_64-pc-windows-msvc codex::tests::
 
+      - name: Exercise Windows Claude settings files and resume
+        run: >-
+          cargo test -p rovai-core --lib --features extended-tests
+          --target x86_64-pc-windows-msvc claude::tests::
+
       - name: Exercise Windows private storage admission
         run: >-
           cargo test -p rovai-core --lib
