@@ -1319,6 +1319,38 @@ impl AgentRuntimeAdapterRegistry {
     }
 }
 
+/// Pi's native tokens, not the provider-specific values in thinkingLevelMap.
+/// Unknown capability shapes must not become evidence that an override is invalid.
+pub(crate) fn pi_thinking_levels(model: &Value) -> Option<Vec<&'static str>> {
+    let reasoning = model.get("reasoning")?.as_bool()?;
+    if !reasoning {
+        return Some(vec!["off"]);
+    }
+    let mapping = match model.get("thinkingLevelMap") {
+        None => None,
+        Some(value) => Some(value.as_object()?),
+    };
+    if mapping.is_some_and(|mapping| {
+        mapping
+            .values()
+            .any(|value| !value.is_null() && !value.is_string())
+    }) {
+        return None;
+    }
+    Some(
+        ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+            .into_iter()
+            .filter(
+                |level| match mapping.and_then(|mapping| mapping.get(*level)) {
+                    Some(Value::Null) => false,
+                    Some(_) => true,
+                    None => !matches!(*level, "xhigh" | "max"),
+                },
+            )
+            .collect(),
+    )
+}
+
 pub fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
     let mut models = vec![ModelDescriptor {
         description: None,
@@ -1352,9 +1384,32 @@ pub fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
             .append_pair("id", model_id)
             .finish();
         let id = format!("pi://model?{query}");
+        let levels = pi_thinking_levels(value);
+        let runtime_metadata = Some(json!({
+            "piThinkingSchemaVersion": 1,
+            "piThinkingState": if levels.is_some() { "known" } else { "unknown" },
+        }));
+        let options = levels
+            .map(|levels| {
+                vec![ModelOptionDescriptor {
+                    key: "thinking_level".to_string(),
+                    label: "思考强度".to_string(),
+                    value_type: "enum".to_string(),
+                    values: levels
+                        .into_iter()
+                        .map(|level| ValueChoice {
+                            value: level.to_string(),
+                            label: level.to_string(),
+                        })
+                        .collect(),
+                    default_value: None,
+                    scope: RuntimeOptionScope::Session,
+                }]
+            })
+            .unwrap_or_default();
         models.push(ModelDescriptor {
             description: None,
-            runtime_metadata: None,
+            runtime_metadata,
             id,
             display_name: value
                 .get("name")
@@ -1364,7 +1419,7 @@ pub fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
             is_default: false,
             hidden: false,
             deprecated: false,
-            options: Vec::new(),
+            options,
         });
     }
     Ok(models)
@@ -4280,6 +4335,66 @@ mod tests {
         .unwrap();
 
         assert_eq!(models[1].id, "pi://model?provider=minimax-cn&id=MiniMax-M3");
+        assert_eq!(
+            models[1].runtime_metadata.as_ref().unwrap()["piThinkingState"],
+            "unknown"
+        );
+        // This catalog parser owns the entire native capability matrix. Neither
+        // UI fixtures nor Host tests need to duplicate provider-specific maps.
+        for (native, expected) in [
+            (json!({"reasoning":false}), Some(vec!["off"])),
+            (
+                json!({"reasoning":true}),
+                Some(vec!["off", "minimal", "low", "medium", "high"]),
+            ),
+            (
+                json!({"reasoning":true,"thinkingLevelMap":{"off":null,"minimal":null,"xhigh":"provider-high","max":"provider-max"}}),
+                Some(vec!["low", "medium", "high", "xhigh", "max"]),
+            ),
+            (
+                json!({"reasoning":true,"thinkingLevelMap":{"off":null,"minimal":null,"low":null,"medium":null,"high":null,"xhigh":null,"max":null}}),
+                Some(vec![]),
+            ),
+            (json!({}), None),
+            (json!({"reasoning":"true"}), None),
+            (json!({"reasoning":true,"thinkingLevelMap":null}), None),
+            (
+                json!({"reasoning":true,"thinkingLevelMap":{"high":42}}),
+                None,
+            ),
+        ] {
+            let mut native = native;
+            native["id"] = json!("model/with & symbols");
+            native["provider"] = json!("custom provider");
+            let catalog = pi_models(Some(&json!([native]))).unwrap();
+            let descriptor = &catalog[1];
+            let metadata = descriptor.runtime_metadata.as_ref().unwrap();
+            assert_eq!(metadata["piThinkingSchemaVersion"], 1);
+            assert_eq!(
+                metadata["piThinkingState"],
+                if expected.is_some() {
+                    "known"
+                } else {
+                    "unknown"
+                }
+            );
+            if let Some(levels) = expected {
+                let option = &descriptor.options[0];
+                assert_eq!(option.key, "thinking_level");
+                assert_eq!(option.scope, RuntimeOptionScope::Session);
+                assert_eq!(option.default_value, None);
+                assert_eq!(
+                    option
+                        .values
+                        .iter()
+                        .map(|choice| choice.value.as_str())
+                        .collect::<Vec<_>>(),
+                    levels
+                );
+            } else {
+                assert!(descriptor.options.is_empty());
+            }
+        }
     }
 
     #[test]

@@ -1,10 +1,25 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-10 关闭原生自动记忆
+
+macOS arm64 的 Claude Code **2.1.280** 与 Codex CLI **0.159.2**，使用所选原生 executable、合成配置及
+loopback Provider 完成开启／关闭对照：开启组向实际模型请求注入唯一原生记忆标记，关闭组不注入，
+项目规则仍在。用户与项目配置保持原字节；Claude 的项目 env 和 Codex 的受信任项目层均证实已加载。
+Codex `config/read` 三项 false 与执行请求和新 Thread 的 `memory_mode=disabled` 相互印证。
+有意提供 Thread 级 true 覆盖时，读回仍为 false，但该 Thread 恢复注入，证明不能把 `config/read` 当作通用执行快照。
+Rovai 的 Thread 请求没有这些反向覆盖。
+
+隔离 Core 下首次、多轮与重启恢复保持原 Native ID / Binding / generation，内置 Memory 写入、读取和搜索仍有效。
+Claude 新会话的保存指引随关闭消失；旧会话恢复仍可能保留缓存中的旧指引和内容，不追溯清理。
+本轮没有真实模型自主生成记忆的正向触发，不以未生成文件宣称该行为验收通过。
+完整方法、MCP/Windows 结果与未验证项见[验收记录](research/native-auto-memory/verification-2026-10-10.md)。
+固定产品策略见[当前架构边界](architecture/runtime-catalog-boundaries.md#受管执行的原生自动记忆)，不增加版本或配置读取门禁。
 
 ## 2026-10-09 Cline / Command Code 暂缓公开（User 105）
 
@@ -191,6 +206,14 @@ shipped platform keys 全部开放。该结论绑定
 maintainer-target-host-acceptance 准入形式；归档不伪称本次提交重跑私密模型会话，也不推断未提供的 OS build、
 executable fingerprint 或原始日志。每台机器的安装、认证、模型、版本、Probe 与 Ready 继续独立 fail closed。
 
+### 2026-10-10 Pi 0.84.4 思考强度与续接
+
+macOS arm64 隔离原生 RPC 通过显式 off/low/high、不覆盖、真正切模、新 Session、warm/cold exact resume
+与清除 override 对照；同模型重复 set_model 会从恢复的 high 回到全局 medium，跳过则保留 high。
+本次模型 max 被原生收窄为 high，Core 回读不一致按配置失败。测试无生成请求，使用合成历史与测试 Key；
+不证明模型生成、凭据有效性、Provider 完整性或其他平台。复现与脱敏证据见
+[Pi 思考强度验收](research/pi-thinking-level-2026-10-10/README.md)。现有平台准入范围不变。
+
 ### 2026-09-07 Pi 0.84.4 edit patch 文件变化证据
 
 对已有 Pi 0.84.4 Native Session 的原始 JSONL 做只读核验：成功 `edit` 的
@@ -285,6 +308,16 @@ Claude inline settings、默认模型切换及 cooldown 边界参考[原生 Fast
 执行，不能把 fixture 写成 post-fix Runtime smoke。当前每 Run 文件变化卡片只归约该 AgentRun 已落库的可靠
 Runtime Evidence，不使用 Git 或工作区扫描；因此 path-only、标准 Diff 与 exact mutation 的实际覆盖直接决定卡片
 细节，未被 Runtime 报告的 shell 或外部写入不进入卡片。
+
+### 2026-10-10 Kimi Code `2.1.1` 官方 Provider 配置
+
+按 [Runtime Launch v56](contracts/runtime-launch-and-verification-v56.md) 移除 Rovai 私有 env 注入。
+本机 macOS arm64 的真实 `kimi acp` 在独立 Home、临时 workspace 和假凭据下完成 initialize、
+`session/new`、进程退出后 initialize + 指定原 ID 的 `session/resume`。两次响应均选择官方
+`config.toml` 的 `native-fixture`，目录只有配置的原生模型，没有 env 临时模型；TOML 字节保持不变。
+2.1.1 的 resume 成功响应没有 `sessionId` 字段，沿用共享 ACP 对已请求 ID 的处理，不伪造返回字段。
+全程无 `session/prompt`、真实 Key 或模型生成；该结果只证明原生配置、目录与恢复入口，不新增平台资格。
+Core 的旧 env 忽略、变量不注入及正式冷恢复由扩展测试拥有，见[当前实施记录](versions/v1.72/implementation-plan.md#2026-10-10-kimi-官方-provider-配置)。
 
 ### 2026-08-24 Kimi Code macOS x64 准入晋升
 

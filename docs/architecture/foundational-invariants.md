@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-10-08
+last_updated: 2026-10-10
 ---
 
 # 当前基础架构不变量
@@ -281,7 +281,7 @@ last_updated: 2026-10-08
 - 完整可执行文件 hash 不在消息发送热路径。安装、更新、受管迁移、轻量身份变化或用户显式检查才使用标准 SHA-256；成功后保存路径、hash、size、mtime 和平台文件 ID。执行边界先比较轻量身份，未变则不重读文件；变化时完整 hash 仍匹配冻结 fingerprint 才可更新轻量身份并继续。校验失败是已持久消息之后的诚实执行结果，不撤销消息。
 - 每个正式 AgentRun 独占一个 Runtime 进程，内部作业使用临时独占进程；Adapter 明确声明哪些 Runtime 可进入 IdleWarm，one-shot/Burst 终态后关闭。Native Session 连续性不授予并行共享进程的资格。
 - `AgentRuntimeFleetManager` 是唯一正式进程所有者，内聚 spawn/reuse/stop/reap、唯一 lease、Resident accounting、TTL/LRU/Sweeper、Core generation 与崩溃清理。Adapter 生成 opaque compatibility digest 并证明 health/quiescence；Manager 不解析模型、权限、MCP 或 Runtime 私有字段。所有事件、释放、取消与迟到回调必须匹配不可复制的 `process_id + agent_run_id + execution_epoch + lease_generation`。
-- 冻结 `config_digest` 保存完整 Run 配置与审计证据，不作为 Codex、ACP 或 Pi 的进程复用字段；ACP 的 `mcp_projection_digest` 同样只绑定该 Run 的投影证据。进程兼容摘要保留 Host 配置、执行目录/Workspace、有效权限语义、Built-in Tool 合同及目录、默认附件输出位置和实际注入的外部 MCP Server 定义；Grok、ZCode、DSH 的原生配置摘要继续参与。Codex 的模型、推理档位、`serviceTier` 和 Native Session binding key 不决定 Host 身份；CodeBuddy 显式 `--model` 与 Kimi 注入进程的有效 Provider 环境仍决定 Host 身份。Kimi 的 `permission_mode` 由每个 Run 建立 Session 时设置，不能沿用旧 Host 捕获的值。
+- 冻结 `config_digest` 保存完整 Run 配置与审计证据，不作为 Codex、ACP 或 Pi 的进程复用字段；ACP 的 `mcp_projection_digest` 同样只绑定该 Run 的投影证据。进程兼容摘要保留 Host 配置、执行目录/Workspace、有效权限语义、Built-in Tool 合同及目录、默认附件输出位置和实际注入的外部 MCP Server 定义；Grok、ZCode、DSH 的原生配置摘要继续参与。Codex 的模型、推理档位、`serviceTier` 和 Native Session binding key 不决定 Host 身份；CodeBuddy 显式 `--model` 仍决定 Host 身份；Kimi 由原生配置负责 Provider，不再读取私有 env 或把其摘要作为复用条件。Kimi 的 `permission_mode` 由每个 Run 建立 Session 时设置，不能沿用旧 Host 捕获的值。
 - Reusable Host 的 `ROVAI_RUN_TMP` 使用进程稳定 exact path，但每次 bind 必须在 active lease/context 前 fail-closed 清空、重建并恢复私有权限；unbind/fence best-effort 清理不能替代下一 bind 重置。所有 Adapter 继续只配置 execution workspace、当前 Camp exact 默认输出目录 和该 exact writable Run tmp，不暴露 process root/父目录；Source Attachment 不新增外部 read root，而是把对应记录的 exact stored path 作为 Context 字符串交给 Runtime，能否读取继续由既有 Runtime/OS 权限决定。Adapter 不解析 source/Temp/Managed 差异。Agent file ingress 绑定当前 process、lease generation、Run 与 epoch；指定源按其实际位置引用，不转入 Run tmp。
 - IdleWarm 默认必须精确匹配 `camp_id + agent_profile_id + runtime_compatibility_digest`；只有能证明完整 Session teardown/rebind 和跨 scope 无泄漏的 Adapter 才可声明另一种复用 identity。此时 Fleet 必须把复用 identity、Resident quota bucket 与当前 Camp/member invalidation scope 分开，并在每次独占领取时更新 invalidation scope，不能以跨 scope 复用为由绕过 Camp 删除或成员永久移除。process digest 与 Native Session binding digest 是不同身份。Resident 的 scope/global 配额约束跨 Run 保留的 IdleWarm/BusyResident/Stopping/Starting；无兼容 Resident 时仍可创建本 Run 独占且终态即关闭的 Burst。acquire 必须使用 `Reserve → Spawn outside lock → Commit`：短锁内原子选择兼容空闲进程、容量或 LRU eviction 并登记计入容量的 Starting，随后无 suspension 地启动 Fleet-owned Startup Operation，在锁外 stop/spawn/handshake，再以 generation、Run/epoch 和 shutdown/invalidation fence 提交。相同 Run/epoch 只等待同一 completion；waiter drop 不取消 operation，不同 Run/Runtime 可并发启动。删除、force-stop、失效与 shutdown 向 Starting operation 发取消，迟到进程不得提交且必须 reap。所有 Host 停止统一为 `Mark Stopping → Reap outside global lock → exact-operation Commit`；同 Host 共享 stop completion，timeout 保留 Stopping、lease 与 Resident capacity。
 - Runtime compatibility 只绑定默认 `attachmentOutputRoot` 位置及原有 Runtime 配置，不绑定文件内容、legacy generation 或 View visibility。文件更新不触发重新 Bootstrap 或 Native Session 重建。旧 View/receipt 只在实际历史附件读取与必要恢复时使用；不能作为普通 Run 或新发布前置。原有 additional directories 加入当前 Camp 输出目录并遵循有效权限模式，不授予 instance/Camps 父目录或统一完全访问。

@@ -3,7 +3,7 @@ import { missionDescriptionContent, missionDescriptionText, missionMentionIds, u
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode, type Ref } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import type { AgentProfile, ThreadOpenProjection, MissionDelivery, MissionRecord, MissionStatus, MissionUpdate, MissionWorkspace, ProjectNavigationGroup } from '@contracts'
+import type { AdapterInstallation, AgentProfile, ThreadOpenProjection, MissionDelivery, MissionRecord, MissionStatus, MissionUpdate, MissionWorkspace, ProjectNavigationGroup } from '@contracts'
 import { useThreadClient, type ThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { DialogControlIcon } from './AppDialog'
@@ -69,8 +69,8 @@ function openMissionThread(client: Pick<ThreadClient, 'request'>, threadId: stri
 }
 
 /** Shared overlays keep card actions identical in the board, drawer and full conversation. */
-export function MissionInteractionProvider({ missions, projects, agents, onChanged, onWorkspaceCleaned, onDeleted, onOpen, onError, children }: {
-  missions: MissionRecord[]; projects: ProjectNavigationGroup[]; agents: AgentProfile[]; onChanged(threadId: string): Promise<void>; onWorkspaceCleaned(threadId: string): Promise<void>; onDeleted(threadId: string): Promise<void>; onOpen(mission: MissionRecord): void; onError(message: string, action?: { label: string; onSelect(): void }): void; children: ReactNode
+export function MissionInteractionProvider({ missions, projects, agents, installations, onChanged, onWorkspaceCleaned, onDeleted, onOpen, onError, children }: {
+  missions: MissionRecord[]; projects: ProjectNavigationGroup[]; agents: AgentProfile[]; installations?: AdapterInstallation[]; onChanged(threadId: string): Promise<void>; onWorkspaceCleaned(threadId: string): Promise<void>; onDeleted(threadId: string): Promise<void>; onOpen(mission: MissionRecord): void; onError(message: string, action?: { label: string; onSelect(): void }): void; children: ReactNode
 }) {
   const client = useThreadClient()
   const [position, setPosition] = useState<(ContextPosition & { kind: 'menu' | 'tags' | 'members' }) | null>(null)
@@ -199,7 +199,7 @@ export function MissionInteractionProvider({ missions, projects, agents, onChang
     {position && position.kind !== 'menu' && selected && <MissionPopover position={position} title={position.kind === 'tags' ? uiAttribute("编辑标签") : uiAttribute("使命队员")} onClose={() => setPosition(null)} className={position.kind === 'tags' ? 'mission-label-popover' : 'mission-members-popover'}>
       {position.kind === 'tags' ? <LabelsEditor key={selected.missionId} m={selected} catalog={catalog} onSave={tags => change(selected, 'update', { tags })}/> : <MissionRoster m={selected}/>}
     </MissionPopover>}
-    {editing && <MissionEdit key={editing.missionId} mission={editing} projects={projects} agents={agents} catalog={catalog} onClose={() => setEditing(null)} onSaved={() => onChanged(editing.threadId)} onSave={(patch, commandId) => change(editing, 'update', patch, commandId)}/>}
+    {editing && <MissionEdit key={editing.missionId} mission={editing} projects={projects} agents={agents} installations={installations} catalog={catalog} onClose={() => setEditing(null)} onSaved={() => onChanged(editing.threadId)} onSave={(patch, commandId) => change(editing, 'update', patch, commandId)}/>}
     {cleaning && (
       <MissionWorkspaceCleanup key={cleaning.missionId} mission={cleaning} onClose={() => setCleaning(null)} onRequested={async () => { await cleanup(cleaning); setCleaning(null) }}/>
     )}
@@ -211,10 +211,11 @@ export function MissionInteractionProvider({ missions, projects, agents, onChang
   </Actions.Provider></MissionPeopleProvider>
 }
 
-function MissionEdit({ mission, projects, agents, catalog, onSave, onSaved, onClose }: {
+function MissionEdit({ mission, projects, agents, installations, catalog, onSave, onSaved, onClose }: {
   mission: MissionRecord
   projects: ProjectNavigationGroup[]
   agents: AgentProfile[]
+  installations?: AdapterInstallation[]
   catalog: string[]
   onSave(patch: Omit<MissionUpdate, 'missionId'>, commandId: string): Promise<void>
   onSaved(): Promise<void>
@@ -304,7 +305,7 @@ function MissionEdit({ mission, projects, agents, catalog, onSave, onSaved, onCl
         <Dialog.Description id="mission-edit-description" className="sr-only"><UiText zh={"编辑使命名称、描述、标签和附件，提及队外队员可在保存时邀请加入。"} /></Dialog.Description>
         <form className="compact-form" onSubmit={event => { event.preventDefault(); void save() }}>
           <div className="compact-body mission-editor-body">
-            <MissionWritingPlane ref={editorRef} titleInputRef={titleInputRef} title={title} descriptionContent={descriptionContent} agents={agents} memberAgentIds={mission.memberAgentIds} unavailableAgentIds={unavailableIds} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={titleError || undefined} descriptionError={descriptionError || undefined} mission={{threadId: mission.threadId, missionId: mission.missionId}} onTitleChange={setTitle} onDescriptionChange={setDescriptionContent} onAttachmentsChange={setAttachments} onNotify={setError}/>
+            <MissionWritingPlane ref={editorRef} titleInputRef={titleInputRef} title={title} descriptionContent={descriptionContent} agents={agents} installations={installations} memberAgentIds={mission.memberAgentIds} unavailableAgentIds={unavailableIds} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={titleError || undefined} descriptionError={descriptionError || undefined} mission={{threadId: mission.threadId, missionId: mission.missionId}} onTitleChange={setTitle} onDescriptionChange={setDescriptionContent} onAttachmentsChange={setAttachments} onNotify={setError}/>
             <div className="mission-editor-properties" aria-label={uiAttribute("使命属性")}>
               <MissionPropertyChip icon={<ProjectGlyph/>} locked className="mission-editor-project-property" title={uiAttribute("编辑使命时不能更改项目")} aria-label={uiAttribute("项目：{0}，编辑使命时不能更改", String(missionProject(mission, projects)))}>{missionProject(mission, projects)}</MissionPropertyChip>
               <MissionPropertyChip icon={<TeamGlyph/>} locked className="mission-editor-team-property mission-editor-team-locked" title={uiAttribute("已有队员和队长需通过队伍菜单管理")} aria-label={uiAttribute("队员与队长：{0} 位队员，{1}", String(members.length), String(lead ? uiAttribute("队长 {0}", String(lead.displayName)) : uiAttribute("未设置队长")))}>

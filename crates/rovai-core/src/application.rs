@@ -2237,6 +2237,8 @@ impl RuntimeCheckAttempt {
             && self.startup_preview.is_none()
             && self.model_target == request.model_target
             && self.runtime_kind == request.runtime_kind
+            && (self.runtime_kind != AdapterKind::Pi
+                || self.catalog_only == (request.trigger == RuntimeCheckTrigger::CatalogOpen))
             && self.search.generation() == request.search.generation()
     }
 }
@@ -3791,7 +3793,11 @@ impl Core {
             .unwrap_or(RuntimeModelCatalogCacheStatus::Unavailable);
         let refresh_status = match cache_status {
             RuntimeModelCatalogCacheStatus::Fresh => "not_required",
-            _ if !wait_for_refresh
+            // Pi keeps cached entries visible in the picker while this request
+            // awaits the shared observation. Its outcome needs no health event
+            // or persisted health diagnostic to reach every waiting picker.
+            _ if kind != AdapterKind::Pi
+                && !wait_for_refresh
                 && initial.as_ref().is_some_and(|installation| {
                     installation.model_catalog_can_display()
                         && installation
@@ -3861,7 +3867,9 @@ impl Core {
                 },
                 "models": [],
                 "refreshStatus": refresh_status,
-                "diagnosticCode": diagnostic.map(|value| value.diagnostic_code),
+                "diagnosticCode": if kind == AdapterKind::Pi {
+                    (refresh_status == "failed").then(|| "runtime_model_catalog_refresh_failed".to_string())
+                } else { diagnostic.map(|value| value.diagnostic_code) },
             }));
         };
         let models = if installation.model_catalog_can_display() {
@@ -3878,12 +3886,14 @@ impl Core {
             "cache": installation.model_catalog,
             "models": models,
             "refreshStatus": refresh_status,
-            "diagnosticCode": installation
+            "diagnosticCode": if kind == AdapterKind::Pi {
+                (refresh_status == "failed").then(|| "runtime_model_catalog_refresh_failed".to_string())
+            } else { installation
                 .last_probe_attempt
                 .as_ref()
                 .filter(|attempt| attempt.status == "failed")
                 .and_then(|attempt| attempt.diagnostic_code.clone())
-                .or_else(|| diagnostic.map(|value| value.diagnostic_code)),
+                .or_else(|| diagnostic.map(|value| value.diagnostic_code)) },
         }))
     }
 
@@ -4489,8 +4499,140 @@ impl Core {
         kind: AdapterKind,
         search: Arc<RuntimeSearchEnvironment>,
     ) -> Result<Option<RuntimeCheckOutcome>> {
+        if kind == AdapterKind::Pi {
+            return self.refresh_pi_model_catalog(search).await.map(Some);
+        }
         self.refresh_verified_runtime_catalog_for_selection(kind, search, None)
             .await
+    }
+
+    async fn refresh_pi_model_catalog(
+        &self,
+        search: Arc<RuntimeSearchEnvironment>,
+    ) -> Result<RuntimeCheckOutcome> {
+        let kind = AdapterKind::Pi;
+        let service = AgentProfileService::default();
+        let (initial, locator) = {
+            let database = self.database.lock().await;
+            let installation = service.managed_installation(&database, kind, "default")?;
+            let locator = installation
+                .as_ref()
+                .map(|installation| {
+                    service.runtime_entrypoint_locator_identity(&database, &installation.id)
+                })
+                .transpose()?
+                .flatten();
+            (installation, locator)
+        };
+        if initial
+            .as_ref()
+            .is_some_and(|installation| !installation.enabled)
+        {
+            return Ok(RuntimeCheckOutcome::StableFailure);
+        }
+        let mut entry_search = search.as_ref().clone();
+        if !search.has_startup_configuration(kind)
+            && let Some(installation) = initial.as_ref().filter(|installation| {
+                matches!(
+                    installation.source,
+                    InstallationSource::Manual | InstallationSource::Custom
+                )
+            })
+        {
+            let mut configuration = entry_search.startup_configuration(kind);
+            configuration.program_path = Some(
+                locator
+                    .as_ref()
+                    .map(|locator| locator.canonical_shim_path.clone())
+                    .unwrap_or_else(|| installation.executable_path.clone()),
+            );
+            entry_search = entry_search.with_startup_configuration(kind, configuration);
+        }
+        let saved_path = initial
+            .as_ref()
+            .map(|installation| PathBuf::from(&installation.executable_path));
+        let observation = tokio::task::spawn_blocking(move || {
+            rovai_core::runtime_discovery::discover_runtime_path_with_manual_candidates(
+                kind,
+                &entry_search,
+                saved_path,
+            )
+        })
+        .await
+        .context("Pi catalog entry resolution worker failed")?;
+        if observation.discovery_status != RuntimeDiscoveryStatus::Found {
+            return Ok(RuntimeCheckOutcome::StableFailure);
+        }
+        let verified = self.verify_runtime_entry(&observation).await?;
+        let path = PathBuf::from(
+            observation
+                .executable_path
+                .as_ref()
+                .context("missing Pi path")?,
+        );
+        let fingerprint = observation
+            .executable_fingerprint
+            .as_deref()
+            .context("missing Pi fingerprint")?;
+        let identity = verified.executable_file_identity().clone();
+        let installation = {
+            let Some(_update) = self.runtime_check_update_guard(&search).await else {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            };
+            let mut database = self.database.lock().await;
+            let current = service.managed_installation(&database, kind, "default")?;
+            if current.as_ref().map(|value| (&value.id, value.generation))
+                != initial.as_ref().map(|value| (&value.id, value.generation))
+            {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            service.commit_discovered_runtime_entry(
+                &mut database,
+                verified,
+                initial.as_ref().map(|value| value.id.as_str()),
+            )?;
+            service
+                .managed_installation(&database, kind, "default")?
+                .context("Pi installation disappeared")?
+        };
+        // This temporary Host observes the whole catalog and never creates a
+        // conversation or borrows the task Host. Failure is local to this read.
+        let catalog = with_runtime_configuration(kind, &search, async {
+            health::refresh_model_catalog(&path, kind).await
+        })
+        .await;
+        let identity_current = observe_executable_file_identity(&path).ok().as_ref()
+            == Some(&identity)
+            && rovai_core::runtime_discovery::entrypoint_locator_identity_is_current(
+                observation.entrypoint_locator_identity.as_ref(),
+            );
+        let Some(_update) = self.runtime_check_update_guard(&search).await else {
+            return Ok(RuntimeCheckOutcome::Superseded);
+        };
+        if !identity_current {
+            return Ok(RuntimeCheckOutcome::Superseded);
+        }
+        match catalog {
+            Ok(catalog) => {
+                let committed = service.commit_pi_model_catalog(
+                    &mut *self.database.lock().await,
+                    &installation,
+                    fingerprint,
+                    search.generation(),
+                    &catalog.models,
+                    &chrono::Utc::now().to_rfc3339(),
+                )?;
+                Ok(if committed {
+                    RuntimeCheckOutcome::Ready
+                } else {
+                    RuntimeCheckOutcome::Superseded
+                })
+            }
+            Err(error) => {
+                eprintln!("[model-catalog] Pi observation failed: {error:#}");
+                Ok(RuntimeCheckOutcome::StableFailure)
+            }
+        }
     }
 
     async fn refresh_verified_runtime_catalog_for_selection(
@@ -24832,7 +24974,7 @@ async fn process_runtime_check_manager(
                     deadline,
                     waiters,
                 };
-                if !is_private_check {
+                if !is_private_check && !(attempt.runtime_kind == AdapterKind::Pi && attempt.catalog_only) {
                 core.runtime_check_activity.write().await.insert(
                     request.runtime_kind,
                     RuntimeCheckActivity {
@@ -24924,7 +25066,10 @@ async fn process_runtime_check_manager(
                 .map(|(index, _)| index);
             let Some(next) = next else { break };
             let attempt = pending.swap_remove(next);
-            if attempt.startup_preview.is_none() && attempt.model_target.is_none() {
+            if attempt.startup_preview.is_none()
+                && attempt.model_target.is_none()
+                && !(attempt.runtime_kind == AdapterKind::Pi && attempt.catalog_only)
+            {
                 core.runtime_check_activity.write().await.insert(
                     attempt.runtime_kind,
                     RuntimeCheckActivity {
@@ -26290,6 +26435,45 @@ mod tests {
 
     #[test]
     fn runtime_check_activity_has_two_slots_and_one_terminal_owner() {
+        for kind in [AdapterKind::Pi, AdapterKind::CodexCli] {
+            for catalog_only in [false, true] {
+                for trigger in [
+                    RuntimeCheckTrigger::CatalogOpen,
+                    RuntimeCheckTrigger::UserCheck,
+                ] {
+                    let search = Arc::new(RuntimeSearchEnvironment::for_test_paths(1, Vec::new()));
+                    let attempt = RuntimeCheckAttempt {
+                        search: search.clone(),
+                        startup_preview: None,
+                        model_target: None,
+                        attempt_id: "fixture".into(),
+                        runtime_kind: kind,
+                        purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                        trigger,
+                        catalog_only,
+                        started_at: tokio::time::Instant::now(),
+                        deadline: tokio::time::Instant::now(),
+                        waiters: vec![],
+                    };
+                    let (acknowledged, _) = oneshot::channel();
+                    let request = RuntimeCheckRequest {
+                        search,
+                        startup_preview: None,
+                        model_target: None,
+                        runtime_kind: kind,
+                        purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                        trigger,
+                        acknowledged,
+                        completion: None,
+                    };
+                    assert_eq!(
+                        attempt.accepts(&request),
+                        kind != AdapterKind::Pi
+                            || catalog_only == (trigger == RuntimeCheckTrigger::CatalogOpen)
+                    );
+                }
+            }
+        }
         assert!(runtime_check_can_satisfy(
             false,
             RuntimeCheckTrigger::CatalogOpen
@@ -26816,6 +27000,349 @@ while IFS= read -r _ignored; do :; done
 "#,
             invocations.display(),
         )
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn pi_catalog_observations_are_independent_of_health_and_fenced_by_identity() {
+        // Unique owner for Pi's no-health bootstrap, manager coalescing and SQL
+        // readback. The Codex owner intentionally requires a Ready snapshot and
+        // permits full-check fallback, so it cannot own this opposite contract.
+        let root = std::env::temp_dir().join(format!("rovai-pi-catalog-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let executable = root.join("pi");
+        write_runtime_resolution_executable(&executable, &r#"#!/bin/sh
+root='__ROOT__'
+printf '%s\n' "$*" >> "$root/calls"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$root/requests"
+  id=$(printf '%s\n' "$line" | /usr/bin/sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+  case "$line" in
+    *'"type":"get_state"'*) printf '{"type":"response","id":"%s","command":"get_state","success":true,"data":{}}\n' "$id" ;;
+    *'"type":"get_available_models"'*)
+      /usr/bin/touch "$root/started"
+      while [ ! -f "$root/release" ]; do /bin/sleep 0.01; done
+      if [ -f "$root/provider-error" ]; then
+        printf '%s\n' '{"type":"extension_error","extensionPath":"fixture.ts","event":"register_provider","error":"invalid provider configuration"}'
+      fi
+      printf '{"type":"response","id":"%s","command":"get_available_models","success":true,"data":{"models":' "$id"
+      /bin/cat "$root/models"
+      printf '}}\n' ;;
+    *) exit 1 ;;
+  esac
+done
+"#.replace("__ROOT__", root.to_str().unwrap()));
+        std::fs::write(
+            root.join("models"),
+            r#"[{"provider":"fixture","id":"old","reasoning":true}]"#,
+        )
+        .unwrap();
+        let mut core = runtime_resolution_test_core(&root).unwrap();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        core.runtime_check_requests = sender;
+        *core.runtime_search_environment.get_mut() = Arc::new(
+            RuntimeSearchEnvironment::for_test_paths(1, Vec::new()).with_startup_configuration(
+                AdapterKind::Pi,
+                rovai_core::runtime_startup::RuntimeStartupConfiguration {
+                    program_path: Some(executable.to_string_lossy().into_owned()),
+                    ..Default::default()
+                },
+            ),
+        );
+        core.database
+            .lock()
+            .await
+            .connection()
+            .execute(
+                "UPDATE runtime_search_environment_state SET generation = 1",
+                [],
+            )
+            .unwrap();
+        let core = Arc::new(core);
+        let (stop, shutdown) = oneshot::channel();
+        let manager = tokio::spawn(process_runtime_check_manager(
+            core.clone(),
+            receiver,
+            shutdown,
+        ));
+        async fn started(root: &Path) {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !root.join("started").exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("Pi catalog fixture did not start");
+        }
+        assert!(
+            core.enqueue_runtime_check(
+                AdapterKind::Pi,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                RuntimeCheckTrigger::CatalogOpen
+            )
+            .await
+            .unwrap()
+        );
+        started(&root).await;
+        assert!(
+            core.runtime_check_activity.read().await.is_empty(),
+            "directory reads must not mark Runtime checking"
+        );
+        {
+            let database = core.database.lock().await;
+            let installation = AgentProfileService::default()
+                .managed_installation(&database, AdapterKind::Pi, "default")
+                .unwrap()
+                .unwrap();
+            assert!(
+                installation.snapshot.is_none(),
+                "static installation exists without any health snapshot"
+            );
+        }
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        let (completion, waiter) = oneshot::channel();
+        core.runtime_check_requests
+            .send(RuntimeCheckRequest {
+                search: core.runtime_search_environment.read().await.clone(),
+                startup_preview: None,
+                model_target: None,
+                runtime_kind: AdapterKind::Pi,
+                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                trigger: RuntimeCheckTrigger::CatalogOpen,
+                acknowledged,
+                completion: Some(completion),
+            })
+            .unwrap();
+        assert!(
+            !acknowledgement.await.unwrap(),
+            "same-environment opens share one probe"
+        );
+        std::fs::write(root.join("release"), "").unwrap();
+        assert_eq!(waiter.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
+        let payload = core
+            .open_runtime_model_catalog(AdapterKind::Pi, true)
+            .await
+            .unwrap();
+        assert_eq!(payload["refreshStatus"], "not_required");
+        assert_eq!(payload["cache"]["status"], "fresh");
+        assert_eq!(payload["models"][1]["options"][0]["key"], "thinking_level");
+        assert_eq!(
+            std::fs::read_to_string(root.join("calls"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+        {
+            let database = core.database.lock().await;
+            let installation = AgentProfileService::default()
+                .managed_installation(&database, AdapterKind::Pi, "default")
+                .unwrap()
+                .unwrap();
+            let mut models = installation.snapshot.unwrap().models;
+            models[1].runtime_metadata = None;
+            database.connection().execute("UPDATE adapter_capability_snapshot SET model_catalog_json=?1 WHERE installation_id=?2",
+                rusqlite::params![serde_json::to_string(&models).unwrap(), installation.id]).unwrap();
+        }
+        assert_eq!(
+            core.runtime_model_catalog_payload(AdapterKind::Pi, "not_required")
+                .await
+                .unwrap()["cache"]["status"],
+            "stale"
+        );
+        // Missing native capability data becomes an attempted unknown, not a
+        // recurring refresh. The fresh old-format cache needed exactly one read.
+        std::fs::write(
+            root.join("models"),
+            r#"[{"provider":"fixture","id":"old"}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+                .await
+                .unwrap()["refreshStatus"],
+            "completed"
+        );
+        assert_eq!(
+            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+                .await
+                .unwrap()["refreshStatus"],
+            "not_required"
+        );
+        {
+            let database = core.database.lock().await;
+            let installation = AgentProfileService::default()
+                .managed_installation(&database, AdapterKind::Pi, "default")
+                .unwrap()
+                .unwrap();
+            let snapshot = installation.snapshot.unwrap();
+            assert_eq!(snapshot.probe_status, "installed_unverified");
+            assert_eq!(snapshot.authentication_status, "unknown");
+            assert_eq!(snapshot.last_successful_probe_at, None);
+            assert!(snapshot.capabilities.is_empty());
+            database.connection().execute("UPDATE adapter_capability_snapshot SET probe_status='ready', authentication_status='authenticated', last_successful_probe_at='2026-01-01T00:00:00Z', stale_at='old-health-invalid', last_error='old-health-failure' WHERE installation_id=?1", [installation.id]).unwrap();
+        }
+        // New environment: directory can recover without reviving stale health.
+        {
+            let _update = core.runtime_search_update.lock().await;
+            let mut search = core.runtime_search_environment.write().await;
+            *search = Arc::new(search.as_ref().clone().with_generation(2));
+            core.database
+                .lock()
+                .await
+                .connection()
+                .execute(
+                    "UPDATE runtime_search_environment_state SET generation=2",
+                    [],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            core.runtime_model_catalog_payload(AdapterKind::Pi, "not_required")
+                .await
+                .unwrap()["cache"]["status"],
+            "invalidated"
+        );
+        assert_eq!(
+            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+                .await
+                .unwrap()["refreshStatus"],
+            "completed"
+        );
+        let before_failure = core
+            .runtime_model_catalog_payload(AdapterKind::Pi, "not_required")
+            .await
+            .unwrap();
+        std::fs::write(
+            root.join("models"),
+            r#"[{"provider":"fixture","id":"partial","reasoning":false}]"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("provider-error"), "").unwrap();
+        assert_eq!(
+            core.await_runtime_check(
+                AdapterKind::Pi,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                RuntimeCheckTrigger::CatalogOpen
+            )
+            .await
+            .unwrap(),
+            RuntimeCheckOutcome::StableFailure
+        );
+        let after_failure = core
+            .runtime_model_catalog_payload(AdapterKind::Pi, "failed")
+            .await
+            .unwrap();
+        assert_eq!(after_failure["models"], before_failure["models"]);
+        assert_eq!(after_failure["cache"], before_failure["cache"]);
+        std::fs::remove_file(root.join("provider-error")).unwrap();
+        // Same successful RPC without an exposed error is only an observation:
+        // no invented completeness property, no permanent merge of absent models.
+        assert_eq!(
+            core.await_runtime_check(
+                AdapterKind::Pi,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                RuntimeCheckTrigger::CatalogOpen
+            )
+            .await
+            .unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        let partial = core
+            .runtime_model_catalog_payload(AdapterKind::Pi, "completed")
+            .await
+            .unwrap();
+        assert_eq!(partial["models"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            partial["models"][1]["id"],
+            "pi://model?provider=fixture&id=partial"
+        );
+        for changed_identity in ["installation", "environment", "executable"] {
+            std::fs::remove_file(root.join("started")).unwrap();
+            std::fs::remove_file(root.join("release")).unwrap();
+            std::fs::write(
+                root.join("models"),
+                r#"[{"provider":"fixture","id":"obsolete"}]"#,
+            )
+            .unwrap();
+            let late = tokio::spawn({
+                let core = core.clone();
+                async move {
+                    core.await_runtime_check(
+                        AdapterKind::Pi,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        RuntimeCheckTrigger::CatalogOpen,
+                    )
+                    .await
+                    .unwrap()
+                }
+            });
+            started(&root).await;
+            let _update = core.runtime_search_update.lock().await;
+            if changed_identity == "environment" {
+                let mut search = core.runtime_search_environment.write().await;
+                *search = Arc::new(
+                    search
+                        .as_ref()
+                        .clone()
+                        .with_generation(search.generation() + 1),
+                );
+                core.database
+                    .lock()
+                    .await
+                    .connection()
+                    .execute(
+                        "UPDATE runtime_search_environment_state SET generation=generation+1",
+                        [],
+                    )
+                    .unwrap();
+            } else if changed_identity == "installation" {
+                core.database.lock().await.connection().execute("UPDATE adapter_installation SET generation=generation+1 WHERE adapter_kind='pi'", []).unwrap();
+            } else {
+                let mut script = std::fs::read_to_string(&executable).unwrap();
+                script.push_str("\n# replaced during the catalog observation\n");
+                std::fs::write(&executable, script).unwrap();
+            }
+            drop(_update);
+            std::fs::write(root.join("release"), "").unwrap();
+            assert_eq!(late.await.unwrap(), RuntimeCheckOutcome::Superseded);
+        }
+        {
+            let database = core.database.lock().await;
+            let snapshot = AgentProfileService::default()
+                .managed_installation(&database, AdapterKind::Pi, "default")
+                .unwrap()
+                .unwrap()
+                .snapshot
+                .unwrap();
+            assert_eq!(
+                snapshot.models[1].id,
+                "pi://model?provider=fixture&id=partial"
+            );
+            assert_eq!(snapshot.stale_at.as_deref(), Some("old-health-invalid"));
+            assert_eq!(snapshot.last_error.as_deref(), Some("old-health-failure"));
+            assert_eq!(
+                snapshot.last_successful_probe_at.as_deref(),
+                Some("2026-01-01T00:00:00Z")
+            );
+        }
+        assert!(core.runtime_check_activity.read().await.is_empty());
+        assert!(core.runtime_product_diagnostics.read().await.is_empty());
+        for line in std::fs::read_to_string(root.join("requests"))
+            .unwrap()
+            .lines()
+        {
+            let request: Value = serde_json::from_str(line).unwrap();
+            assert!(matches!(
+                request["type"].as_str(),
+                Some("get_state" | "get_available_models")
+            ));
+        }
+        stop.send(()).unwrap();
+        manager.await.unwrap();
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]

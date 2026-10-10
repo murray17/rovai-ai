@@ -1,0 +1,2205 @@
+{
+  "native": {
+    "metadata": {
+      "platform": "macOS-26.6-arm64-arm-64bit",
+      "modelProvider": "loopback scripted fixture",
+      "runtimes": {
+        "codex": {
+          "version": "codex-cli 0.159.2",
+          "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
+        },
+        "claude": {
+          "version": "2.1.280 (Claude Code)",
+          "sha256": "387a5c5dcdbb815085edf0baf79591f9d8894efe922bceaf3d75b1b08055229d"
+        }
+      }
+    },
+    "results": [
+      {
+        "runtime": "codex",
+        "disabled": false,
+        "configRead": {
+          "features.memories": true,
+          "memories.generate_memories": true,
+          "memories.use_memories": true
+        },
+        "layers": [
+          {
+            "kind": "project",
+            "disabled": null,
+            "flags": {
+              "features.memories": true,
+              "memories.generate_memories": true,
+              "memories.use_memories": true
+            }
+          },
+          {
+            "kind": "user",
+            "disabled": null,
+            "flags": {
+              "features.memories": true,
+              "memories.generate_memories": true,
+              "memories.use_memories": true
+            }
+          },
+          {
+            "kind": "system",
+            "disabled": null,
+            "flags": {
+              "features.memories": null,
+              "memories.generate_memories": null,
+              "memories.use_memories": null
+            }
+          }
+        ],
+        "startStatus": "completed",
+        "resumeStatus": "completed",
+        "sameThread": true,
+        "first": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": false,
+            "history": false,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "cold": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "inputEligibility": [
+          {
+            "memory_mode": "enabled"
+          }
+        ],
+        "threadOverrideControl": null,
+        "configUnchanged": true
+      },
+      {
+        "runtime": "codex",
+        "disabled": true,
+        "configRead": {
+          "features.memories": false,
+          "memories.generate_memories": false,
+          "memories.use_memories": false
+        },
+        "layers": [
+          {
+            "kind": "sessionFlags",
+            "disabled": null,
+            "flags": {
+              "features.memories": false,
+              "memories.generate_memories": false,
+              "memories.use_memories": false
+            }
+          },
+          {
+            "kind": "project",
+            "disabled": null,
+            "flags": {
+              "features.memories": true,
+              "memories.generate_memories": true,
+              "memories.use_memories": true
+            }
+          },
+          {
+            "kind": "user",
+            "disabled": null,
+            "flags": {
+              "features.memories": true,
+              "memories.generate_memories": true,
+              "memories.use_memories": true
+            }
+          },
+          {
+            "kind": "system",
+            "disabled": null,
+            "flags": {
+              "features.memories": null,
+              "memories.generate_memories": null,
+              "memories.use_memories": null
+            }
+          }
+        ],
+        "startStatus": "completed",
+        "resumeStatus": "completed",
+        "sameThread": true,
+        "first": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "cold": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "inputEligibility": [
+          {
+            "memory_mode": "disabled"
+          }
+        ],
+        "threadOverrideControl": {
+          "status": "completed",
+          "requests": [
+            {
+              "path": "/v1/responses",
+              "memory": true,
+              "rule": true,
+              "history": false,
+              "updatedMemory": true,
+              "generationGuide": {
+                "When to save memories": false,
+                "When to save memory": false,
+                "How to save memories": false,
+                "auto memory": false
+              },
+              "memoryInSystem": false,
+              "saveGuideInSystem": false,
+              "maxTokens": null,
+              "mcpOffered": false
+            }
+          ],
+          "configRead": {
+            "features.memories": false,
+            "memories.generate_memories": false,
+            "memories.use_memories": false
+          }
+        },
+        "configUnchanged": true
+      },
+      {
+        "runtime": "claude",
+        "disabled": false,
+        "first": {
+          "exitCode": 0,
+          "error": false,
+          "sameSession": true,
+          "subtype": "success",
+          "requests": [
+            {
+              "path": "/v1/messages?beta=true",
+              "memory": true,
+              "rule": true,
+              "history": true,
+              "updatedMemory": false,
+              "generationGuide": {
+                "When to save memories": false,
+                "When to save memory": false,
+                "How to save memories": true,
+                "auto memory": true
+              },
+              "memoryInSystem": false,
+              "saveGuideInSystem": true,
+              "maxTokens": 3333,
+              "mcpOffered": false
+            }
+          ]
+        },
+        "cold": {
+          "exitCode": 0,
+          "error": false,
+          "sameSession": true,
+          "subtype": "success",
+          "requests": [
+            {
+              "path": "/v1/messages?beta=true",
+              "memory": true,
+              "rule": true,
+              "history": true,
+              "updatedMemory": true,
+              "generationGuide": {
+                "When to save memories": false,
+                "When to save memory": false,
+                "How to save memories": true,
+                "auto memory": true
+              },
+              "memoryInSystem": false,
+              "saveGuideInSystem": true,
+              "maxTokens": 3333,
+              "mcpOffered": false
+            }
+          ]
+        },
+        "configUnchanged": true
+      },
+      {
+        "runtime": "claude",
+        "disabled": true,
+        "first": {
+          "exitCode": 0,
+          "error": false,
+          "sameSession": true,
+          "subtype": "success",
+          "requests": [
+            {
+              "path": "/v1/messages?beta=true",
+              "memory": false,
+              "rule": true,
+              "history": true,
+              "updatedMemory": false,
+              "generationGuide": {
+                "When to save memories": false,
+                "When to save memory": false,
+                "How to save memories": false,
+                "auto memory": false
+              },
+              "memoryInSystem": false,
+              "saveGuideInSystem": false,
+              "maxTokens": 3333,
+              "mcpOffered": false
+            }
+          ]
+        },
+        "cold": {
+          "exitCode": 0,
+          "error": false,
+          "sameSession": true,
+          "subtype": "success",
+          "requests": [
+            {
+              "path": "/v1/messages?beta=true",
+              "memory": false,
+              "rule": true,
+              "history": true,
+              "updatedMemory": false,
+              "generationGuide": {
+                "When to save memories": false,
+                "When to save memory": false,
+                "How to save memories": false,
+                "auto memory": false
+              },
+              "memoryInSystem": false,
+              "saveGuideInSystem": false,
+              "maxTokens": 3333,
+              "mcpOffered": false
+            }
+          ]
+        },
+        "configUnchanged": true
+      }
+    ]
+  },
+  "managed": {
+    "metadata": {
+      "platform": "macOS-26.6-arm64-arm-64bit",
+      "modelProvider": "loopback scripted fixture",
+      "runtimes": {
+        "codex": {
+          "version": "codex-cli 0.159.2",
+          "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
+        },
+        "claude": {
+          "version": "2.1.280 (Claude Code)",
+          "sha256": "387a5c5dcdbb815085edf0baf79591f9d8894efe922bceaf3d75b1b08055229d"
+        }
+      },
+      "policyImplementationCommit": "3207f67ec641fb20e433673cd14d8a55ece26dbe",
+      "coreBinarySha256": "f57f2183dad78395da37a210cfdb0bbcd8ab7c8f09ab1daac9b2bff1b503afde"
+    },
+    "results": [
+      {
+        "kind": "codex-cli",
+        "withMcp": false,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "01a12489-69f9-7d03-9782-4cd75c86a966",
+          "1ec98926-137d-4984-bacd-44fa99789909",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "6572f81d-c9ed-4b65-9bfe-b6fbfe1b8ef8"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": false,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "01a12489-69f9-7d03-9782-4cd75c86a966",
+          "1ec98926-137d-4984-bacd-44fa99789909",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "6572f81d-c9ed-4b65-9bfe-b6fbfe1b8ef8"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": false,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "01a12489-69f9-7d03-9782-4cd75c86a966",
+          "1ec98926-137d-4984-bacd-44fa99789909",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "a33af31b-5921-40b6-bdc1-5d1195453316"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": true,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "01a12489-a275-7511-a9f3-f686e2e3a7ac",
+          "6cf4381e-e211-41a2-a3ea-7b841df06f87",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 1,
+        "hostIds": [
+          "2666aca7-45e7-4a57-8ae6-5b52750be119"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": true,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "01a12489-a275-7511-a9f3-f686e2e3a7ac",
+          "6cf4381e-e211-41a2-a3ea-7b841df06f87",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 2,
+        "hostIds": [
+          "2666aca7-45e7-4a57-8ae6-5b52750be119"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": true,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "01a12489-a275-7511-a9f3-f686e2e3a7ac",
+          "6cf4381e-e211-41a2-a3ea-7b841df06f87",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": null,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 3,
+        "hostIds": [
+          "23b2a0e4-4ef7-48c8-ba92-ead7debe1a75"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": false,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "b9682be0-2dd9-416a-b4fe-eff3ab2cad16",
+          "5cf3c143-d090-4690-a5b9-c186bc0b6e99",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "claude-code-process:e9054069-5c91-46d2-b48c-dcd785b2fa81:1"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": false,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "b9682be0-2dd9-416a-b4fe-eff3ab2cad16",
+          "5cf3c143-d090-4690-a5b9-c186bc0b6e99",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "claude-code-process:a9072ffb-e6d6-49d4-b6cc-eaf021f47afe:1"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": false,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "b9682be0-2dd9-416a-b4fe-eff3ab2cad16",
+          "5cf3c143-d090-4690-a5b9-c186bc0b6e99",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "claude-code-process:fbd39eb8-5687-4726-9501-263e906f9bbd:1"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": true,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "a2111edc-f4e4-4241-b7e9-a0e901667f11",
+          "9c5c6e1c-1412-4195-938f-1d958f5cad8e",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 1,
+        "hostIds": [
+          "claude-code-process:51d2aaa2-6ad7-462f-b147-3fe79c25ba37:1"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": true,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "a2111edc-f4e4-4241-b7e9-a0e901667f11",
+          "9c5c6e1c-1412-4195-938f-1d958f5cad8e",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 2,
+        "hostIds": [
+          "claude-code-process:7c8f3352-6cf6-4535-8410-ce63dab9df16:1"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": true,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "a2111edc-f4e4-4241-b7e9-a0e901667f11",
+          "9c5c6e1c-1412-4195-938f-1d958f5cad8e",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": false,
+            "rule": true,
+            "history": true,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "maxTokens": 32000,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 3,
+        "hostIds": [
+          "claude-code-process:a13a3a2b-58e9-453d-bb97-c9eccb254262:1"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      }
+    ],
+    "postRunNativeThreadStates": [
+      {
+        "nativeId": "01a12489-69f9-7d03-9782-4cd75c86a966",
+        "withMcp": false,
+        "memory_mode": "disabled"
+      },
+      {
+        "nativeId": "01a12489-a275-7511-a9f3-f686e2e3a7ac",
+        "withMcp": true,
+        "memory_mode": "disabled"
+      }
+    ]
+  },
+  "upgrade": {
+    "metadata": {
+      "platform": "macOS-26.6-arm64-arm-64bit",
+      "modelProvider": "loopback scripted fixture",
+      "runtimes": {
+        "codex": {
+          "version": "codex-cli 0.159.2",
+          "sha256": "16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
+        },
+        "claude": {
+          "version": "2.1.280 (Claude Code)",
+          "sha256": "387a5c5dcdbb815085edf0baf79591f9d8894efe922bceaf3d75b1b08055229d"
+        }
+      },
+      "policyImplementationCommit": "3207f67ec641fb20e433673cd14d8a55ece26dbe",
+      "coreBinarySha256": "f57f2183dad78395da37a210cfdb0bbcd8ab7c8f09ab1daac9b2bff1b503afde",
+      "baselineCommit": "d1dd5cce299b6896b6ea88495aa06d02f6ea91d6",
+      "baselineCoreBinarySha256": "12b4dce4b4eb3b5e3ace3de545f1eace1f2658cbc6ac57d0692d90039fe24aee",
+      "phaseBinaries": {
+        "first": "baseline",
+        "warm": "baseline",
+        "cold": "core"
+      }
+    },
+    "results": [
+      {
+        "kind": "codex-cli",
+        "withMcp": false,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "01a12490-8b75-7711-8eee-0b5e23a51786",
+          "a30befb2-166a-4468-8107-e9625ea602bf",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": false,
+            "history": false,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "9225049c-ce16-4c31-b8bc-85805377e8f3"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": false,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "01a12490-8b75-7711-8eee-0b5e23a51786",
+          "a30befb2-166a-4468-8107-e9625ea602bf",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "9225049c-ce16-4c31-b8bc-85805377e8f3"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": false,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "01a12490-8b75-7711-8eee-0b5e23a51786",
+          "a30befb2-166a-4468-8107-e9625ea602bf",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "20f4256e-bfc9-4d4c-96fd-f00fe16f92e8"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": true,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "01a12490-b836-7e82-b033-ee9af86319a6",
+          "5bc159b4-2459-4f32-a7b8-2c22a1fb661c",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": false,
+            "rule": false,
+            "history": false,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 1,
+        "hostIds": [
+          "d89eb23a-e3cf-4ef9-b92d-fc463e890be5"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": true,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "01a12490-b836-7e82-b033-ee9af86319a6",
+          "5bc159b4-2459-4f32-a7b8-2c22a1fb661c",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 2,
+        "hostIds": [
+          "d89eb23a-e3cf-4ef9-b92d-fc463e890be5"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "codex-cli",
+        "withMcp": true,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "01a12490-b836-7e82-b033-ee9af86319a6",
+          "5bc159b4-2459-4f32-a7b8-2c22a1fb661c",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/responses",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": false,
+              "auto memory": false
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": false,
+            "maxTokens": null,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 3,
+        "hostIds": [
+          "e817fc2d-87b2-486e-afbc-58148dc05906"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": false,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "9f14f715-d9b7-47b4-9566-3294cf5ffcde",
+          "87d63530-cd23-436f-b5f7-fd80e9a1eab6",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "claude-code-process:ef5d8f0f-c9f4-4dd9-a639-d37b3fe8b5ec:1"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": false,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "9f14f715-d9b7-47b4-9566-3294cf5ffcde",
+          "87d63530-cd23-436f-b5f7-fd80e9a1eab6",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "claude-code-process:4f3ff5bd-5d83-4c73-a32f-6cb854bfbed4:1"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": false,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "9f14f715-d9b7-47b4-9566-3294cf5ffcde",
+          "87d63530-cd23-436f-b5f7-fd80e9a1eab6",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": false
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": false
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 0,
+        "hostIds": [
+          "claude-code-process:ded0ad14-c558-479f-a865-87e26332069e:1"
+        ],
+        "mcpStatuses": []
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": true,
+        "phase": "first",
+        "status": "succeeded",
+        "binding": [
+          "a73230f4-a109-46e0-a342-8919dcd95fda",
+          "7d30956b-0088-4e60-bd42-9c661840a654",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 1,
+        "hostIds": [
+          "claude-code-process:a3c47354-403a-4631-8cdf-b448e30a318d:1"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": true,
+        "phase": "warm",
+        "status": "succeeded",
+        "binding": [
+          "a73230f4-a109-46e0-a342-8919dcd95fda",
+          "7d30956b-0088-4e60-bd42-9c661840a654",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 2,
+        "hostIds": [
+          "claude-code-process:6f202bf6-035f-4fdd-b3e1-12c664d33517:1"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      },
+      {
+        "kind": "claude-code-cli",
+        "withMcp": true,
+        "phase": "cold",
+        "status": "succeeded",
+        "binding": [
+          "a73230f4-a109-46e0-a342-8919dcd95fda",
+          "7d30956b-0088-4e60-bd42-9c661840a654",
+          1
+        ],
+        "sameBinding": true,
+        "requests": [
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          },
+          {
+            "path": "/v1/messages?beta=true",
+            "memory": true,
+            "rule": true,
+            "history": true,
+            "updatedMemory": false,
+            "generationGuide": {
+              "When to save memories": false,
+              "When to save memory": false,
+              "How to save memories": true,
+              "auto memory": true
+            },
+            "memoryInSystem": false,
+            "saveGuideInSystem": true,
+            "maxTokens": 32000,
+            "mcpOffered": true
+          }
+        ],
+        "toolReceipts": [
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          },
+          {
+            "writeEffective": true,
+            "readContainsBody": true,
+            "searchFound": true,
+            "sendCommitted": true
+          }
+        ],
+        "mcpCalls": 3,
+        "hostIds": [
+          "claude-code-process:03ad6543-f891-4070-8fbb-3061acc454c7:1"
+        ],
+        "mcpStatuses": [
+          "ready"
+        ]
+      }
+    ],
+    "postRunNativeThreadStates": [
+      {
+        "nativeId": "01a12490-8b75-7711-8eee-0b5e23a51786",
+        "withMcp": false,
+        "memory_mode": "enabled"
+      },
+      {
+        "nativeId": "01a12490-b836-7e82-b033-ee9af86319a6",
+        "withMcp": true,
+        "memory_mode": "enabled"
+      }
+    ]
+  }
+}

@@ -22,6 +22,30 @@ V1 移除 Rovai 强加的 `--pure`，恢复现有压缩监听及原生用户插�
 V1 初始化单独保留 90 秒窗口，容纳原生冷启动依赖锁的 60 秒过期；不删除用户锁或重发任务。
 不增加版本资格门禁或安装管理，不变更数据库 schema、版本指针或模型上下文格式。
 
+## Kimi 使用官方 Provider 配置（2026-10-10）
+
+按 User 要求退役 Rovai 专属 `kimi-code.env`、`ROVAI_KIMI_CONFIG` 与模型变量注入。
+正式运行、健康检查和模型目录探测由 Kimi 读取官方配置；旧文件不再影响启动或 Host 复用，
+不自动迁移、覆盖配置或删除历史。当前合同为 [Runtime Launch v56](../../contracts/runtime-launch-and-verification-v56.md)，
+理由见 [V1.72-D32](decisions.md#v1-72-d32)，验证记录见[实施计划](implementation-plan.md#2026-10-10-kimi-官方-provider-配置)。
+
+## Claude Code / Codex 原生自动记忆（2026-10-10）
+
+受管执行固定关闭 Runtime 原生自动记忆，保留 Rovai Memory、项目规则、原生持久化与原 ID Resume。
+Claude 继续使用既有私有 settings 文件与子进程 env 双重覆盖，Fast 三态和 Bootstrap 不变；Codex 在 App-Server
+启动时传入三个配置覆盖，仅修订 Host 进程兼容摘要，不使 Native Binding 换代。不修改用户原生配置或已有记忆，
+不控制外部 Runtime，不热替换正在运行的旧 Core/Run，不新增检测门禁。
+当前边界见[受管原生自动记忆](../../architecture/runtime-catalog-boundaries.md#受管执行的原生自动记忆)，
+实测版本、测试与限制见[验收记录](../../research/native-auto-memory/verification-2026-10-10.md)。
+
+## Pi 思考强度与目录观察（2026-10-10）
+
+按 User 批复收紧为目录准入/提交/读取解耦、同模型续接避免重复选模、目录观察非破坏性使用。
+复用表、Check Manager、临时探测 Host、整目录缓存和任务租约，不新增缓存、Provider 健康或默认值管理系统。
+能力由 Core 解析为 thinking_level，既有控件与 Run 冻结历史消费；保存不依赖目录健康。
+当前字段和执行顺序见 [Runtime Launch v55](../../contracts/runtime-launch-and-verification-v55.md)，
+验证与边界见[实施计划](implementation-plan.md#2026-10-10-pi-目录观察与思考强度)。
+
 ## Cline / Command Code 保留 ACP，暂缓公开（2026-10-09，User 105）
 
 停止 headless 候选并删除专属 Rust transport/activity、测试和 Python 探针；原始报告与脱敏证据保留，

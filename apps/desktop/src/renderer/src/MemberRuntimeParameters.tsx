@@ -33,7 +33,7 @@ type RuntimeParameterProps = {
 }
 
 type ModelFieldsProps = RuntimeParameterProps & {
-  optionKey?: 'reasoning_effort' | 'effort'
+  optionKey?: 'reasoning_effort' | 'effort' | 'thinking_level'
   optionLabel?: string
 }
 
@@ -420,8 +420,9 @@ function modelFieldsFor(
     case 'qwen-code':
     case 'deepseek-harness':
       return <ModelFields {...props} optionKey="reasoning_effort" optionLabel={uiAttribute("推理强度")} />
-    case 'kiro-cli':
     case 'pi':
+      return <ModelFields {...props} optionKey="thinking_level" optionLabel={uiAttribute('思考强度')} />
+    case 'kiro-cli':
     case 'trae-cn-cli':
     case 'cursor-agent':
     case 'kimi-code-cli':
@@ -455,7 +456,11 @@ function ModelFields({
     ? initialModels.find((model) => model.id === explicit.modelId) ?? null
     : null
   const isDsh = adapterKind === 'deepseek-harness'
-  const optionsKnown = !isDsh || dshModelOptionsResolved(selectedModel, explicit?.dshSource)
+  const isPi = adapterKind === 'pi'
+  const optionsKnown = isPi
+    ? selectedModel?.runtimeMetadata?.piThinkingSchemaVersion === 1
+      && selectedModel.runtimeMetadata.piThinkingState === 'known'
+    : !isDsh || dshModelOptionsResolved(selectedModel, explicit?.dshSource)
   const option = optionKey && selectedModel
     ? selectedModel.options.find((candidate) => candidate.key === optionKey) ?? null
     : null
@@ -573,6 +578,9 @@ function ModelFields({
   const optionInvalid = optionValue
     ? !option?.values.some((candidate) => candidate.value === optionValue)
     : false
+  const showOption = isPi
+    ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
+    : isDsh ? !optionsKnown || option || optionValue : option || optionValue
 
   return (
     <>
@@ -587,7 +595,7 @@ function ModelFields({
         onCatalogChange={updateCatalog}
       />
 
-      {explicit && optionKey && (isDsh ? !optionsKnown || option || optionValue : option || optionValue) && (
+      {explicit && optionKey && showOption && (
         <RuntimeParameterSelect
           label={optionLabel ?? option?.label ?? optionKey}
           value={optionValue}
@@ -595,7 +603,8 @@ function ModelFields({
           onChange={setOption}
           loadingLabel={isDsh && pageActive && !disabled && readStatus === 'loading' && optionLoadingKey === targetKey
             ? uiAttribute('正在读取可选思考强度，当前选择仍可保存') : undefined}
-          defaultChoice={{ value: '', label: isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
+          defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
+            : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
           choices={[
             ...(optionInvalid ? [{ value: optionValue, label: optionsKnown
               ? uiAttribute("当前目录未提供 · {0}", String(optionValue))
@@ -700,7 +709,7 @@ function RuntimeModelPicker({
     }
     const model = models.find((candidate) => candidate.id === value)
     if (model) onChange({ ...draft, model: explicitSelection(model, draft.model,
-      canFilterOptions && adapterKind !== 'deepseek-harness') })
+      canFilterOptions && adapterKind !== 'deepseek-harness' && adapterKind !== 'pi') })
   }
 
   const statusCopy = modelCatalogStatusCopy(cache, {
@@ -753,8 +762,14 @@ function modelCatalogIsServiceable(cache: RuntimeModelCatalogCache): boolean {
 }
 
 function catalogInstallationIdentity(installation: AdapterInstallation): string {
-  return [installation.id, installation.generation, installation.snapshot?.executableFingerprint,
+  const healthIdentity = [installation.id, installation.generation, installation.snapshot?.executableFingerprint,
     installation.snapshot?.staleAt].join(':')
+  if (installation.adapterKind !== 'pi') return healthIdentity
+  // Pi's catalog can be invalidated independently of the shared health fields.
+  // A prior local response must not outlive Core's new ownership projection.
+  const catalogIdentity = installation.snapshot?.models.find(model => model.id === 'pi://runtime-default')
+    ?.runtimeMetadata?.piCatalogIdentity
+  return JSON.stringify([healthIdentity, installation.modelCatalog.status === 'invalidated', catalogIdentity])
 }
 
 // Display policy only. Never use this to approve a new saved model selection.
@@ -762,7 +777,7 @@ export function displayableInstallationModels(installation: AdapterInstallation)
   const cache = installation.modelCatalog
   const snapshot = installation.snapshot
   const sameEnvironmentHistory = cache.status === 'expired'
-    && snapshot?.probeStatus === 'ready' && !snapshot.staleAt
+    && (installation.adapterKind === 'pi' || (snapshot?.probeStatus === 'ready' && !snapshot.staleAt))
   return modelCatalogIsServiceable(cache) || sameEnvironmentHistory
     ? selectableModels(snapshot?.models ?? []) : []
 }
@@ -794,6 +809,7 @@ export function modelCatalogCanValidateOptions(
 }
 
 function latestCatalogRefreshFailed(installation: AdapterInstallation, cache: RuntimeModelCatalogCache): boolean {
+  if (installation.adapterKind === 'pi') return false
   const attempt = installation.lastProbeAttempt
   if (attempt?.status !== 'failed') return false
   const observedAt = cache.observedAt

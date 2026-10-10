@@ -631,6 +631,14 @@ fn runtime_model_catalog_cache_view_at(
             expires_at: None,
         };
     }
+    catalog_observation_cache_view(catalog_succeeded_at, retained_lkg, now)
+}
+
+fn catalog_observation_cache_view(
+    catalog_succeeded_at: Option<&str>,
+    needs_revalidation: bool,
+    now: chrono::DateTime<chrono::Utc>,
+) -> RuntimeModelCatalogCacheView {
     let observed_at = catalog_succeeded_at.map(str::to_owned);
     let Some(observed_at_value) = observed_at.as_deref() else {
         return RuntimeModelCatalogCacheView {
@@ -656,7 +664,7 @@ fn runtime_model_catalog_cache_view_at(
         observed_at_time + chrono::Duration::seconds(MODEL_CATALOG_MAX_SERVICE_AGE_SECONDS);
     let status = if now >= expires_at {
         RuntimeModelCatalogCacheStatus::Expired
-    } else if retained_lkg || now >= revalidate_after {
+    } else if needs_revalidation || now >= revalidate_after {
         RuntimeModelCatalogCacheStatus::Stale
     } else {
         RuntimeModelCatalogCacheStatus::Fresh
@@ -737,9 +745,13 @@ impl AdapterInstallationView {
         self.model_catalog.is_serviceable()
             || (self.model_catalog.status == RuntimeModelCatalogCacheStatus::Expired
                 && self.snapshot.as_ref().is_some_and(|snapshot| {
-                    snapshot.probe_status == "ready"
-                        && snapshot.stale_at.is_none()
-                        && model_catalog_has_native_evidence(self.adapter_kind, &snapshot.models)
+                    self.adapter_kind == AdapterKind::Pi
+                        || (snapshot.probe_status == "ready"
+                            && snapshot.stale_at.is_none()
+                            && model_catalog_has_native_evidence(
+                                self.adapter_kind,
+                                &snapshot.models,
+                            ))
                 }))
     }
 }
@@ -1052,6 +1064,12 @@ pub struct VerifiedDiscoveredRuntimeEntry {
     identity: ExecutableFileIdentity,
 }
 
+impl VerifiedDiscoveredRuntimeEntry {
+    pub fn executable_file_identity(&self) -> &ExecutableFileIdentity {
+        &self.identity
+    }
+}
+
 impl DiscoveredRuntimeEntry {
     /// Reads the executable and entrypoint dependencies. Async callers must run
     /// this in a blocking worker before acquiring the database lock.
@@ -1313,7 +1331,11 @@ impl AgentProfileService {
                        attempt.diagnostic_code, attempt.candidate_path,
                        attempt.executable_fingerprint, attempt.attempted_at,
                        attempt.retry_after, attempt.public_runtime_failure_json,
-                       COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at)
+                       COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at),
+                       (SELECT executable_fingerprint FROM runtime_executable_identity
+                        WHERE installation_id = installation.id
+                          AND executable_path = installation.executable_path),
+                       (SELECT generation FROM runtime_search_environment_state WHERE singleton = 1)
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
@@ -1906,6 +1928,67 @@ impl AgentProfileService {
                 snapshot.executable_fingerprint, snapshot.permission_schema_digest,
                 snapshot.last_successful_probe_at, expected.generation, expected.executable_path,
                 expected.auth_scope, expected.adapter_kind.as_str()],
+        )? != 0;
+        transaction.commit()?;
+        Ok(updated)
+    }
+
+    /// Pi catalogs carry their own identity in the existing sentinel's metadata.
+    /// The row may exist solely as catalog storage; no health evidence is invented
+    /// and an existing health failure or invalidation is never cleared here.
+    pub fn commit_pi_model_catalog(
+        &self,
+        database: &mut Database,
+        expected: &AdapterInstallationView,
+        fingerprint: &str,
+        search_generation: u64,
+        models: &[ModelDescriptor],
+        observed_at: &str,
+    ) -> Result<bool> {
+        anyhow::ensure!(
+            expected.adapter_kind == AdapterKind::Pi,
+            "expected Pi installation"
+        );
+        let search_generation = i64::try_from(search_generation)
+            .context("Runtime Search Environment generation overflow")?;
+        let mut models = models.to_vec();
+        let sentinel = models
+            .iter_mut()
+            .find(|model| model.id == PI_RUNTIME_DEFAULT_MODEL_ID)
+            .context("Pi catalog has no native default entry")?;
+        sentinel.runtime_metadata = Some(json!({"piCatalogIdentity": {
+            "installationGeneration": expected.generation,
+            "executableFingerprint": fingerprint,
+            "searchGeneration": search_generation,
+        }}));
+        let transaction = database.connection_mut().transaction()?;
+        let updated = transaction.execute(
+            "INSERT INTO adapter_capability_snapshot(
+                installation_id, authentication_status, probe_status, last_attempted_at,
+                model_catalog_json, model_catalog_succeeded_at)
+             SELECT installation.id, 'unknown', 'installed_unverified', ?2, ?3, ?2
+             FROM adapter_installation installation
+             JOIN runtime_executable_identity identity ON identity.installation_id = installation.id
+             WHERE installation.id = ?1 AND installation.adapter_kind = 'pi'
+               AND installation.generation = ?4 AND installation.executable_path = ?5
+               AND installation.enabled = 1 AND installation.path_state = 'valid'
+               AND installation.auth_scope = ?6
+               AND identity.executable_path = ?5 AND identity.executable_fingerprint = ?7
+               AND EXISTS(SELECT 1 FROM runtime_search_environment_state
+                          WHERE singleton = 1 AND generation = ?8)
+             ON CONFLICT(installation_id) DO UPDATE SET
+                model_catalog_json = excluded.model_catalog_json,
+                model_catalog_succeeded_at = excluded.model_catalog_succeeded_at",
+            params![
+                expected.id,
+                observed_at,
+                serde_json::to_string(&models)?,
+                expected.generation,
+                expected.executable_path,
+                expected.auth_scope,
+                fingerprint,
+                search_generation
+            ],
         )? != 0;
         transaction.commit()?;
         Ok(updated)
@@ -2707,7 +2790,10 @@ impl AgentProfileService {
             // Saving configuration records exact user intent. Dynamic catalog validation
             // belongs to the real Host, including when an old diagnostic failed.
             if let ModelSelection::Explicit { model_id, options, .. } = &binding.model
-                && (model_id.trim().is_empty() || !options.is_object())
+                && (model_id.trim().is_empty() || !options.is_object()
+                    || (binding.adapter_kind == AdapterKind::Pi && options.as_object().is_some_and(|options| {
+                        options.iter().any(|(key, value)| key != "thinking_level" || !value.is_string())
+                    })))
             {
                 return Ok(CommandHandlerResult::rejected(
                     "runtime_model_options_invalid",
@@ -3716,12 +3802,58 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
         None
     };
     let catalog_succeeded_at = row.get::<_, Option<String>>(39)?;
-    let model_catalog = runtime_model_catalog_cache_view_at(
+    let mut model_catalog = runtime_model_catalog_cache_view_at(
         adapter_kind,
         snapshot.as_ref(),
         catalog_succeeded_at.as_deref(),
         chrono::Utc::now(),
     );
+    if adapter_kind == AdapterKind::Pi {
+        let identity = snapshot
+            .as_ref()
+            .and_then(|snapshot| {
+                snapshot
+                    .models
+                    .iter()
+                    .find(|model| model.id == PI_RUNTIME_DEFAULT_MODEL_ID)
+            })
+            .and_then(|model| model.runtime_metadata.as_ref())
+            .and_then(|metadata| metadata.get("piCatalogIdentity"));
+        if let Some(identity) = identity {
+            let fingerprint: Option<String> = row.get(40)?;
+            let current = row.get::<_, bool>(7)?
+                && row.get::<_, String>(9)? == "valid"
+                && identity["installationGeneration"].as_i64() == Some(row.get(8)?)
+                && identity["searchGeneration"].as_i64() == Some(row.get(41)?)
+                && fingerprint.is_some()
+                && identity["executableFingerprint"].as_str() == fingerprint.as_deref();
+            model_catalog = catalog_observation_cache_view(
+                catalog_succeeded_at.as_deref(),
+                snapshot.as_ref().is_some_and(|snapshot| {
+                    snapshot.models.iter().any(|model| {
+                        model.id != PI_RUNTIME_DEFAULT_MODEL_ID
+                            && model.runtime_metadata.as_ref().is_none_or(|metadata| {
+                                metadata["piThinkingSchemaVersion"] != 1
+                                    || !matches!(
+                                        metadata["piThinkingState"].as_str(),
+                                        Some("known" | "unknown")
+                                    )
+                            })
+                    })
+                }),
+                chrono::Utc::now(),
+            );
+            if !current {
+                model_catalog.status = RuntimeModelCatalogCacheStatus::Invalidated;
+                model_catalog.revalidate_after = None;
+                model_catalog.expires_at = None;
+            }
+        } else if model_catalog.status == RuntimeModelCatalogCacheStatus::Fresh {
+            // Legacy/full-check observations have no independent ownership. Keep
+            // their existing visibility but request one catalog-only observation.
+            model_catalog.status = RuntimeModelCatalogCacheStatus::Stale;
+        }
+    }
     Ok(AdapterInstallationView {
         id: row.get(0)?,
         adapter_kind,
@@ -7520,7 +7652,11 @@ mod slow_tests {
             let selected = ModelSelection::Explicit {
                 dsh_source: None,
                 model_id: "saved-model".to_string(),
-                options: json!({"native-option":"saved-value"}),
+                options: if kind == AdapterKind::Pi {
+                    json!({"thinking_level":"future-native-level"})
+                } else {
+                    json!({"native-option":"saved-value"})
+                },
             };
             let configured = service
                 .set_runtime(
@@ -7538,6 +7674,47 @@ mod slow_tests {
                 )
                 .unwrap();
             assert_eq!(configured.result.status, CommandResultStatus::Applied);
+            if kind == AdapterKind::Pi {
+                // Schema validation is local even without any health/catalog
+                // evidence; unknown string enums survive save and freeze below.
+                for options in [
+                    json!({"thinking_level":7}),
+                    json!({"reasoning_effort":"high"}),
+                    json!([]),
+                ] {
+                    let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+                    let result = service
+                        .set_runtime(
+                            &mut database,
+                            &user_command(
+                                &uuid::Uuid::new_v4().to_string(),
+                                SetMemberRuntimeConfigurationCommand {
+                                    agent_id: profile.agent_id,
+                                    expected_version: profile.version,
+                                    adapter_kind: kind,
+                                    model: ModelSelection::Explicit {
+                                        model_id: "saved-model".into(),
+                                        dsh_source: None,
+                                        options,
+                                    },
+                                    permissions: defaults.permissions.clone(),
+                                },
+                            ),
+                        )
+                        .unwrap();
+                    assert_eq!(result.result.code, "runtime_model_options_invalid");
+                }
+                assert_eq!(
+                    service
+                        .get_profile(&database, "agent_1")
+                        .unwrap()
+                        .unwrap()
+                        .runtime_configuration
+                        .unwrap()
+                        .model,
+                    selected
+                );
+            }
             if kind == AdapterKind::DeepseekHarness {
                 // Reuse the existing no-health database fixture: provenance is
                 // saved intent, independent of a current successful catalog.
@@ -7654,7 +7831,14 @@ mod slow_tests {
             assert!(frozen.reported_version.is_none());
             assert!(frozen.capabilities.is_empty());
             assert_eq!(frozen.model.model_id, "saved-model");
-            assert_eq!(frozen.model.options, json!({"native-option":"saved-value"}));
+            assert_eq!(
+                frozen.model.options,
+                if kind == AdapterKind::Pi {
+                    json!({"thinking_level":"future-native-level"})
+                } else {
+                    json!({"native-option":"saved-value"})
+                }
+            );
             assert!(
                 service
                     .runtime_dispatch_blocker(&database, &frozen)

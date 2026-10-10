@@ -85,6 +85,19 @@ module.exports = async ({ window, userData, waitFor, click, wheel, settle }) => 
     }
     await replaceDescription('@')
     await assertMenu(scenario.name)
+    if (scenario.name === 'create-minimum-day' || scenario.name === 'edit-day') {
+      const before = await evaluate(`document.querySelector('${editor}').textContent`)
+      assert.equal(await evaluate(`document.querySelector('${menu}').innerText.includes('使命模型显示名')`), false)
+      const icon = '.mention-runtime-trigger'
+      assert(await evaluate(`(() => { const button=document.querySelector('${icon}'), r=button.getBoundingClientRect(); return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)); })()`), 'Agent icon is obscured')
+      await click(icon)
+      await waitFor("!!document.querySelector('.mention-runtime-popover')", 'Agent details did not open')
+      assert.equal(await evaluate("document.querySelector('.mention-runtime-popover dd').textContent"), '使命模型显示名', 'Mission did not use the cached model label')
+      assert.equal(await evaluate(`document.querySelector('${editor}').textContent`), before, 'Opening details changed the description')
+      await click('.mention-runtime-heading button')
+      await waitFor(`!document.querySelector('.mention-runtime-popover') && document.activeElement?.matches('${editor}')`, 'Closing details did not restore the description caret')
+      await assertMenu(`${scenario.name}-details-closed`)
+    }
     if (scenario.name === 'create-minimum-day') {
       window.setContentSize(1040, 780)
       await waitFor('innerHeight === 780', 'Open menu did not resize with the window')

@@ -73,6 +73,8 @@ fn project_model(
     };
     let effort_key = if adapter_kind == "claude-code-cli" {
         "effort"
+    } else if adapter_kind == "pi" {
+        "thinking_level"
     } else {
         "reasoning_effort"
     };
@@ -99,6 +101,13 @@ mod tests {
     #[test]
     fn model_metadata_uses_frozen_options_and_default_only_observation() {
         for (adapter, selection, observed, model, effort) in [
+            (
+                "pi",
+                json!({"source":"explicit","modelId":"pi://model?provider=test&id=model","options":{"thinking_level":"max","reasoning_effort":"wrong-option"}}),
+                None,
+                Some("pi://model?provider=test&id=model"),
+                Some("max"),
+            ),
             (
                 "codex-cli",
                 json!({"source":"explicit","modelId":"old-model","options":{"reasoning_effort":"high","api_key":"never-project"}}),

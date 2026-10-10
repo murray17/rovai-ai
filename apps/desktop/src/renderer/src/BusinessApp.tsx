@@ -4336,7 +4336,7 @@ export function BusinessApp({
     <MobileLayoutProvider value={mobile}>
     <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
-    <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
+    <MissionInteractionProvider missions={missionList.missions} projects={displayNavigation?.projects ?? []} agents={agents} installations={installations} onChanged={refreshMission} onWorkspaceCleaned={refreshMissionAfterWorkspaceCleanup} onDeleted={onMissionDeleted} onOpen={mission => { void openMission(mission).catch(error => notifyError(missionError(error))) }} onError={notifyError}>
     <NavigationShell platform={client.platform} settings={view === 'settings'} navigation={desktopNavigation} nativeWindowControls={desktop?.windowControls} browser={!desktop} disabled={startupStatus !== 'resolved' || shuttingDown} className={view === 'camp' && !missionDrawer ? 'app-shell-camp' : ''} data-mobile-view={mobile ? view : undefined} data-mobile-settings-list={mobile && view === 'settings' && mobileSettingsList || undefined}>
       {!mobile && renderNavigation()}
       {!startupGateVisible && mobile && ['compose', 'members', 'memory', 'automations'].includes(view) && <MobilePageHeader
@@ -4639,7 +4639,7 @@ export function BusinessApp({
       <NewConversationDialog purpose="mission" open={newMissionOpen} recovery={missionCreation.current?.command ?? null} recoveryAttachments={missionCreation.current?.attachments ?? []}
         initialWorkspace={currentProjectWorkspace(displayNavigation, currentProject)}
         initialSelection={generalPreferences?.newConversationDefaults ?? null}
-        projects={displayNavigation?.projects ?? []} missionTagCatalog={[...new Set(missionList.missions.flatMap(mission => mission.tags))]} preflight={campCreationPreflight} agents={agents}
+        projects={displayNavigation?.projects ?? []} missionTagCatalog={[...new Set(missionList.missions.flatMap(mission => mission.tags))]} preflight={campCreationPreflight} agents={agents} installations={installations}
         busy={busy === 'create-mission'} projectAccessReady={removedProjectAuthorityReady}
         onOpenChange={open => { if (!busy) setNewMissionOpen(open) }}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory} onWorkspaceSelected={workspace => restoreNavigationProject(workspace.projectPath)}

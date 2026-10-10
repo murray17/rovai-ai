@@ -34,6 +34,11 @@ describe('runtime model catalog source', () => {
     installation.modelCatalog.status = 'expired'
     installation.snapshot!.probeStatus = 'light_ready'
     expect(displayableInstallationModels(installation)).toEqual([])
+    installation.adapterKind = 'pi'
+    installation.snapshot!.staleAt = 'old-health-invalidation'
+    expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
+    installation.modelCatalog.status = 'invalidated'
+    expect(displayableInstallationModels(installation)).toEqual([])
   })
   const installation = runtimeInstallation('copilot-cli')
   const cached: RuntimeModelCatalogView = {
@@ -352,6 +357,26 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('<span>模型</span>')
     expect(markup).not.toContain('审批模式')
     expect(markup).not.toContain('partial_managed')
+    for (const [state, values, value, expected] of [
+      ['known', ['off', 'high'], '', '跟随 Pi 原生设置'],
+      ['known', ['off'], '', null],
+      ['known', [], '', null],
+      ['unknown', [], '', null],
+      ['unknown', [], 'max', '尚未核对 · max'],
+      ['known', ['off'], 'high', '当前目录未提供 · high'],
+    ] as const) {
+      const model = installation.snapshot!.models[0]
+      model.runtimeMetadata = { piThinkingSchemaVersion: 1, piThinkingState: state }
+      model.options = state === 'unknown' ? [] : [{ key: 'thinking_level', label: '思考强度',
+        valueType: 'enum', scope: 'session', defaultValue: null,
+        values: values.map(value => ({ value, label: value })) }]
+      const rendered = renderToStaticMarkup(createElement(MemberModelParameters, {
+        adapterKind: 'pi', installation, disabled: false, onChange: () => undefined,
+        model: { mode: 'explicit', modelId: model.id, options: value ? { thinking_level: value } : {} }
+      }))
+      if (expected) expect(rendered).toContain(`aria-label="思考强度，${expected}"`)
+      else expect(rendered).not.toContain('aria-label="思考强度')
+    }
   })
 
   it('uses switches for native on/off and boolean-string permission fields', () => {

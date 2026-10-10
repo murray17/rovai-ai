@@ -5719,28 +5719,6 @@ pub(crate) fn runtime_compatibility_digest(
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     attachment_authorization: &ThreadOutputDirectory,
 ) -> Result<String> {
-    let kimi_provider_environment_digest = (frozen_runtime.adapter_kind
-        == AdapterKind::KimiCodeCli)
-        .then(kimi_model_environment_compatibility_digest)
-        .transpose()?;
-    runtime_compatibility_digest_with_provider_environment(
-        frozen_runtime,
-        workspace,
-        permission_semantics,
-        external_mcp_servers,
-        attachment_authorization,
-        kimi_provider_environment_digest.as_deref(),
-    )
-}
-
-fn runtime_compatibility_digest_with_provider_environment(
-    frozen_runtime: &FrozenAgentRuntimeConfig,
-    workspace: &AgentRunWorkspace,
-    permission_semantics: PermissionSemantics,
-    external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
-    attachment_authorization: &ThreadOutputDirectory,
-    kimi_provider_environment_digest: Option<&str>,
-) -> Result<String> {
     let execution_root = PathBuf::from(&workspace.execution_root)
         .canonicalize()
         .with_context(|| {
@@ -5780,11 +5758,6 @@ fn runtime_compatibility_digest_with_provider_environment(
         compatibility.insert(
             "grokNativeRulesRevision".to_string(),
             json!(GROK_NATIVE_RULES_REVISION),
-        );
-    }
-    if frozen_runtime.adapter_kind == AdapterKind::KimiCodeCli {
-        compatibility["kimiProviderEnvironmentDigest"] = json!(
-            kimi_provider_environment_digest.context("Kimi provider environment digest missing")?
         );
     }
     if frozen_runtime.adapter_kind == AdapterKind::DeepseekHarness {
@@ -6233,9 +6206,8 @@ fn configure_runtime_command(
                 runtime.reported_version.as_deref(),
             )?;
             // Formal AgentRun hosts inherit the user's KIMI_CODE_HOME, or
-            // Kimi's native default when it is unset. The provider overlay is
-            // process-local and must not replace Kimi's state/config home.
-            configure_kimi_model_environment(command)?;
+            // Kimi's native default when it is unset. Kimi owns config.toml,
+            // provider credentials and model defaults; do not inject an overlay.
         }
         AdapterKind::DeepseekHarness => {
             crate::dsh::configure_host(
@@ -6291,125 +6263,6 @@ fn configure_runtime_command(
         }
     }
     Ok(None)
-}
-
-const KIMI_MODEL_ENVIRONMENT_KEYS: [&str; 6] = [
-    "KIMI_MODEL_NAME",
-    "KIMI_MODEL_PROVIDER_TYPE",
-    "KIMI_MODEL_API_KEY",
-    "KIMI_MODEL_BASE_URL",
-    "KIMI_MODEL_MAX_CONTEXT_SIZE",
-    "KIMI_MODEL_CAPABILITIES",
-];
-
-fn kimi_model_environment_path() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("ROVAI_KIMI_CONFIG") {
-        return Ok(PathBuf::from(path));
-    }
-    Ok(dirs::home_dir()
-        .context("could not determine the user home directory for Kimi Code configuration")?
-        .join(".config/rovai/kimi-code.env"))
-}
-
-pub(crate) fn configure_kimi_model_environment(command: &mut Command) -> Result<()> {
-    let path = kimi_model_environment_path()?;
-    if !path.exists() {
-        return Ok(());
-    }
-    configure_kimi_model_environment_from_path(command, &path)
-}
-
-fn configure_kimi_model_environment_from_path(command: &mut Command, path: &Path) -> Result<()> {
-    for (key, value) in load_kimi_model_environment_from_path(path)? {
-        command.env(key, value);
-    }
-    Ok(())
-}
-
-fn kimi_model_environment_compatibility_digest() -> Result<String> {
-    kimi_model_environment_compatibility_digest_from_path(&kimi_model_environment_path()?)
-}
-
-fn kimi_model_environment_compatibility_digest_from_path(path: &Path) -> Result<String> {
-    let values = path
-        .exists()
-        .then(|| load_kimi_model_environment_from_path(path))
-        .transpose()?;
-    canonical_json_digest(&json!({
-        "schemaVersion": 1,
-        "effectiveProviderEnvironment": values,
-    }))
-}
-
-fn load_kimi_model_environment_from_path(path: &Path) -> Result<BTreeMap<String, String>> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        let mode = std::fs::metadata(path)
-            .with_context(|| format!("failed to inspect {}", path.display()))?
-            .permissions()
-            .mode();
-        if mode & 0o077 != 0 {
-            bail!(
-                "Kimi Code provider configuration {} must not be accessible by group or others",
-                path.display()
-            );
-        }
-    }
-    let contents = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    let mut values = BTreeMap::new();
-    for (index, raw_line) in contents.lines().enumerate() {
-        let line = raw_line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let (key, value) = line.split_once('=').with_context(|| {
-            format!(
-                "invalid Kimi Code provider configuration at {}:{}",
-                path.display(),
-                index + 1
-            )
-        })?;
-        let key = key.trim();
-        let value = value.trim();
-        if !KIMI_MODEL_ENVIRONMENT_KEYS.contains(&key) {
-            bail!(
-                "unsupported Kimi Code provider configuration key {key} at {}:{}",
-                path.display(),
-                index + 1
-            );
-        }
-        if value.is_empty() {
-            bail!(
-                "empty Kimi Code provider configuration value at {}:{}",
-                path.display(),
-                index + 1
-            );
-        }
-        if values.insert(key.to_string(), value.to_string()).is_some() {
-            bail!(
-                "duplicate Kimi Code provider configuration key {key} at {}:{}",
-                path.display(),
-                index + 1
-            );
-        }
-    }
-    for required in [
-        "KIMI_MODEL_NAME",
-        "KIMI_MODEL_PROVIDER_TYPE",
-        "KIMI_MODEL_API_KEY",
-        "KIMI_MODEL_BASE_URL",
-    ] {
-        if !values.contains_key(required) {
-            bail!(
-                "Kimi Code provider configuration {} is missing {required}",
-                path.display()
-            );
-        }
-    }
-    Ok(values)
 }
 
 const GROK_ENVIRONMENT_FILE_NAME: &str = ".env";
@@ -8410,6 +8263,8 @@ mod route_policy_tests {
 
 #[cfg(all(test, unix, feature = "extended-tests"))]
 mod tests {
+    mod native_home;
+
     use super::*;
 
     #[test]
@@ -9739,133 +9594,6 @@ done
         );
 
         host.shutdown().await;
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn kimi_provider_configuration_is_allowlisted_and_process_local() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-kimi-provider-config-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("kimi-code.env");
-        std::fs::write(
-            &path,
-            concat!(
-                "KIMI_MODEL_NAME=MiniMax-M3\n",
-                "KIMI_MODEL_PROVIDER_TYPE=openai\n",
-                "KIMI_MODEL_API_KEY=test-plan-key\n",
-                "KIMI_MODEL_BASE_URL=https://api.minimaxi.com/v1\n",
-                "KIMI_MODEL_MAX_CONTEXT_SIZE=204800\n",
-                "KIMI_MODEL_CAPABILITIES=thinking\n",
-            ),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        }
-
-        let mut command = Command::new("/usr/bin/true");
-        configure_kimi_model_environment_from_path(&mut command, &path).unwrap();
-        let environment = command
-            .as_std()
-            .get_envs()
-            .map(|(key, value)| {
-                (
-                    key.to_string_lossy().to_string(),
-                    value.unwrap().to_string_lossy().to_string(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        assert_eq!(environment.len(), KIMI_MODEL_ENVIRONMENT_KEYS.len());
-        assert_eq!(environment["KIMI_MODEL_NAME"], "MiniMax-M3");
-        assert_eq!(
-            environment["KIMI_MODEL_BASE_URL"],
-            "https://api.minimaxi.com/v1"
-        );
-        assert_eq!(environment["KIMI_MODEL_API_KEY"], "test-plan-key");
-
-        let original_digest = kimi_model_environment_compatibility_digest_from_path(&path).unwrap();
-        let original = std::fs::read_to_string(&path).unwrap();
-        std::fs::write(&path, format!("# display-only comment\n{original}")).unwrap();
-        assert_eq!(
-            kimi_model_environment_compatibility_digest_from_path(&path).unwrap(),
-            original_digest,
-            "comments do not change the child process environment"
-        );
-        std::fs::write(
-            &path,
-            original.replace("test-plan-key", "replacement-plan-key"),
-        )
-        .unwrap();
-        assert_ne!(
-            kimi_model_environment_compatibility_digest_from_path(&path).unwrap(),
-            original_digest,
-            "provider credentials injected at Host startup must fence reuse"
-        );
-        assert_ne!(
-            kimi_model_environment_compatibility_digest_from_path(&root.join("missing")).unwrap(),
-            original_digest
-        );
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn kimi_provider_configuration_rejects_unknown_keys() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-kimi-provider-config-invalid-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("kimi-code.env");
-        std::fs::write(
-            &path,
-            concat!(
-                "KIMI_MODEL_NAME=MiniMax-M3\n",
-                "KIMI_MODEL_PROVIDER_TYPE=openai\n",
-                "KIMI_MODEL_API_KEY=test-plan-key\n",
-                "KIMI_MODEL_BASE_URL=https://api.minimaxi.com/v1\n",
-                "UNSCOPED_SECRET=must-not-pass\n",
-            ),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        }
-
-        let mut command = Command::new("/usr/bin/true");
-        let error = configure_kimi_model_environment_from_path(&mut command, &path)
-            .expect_err("unknown provider keys must fail closed");
-        assert!(error.to_string().contains("unsupported"));
-
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn kimi_provider_configuration_rejects_group_readable_secrets() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let root = std::env::temp_dir().join(format!(
-            "rovai-kimi-provider-config-permissions-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let path = root.join("kimi-code.env");
-        std::fs::write(&path, "KIMI_MODEL_NAME=MiniMax-M3\n").unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
-
-        let mut command = Command::new("/usr/bin/true");
-        let error = configure_kimi_model_environment_from_path(&mut command, &path)
-            .expect_err("group-readable provider secrets must fail closed");
-        assert!(error.to_string().contains("group or others"));
-
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -11962,176 +11690,6 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn kimi_stopped_host_inherits_native_home_and_exactly_resumes() {
-        let root =
-            std::env::temp_dir().join(format!("rovai-kimi-cold-resume-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let executable = root.join("kimi");
-        let protocol_log = root.join("protocol.jsonl");
-        let invocation_log = root.join("invocations");
-        let home_log = root.join("homes");
-        let native_state_home = root.join("user-kimi-home");
-        make_executable(
-            &executable,
-            &format!(
-                r#"#!/bin/sh
-printf '%s\n' "$*" >> '{}'
-printf '%s\n' "${{KIMI_CODE_HOME-__UNSET__}}" >> '{}'
-native_state_home='{}'
-mkdir -p "$native_state_home"
-IFS= read -r initialize || exit 1
-printf '%s\n' "$initialize" >> '{}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
-IFS= read -r session || exit 1
-printf '%s\n' "$session" >> '{}'
-case "$session" in
-  *'"method":"session/new"'*)
-    printf '%s\n' 'session-kimi' > "$native_state_home/session-id"
-    ;;
-  *'"method":"session/resume"'*)
-    test "$(cat "$native_state_home/session-id")" = 'session-kimi' || exit 2
-    ;;
-  *) exit 3 ;;
-esac
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-kimi","configOptions":[{{"id":"model","currentValue":"runtime_default","options":[{{"value":"runtime_default","name":"Runtime Default"}}]}},{{"id":"mode","currentValue":"default","options":[{{"value":"default","name":"Default"}}]}}]}}}}'
-IFS= read -r mode || exit 1
-printf '%s\n' "$mode" >> '{}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":null}}'
-while IFS= read -r ignored; do :; done
-"#,
-                invocation_log.display(),
-                home_log.display(),
-                native_state_home.display(),
-                protocol_log.display(),
-                protocol_log.display(),
-                protocol_log.display(),
-            ),
-        );
-        let builtin_tools = exact_builtin_tools(&root);
-        let frozen = frozen_kimi_runtime(&executable);
-        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
-        let attachment_root = exact_attachment_root(&root);
-        let external_mcp_servers = BTreeMap::from([(
-            "rovai-test".to_string(),
-            McpServerDefinition::Stdio {
-                command: "/usr/bin/printf".to_string(),
-                args: vec!["mcp".to_string()],
-                cwd: Some(root.to_string_lossy().to_string()),
-                env: BTreeMap::new(),
-            },
-        )]);
-        let (incoming, _receiver) = mpsc::unbounded_channel();
-        let fleet = Arc::new(AgentRuntimeFleetManager::new(
-            AgentRuntimeFleetConfig::default(),
-        ));
-        let private_runtime_dir = root.join("private");
-        let adapter = AcpCliRuntimeAdapter::new(
-            AdapterKind::KimiCodeCli,
-            incoming,
-            private_runtime_dir.clone(),
-            fleet.clone(),
-            CompactionDetectorPolicy::Disabled,
-        )
-        .unwrap();
-
-        let first = adapter
-            .ensure_agent_run_runtime(
-                "agent-run-one",
-                1,
-                "camp-one",
-                "agent-one",
-                &workspace,
-                PermissionSemantics::RuntimeManagedV2,
-                &frozen,
-                &builtin_tools,
-                &external_mcp_servers,
-                "sha256:mcp",
-                &attachment_root,
-                "sha256:compatibility",
-            )
-            .await
-            .unwrap();
-        let first_host = first.host_instance_id().to_string();
-        let session_id = first
-            .start_or_resume_session(
-                None,
-                AcpSessionCapabilities {
-                    can_resume: true,
-                    can_load_history: true,
-                },
-                "runtime_default",
-                "runtime_default",
-                &json!({}),
-                &external_mcp_servers,
-            )
-            .await
-            .unwrap();
-        assert_eq!(session_id, "session-kimi");
-        adapter.forget_agent_run("agent-run-one", 1).await;
-
-        assert_eq!(
-            std::fs::read_to_string(native_state_home.join("session-id"))
-                .unwrap()
-                .trim(),
-            session_id
-        );
-
-        let second = adapter
-            .ensure_agent_run_runtime(
-                "agent-run-two",
-                1,
-                "camp-one",
-                "agent-one",
-                &workspace,
-                PermissionSemantics::RuntimeManagedV2,
-                &frozen,
-                &builtin_tools,
-                &external_mcp_servers,
-                "sha256:mcp",
-                &attachment_root,
-                "sha256:compatibility",
-            )
-            .await
-            .unwrap();
-        assert_ne!(second.host_instance_id(), first_host);
-        let successor_session = second
-            .start_or_resume_session(
-                Some(&session_id),
-                AcpSessionCapabilities {
-                    can_resume: true,
-                    can_load_history: true,
-                },
-                "runtime_default",
-                "runtime_default",
-                &json!({}),
-                &external_mcp_servers,
-            )
-            .await
-            .unwrap();
-        assert_eq!(successor_session, session_id);
-        adapter.complete_agent_run("agent-run-two", 1).await;
-        fleet.shutdown_all().await;
-
-        let invocations = std::fs::read_to_string(&invocation_log).unwrap();
-        assert_eq!(invocations.lines().count(), 2);
-        let homes = std::fs::read_to_string(&home_log).unwrap();
-        let homes = homes.lines().collect::<Vec<_>>();
-        let inherited_kimi_home = std::env::var_os("KIMI_CODE_HOME")
-            .map(|value| value.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "__UNSET__".to_string());
-        assert_eq!(homes.len(), 2);
-        assert_eq!(homes, vec![inherited_kimi_home.as_str(); 2]);
-        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
-        assert_eq!(protocol.matches("\"method\":\"session/new\"").count(), 1);
-        assert_eq!(protocol.matches("\"method\":\"session/resume\"").count(), 1);
-        assert_eq!(protocol.matches("\"name\":\"rovai-test\"").count(), 2);
-        assert!(!protocol.contains("\"method\":\"session/load\""));
-        assert!(native_state_home.exists());
-        assert!(!private_runtime_dir.join("home").exists());
-        std::fs::remove_dir_all(root).unwrap();
-    }
-
-    #[tokio::test]
     async fn kimi_completed_run_keeps_the_warm_session_and_idle_compaction_observer() {
         let root =
             std::env::temp_dir().join(format!("rovai-kimi-warm-lru-{}", uuid::Uuid::new_v4()));
@@ -13553,13 +13111,12 @@ while IFS= read -r ignored; do :; done
         assert_ne!(v2.host_config_digest, patch.host_config_digest);
         opencode.reported_version = None;
         assert!(freeze_native_session_compatibility(opencode, &workspace).is_err());
-        let first = runtime_compatibility_digest_with_provider_environment(
+        let first = runtime_compatibility_digest(
             &frozen,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         let process_input_digest = canonical_json_digest(&json!({
@@ -13583,13 +13140,12 @@ while IFS= read -r ignored; do :; done
         upgraded.capabilities = vec!["session.load".to_string(), "session.new".to_string()];
         upgraded.model.model_id = "GLM-5.2".to_string();
         upgraded.config_digest = "sha256:ready-snapshot".to_string();
-        let ready = runtime_compatibility_digest_with_provider_environment(
+        let ready = runtime_compatibility_digest(
             &upgraded,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_eq!(ready, first);
@@ -13604,48 +13160,44 @@ while IFS= read -r ignored; do :; done
         );
 
         let kimi = frozen_kimi_runtime(&executable);
-        let kimi_first = runtime_compatibility_digest_with_provider_environment(
+        let kimi_first = runtime_compatibility_digest(
             &kimi,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
-        let kimi_changed_mcp = runtime_compatibility_digest_with_provider_environment(
+        let kimi_changed_mcp = runtime_compatibility_digest(
             &kimi,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &changed_servers,
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_ne!(kimi_changed_mcp, kimi_first);
 
         let mut kimi_changed_config = kimi.clone();
         kimi_changed_config.config_digest = "sha256:kimi-changed-config".to_string();
-        let kimi_changed_config = runtime_compatibility_digest_with_provider_environment(
+        let kimi_changed_config = runtime_compatibility_digest(
             &kimi_changed_config,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_eq!(kimi_changed_config, kimi_first);
 
         let mut kimi_changed_session_mode = kimi.clone();
         kimi_changed_session_mode.permissions.values = json!({"permission_mode": "plan"});
-        let kimi_changed_session_mode = runtime_compatibility_digest_with_provider_environment(
+        let kimi_changed_session_mode = runtime_compatibility_digest(
             &kimi_changed_session_mode,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_eq!(kimi_changed_session_mode, kimi_first);
@@ -13653,58 +13205,53 @@ while IFS= read -r ignored; do :; done
         let mut codebuddy = frozen_kiro_runtime();
         codebuddy.adapter_kind = AdapterKind::CodebuddyCli;
         codebuddy.model.source = "runtime_default".to_string();
-        let codebuddy_default = runtime_compatibility_digest_with_provider_environment(
+        let codebuddy_default = runtime_compatibility_digest(
             &codebuddy,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         codebuddy.model.source = "explicit".to_string();
         codebuddy.model.model_id = "provider:explicit-model".to_string();
-        let codebuddy_explicit = runtime_compatibility_digest_with_provider_environment(
+        let codebuddy_explicit = runtime_compatibility_digest(
             &codebuddy,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_ne!(codebuddy_explicit, codebuddy_default);
         codebuddy.model.options = json!({"temperature": "0.5"});
-        let codebuddy_turn_option = runtime_compatibility_digest_with_provider_environment(
+        let codebuddy_turn_option = runtime_compatibility_digest(
             &codebuddy,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_eq!(codebuddy_turn_option, codebuddy_explicit);
 
-        let changed_mcp = runtime_compatibility_digest_with_provider_environment(
+        let changed_mcp = runtime_compatibility_digest(
             &upgraded,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &changed_servers,
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_ne!(changed_mcp, first);
 
         upgraded.host_config_digest = "sha256:changed-host-input".to_string();
-        let changed_host = runtime_compatibility_digest_with_provider_environment(
+        let changed_host = runtime_compatibility_digest(
             &upgraded,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             &attachment_authorization,
-            Some("sha256:fixture-provider-environment"),
         )
         .unwrap();
         assert_ne!(changed_host, first);

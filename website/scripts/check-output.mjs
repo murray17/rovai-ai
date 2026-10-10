@@ -18,7 +18,7 @@ function walk(dir) {
 
 walk(dist)
 const pageCount = htmlFiles.filter(path => !path.includes('/examples/') && !path.endsWith('/404.html')).length
-if (pageCount !== 78) problems.push(`Expected 78 published pages, found ${pageCount}`)
+if (pageCount !== 80) problems.push(`Expected 80 published pages, found ${pageCount}`)
 
 for (const path of htmlFiles) {
   const route = '/' + relative(dist, path).replaceAll('\\', '/')
@@ -56,7 +56,7 @@ for (const lang of ['', '/zh']) {
   for (const target of ['linux-x64.tar.gz','macos-arm64.tar.gz','macos-x64.tar.gz','windows-x64.zip']) {
     if (!download.includes(`/releases/download/v0.4.7/rovai-server-0.4.7-${target}`)) problems.push(`${lang}/download: missing Server asset ${target}`)
   }
-  for (const topic of ['remote','desktop-web','server-install','lan-access','tailscale','public-https','server-maintenance']) {
+  for (const topic of ['agents','agent-setup','remote','desktop-web','server-install','lan-access','tailscale','public-https','server-maintenance']) {
     const article = new JSDOM(readFileSync(join(dist, lang, 'docs', topic + '.html'), 'utf8')).window.document
     const counterpart = `${lang ? '' : '/zh'}/docs/${topic}.html`
     if (article.querySelector('.language-link')?.getAttribute('href') !== counterpart) problems.push(`${lang}/docs/${topic}: locale counterpart missing`)

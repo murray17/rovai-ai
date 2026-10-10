@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-10-08
+last_updated: 2026-10-10
 ---
 
 # 长期接口合同
@@ -112,7 +112,9 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
-| [Runtime Launch and Verification v54（当前）](runtime-launch-and-verification-v54.md) | Cline 唯一官方 ACP；原生认证、共享 Fleet 与能力控制恢复，完整退役 Hub，保留历史数据及 compact 缺口 |
+| [Runtime Launch and Verification v56（当前）](runtime-launch-and-verification-v56.md) | Kimi 使用官方 Provider 配置，退役 Rovai 私有 env、注入及复用摘要；继承 Pi 目录与思考强度合同 |
+| [Runtime Launch and Verification v55（历史）](runtime-launch-and-verification-v55.md) | Pi 目录观察独立于健康、同模型续接避免重复选模、thinking_level 非破坏性保存与严格执行核验 |
+| [Runtime Launch and Verification v54（历史）](runtime-launch-and-verification-v54.md) | Cline 唯一官方 ACP；原生认证、共享 Fleet 与能力控制恢复，完整退役 Hub，保留历史数据及 compact 缺口 |
 | [Runtime Launch and Verification v53](runtime-launch-and-verification-v53.md) | 继承 v52；用户续做复用原生恢复路径，Codex 投递前允许一次新 Thread 降级 |
 | [Runtime Launch and Verification v52（历史）](runtime-launch-and-verification-v52.md) | 继承 v51；移除 Claude/Codex 原生连接编辑，保留本地启动设置、原生执行、只读兼容与脱敏 |
 | [Runtime Launch and Verification v51](runtime-launch-and-verification-v51.md) | 继承 v50；保存只做本地提交，不触发发现、检查、目录或 Host 工作；保存回执不含完整 Key，界面按回执结束保存 |

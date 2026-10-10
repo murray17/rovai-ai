@@ -3,10 +3,68 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # v1.72 实施与验收
+
+## 2026-10-10 Kimi 官方 Provider 配置
+
+删除正式 ACP Host 与 Probe 的私有 env 注入、加载器和 `kimiProviderEnvironmentDigest`，
+原生 Home、ACP 选模、权限、MCP 与 Session 恢复保持。指标验收脚本改用显式官方配置来源的隔离 Home。
+没有数据迁移或模型上下文变更；旧文件不自动删除，官方配置不被 Rovai 改写。
+
+测试退役：`kimi_provider_configuration_is_allowlisted_and_process_local`、
+`kimi_provider_configuration_rejects_unknown_keys`、`kimi_provider_configuration_rejects_group_readable_secrets`
+随唯一生产解析器和私有配置合同退出。未新增独立 Rust 测试；扩展既有
+`acp_probes_keep_native_homes_without_prompting` 与 `kimi_stopped_host_inherits_native_home_and_exactly_resumes`，
+分别验证默认/自定义原生 Home、旧文件两种入口被忽略、无变量注入、配置原样保留以及精确冷恢复。
+这些 owner 需要隔离子进程证明环境继承，使用假凭据且不调用模型；修复前旧文件会触发拒绝或注入错误 Provider。
+`warm_compatibility_matches_process_inputs_across_acp_adapters` 保留 MCP、Host 配置与 Session mode 边界。
+
+验证：`pnpm test:rust:pr` 通过（463 passed、1 ignored）；`pnpm typecheck`、`pnpm test`
+（239 个 Vitest 文件、2616 tests）、`pnpm docs:check:ci`、`cargo fmt --all --check` 与脚本语法检查通过。
+Kimi、原生 Home Probe 与 Host compatibility 定向扩展 owner 通过；冷恢复 owner 移到
+`acp/tests/native_home.rs`，在测试子进程中隔离环境，不放宽生产源码检查。
+本机真实 Kimi 2.1.1 在隔离 Home 中读取官方 TOML 并完成新建、停止后精确恢复；配置保持不变，
+未发送 Prompt 或使用真实凭据，结果不外推为模型生成验收。
+
+扩展层的两个既有失败已在未修改的 `main`（`0baa26ebb018298156241d7cf0c86ad94fad4d77`）独立复现：
+
+- `authority_migration::tests::macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data`：
+  `authority_contract_changed`，与 Kimi 修改无关。
+- `channel::tests::pending_picker_upgrade_keeps_history_rolls_back_failure_and_reuses_the_old_card`：
+  fixture 缺少 `last_delivery_sequence` 列，与 Kimi 修改无关。
+
+`pnpm test:rust:extended` 执行中发现上述失败，完成主干对照后停止其余无关模块的扩展探索。
+本次受影响的 Kimi、原生 Home 与 Host compatibility owner 均完成验证；完整扩展套件未跑完，
+不报告全套通过。未修改或跳过两个失败 owner，也未放宽仓库门禁。
+
+## 2026-10-10 受管原生自动记忆
+
+按 User 最终确认，仅调整 Claude/Codex 启动配置：保留 Claude settings 文件运输、Fast 三态与 Bootstrap，
+在私有 settings 和最终子进程环境中关闭自动记忆；Codex App-Server 无条件携带三个关闭参数。
+Host 固定策略修订与 Native Binding 兼容性分离，正常替换后继续原 ID Resume。
+不改 Windows shim、数据库、配置管理或其他 Adapter；既有 Runtime failure 不静默降级。
+
+复用现有命令、文件生命周期、Thread、Fleet 与失败测试 owner，未新增 Rust 测试函数；Windows Full check
+补入已有 Claude 扩展测试。隔离对照和实际 Core 执行证据、基线失败、平台边界见
+[原生自动记忆验收](../../research/native-auto-memory/verification-2026-10-10.md)。
+这是固定启动策略的局部实现，未新增通用策略体系或改写历史决策。
+
+## 2026-10-10 Pi 目录观察与思考强度
+
+按 User 修订实现三个边界：Pi 目录准入、调度、提交、读取独立于健康；目标 Session 激活后避免同模型重复选模；
+目录只作有效观察且不破坏 Pi 已选模型/强度。复用原表与 metadata，无 schema 迁移、新缓存或 Provider 管理系统。
+单一 Core 解析器输出 thinking_level，现有控件、配置摘要和 Run 历史消费；显式值由目标任务 Host 严格回读。
+
+当前规范：[Runtime Launch v55](../../contracts/runtime-launch-and-verification-v55.md)、
+[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#pi-coding-agent-当前边界)、
+[队员配置](../../ui/components/member-identity.md)。这是局部实现修正，未新增需要长期取舍治理的 Version Decision。
+
+验收、两个新增 Rust owner 的准入理由、Pi 0.84.4 原生无生成对照、复现脚本和明确未测边界见
+[Pi 思考强度验收](../../research/pi-thinking-level-2026-10-10/README.md)。默认 workspace 与定向 Rust、前端、Electron 交互、
+typecheck 与桌面构建通过；扩展筛选中的两项既有失败已在独立基线构建复现，保留原样，不报告全套通过。
 
 ## 实施切片
 
