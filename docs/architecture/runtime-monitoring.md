@@ -61,8 +61,9 @@ summary/hourly 只加已归一的 contribution；缺 Input/Output 的 contributi
 执行台根据新完整性字段决定是否能显示 Input＋Output，四项已观测值继续可读。
 
 指标层没有 CLI 版本白名单或私设最低版本。实际字段、来源身份和计量语义决定准入；产品本身的
-Runtime 最低版本和平台门槛保持。OpenCode prompt result 不能证明整轮范围，使用原生逐调用
-来源；ACP `usage_update.cost` 的 Session 累计不进入 Run summary。Codex 完整 buckets、
+Runtime 最低版本和平台门槛保持。OpenCode V1 使用原生逐调用来源；V2 prompt response 只拥有当前
+根会话本轮已报告用量，未覆盖原生子会话／委派，因此沿用部分统计，不能作为完整 Run 总量。
+ACP `usage_update.cost` 的 Session 累计不进入 Run summary。Codex 完整 buckets、
 模型／档位／生效时间仍决定静态价格投影，不以 CLI 版本代替字段完整性。
 
 周期 Flush 不发出立即 Snapshot 事件。普通事件受全局最短间隔约束；terminal 事件可在 Debounce 后立即
@@ -72,8 +73,10 @@ Runtime 最低版本和平台门槛保持。OpenCode prompt result 不能证明�
 
 ### 本地原生数值来源与 Context
 
-CodeBuddy、Kimi Code、Qoder 与 TRAE 使用当前 workspace／Session 下的 JSONL cursor；OpenCode
-使用只读 SQLite 中的根 Session assistant 元数据。版本仅记录实测，不决定 reader 是否运行。prompt 发送前建立历史 offset 与身份 baseline；之后
+CodeBuddy、Kimi Code、Qoder 与 TRAE 使用当前 workspace／Session 下的 JSONL cursor；OpenCode V1
+使用只读 SQLite 中的根 Session assistant 元数据，读取根与所选 Runtime 的有效环境一致。
+OpenCode V2 停用 V1 reader，使用本轮终态 usage，缺响应时保持缺失；不能从两个来源重复累计。
+代际选择数据语义，不形成补丁版本白名单。prompt 发送前建立历史 offset 与身份 baseline；之后
 最多每 4 秒在既有 Flush 锁内读取、buffer、落盘，terminal 强制 Flush 保持同一 Run cursor，增加 400ms
 尾读后才允许后继 prompt 建立 baseline。整个过程在 blocking pool 读取，不持有 Core Database Mutex
 等待原生磁盘。部分行等待完整换行；文件换代、缺口、超限停止采集且不重扫历史。

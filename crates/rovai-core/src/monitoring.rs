@@ -1147,6 +1147,10 @@ fn persist_usage_record(
             delta.any_observed().then(|| {
                 normalized.prompt_input_total_tokens.is_some()
                     && normalized.output_tokens.is_some()
+                    // This is a reliable root-prompt sum, but does not cover
+                    // native delegated Sessions. Reuse the existing partial
+                    // quality instead of advertising a complete Run total.
+                    && record.usage.dialect_id != "opencode-acp-root-prompt-usage-v2"
                     && existing.as_ref().is_none_or(|checkpoint| {
                         record.usage.counter_mode == RuntimeUsageCounterMode::Delta
                             || (checkpoint.baseline.prompt_input_total_tokens.is_some()
@@ -3111,7 +3115,7 @@ fn dsh_exact_prompt_total(usage: &Value, fields: &RuntimeUsageFields) -> Option<
 
 pub fn parse_acp_usage_message(
     adapter_kind: AdapterKind,
-    _runtime_version: Option<&str>,
+    runtime_version: Option<&str>,
     method: &str,
     params: &Value,
 ) -> Vec<ParsedRuntimeUsage> {
@@ -3575,10 +3579,16 @@ pub fn parse_acp_usage_message(
     if method != "rovai/acp_prompt_completed" {
         return Vec::new();
     }
-    if adapter_kind == AdapterKind::OpencodeCli {
-        // This terminal shape can describe only the last assistant call.
-        // Per-call native metadata is the Run source; unavailable metadata
-        // stays unknown instead of presenting this tail as a complete Run.
+    if adapter_kind == AdapterKind::OpencodeCli
+        && crate::opencode_compat::Generation::from_version(runtime_version)
+            != Some(crate::opencode_compat::Generation::V2)
+    {
+        // V1's verified per-call database reader owns consumption. Unknown
+        // dialects cannot borrow V2's root-prompt aggregate semantics.
+        return Vec::new();
+    }
+    if !crate::runtime::is_root_output(params) || !crate::runtime::is_root_output(&params["result"])
+    {
         return Vec::new();
     }
     let usage = params
@@ -3589,6 +3599,30 @@ pub fn parse_acp_usage_message(
         })
         .unwrap_or(&Value::Null);
     let (dialect_id, input_semantics, fields) = match adapter_kind {
+        AdapterKind::OpencodeCli => {
+            // V2 separates reasoning from output and both cache buckets from
+            // input. totalTokens covers this root prompt, not delegated Sessions.
+            let reasoning = integer_at_any(usage, &["/thoughtTokens"]);
+            let output = integer_at_any(usage, &["/outputTokens"])
+                .and_then(|output| output.checked_add(reasoning.unwrap_or(0)));
+            let total_input = integer_at_any(usage, &["/totalTokens"])
+                .zip(output)
+                .and_then(|(total, output)| total.checked_sub(output))
+                .filter(|input| *input >= 0);
+            (
+                "opencode-acp-root-prompt-usage-v2",
+                RuntimeInputSemantics::CacheInclusiveTotal,
+                RuntimeUsageFields {
+                    input_tokens: total_input,
+                    uncached_input_tokens: integer_at_any(usage, &["/inputTokens"]),
+                    output_tokens: output,
+                    reasoning_output_tokens: reasoning,
+                    cache_read_input_tokens: integer_at_any(usage, &["/cachedReadTokens"]),
+                    cache_write_input_tokens: integer_at_any(usage, &["/cachedWriteTokens"]),
+                    ..Default::default()
+                },
+            )
+        }
         AdapterKind::CommandCodeCli => (
             "command-code-acp-prompt-usage-v1",
             RuntimeInputSemantics::CacheInclusiveTotal,
@@ -4993,6 +5027,60 @@ mod tests {
 
     #[test]
     fn runtime_parsers_emit_sparse_usage_without_antigravity_inference() {
+        let root_prompt = json!({"sessionId":"root", "promptId":"prompt-1", "result":{"usage":{
+            "inputTokens":100,"cachedReadTokens":40,"cachedWriteTokens":20,
+            "outputTokens":10,"thoughtTokens":5,"totalTokens":175}}});
+        for version in [None, Some("1.18.32"), Some("unknown")] {
+            assert!(
+                parse_acp_usage_message(
+                    AdapterKind::OpencodeCli,
+                    version,
+                    "rovai/acp_prompt_completed",
+                    &root_prompt
+                )
+                .is_empty()
+            );
+        }
+        let parsed = parse_acp_usage_message(
+            AdapterKind::OpencodeCli,
+            Some("opencode v2.0.26"),
+            "rovai/acp_prompt_completed",
+            &root_prompt,
+        );
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].scope, "turn");
+        assert_eq!(parsed[0].dialect_id, "opencode-acp-root-prompt-usage-v2");
+        let normalized = normalize_usage(&parsed[0]).unwrap();
+        assert_eq!(normalized.prompt_input_total_tokens, Some(160));
+        assert_eq!(normalized.uncached_input_tokens, Some(100));
+        assert_eq!(normalized.output_tokens, Some(15));
+        assert_eq!(normalized.reasoning_output_tokens, Some(5));
+        assert!(parsed[0].cost.is_none());
+        for missing in [json!({}), json!({"inputTokens":100,"outputTokens":10})] {
+            let mut sparse = root_prompt.clone();
+            sparse["result"]["usage"] = missing;
+            for usage in parse_acp_usage_message(
+                AdapterKind::OpencodeCli,
+                Some("2.99.0"),
+                "rovai/acp_prompt_completed",
+                &sparse,
+            ) {
+                assert_eq!(usage.fields.cache_read_input_tokens, None);
+                assert_eq!(usage.fields.reasoning_output_tokens, None);
+                assert_eq!(usage.fields.input_tokens, None);
+            }
+        }
+        let mut child = root_prompt;
+        child["_meta"] = json!({"opencode/child-session":{"sessionId":"child"}});
+        assert!(
+            parse_acp_usage_message(
+                AdapterKind::OpencodeCli,
+                Some("2.0.26"),
+                "rovai/acp_prompt_completed",
+                &child
+            )
+            .is_empty()
+        );
         let mut step = json!({"conversation_id":"native-session","step_index":5,"state":"DONE",
             "step_type":"agent_response","text_delta":"PRIVATE_AGY_CANARY","usage":{
                 "input_tokens":4211,"output_tokens":133,"thinking_tokens":13,"cache_read_tokens":12206,"total_tokens":4344}});

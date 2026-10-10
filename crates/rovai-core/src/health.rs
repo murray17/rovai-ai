@@ -71,6 +71,28 @@ async fn bounded_output(command: &mut Command, deadline: Duration) -> Result<Bou
     .await
 }
 
+pub(crate) async fn read_opencode_version(path: &Path) -> Result<String> {
+    let mut command = runtime_command(path, Some(AdapterKind::OpencodeCli));
+    command.arg("--version");
+    let output = bounded_output(&mut command, Duration::from_secs(15))
+        .await
+        .context("OpenCode initialization could not read the selected executable's version")?;
+    if !output.status.success() {
+        bail!(
+            "OpenCode version read failed: {}",
+            command_detail(
+                &output.stdout.bytes,
+                &output.stderr.bytes,
+                "selected executable returned an error"
+            )
+        );
+    }
+    let version = first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
+        .context("OpenCode version read returned no identity")?;
+    crate::opencode_compat::Generation::require(Some(&version))?;
+    Ok(version)
+}
+
 const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
     ("model.list", "ClientRequest.json", "\"model/list\""),
     ("thread.start", "ClientRequest.json", "\"thread/start\""),
@@ -333,7 +355,7 @@ pub async fn refresh_model_catalog_for_selection(
         }
         _ => {
             let (_, session, _) =
-                run_acp_probe_with_scope(path, kind, true, purpose, true, target).await?;
+                run_acp_probe_with_scope(path, kind, true, purpose, true, target, None).await?;
             if kind == AdapterKind::DeepseekHarness {
                 dsh_preparation = session
                     .as_ref()
@@ -1766,7 +1788,16 @@ async fn acp_probe_at(
             session_result: None,
         };
     }
-    let probe = run_acp_probe(&canonical, kind, include_session, purpose).await;
+    let probe = run_acp_probe_with_scope(
+        &canonical,
+        kind,
+        include_session,
+        purpose,
+        false,
+        None,
+        reported_version.as_deref(),
+    )
+    .await;
     match probe {
         Ok((initialize_result, session_result, grok_resume_verified)) => {
             let mut capabilities = acp_observed_capabilities(
@@ -1853,15 +1884,17 @@ async fn acp_probe_at(
     }
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
 async fn run_acp_probe(
     path: &Path,
     kind: AdapterKind,
     include_session: bool,
     purpose: RuntimeLaunchPurpose,
 ) -> Result<(Value, Option<Value>, bool)> {
-    run_acp_probe_with_scope(path, kind, include_session, purpose, false, None).await
+    run_acp_probe_with_scope(path, kind, include_session, purpose, false, None, None).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_acp_probe_with_scope(
     path: &Path,
     kind: AdapterKind,
@@ -1869,6 +1902,7 @@ async fn run_acp_probe_with_scope(
     purpose: RuntimeLaunchPurpose,
     catalog_only: bool,
     target: Option<(&str, Option<crate::agent_profile::DshModelSource>)>,
+    reported_version: Option<&str>,
 ) -> Result<(Value, Option<Value>, bool)> {
     if !runtime_launch_allowed(kind, purpose) {
         bail!(runtime_launch_disallowed_detail(purpose));
@@ -1885,8 +1919,17 @@ async fn run_acp_probe_with_scope(
     let mut command = runtime_command(path, Some(kind));
     if kind == AdapterKind::DeepseekHarness {
         crate::dsh::configure_probe(&mut command, &probe_root)?;
+    } else if kind == AdapterKind::OpencodeCli && catalog_only {
+        crate::opencode_compat::configure_catalog_command(&mut command);
     } else {
-        configure_acp_command(&mut command, kind, false);
+        let read_version;
+        let version = if kind == AdapterKind::OpencodeCli && reported_version.is_none() {
+            read_version = read_opencode_version(path).await?;
+            Some(read_version.as_str())
+        } else {
+            reported_version
+        };
+        configure_acp_command(&mut command, kind, false, version)?;
     }
     if kind == AdapterKind::ClineCli {
         crate::cline::configure_native_environment(&mut command)?;
@@ -2640,10 +2683,15 @@ fn validate_trae_permission_request(
     Ok(())
 }
 
-pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all: bool) {
+pub fn configure_acp_command(
+    command: &mut Command,
+    kind: AdapterKind,
+    allow_all: bool,
+    version: Option<&str>,
+) -> Result<()> {
     match kind {
         AdapterKind::OpencodeCli => {
-            command.args(["acp", "--pure", "--log-level", "ERROR"]);
+            crate::opencode_compat::Generation::require(version)?.configure_command(command);
         }
         AdapterKind::CopilotCli => {
             command.args([
@@ -2701,6 +2749,7 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         | AdapterKind::AntigravityApp
         | AdapterKind::ZcodeApp => {}
     }
+    Ok(())
 }
 
 pub(crate) fn configure_grok_acp_command(command: &mut Command, plugin_dir: Option<&Path>) {
@@ -3878,7 +3927,7 @@ for line in sys.stdin:
     // Owns command/process omission, not the model-row parser. The retained
     // full path is the baseline, and malformed refreshes must not fabricate success.
     #[tokio::test]
-    async fn antigravity_catalog_refresh_skips_version_and_help() {
+    async fn catalog_refresh_skips_version_and_help() {
         let root = env::temp_dir().join(format!("rovai-agy-catalog-{}", uuid::Uuid::new_v4()));
         let _cleanup = ProbeRootCleanup(root.clone());
         std::fs::create_dir_all(&root).unwrap();
@@ -3926,6 +3975,33 @@ esac
             refresh_model_catalog(&executable, AdapterKind::AntigravityApp)
                 .await
                 .is_err()
+        );
+        let executable = root.join("opencode");
+        std::fs::write(&executable, r#"#!/bin/sh
+root=$(/usr/bin/dirname "$0")
+printf '%s\n' "$*" >> "$root/opencode-calls"
+[ "$*" = "acp" ] || exit 91
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"fixture","models":{"currentModelId":"fixture/model","availableModels":[{"modelId":"fixture/model","name":"Fixture"}]}}}'
+while IFS= read -r ignored; do :; done
+"#).unwrap();
+        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+        let models = refresh_model_catalog(&executable, AdapterKind::OpencodeCli)
+            .await
+            .unwrap();
+        assert!(
+            models
+                .models
+                .iter()
+                .any(|model| model.id == "fixture/model")
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("opencode-calls")).unwrap(),
+            "acp\n"
         );
     }
     #[tokio::test]
@@ -3978,9 +4054,63 @@ esac
 
     #[test]
     fn additive_acp_launch_shapes_match_the_verified_cli_contracts() {
+        for (version, v1) in [
+            ("1.18.32", true),
+            ("opencode v1.99.1", true),
+            ("2.0.26", false),
+            ("opencode v2.99.1-preview.2", false),
+        ] {
+            let mut command = Command::new("/selected/opencode");
+            configure_acp_command(&mut command, AdapterKind::OpencodeCli, false, Some(version))
+                .unwrap();
+            let args = command
+                .as_std()
+                .get_args()
+                .map(|a| a.to_string_lossy().to_string())
+                .collect::<Vec<_>>();
+            if v1 {
+                assert_eq!(args, ["acp", "--log-level", "ERROR"]);
+            } else {
+                assert_eq!(args, ["acp", "--log-level", "error"]);
+            }
+        }
+        for pure in ["0", "1"] {
+            let mut command = Command::new("/selected/opencode");
+            command.env("OPENCODE_PURE", pure);
+            configure_acp_command(
+                &mut command,
+                AdapterKind::OpencodeCli,
+                false,
+                Some("1.18.32"),
+            )
+            .unwrap();
+            assert!(!command.as_std().get_args().any(|arg| arg == "--pure"));
+            assert_eq!(
+                command
+                    .as_std()
+                    .get_envs()
+                    .find(|(key, _)| *key == "OPENCODE_PURE")
+                    .and_then(|(_, value)| value),
+                Some(std::ffi::OsStr::new(pure))
+            );
+        }
+        for version in [
+            None,
+            Some("unknown"),
+            Some("0.0.0-next"),
+            Some("3.0.0"),
+            Some("2.0.bad"),
+        ] {
+            let mut command = Command::new("/selected/opencode");
+            assert!(
+                configure_acp_command(&mut command, AdapterKind::OpencodeCli, false, version)
+                    .is_err()
+            );
+            assert_eq!(command.as_std().get_args().count(), 0);
+        }
         let arguments = |kind| {
             let mut command = Command::new("/usr/bin/true");
-            configure_acp_command(&mut command, kind, false);
+            configure_acp_command(&mut command, kind, false, None).unwrap();
             command
                 .as_std()
                 .get_args()
@@ -4018,7 +4148,7 @@ esac
             ["acp", "--agent", KIRO_ADDITIVE_AGENT_NAME]
         );
         let mut trusted_kiro = Command::new("/usr/bin/true");
-        configure_acp_command(&mut trusted_kiro, AdapterKind::KiroCli, true);
+        configure_acp_command(&mut trusted_kiro, AdapterKind::KiroCli, true, None).unwrap();
         assert_eq!(
             trusted_kiro
                 .as_std()

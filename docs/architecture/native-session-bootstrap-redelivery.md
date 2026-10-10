@@ -71,7 +71,8 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | --- | --- | --- | --- |
 | GitHub Copilot | `preCompact` / `imminent_edge` | 隔离官方 Plugin `preCompact` Hook | 目标 CLI 没有对等 completed Hook；该 edge 一次性推进 revision，accepted redelivery 后即结束，不等待 post event |
 | Cline | 无当前准入信号 | ACP 私有原生 System Rule/只读 Plugin | 补发 detector disabled；ACP compact 缺口保留，只观察真实原生事件，不合成进度，见[ACP 验收](../research/cline-runtime/acp-retirement-2026-10-08.md) |
-| OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
+| OpenCode V1 | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | V1 ACP 不转发内部 native event；Rovai 不再强加 `--pure`，原生外部插件可加载。保留用户显式 OPENCODE_PURE，主动禁用插件时该监听同样不可用；工具权限不构成插件沙箱。复核见 [V1/V2 实施记录](../versions/v1.72/opencode-v1-v2-implementation.md#v1---pure-与真实自动压缩复核) |
+| OpenCode V2 | `opencode.acp.compaction.completed.v2` / `completed` | ACP `session_info_update._meta["opencode/compaction"]` | V2 不生成／注入 V1 插件；根 Session completed＋messageId 进入既有 Observer，历史 quarantine 和原生 occurrence 去重；不声明 summary/patch capability |
 | Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；started 与 summary 不参与 admission |
 | Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only Prompt lifecycle correlation + idle/detached completion compatibility route | Kimi native ACP server 把内部 lifecycle 降格为同形 `agent_message_chunk`；Active Prompt 只有 exact started 建立 pending 后的 exact completed 才准入，blocked 保持 pending，cancelled 清除 pending；idle/detached 保留 exact completion detector |
 | Grok Build | `grok.acp.auto_compact_completed.v1` / `completed` | 当前 ACP `_x.ai/session_notification` inbound route | `0.2.118` no-leader live wire 是初始历史证据；当前支持门为 `>= 1.0.0`，detector 保持 `best_effort` 且目标版本需分别复核。event ID 作为 Runtime occurrence identity，started/failed/cancelled/replay/unknown 全部忽略 |

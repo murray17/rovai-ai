@@ -62,6 +62,7 @@ pub fn is_root_output(payload: &Value) -> bool {
             "parent_tool_use_id",
             "parentToolCallId",
             "parent_tool_call_id",
+            "opencode/child-session",
             "subAgentId",
             "source_agent_id",
             "replay",
@@ -7556,6 +7557,15 @@ mod tests {
 
     #[test]
     fn session_compatibility_key_controls_resume_independently_of_installation_generation() {
+        let legacy = resume_execution(None, Some("opencode-cli:acp-v1:storage"), 1, 1);
+        assert_eq!(
+            legacy.native_session_resume_disposition(),
+            NativeSessionResumeDisposition::Controlled
+        );
+        assert_eq!(
+            legacy.resumable_native_session_id(),
+            Some("session-existing")
+        );
         assert_eq!(
             resume_execution(Some("session-v1"), Some("session-v1"), 1, 2)
                 .native_session_resume_disposition(),

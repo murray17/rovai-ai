@@ -23,7 +23,8 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-')))
+const fixtureRoot = await realpath(process.env.ROVAI_MCP_PROJECTION_FIXTURE_ROOT
+  ?? await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-')))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const grokHome = join(fixtureRoot, 'grok-home')
@@ -33,6 +34,9 @@ const grokNativeStdioMarker = join(fixtureRoot, 'grok-native-stdio-started')
 const grokNativeHttpNameMarker = join(fixtureRoot, 'grok-native-http-name-started')
 const mcpConfigPath = join(fixtureRoot, 'config', 'mcp.json')
 const fixture = join(root, 'crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs')
+const opencodeCallMarker = join(fixtureRoot, 'opencode-mcp-calls')
+const opencodeCallEnvironment = { ROVAI_MCP_SMOKE_CALL_MARKER: opencodeCallMarker }
+const nativeMcpEntryHint = 'If MCP tools are exposed through execute, use that entry point to call the named tool. A missing standalone function does not by itself mean the MCP tool is unavailable.'
 const serverId = '6f589c15-bba8-42e5-a20a-cd6749824207'
 const serverName = 'rovai_smoke'
 const projectedHttpServerId = '1bb55b1c-39fc-40cc-b9d5-e6ba2dfcd577'
@@ -101,7 +105,7 @@ try {
         ]
       : adapterKind === 'grok-build'
         ? [`rovai-projection-stdio:${adapterMarker}-stdio`]
-      : ['kimi-code-cli', 'zcode-app', 'deepseek-harness'].includes(adapterKind)
+      : ['kimi-code-cli', 'zcode-app', 'deepseek-harness', 'opencode-cli'].includes(adapterKind)
         ? [
             `rovai-projection:${adapterMarker}`,
             `rovai-projection-http:${adapterMarker}-http`,
@@ -120,7 +124,7 @@ try {
             `rovai-projection-http:${adapterMarker}-http`,
             `runtime-native-http:${adapterMarker}-stdio`
           ]
-      : ['kimi-code-cli', 'zcode-app', 'deepseek-harness'].includes(adapterKind)
+      : ['kimi-code-cli', 'zcode-app', 'deepseek-harness', 'opencode-cli'].includes(adapterKind)
         ? [
             `runtime-native:${adapterMarker}`,
             `runtime-native:${adapterMarker}-http`,
@@ -128,6 +132,7 @@ try {
           ]
       : [`runtime-native:${adapterMarker}`]
     const startedAt = Date.now()
+    const callsBefore = adapterKind === 'opencode-cli' ? await opencodeCallCount() : null
     const result = await runProjectedTool(
       core.request,
       workspace,
@@ -135,6 +140,7 @@ try {
       adapterMarker,
       core.events
     )
+    if (callsBefore !== null) assert(await opencodeCallCount() - callsBefore === 3, 'OpenCode must actually call each of the three MCP tools once')
     for (const marker of expected) {
       assert(result.output.includes(marker), `${adapterKind} did not return the projected marker ${marker}: ${JSON.stringify(result)}`)
       if (adapterKind === 'deepseek-harness') assert(result.toolOutput.includes(marker), `DSH omitted actual MCP Tool evidence for ${marker}`)
@@ -147,7 +153,7 @@ try {
       assert(await pathExists(grokNativeHttpNameMarker), 'grok-build did not preserve the second native same-name MCP server')
     }
     const expectedServers = adapterKind === 'codex-cli'
-      || ['kimi-code-cli', 'grok-build', 'zcode-app', 'deepseek-harness'].includes(adapterKind)
+      || ['kimi-code-cli', 'grok-build', 'zcode-app', 'deepseek-harness', 'opencode-cli'].includes(adapterKind)
       ? [serverName, projectedHttpServerName, projectedStdioServerName]
       : [serverName]
     const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
@@ -164,7 +170,7 @@ try {
     }
     let lifecycle = null
     let safety = null
-    if (['zcode-app', 'deepseek-harness'].includes(adapterKind)) {
+    if (['zcode-app', 'deepseek-harness', 'opencode-cli'].includes(adapterKind)) {
       // Use the same Camp so a missing compatibility fence would actually reuse
       // the resident Host. A neighbouring member has no Rovai assignments.
       const mutate = async (method, params) => {
@@ -172,21 +178,26 @@ try {
         const mutation = await core.request(method, { expectedConfigDigest: config.configDigest, ...params })
         assert(mutation.status === 'ok', `${method} failed: ${JSON.stringify(mutation)}`)
       }
-      const probe = (body, agentId = 'agent_1', options = {}) => runProjectedTool(core.request, workspace, adapterKind,
-        adapterMarker, core.events, { threadId: result.threadId, agentId,
-          body: body.replace('text lifecycle.', `text lifecycle_${crypto.randomUUID()}.`), ...options })
-      const call = `Call the MCP server named ${serverName} echo tool exactly once with text lifecycle. This is a fresh request: actually call the tool with the current text, never reuse a previous result. Return its actual result. If denied, report denial without retrying. Do not use other tools.`
+      const probe = async (body, agentId = 'agent_1', options = {}) => {
+        const before = adapterKind === 'opencode-cli' ? await opencodeCallCount() : null
+        const run = await runProjectedTool(core.request, workspace, adapterKind,
+          adapterMarker, core.events, { threadId: result.threadId, agentId,
+            body: body.replace('text lifecycle.', `text lifecycle_${crypto.randomUUID()}.`), ...options })
+        if (before !== null) assert(await opencodeCallCount() - before === 1, 'OpenCode lifecycle probe must actually call the MCP tool once')
+        return run
+      }
+      const call = `Call the MCP server named ${serverName} echo tool exactly once with text lifecycle. The exact server/namespace is ${serverName}; do not use ${projectedHttpServerName} or ${projectedStdioServerName}. This is a fresh request: actually call the tool with the current text, never reuse a previous result. Use native tool discovery if needed to locate that exact tool. ${nativeMcpEntryHint} Return its actual result. If unavailable or denied, report that without substituting another server or retrying. Do not use shell or file tools.`
       const assertSource = (run, expected, forbidden, label) => {
         const observed = adapterKind === 'deepseek-harness' ? run.toolOutput : run.output
         assert(observed.includes(expected) && (!forbidden || !observed.includes(forbidden)), `${adapterKind} ${label}: ${JSON.stringify({ output:run.output, toolOutput:run.toolOutput })}`)
       }
       await mutate('mcp.servers.update', { serverId, definitionJson: JSON.stringify({ mcpServers: {
-        [serverName]: { command: process.execPath, args: [fixture], env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-updated' } }
+        [serverName]: { command: process.execPath, args: [fixture], env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-updated', ...opencodeCallEnvironment } }
       } }) })
       const updated = await probe(call)
       assertSource(updated, 'rovai-updated:lifecycle', null, 'MCP update did not take effect')
       assert(updated.hostInstanceId !== result.hostInstanceId, `${adapterKind} reused stale MCP Host`)
-      if (adapterKind === 'deepseek-harness') assert(updated.nativeThreadId === result.nativeThreadId, 'DSH lost exact Session on MCP update')
+      if (['deepseek-harness', 'opencode-cli'].includes(adapterKind)) assert(updated.nativeThreadId === result.nativeThreadId, `${adapterKind} lost exact Session on MCP update`)
       await configureProductRuntime(core.request, adapterKind, ['agent_2'])
       const adjacent = await probe(call, 'agent_2')
       assertSource(adjacent, 'runtime-native:lifecycle', 'rovai-updated:', 'adjacent member did not call its native MCP')
@@ -235,7 +246,8 @@ try {
       assertSource(deleted, 'runtime-native:lifecycle', 'rovai-updated:', 'deleted MCP remained visible')
       lifecycle = { updateObserved: true, oldHostFenced: true, adjacentAssignmentIsolated: true,
         unassignedNativeRestored: true, reassignedObserved: true, deletedNativeRestored: true,
-        agentRunIds: [updated, adjacent, unassigned, reassigned, deleted].map((run) => run.agentRunId) }
+        agentRunIds: [updated, adjacent, unassigned, reassigned, deleted].map((run) => run.agentRunId),
+        ...(adapterKind === 'opencode-cli' ? { actualMcpCalls: await opencodeCallCount() - callsBefore } : {}) }
     }
     results.push({
       adapterKind,
@@ -297,13 +309,13 @@ async function prepareProject(nativeHttpUrl) {
         type: 'local',
         command: [process.execPath, fixture],
         enabled: true,
-        environment: { ROVAI_MCP_SMOKE_SOURCE: 'runtime-native' }
+        environment: { ROVAI_MCP_SMOKE_SOURCE: 'runtime-native', ...opencodeCallEnvironment }
       },
       [projectedHttpServerName]: {
         type: 'local',
         command: [process.execPath, fixture],
         enabled: true,
-        environment: { ROVAI_MCP_SMOKE_SOURCE: 'runtime-native' }
+        environment: { ROVAI_MCP_SMOKE_SOURCE: 'runtime-native', ...opencodeCallEnvironment }
       },
       [projectedStdioServerName]: {
         type: 'remote',
@@ -369,7 +381,7 @@ async function prepareRovaiConfig(projectedHttpUrl) {
       [serverName]: {
         command: process.execPath,
         args: [fixture],
-        env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection' }
+        env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection', ...opencodeCallEnvironment }
       },
       [projectedHttpServerName]: {
         url: projectedHttpUrl
@@ -377,7 +389,7 @@ async function prepareRovaiConfig(projectedHttpUrl) {
       [projectedStdioServerName]: {
         command: process.execPath,
         args: [fixture],
-        env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection-stdio' }
+        env: { ROVAI_MCP_SMOKE_SOURCE: 'rovai-projection-stdio', ...opencodeCallEnvironment }
       }
     },
     _rovai: {
@@ -413,7 +425,10 @@ async function configureRuntime(request, adapterKind) {
   const runtime = await configureProductRuntime(request, adapterKind, ['agent_1'])
   const modelId = selectedModel(adapterKind)
   if (!modelId) return runtime
-  if (!runtime.snapshot.models.some((model) => model.id === modelId)) {
+  const catalog = adapterKind === 'opencode-cli'
+    ? await request('runtime.modelCatalog.open', { runtimeKind: adapterKind, waitForRefresh: true })
+    : runtime.snapshot
+  if (!catalog.models.some((model) => model.id === modelId)) {
     throw new Error(`${adapterKind} smoke model is unavailable: ${modelId}`)
   }
   const profile = await request('members.get', { agentId: 'agent_1' })
@@ -446,12 +461,12 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
           `Call the assigned MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
           'Return exactly that tool result. The other two assigned definitions collide with active native servers and must remain skipped.'
         ]
-    : ['kimi-code-cli', 'zcode-app', 'deepseek-harness'].includes(adapterKind)
+    : ['kimi-code-cli', 'zcode-app', 'deepseek-harness', 'opencode-cli'].includes(adapterKind)
       ? [
           `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
           `Call the assigned HTTP MCP server named \`${projectedHttpServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-http\`.`,
           `Call the assigned stdio MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
-          'Return all three tool results.'
+          `Use native tool discovery if needed to locate the exact tools. ${nativeMcpEntryHint} Return all three tool results.`
         ]
       : [
         `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
@@ -461,11 +476,10 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
   const body = options.body ?? toolInstructions.join('\n')
   let created
   if (options.threadId) {
-    const draft = await request('camp.composerDraft.get', { threadId: options.threadId })
-    const saved = await request('camp.composerDraft.save', { threadId: options.threadId, expectedRevision: draft.revision,
-      content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] }, body) })
     created = await request('camp.messages.send', { commandId: crypto.randomUUID(), threadId: options.threadId,
-      draftRevision: saved.revision, execution: { taskId: null, purpose: 'Verify MCP lifecycle and Session isolation.', completionRole: 'required' } })
+      content: composerDocumentForAddress({ mode: 'explicit', agentIds: [agentId] }, body),
+      sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
+      execution: { taskId: null, purpose: 'Verify MCP lifecycle and Session isolation.', completionRole: 'required' } })
     created = created.commandResult ?? created
     created.payload.threadId = options.threadId
   } else created = await createConfiguredCampAndSend(request, {
@@ -475,10 +489,15 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
     address: { mode: 'explicit', agentIds: [agentId] },
     purpose: `Verify ${adapterKind} preserves Runtime-native MCP and applies its declared same-name policy.`
   })
-  if (created.status !== 'accepted' || !created.payload?.agentRunIds?.[0]) {
+  if (created.status !== 'accepted' || !created.payload?.threadMessageId) {
     throw new Error(`${adapterKind} MCP Projection Camp was not accepted: ${JSON.stringify(created)}`)
   }
-  const agentRunId = created.payload.agentRunIds[0]
+  const intake = await waitFor(async () => {
+    const snapshot = await request('camps.snapshot', { threadId: created.payload.threadId })
+    return snapshot.agentRuns.find(run => run.inputMessageIds?.includes(created.payload.threadMessageId)
+      || run.anchorMessageId === created.payload.threadMessageId)
+  }, 'MCP message Run dispatch', 30_000)
+  const agentRunId = intake.id
   const resolvedApprovals = new Set()
   let lastState = null
   const snapshot = await waitFor(async () => {
@@ -563,6 +582,7 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
 }
 
 function startMcpHttpServer(source) {
+  let toolCallCount = 0
   return new Promise((resolveStart, rejectStart) => {
     const server = createServer(async (request, response) => {
       if (request.method !== 'POST' || request.url !== '/mcp') {
@@ -598,6 +618,7 @@ function startMcpHttpServer(source) {
             }]
           }
         } else if (message.method === 'tools/call') {
+          toolCallCount += 1
           result = {
             content: [{
               type: 'text',
@@ -625,12 +646,21 @@ function startMcpHttpServer(source) {
       const address = server.address()
       resolveStart({
         url: `http://127.0.0.1:${address.port}/mcp`,
+        toolCallCount: () => toolCallCount,
         stop: () => new Promise((resolveStop, rejectStop) => {
           server.close((error) => error ? rejectStop(error) : resolveStop())
         })
       })
     })
   })
+}
+
+async function opencodeCallCount() {
+  const calls = await readFile(opencodeCallMarker, 'utf8').catch(error => {
+    if (error.code === 'ENOENT') return ''
+    throw error
+  })
+  return calls.split('\n').filter(Boolean).length + projectedHttp.toolCallCount() + nativeHttp.toolCallCount()
 }
 
 function selectedModel(adapterKind) {

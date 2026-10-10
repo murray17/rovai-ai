@@ -11,6 +11,17 @@ last_updated: 2026-10-10
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 并行交付：OpenCode V1/V2
+
+按 User 的可用性优先、最小必要改动意见，单一 OpenCode Adapter 在配置冻结前识别所选程序，
+分流原生权限、旧压缩插件与用量来源，复用既有 Host、Session、Bootstrap 和工具授权。
+范围、必要决定与逐版本验证见 [OpenCode V1/V2 实施记录](opencode-v1-v2-implementation.md)。
+V1 移除 Rovai 强加的 `--pure`，恢复现有压缩监听及原生用户插件加载；保留显式环境设置。
+工具权限不是插件沙箱，修复前对照及开发构建验收分别记录，不用普通协作样本替代压缩连续性验证。
+本机 V1 `1.18.32` 与 Brew V2 `2.0.25` 已完成真实开发版、协作、审批/取消、压缩补发与 MCP 回归。
+V1 初始化单独保留 90 秒窗口，容纳原生冷启动依赖锁的 60 秒过期；不删除用户锁或重发任务。
+不增加版本资格门禁或安装管理，不变更数据库 schema、版本指针或模型上下文格式。
+
 ## Kimi 使用官方 Provider 配置（2026-10-10）
 
 按 User 要求退役 Rovai 专属 `kimi-code.env`、`ROVAI_KIMI_CONFIG` 与模型变量注入。

@@ -28,6 +28,7 @@ const useProductPermissionDefaults = process.env.ROVAI_ACP_USE_PRODUCT_PERMISSIO
 const plainTwoTurn = process.env.ROVAI_ACP_PLAIN_TWO_TURN === '1'
 const metricsOneTurn = process.env.ROVAI_ACP_METRICS_ONE_TURN === '1'
 const cancelRunningTool = process.env.ROVAI_ACP_CANCEL_RUNNING_TOOL === '1'
+const cancelNativeChild = process.env.ROVAI_ACP_CANCEL_NATIVE_CHILD === '1'
 const grokCompactionAcceptance = process.env.ROVAI_GROK_COMPACTION_ACCEPTANCE === '1'
 const zcodeCompactionAcceptance = process.env.ROVAI_ZCODE_COMPACTION_ACCEPTANCE === '1'
 const compactionAcceptance = grokCompactionAcceptance || zcodeCompactionAcceptance
@@ -206,8 +207,8 @@ try {
       specification.adapterKind,
       [agentId]
     )
-    const executionDeferred = specification.adapterKind === 'trae-cn-cli'
-      && installation?.snapshot?.probeStatus === 'installed_unverified'
+    const executionDeferred = ['trae-cn-cli', 'opencode-cli'].includes(specification.adapterKind)
+      && ['light_ready', 'installed_unverified'].includes(installation?.snapshot?.probeStatus)
     if (!executionDeferred
         && (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length)) {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
@@ -334,7 +335,7 @@ try {
       }
       if (verifiedInstallation?.snapshot?.probeStatus !== 'ready'
           || !verifiedInstallation.snapshot.models.length) {
-        throw new Error(`TRAE execution did not persist a Ready snapshot: ${JSON.stringify(verifiedInstallation)}`)
+        throw new Error(`${specification.adapterKind} execution did not persist a Ready snapshot: ${JSON.stringify(verifiedInstallation)}`)
       }
     }
     const executionMetrics = await request('monitoring.execution', {
@@ -613,6 +614,7 @@ try {
         }
       )
       const writeRunId = writeRequest.commandResult?.payload?.agentRunIds?.[0]
+        ?? await waitForMessageRun(request, camp.id, writeRequest.commandResult?.payload?.threadMessageId)
       if (!writeRunId) throw new Error(`ACP write AgentRun was not accepted: ${JSON.stringify(writeRequest)}`)
       const resolvedApprovals = new Set()
       const writeDeadline = Date.now() + 180_000
@@ -761,6 +763,8 @@ try {
           ?? camp.id
         const deniedRunId = deniedRequest.commandResult?.payload?.agentRunIds?.[0]
           ?? deniedRequest.payload?.agentRunIds?.[0]
+          ?? await waitForMessageRun(request, deniedCampId,
+            (deniedRequest.commandResult ?? deniedRequest).payload?.threadMessageId)
         if (!deniedRunId) throw new Error(`ACP denied AgentRun was not accepted: ${JSON.stringify(deniedRequest)}`)
         const deniedApprovals = new Set()
         const deniedDeadline = Date.now() + 180_000
@@ -814,14 +818,35 @@ try {
       }
 
       if (cancelRunningTool) {
+        const nativeChildCase = cancelNativeChild && specification.adapterKind === 'opencode-cli'
         const cancelPath = join(projectRoot, `ACP_CANCELLED_${adapterFileStem}.txt`)
-        const cancelCommand = process.platform === 'win32'
+        const toolStartedPath = specification.adapterKind === 'opencode-cli'
+          ? join(projectRoot, `ACP_TOOL_STARTED_${adapterFileStem}.txt`)
+          : null
+        const delayedCommand = process.platform === 'win32'
           ? `Start-Sleep -Seconds 30; Set-Content -LiteralPath '${cancelPath.replaceAll("'", "''")}' -Value 'SHOULD_NOT_EXIST'`
           : `sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'`
+        let cancelCommand = delayedCommand
+        if (toolStartedPath) {
+          // Execute an existing fixture, like a build/test command. Some native
+          // models correctly refuse direct Shell file creation in favour of
+          // their file-editing tool, before cancellation can be exercised.
+          const fixturePath = join(projectRoot, 'acp-cancellation-fixture.cjs')
+          await writeFile(fixturePath, `const fs = require('node:fs');\nfs.writeFileSync(${JSON.stringify(toolStartedPath)}, 'STARTED');\nsetTimeout(() => fs.writeFileSync(${JSON.stringify(cancelPath)}, 'SHOULD_NOT_EXIST'), 30000);\n`)
+          const quote = process.platform === 'win32'
+            ? value => `'${value.replaceAll("'", "''")}'`
+            : value => `'${value.replaceAll("'", "'\\''")}'`
+          cancelCommand = `${process.platform === 'win32' ? '& ' : ''}${quote(process.execPath)} ${quote(fixturePath)}`
+        }
+        const cancelPrompt = nativeChildCase
+          ? `Use one native OpenCode subagent to execute this command with its shell tool: ${cancelCommand}. Do not run shell yourself. Wait for the child to finish before replying; do not start any other child.`
+          : toolStartedPath
+            ? `Use the Bash or terminal tool to execute this existing cancellation test fixture: ${cancelCommand}. Read-only inspection is allowed if required. Run it in the foreground and wait for it to finish; do not modify or simulate the fixture. After it completes, reply exactly CANCEL_TOOL_FINISHED.`
+            : `Use the Bash or terminal tool exactly once to run: ${cancelCommand}. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`
         const cancelRequest = await sendExistingCampMessage(
           request,
           camp.id,
-          `Use the Bash or terminal tool exactly once to run: ${cancelCommand}. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
+          cancelPrompt,
           {
             taskId: null,
             purpose: 'Verify ACP running Tool cancellation and process cleanup',
@@ -829,10 +854,11 @@ try {
           }
         )
         const cancelRunId = cancelRequest.commandResult?.payload?.agentRunIds?.[0]
+          ?? await waitForMessageRun(request, camp.id, cancelRequest.commandResult?.payload?.threadMessageId)
         if (!cancelRunId) throw new Error(`ACP cancel AgentRun was not accepted: ${JSON.stringify(cancelRequest)}`)
-        const cancelled = await cancelAgentRun(request, camp.id, cancelRunId, events)
-        if (specification.adapterKind === 'zcode-app') {
-          if (cancelled.run.status !== 'cancelled') throw new Error('ZCode cancel must reach cancelled')
+        const cancelled = await cancelAgentRun(request, camp.id, cancelRunId, events, toolStartedPath)
+        if (['zcode-app', 'opencode-cli'].includes(specification.adapterKind)) {
+          if (cancelled.run.status !== 'cancelled') throw new Error(`${specification.adapterKind} cancel must reach cancelled`)
           await new Promise((done) => setTimeout(done, 35_000))
         }
         const cancelledFile = await readFile(cancelPath, 'utf8').catch((error) => {
@@ -848,6 +874,8 @@ try {
         results.at(-1).cancellation = {
           status: cancelled.run.status,
           fileCreated: false,
+          ...(toolStartedPath ? { toolStartedBeforeCancel: true } : {}),
+          ...(nativeChildCase ? { nativeChildRequested: true, childStartedBeforeCancel: true } : {}),
           approvalCount: cancelled.resolvedApprovals.size
         }
       }
@@ -882,6 +910,7 @@ async function sendExistingCampMessage(request, threadId, body, execution) {
 }
 
 async function waitForMessageRun(request, threadId, messageId) {
+  if (!messageId) throw new Error('ACP smoke intake did not return a message ID')
   const deadline = Date.now() + 30_000
   while (Date.now() < deadline) {
     const snapshot = await request('camps.snapshot', { threadId })
@@ -1010,6 +1039,7 @@ async function runFileOperationMatrix({ request, events, threadId, adapterKind, 
       completionRole: 'required'
     })
     const agentRunId = sent.commandResult?.payload?.agentRunIds?.[0]
+      ?? await waitForMessageRun(request, threadId, sent.commandResult?.payload?.threadMessageId)
     if (!agentRunId) {
       throw new Error(`${adapterKind} ${testCase.name} file-operation Run was not accepted: ${JSON.stringify(sent)}`)
     }
@@ -1215,7 +1245,7 @@ async function waitForFileOperationRun({ request, threadId, agentRunId, adapterK
   throw new Error(`${adapterKind} ${name} file-operation Run timed out: ${JSON.stringify(run)}`)
 }
 
-async function cancelAgentRun(request, threadId, agentRunId, events = []) {
+async function cancelAgentRun(request, threadId, agentRunId, events = [], toolStartedPath = null) {
   const resolvedApprovals = new Set()
   const deadline = Date.now() + 180_000
   let cancellationRequested = false
@@ -1247,10 +1277,25 @@ async function cancelAgentRun(request, threadId, agentRunId, events = []) {
       && event.params?.agentRunId === agentRunId
       && event.params?.payload?.status === 'in_progress'
       && String(event.params?.payload?.input ?? '').includes('sleep 30'))
-    if (!cancellationRequested && (resolvedApprovals.size > 0 || runningNativeTool) && run) {
+    const readyToCancel = toolStartedPath
+      ? await readFile(toolStartedPath, 'utf8').then(value => value.trim() === 'STARTED').catch(error => {
+          if (error.code === 'ENOENT') return false
+          throw error
+        })
+      : resolvedApprovals.size > 0 || runningNativeTool
+    if (!cancellationRequested && readyToCancel && run) {
       const turn = snapshot.turns.find((candidate) => candidate.id === run.threadTurnId)
-      if (!turn) throw new Error(`ACP cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
-      await requestCampTurnCancellation(request, threadId, turn)
+      if (turn) await requestCampTurnCancellation(request, threadId, turn)
+      else {
+        const cancellation = await request('agentRuns.cancel', {
+          commandId: crypto.randomUUID(),
+          command: { threadId, agentRunId, expectedVersion: run.version }
+        })
+        if (cancellation.status === 'rejected') {
+          if (cancellation.code === 'command.version_conflict') continue
+          throw new Error(`ACP Run cancellation was rejected: ${JSON.stringify(cancellation)}`)
+        }
+      }
       cancellationRequested = true
     }
     if (cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
@@ -1373,6 +1418,7 @@ async function runCommandOutputMatrix({ request, events, threadId, adapterKind }
       }
     )
     const runId = sent.commandResult?.payload?.agentRunIds?.[0]
+      ?? await waitForMessageRun(request, threadId, sent.commandResult?.payload?.threadMessageId)
     if (!runId) throw new Error(`ACP ${specification.name} matrix Run was not accepted: ${JSON.stringify(sent)}`)
     const resolvedApprovals = new Set()
     const deadline = Date.now() + 180_000

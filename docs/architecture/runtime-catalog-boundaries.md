@@ -182,6 +182,15 @@ CLI/settings 覆盖仍受原生管理策略约束。明确的参数拒绝或配�
 <a id="浅检测与按需深检"></a>
 ## 安装发现与真实 Host 验证
 
+OpenCode 保持一个产品与 Adapter。显式路径或现有发现顺序确定程序后，在启动准备阶段先取得
+与该程序身份匹配的代际：复用健康 Host／现有版本字段，否则有界读取同一程序的版本，再冻结配置。
+不新增缓存，不在页面、保存或浅发现中探测，不主动寻找 opencode2，不在失败后换程序。
+V1/V2 未知且无法确定必需配置时报告初始化错误；握手冲突在正文前停止，不修补冻结身份或重发。
+Host 的程序指纹与 Native Session 的协议／存储来源分别判断，普通补丁更新不自动丢弃会话。
+权限保留一般 allow/ask/deny 与 Shell、Skill 放行例外，V2 用原生有序规则覆盖 build/plan，
+其他自定义／子 agent 仍有原生规则。细节与测试边界见
+[OpenCode V1/V2 实施记录](../versions/v1.72/opencode-v1-v2-implementation.md)。
+
 启动与 rescan 只解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity；
 不执行 `--version` 或协议深检。发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
 安装记录不伪造 Ready、认证或能力；旧快照只供主动诊断和模型 Picker 参考。
