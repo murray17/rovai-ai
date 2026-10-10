@@ -227,6 +227,16 @@ function runtimeParametersFor(
       return <GrokRuntimeParameters {...props} />
     case 'deepseek-harness':
       return <DeepseekHarnessRuntimeParameters {...props} />
+    case 'cline-cli':
+      return (
+        <div className="runtime-parameter-form">
+          {modelFieldsFor('cline-cli', props)}
+          <PermissionSelect {...props} fieldKey="mode" label={uiAttribute("执行模式")} />
+          <PermissionSwitch {...props} fieldKey="auto_approve" label={uiAttribute("自动通过权限请求")} enabledValue="true" disabledValue="false" />
+        </div>
+      )
+    case 'command-code-cli':
+      return <div className="runtime-parameter-form">{modelFieldsFor('command-code-cli', props)}<PermissionSelect {...props} fieldKey="permission_mode" label={uiAttribute("权限模式")} /></div>
     case 'zcode-app':
       return <div className="runtime-parameter-form">{modelFieldsFor('zcode-app', props)}<PermissionSelect {...props} fieldKey="permission_mode" label={uiAttribute("权限模式")} /></div>
     case 'antigravity-app':
@@ -399,6 +409,7 @@ function modelFieldsFor(
   props: RuntimeParameterProps
 ): React.JSX.Element {
   switch (adapterKind) {
+    case 'command-code-cli':
     case 'claude-code-cli':
       return <ModelFields {...props} optionKey="effort" optionLabel={uiAttribute("思考强度")} />
     case 'codex-cli':
@@ -416,6 +427,7 @@ function modelFieldsFor(
     case 'kimi-code-cli':
     case 'grok-build':
     case 'zcode-app':
+    case 'cline-cli':
     case 'antigravity-app':
       return <ModelFields {...props} />
   }
@@ -912,17 +924,21 @@ function PermissionSwitch({
   disabled,
   onChange,
   fieldKey,
-  label
+  label,
+  enabledValue = 'on',
+  disabledValue = 'off'
 }: RuntimeParameterProps & {
   fieldKey: string
   label: string
+  enabledValue?: string
+  disabledValue?: string
 }): React.JSX.Element {
   const language = useInterfaceLanguage()
   const hintId = useId()
   const descriptor = permissionDescriptor(permissionOptions, fieldKey)
-  const checked = draft.permissions.values[fieldKey] === 'on'
-  const recommendEnabling = descriptor?.choices.some(choice => choice.value === 'on') === true
-    && installation.memberRuntimeDefaults?.permissions.values[fieldKey] === 'on'
+  const checked = draft.permissions.values[fieldKey] === enabledValue
+  const recommendEnabling = descriptor?.choices.some(choice => choice.value === enabledValue) === true
+    && installation.memberRuntimeDefaults?.permissions.values[fieldKey] === enabledValue
   return (
     <label className="field-label runtime-parameter-switch-field">
       <span className="permission-switch-label">{label}</span>
@@ -939,7 +955,7 @@ function PermissionSwitch({
           onChange={(event) => updatePermission(
             draft,
             fieldKey,
-            event.target.checked ? 'on' : 'off',
+            event.target.checked ? enabledValue : disabledValue,
             onChange
           )}
         />

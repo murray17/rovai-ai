@@ -71,7 +71,11 @@ app.whenReady().then(async () => {
     await key('Tab'); assert.equal(await run('document.activeElement.getAttribute("aria-label")'), '推理强度，跟随模型默认值')
     await click('button[aria-label^="文件系统访问，Safe"]'); await key('End'); await key('Enter')
     assert.equal((await draft()).permissions.values.sandbox_mode, 'full')
-    await click('[data-member-runtime-select]'); await key('Escape')
+    await click('[data-member-runtime-select]')
+    const runtimeOptions = await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).map(element => element.textContent)')
+    assert.ok(runtimeOptions.some(label => label.includes('Codex CLI')))
+    assert.ok(runtimeOptions.every(label => !label.includes('Cline') && !label.includes('Command Code')))
+    await key('Escape')
     assert.equal(await run('document.activeElement.hasAttribute("data-member-runtime-select")'), true)
     for (const page of ['member', 'onboarding']) {
       await run(`window.runtimeTest.reset(${JSON.stringify(page)}, 'normal')`); await settle()

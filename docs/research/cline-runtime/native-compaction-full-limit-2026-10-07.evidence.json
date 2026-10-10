@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "userMessageId": "840d3b4e-9cad-4d00-a251-cf2699a48baf",
+  "classification": "native_compaction_not_observed",
+  "checkoutCommit": "2cb46da949fa007fed4a787f00a9b62e50474426",
+  "runtime": "cline --acp",
+  "runtimeVersion": "3.0.65",
+  "clineUpstreamCommit": "9131e36429314ea614491bf749678adbacb3d3cb",
+  "model": "sub2api/gpt-6-sol",
+  "catalogReadAt": "2026-10-07T04:03:22.595882+00:00",
+  "catalog": [
+    {
+      "endpoint": "/models",
+      "httpStatus": 200,
+      "modelCount": 17,
+      "matchingModel": []
+    },
+    {
+      "endpoint": "/models?client_version=0.157.1",
+      "httpStatus": 200,
+      "modelCount": 8,
+      "matchingModel": [
+        {
+          "slug": "gpt-6-sol",
+          "context_window": 272000,
+          "max_context_window": 872000,
+          "default_reasoning_level": "medium",
+          "supported_in_api": true
+        }
+      ]
+    }
+  ],
+  "previousMaxSuccessfulInputTokens": 918618,
+  "newSuccessfulInputTokens": null,
+  "providerOverflowObserved": true,
+  "nativeCompactionCount": 0,
+  "nativeRecoverySuccess": false,
+  "nativeHttpRetryAttempts": null,
+  "outputReservationTokens": null,
+  "requestInputTokensAtOverflow": null,
+  "runtimeOrModelConfigurationChanged": false,
+  "manualCompactionSent": false,
+  "newTriggerHooksInstalled": false,
+  "coreRetryCount": 0,
+  "binding": {
+    "native_session_id": "1791217949748_FrXN__cli",
+    "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+    "native_binding_generation": 13,
+    "native_binding_compatibility_digest": "bba6f7e0201249c8e3df882a89ead70f1bfeb423b0bc7ddceb905ec2dcd04e20",
+    "native_charter_digest": "sha256:1a0e9dc24389be3bca2c32123a070e0cf93e9403766c4135721ac72af4b132a3"
+  },
+  "round": {
+    "round": 1,
+    "inputBytes": 32700,
+    "inputSha256": "f0e050147eb279edd0ba744ba558aea96532151d7d9b6e26f7b6315a86467403",
+    "seconds": 213.67,
+    "run": {
+      "id": "f7fb243f-6ec8-4997-b176-03d995840acb",
+      "status": "failed",
+      "last_error_code": "runtime_prompt_runtime_error",
+      "public_runtime_failure_json": "{\"runtimeKind\":\"cline-cli\",\"origin\":\"runtime\",\"phase\":\"execution\",\"code\":\"runtime_prompt_runtime_error\",\"summary\":\"Cline 未能完成运行\",\"detail\":\"ACP error -32603: Internal error: Your input exceeds the context window of this model. Please adjust your input and try again.\",\"retryable\":true}",
+      "automatic_retry_count": 0,
+      "manual_retry_allowed": 1,
+      "created_at": "2026-10-07T04:04:05.162408+00:00",
+      "started_at": "2026-10-07T04:04:05.184176+00:00",
+      "ended_at": "2026-10-07T04:07:38.437350+00:00",
+      "execution_epoch": 1,
+      "runtime_reported_version": "3.0.65",
+      "runtime_observed_model_id": "gpt-6-sol"
+    },
+    "context": {
+      "conversation_id": "74e30826-f072-4773-b2f1-054ad5e70955",
+      "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+      "native_binding_generation": 13,
+      "native_session_id": "1791217949748_FrXN__cli",
+      "runtime_kind": "cline-cli",
+      "runtime_version": "3.0.65",
+      "model_key": "gpt-6-sol",
+      "effective_config_digest": "28dc951f1f0a2e08f059954e4e8564badd1f4a759dca628ae01a873d97ec747c",
+      "context_used_tokens": null,
+      "context_window_tokens": 272000,
+      "source": "runtime_private_extension",
+      "dialect_id": "cline-plugin-model-context-v1",
+      "observed_at": "2026-10-07T04:07:38.303Z",
+      "source_agent_run_id": "f7fb243f-6ec8-4997-b176-03d995840acb",
+      "source_execution_epoch": 1,
+      "native_context_ratio": null
+    },
+    "inputDelivery": {
+      "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+      "native_binding_generation": 13,
+      "status": "not_accepted",
+      "bootstrap_redelivery_present": 0
+    },
+    "messagesBefore": 212,
+    "messagesAfter": 214,
+    "newMetrics": []
+  },
+  "observerRecords": [
+    {
+      "hostId": "9bca9301-08c6-40c3-b5ea-f98bbcf0f3b9",
+      "schemaVersion": 1,
+      "sessionId": "1791217949748_FrXN__cli",
+      "leaseId": "acp-prompt-c0ade318-ef64-47d3-94fe-fa3922bd7612-5",
+      "runId": "run_AQ-9-yLw",
+      "seq": 1,
+      "kind": "run_started",
+      "observedAt": "2026-10-07T04:04:08.965Z"
+    },
+    {
+      "hostId": "9bca9301-08c6-40c3-b5ea-f98bbcf0f3b9",
+      "schemaVersion": 1,
+      "sessionId": "1791217949748_FrXN__cli",
+      "leaseId": "acp-prompt-c0ade318-ef64-47d3-94fe-fa3922bd7612-5",
+      "runId": "run_AQ-9-yLw",
+      "seq": 3,
+      "kind": "run_finished",
+      "observedAt": "2026-10-07T04:07:38.318Z",
+      "status": "failed"
+    },
+    {
+      "hostId": "9bca9301-08c6-40c3-b5ea-f98bbcf0f3b9",
+      "schemaVersion": 1,
+      "sessionId": "1791217949748_FrXN__cli",
+      "leaseId": "acp-prompt-c0ade318-ef64-47d3-94fe-fa3922bd7612-5",
+      "runId": "run_AQ-9-yLw",
+      "seq": 2,
+      "kind": "model_completed",
+      "observedAt": "2026-10-07T04:07:38.303Z",
+      "messageId": "msg_sdLj7EkI",
+      "requestId": null,
+      "modelId": "gpt-6-sol",
+      "providerId": "openai-compatible",
+      "contextWindow": 272000,
+      "contextWindowSource": "native_models_config",
+      "metrics": {}
+    }
+  ],
+  "observerSequenceComplete": true,
+  "observerRawSha256": "e388052a725b38e7a32e428663a41aa88a2f305e47f443aa0cfed25ea35f2a7d",
+  "nativeSnapshots": {
+    "before": {
+      "messageCount": 212,
+      "systemPromptSha256": "79512cae327de57da3a4b70df71951250c478ec091d8a5983d9f32ad57ca5296",
+      "nativeFiles": [
+        {
+          "name": "1791217949748_FrXN__cli.messages.json",
+          "bytes": 1526405,
+          "sha256": "ff42b09bb9dbdf1961baa5915a10904e5915b535b570b8fc6759aad44387a516"
+        },
+        {
+          "name": "1791217949748_FrXN__cli.json",
+          "bytes": 3776,
+          "sha256": "7154aaf8e7294031efd4a3d52434b6a07718413a4c3b7e6cb5e47a22f8f182bb"
+        }
+      ]
+    },
+    "after": {
+      "messageCount": 214,
+      "systemPromptSha256": "79512cae327de57da3a4b70df71951250c478ec091d8a5983d9f32ad57ca5296",
+      "nativeFiles": [
+        {
+          "name": "1791217949748_FrXN__cli.messages.json",
+          "bytes": 1561090,
+          "sha256": "497e8737f7dfee619f7786523b54a7989b1ecafceb712dc572848dbcd6d112ed"
+        },
+        {
+          "name": "1791217949748_FrXN__cli.json",
+          "bytes": 3776,
+          "sha256": "79661cf6ca2679dc025b54815160cfff0dd925a97e2c1a5fbf31cfea571f871b"
+        }
+      ]
+    }
+  },
+  "nativePriorMessageIdsRetained": true,
+  "nativeAgentErrorRecords": [
+    {
+      "timestamp": "2026-10-07T04:07:38.306Z",
+      "clineVersion": "",
+      "taskId": "conv_1791345846806_nggs1wk",
+      "hookName": "agent_error",
+      "iteration": 1,
+      "error": {
+        "name": "Error",
+        "message": "Your input exceeds the context window of this model. Please adjust your input and try again.",
+        "stack": "Error: Your input exceeds the context window of this model. Please adjust your input and try again.\n    at execute (/$bunfs/root/chunk-v45ynnaz.js:389:6881)\n    at processTicksAndRejections (native:7:39)"
+      }
+    }
+  ],
+  "nativeCompactionRows": [],
+  "publicAgentReplies": [],
+  "bootstrap": {
+    "bytes": 3740,
+    "sha256": "7bd7d75a1896a384a7567c19f3aac05f224561469f19c61cca0c1595eb1c99a5",
+    "sameSession": true,
+    "identityPresent": true,
+    "hostObserverSha256": "08af5b71bb6b1be0e95e732972c4ab06dd09903ebd1da30c9259259d109cf59a",
+    "hostBootstrapSha256": "f5eb507e26078f4ee223a0887876c06375167b747e0718925c47103f52fc672e"
+  },
+  "integrity": {
+    "host": {
+      "sha256": "c032615948b76f462165f416846dab2a14fc4242f783fcf03599ed968eb307e4",
+      "unchangedFromFirstAcceptance": true
+    },
+    "cline": {
+      "sha256": "c23a6dc7796a4bb04f6ab0804576a353bc3360b2bac1b2fb16236dd0efae360e",
+      "unchangedFromFirstAcceptance": true
+    },
+    "clineWrapper": {
+      "sha256": "37848dcde533871a1a95af479221c8768292652ae73c73a8825288a67470f355",
+      "unchangedFromFirstAcceptance": true
+    },
+    "providers": {
+      "sha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+      "unchangedFromFirstAcceptance": true
+    },
+    "models": {
+      "sha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+      "unchangedFromFirstAcceptance": true
+    },
+    "nativeMcp": {
+      "sha256": "e93fc8db2b1bd77107fe6c758bca9545fa864cf7cce8ab93a7b2b93a1d566a7b",
+      "unchangedFromFirstAcceptance": true
+    },
+    "observer": {
+      "sha256": "08af5b71bb6b1be0e95e732972c4ab06dd09903ebd1da30c9259259d109cf59a",
+      "unchangedFromFirstAcceptance": true
+    },
+    "bootstrap": {
+      "sha256": "f5eb507e26078f4ee223a0887876c06375167b747e0718925c47103f52fc672e",
+      "unchangedFromFirstAcceptance": true
+    }
+  },
+  "limits": [
+    "Catalog 272000/872000 is not a demonstrated current provider rejection boundary; last successful input was already 918618.",
+    "The extra 32700 bytes have no successful provider usage. Do not estimate an exact rejected token count or claim a successful 1M-token request.",
+    "No captured raw HTTP request/response; native HTTP retries and output reservation remain unknown.",
+    "New native Host was observed with the existing Session/Binding/generation; no Session replacement or history reset."
+  ]
+}

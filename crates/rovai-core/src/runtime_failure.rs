@@ -408,6 +408,8 @@ fn runtime_display_name(runtime_kind: AdapterKind) -> &'static str {
         AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::DeepseekHarness => "DeepSeek Harness",
+        AdapterKind::ClineCli => "Cline",
+        AdapterKind::CommandCodeCli => "Command Code",
         AdapterKind::AntigravityApp => "Antigravity",
         AdapterKind::ZcodeApp => "ZCode",
     }
@@ -568,7 +570,7 @@ fn contains_private_payload_label(line: &str) -> bool {
     .any(|label| normalized.contains(label))
 }
 
-fn redact_secret_values(mut value: String) -> String {
+pub(crate) fn redact_secret_values(mut value: String) -> String {
     let mut bearer_search_from = 0;
     loop {
         let lower = value.to_ascii_lowercase();

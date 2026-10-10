@@ -13,7 +13,7 @@ use std::{
 #[cfg(unix)]
 use std::{fs::OpenOptions, io::Write};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 #[cfg(all(test, unix, feature = "extended-tests"))]
 use rovai_core::agent_runtime_adapter::TRAE_RUNTIME_DEFAULT_MODEL_ID;
 use rovai_core::{
@@ -138,6 +138,15 @@ pub enum AcpIncoming {
         display_agent_run_id: Option<String>,
         display_execution_epoch: Option<i64>,
         display_event: Option<Box<RuntimeCompactionDisplayEvent>>,
+    },
+    CompactionDisplay {
+        adapter_kind: AdapterKind,
+        host_instance_id: String,
+        agent_run_id: String,
+        execution_epoch: i64,
+        native_session_id: String,
+        native_prompt_id: String,
+        event: Box<RuntimeCompactionDisplayEvent>,
     },
     IngressBarrier {
         completion: oneshot::Sender<()>,
@@ -1310,11 +1319,15 @@ pub(crate) struct AcpHost {
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
     zcode_background: std::sync::Mutex<HashMap<(String, String), ZcodeBackgroundRoute>>,
+    paired_tools: Mutex<HashMap<(String, String, String), Value>>,
+    cline_observed_sequences: Mutex<HashMap<(String, String), u64>>,
     zcode_detached_prompts: RwLock<HashMap<String, AcpSessionRoute>>,
     zcode_cleanup_confirmed: AtomicBool,
     session_results: RwLock<HashMap<String, Value>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
+    exit_handled: AtomicBool,
+    stdout_finished: Notify,
     protocol_violated: AtomicBool,
     initialize_result: RwLock<Option<Value>>,
     trae_permission_mode: Option<String>,
@@ -1326,6 +1339,87 @@ pub(crate) struct AcpHost {
     executable_path: PathBuf,
     builtin_tools: Option<BuiltinToolProcessConfig>,
     grok_context_windows: BTreeMap<String, i64>,
+}
+
+fn enrich_paired_tool_message(
+    adapter_kind: AdapterKind,
+    tools: &mut HashMap<(String, String, String), Value>,
+    session_id: &str,
+    prompt_id: &str,
+    message: &mut Value,
+) -> Result<bool> {
+    if message["method"] != "session/update" {
+        return Ok(true);
+    }
+    let update = &mut message["params"]["update"];
+    let Some(stage) = update["sessionUpdate"].as_str() else {
+        return Ok(true);
+    };
+    if !matches!(stage, "tool_call" | "tool_call_update") {
+        return Ok(true);
+    }
+    let call_id = update["toolCallId"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .context("acp_tool_id_missing")?
+        .to_string();
+    let key = (session_id.to_string(), prompt_id.to_string(), call_id);
+    let terminal = matches!(update["status"].as_str(), Some("completed" | "failed"));
+    let enrich = if adapter_kind == AdapterKind::CommandCodeCli {
+        crate::command_code_acp::enrich_tool_update
+    } else {
+        crate::cline::enrich_tool_update
+    };
+    // Cline requests permission before execution. It emits a populated pending
+    // tool_call_update, then failed on denial, without ever emitting tool_call.
+    // Retain that input for the failure; a denied proposal is never a mutation.
+    if stage == "tool_call" || (update["status"] == "pending" && update["rawInput"].is_object()) {
+        ensure!(
+            tools.len() < 1024 || tools.contains_key(&key),
+            "acp_tool_budget_exceeded"
+        );
+        enrich(update, None);
+        tools.insert(key, update.clone());
+    } else if terminal {
+        let initial = tools.get(&key).cloned();
+        let permission_only_denial = adapter_kind == AdapterKind::ClineCli
+            && update["status"] == "failed"
+            && update["rawOutput"].is_null()
+            && initial
+                .as_ref()
+                .is_some_and(|value| value["sessionUpdate"] == "tool_call_update");
+        // Permission rejection and the native tool runner may each report the
+        // same failure. The permission notification has no rawOutput; keep its
+        // input until the actual result arrives (or prompt cleanup). Cline may
+        // label that result "completed" while reporting success=false inside.
+        ensure!(
+            initial.is_some() || update["status"] == "failed",
+            "acp_terminal_without_tool_call"
+        );
+        if initial
+            .as_ref()
+            .is_some_and(|value| value["status"] == "failed")
+        {
+            update["status"] = json!("failed");
+        }
+        enrich(update, initial.as_ref());
+        if update["status"] == "failed" && update["rawOutput"].is_null() {
+            if let Some(initial) = tools.get_mut(&key) {
+                initial["status"] = json!("failed");
+            }
+        } else {
+            tools.remove(&key);
+        }
+        // Core already owns the resolved permission decision. This notification
+        // is not the tool result: auditing it now and then auditing the native
+        // result would give one Action ID two different idempotent payloads.
+        if permission_only_denial {
+            return Ok(false);
+        }
+    } else if let Some(initial) = tools.get(&key) {
+        enrich(update, Some(initial));
+    }
+    Ok(true)
 }
 
 impl AcpHost {
@@ -1349,7 +1443,7 @@ impl AcpHost {
         ) {
             bail!("Runtime launch policy rejected Agent execution");
         }
-        let private_config =
+        let mut private_config =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
         let private_config_root = private_config.as_ref().map(|config| config.root.as_path());
         let host_instance_id = uuid::Uuid::new_v4().to_string();
@@ -1442,12 +1536,18 @@ impl AcpHost {
         } else {
             None
         };
+        // From this point a process may exist; its owner handles cleanup.
+        if let Some(config) = private_config.as_mut() {
+            config.preparing = false;
+        }
         let mut child = ManagedProcess::spawn(spec).with_context(|| {
             format!(
                 "failed to start {} as an ACP server",
                 frozen_runtime.executable_path
             )
         })?;
+        #[cfg(target_os = "macos")]
+        child.track_descendants(&private_runtime_dir.join("owned-processes"))?;
         let stdin = child.take_stdin().context("ACP stdin was unavailable")?;
         let stdout = child.take_stdout().context("ACP stdout was unavailable")?;
         let stderr = child.take_stderr().context("ACP stderr was unavailable")?;
@@ -1502,11 +1602,15 @@ impl AcpHost {
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
             zcode_background: std::sync::Mutex::new(HashMap::new()),
+            paired_tools: Mutex::new(HashMap::new()),
+            cline_observed_sequences: Mutex::new(HashMap::new()),
             zcode_detached_prompts: RwLock::new(HashMap::new()),
             zcode_cleanup_confirmed: AtomicBool::new(false),
             session_results: RwLock::new(HashMap::new()),
             incoming,
             alive: AtomicBool::new(true),
+            exit_handled: AtomicBool::new(false),
+            stdout_finished: Notify::new(),
             protocol_violated: AtomicBool::new(false),
             initialize_result: RwLock::new(None),
             trae_permission_mode: (frozen_runtime.adapter_kind == AdapterKind::TraeCnCli).then(
@@ -1534,6 +1638,7 @@ impl AcpHost {
             builtin_tools,
             grok_context_windows,
         });
+        Self::spawn_exit_watcher(&host);
         Self::spawn_stdout_reader(host.clone(), stdout);
         Self::spawn_stderr_reader(host.clone(), stderr);
         if host.adapter_kind == AdapterKind::DeepseekHarness {
@@ -1579,6 +1684,17 @@ impl AcpHost {
         let initialized = host.rpc("initialize", initialize_params).await;
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
+                if host.adapter_kind == AdapterKind::CommandCodeCli {
+                    if let Err(error) = crate::command_code_acp::verify_ready(
+                        host.private_config_root
+                            .as_deref()
+                            .context("Command Code private Host missing")?,
+                        host.pid(),
+                    ) {
+                        host.shutdown().await;
+                        return Err(error);
+                    }
+                }
                 *host.initialize_result.write().await = Some(result.clone());
                 let auth_method = match frozen_runtime.adapter_kind {
                     AdapterKind::CursorAgent => Ok(Some(("cursor_login", "Cursor"))),
@@ -1818,6 +1934,29 @@ impl AcpHost {
                                 let session_id = session_id
                                     .as_deref()
                                     .expect("forwarded ACP route has Session ID");
+                                if matches!(
+                                    host.adapter_kind,
+                                    AdapterKind::ClineCli | AdapterKind::CommandCodeCli
+                                ) {
+                                    match host
+                                        .enrich_paired_tool_message(
+                                            session_id,
+                                            &active_prompt.prompt_id,
+                                            &mut message,
+                                        )
+                                        .await
+                                    {
+                                        Ok(false) => continue,
+                                        Ok(true) => {}
+                                        Err(error) => {
+                                            host.send_host_diagnostic(format!(
+                                                "ACP tool observation failed: {error:#}"
+                                            ));
+                                            host.protocol_violated.store(true, Ordering::Release);
+                                            break;
+                                        }
+                                    }
+                                }
                                 host.forward_compaction_observation(
                                     session_id,
                                     &message,
@@ -1927,19 +2066,81 @@ impl AcpHost {
                     }
                 }
             }
-            host.alive.store(false, Ordering::Release);
-            host.release_all_client_terminals().await;
-            for (_, pending) in host.pending.lock().await.drain() {
-                if let PendingRpc::Response { sender, .. } = pending {
-                    let _ = sender.send(Err("ACP Host exited".to_string()));
+            host.stdout_finished.notify_one();
+            host.handle_exit().await;
+        });
+    }
+
+    fn spawn_exit_watcher(host: &Arc<Self>) {
+        let host = Arc::downgrade(host);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(250));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                let Some(host) = host.upgrade() else {
+                    return;
+                };
+                if !host.is_alive() {
+                    return;
                 }
-            }
-            for owner in host.owners().await {
-                let _ = host
-                    .incoming
-                    .send(owner.exited(host.adapter_kind, &host.host_instance_id));
+                let exited = {
+                    let mut child = host.child.lock().await;
+                    // Record descendants while their ancestry is available, including
+                    // SDK subprocesses that may vanish with the native leader.
+                    host.capture_native_descendants(&mut child)
+                        .and_then(|()| child.try_wait())
+                };
+                match exited {
+                    Ok(None) => continue,
+                    Ok(Some(_)) => {}
+                    Err(_) => {
+                        host.send_host_diagnostic("ACP Host exit observation failed".to_string())
+                    }
+                }
+                // Stop descendants that can retain protocol pipe handles, then
+                // let the reader consume any buffered authoritative terminal.
+                let _ = host.child.lock().await.force_terminate_tree();
+                let _ = timeout(Duration::from_secs(1), host.stdout_finished.notified()).await;
+                host.handle_exit().await;
+                return;
             }
         });
+    }
+
+    async fn handle_exit(&self) {
+        if self.exit_handled.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        // Reap the owned tree before reporting isolation. Waiting for stdout
+        // EOF alone allows orphan tools to write after their leader has died.
+        self.shutdown_and_reap().await;
+        for (_, pending) in self.pending.lock().await.drain() {
+            if let PendingRpc::Response { sender, .. } = pending {
+                let _ = sender.send(Err("ACP Host exited".to_string()));
+            }
+        }
+        for owner in self.owners().await {
+            let _ = self
+                .incoming
+                .send(owner.exited(self.adapter_kind, &self.host_instance_id));
+        }
+    }
+
+    async fn enrich_paired_tool_message(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+        message: &mut Value,
+    ) -> Result<bool> {
+        let mut tools = self.paired_tools.lock().await;
+        enrich_paired_tool_message(
+            self.adapter_kind,
+            &mut tools,
+            session_id,
+            prompt_id,
+            message,
+        )
     }
 
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
@@ -1958,6 +2159,36 @@ impl AcpHost {
                 session_id,
                 prompt_id,
             } => {
+                let native_response_succeeded = response.is_ok();
+                let cline_observations = if self.adapter_kind == AdapterKind::ClineCli {
+                    match self
+                        .capture_cline_observations(&session_id, &prompt_id, response.as_ref().ok())
+                        .await
+                    {
+                        Ok(observations) => observations,
+                        Err(_) => {
+                            // Optional numeric evidence cannot replace the native ACP
+                            // terminal result. Reject incomplete observations only.
+                            eprintln!(
+                                "Cline numeric observations unavailable for completed prompt"
+                            );
+                            Vec::new()
+                        }
+                    }
+                } else {
+                    Vec::new()
+                };
+                if matches!(
+                    self.adapter_kind,
+                    AdapterKind::ClineCli | AdapterKind::CommandCodeCli
+                ) {
+                    self.paired_tools
+                        .lock()
+                        .await
+                        .retain(|(session, prompt, _), _| {
+                            session != &session_id || prompt != &prompt_id
+                        });
+                }
                 if self.adapter_kind == AdapterKind::ZcodeApp {
                     self.zcode_detached_prompts
                         .write()
@@ -1979,7 +2210,15 @@ impl AcpHost {
                     active_prompt.acceptance_emitted = true;
                     let active_prompt = active_prompt.clone();
                     route.phase = AcpSessionPhase::PromptCompleted(active_prompt.clone());
-                    route.sequence = route.sequence.saturating_add(1);
+                    route.sequence = route.sequence.saturating_add(
+                        if self.adapter_kind == AdapterKind::ClineCli
+                            && !cline_observations.is_empty()
+                        {
+                            2
+                        } else {
+                            1
+                        },
+                    );
                     Some((active_prompt, should_emit_input_disposition, route.sequence))
                 };
                 if let Some((active_prompt, should_emit_input_disposition, sequence)) =
@@ -2021,11 +2260,26 @@ impl AcpHost {
                         _ => {}
                     }
                     let input_disposition =
-                        if response.is_ok() || active_prompt.prompt_activity_observed {
+                        if native_response_succeeded || active_prompt.prompt_activity_observed {
                             "accepted"
                         } else {
                             "not_accepted"
                         };
+                    if self.adapter_kind == AdapterKind::ClineCli && !cline_observations.is_empty()
+                    {
+                        for record in &cline_observations {
+                            self.forward_cline_compaction(&session_id, &prompt_id, &owner, record)
+                                .await;
+                        }
+                        let _ = self.incoming.send(owner.message(
+                            self.adapter_kind, &self.host_instance_id,
+                            &session_id, &active_prompt, sequence.saturating_sub(1),
+                            json!({"jsonrpc":"2.0","method":"session/update","params":{
+                                "sessionId":session_id,
+                                "update":{"sessionUpdate":"usage_update","_meta":{"clineObservations":cline_observations}}
+                            }}),
+                        ));
+                    }
                     let params = match (response, response_error) {
                         (Ok(result), _) => json!({
                             "sessionId": session_id,
@@ -2065,9 +2319,152 @@ impl AcpHost {
         }
     }
 
+    async fn capture_cline_observations(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+        response: Option<&Value>,
+    ) -> Result<Vec<Value>> {
+        let mut sequences = self.cline_observed_sequences.lock().await;
+        let last = sequences
+            .remove(&(session_id.to_owned(), prompt_id.to_owned()))
+            .unwrap_or(0);
+        let root = self
+            .private_config_root
+            .as_deref()
+            .context("Cline private Host directory missing")?;
+        let records = crate::cline::drain_observations(root, session_id, prompt_id);
+        let unbound = crate::cline::unbind_prompt(root, session_id);
+        let records = records?;
+        unbound?;
+        // ACP is the completion authority. Older native entries do not load
+        // Plugin hooks: absent numeric evidence remains unknown, never invented.
+        if !records.is_empty() && response.is_some_and(|value| value["stopReason"] == "end_turn") {
+            ensure!(
+                records
+                    .first()
+                    .is_some_and(|value| value["kind"] == "run_started"),
+                "cline_observer_missing_run_start"
+            );
+            ensure!(
+                records.last().is_some_and(
+                    |value| value["kind"] == "run_finished" && value["status"] == "completed"
+                ),
+                "cline_observer_missing_terminal"
+            );
+        }
+        Ok(records
+            .into_iter()
+            .filter(|value| {
+                value["kind"] == "compaction" || value["seq"].as_u64().is_some_and(|seq| seq > last)
+            })
+            .collect())
+    }
+
+    async fn poll_cline_usage(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+    ) -> Vec<NativeUsageObservation> {
+        // Serialize the private file read against terminal capture. The route
+        // is rechecked while this guard excludes lease completion/rebinding.
+        let mut sequences = self.cline_observed_sequences.lock().await;
+        let prompt_id = {
+            let routes = self.routes.read().await;
+            let Some(route) = routes.get(session_id) else {
+                return Vec::new();
+            };
+            if &route.owner != owner {
+                return Vec::new();
+            }
+            let AcpSessionPhase::PromptActive(prompt) = &route.phase else {
+                return Vec::new();
+            };
+            prompt.prompt_id.clone()
+        };
+        let Some(root) = self.private_config_root.clone() else {
+            return Vec::new();
+        };
+        let session = session_id.to_owned();
+        let prompt = prompt_id.clone();
+        let records = tokio::task::spawn_blocking(move || {
+            crate::cline::read_observations(&root, &session, &prompt, false)
+        })
+        .await;
+        let Ok(Ok(records)) = records else {
+            return Vec::new();
+        };
+        if !records
+            .first()
+            .is_some_and(|record| record["kind"] == "run_started")
+        {
+            return Vec::new();
+        }
+        let last = sequences
+            .entry((session_id.to_owned(), prompt_id.clone()))
+            .or_default();
+        let mut observations = Vec::new();
+        for record in records {
+            let seq = record["seq"].as_u64().unwrap_or(0);
+            if seq <= *last {
+                continue;
+            }
+            *last = seq;
+            self.forward_cline_compaction(session_id, &prompt_id, owner, &record)
+                .await;
+            for usage in crate::cline::parse_observations(&record) {
+                observations.push(NativeUsageObservation {
+                    source_identity: format!(
+                        "cline:{}:{}",
+                        self.host_instance_id, usage.identity_suffix
+                    ),
+                    usage,
+                });
+            }
+        }
+        observations
+    }
+
+    async fn forward_cline_compaction(
+        &self,
+        session_id: &str,
+        prompt_id: &str,
+        owner: &AcpRuntimeOwner,
+        record: &Value,
+    ) {
+        let Some(event) = crate::cline::compaction_display(record) else {
+            return;
+        };
+        // Display has its own exact prompt fence. Disabling Bootstrap
+        // redelivery must not hide an observed native compaction.
+        let _ = self.incoming.send(AcpIncoming::CompactionDisplay {
+            adapter_kind: self.adapter_kind,
+            host_instance_id: self.host_instance_id.clone(),
+            agent_run_id: owner.agent_run_id.clone(),
+            execution_epoch: owner.execution_epoch,
+            native_session_id: session_id.to_owned(),
+            native_prompt_id: prompt_id.to_owned(),
+            event: Box::new(event.clone()),
+        });
+        if event.phase == RuntimeCompactionDisplayPhase::Completed {
+            self.forward_compaction_observation(
+                session_id,
+                &json!({"method":"_rovai/cline_plugin_compaction","params":{
+                    "sessionId":session_id,"compactionId":event.compaction_id,"status":"completed"
+                }}),
+                AcpCompactionSignalSurface::ActivePrompt,
+                None,
+            )
+            .await;
+        }
+    }
+
     fn spawn_stderr_reader(host: Arc<Self>, stderr: ManagedChildStderr) {
         tokio::spawn(async move {
-            if host.adapter_kind == AdapterKind::ZcodeApp {
+            if matches!(
+                host.adapter_kind,
+                AdapterKind::ZcodeApp | AdapterKind::ClineCli | AdapterKind::CommandCodeCli
+            ) {
                 // Native diagnostics are not a public protocol and may echo
                 // runtimeModel credentials. Drain without retaining their body.
                 let _ = tokio::io::copy(&mut BufReader::new(stderr), &mut tokio::io::sink()).await;
@@ -2934,7 +3331,7 @@ impl AcpHost {
         child: &ManagedProcess,
         deadline: tokio::time::Instant,
     ) -> bool {
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             loop {
                 match child.captured_tree_is_empty() {
@@ -2954,7 +3351,7 @@ impl AcpHost {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
         }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             #[cfg(target_os = "macos")]
             if self.adapter_kind != AdapterKind::ZcodeApp {
@@ -3070,13 +3467,9 @@ impl AcpHost {
         // On Linux explicit teardown uses pinned descendant identities, including
         // ZCode's watcher. The watcher still handles unexpected native EOF; its
         // group report is not the proof for an explicit pidfd-backed teardown.
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         return _child.capture_descendants();
-        #[cfg(target_os = "macos")]
-        if self.adapter_kind != AdapterKind::ZcodeApp {
-            return _child.capture_descendants();
-        }
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         Ok(())
     }
 
@@ -3275,6 +3668,17 @@ fn detect_acp_compaction_signal(
                 .or_else(|| value.as_i64().map(|value| value.to_string()))
         });
     match adapter_kind {
+        AdapterKind::ClineCli
+            if surface == AcpCompactionSignalSurface::ActivePrompt
+                && method == "_rovai/cline_plugin_compaction"
+                && message["params"]["status"] == "completed" =>
+        {
+            Some(DetectedAcpCompactionSignal {
+                source_signal: "cline.plugin.compaction.completed.v1",
+                admission_point: "completed",
+                runtime_occurrence_id,
+            })
+        }
         AdapterKind::ZcodeApp
             if method == "_zcode/compaction" && message["params"]["status"] == "completed" =>
         {
@@ -3477,6 +3881,57 @@ impl AcpAssistantSuffixCollector {
     }
 }
 
+#[derive(Debug, Default)]
+struct AcpSessionPermissions {
+    mode: Option<String>,
+    auto_approve: Option<bool>,
+}
+
+impl AcpSessionPermissions {
+    fn from_frozen(frozen: &FrozenAgentRuntimeConfig) -> Result<Self> {
+        let values = &frozen.permissions.values;
+        let mode = match frozen.adapter_kind {
+            AdapterKind::KimiCodeCli => Some(
+                values["permission_mode"]
+                    .as_str()
+                    .filter(|mode| matches!(*mode, "default" | "plan" | "auto" | "yolo"))
+                    .context("Kimi Code Runtime requires valid permission_mode")?,
+            ),
+            AdapterKind::CommandCodeCli => Some(
+                values["permission_mode"]
+                    .as_str()
+                    .filter(|mode| {
+                        matches!(
+                            *mode,
+                            "default" | "auto-accept" | "plan" | "dont-ask" | "bypass"
+                        )
+                    })
+                    .context("Command Code Runtime requires valid permission_mode")?,
+            ),
+            AdapterKind::ClineCli => Some(
+                values["mode"]
+                    .as_str()
+                    .filter(|mode| matches!(*mode, "act" | "plan"))
+                    .context("Cline Runtime requires valid mode")?,
+            ),
+            _ => None,
+        };
+        let auto_approve = if frozen.adapter_kind == AdapterKind::ClineCli {
+            Some(match values["auto_approve"].as_str() {
+                Some("true") => true,
+                Some("false") => false,
+                _ => bail!("Cline Runtime requires auto_approve"),
+            })
+        } else {
+            None
+        };
+        Ok(Self {
+            mode: mode.map(str::to_string),
+            auto_approve,
+        })
+    }
+}
+
 pub struct AcpRuntime {
     owner: AcpRuntimeOwner,
     host: Arc<AcpHost>,
@@ -3487,7 +3942,7 @@ pub struct AcpRuntime {
     execution_root: PathBuf,
     attachment_access_root: Option<PathBuf>,
     workspace_access: String,
-    session_permission_mode: Option<String>,
+    session_permissions: AcpSessionPermissions,
     dsh_model_source: Option<rovai_core::agent_profile::DshModelSource>,
     active_observation: Mutex<Option<AcpPromptObservation>>,
     native_usage: Mutex<Option<Arc<std::sync::Mutex<NativeUsageReader>>>>,
@@ -3536,6 +3991,8 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
             | AdapterKind::KimiCodeCli
+            | AdapterKind::CommandCodeCli
+            | AdapterKind::ClineCli
     )
 }
 
@@ -3624,7 +4081,7 @@ impl AcpRuntime {
         execution_root: PathBuf,
         attachment_access_root: Option<PathBuf>,
         workspace_access: String,
-        session_permission_mode: Option<String>,
+        session_permissions: AcpSessionPermissions,
         dsh_model_source: Option<rovai_core::agent_profile::DshModelSource>,
     ) -> Arc<Self> {
         Arc::new(Self {
@@ -3637,14 +4094,38 @@ impl AcpRuntime {
             execution_root,
             attachment_access_root,
             workspace_access,
-            session_permission_mode,
+            session_permissions,
             dsh_model_source,
             active_observation: Mutex::new(None),
             native_usage: Mutex::new(None),
         })
     }
 
-    pub(crate) async fn bind_dsh_bootstrap(&self, session_id: &str, bootstrap: &str) -> Result<()> {
+    pub(crate) async fn bind_managed_bootstrap(
+        &self,
+        session_id: &str,
+        bootstrap: &str,
+    ) -> Result<()> {
+        if self.host.adapter_kind == AdapterKind::ClineCli {
+            return crate::cline::bind_bootstrap(
+                self.host
+                    .private_config_root
+                    .as_deref()
+                    .context("Cline private Host missing")?,
+                session_id,
+                bootstrap,
+            );
+        }
+        if self.host.adapter_kind == AdapterKind::CommandCodeCli {
+            return crate::command_code_acp::bind_bootstrap(
+                self.host
+                    .private_config_root
+                    .as_deref()
+                    .context("Command Code private Host missing")?,
+                session_id,
+                bootstrap,
+            );
+        }
         if self.host.adapter_kind != AdapterKind::DeepseekHarness {
             bail!("DSH Bootstrap requires the DSH Adapter");
         }
@@ -3725,6 +4206,8 @@ impl AcpRuntime {
                 | AdapterKind::QwenCode
                 | AdapterKind::CursorAgent
                 | AdapterKind::GrokBuild
+                | AdapterKind::ClineCli
+                | AdapterKind::CommandCodeCli
         ) {
             external_mcp_servers
                 .iter()
@@ -3758,6 +4241,24 @@ impl AcpRuntime {
             AcpSessionContinuation::Resume | AcpSessionContinuation::HistoryRestore => {
                 let existing_session_id =
                     existing_session_id.context("cross-Host ACP continuation has no Session ID")?;
+                if self.host.adapter_kind == AdapterKind::CommandCodeCli {
+                    // Command Code 1.74.1 silently opens an empty Session when
+                    // resume/load names missing history. Its official catalog
+                    // must prove the exact target before either operation.
+                    let catalog = self
+                        .host
+                        .rpc_with_timeout(
+                            "session/list",
+                            json!({"cwd": cwd}),
+                            ACP_HISTORY_RESTORE_TIMEOUT,
+                        )
+                        .await?;
+                    crate::command_code_acp::verify_restore_target(
+                        &catalog,
+                        existing_session_id,
+                        &cwd,
+                    )?;
+                }
                 self.host
                     .bind_session(
                         existing_session_id,
@@ -3842,6 +4343,21 @@ impl AcpRuntime {
         self.host
             .remember_session(&session_id, session_result.as_ref())
             .await;
+        if self.host.adapter_kind == AdapterKind::ClineCli
+            && model_source == "runtime_default"
+            && let Some(expected) = crate::cline::configured_native_model()?
+        {
+            let observed = session_result
+                .as_ref()
+                .and_then(acp_runtime_model_id_from_session);
+            if observed.as_deref() != Some(expected.as_str()) {
+                return Err(anyhow::Error::new(AcpLiveModelValidationError {
+                    code: "runtime_model_unavailable",
+                    model_id: expected,
+                    detail: "Cline ACP did not select the native configured model".to_string(),
+                }));
+            }
+        }
         if let Some(requested) = self.host.trae_permission_mode.as_deref() {
             let current = session_result
                 .as_ref()
@@ -4003,7 +4519,8 @@ impl AcpRuntime {
         }
         if self.host.adapter_kind == AdapterKind::KimiCodeCli {
             let configured = self
-                .session_permission_mode
+                .session_permissions
+                .mode
                 .as_deref()
                 .context("Kimi Code Runtime has no frozen Session mode")?;
             let effective = if self.workspace_access == "read_only" {
@@ -4013,6 +4530,46 @@ impl AcpRuntime {
             };
             self.set_config_option(&session_id, "mode", effective)
                 .await?;
+        }
+        if self.host.adapter_kind == AdapterKind::CommandCodeCli {
+            let mode = self
+                .session_permissions
+                .mode
+                .as_deref()
+                .context("Command Code native mode missing")?;
+            self.host
+                .rpc(
+                    "session/set_mode",
+                    json!({"sessionId":session_id, "modeId":mode}),
+                )
+                .await?;
+        }
+        if self.host.adapter_kind == AdapterKind::ClineCli {
+            let mode = self
+                .session_permissions
+                .mode
+                .as_deref()
+                .context("Cline native mode missing")?;
+            self.set_config_option(&session_id, "mode", mode).await?;
+            let approve = self
+                .session_permissions
+                .auto_approve
+                .context("Cline approval mode missing")?;
+            // Some native ACP entries always request permission and do not
+            // advertise this option. Shared permission handling still applies
+            // the frozen choice; never send an unadvertised config ID.
+            if session_result
+                .as_ref()
+                .and_then(|session| session["configOptions"].as_array())
+                .is_some_and(|options| options.iter().any(|option| option["id"] == "auto_approve"))
+            {
+                self.set_config_option(
+                    &session_id,
+                    "auto_approve",
+                    if approve { "true" } else { "false" },
+                )
+                .await?;
+            }
         }
         if prebound_session {
             self.host
@@ -4168,6 +4725,24 @@ impl AcpRuntime {
         .await
         .ok()
         .flatten();
+        if self.host.adapter_kind == AdapterKind::ClineCli {
+            if let Err(error) = crate::cline::bind_prompt(
+                self.host
+                    .private_config_root
+                    .as_deref()
+                    .context("Cline private Host directory missing")?,
+                &session_id,
+                &prepared.prompt_id,
+            ) {
+                self.host.pending.lock().await.remove(&prepared.request_id);
+                if let Some(route) = self.host.routes.write().await.get_mut(&session_id)
+                    && matches!(route.phase, AcpSessionPhase::PromptActive(_))
+                {
+                    route.phase = AcpSessionPhase::Ready;
+                }
+                return Err(error);
+            }
+        }
         *self.active_observation.lock().await = Some(AcpPromptObservation::new(
             prepared.prompt_id.clone(),
             delivery_id.to_string(),
@@ -4177,6 +4752,11 @@ impl AcpRuntime {
             .dispatch_prepared_prompt(&session_id, &prepared, text)
             .await
         {
+            if self.host.adapter_kind == AdapterKind::ClineCli
+                && let Some(root) = self.host.private_config_root.as_deref()
+            {
+                let _ = crate::cline::unbind_prompt(root, &session_id);
+            }
             let mut observation = self.active_observation.lock().await;
             if observation
                 .as_ref()
@@ -4548,6 +5128,12 @@ impl AcpRuntime {
     }
 
     pub(crate) async fn poll_native_usage(&self, prompt_end: bool) -> Vec<NativeUsageObservation> {
+        if self.adapter_kind() == AdapterKind::ClineCli {
+            let Some(session) = self.session_id().await else {
+                return Vec::new();
+            };
+            return self.host.poll_cline_usage(&session, &self.owner).await;
+        }
         let Some(reader) = self.native_usage.lock().await.clone() else {
             return Vec::new();
         };
@@ -4723,6 +5309,8 @@ impl AcpCliRuntimeAdapter {
         if !launchable_acp_adapter(kind) {
             bail!("{} is not a launchable ACP Adapter", kind.as_str());
         }
+        #[cfg(target_os = "macos")]
+        ManagedProcess::recover_descendants(&self.private_runtime_dir.join("owned-processes"))?;
         if matches!(
             kind,
             AdapterKind::CopilotCli
@@ -4755,20 +5343,9 @@ impl AcpCliRuntimeAdapter {
         if frozen_runtime.adapter_kind != self.kind {
             bail!("ACP Runtime received an AgentRun for another Adapter");
         }
-        let session_permission_mode = if self.kind == AdapterKind::KimiCodeCli {
-            let mode = frozen_runtime
-                .permissions
-                .values
-                .get("permission_mode")
-                .and_then(Value::as_str)
-                .context("Kimi Code Runtime requires permission_mode")?;
-            if !matches!(mode, "default" | "plan" | "auto" | "yolo") {
-                bail!("Kimi Code permission_mode is invalid");
-            }
-            Some(mode.to_string())
-        } else {
-            None
-        };
+        // Native mode/config RPCs are reapplied for each frozen Run even when
+        // Fleet reuses a Host launched under a previous member configuration.
+        let session_permissions = AcpSessionPermissions::from_frozen(frozen_runtime)?;
         let existing = { self.runtimes.lock().await.get(agent_run_id).cloned() };
         if let Some(existing) = existing {
             if existing.execution_epoch() == execution_epoch
@@ -4856,7 +5433,7 @@ impl AcpCliRuntimeAdapter {
             } else {
                 "runtime_managed".to_string()
             },
-            session_permission_mode,
+            session_permissions,
             frozen_runtime.model.dsh_source,
         );
         self.runtimes
@@ -4883,6 +5460,7 @@ impl AcpCliRuntimeAdapter {
         if !matches!(
             self.kind,
             AdapterKind::CodebuddyCli
+                | AdapterKind::ClineCli
                 | AdapterKind::KimiCodeCli
                 | AdapterKind::OpencodeCli
                 | AdapterKind::QoderCli
@@ -5079,6 +5657,15 @@ fn runtime_compatibility_digest_with_provider_environment(
         compatibility["dshNativeConfigurationDigest"] =
             json!(crate::dsh::native_configuration_digest(&execution_root)?);
     }
+    if frozen_runtime.adapter_kind == AdapterKind::CommandCodeCli {
+        compatibility["commandCodeNativeConfigurationDigest"] = json!(
+            crate::command_code_acp::native_configuration_digest(&execution_root)?
+        );
+    }
+    if frozen_runtime.adapter_kind == AdapterKind::ClineCli {
+        compatibility["clineNativeConfigurationDigest"] =
+            json!(crate::cline::runtime_configuration_digest()?);
+    }
     if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
         compatibility["zcodeNativeConfigurationDigest"] = json!(
             crate::zcode::NativeConfig::load_for_executable(
@@ -5101,6 +5688,8 @@ pub(crate) fn freeze_native_session_compatibility(
             | AdapterKind::GrokBuild
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
+            | AdapterKind::CommandCodeCli
+            | AdapterKind::ClineCli
     ) {
         return Ok(frozen_runtime);
     }
@@ -5133,6 +5722,15 @@ pub(crate) fn freeze_native_session_compatibility(
     if adapter_kind == AdapterKind::DeepseekHarness {
         compatibility["dshNativeConfigurationDigest"] =
             json!(crate::dsh::native_configuration_digest(&execution_root)?);
+    }
+    if adapter_kind == AdapterKind::CommandCodeCli {
+        compatibility["commandCodeNativeConfigurationDigest"] = json!(
+            crate::command_code_acp::native_configuration_digest(&execution_root)?
+        );
+    }
+    if adapter_kind == AdapterKind::ClineCli {
+        compatibility["clineNativeConfigurationDigest"] =
+            json!(crate::cline::runtime_configuration_digest()?);
     }
     if is_grok {
         let compatibility = compatibility
@@ -5181,10 +5779,19 @@ pub(crate) fn freeze_native_session_compatibility(
     Ok(frozen_runtime)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 struct PreparedPrivateHostConfig {
     root: PathBuf,
     remove_on_shutdown: bool,
+    preparing: bool,
+}
+
+impl Drop for PreparedPrivateHostConfig {
+    fn drop(&mut self) {
+        if self.preparing && self.remove_on_shutdown {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
 }
 
 fn prepare_private_host_config(
@@ -5192,7 +5799,10 @@ fn prepare_private_host_config(
     adapter_kind: AdapterKind,
 ) -> Result<Option<PreparedPrivateHostConfig>> {
     let (root, remove_on_shutdown) = match adapter_kind {
-        AdapterKind::KiroCli | AdapterKind::DeepseekHarness => (
+        AdapterKind::KiroCli
+        | AdapterKind::DeepseekHarness
+        | AdapterKind::ClineCli
+        | AdapterKind::CommandCodeCli => (
             private_runtime_dir
                 .join("acp-host")
                 .join(uuid::Uuid::new_v4().to_string()),
@@ -5202,6 +5812,7 @@ fn prepare_private_host_config(
             return Ok(Some(PreparedPrivateHostConfig {
                 root: crate::zcode::private_runtime_root("rvzc")?,
                 remove_on_shutdown: true,
+                preparing: true,
             }));
         }
         _ => return Ok(None),
@@ -5216,6 +5827,7 @@ fn prepare_private_host_config(
     Ok(Some(PreparedPrivateHostConfig {
         root,
         remove_on_shutdown,
+        preparing: true,
     }))
 }
 
@@ -5238,6 +5850,29 @@ fn configure_runtime_command(
         .as_object()
         .context("ACP permission configuration must be an object")?;
     match runtime.adapter_kind {
+        AdapterKind::CommandCodeCli => {
+            crate::command_code_acp::configure_host(
+                command,
+                private_config_root.context("Command Code private Host directory missing")?,
+                external_mcp_servers,
+            )?;
+        }
+        AdapterKind::ClineCli => {
+            let root = private_config_root.context("Cline private Host directory missing")?;
+            let auto_approve = match values.get("auto_approve").and_then(Value::as_str) {
+                Some("true") => true,
+                Some("false") => false,
+                _ => bail!("Cline auto_approve invalid"),
+            };
+            crate::cline::configure_native_environment(command)?;
+            crate::cline::configure_host(
+                command,
+                root,
+                &crate::cline::runtime_native_paths()?,
+                auto_approve,
+                external_mcp_servers,
+            )?;
+        }
         AdapterKind::ZcodeApp => {
             let root = private_config_root.context("ZCode private socket directory missing")?;
             command
@@ -6616,6 +7251,9 @@ pub fn automatically_allows_permission_requests(
             permissions["permission_mode"] == "bypassPermissions"
         }
         AdapterKind::QwenCode => permissions["approval_mode"] == "yolo",
+        AdapterKind::ClineCli => {
+            permissions["mode"] == "act" && permissions["auto_approve"] == "true"
+        }
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
         AdapterKind::CodexCli
@@ -6623,7 +7261,8 @@ pub fn automatically_allows_permission_requests(
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp
         | AdapterKind::DeepseekHarness
-        | AdapterKind::ZcodeApp => false,
+        | AdapterKind::ZcodeApp
+        | AdapterKind::CommandCodeCli => false,
     }
 }
 
@@ -8050,7 +8689,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "read_only".to_string(),
-            None,
+            AcpSessionPermissions::default(),
             None,
         );
         let target = outside.join("runtime-owned.txt");
@@ -8192,7 +8831,10 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            Some("yolo".to_string()),
+            AcpSessionPermissions {
+                mode: Some("yolo".to_string()),
+                ..Default::default()
+            },
             None,
         );
         runtime
@@ -8764,7 +9406,10 @@ done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            Some("default".to_string()),
+            AcpSessionPermissions {
+                mode: Some("default".to_string()),
+                ..Default::default()
+            },
             None,
         );
         runtime
@@ -9331,7 +9976,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            None,
+            AcpSessionPermissions::default(),
             None,
         );
         let session_id = runtime
@@ -9463,6 +10108,748 @@ while IFS= read -r ignored; do :; done
         }
     }
 
+    // Native process / Mod loading / ACP routing cannot be proved by a fake
+    // transport. This opt-in smoke never sends an LLM prompt: /acp is an
+    // advertised native control command. Generation is verified separately.
+    #[tokio::test]
+    #[ignore = "requires isolated Command Code 1.74.1 native Home and executable"]
+    async fn isolated_command_code_acp_bootstrap_gate_and_resident_sessions() {
+        use crate::runtime_startup::{RuntimeEnvironmentVariable, RuntimeStartupConfiguration};
+        let root = PathBuf::from(
+            std::env::var_os("ROVAI_COMMAND_CODE_SMOKE_ROOT").expect("isolated root required"),
+        );
+        let executable = PathBuf::from(
+            std::env::var_os("ROVAI_COMMAND_CODE_SMOKE_EXECUTABLE")
+                .expect("isolated executable required"),
+        );
+        assert!(root.is_absolute() && root.join("home/.commandcode/auth.json").is_file());
+        let paths = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        let search = crate::runtime_discovery::RuntimeSearchEnvironment::for_test_paths(1, paths)
+            .with_startup_configuration(
+                AdapterKind::CommandCodeCli,
+                RuntimeStartupConfiguration {
+                    program_path: None,
+                    environment: vec![RuntimeEnvironmentVariable {
+                        name: "HOME".into(),
+                        value: root.join("home").to_string_lossy().into_owned(),
+                    }],
+                    custom_api_snapshot: None,
+                },
+            );
+        crate::runtime_discovery::with_runtime_configuration(
+            AdapterKind::CommandCodeCli,
+            &search,
+            async {
+                let cwd = root.join("workspace");
+                std::fs::create_dir_all(&cwd).unwrap();
+                let workspace =
+                    AgentRunWorkspace::runtime_managed_path(cwd.to_string_lossy().into_owned());
+                let mut frozen = frozen_trae_runtime(&executable);
+                frozen.adapter_kind = AdapterKind::CommandCodeCli;
+                frozen.reported_version = Some("1.74.1".into());
+                frozen.permissions.adapter_kind = AdapterKind::CommandCodeCli;
+                frozen.permissions.values = json!({"permission_mode":"bypass"});
+                let (incoming, mut receiver) = mpsc::unbounded_channel();
+                let host = AcpHost::spawn(
+                    &cwd,
+                    &workspace,
+                    PermissionSemantics::RuntimeManagedV2,
+                    &frozen,
+                    incoming,
+                    Some(exact_builtin_tools(&root)),
+                    CompactionDetectorPolicy::Disabled,
+                    true,
+                    &BTreeMap::new(),
+                    &root.join("private"),
+                    None,
+                )
+                .await
+                .unwrap();
+                let pid = host.pid();
+                let mut sessions = Vec::new();
+                for i in 0..2 {
+                    let runtime = AcpRuntime::from_host(
+                        AcpRuntimeOwner {
+                            agent_run_id: format!("command-control-{i}"),
+                            execution_epoch: 1,
+                        },
+                        host.clone(),
+                        "compatibility".into(),
+                        "mcp".into(),
+                        cwd.clone(),
+                        Some(exact_attachment_root(&root)),
+                        "runtime_managed".into(),
+                        AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+                        frozen.model.dsh_source,
+                    );
+                    let id = runtime
+                        .start_or_resume_session(
+                            None,
+                            AcpSessionCapabilities::default(),
+                            "runtime_default",
+                            "runtime_default",
+                            &json!({}),
+                            &BTreeMap::new(),
+                        )
+                        .await
+                        .unwrap();
+                    runtime
+                        .bind_managed_bootstrap(&id, &format!("SYSTEM-SESSION-{i}"))
+                        .await
+                        .unwrap();
+                    assert!(
+                        runtime
+                            .bind_managed_bootstrap(&id, "CHANGED")
+                            .await
+                            .is_err()
+                    );
+                    for mode in ["default", "auto-accept", "plan", "dont-ask", "bypass"] {
+                        host.rpc("session/set_mode", json!({"sessionId":id, "modeId":mode}))
+                            .await
+                            .unwrap();
+                    }
+                    assert!(
+                        host.rpc(
+                            "session/set_model",
+                            json!({"sessionId":id, "modelId":"sub2api/gpt-6-sol"})
+                        )
+                        .await
+                        .is_err()
+                    );
+                    sessions.push((runtime, id));
+                }
+                assert_ne!(sessions[0].1, sessions[1].1);
+                for i in [0usize, 1, 0] {
+                    let (runtime, id) = &sessions[i];
+                    assert_eq!(
+                        runtime
+                            .start_or_resume_session(
+                                Some(id),
+                                AcpSessionCapabilities {
+                                    can_resume: true,
+                                    can_load_history: true
+                                },
+                                "runtime_default",
+                                "runtime_default",
+                                &json!({}),
+                                &BTreeMap::new()
+                            )
+                            .await
+                            .unwrap(),
+                        *id
+                    );
+                    let prompt = runtime
+                        .start_prompt(&format!("control-{i}"), "/acp")
+                        .await
+                        .unwrap();
+                    let mut context = None;
+                    loop {
+                        let incoming =
+                            tokio::time::timeout(Duration::from_secs(60), receiver.recv())
+                                .await
+                                .unwrap()
+                                .unwrap();
+                        if let AcpIncoming::Message {
+                            native_prompt_id,
+                            message,
+                            ..
+                        } = incoming
+                        {
+                            if native_prompt_id != prompt {
+                                continue;
+                            }
+                            if message["params"]["update"]["sessionUpdate"] == "usage_update" {
+                                context = Some(message["params"]["update"].clone());
+                            }
+                            if message["method"] == "rovai/acp_prompt_completed" {
+                                assert_eq!(message["params"]["result"]["stopReason"], "end_turn");
+                                break;
+                            }
+                        }
+                    }
+                    assert!(
+                        context
+                            .as_ref()
+                            .and_then(|v| v["size"].as_u64())
+                            .is_some_and(|v| v > 0)
+                    );
+                    eprintln!(
+                        "COMMAND_CONTROL {}",
+                        json!({"sessionId":id,"pid":pid,"context":context})
+                    );
+                    runtime.detach().await;
+                    assert_eq!(host.pid(), pid);
+                }
+                // Native resume itself accepts nonexistent IDs. Our official
+                // catalog preflight must reject them before opening a Session.
+                for id in [uuid::Uuid::new_v4().to_string(), "12345678".into()] {
+                    let error = sessions[0]
+                        .0
+                        .start_or_resume_session(
+                            Some(&id),
+                            AcpSessionCapabilities {
+                                can_resume: true,
+                                can_load_history: true,
+                            },
+                            "runtime_default",
+                            "runtime_default",
+                            &json!({}),
+                            &BTreeMap::new(),
+                        )
+                        .await
+                        .unwrap_err();
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("command_code_restore_target_missing")
+                    );
+                    assert!(!host.knows_session(&id).await);
+                }
+                // The native Mod runner swallows ordinary hook exceptions.
+                // A missing binding must kill the real Host before it can
+                // reach the Provider, rather than emit an unprotected request.
+                let (runtime, id) = &sessions[0];
+                runtime
+                    .start_or_resume_session(
+                        Some(id),
+                        AcpSessionCapabilities {
+                            can_resume: true,
+                            can_load_history: true,
+                        },
+                        "runtime_default",
+                        "runtime_default",
+                        &json!({}),
+                        &BTreeMap::new(),
+                    )
+                    .await
+                    .unwrap();
+                std::fs::remove_file(
+                    host.private_config_root
+                        .as_ref()
+                        .unwrap()
+                        .join("bindings")
+                        .join(format!("{id}.json")),
+                )
+                .unwrap();
+                let _ = runtime
+                    .start_prompt("missing-bootstrap", "Reply once.")
+                    .await;
+                tokio::time::timeout(Duration::from_secs(20), async {
+                    while host.is_alive() {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                })
+                .await
+                .expect("missing Bootstrap must stop the native process before generation");
+                eprintln!("COMMAND_BOOTSTRAP_MISSING_HOST_STOPPED");
+                host.shutdown().await;
+            },
+        )
+        .await;
+    }
+
+    // This is an opt-in real Runtime smoke, never part of the fixture suite.
+    // The caller supplies an isolated Cline native Home and executable; the
+    // test proves our shared ACP Host, observer lease and exact cold load seam.
+    #[tokio::test]
+    #[ignore = "requires explicitly selected installed Cline and an authorized native Provider"]
+    async fn isolated_cline_acp_host_observes_warm_and_exact_cold_prompts() {
+        let executable = std::env::var_os("ROVAI_CLINE_SMOKE_EXECUTABLE")
+            .map(PathBuf::from)
+            .expect("ROVAI_CLINE_SMOKE_EXECUTABLE is required");
+        let root = std::env::var_os("ROVAI_CLINE_SMOKE_ROOT")
+            .map(PathBuf::from)
+            .expect("ROVAI_CLINE_SMOKE_ROOT is required");
+        let workspace_root = root.join("workspace");
+        std::fs::create_dir_all(&workspace_root).unwrap();
+        let workspace =
+            AgentRunWorkspace::runtime_managed_path(workspace_root.to_string_lossy().to_string());
+        let mut frozen = frozen_trae_runtime(&executable);
+        frozen.adapter_kind = AdapterKind::ClineCli;
+        frozen.reported_version = None;
+        frozen.permissions.adapter_kind = AdapterKind::ClineCli;
+        frozen.permissions.values = json!({"mode":"act","auto_approve":"true"});
+        let builtin_tools = exact_builtin_tools(&root);
+        let attachments = exact_attachment_root(&root);
+        async fn collect_prompt(
+            receiver: &mut mpsc::UnboundedReceiver<AcpIncoming>,
+            prompt_id: &str,
+            marker: &str,
+        ) {
+            let mut reply = String::new();
+            let mut usage_seen = false;
+            let mut completed = false;
+            while !completed {
+                let incoming = tokio::time::timeout(Duration::from_secs(180), receiver.recv())
+                    .await
+                    .expect("Cline prompt timed out")
+                    .expect("Cline Host exited before prompt completion");
+                if let AcpIncoming::Message {
+                    native_prompt_id,
+                    message,
+                    ..
+                } = incoming
+                {
+                    if native_prompt_id != prompt_id {
+                        continue;
+                    }
+                    let update = &message["params"]["update"];
+                    if update["sessionUpdate"] == "agent_message_chunk" {
+                        if let Some(text) = update["content"]["text"].as_str() {
+                            reply.push_str(text);
+                        }
+                    }
+                    if update["sessionUpdate"] == "usage_update"
+                        && update["_meta"]["clineObservations"]
+                            .as_array()
+                            .is_some_and(|records| {
+                                records.iter().any(|record| {
+                                    record["kind"] == "model_completed"
+                                        && record["metrics"]["inputTokens"].as_u64().is_some()
+                                })
+                            })
+                    {
+                        usage_seen = true;
+                        for record in update["_meta"]["clineObservations"].as_array().unwrap() {
+                            if record["kind"] == "model_completed" {
+                                eprintln!(
+                                    "CLINE_METRICS {}",
+                                    serde_json::to_string(&crate::cline::parse_observations(
+                                        record
+                                    ))
+                                    .unwrap()
+                                );
+                            }
+                        }
+                    }
+                    if message["method"] == "rovai/acp_prompt_completed" {
+                        assert_eq!(message["params"]["result"]["stopReason"], "end_turn");
+                        completed = true;
+                    }
+                }
+            }
+            assert!(
+                reply.contains(marker),
+                "Cline reply omitted the requested marker"
+            );
+            assert!(
+                usage_seen,
+                "Cline observer did not reach the shared ACP Host"
+            );
+        }
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &workspace_root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(builtin_tools.clone()),
+            CompactionDetectorPolicy::BestEffort,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "cline-host-smoke".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            workspace_root.clone(),
+            Some(attachments.clone()),
+            "runtime_managed".to_string(),
+            AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+            frozen.model.dsh_source,
+        );
+        let session_id = runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        for (turn, marker) in ["ROVAI_CLINE_CORE_FIRST", "ROVAI_CLINE_CORE_WARM"]
+            .into_iter()
+            .enumerate()
+        {
+            let prompt_id = runtime
+                .start_prompt(
+                    &format!("delivery-{turn}"),
+                    &format!("Reply exactly {marker}. Do not use tools."),
+                )
+                .await
+                .unwrap();
+            collect_prompt(&mut receiver, &prompt_id, marker).await;
+            if turn == 0 {
+                runtime.detach().await;
+                assert_eq!(
+                    runtime
+                        .start_or_resume_session(
+                            Some(&session_id),
+                            AcpSessionCapabilities {
+                                can_resume: false,
+                                can_load_history: true,
+                            },
+                            "runtime_default",
+                            "runtime_default",
+                            &json!({}),
+                            &BTreeMap::new(),
+                        )
+                        .await
+                        .unwrap(),
+                    session_id
+                );
+            }
+        }
+        runtime.detach().await;
+        let session_b = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "cline-second-session-smoke".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            workspace_root.clone(),
+            Some(attachments.clone()),
+            "runtime_managed".to_string(),
+            AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+            frozen.model.dsh_source,
+        );
+        let session_b_id = session_b
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(session_b_id, session_id);
+        let prompt_b = session_b
+            .start_prompt(
+                "delivery-b",
+                "Reply exactly ROVAI_CLINE_CORE_SESSION_B. Do not use tools.",
+            )
+            .await
+            .unwrap();
+        collect_prompt(&mut receiver, &prompt_b, "ROVAI_CLINE_CORE_SESSION_B").await;
+        session_b.detach().await;
+        assert_eq!(
+            runtime
+                .start_or_resume_session(
+                    Some(&session_id),
+                    AcpSessionCapabilities {
+                        can_resume: false,
+                        can_load_history: true,
+                    },
+                    "runtime_default",
+                    "runtime_default",
+                    &json!({}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap(),
+            session_id
+        );
+        let prompt_a = runtime
+            .start_prompt(
+                "delivery-a-return",
+                "Reply exactly ROVAI_CLINE_CORE_A_RETURN. Do not use tools.",
+            )
+            .await
+            .unwrap();
+        collect_prompt(&mut receiver, &prompt_a, "ROVAI_CLINE_CORE_A_RETURN").await;
+        runtime.detach().await;
+        std::fs::write(
+            workspace_root.join("sample.txt"),
+            "Cline Core before edit.\n",
+        )
+        .unwrap();
+        runtime
+            .start_or_resume_session(
+                Some(&session_id),
+                AcpSessionCapabilities {
+                    can_resume: false,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        let tool_prompt = runtime
+            .start_prompt(
+                "delivery-tools",
+                "Use read_files to read sample.txt, then use apply_patch to change its only line to 'Cline Core after edit.'. Then use run_commands to execute exactly: sleep 6; printf 'ROVAI_CLINE_CORE_STDOUT\\n'; printf 'ROVAI_CLINE_CORE_STDERR\\n' >&2; exit 7 . The failure is intentional; do not retry. Report briefly.",
+            )
+            .await
+            .unwrap();
+        let mut tool_kinds = std::collections::BTreeSet::new();
+        let mut command_failed_with_output = false;
+        let mut live_usage = Vec::new();
+        let mut terminal_usage = Vec::new();
+        loop {
+            let incoming = tokio::time::timeout(Duration::from_secs(180), receiver.recv())
+                .await
+                .expect("Cline tool prompt timed out")
+                .expect("Cline Host exited during tool prompt");
+            let AcpIncoming::Message {
+                native_prompt_id,
+                message,
+                ..
+            } = incoming
+            else {
+                continue;
+            };
+            if native_prompt_id != tool_prompt {
+                continue;
+            }
+            if message["method"] == "rovai/acp_prompt_completed" {
+                assert_eq!(message["params"]["result"]["stopReason"], "end_turn");
+                break;
+            }
+            if message["params"]["update"]["sessionUpdate"] == "usage_update" {
+                terminal_usage.extend(crate::monitoring::parse_acp_usage_message(
+                    AdapterKind::ClineCli,
+                    None,
+                    "session/update",
+                    &message["params"],
+                ));
+            }
+            if message["params"]["update"]["sessionUpdate"] == "tool_call" {
+                let samples = runtime.poll_native_usage(false).await;
+                for item in samples {
+                    eprintln!(
+                        "CLINE_LIVE_METRICS {}",
+                        serde_json::to_string(&item.usage).unwrap()
+                    );
+                    live_usage.push(item.usage);
+                }
+                assert!(
+                    runtime.poll_native_usage(false).await.is_empty(),
+                    "same native calls sampled twice"
+                );
+            }
+            if let Some(completed) =
+                completed_action(AdapterKind::ClineCli, &message["params"]).unwrap()
+            {
+                tool_kinds.insert(completed.native_kind.clone());
+                if completed.native_kind == "execute" {
+                    let text = &message["params"]["update"]["content"];
+                    command_failed_with_output =
+                        matches!(completed.outcome, ActionResultOutcome::Failed)
+                            && text.to_string().contains("ROVAI_CLINE_CORE_STDOUT")
+                            && text.to_string().contains("ROVAI_CLINE_CORE_STDERR");
+                }
+            }
+        }
+        assert!(
+            live_usage
+                .iter()
+                .any(|usage| usage.fields.context_used_tokens.is_some_and(|n| n > 0)),
+            "no current context observed before prompt completion"
+        );
+        for live in &live_usage {
+            assert!(
+                !terminal_usage
+                    .iter()
+                    .any(|item| item.identity_suffix == live.identity_suffix),
+                "terminal repeated a live observation"
+            );
+        }
+        for usage in &terminal_usage {
+            eprintln!(
+                "CLINE_TERMINAL_METRICS {}",
+                serde_json::to_string(usage).unwrap()
+            );
+        }
+        assert!(
+            tool_kinds.contains("read"),
+            "Cline read action was not observed"
+        );
+        assert!(
+            tool_kinds.contains("edit"),
+            "Cline edit action was not observed"
+        );
+        assert!(
+            command_failed_with_output,
+            "Cline failed command output was not projected"
+        );
+        assert_eq!(
+            std::fs::read_to_string(workspace_root.join("sample.txt")).unwrap(),
+            "Cline Core after edit.\n"
+        );
+        runtime.detach().await;
+        runtime
+            .start_or_resume_session(
+                Some(&session_id),
+                AcpSessionCapabilities {
+                    can_resume: false,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        let late_effect = workspace_root.join("cancel-late-effect.txt");
+        let cancel_prompt = runtime
+            .start_prompt(
+                "delivery-cancel",
+                &format!(
+                    "Use run_commands to execute exactly this command: sleep 8; touch {} . Wait for its result. Do not use other tools.",
+                    late_effect.display()
+                ),
+            )
+            .await
+            .unwrap();
+        let mut cancel_stages = Vec::new();
+        loop {
+            let incoming = tokio::time::timeout(Duration::from_secs(120), receiver.recv())
+                .await
+                .expect("Cline cancel tool did not start")
+                .expect("Cline Host exited before cancel tool started");
+            let AcpIncoming::Message {
+                native_prompt_id,
+                message,
+                ..
+            } = incoming
+            else {
+                continue;
+            };
+            if native_prompt_id != cancel_prompt {
+                continue;
+            }
+            let update = &message["params"]["update"];
+            if let Some(stage) = update["sessionUpdate"].as_str() {
+                cancel_stages.push(format!(
+                    "{stage}/{} /{}",
+                    update["status"].as_str().unwrap_or_default(),
+                    update["title"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .starts_with("run_commands")
+                ));
+            }
+            assert_ne!(
+                message["method"], "rovai/acp_prompt_completed",
+                "Cline completed before the cancel tool started: {cancel_stages:?}"
+            );
+            if (update["sessionUpdate"] == "tool_call"
+                || (update["sessionUpdate"] == "tool_call_update"
+                    && update["status"] == "in_progress"))
+                && update["title"]
+                    .as_str()
+                    .is_some_and(|title| title.starts_with("run_commands"))
+            {
+                break;
+            }
+        }
+        runtime.cancel().await.unwrap();
+        loop {
+            let incoming = tokio::time::timeout(Duration::from_secs(30), receiver.recv())
+                .await
+                .expect("Cline cancelled prompt did not settle")
+                .expect("Cline Host exited before cancel settlement");
+            let AcpIncoming::Message {
+                native_prompt_id,
+                message,
+                ..
+            } = incoming
+            else {
+                continue;
+            };
+            if native_prompt_id == cancel_prompt
+                && message["method"] == "rovai/acp_prompt_completed"
+            {
+                assert_eq!(message["params"]["result"]["stopReason"], "cancelled");
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        assert!(
+            !late_effect.exists(),
+            "Cline cancel did not stop the delayed command side effect"
+        );
+        runtime.detach().await;
+        host.shutdown().await;
+
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let cold_host = AcpHost::spawn(
+            &workspace_root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(builtin_tools),
+            CompactionDetectorPolicy::BestEffort,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let cold_runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "cline-cold-host-smoke".to_string(),
+                execution_epoch: 1,
+            },
+            cold_host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            workspace_root,
+            Some(attachments),
+            "runtime_managed".to_string(),
+            AcpSessionPermissions::from_frozen(&frozen).unwrap(),
+            frozen.model.dsh_source,
+        );
+        assert_eq!(
+            cold_runtime
+                .start_or_resume_session(
+                    Some(&session_id),
+                    AcpSessionCapabilities {
+                        can_resume: false,
+                        can_load_history: true,
+                    },
+                    "runtime_default",
+                    "runtime_default",
+                    &json!({}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap(),
+            session_id
+        );
+        assert!(receiver.try_recv().is_err(), "history replay reached a Run");
+        let prompt_id = cold_runtime
+            .start_prompt(
+                "delivery-cold",
+                "Reply exactly ROVAI_CLINE_CORE_COLD. Do not use tools.",
+            )
+            .await
+            .unwrap();
+        collect_prompt(&mut receiver, &prompt_id, "ROVAI_CLINE_CORE_COLD").await;
+        cold_host.shutdown().await;
+    }
+
     #[tokio::test]
     async fn prompt_error_after_activity_keeps_input_accepted_while_early_rejection_does_not() {
         for (case_name, prompt_activity, error_code, expected_accepted) in [
@@ -9526,7 +10913,7 @@ while IFS= read -r ignored; do :; done
                 root.clone(),
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
-                None,
+                AcpSessionPermissions::default(),
                 None,
             );
             runtime
@@ -9644,7 +11031,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            None,
+            AcpSessionPermissions::default(),
             None,
         );
         let session_id = runtime
@@ -9780,7 +11167,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            None,
+            AcpSessionPermissions::default(),
             None,
         );
 
@@ -9880,7 +11267,7 @@ while IFS= read -r ignored; do :; done
                 root.clone(),
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
-                None,
+                AcpSessionPermissions::default(),
                 None,
             );
 
@@ -9990,7 +11377,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            None,
+            AcpSessionPermissions::default(),
             None,
         );
         let session_id = runtime
@@ -10118,7 +11505,7 @@ while IFS= read -r ignored; do :; done
                 root.clone(),
                 Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
-                None,
+                AcpSessionPermissions::default(),
                 None,
             );
             let error = runtime
@@ -10174,6 +11561,10 @@ while IFS= read -r ignored; do :; done
             &format!(
                 r#"#!/bin/sh
 printf '%s\n' "$*" >> '{}'
+if [ "$1" = "--config" ] && [ "$3" = "models" ]; then
+  printf '%s\n' '{{"models":[]}}'
+  exit 0
+fi
 IFS= read -r initialize || exit 1
 printf '%s\n' "$initialize" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
@@ -10629,6 +12020,8 @@ while IFS= read -r ignored; do :; done
                 && display_execution_epoch.is_none()
         ));
 
+        let mut next_frozen = frozen.clone();
+        next_frozen.permissions.values = json!({"permission_mode": "plan"});
         let second = adapter
             .ensure_agent_run_runtime(
                 "agent-run-two",
@@ -10637,7 +12030,7 @@ while IFS= read -r ignored; do :; done
                 "agent-one",
                 &workspace,
                 PermissionSemantics::RuntimeManagedV2,
-                &frozen,
+                &next_frozen,
                 &builtin_tools,
                 &external_mcp_servers,
                 "sha256:mcp",
@@ -10684,6 +12077,13 @@ while IFS= read -r ignored; do :; done
                 .count(),
             2
         );
+        let modes = protocol
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|message| message["method"] == "session/set_config_option")
+            .map(|message| message["params"]["value"].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(modes, vec![json!("default"), json!("plan")]);
         assert!(!protocol.contains("\"method\":\"session/load\""));
         assert!(!protocol.contains("\"method\":\"session/resume\""));
         assert!(!private_runtime_dir.join("home").exists());
@@ -10747,7 +12147,10 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            Some("default".to_string()),
+            AcpSessionPermissions {
+                mode: Some("default".to_string()),
+                ..Default::default()
+            },
             None,
         );
         let session_id = runtime
@@ -10916,7 +12319,7 @@ while IFS= read -r ignored; do :; done
             root.clone(),
             Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
-            None,
+            AcpSessionPermissions::default(),
             None,
         );
         let prompt_id = "prompt-final-assistant-suffix";
@@ -10985,6 +12388,119 @@ while IFS= read -r ignored; do :; done
 
         host.shutdown().await;
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn leader_exit_reaps_inherited_pipes_and_preserves_buffered_response() {
+        for completed in [false, true] {
+            let root = std::env::temp_dir()
+                .join(format!("rovai-acp-leader-exit-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("agent");
+            let late = root.join("late");
+            let started = root.join("started");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+IFS= read -r request || exit 1
+(sleep 3; printf late > '{}') &
+printf ready > '{}'
+{}
+while IFS= read -r ignored; do :; done
+"#,
+                    late.display(),
+                    started.display(),
+                    if completed {
+                        "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"terminal\":true}}'\nexit 0"
+                    } else {
+                        ""
+                    }
+                ),
+            );
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen_trae_runtime(&executable),
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::Disabled,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
+                None,
+            )
+            .await
+            .unwrap();
+            let owner = AcpRuntimeOwner {
+                agent_run_id: "leader-exit-run".into(),
+                execution_epoch: 1,
+            };
+            host.bind_session("leader-exit-session", &owner, AcpSessionPhase::Ready)
+                .await
+                .unwrap();
+            let pid = host.pid().unwrap();
+            let caller = host.clone();
+            let pending =
+                tokio::spawn(async move { caller.rpc("fixture/request", json!({})).await });
+            timeout(Duration::from_secs(2), async {
+                while !started.is_file() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            if !completed {
+                // This exact PID is the child just created by this test. Kill
+                // only the leader so its tool retains the inherited pipes.
+                assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
+            }
+            let response = timeout(Duration::from_secs(2), pending)
+                .await
+                .unwrap()
+                .unwrap();
+            if completed {
+                assert_eq!(response.unwrap()["terminal"], true);
+            } else {
+                assert!(response.unwrap_err().to_string().contains("Host exited"));
+            }
+            // stderr/cleanup diagnostics may race with the exit notification;
+            // they are not terminal events and do not own the Run outcome.
+            let exited = timeout(Duration::from_secs(2), async {
+                loop {
+                    let event = receiver.recv().await.unwrap();
+                    if !matches!(event, AcpIncoming::HostDiagnostic { .. }) {
+                        break event;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                matches!(&exited, AcpIncoming::Exited { agent_run_id, execution_epoch: 1, .. } if agent_run_id == &owner.agent_run_id),
+                "expected exact owner exit, got {exited:?}"
+            );
+            assert!(!host.is_alive());
+            tokio::time::sleep(Duration::from_millis(3200)).await;
+            assert!(
+                !late.exists(),
+                "child must not write after the leader exited"
+            );
+            while let Ok(event) = receiver.try_recv() {
+                assert!(
+                    matches!(event, AcpIncoming::HostDiagnostic { .. }),
+                    "reader and exit watcher must notify once: {event:?}"
+                );
+            }
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
@@ -11470,7 +12986,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn private_host_config_is_created_only_for_kiro() {
+    fn private_host_config_is_scoped_to_profiles_that_require_it() {
         let root = std::env::temp_dir().join(format!(
             "rovai-private-host-config-{}",
             uuid::Uuid::new_v4()
@@ -11484,6 +13000,14 @@ while IFS= read -r ignored; do :; done
         assert_ne!(kiro_one.root, kiro_two.root);
         assert!(kiro_one.remove_on_shutdown);
         assert!(kiro_two.remove_on_shutdown);
+        let cline = prepare_private_host_config(&root, AdapterKind::ClineCli)
+            .unwrap()
+            .unwrap();
+        assert_ne!(cline.root, kiro_one.root);
+        assert!(cline.remove_on_shutdown);
+        let abandoned = cline.root.clone();
+        drop(cline);
+        assert!(!abandoned.exists());
 
         assert!(
             prepare_private_host_config(&root, AdapterKind::CursorAgent)
@@ -11569,6 +13093,15 @@ while IFS= read -r ignored; do :; done
         assert_eq!(
             select_acp_session_continuation(
                 AdapterKind::KimiCodeCli,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::HistoryRestore
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::CommandCodeCli,
                 false,
                 Some("session-1"),
                 load_only,
@@ -11962,6 +13495,10 @@ while IFS= read -r ignored; do :; done
     #[test]
     fn acp_bypass_modes_auto_allow_protocol_permission_requests() {
         let automatic = [
+            (
+                AdapterKind::ClineCli,
+                json!({"mode":"act","auto_approve":"true"}),
+            ),
             (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
             (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
             (AdapterKind::KiroCli, json!({"trust_all_tools": "on"})),
@@ -11997,6 +13534,14 @@ while IFS= read -r ignored; do :; done
         }
 
         let interactive = [
+            (
+                AdapterKind::ClineCli,
+                json!({"mode":"act","auto_approve":"false"}),
+            ),
+            (
+                AdapterKind::ClineCli,
+                json!({"mode":"plan","auto_approve":"true"}),
+            ),
             (
                 AdapterKind::DeepseekHarness,
                 json!({"approval_policy": "ask"}),
@@ -12433,7 +13978,101 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn successful_terminal_acp_write_keeps_one_structured_location_without_inventing_a_diff() {
+    fn paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt() {
+        let mut tools = HashMap::new();
+        for (session, prompt, path) in [
+            ("a", "p1", "denied-a.txt"),
+            ("b", "p1", "denied-b.txt"),
+            ("a", "p2", "denied-next.txt"),
+        ] {
+            let mut pending = json!({"method":"session/update","params":{"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"reused-id","status":"pending",
+                "title":"run_commands","kind":"execute","rawInput":{"commands":[format!("touch {path}")]}
+            }}});
+            enrich_paired_tool_message(
+                AdapterKind::ClineCli,
+                &mut tools,
+                session,
+                prompt,
+                &mut pending,
+            )
+            .unwrap();
+        }
+        for (session, prompt, path) in [
+            ("a", "p1", "denied-a.txt"),
+            ("a", "p2", "denied-next.txt"),
+            ("b", "p1", "denied-b.txt"),
+        ] {
+            let failure = json!({"method":"session/update","params":{"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"reused-id","status":"failed"
+            }}});
+            let mut first = failure.clone();
+            assert!(
+                !enrich_paired_tool_message(
+                    AdapterKind::ClineCli,
+                    &mut tools,
+                    session,
+                    prompt,
+                    &mut first,
+                )
+                .unwrap(),
+                "permission decision must not create a second tool result"
+            );
+            assert_eq!(
+                first["params"]["update"]["rawInput"]["commands"][0],
+                format!("touch {path}")
+            );
+            assert!(
+                first
+                    .pointer("/params/update/_meta/rovaiClineMutation")
+                    .is_none()
+            );
+            let mut repeat = failure;
+            assert!(
+                !enrich_paired_tool_message(
+                    AdapterKind::ClineCli,
+                    &mut tools,
+                    session,
+                    prompt,
+                    &mut repeat,
+                )
+                .unwrap()
+            );
+            assert_eq!(
+                repeat["params"]["update"]["rawInput"]["commands"][0],
+                format!("touch {path}")
+            );
+            let mut actual_result = json!({"method":"session/update","params":{"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"reused-id","status":"completed",
+                "rawOutput":[{"success":false,"result":"User rejected the tool call"}]
+            }}});
+            assert!(
+                enrich_paired_tool_message(
+                    AdapterKind::ClineCli,
+                    &mut tools,
+                    session,
+                    prompt,
+                    &mut actual_result,
+                )
+                .unwrap()
+            );
+            assert_eq!(actual_result["params"]["update"]["status"], "failed");
+        }
+        assert!(tools.is_empty());
+        for kind in [AdapterKind::ClineCli, AdapterKind::CommandCodeCli] {
+            let mut unknown_success = json!({"method":"session/update","params":{"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"reused-id","status":"completed"
+            }}});
+            assert!(
+                enrich_paired_tool_message(kind, &mut tools, "a", "p1", &mut unknown_success)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn successful_terminal_acp_file_operation_keeps_one_structured_location_without_inventing_a_diff()
+     {
         let completion = completed_action(
             AdapterKind::KimiCodeCli,
             &json!({
@@ -12459,6 +14098,44 @@ while IFS= read -r ignored; do :; done
             Some("write")
         );
         assert!(completion.public_file_changes.is_none());
+        // The Cline native envelope omits locations and its sparse terminal
+        // omits input. Its profile supplies a confirmed path to this same seam.
+        for (initial, output, operation) in [
+            (
+                json!({"title":"read_files: fixture","rawInput":{"files":[{"path":"src/target.ts"}]}}),
+                json!([{"success":true,"result":"PRIVATE_SOURCE"}]),
+                "read",
+            ),
+            (
+                json!({"title":"apply_patch: fixture","rawInput":{"input":"*** Begin Patch\n*** Update File: src/target.ts\n@@\n-old\n+new\n*** End Patch"}}),
+                json!({"success":true,"result":"Applied"}),
+                "write",
+            ),
+        ] {
+            let mut initial = initial;
+            crate::cline::enrich_tool_update(&mut initial, None);
+            assert!(initial.get("locations").is_none());
+            let mut terminal = json!({"sessionUpdate":"tool_call_update","toolCallId":"cline-file","status":"completed","rawOutput":output});
+            crate::cline::enrich_tool_update(&mut terminal, Some(&initial));
+            let completion = completed_action(AdapterKind::ClineCli, &json!({"update":terminal}))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                completion.public_file_operation_path.as_deref(),
+                Some("src/target.ts")
+            );
+            assert_eq!(
+                completion.public_file_operation_kind.as_deref(),
+                Some(operation)
+            );
+            assert!(completion.public_file_changes.is_none());
+            assert!(
+                !completion
+                    .result_data
+                    .to_string()
+                    .contains("PRIVATE_SOURCE")
+            );
+        }
     }
 
     #[test]

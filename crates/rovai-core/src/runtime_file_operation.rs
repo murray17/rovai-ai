@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn admits_structured_reads_from_acp_codex_claude_and_pi_only() {
+    fn admits_structured_reads_only_from_allowlisted_native_sources() {
         for (adapter, protocol, source) in [
             (
                 "opencode-cli",
@@ -373,6 +373,11 @@ mod tests {
                 "assistant.tool_use.file+user.tool_result.completed",
             ),
             ("pi", "pi-jsonl-rpc-v1", "tool_execution_end.completed"),
+            (
+                "cline-cli",
+                "acp-v1",
+                "session/update.tool_call_update.completed",
+            ),
         ] {
             let admitted = admit_runtime_file_operation(
                 &json!({
@@ -411,6 +416,27 @@ mod tests {
             rejected,
             Err("runtime_file_operation_source_not_allowlisted")
         );
+
+        for (source, operation, accepted) in [
+            ("tool.finished.completed.apply_patch", "write", false),
+            ("tool.finished.completed.editor", "write", false),
+            ("tool.finished.completed.read_files", "write", false),
+            ("tool.finished.completed.apply_patch", "read", false),
+            ("tool.finished.failed.apply_patch", "write", false),
+            ("session/update.tool_call_update.completed", "write", true),
+        ] {
+            let result = admit_runtime_file_operation(
+                &json!({"runtimeFileOperation": {
+                    "adapterKind":"cline-cli", "protocolFamily":"acp-v1",
+                    "sourceEventKind":source, "operationKind":operation,
+                    "path":absolute_test_path("/repo/src/app.ts")
+                }}),
+                Path::new(&absolute_test_path("/repo")),
+                Some("cline-cli"),
+            )
+            .expect("candidate should exist");
+            assert_eq!(result.is_ok(), accepted, "{source}/{operation}");
+        }
     }
 
     #[test]
@@ -427,6 +453,7 @@ mod tests {
             AdapterKind::KimiCodeCli,
             AdapterKind::GrokBuild,
             AdapterKind::DeepseekHarness,
+            AdapterKind::CommandCodeCli,
         ] {
             let admitted = admit_runtime_file_operation(
                 &json!({

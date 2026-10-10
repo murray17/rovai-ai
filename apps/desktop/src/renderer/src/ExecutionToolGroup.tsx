@@ -355,10 +355,11 @@ export function ModifiedFileRow({ threadId, change, semanticKind, completeEviden
   }, [client, expanded, deferred, threadId, completeEvidence?.id, change.path, diff, retry])
   const fileName = change.path.split('/').filter(Boolean).at(-1) ?? change.path
   const verb = change.changeKind === 'add' ? t('新增') : t('编辑')
-  const exactMutation = semanticKind === 'exact_mutation'
+  const reportedMutation = semanticKind === 'reported_mutation'
+  const fragmentDiff = semanticKind === 'exact_mutation' || reportedMutation
   const lines = useMemo(
-    () => !expanded || diff === null ? [] : exactMutation ? exactMutationDiffLines(diff) : inlineDiffLines(diff),
-    [diff, exactMutation, expanded]
+    () => !expanded || diff === null ? [] : fragmentDiff ? exactMutationDiffLines(diff) : inlineDiffLines(diff),
+    [diff, fragmentDiff, expanded]
   )
   const openFile = async (): Promise<void> => {
     await openAgentRunActivityFilePreview({
@@ -417,15 +418,16 @@ export function ModifiedFileRow({ threadId, change, semanticKind, completeEviden
       </summary>
       <div
         id={diffId}
-        className={`modified-file-diff${exactMutation ? ' is-exact-mutation' : ''}`}
+        className={`modified-file-diff${fragmentDiff ? ' is-exact-mutation' : ''}`}
         tabIndex={expanded ? 0 : -1}
         hidden={!expanded}
-        aria-label={uiAttribute("{0} 的{1}", String(change.path), String(exactMutation ? uiAttribute("修改片段") : uiAttribute("文件差异")))}
+        aria-label={uiAttribute("{0} 的{1}", String(change.path), String(reportedMutation ? uiAttribute("补丁片段") : fragmentDiff ? uiAttribute("修改片段") : uiAttribute("文件差异")))}
       >
+          {expanded && reportedMutation && <div className="modified-file-diff-line is-metadata" title={uiAttribute('已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。')}><code><UiText zh="补丁片段" /></code></div>}
           {expanded && diff === null && (diffError
             ? <div role="status"><UiText zh={"文件差异读取失败。"} /><button className="quiet-button compact" type="button" onClick={() => setRetry(value => value + 1)}><UiText zh={"重试"} /></button></div>
             : <div role="status"><UiText zh={"正在读取文件差异…"} /></div>)}
-          {lines.map((line, index) => exactMutation
+          {lines.map((line, index) => fragmentDiff
             ? (
                 <div className={`modified-file-diff-line is-${line.kind}`} key={`${index}:${line.text}`}>
                   <span aria-hidden="true">{line.kind === 'addition' ? '+' : '-'}</span>

@@ -12,12 +12,14 @@ it('indexes evidence body without paths, hunk headers, signs or invented current
   ])
   expect(fileChangeFindLines({ ...file, presentationKind: 'operation_only' })).toEqual([])
 })
-it('keeps exact mutation block order and stable file-local coordinates', () => {
-  const lines = fileChangeFindLines({ ...file, presentationKind: 'exact_mutations', blocks: [
-    { sequence: 2, semantics: 'exact_mutation', changeKind: 'update', diff: '-old two\n+new two' },
-    { sequence: 1, semantics: 'operation_only', changeKind: 'update' },
-    { sequence: 0, semantics: 'exact_mutation', changeKind: 'update', diff: '-old one\n+new one' }
-  ] })
-  expect(lines.map(line => line.text)).toEqual(['old one', 'new one', 'old two', 'new two'])
-  expect(lines.map(line => line.id)).toEqual(['history-1:0:0', 'history-1:0:1', 'history-1:1:0', 'history-1:1:1'])
+it('keeps mutation fragment order and stable file-local coordinates', () => {
+  for (const semantics of ['exact_mutation', 'reported_mutation'] as const) {
+    const lines = fileChangeFindLines({ ...file, presentationKind: semantics === 'exact_mutation' ? 'exact_mutations' : 'reported_mutations', blocks: [
+      { sequence: 2, semantics, changeKind: 'update', diff: '-old two\n+new two' },
+      { sequence: 1, semantics: 'operation_only', changeKind: 'update' },
+      { sequence: 0, semantics, changeKind: 'update', diff: '-old one\n+new one' }
+    ] })
+    expect(lines.map(line => line.text)).toEqual(['old one', 'new one', 'old two', 'new two'])
+    expect(lines.map(line => line.id)).toEqual(['history-1:0:0', 'history-1:0:1', 'history-1:1:0', 'history-1:1:1'])
+  }
 })

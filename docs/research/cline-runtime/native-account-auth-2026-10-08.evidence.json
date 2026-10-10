@@ -1,0 +1,487 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-08",
+  "baseline": "8eb7f6485e67b67a7a3e02f5ecda591871fc5a4c",
+  "testedSource": "232ecaf7, 1a2255cd, 728ff463; merged runtime and packaged revalidation at 95ded2d2",
+  "installation": {
+    "source": "Homebrew",
+    "cliVersion": "3.0.3",
+    "platform": "macos-arm64",
+    "entrypoint": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+    "binarySha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "staticApiKey": false
+  },
+  "realRefresh": {
+    "status": "not_observed",
+    "reason": "credential had about 239 hours remaining; real credentials and expiry were not altered"
+  },
+  "concurrency": {
+    "status": "single_rovai_native_process_per_provider_file",
+    "externalNativeProcessesQualified": false
+  },
+  "cases": [
+    {
+      "fixture": "account-single-02",
+      "passed": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "3a729cac-4bda-408e-903a-a9df1be87b13",
+          "status": "succeeded"
+        },
+        {
+          "label": "warm",
+          "runId": "d0c5d437-1102-4c8e-b9ad-5984032db2f6",
+          "status": "succeeded"
+        },
+        {
+          "label": "cold",
+          "runId": "31e38816-9753-487f-9087-9950faf35f5a",
+          "status": "succeeded"
+        }
+      ],
+      "ownedHostsRemaining": [],
+      "assertionNote": "obsolete warm Host equality assertion after three succeeded requests; retained negative evidence"
+    },
+    {
+      "fixture": "account-extended-03",
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "835d44f5-e7eb-4b5a-b0aa-bc43c1fed38d",
+          "status": "succeeded"
+        },
+        {
+          "label": "member-b",
+          "runId": "12cada0c-6c8b-4b01-b0c2-16afb3e5756c",
+          "status": "succeeded"
+        },
+        {
+          "label": "warm",
+          "runId": "98fd79c6-054a-4b21-80b1-be49a8940209",
+          "status": "succeeded"
+        },
+        {
+          "label": "cold",
+          "runId": "7f737286-a187-4942-b697-d6c9e6f6b818",
+          "status": "succeeded"
+        },
+        {
+          "label": "files",
+          "runId": "01242e44-517b-4a70-ac2f-fe0b885035dd",
+          "status": "succeeded"
+        },
+        {
+          "label": "allow",
+          "runId": "b7dcd2f9-c1f1-4aaa-a60f-1fe0f7cc5e03",
+          "status": "succeeded"
+        },
+        {
+          "label": "deny",
+          "runId": "7b5ecc56-39c6-4cdd-a2d9-123738b6c177",
+          "status": "succeeded"
+        },
+        {
+          "label": "cancel",
+          "runId": "be65b30d-cc18-42f9-84fc-904c74b6fcf5",
+          "status": "cancelled"
+        },
+        {
+          "label": "after-cancel",
+          "runId": "e11c6e6b-0751-4ee3-aedb-e4e8e056605c",
+          "status": "succeeded"
+        }
+      ],
+      "ownedHostsRemaining": [],
+      "assertionNote": null
+    },
+    {
+      "fixture": "auth-byok-regression-05",
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "3f366b3d-482f-4f7f-b4af-c9bfdb955fa6",
+          "status": "succeeded"
+        },
+        {
+          "label": "warm",
+          "runId": "79b5106c-3898-4e87-8910-540de5be3c5e",
+          "status": "succeeded"
+        },
+        {
+          "label": "cold",
+          "runId": "48743fe1-f8bd-4d99-99c9-3bacb0e6cf02",
+          "status": "succeeded"
+        }
+      ],
+      "ownedHostsRemaining": [],
+      "assertionNote": null
+    },
+    {
+      "fixture": "account-long-04",
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "e866f2a6-6f8a-4209-9eb2-fc8877797664",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-1",
+          "runId": "f5ad237d-197f-4ee2-b92e-4a60d6f72ebb",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-2",
+          "runId": "c8dd4905-fe85-449f-846d-368b828b7ba4",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-3",
+          "runId": "6b14e6f9-7c76-4f4c-af86-d7380ba2f21a",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-4",
+          "runId": "993725e6-0381-4753-b478-754dce9dabca",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-5",
+          "runId": "75c1ea57-85f9-4c53-94b7-21cf37e30203",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-cold",
+          "runId": "1274fa47-c370-4599-8a66-c78212e04a7d",
+          "status": "succeeded"
+        }
+      ],
+      "historyReduced": true,
+      "coldContinuity": true,
+      "modelWindowUnmodified": true,
+      "historyRounds": [
+        {
+          "batch": 1,
+          "before": {
+            "count": 6,
+            "bytes": 8187,
+            "lastInputTokens": 4685
+          },
+          "after": {
+            "count": 16,
+            "bytes": 154083,
+            "lastInputTokens": 97059
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 2,
+          "before": {
+            "count": 16,
+            "bytes": 154083,
+            "lastInputTokens": 97059
+          },
+          "after": {
+            "count": 22,
+            "bytes": 294551,
+            "lastInputTokens": 188163
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 3,
+          "before": {
+            "count": 22,
+            "bytes": 294551,
+            "lastInputTokens": 188163
+          },
+          "after": {
+            "count": 28,
+            "bytes": 435108,
+            "lastInputTokens": 279051
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 4,
+          "before": {
+            "count": 28,
+            "bytes": 435108,
+            "lastInputTokens": 279051
+          },
+          "after": {
+            "count": 34,
+            "bytes": 575752,
+            "lastInputTokens": 370223
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 5,
+          "before": {
+            "count": 34,
+            "bytes": 575752,
+            "lastInputTokens": 370223
+          },
+          "after": {
+            "count": 29,
+            "bytes": 567381,
+            "lastInputTokens": 368502
+          },
+          "historyReduced": true
+        }
+      ],
+      "ownedHostsRemaining": []
+    },
+    {
+      "fixture": "account-extensions-07",
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "b64f6941-9325-426d-abee-b2050a5f40bf",
+          "status": "succeeded"
+        },
+        {
+          "label": "mcp",
+          "runId": "afde5644-aa4d-4685-b379-620309109899",
+          "status": "succeeded"
+        },
+        {
+          "label": "skill",
+          "runId": "f0beae64-2e25-4876-86f1-eed35690a9fa",
+          "status": "succeeded"
+        }
+      ],
+      "ownedHostsRemaining": [],
+      "packagedRendererToCore": false,
+      "authConcurrency": null
+    },
+    {
+      "fixture": "account-packaged-08",
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "a009e07a-5e3a-4d44-9a5d-1fb722828eb5",
+          "status": "succeeded"
+        },
+        {
+          "label": "deny",
+          "runId": "f4589359-7e40-4557-a845-4599285b4ffa",
+          "status": "succeeded"
+        },
+        {
+          "label": "cancel",
+          "runId": "210ada45-aaaf-4dda-913e-60638b6efb6d",
+          "status": "cancelled"
+        },
+        {
+          "label": "after-cancel",
+          "runId": "d5e37fe5-935a-48e0-b629-bc08514f529b",
+          "status": "succeeded"
+        }
+      ],
+      "ownedHostsRemaining": [],
+      "packagedRendererToCore": true,
+      "authConcurrency": {
+        "activeRunId": "210ada45-aaaf-4dda-913e-60638b6efb6d",
+        "competingDiagnostic": "cline_hub_auth_scope_busy",
+        "competingModelInputs": 0
+      }
+    }
+  ],
+  "recovery": {
+    "modelInputs": 0,
+    "ownershipRecorded": true,
+    "nativeAliveBeforeRestart": true,
+    "restartReapedNative": true,
+    "privateHostRemoved": true,
+    "normalDiagnosticAfterRecovery": "ready",
+    "preparationFailureCleanedTwice": true,
+    "unloggedExplicit": true,
+    "sourceChanged": false,
+    "passed": true,
+    "hostTempRemaining": []
+  },
+  "loginRoutingFailures": [
+    {
+      "fixture": "account-packaged-login-09",
+      "passed": false,
+      "reason": "fresh discovery omitted saved startup configuration",
+      "ownedHostsRemaining": []
+    },
+    {
+      "fixture": "account-packaged-login-10",
+      "passed": false,
+      "reason": "fresh discovery omitted saved startup configuration",
+      "ownedHostsRemaining": []
+    }
+  ],
+  "loginRoutingRegression": {
+    "modelInputs": 0,
+    "loginFixture": {
+      "packagedRendererToCore": false,
+      "selectedAbsoluteProgram": true,
+      "explicitStart": true,
+      "privateOutputRedacted": true,
+      "input": true,
+      "cancel": true,
+      "subsequentCompletion": true,
+      "realOAuth": false,
+      "shutdownActiveLogin": true
+    },
+    "sourceChanged": false,
+    "passed": true,
+    "hostTempRemaining": []
+  },
+  "validation": {
+    "rustWorkspace": {
+      "passed": 463,
+      "ignored": 2
+    },
+    "clineExtended": {
+      "passed": 9,
+      "ignored": 2
+    },
+    "vitest": {
+      "passed": 2605
+    },
+    "node": {
+      "passed": 335,
+      "skipped": 2
+    },
+    "settingsElectronInteraction": "passed across day/night, 1040x700 and 200% zoom",
+    "desktopBridge": "passed",
+    "typecheck": "passed",
+    "documentationGates": "passed",
+    "fmt": "passed",
+    "allTargetsAllFeatures": "passed",
+    "adHocMacArm64Signature": "passed"
+  },
+  "packagedLoginRoutingRegression": {
+    "modelInputs": 0,
+    "packagedRendererToCore": true,
+    "loginFixture": {
+      "packagedRendererToCore": true,
+      "selectedAbsoluteProgram": true,
+      "explicitStart": true,
+      "privateOutputRedacted": true,
+      "input": true,
+      "cancel": true,
+      "subsequentCompletion": true,
+      "realOAuth": false,
+      "shutdownActiveLogin": true
+    },
+    "sourceChanged": false,
+    "passed": true,
+    "hostTempRemaining": []
+  },
+  "credentialProtection": {
+    "accountFixtureFilesScanned": 724,
+    "rawAccessOrRefreshTokenCopiesFound": 0,
+    "changedPublicFilesScanned": 34,
+    "rawCredentialOrPrivateEndpointMatches": 0
+  },
+  "packagedCoreSha256": "61d29ebf0c4be056e3671af351805f83d5f94ae66997f507a28e020851be8a4d",
+  "mergeFollowUp": {
+    "sourceHead": "95ded2d2c7c43aa51d4c8ed33bc331d31d2e014e",
+    "mergedMain": "ed90fa9b",
+    "projectionSchemaVersion": 136,
+    "packagedCoreSha256": "6f0b94f32701fd7629a8c649a6bdf86481d71d05aa8a536c76be1a2570d2e18a",
+    "accountContinuity": {
+      "fixture": "account-packaged-final-13",
+      "passed": true,
+      "sourceHead": "95ded2d2c7c43aa51d4c8ed33bc331d31d2e014e",
+      "packagedRendererToCore": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "d88eea0c-2c55-4264-ad39-028a98753187",
+          "status": "succeeded"
+        },
+        {
+          "label": "warm",
+          "runId": "16d4889b-6719-49b5-8341-51ddc73b2a61",
+          "status": "succeeded"
+        },
+        {
+          "label": "cold",
+          "runId": "b09f8c48-6874-4b2e-a3bc-831e0a6c3f9b",
+          "status": "succeeded"
+        }
+      ],
+      "ownedHostsRemaining": []
+    },
+    "loginInteraction": {
+      "passed": true,
+      "modelInputs": 0,
+      "packagedRendererToCore": true,
+      "loginFixture": {
+        "packagedRendererToCore": true,
+        "selectedAbsoluteProgram": true,
+        "explicitStart": true,
+        "privateOutputRedacted": true,
+        "input": true,
+        "cancel": true,
+        "subsequentCompletion": true,
+        "realOAuth": false,
+        "shutdownActiveLogin": true
+      },
+      "sourceChanged": false,
+      "hostTempRemaining": []
+    },
+    "validation": {
+      "rustWorkspace": {
+        "passed": 465,
+        "ignored": 2
+      },
+      "vitest": {
+        "passed": 2607
+      },
+      "node": {
+        "passed": 335,
+        "skipped": 2
+      },
+      "allTargetsAllFeatures": "passed",
+      "typecheck": "passed",
+      "documentationGates": "passed",
+      "fmt": "passed",
+      "adHocSignature": "passed",
+      "continuationBrowser": {
+        "final": "passed unchanged",
+        "initial": "keyboard wait timeout; negative log retained"
+      },
+      "extendedMigrations": {
+        "passed": 28,
+        "failed": 1,
+        "failure": "authority_migration::tests::macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data",
+        "phase": "authority_open before any migration",
+        "code": "authority_contract_changed / IdentityChanged",
+        "alsoReproducedAt": "728ff463",
+        "productionAndTestUnchanged": true
+      }
+    },
+    "ci": {
+      "ubuntu": {
+        "conclusion": "success",
+        "url": "https://github.com/murray17/rovai-ai/actions/runs/37729920420"
+      },
+      "windows": {
+        "conclusion": "success",
+        "url": "https://github.com/murray17/rovai-ai/actions/runs/37729971072"
+      }
+    },
+    "credentialProtection": {
+      "privateFilesScanned": 1131,
+      "privateCredentialMatches": 0,
+      "publicFilesScanned": 96,
+      "publicCredentialMatches": 0
+    }
+  }
+}

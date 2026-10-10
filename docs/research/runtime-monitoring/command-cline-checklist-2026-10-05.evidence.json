@@ -1,0 +1,392 @@
+{
+  "date": "2026-10-05",
+  "platform": "macos-arm64",
+  "baselineCommit": "51357adb46b343af28438337dcf7f2cb56d73056",
+  "scope": "fixed-version native probes; product evidence is listed separately",
+  "cline": {
+    "version": "3.0.65",
+    "model": "gpt-6-sol",
+    "provider": "openai-compatible",
+    "ruleProbe": {
+      "rule": {
+        "sessionId": "1791178047835_RumTv_cli",
+        "requests": [
+          {
+            "root": true,
+            "bootstrapCount": 1,
+            "keys": [
+              "systemPrompt",
+              "messages",
+              "tools",
+              "modelTools",
+              "signal",
+              "options"
+            ]
+          }
+        ],
+        "replies": "BOOTSTRAP48_ROSE"
+      },
+      "missing": {
+        "sessionId": "1791178016390_1AWEn_cli",
+        "requests": [
+          {
+            "root": true,
+            "bootstrapCount": 0,
+            "keys": [
+              "systemPrompt",
+              "messages",
+              "tools",
+              "modelTools",
+              "signal",
+              "options"
+            ]
+          }
+        ],
+        "replies": "ABSENT48"
+      },
+      "throw": {
+        "sessionId": "1791177998142_v67aa_cli",
+        "requests": [],
+        "replies": "",
+        "error": "{\"code\": -32603, \"message\": \"Internal error\", \"data\": {\"details\": \"SessionRuntime.shutdown called while a run is in progress (agentId=agent_1791177998357_irlohl)\"}}"
+      }
+    },
+    "autoCompaction": "not_observed; isolated budget probes do not qualify native continuity",
+    "productApp": {
+      "isolated": true,
+      "runs": [
+        {
+          "agentId": "agent_1",
+          "runId": "2b4d8825-ef13-4226-b422-38e80702ae81",
+          "status": "succeeded",
+          "metrics": {
+            "runs": [
+              {
+                "agentRunId": "2b4d8825-ef13-4226-b422-38e80702ae81",
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-05T05:35:18.963703+00:00",
+                "inputOutputComplete": true,
+                "lastObservedAt": "2026-10-05T05:35:18.846Z",
+                "outputTokens": 138,
+                "promptInputTotalTokens": 13203
+              }
+            ],
+            "schemaVersion": 1,
+            "sessions": [
+              {
+                "agentId": "agent_2",
+                "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+                "dialectId": "cline-plugin-model-context-v1",
+                "modelKey": "gpt-6-sol",
+                "nativeRatio": null,
+                "observedAt": "2026-10-04T17:24:10.856Z",
+                "runtimeKind": "cline-cli",
+                "sessionGeneration": 2,
+                "source": "runtime_private_extension",
+                "usedTokens": 4252,
+                "windowTokens": 272000
+              },
+              {
+                "agentId": "agent_1",
+                "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+                "dialectId": "cline-plugin-model-context-v1",
+                "modelKey": "gpt-6-sol",
+                "nativeRatio": null,
+                "observedAt": "2026-10-05T05:35:18.846Z",
+                "runtimeKind": "cline-cli",
+                "sessionGeneration": 3,
+                "source": "runtime_private_extension",
+                "usedTokens": 4735,
+                "windowTokens": 272000
+              }
+            ]
+          },
+          "publicReplies": [
+            {
+              "messageId": "23e87caf-298b-4d2b-86cd-6e35131d41e7",
+              "authorId": "agent_1",
+              "body": "PARITY48_APP_OK",
+              "presentation": {
+                "explicitOrder": [],
+                "footerRecipients": [],
+                "inlineOccurrences": [],
+                "inlineOrder": []
+              }
+            }
+          ],
+          "publicMessageOrigins": [
+            {
+              "id": "23e87caf-298b-4d2b-86cd-6e35131d41e7",
+              "origin_kind": "agent",
+              "source_operation_id": "builtin-tool-870823c16a9927cee448524ad91f8680e4032f1c5e48a582c7db13afa62e5d9a",
+              "agent_addressing_mode": "public_only"
+            }
+          ]
+        },
+        {
+          "agentId": "agent_2",
+          "runId": "4244787c-20a1-4435-8e82-1ab844355dde",
+          "status": "succeeded",
+          "metrics": {
+            "runs": [
+              {
+                "agentRunId": "4244787c-20a1-4435-8e82-1ab844355dde",
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-05T05:36:37.015763+00:00",
+                "inputOutputComplete": true,
+                "lastObservedAt": "2026-10-05T05:36:36.902Z",
+                "outputTokens": 142,
+                "promptInputTotalTokens": 13201
+              }
+            ],
+            "schemaVersion": 1,
+            "sessions": [
+              {
+                "agentId": "agent_1",
+                "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+                "dialectId": "cline-plugin-model-context-v1",
+                "modelKey": "gpt-6-sol",
+                "nativeRatio": null,
+                "observedAt": "2026-10-05T05:35:18.846Z",
+                "runtimeKind": "cline-cli",
+                "sessionGeneration": 3,
+                "source": "runtime_private_extension",
+                "usedTokens": 4735,
+                "windowTokens": 272000
+              },
+              {
+                "agentId": "agent_2",
+                "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+                "dialectId": "cline-plugin-model-context-v1",
+                "modelKey": "gpt-6-sol",
+                "nativeRatio": null,
+                "observedAt": "2026-10-05T05:36:36.902Z",
+                "runtimeKind": "cline-cli",
+                "sessionGeneration": 3,
+                "source": "runtime_private_extension",
+                "usedTokens": 4735,
+                "windowTokens": 272000
+              }
+            ]
+          },
+          "publicReplies": [
+            {
+              "messageId": "82ff84df-9435-4f08-ab6c-8e7f60783a8c",
+              "authorId": "agent_2",
+              "body": "PARITY48_APP_OK",
+              "presentation": {
+                "explicitOrder": [],
+                "footerRecipients": [],
+                "inlineOccurrences": [],
+                "inlineOrder": []
+              }
+            }
+          ],
+          "publicMessageOrigins": [
+            {
+              "id": "82ff84df-9435-4f08-ab6c-8e7f60783a8c",
+              "origin_kind": "agent",
+              "source_operation_id": "builtin-tool-38741f63985744ec7e9f4fc6604ecd7536f16acce4e6274fda24d9a7c38fbeb3",
+              "agent_addressing_mode": "public_only"
+            }
+          ]
+        },
+        {
+          "agentId": "agent_1",
+          "runId": "d27cecfa-bcc3-46a3-9bba-2c97df63925f",
+          "status": "succeeded",
+          "metrics": {
+            "runs": [
+              {
+                "agentRunId": "d27cecfa-bcc3-46a3-9bba-2c97df63925f",
+                "cacheReadTokens": 0,
+                "cacheWriteTokens": 0,
+                "executionEpoch": 1,
+                "finalizedAt": "2026-10-05T05:41:26.738260+00:00",
+                "inputOutputComplete": true,
+                "lastObservedAt": "2026-10-05T05:41:26.643Z",
+                "outputTokens": 103,
+                "promptInputTotalTokens": 10443
+              }
+            ],
+            "schemaVersion": 1,
+            "sessions": [
+              {
+                "agentId": "agent_1",
+                "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+                "dialectId": "cline-plugin-model-context-v1",
+                "modelKey": "gpt-6-sol",
+                "nativeRatio": null,
+                "observedAt": "2026-10-05T05:41:26.643Z",
+                "runtimeKind": "cline-cli",
+                "sessionGeneration": 3,
+                "source": "runtime_private_extension",
+                "usedTokens": 5295,
+                "windowTokens": 272000
+              },
+              {
+                "agentId": "agent_2",
+                "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+                "dialectId": "cline-plugin-model-context-v1",
+                "modelKey": "gpt-6-sol",
+                "nativeRatio": null,
+                "observedAt": "2026-10-05T05:36:36.902Z",
+                "runtimeKind": "cline-cli",
+                "sessionGeneration": 3,
+                "source": "runtime_private_extension",
+                "usedTokens": 4735,
+                "windowTokens": 272000
+              }
+            ]
+          },
+          "publicReplies": [
+            {
+              "messageId": "60a494e2-a8f2-4e29-ac89-04afbe5414cb",
+              "authorId": "agent_1",
+              "body": "PARITY48_APP_OK",
+              "presentation": {
+                "explicitOrder": [],
+                "footerRecipients": [],
+                "inlineOccurrences": [],
+                "inlineOrder": []
+              }
+            }
+          ],
+          "publicMessageOrigins": [
+            {
+              "id": "60a494e2-a8f2-4e29-ac89-04afbe5414cb",
+              "origin_kind": "agent",
+              "source_operation_id": "builtin-tool-364b4bff105e8a1b3b3be3d519b71af3d03ace745f498656a4ff49c566dc6ae0",
+              "agent_addressing_mode": "public_only"
+            }
+          ]
+        }
+      ],
+      "policies": [
+        {
+          "adapter_kind": "cline-cli",
+          "policy": "best_effort",
+          "policy_epoch": 1
+        }
+      ],
+      "observerLeases": [
+        {
+          "adapter_kind": "cline-cli",
+          "status": "active",
+          "host_instance_id": "8002318d-18e9-4f9d-9f90-d29abc835be5",
+          "native_session_id": "1791178575319_mteI2_cli",
+          "native_binding_generation": 3,
+          "detector_policy_epoch": 1
+        },
+        {
+          "adapter_kind": "cline-cli",
+          "status": "active",
+          "host_instance_id": "851421e3-5968-4ef6-9bfc-87844dbbc00f",
+          "native_session_id": "1791178505153_gIxXE_cli",
+          "native_binding_generation": 3,
+          "detector_policy_epoch": 1
+        }
+      ]
+    },
+    "latestSourceCheck": {
+      "version": "3.0.68",
+      "runtimeExecuted": false,
+      "files": [
+        {
+          "path": "apps/cli/src/acp/acpAgent.ts",
+          "sha256": "39f68873abc43f80a858dbdbdfb7b6d3f3d29fb7fdf96157d229c7a71084a165",
+          "identical": true
+        },
+        {
+          "path": "sdk/packages/core/src/extensions/plugin/plugin-loader.ts",
+          "sha256": "88b3a6d96ba5e48d95e8d7b0a16731d66e83bf7f4932213e7c14d2b0e812114e",
+          "identical": true
+        }
+      ]
+    }
+  },
+  "commandCode": {
+    "version": "1.74.1",
+    "officialAcp": true,
+    "byok": {
+      "requestedModel": "sub2api/gpt-6-sol",
+      "listed": false,
+      "setModelErrorCode": -32602,
+      "setModelError": "Unknown model"
+    },
+    "nativeAccount": {
+      "errorCode": -32603,
+      "providerStatus": 400,
+      "errorCategory": "insufficient_credits",
+      "modelsAttempted": [
+        "deepseek/deepseek-v4-flash",
+        "poolside/laguna-s-2.1-free"
+      ]
+    },
+    "residentControl": [
+      {
+        "label": "A",
+        "sessionId": "f6770fe1-3577-4c60-ada1-f13f4a9d1c3c",
+        "pid": 6089,
+        "stopReason": "end_turn",
+        "notificationKinds": [
+          "None",
+          "agent_message_chunk",
+          "usage_update"
+        ]
+      },
+      {
+        "label": "B",
+        "sessionId": "ba5d19e8-7ae1-4f20-9720-4e5737aae904",
+        "pid": 6089,
+        "stopReason": "end_turn",
+        "notificationKinds": [
+          "None",
+          "agent_message_chunk",
+          "usage_update"
+        ]
+      },
+      {
+        "label": "A-return",
+        "sessionId": "f6770fe1-3577-4c60-ada1-f13f4a9d1c3c",
+        "pid": 6089,
+        "stopReason": "end_turn",
+        "notificationKinds": [
+          "None",
+          "agent_message_chunk",
+          "usage_update"
+        ]
+      }
+    ],
+    "contextGauge": {
+      "used": 0,
+      "size": 1000000,
+      "model": "deepseek/deepseek-v4-flash",
+      "surface": "ACP usage_update after native /acp (no LLM generation)"
+    },
+    "productAdapter": "not_implemented"
+  },
+  "validation": {
+    "rustWorkspace": {
+      "passed": 455,
+      "ignored": 2
+    },
+    "targetedRust": {
+      "cline": 2,
+      "compaction": 3
+    },
+    "nodeObserver": 1,
+    "vitest": 2588,
+    "nodeSuite": {
+      "passed": 335,
+      "skipped": 2
+    },
+    "typecheck": "passed",
+    "documentationGates": "passed",
+    "macosPackage": "passed"
+  }
+}

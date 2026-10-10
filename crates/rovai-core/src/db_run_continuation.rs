@@ -51,6 +51,20 @@ pub(super) fn request_schema_matches(connection: &Connection) -> rusqlite::Resul
     Ok(true)
 }
 
+// Main's receipt 188 introduced internal requests; Preview's same receipt owns
+// the direct-reply index/catalog. Reject partial request shapes in either lineage.
+pub(super) fn request_source_schema_matches(connection: &Connection) -> rusqlite::Result<bool> {
+    if request_schema_matches(connection)? {
+        return Ok(true);
+    }
+    connection.query_row("SELECT
+        NOT EXISTS(SELECT 1 FROM pragma_table_info('camp') WHERE name='last_delivery_sequence')
+        AND NOT EXISTS(SELECT 1 FROM pragma_table_info('camp_message_delivery') WHERE name='source_kind')
+        AND NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name IN ('camp_delivery_source_immutable','camp_continuation_source_kind'))
+        AND EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='camp_message_delivery' AND instr(sql,?1)>0)",
+        [MESSAGE_REFERENCE], |row| row.get(0))
+}
+
 /// Changes only the queue's source model. Published messages and frozen evidence
 /// are retained, including the old operation records from development builds.
 pub(super) fn migrate_requests(database: &mut Database) -> Result<()> {
@@ -64,43 +78,56 @@ pub(super) fn migrate_requests(database: &mut Database) -> Result<()> {
         anyhow::ensure!(
             matches!(classify_database_contract(&tx)?,
             DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                if marker.contract_version=="v1.72" && marker.projection_schema_version==137),
-            "Continuation requests require v1.72/schema 137"
+                if marker.contract_version=="v1.72" && marker.projection_schema_version==139),
+            "Continuation requests require v1.72/schema 139"
         );
         let before = public_history_claim_preserved_evidence_digest(&tx)?;
-        let source: String = tx.query_row(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='camp_message_delivery'",
-            [],
-            |r| r.get(0),
-        )?;
-        anyhow::ensure!(
-            source.contains(MESSAGE_REFERENCE),
-            "Missing message Delivery source constraint"
-        );
-        let target = replacement_table_schema_v171(source, "camp_message_delivery")
-            .replace(MESSAGE_REFERENCE, REQUEST_REFERENCE);
-        rebuild_table_v171(&tx, "camp_message_delivery", &target, &[], &[])?;
-        tx.execute_batch("ALTER TABLE camp ADD COLUMN last_delivery_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_delivery_sequence>=0);
+        // Main/138 already has internal requests but lacks both deferred ACP
+        // identities. Converge the catalog without replacing its receipt 188.
+        if !cline_runtime_v184_schema_matches(&tx)? {
+            rewrite_cline_runtime_closed_sets(&tx, false)?;
+        }
+        if !command_code_runtime_v185_schema_matches(&tx)? {
+            rewrite_command_code_runtime_closed_sets(&tx, false)?;
+        }
+        if !request_schema_matches(&tx)? {
+            let source: String = tx.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='camp_message_delivery'",
+                [],
+                |r| r.get(0),
+            )?;
+            anyhow::ensure!(
+                source.contains(MESSAGE_REFERENCE),
+                "Missing message Delivery source constraint"
+            );
+            let target = replacement_table_schema_v171(source, "camp_message_delivery")
+                .replace(MESSAGE_REFERENCE, REQUEST_REFERENCE);
+            rebuild_table_v171(&tx, "camp_message_delivery", &target, &[], &[])?;
+            tx.execute_batch("ALTER TABLE camp ADD COLUMN last_delivery_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_delivery_sequence>=0);
             UPDATE camp SET last_delivery_sequence=COALESCE((SELECT MAX(queue_sequence) FROM camp_message_delivery WHERE camp_id=camp.id),0);
             UPDATE camp_message_delivery SET message_id=NULL,source_kind='continuation'
                 WHERE EXISTS(SELECT 1 FROM camp_run_continuation WHERE delivery_id=camp_message_delivery.id);")?;
-        for (_, sql) in REQUEST_GUARDS {
-            tx.execute_batch(sql)?;
+            for (_, sql) in REQUEST_GUARDS {
+                tx.execute_batch(sql)?;
+            }
         }
-        tx.execute_batch("INSERT INTO schema_migration VALUES(188,datetime('now'));
-            UPDATE rovai_data_contract SET projection_schema_version=138,updated_at=datetime('now') WHERE singleton=1;")?;
+        tx.execute_batch("INSERT INTO schema_migration VALUES(190,datetime('now'));
+            UPDATE rovai_data_contract SET projection_schema_version=140,updated_at=datetime('now') WHERE singleton=1;")?;
         anyhow::ensure!(
             public_history_claim_preserved_evidence_digest(&tx)? == before,
             "Continuation request migration changed frozen evidence"
         );
-        validate_migration_foreign_keys(
-            &tx,
-            &[
+        let tables = DSH_RUNTIME_TABLES
+            .iter()
+            .chain(DSH_SKILL_TABLES.iter())
+            .copied()
+            .chain([
                 "camp_message_delivery",
                 "camp_run_continuation",
                 "agent_run_input",
-            ],
-        )?;
+            ])
+            .collect::<Vec<_>>();
+        validate_migration_foreign_keys(&tx, &tables)?;
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
@@ -121,7 +148,7 @@ pub(super) fn migrate_requests(database: &mut Database) -> Result<()> {
 pub(super) fn downgrade_requests_for_test(connection: &Connection) {
     if !connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=188)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=190)",
             [],
             |r| r.get::<_, bool>(0),
         )
@@ -149,8 +176,8 @@ pub(super) fn downgrade_requests_for_test(connection: &Connection) {
     rebuild_table_v171(&tx, "camp_message_delivery", &target, &["source_kind"], &[]).unwrap();
     tx.execute_batch(
         "ALTER TABLE camp DROP COLUMN last_delivery_sequence;
-        DELETE FROM schema_migration WHERE version=188;
-        UPDATE rovai_data_contract SET projection_schema_version=137 WHERE singleton=1;",
+        DELETE FROM schema_migration WHERE version=190;
+        UPDATE rovai_data_contract SET projection_schema_version=139 WHERE singleton=1;",
     )
     .unwrap();
     tx.commit().unwrap();
@@ -204,39 +231,56 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         anyhow::ensure!(
             matches!(classify_database_contract(&tx)?,DatabaseContractClassification::SupportedMigrationSource(ref marker)
-            if marker.contract_version=="v1.72" && marker.projection_schema_version==133),
-            "Run continuation requires v1.72/schema 133"
+            if marker.contract_version=="v1.72" && marker.projection_schema_version==135),
+            "Run continuation requires v1.72/schema 135"
         );
         let before = public_history_claim_preserved_evidence_digest(&tx)?;
-        let source: String = tx.query_row(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_run_input'",
-            [],
-            |r| r.get(0),
-        )?;
-        anyhow::ensure!(
-            source.contains("delivery_id TEXT NOT NULL UNIQUE"),
-            "Missing original Delivery uniqueness constraint"
-        );
-        let target = replacement_table_schema_v171(source, "agent_run_input").replace(
-            "delivery_id TEXT NOT NULL UNIQUE",
-            "delivery_id TEXT NOT NULL",
-        );
-        rebuild_table_v171(&tx, "agent_run_input", &target, &[], &[])?;
-        for (_, sql) in OBJECTS {
-            tx.execute_batch(sql)?;
+        // Main/135 owns structured Mission descriptions instead of the Preview
+        // catalog. Converge both catalog entries without touching those rows.
+        if !cline_runtime_v184_schema_matches(&tx)? {
+            rewrite_cline_runtime_closed_sets(&tx, false)?;
         }
-        tx.execute_batch("INSERT INTO schema_migration VALUES(184,datetime('now'));
-            UPDATE rovai_data_contract SET projection_schema_version=134,updated_at=datetime('now') WHERE singleton=1;")?;
+        if !command_code_runtime_v185_schema_matches(&tx)? {
+            rewrite_command_code_runtime_closed_sets(&tx, false)?;
+        }
+        // The main/134 branch already owns this exact schema. Preserve it;
+        // Preview/135 adds it here. Both advance with one transactional receipt.
+        if !schema_matches(&tx)? {
+            let source: String = tx.query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_run_input'",
+                [],
+                |r| r.get(0),
+            )?;
+            anyhow::ensure!(
+                source.contains("delivery_id TEXT NOT NULL UNIQUE"),
+                "Missing original Delivery uniqueness constraint"
+            );
+            let target = replacement_table_schema_v171(source, "agent_run_input").replace(
+                "delivery_id TEXT NOT NULL UNIQUE",
+                "delivery_id TEXT NOT NULL",
+            );
+            rebuild_table_v171(&tx, "agent_run_input", &target, &[], &[])?;
+            for (_, sql) in OBJECTS {
+                tx.execute_batch(sql)?;
+            }
+        }
+        tx.execute_batch("INSERT INTO schema_migration VALUES(186,datetime('now'));
+            UPDATE rovai_data_contract SET projection_schema_version=136,updated_at=datetime('now') WHERE singleton=1;")?;
         anyhow::ensure!(
             before == public_history_claim_preserved_evidence_digest(&tx)?,
             "Continuation migration changed existing model evidence"
         );
-        validate_migration_foreign_keys(&tx, &["agent_run_input", "camp_run_continuation"])?;
+        let tables = DSH_RUNTIME_TABLES
+            .iter()
+            .chain(DSH_SKILL_TABLES.iter())
+            .copied()
+            .chain(["agent_run_input", "camp_run_continuation"])
+            .collect::<Vec<_>>();
+        validate_migration_foreign_keys(&tx, &tables)?;
         anyhow::ensure!(
             matches!(
                 classify_database_contract(&tx)?,
-                DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                    if marker.projection_schema_version == 134
+                DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version==136
             ),
             "Continuation schema admission failed"
         );
@@ -279,7 +323,7 @@ pub(super) fn downgrade_for_test(connection: &Connection) {
         "delivery_id TEXT NOT NULL UNIQUE",
     );
     rebuild_table_v171(&tx, "agent_run_input", &target, &[], &[]).unwrap();
-    tx.execute_batch("DELETE FROM schema_migration WHERE version=184; UPDATE rovai_data_contract SET projection_schema_version=133 WHERE singleton=1;").unwrap();
+    tx.execute_batch("DELETE FROM schema_migration WHERE version=186; UPDATE rovai_data_contract SET projection_schema_version=135 WHERE singleton=1;").unwrap();
     tx.commit().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
 }
@@ -336,47 +380,147 @@ pub(crate) fn assert_legacy_request_upgrade(database: &mut Database, sources: &[
 mod tests {
     use super::*;
 
-    // Owns continuation schema changes (133 -> 134 and 137 -> 138): a failure after
+    // Owns schema 135 -> 136 and 139 -> 140: a failure after
     // rebuilding the table must restore both evidence and schema atomically.
     #[test]
     fn continuation_migration_rolls_back_and_preserves_frozen_evidence() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database();
-        downgrade_requests_for_test(database.connection());
-        let request_schema: String = database
-            .connection()
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE name='camp_message_delivery'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        database.connection().execute_batch("CREATE TRIGGER reject_request_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=188 BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
-        assert!(migrate_requests(&mut database).is_err());
-        assert!(!database.schema_migration_applied(188).unwrap());
-        assert_eq!(
-            database
+        for main_source in [false, true] {
+            let (mut database, directory) = crate::test_support::seeded_runtime_database();
+            database.connection().execute_batch(
+                "UPDATE schema_migration SET applied_at='2026-10-01T00:00:00Z' WHERE version=188;").unwrap();
+            if main_source {
+                database
+                    .connection()
+                    .execute_batch("PRAGMA foreign_keys=OFF")
+                    .unwrap();
+                let tx = database.connection().unchecked_transaction().unwrap();
+                rewrite_command_code_runtime_closed_sets(&tx, true).unwrap();
+                rewrite_cline_runtime_closed_sets(&tx, true).unwrap();
+                tx.execute_batch("DELETE FROM schema_migration WHERE version IN (189,190);
+                    UPDATE rovai_data_contract SET projection_schema_version=138 WHERE singleton=1;").unwrap();
+                tx.commit().unwrap();
+                database
+                    .connection()
+                    .execute_batch("PRAGMA foreign_keys=ON")
+                    .unwrap();
+                assert!(
+                    matches!(classify_database_contract(database.connection()).unwrap(),
+                    DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                        if marker.projection_schema_version == 138)
+                );
+                database
+                    .connection()
+                    .execute_batch(
+                        "SAVEPOINT partial_request;
+                    DROP TRIGGER camp_continuation_source_kind;",
+                    )
+                    .unwrap();
+                assert!(!matches!(
+                    classify_database_contract(database.connection()).unwrap(),
+                    DatabaseContractClassification::SupportedMigrationSource(_)
+                ));
+                database
+                    .connection()
+                    .execute_batch("ROLLBACK TO partial_request; RELEASE partial_request")
+                    .unwrap();
+                let before =
+                    public_history_claim_preserved_evidence_digest(database.connection()).unwrap();
+                message_mentions::migrate(&mut database).unwrap();
+                assert_eq!(
+                    before,
+                    public_history_claim_preserved_evidence_digest(database.connection()).unwrap()
+                );
+            } else {
+                downgrade_requests_for_test(database.connection());
+                database
+                    .connection()
+                    .execute_batch(
+                        "SAVEPOINT partial_request;
+                    ALTER TABLE camp ADD COLUMN last_delivery_sequence INTEGER NOT NULL DEFAULT 0;",
+                    )
+                    .unwrap();
+                assert!(!matches!(
+                    classify_database_contract(database.connection()).unwrap(),
+                    DatabaseContractClassification::SupportedMigrationSource(_)
+                ));
+                database
+                    .connection()
+                    .execute_batch("ROLLBACK TO partial_request; RELEASE partial_request")
+                    .unwrap();
+            }
+            let before =
+                public_history_claim_preserved_evidence_digest(database.connection()).unwrap();
+            let request_schema: String = database
                 .connection()
                 .query_row(
                     "SELECT sql FROM sqlite_master WHERE name='camp_message_delivery'",
                     [],
-                    |r| r.get::<_, String>(0)
+                    |r| r.get(0),
                 )
-                .unwrap(),
-            request_schema
-        );
-        assert_eq!(
+                .unwrap();
+            database.connection().execute_batch("CREATE TRIGGER reject_request_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=190 BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+            assert!(migrate_requests(&mut database).is_err());
+            assert!(!database.schema_migration_applied(190).unwrap());
+            assert_eq!(
+                request_schema_matches(database.connection()).unwrap(),
+                main_source
+            );
+            assert_eq!(
+                command_code_runtime_v185_schema_matches(database.connection()).unwrap(),
+                !main_source
+            );
+            assert_eq!(
+                public_history_claim_preserved_evidence_digest(database.connection()).unwrap(),
+                before
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT sql FROM sqlite_master WHERE name='camp_message_delivery'",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                request_schema
+            );
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
             database
                 .connection()
-                .query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))
-                .unwrap(),
-            1
-        );
-        database
-            .connection()
-            .execute_batch("DROP TRIGGER reject_request_receipt")
-            .unwrap();
-        migrate_requests(&mut database).unwrap();
-        assert!(request_schema_matches(database.connection()).unwrap());
+                .execute_batch("DROP TRIGGER reject_request_receipt")
+                .unwrap();
+            migrate_requests(&mut database).unwrap();
+            assert!(request_schema_matches(database.connection()).unwrap());
+            assert!(command_code_runtime_v185_schema_matches(database.connection()).unwrap());
+            assert_eq!(
+                public_history_claim_preserved_evidence_digest(database.connection()).unwrap(),
+                before
+            );
+            let receipt: String = database
+                .connection()
+                .query_row(
+                    "SELECT applied_at FROM schema_migration WHERE version=188",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(receipt, "2026-10-01T00:00:00Z");
+            drop(database);
+            let database = Database::open(&directory).unwrap();
+            assert!(matches!(
+                classify_database_contract(database.connection()).unwrap(),
+                DatabaseContractClassification::Current(_)
+            ));
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         downgrade_for_test(database.connection());
         let before = public_history_claim_preserved_evidence_digest(database.connection()).unwrap();
         let schema: String = database
@@ -387,9 +531,9 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        database.connection().execute_batch("CREATE TRIGGER reject_continuation_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=184 BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
+        database.connection().execute_batch("CREATE TRIGGER reject_continuation_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=186 BEGIN SELECT RAISE(ABORT,'fixture failure'); END;").unwrap();
         assert!(migrate(&mut database).is_err());
-        assert!(!database.schema_migration_applied(184).unwrap());
+        assert!(!database.schema_migration_applied(186).unwrap());
         assert!(
             !database
                 .connection()

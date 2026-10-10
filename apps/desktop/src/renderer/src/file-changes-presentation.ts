@@ -47,6 +47,7 @@ export function agentRunFileChangeModeLabel(
 ): string {
   if (presentationKind === 'full_net_diff') return uiAttribute('完整差异')
   if (presentationKind === 'exact_mutations') return uiAttribute('片段差异')
+  if (presentationKind === 'reported_mutations') return uiAttribute('补丁片段')
   if (presentationKind === 'operation_history') return uiAttribute('操作记录')
   return uiAttribute('仅文件操作')
 }

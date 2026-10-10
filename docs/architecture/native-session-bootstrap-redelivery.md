@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: native-session-bootstrap-redelivery
-last_updated: 2026-09-22
+last_updated: 2026-10-06
 ---
 
 # Native Session Bootstrap Redelivery
@@ -42,6 +42,7 @@ pending。
 | Runtime | Bootstrap class | 当前 policy | 环境变量 |
 | --- | --- | --- | --- |
 | GitHub Copilot | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_COPILOT_COMPACTION_DETECTOR_POLICY` |
+| Cline | `managed_system_prompt`，每轮原生 Rule 重组 | `disabled`；保留启动 reconciliation 废止旧 epoch | 原开关不能再启用 user 层补发 |
 | OpenCode | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_OPENCODE_COMPACTION_DETECTOR_POLICY` |
 | Kiro | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIRO_COMPACTION_DETECTOR_POLICY` |
 | Kimi Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY` |
@@ -69,6 +70,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | Runtime | 唯一 admission point | detector transport | 选择理由 |
 | --- | --- | --- | --- |
 | GitHub Copilot | `preCompact` / `imminent_edge` | 隔离官方 Plugin `preCompact` Hook | 目标 CLI 没有对等 completed Hook；该 edge 一次性推进 revision，accepted redelivery 后即结束，不等待 post event |
+| Cline | 无当前准入信号 | ACP 私有原生 System Rule/只读 Plugin | 补发 detector disabled；ACP compact 缺口保留，只观察真实原生事件，不合成进度，见[ACP 验收](../research/cline-runtime/acp-retirement-2026-10-08.md) |
 | OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
 | Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；started 与 summary 不参与 admission |
 | Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only Prompt lifecycle correlation + idle/detached completion compatibility route | Kimi native ACP server 把内部 lifecycle 降格为同形 `agent_message_chunk`；Active Prompt 只有 exact started 建立 pending 后的 exact completed 才准入，blocked 保持 pending，cancelled 清除 pending；idle/detached 保留 exact completion detector |
@@ -133,6 +135,10 @@ AgentRun，`summary_text` 只携带现有 Qoder/Qwen Hook 已经明确给出的�
 edge，OpenCode 只表达完成，CodeBuddy 只表达 post-compaction Session boundary；缺失值保持缺失。`summary_preview`、trigger、
 Session ID、时间差、token drop 与普通文本不能补造展示数据。Codex 不进入本 detector policy；其 app-server
 `contextCompaction` item 由执行 Evidence 入口直接截获为同一 display schema，仍不推进 Bootstrap revision。
+
+Cline 仅走官方 ACP。只读 Plugin 可观察实际原生压缩事件，但不注入 compaction 配置或实现压缩，
+不以模型回复、token 下降或配置窗口生成事件。ACP 已知未传 compaction 配置的缺口保留；
+此前 Hub/shim 的成功不作为当前资格，见 [ACP 验收](../research/cline-runtime/acp-retirement-2026-10-08.md)。
 
 Claude Code 与 Cursor Agent 当前没有执行台 Compaction 展示入口；本次需求不新增其协议接入。Antigravity 也只允许在现有
 Adapter 已经收到明确原生事件时投影，不为填满 Runtime 矩阵新增 detector 或启动配置。

@@ -1,0 +1,835 @@
+{
+  "schemaVersion": 1,
+  "scope": "Cline official ACP retirement; installed CLI only",
+  "implementationCommit": "9b8fa131d77e8b98feb79667d4a74c699bca0336",
+  "platform": "macos-arm64",
+  "cline": {
+    "version": "3.0.3",
+    "source": "Homebrew Cellar",
+    "executable": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+    "platformBinarySha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+    "launchArguments": [
+      "--acp"
+    ],
+    "replacedOrPatched": false
+  },
+  "packagedApp": {
+    "version": "0.4.6",
+    "signature": "ad-hoc verified",
+    "coreSha256": "9e82d9a76213827a334c1e5a8adc80d21ee8157460e762b1c4ab370d4ea902db",
+    "dailyAppReplaced": false
+  },
+  "scenarios": [
+    {
+      "id": "account-product-6",
+      "authentication": "native-openai-codex-no-static-key",
+      "provider": "openai-codex",
+      "fixturePassed": false,
+      "packagedRendererToCore": false,
+      "publicReplyRendered": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "7ac825f6-66f7-47d9-a027-235ce9997c6f",
+          "status": "succeeded",
+          "host": "6b31590c-0885-4ddf-907d-3237ce6bf85f",
+          "session": "1791468486953_17veh_cli",
+          "binding": "ccbaeaf9-6f25-475c-9f82-e8b086e25caa",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "warm",
+          "runId": "e76316df-0459-4025-ac44-39287abcd62b",
+          "status": "succeeded",
+          "host": "6b31590c-0885-4ddf-907d-3237ce6bf85f",
+          "session": "1791468486953_17veh_cli",
+          "binding": "ccbaeaf9-6f25-475c-9f82-e8b086e25caa",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "cold",
+          "runId": "5360e956-ad96-4420-bc7b-66c7f9f7a8ee",
+          "status": "succeeded",
+          "host": "aedf2859-586d-468b-82bd-7d01089b190d",
+          "session": "1791468512839_pghhO_cli",
+          "binding": "9f4a0f5e-e344-41e0-bc22-7bca657687c4",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        }
+      ],
+      "warmSameHost": true,
+      "warmSameSessionAndBinding": true,
+      "exactCold": false,
+      "nativeLoadError": {
+        "code": -32601,
+        "message": "Method not found",
+        "advertisedLoadSession": true,
+        "advertisedResume": false
+      },
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ]
+    },
+    {
+      "id": "account-parallel",
+      "authentication": "native-account-no-static-key",
+      "provider": "openai-codex",
+      "fixturePassed": true,
+      "packagedRendererToCore": false,
+      "publicReplyRendered": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "2539288f-76ac-49ef-b0f8-d51827a358b7",
+          "status": "succeeded",
+          "host": "366e8a2b-24e4-4969-8840-bd178afe9969",
+          "session": "1791468668801_6hw54_cli",
+          "binding": "83f2aaee-c69a-4cbf-80d9-f3d4c7d25a59",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "member-b",
+          "runId": "bf171902-36a8-43fd-9094-cec09df1526f",
+          "status": "succeeded",
+          "host": "e4282156-1537-421e-bee6-3b144177e93c",
+          "session": "1791468680988_VgeP4_cli",
+          "binding": "6817e0dd-0875-4855-b432-7c981d2a1306",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 0
+        },
+        {
+          "label": "warm",
+          "runId": "f261ec79-43e0-423a-95d2-f62c5a540443",
+          "status": "succeeded",
+          "host": "366e8a2b-24e4-4969-8840-bd178afe9969",
+          "session": "1791468668801_6hw54_cli",
+          "binding": "83f2aaee-c69a-4cbf-80d9-f3d4c7d25a59",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "parallel-A",
+          "runId": "a01a4cdf-9936-40f4-a890-40e65fd8d6cf",
+          "status": "succeeded",
+          "host": "366e8a2b-24e4-4969-8840-bd178afe9969",
+          "session": "1791468702530_rpGcB_cli",
+          "binding": "9cb93c72-c8bd-471a-981f-a2b3a7184cbe",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 3
+        },
+        {
+          "label": "parallel-B",
+          "runId": "a6bc1f16-a661-43b7-811a-d6f18f108afb",
+          "status": "succeeded",
+          "host": "e4282156-1537-421e-bee6-3b144177e93c",
+          "session": "1791468702525_Vefpf_cli",
+          "binding": "429868bb-0ed0-43b6-92ae-4c364cfdcdc8",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 3
+        },
+        {
+          "label": "cancel",
+          "runId": "b56ef0f8-4c39-48ed-8f86-ede850a7a5f9",
+          "status": "cancelled",
+          "host": "366e8a2b-24e4-4969-8840-bd178afe9969",
+          "session": "1791468702530_rpGcB_cli",
+          "binding": "9cb93c72-c8bd-471a-981f-a2b3a7184cbe",
+          "generation": 2,
+          "publicMessages": 0,
+          "committedBuiltinSends": 0,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 1
+        },
+        {
+          "label": "after-cancel",
+          "runId": "435eadb0-24b2-4487-b4e1-9eaff9736416",
+          "status": "succeeded",
+          "host": "cddbcbd2-d0e1-4b38-b660-f1817014a0ff",
+          "session": "1791468742189_J3_gn_cli",
+          "binding": "3d6dc449-53f9-41b9-9978-b6df68385eb4",
+          "generation": 3,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 3
+        }
+      ],
+      "warmSameHost": true,
+      "warmSameSessionAndBinding": true,
+      "parallel": {
+        "separateHosts": true,
+        "barrierPassed": true,
+        "separateApprovalsAndSends": true
+      },
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ]
+    },
+    {
+      "id": "byok-product-2",
+      "authentication": "byok",
+      "provider": "openai-compatible",
+      "fixturePassed": true,
+      "packagedRendererToCore": false,
+      "publicReplyRendered": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "a1ade071-4170-44f1-8ed3-a1ba1d3ca2a6",
+          "status": "succeeded",
+          "host": "4d094f13-1953-4157-bc44-3ec83ecb9365",
+          "session": "1791468816542_sNfcN_cli",
+          "binding": "9037bee4-13f1-4dbb-af5f-985024d786fa",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "warm",
+          "runId": "5bb2b9d1-4d63-43d0-a4e9-80c6fd829f59",
+          "status": "succeeded",
+          "host": "4d094f13-1953-4157-bc44-3ec83ecb9365",
+          "session": "1791468816542_sNfcN_cli",
+          "binding": "9037bee4-13f1-4dbb-af5f-985024d786fa",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "files",
+          "runId": "a5192099-66d9-4e57-ac15-fadafc19d53d",
+          "status": "succeeded",
+          "host": "4d094f13-1953-4157-bc44-3ec83ecb9365",
+          "session": "1791468816542_sNfcN_cli",
+          "binding": "9037bee4-13f1-4dbb-af5f-985024d786fa",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 0
+        },
+        {
+          "label": "allow",
+          "runId": "1624c989-03e4-4cd3-9a77-61b0ca0fd1dd",
+          "status": "succeeded",
+          "host": "4d094f13-1953-4157-bc44-3ec83ecb9365",
+          "session": "1791468857908_ubKA2_cli",
+          "binding": "3348cee0-b2a3-4f2e-9dab-1b2e58746851",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 5
+        },
+        {
+          "label": "deny",
+          "runId": "a17480a4-98f4-417e-8c60-5f64e037ecea",
+          "status": "succeeded",
+          "host": "4d094f13-1953-4157-bc44-3ec83ecb9365",
+          "session": "1791468857908_ubKA2_cli",
+          "binding": "3348cee0-b2a3-4f2e-9dab-1b2e58746851",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 2
+        },
+        {
+          "label": "cancel",
+          "runId": "9c7d5b9e-044e-4b01-b991-a10d831ae804",
+          "status": "cancelled",
+          "host": "4d094f13-1953-4157-bc44-3ec83ecb9365",
+          "session": "1791468857908_ubKA2_cli",
+          "binding": "3348cee0-b2a3-4f2e-9dab-1b2e58746851",
+          "generation": 2,
+          "publicMessages": 0,
+          "committedBuiltinSends": 0,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 1
+        },
+        {
+          "label": "after-cancel",
+          "runId": "e42e1917-d436-4dd0-afa8-635bd2daee58",
+          "status": "succeeded",
+          "host": "8ec6173f-9fb7-4a74-9228-1b7b812bf697",
+          "session": "1791468923202_4nfpk_cli",
+          "binding": "9c2f7872-7ea8-4c74-b32b-be87b19a7e0e",
+          "generation": 3,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 3
+        }
+      ],
+      "warmSameHost": true,
+      "warmSameSessionAndBinding": true,
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ]
+    },
+    {
+      "id": "account-extensions",
+      "authentication": "native-account-no-static-key",
+      "provider": "openai-codex",
+      "fixturePassed": true,
+      "packagedRendererToCore": false,
+      "publicReplyRendered": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "e394ff6f-def2-4f05-95d0-8e7a4d6be5ba",
+          "status": "succeeded",
+          "host": "3acd2e17-0cb4-4994-8173-ed7d4a09cb0c",
+          "session": "1791469113258_mUUjk_cli",
+          "binding": "7d292787-0c74-4b95-b0d3-3a09cc3f31c2",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "mcp",
+          "runId": "f5c54771-64d5-4f95-9c05-b04b35f77726",
+          "status": "succeeded",
+          "host": "637dd4f7-fa3b-4b5e-8c72-2cb6d31bb1c0",
+          "session": "1791469126552_6em84_cli",
+          "binding": "36bf2d10-b863-4bbb-9ec8-3d37ad81e4c6",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 0
+        },
+        {
+          "label": "skill",
+          "runId": "e6610358-f833-4d2f-9339-82937fa8c4c9",
+          "status": "succeeded",
+          "host": "637dd4f7-fa3b-4b5e-8c72-2cb6d31bb1c0",
+          "session": "1791469126552_6em84_cli",
+          "binding": "36bf2d10-b863-4bbb-9ec8-3d37ad81e4c6",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 0
+        }
+      ],
+      "mcpCallCount": 1,
+      "skillMarkerObserved": true,
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ]
+    },
+    {
+      "id": "byok-cold",
+      "authentication": "byok",
+      "provider": "openai-compatible",
+      "fixturePassed": false,
+      "packagedRendererToCore": false,
+      "publicReplyRendered": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "b164cf04-f037-4de8-b419-826aa3b5ca48",
+          "status": "succeeded",
+          "host": "d3fc5079-0580-4d47-97f1-13dac1e43797",
+          "session": "1791469113254_2Q9qs_cli",
+          "binding": "2e59e22d-5100-4d7f-ae43-94e0ecebc6e4",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "warm",
+          "runId": "102c4b78-a3e4-416d-8456-cde35507e6bd",
+          "status": "succeeded",
+          "host": "d3fc5079-0580-4d47-97f1-13dac1e43797",
+          "session": "1791469113254_2Q9qs_cli",
+          "binding": "2e59e22d-5100-4d7f-ae43-94e0ecebc6e4",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "cold",
+          "runId": "159ee866-3179-4c04-bd61-0e54a6f60ee3",
+          "status": "succeeded",
+          "host": "a27bbb6d-dda2-447c-824e-10bb4b546e4c",
+          "session": "1791469133990_HdMa1_cli",
+          "binding": "11b71962-bc00-4672-ad64-cf9be4e1bd9d",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        }
+      ],
+      "warmSameHost": true,
+      "warmSameSessionAndBinding": true,
+      "exactCold": false,
+      "nativeLoadError": {
+        "code": -32601,
+        "message": "Method not found",
+        "advertisedLoadSession": true,
+        "advertisedResume": false
+      },
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ]
+    },
+    {
+      "id": "packaged-account",
+      "authentication": "native-account-no-static-key",
+      "provider": "openai-codex",
+      "fixturePassed": true,
+      "packagedRendererToCore": true,
+      "publicReplyRendered": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "1b5a898e-0d85-46d2-a726-1414e788c75a",
+          "status": "succeeded",
+          "host": "5c0ddd46-3de3-45c9-a547-4307bf525f23",
+          "session": "1791471012746_umeXJ_cli",
+          "binding": "73024e49-7da1-4297-8289-7a4f4114cdd7",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "member-b",
+          "runId": "c6df265a-295c-41e4-aa78-3c8ea2517528",
+          "status": "succeeded",
+          "host": "70e73d0d-0f0b-421b-85ba-4236d43e2424",
+          "session": "1791471035212_KSkON_cli",
+          "binding": "99b134e4-94a7-4410-ae78-cdb4c53f0e2a",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 0
+        },
+        {
+          "label": "warm",
+          "runId": "cc548bd0-36ef-4baf-be41-df58a35ea5f9",
+          "status": "succeeded",
+          "host": "5c0ddd46-3de3-45c9-a547-4307bf525f23",
+          "session": "1791471012746_umeXJ_cli",
+          "binding": "73024e49-7da1-4297-8289-7a4f4114cdd7",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "parallel-A",
+          "runId": "c7272b78-9077-4d22-986e-8aa9a1c5a264",
+          "status": "succeeded",
+          "host": "5c0ddd46-3de3-45c9-a547-4307bf525f23",
+          "session": "1791471059929_2otTm_cli",
+          "binding": "e13b5feb-1a7c-4998-a59e-b1e0fb60af7a",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 3
+        },
+        {
+          "label": "parallel-B",
+          "runId": "6e535616-3317-4d4f-874c-a173717959aa",
+          "status": "succeeded",
+          "host": "70e73d0d-0f0b-421b-85ba-4236d43e2424",
+          "session": "1791471059946_uIO8A_cli",
+          "binding": "1c794b59-c3aa-4c44-a06d-93350dc0378b",
+          "generation": 2,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 3
+        },
+        {
+          "label": "cancel",
+          "runId": "30a75ce2-501f-4de1-bb0f-7223a54bdfa1",
+          "status": "cancelled",
+          "host": "5c0ddd46-3de3-45c9-a547-4307bf525f23",
+          "session": "1791471059929_2otTm_cli",
+          "binding": "e13b5feb-1a7c-4998-a59e-b1e0fb60af7a",
+          "generation": 2,
+          "publicMessages": 0,
+          "committedBuiltinSends": 0,
+          "identityMarkerPresent": false,
+          "earlyMemoryPresent": false,
+          "approvals": 1
+        },
+        {
+          "label": "after-cancel",
+          "runId": "fbc675fc-4b18-486e-9941-5c5b822225a3",
+          "status": "succeeded",
+          "host": "57967db0-a586-487c-844e-258a6dfeef84",
+          "session": "1791471098964_WxU9J_cli",
+          "binding": "a21aca9d-6f5b-45da-b8df-04efda12d989",
+          "generation": 3,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": false,
+          "approvals": 3
+        }
+      ],
+      "warmSameHost": true,
+      "warmSameSessionAndBinding": true,
+      "parallel": {
+        "separateHosts": true,
+        "barrierPassed": true,
+        "separateApprovalsAndSends": true
+      },
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ]
+    },
+    {
+      "id": "packaged-byok",
+      "authentication": "byok",
+      "provider": "openai-compatible",
+      "fixturePassed": true,
+      "packagedRendererToCore": true,
+      "publicReplyRendered": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "70e5b1e1-cad7-48da-821a-ba0784090ce5",
+          "status": "succeeded",
+          "host": "32fa34c6-dda0-42ac-8734-abb7f4bcdd75",
+          "session": "1791471012856_sI0u-_cli",
+          "binding": "52f437dd-68d8-47da-8b12-4a72bb244485",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        },
+        {
+          "label": "warm",
+          "runId": "3045e96c-e6ac-4391-8041-0d1e3c304508",
+          "status": "succeeded",
+          "host": "32fa34c6-dda0-42ac-8734-abb7f4bcdd75",
+          "session": "1791471012856_sI0u-_cli",
+          "binding": "52f437dd-68d8-47da-8b12-4a72bb244485",
+          "generation": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryPresent": true,
+          "approvals": 0
+        }
+      ],
+      "warmSameHost": true,
+      "warmSameSessionAndBinding": true,
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ]
+    },
+    {
+      "id": "unauthenticated",
+      "authentication": "native-account-no-static-key",
+      "provider": "openai-codex",
+      "fixturePassed": false,
+      "packagedRendererToCore": false,
+      "publicReplyRendered": false,
+      "turns": [],
+      "cleanup": {
+        "hostTempRemaining": 0,
+        "providerCopiesCreated": false,
+        "coreProcessesExited": true
+      },
+      "sourceConfiguration": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ],
+      "expectedNegative": {
+        "diagnosticOutcome": "stable_failure",
+        "nativeFailure": "runtime_authentication_required",
+        "authenticationStatus": "unknown",
+        "modelInputs": 0,
+        "automaticLogin": false,
+        "providerFallback": false
+      }
+    }
+  ],
+  "notQualified": {
+    "exactColdOnInstalledCli": "native session/load missing despite advertisement",
+    "nativeCompaction": "ACP startup does not deliver compaction; no workaround",
+    "exactSystemPromptOccurrenceCount": "not observed in installed native model input",
+    "usage": "only advertised/observed fields; Plugin absence remains unknown",
+    "firstFullOAuth": "not exercised",
+    "realTokenRefresh": "not exercised",
+    "externalRefreshConcurrency": "not exercised",
+    "fullMultiplatformRuntime": "not exercised",
+    "nativeRevokedAuthorizationAndNetworkOutage": "not newly induced; shared ACP rejection/unknown-transport regression retained"
+  },
+  "priorNegatives": [
+    {
+      "case": "BYOK initial fixture",
+      "result": "Fleet startup could not commit before model input; reason unproven; later independent fixture used unchanged source"
+    },
+    {
+      "case": "initial optional Plugin Bootstrap",
+      "result": "model input sent, identity witness missing; retained failure, no automatic replay; replaced by immutable native file Rule"
+    }
+  ],
+  "checks": {
+    "rustWorkspace": "462 passed, 2 ignored",
+    "rustAllTargetsAllFeatures": "passed",
+    "sharedAcp": "69 passed, 2 opt-in native smokes ignored",
+    "cline": "3 passed",
+    "fleet": "23 passed",
+    "piAndNativeSources": "23 passed, 1 real Runtime smoke ignored",
+    "managedProcess": "4 passed + 2 macOS kernel identity/ledger tests",
+    "migration": "23 migration-owner filter + expanded catalog owner passed",
+    "frontend": "typecheck; 238 files / 2611 tests passed",
+    "documents": "generic version, decision, base-diff gates passed",
+    "windowsWorkspace": {
+      "commit": "9b8fa131d77e8b98feb79667d4a74c699bca0336",
+      "status": "success",
+      "url": "https://github.com/murray17/rovai-ai/actions/runs/37795323664"
+    }
+  }
+}

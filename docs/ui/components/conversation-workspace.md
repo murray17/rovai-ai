@@ -739,9 +739,9 @@ standalone raw Evidence、Envelope JSON 或独立
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Runtime File Change Observation v6](../../contracts/runtime-file-change-observation-v6.md)准入的可靠
+只有 [Runtime File Change Observation v7](../../contracts/runtime-file-change-observation-v7.md)准入的可靠
 Evidence 才进入文件操作呈现。成功 read 的可靠单路径显示为不可展开的 `阅读 <basename>`；成功 write 的可靠
-单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot 或 exact mutation 时，每个文件作为同一
+单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot、exact mutation 或已准入 reported mutation 时，每个文件作为同一
 Canonical Activity 的 presentation row，明确 add 显示“新增”，其他显示“编辑”；没有可靠内容时不显示
 `+A −D` 或空 disclosure。read 只属于过程事实，永不进入 AgentRun `Files Changed`。
 
@@ -765,6 +765,10 @@ Canonical Activity 计算。每行复用既有 File Tool 图标，顶格占满�
 Claude Code `Edit` 的 exact mutation 展开只显示 `− oldText / + newText` 片段，不显示 `@@`、旧/新文件行号或
 推测上下文。同一文件连续 Edit 在 Command View 中仍按各 Tool 时序分别显示；Write、NotebookEdit、ApplyPatch、
 失败/缺失 result 与 `replace_all=true` 保持普通 Tool Activity。
+
+Cline 已确认成功的 Update 补丁或 editor 替换用 `reported_mutation` 展示“补丁片段”，复用无行号片段布局。
+提示说明原生匹配可能调整文本、统计来自补丁；Command 和 Review 都保留该来源区别，不合成为完整文件净差异。
+失败、未知语法、创建/移动/删除等未准入内容保持原有文件行回退。
 
 每个 terminal `agentRunId + executionEpoch` 可以在对应 Run 的会话位置追加一张独立卡片，标题固定为
 `Files Changed`。卡片位于来源 Run 最后一条公开消息后的结果区域；同 Run 有入队卡片时，顺序固定为

@@ -1,10 +1,26 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-04
+last_updated: 2026-10-09
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-09 Cline / Command Code 暂缓公开（User 105）
+
+两者保留官方 ACP Client/Host/Fleet 接线及原生身份、配置、历史数据，但全部平台为 NotQualified，
+不在设置、新手引导、成员/Skill 选择、安装引导和监控筛选中展示。历史 Run 和已有用量仍可读。
+Command Code headless 候选已停止，专属传输、事件归约、测试和探针退出当前树；不保留备用执行后端。
+
+| Runtime | 当前已知缺口与未完成范围 |
+| --- | --- |
+| Cline 官方 ACP | 已安装 3.0.70 的 ACP 未交付原生 `compaction` 配置，普通 CLI 的自动压缩不等于 ACP 可用；旧版本已有真实 overflow 负例。账号/BYOK first/warm/cold 有通过证据，但当前 ACP 的自动压缩及压缩后恢复未通过，真实刷新和完整多平台矩阵未验收。 |
+| Command Code 官方 ACP | 1.74.1/1.79.1 的 ACP 目录缺少自定义 BYOK，`session/set_model` 与 `session/set_config_option` 拒绝。1.79.1 的 `acp --model` 参数被忽略，不能实现启动选模。已测 sub2api/gpt-6-sol 的 MCP 可发现但实际调用仍失败；费用、非零命令结构化退出码及完整平台资格未齐备。原生默认 BYOK first/warm/cold 已通过，不能外推为任意模型可切换。 |
+
+Cline 的[当前版本报告](research/cline-runtime/latest-acp-2026-10-08.md)、Command 的
+[模型选择报告](research/command-code-runtime/model-selection-2026-10-09.md)与
+[MCP 调查](research/command-code-runtime/mcp-delivery-ab-2026-10-06.md)保留各自证据。
+以下按时间记录的是历史实测，曾经的 Preview 或 headless 不代表当前产品公开范围。
 
 ### v1.70 Skills 来源切换的证据边界（2026-09-24）
 
@@ -22,11 +38,92 @@ Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core 
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
 
+## 2026-10-08 Cline 官方 ACP 与 Native Hub 退役
+
+Cline 唯一入口恢复为用户所选 `cline --acp`，共享 Host/Fleet、权限、取消、System Rule、工具与监控。
+没有 Hub 备用、版本门槛或账号串行。旧 Binding 以共享不兼容机制换代，公开历史保持；不迁移或重放原生历史。
+切换时 Homebrew 3.0.3 广告 loadSession=true，但实际 session/load 返回 -32601；保留为原生负例。
+User 97 明确授权升级后，日常命令改用官方 npm 3.0.70，原 Homebrew keg 保留且解除链接。
+新版本账号/BYOK 各三轮打包 App first/warm/cold 全部通过：warm 同 Host，cold 新 Host、同 Session/Binding/generation，
+恢复后实际生成、身份/早期记忆和一次公开发送正确，旧 Usage/Diff 不重复归属；本轮无真实刷新。
+最新逐项证据见 [3.0.70 升级核验](research/cline-runtime/latest-acp-2026-10-08.md)；
+旧并行、App 与工具结果仍绑定 [3.0.3 ACP 退役验收](research/cline-runtime/acp-retirement-2026-10-08.md)，不外推版本。
+3.0.70 普通 CLI 默认 agentic，但 ACP buildConfig 仍未交付 compaction；未另跑长上下文触发，不沿用 Hub basic 证据。
+2026-10-09 按 User 99 撤回 macOS arm64 Preview，暂不公开；所有平台 NotQualified，历史证据保留。
+原因与产品边界见 [Cline 实施边界](architecture/runtime-catalog-boundaries.md#cline-实施边界)。不增加固定版本或账号门槛。
+旧 [Hub 报告](research/cline-runtime/hub-adapter-implementation.md)、
+[认证简化报告](research/cline-runtime/native-auth-warm-parallel-2026-10-08.md)保留成功、失败和原复现提交，均为历史。
+
+## 2026-10-09 Command BYOK 模型选择对照
+
+官方 1.74.1 和独立测试安装 1.79.1 均可用原生默认 sub2api/gpt-6-sol 完成 first/warm/cold，
+六轮真实生成及早期 marker 恢复通过；但两种 ACP 模型选择方法都拒绝同一自定义模型 ID。
+原生 CLI 目录和 `--model` 正常，ACP 目录缺少 BYOK；OpenCode 1.18.32 ACP 与 Pi 0.84.4 RPC
+的合成 Provider 对照可正确切换同名跨 Provider 模型，并保留拒绝后的选择与 cold 状态。
+详见[逐项报告](research/command-code-runtime/model-selection-2026-10-09.md)；没有变更 Command 生产后端或日常安装，
+没有修复或重新宣称 MCP、刷新与完整资格。上游 #993 仍开放，Rovai 保留原生默认哨兵。
+
+## 2026-10-06 Command / Cline 此前补验
+
+
+Command Code 1.74.1 改用 Host 私有原生 MCP 配置：真实 stdio/HTTP 发现、cwd、字面 env/headers、
+同名优先和更新/撤销边界通过；该轮 sub2api/gpt-6-sol 实际调用仍未通过。相同服务器经 Cline 真实调用成功。
+Cline 3.0.65 改用 managed System Rule；真实 System B 恰好一次/user B 为零，A/B/A、App first/warm/cold
+和正确记忆通过。原生 ACP compaction 仍未启用。最新事实以[本轮完整对照](research/runtime-monitoring/command-cline-native-system-2026-10-06.md)
+及证据为准；下面按时间保留的旧 first_payload/ACP MCP 交付描述不再是当前实现。两者当时为 macOS arm64 Preview，现已撤回。
+
+## Command Code 接入实施状态
+
+Command Code 1.64.0 已在 macOS arm64 隔离 Home 与本机模型 fixture 下观察到 headless NDJSON、完整 UUID 精确恢复、Mod 缺失/异常后的继续请求，以及部分原生 Tool/权限事件；细节和复现入口见[研究记录](research/command-code-runtime/README.md)与[Parity Matrix](research/command-code-runtime/parity-matrix.md)。2026-09-25 又用官方 1.65.2、隔离的现有 BYOK 配置和 `sub2api/gpt-6-sol` 真实完成原生生成、同 UUID 续接、read/edit/command 与手动 compact 后恢复；范围及失败语义见[真实 Smoke](research/command-code-runtime/real-byok-smoke-2026-09-25.md)。这些调用没有经过 Rovai AgentRun 或 App Camp。其曾在 v1.68 基线确认的普通 Prompt 引导见[研究提案 revision 3](research/command-code-runtime/prompt-guidance-proposal.md)；合并后的 [revision 4](versions/v1.72/model-context-change-command-code.md)已在 2026-09-27 确认，复用共享 first_payload。以上属于旧 headless 路径；当前产品路径见下段。
+
+2026-10-04 使用官方 1.66.0 经 Core headless transport 完成真实首次、精确恢复与多工具调用：四个 token 桶的逐调用和与原生 result 完全对齐，最新调用输入独立形成运行中的 Context used。窗口/比例/成本未知；仍无 Product AgentRun 和 App 证据。见[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+
+2026-10-05 官方 1.74.1 ACP 接入共享 Core Host/Fleet 和 Product identity `command-code-cli`，Migration 185
+升级 schema 135，macOS arm64 为 Preview，其他平台 NotQualified。Bootstrap 改为带加载/绑定门禁的官方
+System Mod；真实 Core 门禁、同 PID A→B→A、五种 mode、原生 BYOK 模型生成、warm/exact cold、手动及自动
+压缩后身份/记忆保留已通过。隔离 App 中芝士已切换 Command Code，真实读写中文/空格路径、可点击 +1/−1、
+内置 CLI 公开发送、warm 与 App/Core 重启恢复通过。ACP 的 `session/set_model` 拒绝自定义 ID，但原生
+config.json.model 默认值可使用同一 BYOK；目录缺省补 runtime-default 哨兵，不伪造可选模型。
+prompt 四桶按输入已含缓存归约，标准 usage_update 提供本次实测 272000 窗口；Session 累计用量/费用
+不冒领为 Run。非零 shell exit 仅见文本、无结构化退出码。完整矩阵仍未取得 First-Class；详见
+[最新 14 轴对照](research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
+
+## Cline ACP 与 Hub 研究历史（截至本次产品切换前）
+
+用户已选择官方 `cline --acp` 并允许 sub2api BYOK。Cline 3.0.65 / macOS arm64 经共享 Core ACP Host
+真实验证首次、warm、A→B→A、exact cold load、read/edit/command、取消与逐调用数值采集。
+四个 token 桶与可选 reasoning 来自官方只读 Plugin，运行中及终态 Context used 已观察到；
+后续从原生 models.json 精确匹配容量，真实 App 已取得 272k 窗口与比例，费用仍未知。详见[窗口补采](research/runtime-monitoring/command-cline-context-window-2026-10-05.md)、[Cline 矩阵](research/cline-runtime/README.md)和[数值验收](research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+内部 closed identity、发现/Host/Skill/数据库接线已存在，Migration 184 升级 schema 134；
+macOS arm64 开放开发 `Preview`，其余平台保持 `NotQualified`；Preview 不带资格 evidence，
+AgentRun/App 主路径与正常 managed System Rule 已通过；compaction 与 First-Class 全矩阵仍未通过。
+[3.0.65 零干预验收](research/cline-runtime/native-compaction-2026-10-07.md)观察到最高成功 input 918,618
+及真实 overflow，未出现压缩；cold 加载同一 Session 后仍 overflow。
+[新版本源码核对](research/cline-runtime/upstream-compaction-version-audit-2026-10-07.md)确认截至 2026-10-07，
+3.0.66、3.0.67、当前稳定版 3.0.68 与固定 main 均未补 ACP buildConfig 的 compaction 配置，
+下游仍要求显式启用；不能仅靠升最低版本解决。随后 User 授权的
+[3.0.68 启动 shim 实验](research/cline-runtime/acp-compaction-shim-2026-10-07.md)已通过真实
+自动压缩、System Rule、Session/Binding 和 cold 连续性验证；同版本未注入对照仍无压缩。
+该实验未切换生产入口、升级最低版本或补齐 overflow+retry/First-Class 全矩阵。
+随后[用户实际安装入口核验](research/cline-runtime/installed-acp-entrypoint-2026-10-07.md)确认正常
+发现选中 Homebrew 3.0.3，实际执行编译后的平台二进制，未暴露可验证的 ACP/Core 启动注入入口。
+原生 ACP 初始化通过，但现有最低版本使产品非 Ready；两项事实分别记录。未以实验 SDK 替换
+用户安装，未增加生产 shim 或新版本限制，自动压缩兼容接入仍阻断。
+
+[同一实际安装的 Hub 验证](research/cline-runtime/native-hub-2026-10-07.md)随后通过独立进程、
+认证及来源检查；相同 provider/model/272000 窗口的 96 次正式对照证明显式 basic 可触发原生
+历史压缩并继续真实请求，默认不传和 off 未见压缩。Hub 重启后 attach-only 执行失败；继续按
+本安装 CLI 的 readMessages/start 原生恢复序列补测，同一 Session ID 的历史/System 和真实请求通过。
+完整产品 System Rule/工具/权限合同仍未通过。
+只读原生 hook 可提供 Run ID，不借用源码实验的恢复结果。该研究时点生产仍为 ACP、Hub Adapter
+尚未实现；随后产品实现以上方 2026-10-07 更新为准。overflow recovery、压缩取消与多 Session
+交错未验收，旧 ACP 最低版本门槛继续独立保留。
+
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十六种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
+当前 closed `AdapterKind` 包含十八种 Runtime identity：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code、
-Grok Build、Pi Coding Agent、ZCode 与 DeepSeek Harness。
+Grok Build、Pi Coding Agent、ZCode、DeepSeek Harness、Cline 与 Command Code。Cline 与 Command Code 均暂不公开，所有平台 NotQualified。identity 不代表 First-Class。
 Cursor 在三个目标平台均为 `not_qualified`；Pi、Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。Pi 三个平台分别绑定自己的 adapter-scoped evidence，不继承通用 macOS/Windows、
 Kimi 或 Grok 的平台结论。

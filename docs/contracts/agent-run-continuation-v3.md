@@ -33,7 +33,9 @@ Desktop Delivery 保留 continuationRequest，以首条原输入作为 messageId
 
 ## 历史记录与证据
 
-Migration 188 / schema 138 调整内部队列来源与序号，既有续做 Delivery 转为无消息外键的内部来源。
+Migration 190 / schema 140 收敛内部队列来源与序号，既有续做 Delivery 转为无消息外键的内部来源。
+主干此前的 188 / schema 138 已具有该结构；同号 Preview 收据拥有直接回复索引与 Runtime catalog。
+升级按实际完整结构区分两种来源，保留旧收据；已具备内部请求结构时不重建队列，补齐保留的 ACP 身份。
 已生成的公开记录不批量删除、隐藏或改写索引；原事件、旧 Run、冻结 Manifest、Runtime 输入和工具回执保留。
 未领取请求继续排队，不重新授权、不重复发布。旧 Core 拒绝新 schema。
 模型模板、字段和会话兼容版本轴保持，不清空原生会话。范围与前后对照见

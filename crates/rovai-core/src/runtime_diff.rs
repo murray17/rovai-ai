@@ -56,6 +56,21 @@ struct ExactMutationEvidenceEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+struct ReportedMutationFragment {
+    old_text: String,
+    new_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct ReportedMutationEvidenceEntry {
+    semantics: String,
+    path: String,
+    fragments: Vec<ReportedMutationFragment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 struct FullBeforeAfterEvidenceEntry {
     semantics: String,
     path: String,
@@ -159,6 +174,18 @@ fn admit_candidate(
                 && source_event_kind == "tool.updated.result"
                 && semantic_kind == "zcode_edit_patch"
         }
+        AdapterKind::CommandCodeCli if semantic_kind == "reported_mutation" => {
+            protocol_family == "acp-v1"
+                && source_event_kind == "session/update.tool_call_update.completed.edit_file"
+        }
+        AdapterKind::ClineCli if semantic_kind == "reported_mutation" => {
+            protocol_family == "acp-v1"
+                && matches!(
+                    source_event_kind,
+                    "session/update.tool_call_update.completed.apply_patch"
+                        | "session/update.tool_call_update.completed.editor"
+                )
+        }
         adapter if adapter.uses_acp() => {
             protocol_family == "acp-v1"
                 && source_event_kind == "session/update.tool_call_update.completed"
@@ -189,6 +216,9 @@ fn admit_candidate(
     }
     if semantic_kind == "exact_mutation" {
         return admit_exact_mutations(raw_entries, execution_root, managed_output_root);
+    }
+    if semantic_kind == "reported_mutation" {
+        return admit_reported_mutations(raw_entries, execution_root, managed_output_root);
     }
     let mut total_bytes = 0_usize;
     let mut entries = Vec::with_capacity(raw_entries.len());
@@ -468,6 +498,94 @@ fn admit_exact_mutations(
         evidence_entries: serde_json::to_value(evidence_entries)
             .map_err(|_| "runtime_diff_entries_invalid")?,
     })
+}
+
+fn admit_reported_mutations(
+    raw_entries: &[Value],
+    execution_root: &Path,
+    managed_output_root: Option<&Path>,
+) -> Result<AdmittedCommandDiff, &'static str> {
+    let mut total_bytes = 0usize;
+    let mut evidence = Vec::new();
+    let mut entries = Vec::new();
+    let mut paths = std::collections::BTreeSet::new();
+    for raw in raw_entries {
+        let mut entry: ReportedMutationEvidenceEntry =
+            serde_json::from_value(raw.clone()).map_err(|_| "runtime_diff_content_invalid")?;
+        if entry.semantics != "reported_mutation" {
+            return Err("runtime_diff_semantics_invalid");
+        }
+        if managed_output_root
+            .is_some_and(|root| reported_path_is_within_root(execution_root, &entry.path, root))
+        {
+            continue;
+        }
+        entry.path = normalize_reported_path_for_display(execution_root, &entry.path)
+            .ok_or("runtime_diff_path_invalid")?;
+        if !paths.insert(entry.path.clone()) {
+            return Err("runtime_diff_path_invalid");
+        }
+        let (diff, additions, deletions) =
+            reported_fragment_diff(&entry.fragments).ok_or("runtime_diff_content_invalid")?;
+        let source_bytes: usize = entry
+            .fragments
+            .iter()
+            .map(|fragment| fragment.old_text.len() + fragment.new_text.len())
+            .sum();
+        total_bytes = total_bytes
+            .checked_add(diff.len().max(source_bytes))
+            .ok_or("runtime_diff_size_limit")?;
+        if total_bytes > MAX_DIFF_BYTES {
+            return Err("runtime_diff_size_limit");
+        }
+        entries.push(NormalizedDiffEntry {
+            path: entry.path.clone(),
+            change_kind: "update".to_string(),
+            additions,
+            deletions,
+            diff,
+        });
+        evidence.push(entry);
+    }
+    if entries.is_empty() {
+        return Err(RUNTIME_DIFF_MANAGED_OUTPUT_ROOT);
+    }
+    Ok(AdmittedCommandDiff {
+        semantic_kind: "reported_mutation".to_string(),
+        entries,
+        evidence_entries: serde_json::to_value(evidence)
+            .map_err(|_| "runtime_diff_entries_invalid")?,
+    })
+}
+
+fn reported_fragment_diff(fragments: &[ReportedMutationFragment]) -> Option<(String, u64, u64)> {
+    if fragments.is_empty() || fragments.len() > 1024 {
+        return None;
+    }
+    let mut diff = String::new();
+    let mut source_bytes = 0usize;
+    let (mut additions, mut deletions) = (0, 0);
+    for fragment in fragments {
+        source_bytes = source_bytes
+            .checked_add(fragment.old_text.len())?
+            .checked_add(fragment.new_text.len())?;
+        if fragment.old_text == fragment.new_text || source_bytes > MAX_SINGLE_DIFF_BYTES {
+            return None;
+        }
+        let block = exact_mutation_fragment(&fragment.old_text, &fragment.new_text);
+        if diff.len().checked_add(block.len())? > MAX_SINGLE_DIFF_BYTES {
+            return None;
+        }
+        diff.push_str(&block);
+        additions += fragment_line_count(&fragment.new_text);
+        deletions += fragment_line_count(&fragment.old_text);
+    }
+    Some((diff, additions, deletions))
+}
+
+pub(crate) fn reported_mutation_diff(entry: &Value) -> Option<(String, u64, u64)> {
+    let entry: ReportedMutationEvidenceEntry = serde_json::from_value(entry.clone()).ok()?;
+    (entry.semantics == "reported_mutation").then(|| reported_fragment_diff(&entry.fragments))?
 }
 
 fn normalized_change_kind(raw: &Value, semantic_kind: &str) -> Result<String, &'static str> {
@@ -932,6 +1050,16 @@ pub fn projection_from_evidence(
 
 fn command_diff_entry_from_evidence(entry: &Value) -> Option<NormalizedDiffEntry> {
     match entry.get("semantics")?.as_str()? {
+        "reported_mutation" => {
+            let (diff, additions, deletions) = reported_mutation_diff(entry)?;
+            Some(NormalizedDiffEntry {
+                path: entry.get("path")?.as_str()?.to_string(),
+                change_kind: "update".to_string(),
+                additions,
+                deletions,
+                diff,
+            })
+        }
         "exact_mutation" => {
             let entry = serde_json::from_value::<ExactMutationEvidenceEntry>(entry.clone()).ok()?;
             (entry.old_text != entry.new_text).then(|| NormalizedDiffEntry {
@@ -1397,6 +1525,107 @@ mod tests {
                 .expect("different complete states should produce a patch");
         assert!(patch.starts_with("--- /outside/app.ts\n+++ /outside/app.ts\n"));
         assert!(!patch.contains("a//outside"));
+    }
+
+    #[test]
+    fn reported_mutations_preserve_native_fragments_without_claiming_exact_or_full_states() {
+        let mut payload = serde_json::json!({"runtimeDiff":{
+            "adapterKind":"cline-cli","protocolFamily":"acp-v1",
+            "sourceEventKind":"session/update.tool_call_update.completed.apply_patch",
+            "semanticKind":"reported_mutation","entries":[{
+                "semantics":"reported_mutation","path":"src/中文 edit.ts",
+                "fragments":[{"oldText":"old\n","newText":"new\n","private":"PRIVATE"},
+                    {"oldText":"second\n","newText":"changed\n"}]
+            }]
+        }});
+        let admitted = admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(admitted.semantic_kind, "reported_mutation");
+        assert_eq!(
+            (admitted.entries[0].additions, admitted.entries[0].deletions),
+            (2, 2)
+        );
+        assert_eq!(admitted.entries[0].diff, "-old\n+new\n-second\n+changed\n");
+        assert!(!admitted.evidence_entries.to_string().contains("PRIVATE"));
+        let mut legacy = payload.clone();
+        legacy["runtimeDiff"]["protocolFamily"] = json!("cline-hub-v1");
+        assert!(
+            admit_runtime_diff(&legacy, Path::new("/repo"), Some("cline-cli"))
+                .unwrap()
+                .is_err()
+        );
+        let mut terminal = payload.clone();
+        terminal["runtimeDiff"]["protocolFamily"] = serde_json::json!("acp-v1");
+        terminal["runtimeDiff"]["sourceEventKind"] =
+            serde_json::json!("session/update.tool_call_update.completed.apply_patch");
+        assert!(
+            admit_runtime_diff(&terminal, Path::new("/repo"), Some("cline-cli"))
+                .unwrap()
+                .is_ok()
+        );
+        terminal["runtimeDiff"]["sourceEventKind"] =
+            serde_json::json!("session/update.tool_call_update.failed.apply_patch");
+        assert!(
+            admit_runtime_diff(&terminal, Path::new("/repo"), Some("cline-cli"))
+                .unwrap()
+                .is_err()
+        );
+        let rebuilt = projection_from_evidence(&serde_json::json!({"runtimeDiff":{
+            "schemaVersion":1,"status":"available","semanticKind":"reported_mutation","entries":admitted.evidence_entries
+        }}), "evidence").unwrap();
+        assert_eq!(rebuilt.entries.unwrap(), admitted.entries);
+        for source in [
+            "session/update.tool_call_update.completed",
+            "assistant.text",
+        ] {
+            payload["runtimeDiff"]["sourceEventKind"] = serde_json::json!(source);
+            assert!(
+                admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
+                    .unwrap()
+                    .is_err()
+            );
+        }
+        payload["runtimeDiff"]["sourceEventKind"] =
+            serde_json::json!("session/update.tool_call_update.completed.editor");
+        assert!(
+            admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
+                .unwrap()
+                .is_ok()
+        );
+        assert!(
+            admit_runtime_diff(&payload, Path::new("/repo"), Some("qoder-cli"))
+                .unwrap()
+                .is_err()
+        );
+        payload["runtimeDiff"]["entries"][0]["path"] =
+            serde_json::json!("/repo/run-tmp/private.ts");
+        assert_eq!(
+            admit_runtime_diff_with_file_operation_path_and_managed_output_root(
+                &payload,
+                Path::new("/repo"),
+                Some("cline-cli"),
+                None,
+                Some(Path::new("/repo/run-tmp"))
+            )
+            .unwrap()
+            .unwrap_err(),
+            RUNTIME_DIFF_MANAGED_OUTPUT_ROOT
+        );
+        payload["runtimeDiff"]["entries"][0]["path"] = serde_json::json!("src/a.ts");
+        payload["runtimeDiff"]["entries"][0]["fragments"] = serde_json::json!([]);
+        assert!(
+            admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
+                .unwrap()
+                .is_err()
+        );
+        // CRLF normalization makes rendered fragments smaller than their source.
+        // Enforce the file budget across fragments, not only on rendered text.
+        payload["runtimeDiff"]["entries"][0]["fragments"] = json!([
+            {"oldText":"\r\n".repeat(600_000),"newText":"x"},
+            {"oldText":"\r\n".repeat(600_000),"newText":"y"}
+        ]);
+        assert!(reported_mutation_diff(&payload["runtimeDiff"]["entries"][0]).is_none());
     }
 
     #[test]

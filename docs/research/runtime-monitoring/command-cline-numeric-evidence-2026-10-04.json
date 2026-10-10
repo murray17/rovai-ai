@@ -1,0 +1,878 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-04",
+  "platform": "macos-arm64",
+  "commandCodeVersion": "1.66.0",
+  "clineVersion": "3.0.65",
+  "model": "gpt-6-sol",
+  "records": {
+    "command": [
+      {
+        "stage": "first",
+        "value": {
+          "identitySuffix": "identitySuffix-1",
+          "dialectId": "command-code-native-model-usage-v1",
+          "source": "runtime_event",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": 13319,
+            "uncachedInputTokens": null,
+            "outputTokens": 9,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:35.248196+00:00"
+        }
+      },
+      {
+        "stage": "first",
+        "value": {
+          "identitySuffix": "identitySuffix-3",
+          "dialectId": "command-code-native-model-context-v1",
+          "source": "runtime_event",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 13319,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "sub2api/gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:35.248196+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-1",
+          "dialectId": "command-code-native-model-usage-v1",
+          "source": "runtime_event",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": 13355,
+            "uncachedInputTokens": null,
+            "outputTokens": 116,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:41.160644+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-3",
+          "dialectId": "command-code-native-model-context-v1",
+          "source": "runtime_event",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 13355,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "sub2api/gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:41.160644+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-4",
+          "dialectId": "command-code-native-model-usage-v1",
+          "source": "runtime_event",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": 13483,
+            "uncachedInputTokens": null,
+            "outputTokens": 69,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 13184,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:44.888901+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-5",
+          "dialectId": "command-code-native-model-context-v1",
+          "source": "runtime_event",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 13483,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "sub2api/gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:44.888901+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-6",
+          "dialectId": "command-code-native-model-usage-v1",
+          "source": "runtime_event",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": 13589,
+            "uncachedInputTokens": null,
+            "outputTokens": 95,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 13312,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:51.034768+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-7",
+          "dialectId": "command-code-native-model-context-v1",
+          "source": "runtime_event",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 13589,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "sub2api/gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:51.034768+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-8",
+          "dialectId": "command-code-native-model-usage-v1",
+          "source": "runtime_event",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": 14161,
+            "uncachedInputTokens": null,
+            "outputTokens": 37,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 13184,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:54.239261+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-9",
+          "dialectId": "command-code-native-model-context-v1",
+          "source": "runtime_event",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 14161,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "sub2api/gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:54.239261+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-10",
+          "dialectId": "command-code-native-model-usage-v1",
+          "source": "runtime_event",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": 14721,
+            "uncachedInputTokens": null,
+            "outputTokens": 82,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:59.162777+00:00"
+        }
+      },
+      {
+        "stage": "resumed-tools",
+        "value": {
+          "identitySuffix": "identitySuffix-11",
+          "dialectId": "command-code-native-model-context-v1",
+          "source": "runtime_event",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-2",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 14721,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "sub2api/gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:59.162777+00:00"
+        }
+      }
+    ],
+    "cline": [
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-12",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-14",
+          "fields": {
+            "inputTokens": 2279,
+            "uncachedInputTokens": null,
+            "outputTokens": 11,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:58:52.020Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-15",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2279,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:58:52.020Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-16",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-17",
+          "fields": {
+            "inputTokens": 2312,
+            "uncachedInputTokens": null,
+            "outputTokens": 12,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 2176,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:58:54.197Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-18",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2312,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:58:54.197Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-19",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-20",
+          "nativeTurnId": "nativeTurnId-21",
+          "fields": {
+            "inputTokens": 2280,
+            "uncachedInputTokens": null,
+            "outputTokens": 12,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:58:58.702Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-22",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-20",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2280,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:58:58.702Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-23",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-24",
+          "fields": {
+            "inputTokens": 2346,
+            "uncachedInputTokens": null,
+            "outputTokens": 12,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:01.176Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-25",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2346,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:01.176Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-26",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-27",
+          "fields": {
+            "inputTokens": 2444,
+            "uncachedInputTokens": null,
+            "outputTokens": 131,
+            "reasoningOutputTokens": 20,
+            "cacheReadInputTokens": 2176,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:05.865Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-28",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2444,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:05.865Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-29",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-27",
+          "fields": {
+            "inputTokens": 2637,
+            "uncachedInputTokens": null,
+            "outputTokens": 100,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 2304,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:10.620Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-30",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2637,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:10.620Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-31",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-27",
+          "fields": {
+            "inputTokens": 2824,
+            "uncachedInputTokens": null,
+            "outputTokens": 54,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:13.639Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-32",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2824,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:13.639Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-33",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-27",
+          "fields": {
+            "inputTokens": 2978,
+            "uncachedInputTokens": null,
+            "outputTokens": 75,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:23.794Z"
+        }
+      },
+      {
+        "stage": "CLINE_LIVE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-34",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 2978,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:23.794Z"
+        }
+      },
+      {
+        "stage": "CLINE_TERMINAL_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-35",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-27",
+          "fields": {
+            "inputTokens": 3137,
+            "uncachedInputTokens": null,
+            "outputTokens": 38,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 0,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:31.464Z"
+        }
+      },
+      {
+        "stage": "CLINE_TERMINAL_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-36",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 3137,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:31.464Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-37",
+          "dialectId": "cline-plugin-model-usage-v1",
+          "source": "runtime_private_extension",
+          "scope": "model_call",
+          "counterMode": "delta",
+          "inputSemantics": "cache_inclusive_total",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": "nativeTurnId-38",
+          "fields": {
+            "inputTokens": 3478,
+            "uncachedInputTokens": null,
+            "outputTokens": 12,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": 3072,
+            "cacheWriteInputTokens": 0,
+            "contextUsedTokens": null,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": null,
+          "occurredAt": "2026-10-04T12:59:51.225Z"
+        }
+      },
+      {
+        "stage": "CLINE_METRICS",
+        "value": {
+          "identitySuffix": "identitySuffix-39",
+          "dialectId": "cline-plugin-model-context-v1",
+          "source": "runtime_private_extension",
+          "scope": "session",
+          "counterMode": "gauge",
+          "inputSemantics": "unknown",
+          "nativeSessionId": "nativeSessionId-13",
+          "nativeTurnId": null,
+          "fields": {
+            "inputTokens": null,
+            "uncachedInputTokens": null,
+            "outputTokens": null,
+            "reasoningOutputTokens": null,
+            "cacheReadInputTokens": null,
+            "cacheWriteInputTokens": null,
+            "contextUsedTokens": 3478,
+            "contextSizeTokens": null,
+            "nativeContextRatio": null
+          },
+          "cost": null,
+          "contextModelId": "gpt-6-sol",
+          "occurredAt": "2026-10-04T12:59:51.225Z"
+        }
+      }
+    ]
+  }
+}

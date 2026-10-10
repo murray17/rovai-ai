@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v4
-last_updated: 2026-09-24
+last_updated: 2026-10-04
 ---
 
 # Runtime Activity Mapping Registry
@@ -11,6 +11,8 @@ last_updated: 2026-09-24
 
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
+| `command-code-cli` | Command Code | 官方 ACP v1 | `run_level` | 按 Session/Prompt/ToolCall 配对，保留同调用标准 locations；过滤原生 proposed diff，只有成功 edit_file 的单次替换片段形成 reported_mutation；失败、replace_all、未知旧状态保持路径回退 | 公共 ACP owner 验证 started/failed 不生成 Diff、成功片段和私有字段排除；共享 lifecycle | 1.74.1 + 原生 sub2api/gpt-6-sol 的 read/edit/command、allow/deny/cancel 通过；隔离 App 中文/空格文件、read/edit/read、可点击 +1/−1 与 CLI 发送通过。非零 exit 仍被上游标为 completed 且只在文本中报告；macOS arm64 Preview，未取得 First-Class |
+| `cline-cli` | Cline | `acp-v1` | `run_level` | 共享 ACP tool 配对；run_commands 原生失败与成功 apply_patch/editor reported_mutation | 共享 ACP、Diff/file-operation/recovery owner | macOS arm64 Preview；[当前 ACP 验收](../research/cline-runtime/acp-retirement-2026-10-08.md)，Hub 证据退役 |
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v3 不生成 commandActions 标题，但非空、全 read、唯一 path 的 `commandActions` 可形成 typed read；Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的 Shell 标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | structured read 正反例、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过；[`0.153.4` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
 | `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；同一 ToolCall 的 start/update 精确 `read/write/edit + args.path` 与成功 terminal 可形成 typed read/write；成功 `edit` 的 `result.details.patch` 只有在 old/new header 都与同 ToolCall path 完全一致且包含 hunk 时形成 unified diff；`write` 保持 path-only；update 作为累计预览，唯一 terminal 结算 Action；所有 Built-in/Extension Tool 按 Pi 原生语义执行，Rovai 不审批或阻断 | Tool started→terminal、结束事件省略参数、read/write/edit、edit patch 正例、header mismatch、write/失败 edit 反例、累计输出、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai Approval、sandbox 或 MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；[v1.52 read/write 真实结果](../versions/v1.52/runtime-acceptance.md)已通过；`0.84.4` native session 的 edit patch wire 已核验，本次 post-fix 模型 smoke 未执行 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text`；`1.18.20` write metadata 的 Boolean `exists` 只在同 ToolCall 路径对齐后区分 add/update | 受控 fixture、固定 `printf` 与 metadata 正反例断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；[`1.18.20` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
@@ -30,6 +32,11 @@ last_updated: 2026-09-24
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
 该运行不能因为产品基线为 `fine_grained` 就补写工具调用。
+
+Cline 新 identity 复用既有 ACP typed kind 和 `activity-v4`，没有改变已支持 Runtime 的解释或历史
+projection。[真实文件验证](../research/runtime-monitoring/command-cline-files-context-2026-10-04.md)
+覆盖 AgentRun 持久化与 App 的单文件读取/编辑路径；缺事件时仍不补造细粒度 Activity，基线保持
+`run_level`。来源、其余能力边界与数值证据见[Cline 矩阵](../research/cline-runtime/README.md)。
 
 ## Classifier cutover
 
@@ -327,3 +334,7 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。`grep_sea
 需路径、hunk 和计数全都一致；Write 只有 operation 时不补造 Diff。具体准入见
 [Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)。该新 Runtime 复用已有 typed kind
 分类规则，不改变现有 Runtime 的字段解释，因此保持 activity-v4，无历史回写。
+
+Cline descriptor 仅指向共享 ACP；历史已持久化 payload 的 activity-v4 解释保持不变。
+ACP `run_commands/read_files/apply_patch/editor/search_codebase` 分别归一为 execute/read/edit/edit/search；
+未识别工具保留 other。工具名只用于该 Adapter 的已验证结构映射，不将模型文本当作活动语义。

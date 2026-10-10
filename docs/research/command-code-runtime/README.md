@@ -1,0 +1,143 @@
+---
+document_type: runtime-research
+runtime: command-code
+upstream: CommandCodeAI/command-code
+authority: research-evidence-only
+status: deferred
+admission: not-qualified
+observed_version: 1.64.0, 1.65.2
+observed_platform: macos-arm64
+last_updated: 2026-10-09
+---
+
+# Command Code Runtime 接入研究
+
+2026-10-09 User 105：**停止 headless 候选，保留官方 ACP 实现但不公开入口**。所有平台为 NotQualified。
+ACP 的自定义 BYOK 目录/切换、启动 `--model` 和已测 BYOK MCP 调用缺口见
+[模型选择报告](model-selection-2026-10-09.md)、[MCP 调查](mcp-delivery-ab-2026-10-06.md)及
+[兼容性清单](../../runtime-compatibility.md)。headless Rust 传输、事件归约器、专属测试及探针已删除；
+以下为按时间保留的历史研究，旧“当前判断”不再是待实施方案。
+
+2026-10-09 User 101：[headless 同 Session 换模型与权限验证](headless-resume-2026-10-09.md)已证明
+实际 1.66.0 的 A→B→A、System Mod 和真实续接；普通写入审批仍被原生 print gate 阻断，故保持 ACP 生产入口。
+1.79.1 的模型恢复对照也显示不传 `--model` 时采用全局默认，未按文档描述保持上轮 B。
+
+2026-10-09：[BYOK 模型选择与跨 Runtime 对照](model-selection-2026-10-09.md)复现 1.74.1/1.79.1
+官方 ACP 拒绝自定义模型，而原生默认、CLI 显式选择和真实 first/warm/cold 可用；核对上游 #993，
+并以 OpenCode ACP、Pi RPC 和同源双 Provider 做路由对照。下文早期 headless 判断为历史。
+
+本文记录实现前的本地检查与候选设计，以及隔离的 headless 传输层实现。它不增加 Product Runtime identity、平台准入或机器 Ready 证据。正式接入必须遵循 [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)；产品目录与平台资格分别由 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md) 和 [Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md) 决定。
+
+2026-09-25 的 [真实 BYOK Smoke](real-byok-smoke-2026-09-25.md)、[与现有 Runtime 的差异](runtime-comparison-2026-09-25.md)和[当前 Context 基线提案 revision 4](prompt-guidance-v1.70-proposal.md)分别记录原生证据、产品差距和待确认的输入方案；下文保留 1.64.0 的固定 fixture 历史。
+
+实现前六列评估见 [Parity Matrix](parity-matrix.md)。
+
+2026-10-05 增量：[1.74.1 官方 ACP 与完整 Checklist 复核](../runtime-monitoring/command-cline-checklist-2026-10-05.md)。官方已提供常驻 ACP；原生控制面已测，模型调用受 BYOK 目录与账号余额阻断。以下早期版本“未见 ACP”只保留其当时范围，不再代表最新上游能力。
+
+2026-10-06 最新：[原生/ACP MCP 交付 A/B](mcp-delivery-ab-2026-10-06.md)已使用当前真实 BYOK 完成请求级观察。
+四组在搜索后均缺少目标 callable tool，保持原生交付并提供上游最小复现；独立 Provider 正向对照成功不能冒充 Command ACP 通过。
+当前会话、System、warm/cold 与 Cline 全面对照见[追加验收](../runtime-monitoring/command-cline-native-system-2026-10-06.md)，下文早期 headless 方案不再代表当前实现。
+
+## 历史判断（headless，已退役）
+
+候选路线是独立的 `command-code-cli` Adapter，采用 `one_shot_resumable` 进程策略，读取 Command Code 原生 `-p --output-format json` NDJSON，并按完整原生 Session ID 恢复。进程与输入收敛最接近 Claude Code；两者的协议、权限和配置结论不能直接沿用。
+
+**接入方向更新（2026-09-24）：**开发者已在当时 v1.68 基线上二次确认[研究提案 revision 3](prompt-guidance-proposal.md)，复用现有 `first_payload`：新 Native Session 的第一条普通用户 Prompt 带完整 Bootstrap，普通精确恢复只带本 Run 动态上下文，合格压缩信号后的下一次输入沿用现有补发机制；不新增 delivery mode、包裹 marker 或每 Run 重投。Rovai 不以受管 `--mod` 或可变 `AGENTS.md` 承担 Bootstrap。内部传输现已要求 Core 生成的 `PreparedContext` 并写入其 `runtime_payload`，但尚无 Command Code Product Adapter/AgentRun dispatch。此前 Mod 失败实测继续保留为选择此路线的证据。
+
+这仍是 **Research**。[1.65.2 真实 BYOK Smoke](real-byok-smoke-2026-09-25.md)已在隔离 Home 中覆盖显式模型、精确续接、读、编辑、命令输出及手动压缩后的原生恢复。它没有经过 Rovai Product Adapter 或 App Camp；MCP、权限、取消和各平台 qualification evidence 仍未闭合。普通 Prompt 引导明确低于 System/Developer 指令，且同一次 Command Code 多轮执行期间的原生压缩仍可能丢失引导；它是开发者选择的产品差异，不等于高权限 Bootstrap parity。成员级 MCP 隔离、权限失败语义与其他能力轴仍须分别闭合。正式 Product Runtime 准入不能由本研究文档单独宣称。
+
+## 2026-09-23 本机检查
+
+本机为 macOS arm64，Node `v26.9.0`。PATH 中没有 `command-code`、`commandcode`、`cmdc` 或 `cmd`，探测前也没有 `~/.commandcode` 目录。把 npm 官方 `command-code@1.64.0` 安装到一次性临时目录，跳过 install scripts，仅执行 `--version`、`--help` 与 `mcp --help`，没有发送模型 Prompt 或使用认证。临时安装不属于 Rovai Product Runtime Installation。
+
+**浅检测副作用：**即使设置 `COMMANDCODE_SKIP_UPDATES=1`，单独执行 `--version` 也会创建 `~/.commandcode/telemetry-install-id`。复核时先确认该目录此前不存在，再重跑一次 `--version` 并观察同一文件；两次均只出现这个 37 字节文件。探测后精确移除本轮新建文件与空目录。没有监测网络请求，不能从文件名推断实际遥测发送。Rovai 的 light probe 不能直接假设 `--version` 无落盘副作用；需要验证隔离配置根或其他无副作用身份读取办法，且正式认证运行仍须保留用户原生配置。
+
+**本轮新增验证：**以 `DO_NOT_TRACK=1 COMMANDCODE_SKIP_UPDATES=1` 再运行 `--version`，本次未创建此前的 `~/.commandcode` 目录；这只证明这一次本机落盘观察，不能替代跨平台浅检。用隔离 `HOME`、临时 `providers.json` 和本机 OpenAI-compatible fixture 服务验证 BYOK：`--list-models --local-only` 列出了 `probe/fixture`；但 `-p --output-format json --model probe/fixture --local-only --permission-mode dont-ask` 在发起模型调用前以退出码 `3` 和无 `sessionId` 的 `result.subtype=error` 返回 `Not authenticated`。移除 `--skip-onboarding`、改用发布包 bin 入口后结果仍相同。隔离目录没有新增认证文件。发布包的 `runPrintMode` 在创建 Harness 前检查 `getCommandAuthKey()` 是否非空，解释了本次 BYOK 也被拦截的行为；这不证明已登录环境或其他版本的结果。
+
+为检查后续协议，仅在隔离 `HOME`、`CMD_LOCAL_ONLY=1`、`DO_NOT_TRACK=1` 和本机 fixture 端点下设置占位 `COMMAND_CODE_API_KEY=local-fixture`。这是**本地测试绕过存在性检查**，不是有效账号认证，也不是 Rovai 的正式配置。该条件下，官方 1.64.0 CLI 确实输出 `run_start → turn_start → model_request_* → text_delta → message_end → run_end → result.success`，`result.sessionId` 是完整 UUID；用同一 ID 启动下一轮成功恢复，`run_end.nextState.messages` 从 2 条增至 4 条。使用不存在的完整 ID 时退出码 `1`、无事件、无 `sessionId` 的 `result.error` 明确表示找不到 Session，不能自动改用最近一次。
+
+Tool fixture 还观察到：默认 headless 的 `shell_command` 产生 `tool_queued → tool_hook_blocked`；`--yolo --permission-mode dont-ask` 下无副作用的 `printf` 产生 `tool_queued → tool_running → tool_update → tool_completed`，`result` 文本含 `COMMAND_CODE_TOOL_MARKER`；同一参数组合下 `touch ./mutation-probe` 产生 `tool_queued → tool_denied` 且文件未创建。这些仅验证此隔离 fixture 的权限结果，不证明正式的每 Run Approval。**Tool 被拒绝后顶层仍可返回 `result.success`**，Action 必须按 Tool 终态独立归约。`run_end.result.nextState` 含完整会话内容，不能直接进入公开事件。
+
+**Mod 路线的阻断证据：**在同一隔离 fixture 中，简单 `--mod` 的 `appendSystemPrompt` 正常加载时，首轮及按完整 ID 恢复后的模型请求都含 `BOOTSTRAP_MARKER`。把 hook 改为抛错时，CLI 发出 `mod_error`，但仍向模型发请求、返回 `result.success`，且请求不含 Bootstrap。`--mod` 指向不存在的文件时甚至没有 `mod_error`，同样继续发请求并返回成功。故仅靠受管 Mod 无法满足 Rovai 的高权限 Bootstrap 必达合同；启动前检查文件也不能覆盖运行中 hook 异常。开发者已选择改用普通 Prompt 引导，不把现有 Mod 路径列为已实现。
+
+补充试验：隔离 Home 下的 `~/.commandcode/AGENTS.md` 也会进入模型的 system prompt，恢复后重新读取；删除该文件再恢复同一 Session 时，CLI 仍成功发送缺少该内容的请求。每 Run 私有 Home 因而是隔离上下文、MCP 配置的候选架构，但单独使用 Memory 文件仍没有失败关闭保证，并会引入官方认证配置、Session 存储、原生用户设置与多平台路径的迁移问题，当前不能替代正式方案。
+
+历史实验脚本（仅在上述固定提交中保留）为 [退役前 fixtures/local_headless_probe.py](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/docs/research/command-code-runtime/fixtures/local_headless_probe.py)。传入已安装的 1.64.0 `command-code` bin 绝对路径：
+
+```sh
+python3 docs/research/command-code-runtime/fixtures/local_headless_probe.py --cli /absolute/path/to/command-code
+```
+
+脚本自建临时 Home、workspace 和 `127.0.0.1` 模型 fixture，只打印事件类型/结果摘要，不输出 Prompt、原生 transcript 或配置密钥。本机运行上述脚本已通过，包括 Mod 与 Home Memory 的正常、恢复和缺失路径；它验证的是 CLI 协议与隔离条件，不是正式认证或真实模型行为。
+
+2026-09-24 用固定 1.64.0 包再运行夹具，在首个普通 Prompt 投递 `BOOTSTRAP_MARKER + DYNAMIC_MARKER_ONE`，按返回的完整 UUID 恢复后仅投递 `DYNAMIC_MARKER_TWO`。首个 headless 输入引发两次模型请求，两次最新 user message 均含首次 Bootstrap/动态输入，system messages 均不含该 Bootstrap；恢复输入引发一次模型请求，最新 user message 只含第二次动态输入，完整请求历史仍含第一次 Bootstrap。断言检查所有观察到的模型请求，不依赖首轮恰好只发一次请求。这是本机受控模型 endpoint 和临时 Home 的协议证据；真实模型、压缩、Core 冷恢复后的引导有效性仍未验证。
+
+同一 workspace 下，仅复制静态 fixture Provider/Settings 到第二个隔离 Home：第二个 Home 按第一个 Home 的完整 UUID 恢复被拒且无事件，自己新建 Session 的 ID 独立。这证明本机 1.64.0 的原生 Session 发现受 Home 边界约束；它尚未证明生产认证、MCP/Skills/Taste 投影或从用户原生配置安全建立/刷新私有 Home 的完整方案。
+
+已在 [`command_code.rs`](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/crates/rovai-core/src/command_code.rs) 建立内部 headless 传输层：受管 one-shot 进程、stdin 投递、逐行 NDJSON、完整 Session ID fence、最终 `result` 裁定以及取消后的进程树清理。传输输入改为共享 Context owner 产出的 `PreparedContext.runtime_payload`，且要求 `first_payload` mode；不再接受任意字符串作为正式请求字段。[`command_code_activity.rs`](https://github.com/murray17/rovai-ai/blob/2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e/crates/rovai-core/src/command_code_activity.rs) 只将公开文本、模型和 Tool 生命周期投影成 Core 事件，并剔除私有 thinking 与含完整会话的 `run_end`。Parser、事件归约和假 CLI 进程边界测试已通过；1.65.2 真实试验发现非零 Shell 退出仍是 `tool_completed`，现按终态文本中的非零退出码单独归为失败。正式 AgentRun 仍未连接 Context materialization、Native Binding/Input Delivery、Skills、MCP、权限审批和 Product Catalog；真实原生 CLI Smoke 不能充当 App Camp 验收，各平台准入仍在后续阶段。
+
+| 本地证据 | 观察 | 能证明的范围 |
+| --- | --- | --- |
+| npm registry manifest / 发布包 `package.json` | `1.64.0`；Node `>=22`；bin 包含 `cmd`、`cmdc`、`command-code`、`commandcode` | 目标发布包的入口与 Node 前置条件 |
+| 发布包 `--version` | `1.64.0`，且创建 `telemetry-install-id` | 该临时入口可在本机启动至版本输出；不能直接视为无副作用浅检 |
+| 发布包 `--help` | `-p`、`--output-format json`、`--resume`、`--session`、`--mod`、`--skill`、`--skip-onboarding`、`--no-auto-update`；没有 `acp` 子命令或 `--mcp-config` 参数 | 对 1.64.0 已公布 CLI 入口的观察；不能证明不存在其他未公开接口 |
+| 发布包 `mcp --help` | `add/list/get/remove/add-json/auth` | MCP 管理命令存在；没有展示单次 Run 配置参数 |
+| 本仓库 [`AdapterKind::ALL`](../../../crates/rovai-core/src/agent_profile.rs) | 16 个 closed identity，尚无 Command Code | 当前 Product Runtime Catalog 未接入 |
+
+官方 [CLI Reference](https://commandcode.ai/docs/reference/cli) 与 [Headless Mode](https://commandcode.ai/docs/headless) 描述 `json` 输出为逐行 `AgentEvent`，最后一行是 `result`；`sessionId` 和 `stopReason` 在早期失败时可缺失。`--resume <id>` 可恢复指定 headless Session；`--continue` 取当前目录最近一次，不能用于 Rovai 的精确绑定。官方 [Sessions](https://commandcode.ai/docs/sessions) 说明 Session 存储与 cwd/project slug 关联，恢复还会读取原生模型状态。上述是文档证据，不是本次真实模型运行证据。
+
+## 与现有 Runtime 的差异
+
+| Rovai 形态 | 已有代表 | Command Code 的差异 |
+| --- | --- | --- |
+| ACP 常驻 Host | OpenCode、Kimi、Grok 等 | 1.64.0 CLI 未给出 ACP 服务入口；不能复用 `initialize/session/new/session/prompt`、标准 MCP 注入或 ACP permission request。 |
+| 原生常驻协议 | Codex app-server、Pi JSONL RPC | Command Code 当前公开机器入口是一次 `-p` 运行后退出；没有已验证的可驻留请求/响应 Host。 |
+| one-shot 原生协议 | Claude Code stream-json、Antigravity | 进程寿命相近，但 Command Code 使用自己的 `AgentEvent`/`result` NDJSON、Session 文件、权限与扩展 API，不能复用 Claude parser。 |
+| 扩展投递 | Pi 受管 Extension | Command Code `--mod` 能按本次 CLI 启动加载 Mod；Mod API 标为 Experimental，且 print 模式的 UI 确认默认拒绝，不能照搬 Pi 的 Bootstrap 或 Approval 结论。 |
+
+本仓库的 [`AgentRuntimeAdapter` registry](../../../crates/rovai-core/src/agent_runtime_adapter.rs) 是编译期接口，不是插件 ABI。新增 identity 还会触及可执行发现、平台准入、静态/深检、模型与权限 schema、Skill/MCP projection、AgentRun dispatch、Runtime Activity、Usage、终态、取消、设置/诊断投影。现有 [Claude one-shot 实现](../../../crates/rovai-core/src/claude.rs) 可参考 `ManagedProcess`、stdin 交付、进程树清理和 Input ACK 的控制流；[Core dispatch](../../../crates/rovai-core/src/application.rs) 仍需要独立 Command Code 分支。公共 [Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md) 已覆盖 one-shot 子进程，不需要 Adapter 私有进程池。
+
+## 需要单独设计的行为
+
+### 权限与 Headless
+
+[Headless Mode](https://commandcode.ai/docs/headless) 和 [Permissions](https://commandcode.ai/docs/permissions) 表明 print 模式没有交互式提示，默认阻止会修改系统的 Tool；`--yolo` 可启用最高原生权限，但显式 deny/ask 规则仍可能限制它。Rovai 不能把 headless 的无交互路径映射成可靠的 allow-once UI。
+
+[Shell Hooks](https://commandcode.ai/docs/hooks) 的 `PreToolUse` 可以主动拒绝，但非 `2` 的异常退出、退出 `0` 且输出 JSON 无效或 schema 不符时，工具仍可执行；因此它不能成为唯一的 fail-closed 外部审批桥。[Mods](https://commandcode.ai/docs/mods) 的 `beforeToolCall` 在原生 permission check 之后执行；print 模式下 `cmd.ui.confirm()` 返回 `false`。候选方案必须明确唯一审批权威，并用真实副作用测试验证 allow、deny、bridge 失败与取消。若只采用原生无交互权限，应在产品中如实暴露其能力差异。
+
+### Session、Bootstrap 与 Compaction
+
+候选的 `--resume <完整 sessionId>` 必须和当前 Conversation 的 Native Binding 一一对应；不能使用 `--continue`、Session 名称或 ID 前缀。`--session <path|id>` 是否能提供 Rovai 私有的持久路径以及其 cwd、模型和恢复失败语义，都需真实验证。对 `result.sessionId` 为空、进程失败和恢复失败必须区分 input 未接受、可能已接受和 continuity lost，不能把再次启动误作安全重试。
+
+`--mod <path>` 与 `appendSystemPrompt` 可以把内容放进高权限层，但上述实测已证明加载缺失和 hook 异常均继续请求模型；它不能单独承担必达 Bootstrap。[Mods](https://commandcode.ai/docs/mods) 的 API 仍为 Experimental。`SessionStart` Hook 只提供上下文且不阻止启动，不能替代。复用 `first_payload` 后，普通精确恢复依赖原生 Session 保留初次引导；Command Code 的原生 `compaction_*` 事件尚未获准作为 Core 补发信号，手动压缩、自动压缩、错误重试与 cold resume 的连续性均需单独验证，跨成员无泄漏也要验收。
+
+### MCP、Skills 与 Taste
+
+官方 [MCP 文档](https://commandcode.ai/docs/mcp) 的 `local`、`project`、`user` 分别存于用户项目目录、仓库 `.mcp.json`、用户全局目录，不是 Rovai AgentRun/Native Session 作用域。本次 CLI 帮助未见类似 Claude `--mcp-config` 的单次投递参数。不能把 A 成员的 `PreparedMcpProjection` 写入共享 workspace 或用户配置，再让 B 成员并发运行。需要先验证官方单次覆盖能力；若无，可研究由受管 Mod `addTool` 承接 Core 的受限桥，但这意味着自己实现 MCP Tool 的名称、权限、取消、Server 生命周期和隔离，不能称作直接复用原生 MCP。
+
+复核 1.64.0 的 `--config` 也不能直接填这个缺口：发布包帮助虽有通用 `--config <key=value>`，但在隔离 Home、`CMD_LOCAL_ONLY=1` 的 headless 启动前传 `--config 'mcp={}'` 会以 `Unknown config setting: mcp` 和退出码 1 拒绝。该试验没有发送模型请求，只排除把 MCP 原始设置作为本版本 CLI 参数的简单路径；不证明官方不存在其他可隔离入口。
+
+隔离 fixture 进一步使用同一 workspace、两个独立 Home 和一个最小 stdio MCP server：只在 A 的用户级 `mcp.json` 登记 `rovai-probe`。A 的 `search_tools` 结果加载 `mcp__rovai-probe__ping` schema；B 的相同查询返回无匹配，模型请求中也没有该 schema。在 `dont-ask` 下，A 的调用产生 `tool_denied` 且 server 未收到 `tools/call`；改为原生 `yolo` 后 A 的 server 收到 `initialize → tools/list → tools/call`，模型下一轮看到了固定结果 marker。此证据证明 1.64.0 可以通过私有 Home 做**受控 fixture 的成员可见性隔离**和原生权限分流；它不等于 Rovai `PreparedMcpProjection` 已接入。生产路线还必须解决私有 Home 的原生认证、配置/会话持久化、更新与撤销、project 原生 MCP 追加、Secret 权限、Server 子进程取消和并发生命周期，不能把 fixture 标成 MCP 轴通过。
+
+`--skill <path>` 是单次进程追加入口，比 MCP 容易投递；但官方 [Skills 文档](https://commandcode.ai/docs/skills) 规定项目、`.agents` 和用户 Skill 优先于额外路径。同名冲突、更新、撤销、相邻 Session 可见性仍需实测。`--no-skills --skill` 可以缩小发现面，但会改变 Command Code 原生 Skill 行为，不应在未决定产品差异前默认使用。
+
+Command Code 的 [Taste](https://commandcode.ai/docs/taste) 默认学习，项目级 Taste 是共享工作区状态，且可发生额外模型调用。`--skip-onboarding` 只跳过 onboarding，不等于关闭学习。需要决定 Rovai 多成员是否共享此原生学习结果、是否应停用自动学习以及其用量如何归属；不能将 Taste 称为成员私有 Memory。不能靠改写共享 `.commandcode/settings.local.json` 实现每成员开关。
+
+### 输出、Usage、更新与发现
+
+只以 `result.subtype=success` 及匹配的 Session/Run 证据形成成功终态，`finalText` 只能作为 [Missing-Send](../../../crates/rovai-core/src/agent_profile.rs) 的 zero-send 恢复候选，不能直接广播。`AgentEvent` 的 Tool ID、cumulative/delta、stderr、非零退出、空输出和取消后的迟到事件仍要按当前 Action/Output 合同逐项映射。最终 `usage` 是文档化的 Run 总量候选；需要核对字段 scope、cache、重试与计数方式，不能从 Session totals 重复累计。
+
+发现时建议首选跨平台 `command-code`，不用 macOS/Linux 的 `cmd` 别名作为 canonical identity；Windows 的 `cmd` 是系统解释器，Command Code 使用 `cmdc`。[CLI Reference](https://commandcode.ai/docs/reference/cli) 已说明此冲突。运行 `--no-auto-update` 可减少执行中版本漂移，但本机 `--version` 试验表明禁用更新不等于零本机写入；浅检要单独设计隔离。仍须以 executable fingerprint、reported version 和目标平台证据对 Ready 与 Qualification 分层；Node `>=22` 是额外的启动前置条件。
+
+## Parity Matrix
+
+当前 14 项能力轴、上游证据、实现状态与待接受差异统一维护在 [Parity Matrix](parity-matrix.md)。`DocumentationOnly` 不代表通过真实行为验证；本机包启动至帮助页只验证入口，不能把任一功能轴标为 `Verified + Implemented`。
+
+## 建议的验证顺序
+
+1. 固定 Command Code 版本与隔离测试账户/工作区，在 `-p --output-format json` 下采集一轮正常、认证失败、Tool 失败、取消的原生 wire；明确 result、exit code 与 Input accepted 证据。
+2. 在模型输入提案二次确认后，用两个成员共享同一 workspace，验证普通 Prompt 引导只进入目标成员本轮输入、独立完整 Session ID、跨进程恢复与 Taste 边界；Mod 缺失/抛错证据已记录，不作为正式注入路径。
+3. 证明 `PreparedMcpProjection` 可以只进入目标 Run/Session；如走 Mod bridge，先完成 Tool 权限、Server 生命周期和无泄漏最小闭环。
+4. 再实现独立 Adapter 与 Core 映射，运行 Checklist 的所有 Golden Flows，并按 Runtime 版本和平台形成资格证据。
+
+当前建议记录：`adapter_kind=command-code-cli`（候选）、`host_strategy=one_shot_resumable`（候选）、`nearest_production_adapter=claude-code-cli`、`admission=research`、`evidence_revision=null`、`accepted_upstream_differences=[]`。

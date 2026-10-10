@@ -5360,8 +5360,15 @@ mod tests {
     }
 
     #[cfg(feature = "slow-tests")]
-    fn runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery() {
+    fn runtime_loss_closes_an_unanswered_intercepted_request_and_fails_the_run() {
         let mut fixture = fixture("ask");
+        // A native intercepted request follows accepted task input.
+        crate::test_support::insert_test_runtime_input(
+            &fixture.database,
+            &fixture.agent_run_id,
+            1,
+            "accepted",
+        );
         let service = ActionSafetyService::default();
         let prepare = intercepted_prepare_envelope(&fixture, "action-runtime-lost", "request-1");
         service
@@ -5393,7 +5400,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(reconciled.result.status, CommandResultStatus::Applied);
-        let state: (String, String, String, String, i64) = fixture
+        let state: (String, String, String, Option<String>, i64) = fixture
             .database
             .connection()
             .query_row(
@@ -5424,8 +5431,20 @@ mod tests {
                 "not_executed".to_string(),
                 "runtime_request_lost".to_string(),
                 "cancelled".to_string(),
-                "runtime_recovery".to_string(),
-                1,
+                None,
+                0,
+            )
+        );
+        let run: (String, String, bool) = fixture.database.connection().query_row(
+            "SELECT status, last_error_code, cancel_acknowledged_at IS NULL FROM agent_run WHERE id = ?1",
+            [&fixture.agent_run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            run,
+            (
+                "failed".into(),
+                "accepted_input_outcome_unknown".into(),
+                true
             )
         );
         drop(fixture.database);
@@ -5435,6 +5454,13 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     fn runtime_loss_marks_a_dispatched_intercepted_action_unknown() {
         let mut fixture = fixture("allow");
+        // A native intercepted request follows accepted task input.
+        crate::test_support::insert_test_runtime_input(
+            &fixture.database,
+            &fixture.agent_run_id,
+            1,
+            "accepted",
+        );
         let service = ActionSafetyService::default();
         let prepare = intercepted_prepare_envelope(&fixture, "action-runtime-unknown", "request-2");
         service
@@ -5562,7 +5588,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        let state: (String, String, String, String, i64) = fixture
+        let state: (String, String, String, Option<String>, i64) = fixture
             .database
             .connection()
             .query_row(
@@ -5595,8 +5621,20 @@ mod tests {
                 "unknown".to_string(),
                 "unknown".to_string(),
                 "safely_closed".to_string(),
-                "unknown_action_outcome".to_string(),
-                1,
+                None,
+                0,
+            )
+        );
+        let run: (String, String, bool) = fixture.database.connection().query_row(
+            "SELECT status, last_error_code, cancel_acknowledged_at IS NULL FROM agent_run WHERE id = ?1",
+            [&fixture.agent_run_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            run,
+            (
+                "failed".into(),
+                "accepted_input_outcome_unknown".into(),
+                true
             )
         );
         drop(fixture.database);
@@ -6098,8 +6136,8 @@ mod tests {
         }
 
         #[test]
-        fn runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery() {
-            super::runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery();
+        fn runtime_loss_closes_an_unanswered_intercepted_request_and_fails_the_run() {
+            super::runtime_loss_closes_an_unanswered_intercepted_request_and_fails_the_run();
         }
 
         #[test]

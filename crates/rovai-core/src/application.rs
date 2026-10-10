@@ -2415,6 +2415,8 @@ struct Core {
     kimi_code_cli: AcpCliRuntimeAdapter,
     grok_build: AcpCliRuntimeAdapter,
     deepseek_harness: AcpCliRuntimeAdapter,
+    cline_cli: AcpCliRuntimeAdapter,
+    command_code_cli: AcpCliRuntimeAdapter,
     zcode_app: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
@@ -2768,6 +2770,8 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::DeepseekHarness => "DeepSeek Harness",
+        AdapterKind::ClineCli => "Cline",
+        AdapterKind::CommandCodeCli => "Command Code",
         AdapterKind::AntigravityApp => "Antigravity",
         AdapterKind::ZcodeApp => "ZCode",
     }
@@ -5475,6 +5479,20 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
+        if let Some(runtime) = self
+            .cline_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
+            .command_code_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
         self.grok_build
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -5581,6 +5599,7 @@ impl Core {
         tokio::join!(
             self.codex_cli.shutdown_all(),
             self.pi.shutdown_all(),
+            self.cline_cli.shutdown_all(),
             self.opencode_cli.shutdown_all(),
             self.copilot_cli.shutdown_all(),
             self.kiro_cli.shutdown_all(),
@@ -5592,6 +5611,7 @@ impl Core {
             self.kimi_code_cli.shutdown_all(),
             self.grok_build.shutdown_all(),
             self.deepseek_harness.shutdown_all(),
+            self.command_code_cli.shutdown_all(),
             self.zcode_app.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
             self.antigravity_app.shutdown_all(),
@@ -5604,6 +5624,7 @@ impl Core {
             tokio::join!(
                 self.codex_cli.shutdown_all(),
                 self.pi.shutdown_all(),
+                self.cline_cli.shutdown_all(),
                 self.opencode_cli.shutdown_all(),
                 self.copilot_cli.shutdown_all(),
                 self.kiro_cli.shutdown_all(),
@@ -5615,6 +5636,7 @@ impl Core {
                 self.kimi_code_cli.shutdown_all(),
                 self.grok_build.shutdown_all(),
                 self.deepseek_harness.shutdown_all(),
+                self.command_code_cli.shutdown_all(),
                 self.zcode_app.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
                 self.antigravity_app.shutdown_all(),
@@ -5642,6 +5664,8 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
             rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
             AdapterKind::DeepseekHarness => Some(&self.deepseek_harness),
+            AdapterKind::CommandCodeCli => Some(&self.command_code_cli),
+            AdapterKind::ClineCli => Some(&self.cline_cli),
             rovai_core::agent_profile::AdapterKind::ZcodeApp => Some(&self.zcode_app),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::Pi
@@ -11511,6 +11535,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
+            | rovai_core::agent_profile::AdapterKind::CommandCodeCli
+            | rovai_core::agent_profile::AdapterKind::ClineCli
             | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
@@ -11520,8 +11546,11 @@ impl Core {
                         adapter_kind: kind,
                         reported_version: probe.result.reported_version,
                         executable_fingerprint: probe.result.executable_fingerprint,
-                        authentication_status: probe_authentication_status(probe.result.status)
-                            .to_string(),
+                        authentication_status: if kind == AdapterKind::ClineCli {
+                            "unknown".to_string()
+                        } else {
+                            probe_authentication_status(probe.result.status).to_string()
+                        },
                         probe_status: probe_status_name(probe.result.status).to_string(),
                         capabilities: probe.result.capabilities,
                         initialize_result: probe.initialize_result,
@@ -11529,7 +11558,9 @@ impl Core {
                         attempted_at,
                         last_error: if matches!(
                             kind,
-                            AdapterKind::ZcodeApp | AdapterKind::DeepseekHarness
+                            AdapterKind::ZcodeApp
+                                | AdapterKind::DeepseekHarness
+                                | AdapterKind::CommandCodeCli
                         ) && probe.result.status
                             == health::AgentRuntimeProbeStatus::Ready
                         {
@@ -13892,6 +13923,16 @@ impl Core {
             .context("failed to discover effective Grok native MCP names")?;
             projection.finalize_native_name_conflicts(&native_names)?;
         }
+        if execution.runtime.adapter_kind == AdapterKind::CommandCodeCli
+            && !projection.servers.is_empty()
+        {
+            let native_names = health::inspect_command_code_native_mcp_server_names(
+                Path::new(&execution.runtime.executable_path),
+                &execution_root,
+            )
+            .await?;
+            projection.finalize_native_name_conflicts(&native_names)?;
+        }
         Ok(projection)
     }
 
@@ -13939,7 +13980,7 @@ impl Core {
         Ok(())
     }
 
-    async fn acknowledge_pi_agent_start(
+    async fn acknowledge_native_agent_start(
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
@@ -16822,6 +16863,28 @@ impl Core {
         .await
     }
 
+    // A native file Rule is immutable for the lifetime of its member Host.
+    // Freeze B before acquisition so a changed Binding payload gets a new Host;
+    // a normal warm Run observes the same frozen payload and reuses its Host.
+    async fn acp_host_bootstrap_digest(
+        &self,
+        execution: &AgentRunExecution,
+        digest: String,
+    ) -> Result<String> {
+        if execution.runtime.adapter_kind != AdapterKind::ClineCli {
+            return Ok(digest);
+        }
+        let mut database = self.database.lock().await;
+        let bootstrap = ContextService.prepare_session_bootstrap(
+            &mut database,
+            &ManagedBlobStore::new(&self.data_dir),
+            &execution.agent_run_id,
+            execution.execution_epoch,
+            CharterDeliveryMode::ManagedSystemPrompt,
+        )?;
+        canonical_json_digest(&json!({"runtime":digest,"bootstrap":bootstrap.payload}))
+    }
+
     async fn launch_acp_agent_run(
         self: &Arc<Self>,
         launch: PreparedRuntimeLaunch<'_>,
@@ -16863,6 +16926,9 @@ impl Core {
             &mcp_projection.servers,
             attachment_authorization,
         )?;
+        runtime_compatibility_digest = self
+            .acp_host_bootstrap_digest(execution, runtime_compatibility_digest)
+            .await?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
             .await?;
         let runtime_result = adapter
@@ -16882,10 +16948,6 @@ impl Core {
             )
             .await;
         let mut runtime = runtime_result?;
-        let active_builtin_tools = runtime
-            .builtin_tool_process_config()
-            .context("ACP Runtime has no Built-in Tool process context")?
-            .clone();
         let session_capabilities = runtime.session_capabilities().await;
         let mut binding_credential = initial_binding;
         let mut session_continuation = runtime
@@ -16898,8 +16960,49 @@ impl Core {
             && session_continuation == acp::AcpSessionContinuation::New
         {
             binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
+            if execution.runtime.adapter_kind == AdapterKind::ClineCli {
+                let digest = acp::runtime_compatibility_digest(
+                    &execution.runtime,
+                    &execution.workspace,
+                    execution.permission_semantics,
+                    &mcp_projection.servers,
+                    attachment_authorization,
+                )?;
+                let digest = self.acp_host_bootstrap_digest(execution, digest).await?;
+                if digest != runtime_compatibility_digest {
+                    adapter
+                        .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                        .await;
+                    runtime_compatibility_digest = digest;
+                    self.persist_runtime_compatibility_digest(
+                        execution,
+                        &runtime_compatibility_digest,
+                    )
+                    .await?;
+                    runtime = adapter
+                        .ensure_agent_run_runtime(
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            &execution.camp_id,
+                            &execution.agent_id,
+                            &execution.workspace,
+                            execution.permission_semantics,
+                            &execution.runtime,
+                            &builtin_tools,
+                            &mcp_projection.servers,
+                            &mcp_projection.projection_digest,
+                            attachment_access_root,
+                            &runtime_compatibility_digest,
+                        )
+                        .await?;
+                }
+            }
             session_continuation = acp::AcpSessionContinuation::New;
         }
+        let active_builtin_tools = runtime
+            .builtin_tool_process_config()
+            .context("ACP Runtime has no Built-in Tool process context")?
+            .clone();
         let charter_delivery_mode =
             charter_delivery_mode_for_adapter(execution.runtime.adapter_kind);
         let new_session_native_rules = if execution.runtime.adapter_kind == AdapterKind::GrokBuild
@@ -16992,6 +17095,9 @@ impl Core {
                     &mcp_projection.servers,
                     attachment_authorization,
                 )?;
+                runtime_compatibility_digest = self
+                    .acp_host_bootstrap_digest(execution, runtime_compatibility_digest)
+                    .await?;
                 self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
                     .await?;
                 launch_permit.check_cancelled()?;
@@ -17057,15 +17163,18 @@ impl Core {
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await
             .context("failed to bind ACP Native Session")?;
-        if execution.runtime.adapter_kind == AdapterKind::DeepseekHarness {
+        if matches!(
+            execution.runtime.adapter_kind,
+            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+        ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
                     != binding_credential.native_binding_generation
             {
-                anyhow::bail!("DSH Bootstrap does not match its Native Binding");
+                anyhow::bail!("Managed Bootstrap does not match its Native Binding");
             }
             runtime
-                .bind_dsh_bootstrap(&session_id, &bootstrap.payload)
+                .bind_managed_bootstrap(&session_id, &bootstrap.payload)
                 .await?;
         }
         self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id)
@@ -17426,6 +17535,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::KimiCodeCli
             | rovai_core::agent_profile::AdapterKind::GrokBuild
             | rovai_core::agent_profile::AdapterKind::DeepseekHarness
+            | rovai_core::agent_profile::AdapterKind::CommandCodeCli
+            | rovai_core::agent_profile::AdapterKind::ClineCli
             | rovai_core::agent_profile::AdapterKind::ZcodeApp) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
@@ -18169,6 +18280,18 @@ async fn run_core(
     let compaction_detector_policies =
         DesiredCompactionDetectorPolicies::from_process_environment();
     let recovery = (|| -> Result<_> {
+        // An old native tool can outlive Core. Reclaim persisted ownership before
+        // readiness, so another Runtime sharing its execution root cannot race it.
+        #[cfg(target_os = "macos")]
+        rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
+            &data_dir.join("runtime"),
+        )?;
+        // Retired backend: recover only processes proven owned by the generic
+        // kernel-identity ledger. Never launch it or touch persistent history/credentials.
+        #[cfg(target_os = "macos")]
+        rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
+            &data_dir.join("runtime/cline-hub/hosts"),
+        )?;
         ManagedBlobStore::new(&data_dir).recover_gc_state(&mut database)?;
         recover_legacy_pending_cancellations(&mut database)?;
         rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
@@ -18396,6 +18519,24 @@ async fn run_core(
             runtime_fleet.clone(),
             compaction_detector_policies
                 .policy_for(AdapterKind::DeepseekHarness)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        ),
+        command_code_cli: AcpCliRuntimeAdapter::deferred(
+            rovai_core::agent_profile::AdapterKind::CommandCodeCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/command-code"),
+            runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::CommandCodeCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        ),
+        cline_cli: AcpCliRuntimeAdapter::deferred(
+            AdapterKind::ClineCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/cline-cli"),
+            runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::ClineCli)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         ),
         grok_build: AcpCliRuntimeAdapter::deferred(
@@ -19718,7 +19859,7 @@ async fn process_agent_run_pi_message(
     }
     if message_type == "agent_start"
         && let Some(execution) = core
-            .acknowledge_pi_agent_start(
+            .acknowledge_native_agent_start(
                 agent_run_id,
                 execution_epoch,
                 delivery_id,
@@ -19823,7 +19964,7 @@ async fn process_agent_run_pi_message(
         persist_pi_prompt_completion(
             core,
             output,
-            &runtime,
+            runtime.as_ref(),
             host_instance_id,
             agent_run_id,
             execution_epoch,
@@ -19865,14 +20006,14 @@ async fn persist_pi_prompt_completion(
     } else {
         format!("runtime_prompt_{stop_reason}")
     };
-    let error_detail = format!("Pi agent_settled ended the prompt as {stop_reason}");
+    let error_detail = format!("Native prompt result ended the prompt as {stop_reason}");
     let public_failure = (outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(
             AdapterKind::Pi,
             RuntimeFailureOrigin::Runtime,
             RuntimeFailurePhase::Execution,
             &base_error_code,
-            "Pi 未能完成运行",
+            "Runtime 未能完成运行",
             Some(&error_detail),
             &[(&core.data_dir, "<data-dir>")],
             manual_retry_allowed,
@@ -19982,12 +20123,12 @@ async fn persist_pi_prompt_completion(
         let terminal = if outcome == RuntimeTerminalOutcome::Succeeded {
             let final_output = final_message
                 .clone()
-                .context("Pi successful terminal has no final message")?;
+                .context("Native successful terminal has no final message")?;
             let mut database = core.database.lock().await;
             let envelope = CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
                 actor: ActorRef::System {
-                    component_id: "runtime-adapter:pi".to_string(),
+                    component_id: format!("runtime-adapter:{}", AdapterKind::Pi.as_str()),
                 },
                 camp_id: Some(execution.camp_id.clone()),
                 expected_versions: Vec::new(),
@@ -20021,7 +20162,7 @@ async fn persist_pi_prompt_completion(
                 &CommandEnvelope {
                     command_id: uuid::Uuid::new_v4().to_string(),
                     actor: ActorRef::System {
-                        component_id: "runtime-adapter:pi".to_string(),
+                        component_id: format!("runtime-adapter:{}", AdapterKind::Pi.as_str()),
                     },
                     camp_id: Some(execution.camp_id.clone()),
                     expected_versions: Vec::new(),
@@ -20571,6 +20712,45 @@ async fn process_acp_events(
                     execution_epoch,
                 )
                 .await;
+            }
+            AcpIncoming::CompactionDisplay {
+                adapter_kind,
+                host_instance_id,
+                agent_run_id,
+                execution_epoch,
+                native_session_id,
+                native_prompt_id,
+                event,
+            } => {
+                let Some(runtime) = acp_runtime_on_host(
+                    &core,
+                    adapter_kind,
+                    &host_instance_id,
+                    &agent_run_id,
+                    execution_epoch,
+                )
+                .await
+                else {
+                    continue;
+                };
+                if runtime.session_id().await.as_deref() != Some(&native_session_id)
+                    || runtime.prompt_id().await.as_deref() != Some(&native_prompt_id)
+                {
+                    continue;
+                }
+                if let Err(error) = persist_runtime_compaction_display(
+                    &core,
+                    &output,
+                    &agent_run_id,
+                    execution_epoch,
+                    None,
+                    *event,
+                    "cline.plugin.compaction.v1",
+                )
+                .await
+                {
+                    eprintln!("Cline local compaction display skipped: {error:#}");
+                }
             }
             AcpIncoming::CompactionObservation {
                 adapter_kind,
@@ -21470,6 +21650,25 @@ fn normalize_acp_event_with_completion(
             {
                 payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":zcode::PROTOCOL,
                     "sourceEventKind":"tool.updated.result","semanticKind":"zcode_edit_patch","entries":entries});
+            }
+            if adapter_kind == AdapterKind::CommandCodeCli
+                && public_status == "completed"
+                && let Some(entries) = update.pointer("/_meta/rovaiCommandMutation/entries")
+            {
+                payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":"session/update.tool_call_update.completed.edit_file", "semanticKind":"reported_mutation", "entries":entries});
+            }
+            if adapter_kind == AdapterKind::ClineCli
+                && public_status == "completed"
+                && let Some(mutation) = update.pointer("/_meta/rovaiClineMutation")
+                && let Some(tool @ ("apply_patch" | "editor")) = mutation["tool"].as_str()
+                && let Some(entries) = mutation.get("entries")
+            {
+                payload["runtimeDiff"] = json!({
+                    "adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":format!("session/update.tool_call_update.completed.{tool}"),
+                    "semanticKind":"reported_mutation","entries":entries,
+                });
             }
             ("runtime.action", payload)
         }
@@ -22968,6 +23167,7 @@ async fn flush_runtime_usage(
     // finish this Run between advancing the native cursor and buffering it.
     for kind in [
         AdapterKind::CodebuddyCli,
+        AdapterKind::ClineCli,
         AdapterKind::KimiCodeCli,
         AdapterKind::OpencodeCli,
         AdapterKind::QoderCli,
@@ -26321,6 +26521,24 @@ mod tests {
                     .policy_for(AdapterKind::DeepseekHarness)
                     .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
+            command_code_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::CommandCodeCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/command-code"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::CommandCodeCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            cline_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::ClineCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/cline-cli"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::ClineCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
             grok_build: AcpCliRuntimeAdapter::new(
                 AdapterKind::GrokBuild,
                 acp_tx.clone(),
@@ -28947,6 +29165,26 @@ done
 
     #[test]
     fn controlled_native_resume_classifies_only_explicit_rejection_as_incompatible() {
+        let missing = crate::command_code_acp::verify_restore_target(
+            &json!({"sessions": []}),
+            "missing-session",
+            "/workspace",
+        )
+        .unwrap_err();
+        assert_eq!(
+            classify_native_resume_failure(&missing),
+            NativeSessionResumeFailure::Incompatible
+        );
+        let invalid = crate::command_code_acp::verify_restore_target(
+            &json!({}),
+            "missing-session",
+            "/workspace",
+        )
+        .unwrap_err();
+        assert_eq!(
+            classify_native_resume_failure(&invalid),
+            NativeSessionResumeFailure::Ambiguous
+        );
         assert_eq!(
             classify_native_resume_failure(&anyhow::anyhow!("session not found")),
             NativeSessionResumeFailure::Incompatible
@@ -31536,6 +31774,53 @@ for line in sys.stdin:
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
 
+        let command_initial = json!({"sessionUpdate":"tool_call", "toolCallId":"command-edit",
+            "status":"pending", "kind":"edit", "title":"Edit file",
+            "locations":[{"path":"src/a.ts"}],
+            "rawInput":{"file_path":"src/a.ts","old_string":"old\n","new_string":"new\n","private":"COMMAND_PRIVATE"},
+            "content":[{"type":"diff","path":"src/a.ts","oldText":"old\n","newText":"new\n"}]});
+        for (status, has_diff) in [
+            ("pending", false),
+            ("in_progress", false),
+            ("failed", false),
+            ("completed", true),
+        ] {
+            let mut update = json!({"sessionUpdate":"tool_call_update","toolCallId":"command-edit","status":status});
+            rovai_core::command_code_acp::enrich_tool_update(&mut update, Some(&command_initial));
+            let (_, payload) = normalize_acp_event(
+                AdapterKind::CommandCodeCli,
+                "session/update",
+                &json!({"update":update}),
+            );
+            assert_eq!(!payload["runtimeDiff"].is_null(), has_diff, "{status}");
+            if has_diff {
+                assert_eq!(payload["runtimeDiff"]["semanticKind"], "reported_mutation");
+                assert_eq!(
+                    payload.pointer("/runtimeDiff/entries/0/fragments/0/oldText"),
+                    Some(&json!("old\n"))
+                );
+            }
+            assert!(!payload.to_string().contains("COMMAND_PRIVATE"));
+        }
+        for case in ["unknown-kind", "replace-all", "empty-old"] {
+            let mut initial = command_initial.clone();
+            let mut update = initial.clone();
+            rovai_core::command_code_acp::enrich_tool_update(&mut update, None);
+            assert_eq!(
+                update["content"],
+                json!([]),
+                "proposed diff must never enter complete-file evidence"
+            );
+            match case {
+                "unknown-kind" => initial["kind"] = json!("other"),
+                "replace-all" => initial["rawInput"]["replace_all"] = json!(true),
+                _ => initial["rawInput"]["old_string"] = json!(""),
+            }
+            update["status"] = json!("completed");
+            rovai_core::command_code_acp::enrich_tool_update(&mut update, Some(&initial));
+            assert!(update.pointer("/_meta/rovaiCommandMutation").is_none());
+        }
+
         let query = "password=公开测试词 token=也照常展示";
         let (_, web_payload) = normalize_acp_event(
             AdapterKind::OpencodeCli,
@@ -31697,7 +31982,7 @@ for line in sys.stdin:
             .into_iter()
             .filter(|adapter_kind| adapter_kind.uses_acp())
             .collect::<Vec<_>>();
-        assert_eq!(acp_adapters.len(), 12);
+        assert_eq!(acp_adapters.len(), 14);
         for adapter_kind in acp_adapters {
             let expected_output = format!("{} terminal output", adapter_kind.as_str());
             let (event_type, payload) = normalize_acp_event(

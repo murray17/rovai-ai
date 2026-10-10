@@ -428,3 +428,56 @@ pub(crate) fn absolute_test_path(path: &str) -> String {
         path.to_owned()
     }
 }
+
+// Shared input fixture for accepted-input recovery and intercepted-action owners.
+#[cfg(feature = "extended-tests")]
+pub(crate) fn insert_test_runtime_input(
+    database: &Database,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    status: &str,
+) {
+    let now = chrono::Utc::now().to_rfc3339();
+    database
+        .connection()
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            r#"
+            INSERT INTO runtime_input_delivery(
+                id, agent_run_id, execution_epoch, context_manifest_id,
+                native_binding_id, native_binding_generation,
+                boundary_camp_message_sequence, dynamic_payload_digest,
+                status, native_input_id, prepared_at, accepted_at,
+                resolved_at, updated_at,
+                runtime_attachment_auth_receipt_version,
+                runtime_attachment_auth_receipt_json,
+                runtime_attachment_auth_receipt_digest,
+                runtime_request_digest
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7, ?8, ?9, ?10, ?10, ?9,
+                1, '{"schemaVersion":1}', 'sha256:test-auth', 'sha256:test-request'
+            )
+            "#,
+            rusqlite::params![
+                format!("test-input-{agent_run_id}-{execution_epoch}"),
+                agent_run_id,
+                execution_epoch,
+                format!("test-manifest-{agent_run_id}-{execution_epoch}"),
+                format!("test-binding-{agent_run_id}-{execution_epoch}"),
+                format!("sha256:{agent_run_id}:{execution_epoch}"),
+                status,
+                (status == "accepted")
+                    .then(|| format!("native-input-{agent_run_id}-{execution_epoch}")),
+                now,
+                (status == "accepted").then_some(now.as_str()),
+            ],
+        )
+        .unwrap();
+    database
+        .connection()
+        .execute_batch("PRAGMA foreign_keys = ON;")
+        .unwrap();
+}

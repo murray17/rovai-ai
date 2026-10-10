@@ -90,6 +90,224 @@ Rust owner 分成四个可执行层级；feature gating 只改变日常路由，
 `slow-tests`，则使用 `--features slow-tests`。过滤命令显示 `0 tests` 不构成验证证据，提交前先用
 `-- --list` 确认目标 owner 实际进入清单。
 
+## Command Code headless 测试退役（2026-10-09，User 105）
+
+User 已停止 headless 候选；删除唯一消费者 `command_code.rs`、其专属 `command_code_activity.rs`、
+`local_headless_probe.py`、`headless_resume_probe.py`，并移除跨 Runtime 模型探针中的 print 正向对照。
+ACP 的 `command_code_acp.rs`、System Mod、Cline、共享 ACP、文件证据、Usage 与 ManagedProcess 仍保留。
+删除的 Rust owner 共五个（三个默认单元、一个扩展进程、一个人工 ignored Smoke）：
+
+- `command_code::tests::usage_counts_root_calls_once_and_keeps_context_separate`
+- `command_code::tests::headless_decoder_fences_session_and_terminal_outcome`
+- `command_code::tests::isolated_command_code_reports_live_calls_and_exact_resume_usage`
+- `command_code::tests::managed_headless_process_delivers_stdin_and_exact_resume`
+- `command_code_activity::tests::command_code_activity_separates_public_text_tool_outcomes_and_private_state`
+
+这些 owner 的私有 NDJSON/print 合同随唯一执行入口退出，没有迁移给 ACP，也不保留永久停用代码。
+当前后端继续由 `acp::tests`、`command_code_acp::tests`、`cline::tests` 及
+`scripts/lib/command-code-bootstrap.test.mjs` / `scripts/lib/cline-observer.test.mjs` 负责。
+平台与 Renderer 既有 owner 补充不公开两个产品的断言；历史身份和用量标签保留，未新增独立 Rust 测试。
+最低验证：`cargo test --workspace`、`cargo test -p rovai-core --features extended-tests --lib acp::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib command_code_acp::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib cline::tests::`，以及相关 Renderer/Node 测试、typecheck 与文档门禁。
+以下 2026-10-04 的 headless owner/命令是退役前历史，不能作为当前测试入口。
+
+## 主干 / Preview Migration 合流（2026-10-08）
+
+扩展既有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，保留 schema 133
+与 Preview 134 case，并增加主干 continuation 134 的来源、残缺结构拒绝、两个 catalog 同事务回滚、
+重开后当前 schema 检查；不增加平行 owner。后续 main/135 的 Mission 描述来源加入同一矩阵，
+验证结构化 Atom 保留、186 catalog 合流失败回滚及 187/137 重开。继续执行与 Mission 描述既有
+migration owner 保留 frozen evidence、FK 恢复与 receipt failure case。纯 admission owner 补入
+135/136 来源及缺失合流收据。SQLite 结构、事务和重开边界不能由纯 parser 代替；定向命令为
+`cargo test -p rovai-core --features extended-tests --lib migration`，默认门禁仍为 `pnpm test:rust:pr`。
+
+## Cline 官方 ACP 与 Hub 退役 owner（2026-10-08，User 95）
+
+User 95 退役整个 Hub 执行合同，因此删除 cline_hub 的 config/events/failure/login/platform/transport/tests，
+以及 native_hub_*、仅供旧 SDK/shim 实验的 compaction fixtures 和专用 Bun 依赖。历史复现链接固定 ada6f6c1，
+成功、失败证据不删。对应 Hub 握手、WebSocket 限额、认证登录状态机/锁和全历史恢复已无当前 successor。
+保留 ManagedProcess/Pi 结算及共享权限、取消、generation/未知输入、文件证据 owner。
+
+恢复既有 ACP owner（不恢复固定版本门槛测试）：Cline 原生 Rule/observer、工具失败与 mutation 配对、
+原生配置投影、模式、load replay quarantine；Node 的 cline-observer owner 继续检查数值过滤；Rust Host owner 检查冻结 Rule、成员隔离与源文件不变。
+默认模型不在 switchable catalog 的本机负例扩展 grouped_acp_models 既有 owner：原生当前模型可以使用 shared
+runtime-default 哨兵，不伪造可切换模型。协议分类、旧 Hub Missing-Send 拒绝和文件来源扩展原有 owner。
+Host 配置/协议/恢复定向测试以 extended-tests 执行，分类全表 owner 使用 slow-tests；不以零测试通过替代执行。
+真实安装与打包 App 使用精简 acp_product_probe/packaged_client，和模拟服务、旧 Hub 矩阵分开记录。
+验证结果及未通过项见 [ACP 退役验收](../research/cline-runtime/acp-retirement-2026-10-08.md)。
+
+以下小节保留先前测试演变的历史，并非当前入口清单。
+
+## Cline 原生账号认证初版 owner（2026-10-08，历史）
+
+本节是 User 85/87 阶段记录；当前测试归属与退役说明见下方 User 89 简化小节。
+
+- `cline_hub::auth::tests::auth_source_and_projection_preserve_selected_metadata_without_oauth_copies`
+  拥有账号/BYOK/未知来源与端点冲突、无关 OAuth 不复制及选中原生元数据保留的纯函数边界。
+  旧配置 owner 只拥有 MCP 准备清理，不能发现凭据来源与投影错误。
+- `cline::tests::native_refresh_keeps_binding_identity_but_account_and_byok_changes_fence_it`
+  拥有 token 轮换不重绑、账号和 BYOK 变化仍重绑的纯兼容性边界；稀疏 Usage owner 不拥有配置摘要。
+- `cline_hub::login::tests::login_interaction_is_private_and_cancel_releases_only_proven_empty_ownership`
+  用最小私有 CLI 子进程验证交互、脱敏、取消后进程退出、单源租约、后续登录及未确认 owner 阻断。
+  归入 extended-tests，纯函数不能证明内核进程所有权释放；不使用模型/真实 token，不代表 OAuth 刷新通过。
+- 既有 `cline_hub::failure::tests` 增加认证/订阅/网络分类；既有产品 Smoke 增加显式 `--native-account`，
+  无静态 key、直接引用授权原生源，保留失败记录。既有 diagnostic/recovery fixture 扩展已保存路径与凭据源的 Core 登录路由，
+  发现并防止 fresh discovery 丢失已保存配置的回归。Renderer 登录交互由现有 settings-workspace fixture 承接。
+
+最小命令：`cargo test -p rovai-core --features extended-tests --lib cline`、`pnpm test:settings-workspace`。
+真实账号/刷新/并发结论必须来自独立[验收矩阵](../research/cline-runtime/native-account-auth-2026-10-08.md)。
+
+## Cline 认证简化的测试变更（2026-10-08，User 89）
+
+`cline_hub/auth.rs` 与其 `auth_source_and_projection_preserve_selected_metadata_without_oauth_copies`
+测试一同退役：Provider/字段/端点准入、凭据投影与全生命周期认证锁已退出生产合同。
+现有配置准备 owner 保留失败清理、live/preexisting 所有权边界，改断言不创建 Provider 副本、源文件不变。
+现有 login owner 保留交互、脱敏、取消/整树清理；以未知账号格式、并存登录及持锁的旧 starting 记录
+取代已退出的互斥/账号元数据准入断言。原生退出成功仅表示流程完成。
+现有配置 identity owner 扩展缺 tokenSource/accountId 的轮换、无关 Provider 更新和当前 Key/账号/端点变化。
+原生错误 owner 的 typed-error 传播 case 改用仍有效的原生未登录错误；拒绝/未知/脱敏断言全部保留。
+没有新增 Rust 测试函数，未改动共享进程、Migration、权限或输入重放测试。
+
+最小命令仍为 `cargo test -p rovai-core --features extended-tests --lib cline`。
+已有产品脚本增加同源双成员 barrier 与各自审批/发送，并统一验证同 Host warm；BYOK 也直引原生来源。
+真实刷新与首次授权不由模拟 fixture 或既有登录请求推断。
+
+## Cline Hub 评审修正与测试退役（2026-10-08）
+
+User 消息 83 明确删除 Cline ACP 后端，因而退役 `cline_backend_tests`、
+`isolated_cline_acp_host_observes_warm_and_exact_cold_prompts`、原 `cline::tests` 的 Plugin 文件租约/
+Host overlay owner，以及 `scripts/lib/cline-observer.test.mjs`。生产 ACP transport、Plugin 和对应
+恢复合同在同一改动中退出；`paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`
+及 ACP Application/文件 owner 中的 Cline 专属 case 随不可达分支退出。Hub 的 Run/Session fencing、
+拒绝无副作用和已完成文件变更分别由 Hub 验收与共享文件来源 owner 承接。历史记录不构成兼容需求。原指标解析的全部稀疏桶、窗口和非法来源
+case 保留到 `cline::tests::native_metrics_keep_sparse_usage_and_verified_context_windows`；
+共享 ACP、文件解析、未知输入与 epoch fencing owner 保留。
+
+新增 owner 均覆盖评审中的独立失败边界：
+
+- `cline_hub::failure::tests`：纯函数验证明确拒绝/传输未知和原生错误秘密排除，旧实现丢失分类。
+- `cline_hub::config::tests::native_catalog_exposes_all_configured_models_without_cross_provider_or_secret_metadata`：
+  原配置只有默认模型，新纯 parser 验证多模型、当前 Provider 边界和私有元数据排除。
+- `cline_hub::config::tests::preparation_failure_removes_private_copies_but_never_claims_a_live_or_preexisting_host`：
+  最小临时文件 fixture，证明复制后 MCP 校验失败的清理及所有权移交，属于 extended-tests；纯 parser 无法证明文件删除。
+- `cline_hub::transport::tests`：实际 loopback WebSocket 证明超过旧 16 MiB 的历史帧和超限头部拒绝，
+  属于 extended-tests；只测 JSON 长度不能发现库自身的帧限制。没有模型调用。
+- `cline_hub::tests::installed_hub_known_rejection_and_bounded_history_cold_restore`：显式 ignored 真原生
+  protocol fixture，覆盖 native `ok:false` 到 Run 终态的完整链、禁止重发、有界合成历史的同 ID 冷恢复与拒绝无副作用。
+  可通过 `ROVAI_CLINE_HUB_HISTORY_BYTES` 在 1 KiB–32 MiB 范围选择合成大小，默认 1 MiB；超限负例不得算作通过。
+  只向不存在的 Session 提交失败请求，不执行模型；普通 CI 不依赖安装或私有配置。
+
+最小验证：`cargo test -p rovai-core --features extended-tests --lib cline`；恢复、文件来源与
+ACP 的既有扩展 owner 按改动范围执行，最终默认 workspace 门禁仍使用 `pnpm test:rust:pr`。
+Windows 真机编译使用手动 `Full check` 的 `windows-check` scope；不把 macOS 或 Ubuntu 检查当作 Windows 证据。
+
+以下 2026-10-07/04 小节是准入历史，已退役 owner 的当前归属以上文为准。
+
+## Cline Native Hub owner（2026-10-07）
+
+- 新纯函数 owner `cline_hub::config::tests::native_compaction_preferences_preserve_off_and_reject_unknown_defaults`
+  覆盖独立的原生偏好边界：多行 CLI help 默认、明确 off/basic/agentic、非法类型与未知默认。
+  原 ACP observer 不能拥有新原生配置解析；默认层运行 `cargo test -p rovai-core --lib native_compaction_preferences`。
+- `cline_hub::tests::installed_hub_rule_approval_usage_and_cleanup` 是独立 WS/进程边界 Smoke，归入
+  extended-tests 且带明确凭据/模型费用原因的 ignored。需要 `ROVAI_CLINE_HUB_ACCEPTANCE_EXECUTABLE`
+  和隔离原生 CLINE_DIR/CLINE_DATA_DIR；命令 `cargo test -p rovai-core --features extended-tests --lib
+  installed_hub_rule_approval_usage_and_cleanup -- --ignored --nocapture`。不将真实模型混入默认层。
+- `agent_profile::cline_backend_tests::backend_provenance_uses_the_current_binding_and_preserves_legacy_acp`
+  拥有现有 Binding 的后端查询：旧 ACP 不迁移、新 Hub 保留、错误 digest 不匹配、缺证据阻断、其他
+  Runtime 切入走共享重绑。两个最小内存表验证 JOIN，纯枚举测试不能证明该读取边界；默认层运行
+  `cargo test -p rovai-core --lib cline_backend_tests`，不启动完整迁移或进程。
+- `runtime::tests::recovery_boundaries_are_closed_over_the_product_adapter_catalog` 与 runtime_diff/runtime_file_operation 既有
+  owner 扩展 Hub/ACP 冻结边界、成功/失败补丁 case；没有复制 SQLite fixture 或删除原 case。
+- 历史 v103/v107 fixture 的封闭 Skill group 列表排除后来引入的 Cline/Command Code；原 Migration
+  保留断言不变。当前 catalog owner 补齐两个已有 Runtime，并将 ACP 数量预期与现有清单对齐。
+- `docs/research/cline-runtime/fixtures/native_hub_product_probe.mjs` 拥有隔离 Core→Native Hub→builtin IPC
+  的产品 seam，读取 SQL 证据但不写数据库。每个 first/warm/cold 必须有一条实际 source_operation_id
+  发送，missing-send fallback 不算通过。流程与参数见 [产品报告](../research/cline-runtime/hub-adapter-implementation.md)。
+
+<a id="command-code--cline-数值通道2026-10-04"></a>
+## Command Code / Cline 数值通道（2026-10-04）
+
+新增 owner 按数值来源和失败边界划分，不复制公共 Monitoring fixture：
+
+| Owner | 独立失败语义与最低成本 |
+| --- | --- |
+| `command_code::tests::usage_counts_root_calls_once_and_keeps_context_separate` | root start/end 配对、终态重述/子事件去重、稀疏桶和最新 Context；现有 decoder 只拥有帧和权威终态，不能证明计量语义。纯事件进入默认层 |
+| `cline::tests::observer_records_are_private_bounded_and_owned_by_one_prompt` | 新的官方 Plugin 文件边界：精确 lease、跨 Run/重复序号、预算、只读 poll 与终态消费；复用单个最小临时目录，归入 extended-tests。纯 DTO 不能证明文件隔离/消费 |
+| `cline::tests::host_overlay_preserves_native_paths_and_fences_config_changes` | Host 私有配置必须保留原生路径/插件、合并 MCP、限制文件权限并感知 credential 变化；最小文件 fixture，归入 extended-tests，不启动进程/数据库/模型 |
+| `db::tests::runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` | 新的已部署 schema 133 来源，七个 CHECK 表及其触发器/收据/marker 必须在故障后整体回滚；沿用 extended-tests 数据库 owner 层级。旧 DSH migration 不拥有此来源；纯函数无法证明事务回滚与重开 |
+
+真实 `isolated_command_code_reports_live_calls_and_exact_resume_usage` 和
+`isolated_cline_acp_host_observes_warm_and_exact_cold_prompts` 使用显式原因的 ignored Smoke，
+只接受隔离环境与真实凭据。前者核对逐调用四桶和等于原生最终 result，并证明 Context 在结束前到达；
+后者覆盖共享 Host/原生 Plugin seam、live/terminal 去重、精确恢复及工具/取消行为。
+普通 fixture 无法证明当前官方 Runtime 和模型实际返回这些字段。数值记录及环境约束见
+[真实验收](../research/runtime-monitoring/command-cline-verification-2026-10-04.md)。
+
+现有 Command transport owner 扩展为大 stdin 与两个输出管道同时阻塞的回归，并验证写入期间可取消，
+不新增等价进程测试。现有 Monitoring parser/flush、ACP event 和数据库 preflight/来源矩阵 owner
+直接加入 Cline case。JS 的 `scripts/lib/cline-observer.test.mjs` 独立拥有官方 Hook 对私有正文、子代理、
+迟到调用与非数值字段的排除；已进入 `pnpm test`。没有退役测试。
+
+合入主干指标后，既有 TRAE LRU owner 将 `models --json` 查询与 `acp serve` Host 启动分别计数，
+仍要求两个 prompt 共用同一 Host/Session。原 `private_host_config_is_created_only_for_kiro` 更名为
+`private_host_config_is_scoped_to_profiles_that_require_it`，保留全部原输入并补 Cline 私有目录 case。
+
+本次 `reported_mutation` 新增纯函数 owner
+`runtime_diff::tests::reported_mutations_preserve_native_fragments_without_claiming_exact_or_full_states`：
+拥有新持久化语义的来源白名单、字段剔除、路径排除和 Evidence 读回；既有 exact mutation owner 不拥有模糊匹配语义。
+它不创建文件、数据库、子进程或真实模型。Cline 配对、Command Code 生命周期、ACP 公共 seam、AgentRun reducer
+和 Renderer 均扩展既有 owner，不复制同一链路。沿现有 Runtime Diff owner 的 extended-tests 层级；定向命令为 `cargo test -p rovai-core --features extended-tests --lib runtime_diff::tests::`。
+真实模型与隔离 App 属于单独验收，见研究记录。
+
+Cline 窗口补采扩展既有 observer/config 两个 Rust owner 和 `scripts/lib/cline-observer.test.mjs`：
+覆盖精确 Provider/模型匹配、Host 快照与配置变更栅栏、无 used 的独立窗口、无效值/未知来源回退和私有字段排除。
+未增加独立测试或退役测试；定向命令为 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`
+与 `node --test scripts/lib/cline-observer.test.mjs`。真实目录、模型调用和 UI 证据见
+[窗口补采](../research/runtime-monitoring/command-cline-context-window-2026-10-05.md)。
+
+最小命令：`cargo test -p rovai-core --features extended-tests --lib command_code::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib cline::tests::`、
+`cargo test -p rovai-core --features extended-tests --lib runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`；
+其余定向与真实 Smoke 命令见上述验收记录，默认 workspace 门禁仍按下方路由。
+
+## 2026-10-09 主干合流的回归归属
+
+迁移编号 186 的冲突由既有 `db::user_anchors::tests::direct_reply_index_migration_is_atomic` 扩为两种来源：
+Preview/137 缺索引，main/136 有索引但缺 Cline/Command catalog；后者先经 187 保留 Mission 描述，
+再由 188/schema 138 收敛。失败收据回滚、部分来源拒绝、历史摘要不变及重开准入均保留；没有新增 Rust owner。
+既有 catalog migration owner 同步去掉后续 188 receipt 后再构造旧来源，不删除原输入矩阵。
+
+随后 Mention 主干也使用 receipt 187。扩展其既有
+`db::message_mentions::tests::mention_format_upgrade_preserves_frozen_rows_and_is_atomic`：覆盖 Preview/138 的 v32
+升级与 main/137 已有 v33、缺 Preview catalog 的来源，189/schema 139 收敛；验证部分 v33 拒绝、
+收据失败回滚、冻结行摘要与旧 187 收据不变及重开。沿既有 downgrade 链构造旧数据，不新增或退役 owner。
+最低命令为 `cargo test -p rovai-core --features extended-tests --lib db::`。
+完整迁移回归另发现 v104/v105 的旧目录 fixture 从当前 ALL 枚举意外带入 Cline/Command；
+只从其旧来源中排除后加入的两项，原迁移结果、Skill 分配及自定义范围断言不变。
+
+2026-10-10 合流内部续做请求后，主干 188/schema 138 与 Preview 同号收据也按完整结构区分，
+190/schema 140 收敛队列与 ACP catalog。扩展既有
+`db::run_continuation::tests::continuation_migration_rolls_back_and_preserves_frozen_evidence`：
+覆盖主干已具备内部请求但缺 catalog、Preview 139 仍使用消息来源、部分结构拒绝、失败回滚、旧 188
+收据与冻结证据保留及重开。既有 `delivery_queue::tests::user_continuation_preserves_source_and_claims_independent_fifo_batches`
+拥有带历史消息/排队数据的转换。没有新增或退役 Rust owner；最小命令为
+`cargo test -p rovai-core --features extended-tests --lib continuation_`，并复验 Mention 与 catalog migration owner。
+
+
+
+macOS 采用一个内核身份树，保留主干取消时捕获与本分支的可选持久 ledger。既有
+`runtime_probe_process::tests::cancelling_the_owner_kills_the_spawned_process_group` 在合流时暴露 100 ms
+缓存漏掉新 fork 的问题；取消捕获改为新鲜快照，原断言保留。PID-version 内核负例与崩溃恢复仍由
+`managed_process::process_tree::tests::pid_version_and_restart_ledger_preserve_process_ownership` 拥有，
+模块路径从原 macos 名称归入共享 process_tree 后同步 helper filter，未退役测试。
+
+Claude 既有公开文本测试保留 thinking/text/tool 交错与批量终态矩阵；绑定原生 message ID 后允许
+私有 thought started/completed 事件，并精确检查它们只有 itemId。公开文本仍单独断言，私有内容不外发。
+
+定向执行上述 owner、`managed_process::`、`acp::`、`claude::`、`antigravity::` 和 `continuation_`；
+默认 workspace、前端与文档门禁在合流后重跑。模型测试仍与这些本地控制夹具分开记录。
+
 ## 续做可靠性回归
 
 复用 `managed_process::tests::cancellation_reaps_captured_detached_children_after_parent_exit`，将既有 Linux
@@ -1030,6 +1248,66 @@ owner，覆盖已安装指标 schema 129 和 main Thread schema 128 两条路径
 `fresh_schema_database_at`，沿用 `extended-tests`；不新增 Rust owner。既有 Session Context 迁移
 owner 继续拥有指标数量保留与 127/128 升级；默认 workspace 与字段级回归另行执行。
 最低命令：`cargo test -p rovai-core --features extended-tests --lib thread_upgrade_preserves_existing_tables_and_rolls_back_on_receipt_failure`。
+
+## Command Code 官方 ACP 增量（2026-10-05）
+
+合并后的 catalog migration owner 同时保留 Migration 184/schema 133 和 185/schema 134 的来源、行数、
+故障回滚及重开断言，没有退役旧边界。Tool、Usage、权限、MCP 名称和平台 case 扩展已有最低层 owner。
+新增 ignored `isolated_command_code_acp_bootstrap_gate_and_resident_sessions` 拥有真实官方 Mod 在 initialize
+前加载、同 PID A→B→A 控制 RPC 与缺失绑定结束真实 Host 的跨进程边界；fixture 无法证明原生可选 Mod
+执行位置。它要求显式隔离 Home/可执行文件，不默认联网调用模型。`scripts/lib/command-code-bootstrap.test.mjs`
+拥有 Node hook 的 A/B 绑定及缺失/摘要/预算负例，已纳入 `pnpm test`。
+
+
+Command Code 原生配置指纹回归由
+`command_code_acp::tests::native_configuration_tracks_scoped_mod_sources_without_hashing_history` 拥有。
+新增此默认 Rust owner 的原因是没有既有测试覆盖其官方 Mod scope：同一嵌套 cwd 下，用户相对路径、
+项目相对路径、自动发现 Mod 和本地 source 的正文变化必须使配置不兼容，而 Session 历史追加必须不改变
+配置指纹；非法 settings 必须拒绝。这是保留 Host/Native Binding 的跨文件行为门禁，不是枚举快照测试。
+
+真实 App 拒绝审批暴露 Cline 在执行前只发送 `tool_call_update.pending → failed`，缺少 `tool_call` 时
+原配对器会退出读取，Run 停在 waiting。新增最低层纯状态 owner
+`acp::tests::paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`：拥有权限提案的
+稀疏失败、原生重复失败、权限通知不提前生成审计结果、后续 completed/result 仍保留拒绝结果，以及相同 Tool ID 在不同
+Session/Prompt 的隔离；成功但没有初始输入仍拒绝。
+现有 completion/路径 owner 没有配对状态，不能证明此回归；该测试不启动数据库或进程，沿用 ACP 的
+`extended-tests` 路由。最小命令：`cargo test -p rovai-core --features extended-tests --lib paired_tools_accept_permission_only_denial_without_crossing_session_or_prompt`。
+
+Run 权限刷新扩展既有 `kimi_completed_run_keeps_the_warm_session_and_idle_compaction_observer`：
+第二轮冻结 mode 改为 plan，仍断言同 Host/Session，并直接核对原生 RPC 先 default 后 plan。
+Cline/Command Code 同样将动态配置移到 AcpRuntime，不再由 Host 保存旧值；两者的模式切换及执行行为
+由隔离 packaged App 真实验证。未新增平行进程 fixture。
+
+## ACP leader 退出与继承管道（2026-10-05）
+
+新增 extended owner `acp::tests::leader_exit_reaps_inherited_pipes_and_preserves_buffered_response`。
+真实 Cline/Command Code SIGKILL 验收复现 leader 已死但子进程持有 stdout，原 reader 不产生 EOF，
+Command 延迟写入且 Run 留在 waiting。现有 client-terminal cancel owner 不经过 Runtime 原生子进程，
+无法覆盖该失败。最小真实进程 fixture 验证非零强杀清理、pending RPC 失败、精确一次退出通知，
+同时保留退出前已写入管道的权威 response；不使用数据库或网络。定向命令：
+`cargo test -p rovai-core --features extended-tests --lib leader_exit_reaps_inherited_pipes_and_preserves_buffered_response`。
+
+另以 `managed_process::macos::tests` 最小真实进程 owner 覆盖 macOS detached 子进程，
+验证 kernel PID version 拒绝替代身份，以及私有 ledger 在原 owner 消失后的回收和重复恢复。
+只用有界 sleep/标记文件，无数据库或模型；进程组内 fixture 无法证明 setsid 后代与 Core 重启路径。
+
+既有 `runtime::tests::startup_recovery_terminalizes_an_accepted_unknown_input_without_a_waiting_blocker`
+扩展 accepted / delivery_unknown / 已 dispatch 的 prepared 三种输入，并分别经过重启和同 Core Runtime loss。
+沿用最小数据库 owner，验证失败、未确认 cleanup、原输入保留、Delivery 收口与重复恢复不再处理，
+并断言完整公开快照仍为 failed、无旧恢复操作，避免 cleanup 记账被误投影为用户取消；不新增平行 DB fixture。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib startup_recovery_terminalizes_an_accepted_unknown_input_without_a_waiting_blocker`。
+
+两项既有 slow `action::tests::slow_tests::runtime_loss_*` 保留审批取消、未执行/unknown、attempt 与 delivery 的
+全部断言，将过时的永久 waiting 预期对齐 v6 的失败终态，并追加 cleanup 仍未确认的断言；未删除或降低覆盖。
+与主干真实 Host-loss 边界合并后，两项 fixture 显式记录原生工具执行前已 accepted 的输入；复用从
+runtime owner 移到 test_support 的同一最小输入 helper，不复制数据库场景。恢复 owner 另验证失败清理
+不会命中旧用户取消的公开投影，保留 unknown input 不重放与旧 epoch fence。
+
+既有 ignored 原生 owner `isolated_command_code_acp_bootstrap_gate_and_resident_sessions` 增加不存在完整 ID
+和截短 ID 的恢复反例：官方 Runtime 的 resume/load 静默成功，Rovai 必须在打开前以 session/list 拒绝；
+复用同一真实 Host 验证没有登记假 Session，不新增默认 fixture 或数据库。真实模型的有效 cold 恢复独立在 App 验收。
+既有 `controlled_native_resume_classifies_only_explicit_rejection_as_incompatible` 同时检查 catalog 明确缺失为
+incompatible、无效响应为 ambiguous，保证后续共享 continuity-lost 回退保留正确失败分类。
 
 ## Runtime 轻量启动回归 owner
 

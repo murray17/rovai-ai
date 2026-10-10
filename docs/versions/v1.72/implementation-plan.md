@@ -1096,7 +1096,7 @@ JavaScript 全套与文档门禁在仅含受版本控制文件及本次补丁的
 ## 2026-10-07 移除自定义 API 配置
 
 基线 `a5e202ab`，分支 `rovai/remove-custom-api`；已整合原本的本地保存修复及主线 `f67682c8`。
-按 User 明确取消要求执行 [Runtime Launch v52](../../contracts/runtime-launch-and-verification-v52.md)。
+按 User 明确取消要求执行 [Runtime Launch v53](../../contracts/runtime-launch-and-verification-v53.md)。
 
 - 移除 Claude/Codex 官方/API 单选、连接登录状态、URL、Key、模型映射及模型列表；普通启动设置保持。
 - Core、Desktop 与 Web 均退出 `runtime.startup.observe`，封闭输入拒绝旧连接补丁和 `apiKey/customApi`。
@@ -1156,6 +1156,17 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
   新版本已安装，当前会话仍运行旧版；退出后应从规范安装路径显式打开新版，不从备份启动。
 
 
+## 2026-10-08 Cline 原生认证简化（User 89）
+
+- 删除 `cline_hub/auth.rs` 的认证选择/白名单/字段准入/Provider 投影与 `NativeAuthLease`。
+- Hub 与显式登录统一直引原生源，保留普通环境；账号与 BYOK 均按 Fleet 复用、回收及并行。
+- 当前 Provider 的非挥发配置参与兼容性；缺可读账号标识不阻断，轮换及无关 Provider 更新不重绑。
+- 登录 completed 改为原生命令流程完成；零模型检查 authenticationStatus 保持 unknown。
+- 原生匹配回复 `ok:true / finishReason:error` 也进入已有脱敏错误分类，输入不重放。
+- 代码、真实负例、账号 warm/双成员并行、BYOK 和 App 结果见
+  [本轮报告](../../research/cline-runtime/native-auth-warm-parallel-2026-10-08.md)。
+- 无 schema 或其他 Runtime 改造，保留 Preview；首次完整授权、真实刷新和外部并发刷新未验证不再封禁普通执行。
+
 ## 2026-10-08 移除 Core legacy heartbeat
 
 用户授权范围为完整迁移消费者并删除全局 500ms 循环，保持既有事务、执行、恢复和渠道重试语义。
@@ -1213,6 +1224,80 @@ API 专用 UI/CLI fixture 退役，启动页 UI 回归由既有 settings-workspa
   同步 main `7f1562f3` 后完整 Rust、JavaScript、类型、构建与文档门再次通过；最终文档 diff 基线为该提交。
   隔离 Electron 验收覆盖 1040×700 日夜主题及键盘选择；未调用真实模型，也不宣称 Windows 真机验收。
 - Next：review、推送 PR、CI 与合入后清理。
+
+## 2026-10-08 Cline 官方 ACP 与 Hub 完整退役（User 95）
+
+- 接回共享 ACP Client/Host/Fleet、诊断、事件、权限、load 重放隔离与工具解码；无版本或认证字段门槛。
+- 删除 Hub 模块、类型、WebSocket 依赖、登录 UI/IPC、全部 Hub/shim 实验入口；Pi 结算与共享进程能力保留。
+- 原生认证源直引，无凭据副本。冻结 Bootstrap 使用成员 Host 不可变原生文件 Rule，普通 warm 和并行不依赖认证类型。
+- 旧 Binding 按共享不兼容替换，公开历史及原生历史保留，旧输入不自动重发。
+- 当前安装 3.0.3 广告 loadSession 却返回 -32601；cold 真实验收不通过，不能沿用 Hub 结论。
+- 合同/Architecture/Context/当前导航已更新，历史报告固定退役前复现链接；当前验收见
+  [ACP 退役报告](../../research/cline-runtime/acp-retirement-2026-10-08.md)。后端切换不改变其他 Runtime 合同；主干分叉数据由 186/187 汇合到 schema 137，current_version 不变。
+
+## 2026-10-08 主干 schema 135 与 Preview 合流
+
+- 保留 main 的 Mission 原子保存、结构化提及、Pending 首发邀请和续做修复。
+- Migration 184/185 的双来源由完整 schema 识别，186 汇合 Runtime catalog/续做，187 保留或回填 Mission 描述到 schema 137。
+- 扩展已有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，覆盖 main/135 结构化 Atom、部分结构拒绝、失败回滚和重开库；保留 Mission 描述及 continuation 的原 owner。未新增平行测试体系。
+- 主干 Runtime Launch v53 和 D17/D18 保留原编号；本分支决定顺延 D22–D30，现行后端由 v54/D30 拥有。
+
+## 2026-10-08 官方 ACP 切换交付
+
+- 最终实现 `9b8fa131`：共享 ACP 69 项、Fleet/Pi/进程与迁移 owner、Rust workspace/all-feature 编译、前端类型及 2611 项测试通过。
+- Windows runner 对该提交执行 workspace/all-targets 编译通过；macOS arm64 App 签名与真实账号/BYOK 主路径通过。
+- 打包账号 6 成功 / 1 预期取消，独立双成员并行、同 Host warm、审批与取消后继续成立；BYOK 打包 first/warm 两轮通过。
+- 无凭据诊断返回原生 authentication_required，未自动登录。3.0.3 load 广告与实际不符仍是明确 native cold 缺口，ACP compact 不宣称修复。
+- 最终边界、负例、真实/模拟验证区分和公开证据见 [ACP 退役验收](../../research/cline-runtime/acp-retirement-2026-10-08.md)。PR #662 更新后保留未合并。
+
+## 2026-10-09 headless 候选与最新主干合流（User 101）
+
+- headless 显式 A→B→A 同 Session 与 System Mod 已由实际 1.66.0 和官方 1.79.1 对照验证；
+  普通写入仍受原生 print permission gate 阻断，生产保持 ACP，不把全权限 Mod 实验冒充普通审批。
+  真实 BYOK 四次成功、一次预期取消及无模型覆盖的差异见[专门报告](../../research/command-code-runtime/headless-resume-2026-10-09.md)。
+- 合流 main `81f8b1fc`，保留 Mention v33、DSH 原生/Web 模型来源与 Windows Job 当前活跃数清理。
+  共享 ACP 同时保留本分支 Session permissions 和 DSH 来源字段，Cline 保持隐藏。
+- 保留主干 D19–D21；本分支当前版本决定顺延 D22–D31，仅调整追溯链接，不改变已接受的语义。
+- 两种 receipt 187 按真实格式识别，189/schema 139 收敛；原有 184–188 兼容与收据保留，
+  既有 Mention 迁移 owner 扩展两种来源、部分结构、失败回滚及冻结证据保留。
+
+本地合流验证：默认 Rust workspace 465 通过／2 人工 Smoke 忽略，共享 ACP 69 通过／2 人工 Smoke 忽略，
+Claude 34、DSH 5 与模型目录 owner 通过。前端类型、239 文件／2615 Vitest、339 Node 测试、文档门禁
+及桌面构建通过。Mention 两来源／回滚／旧收据保留与修正后的 v104/v105 fixture 定向通过。
+这些检查不新增 headless 产品准入，也不代替 Windows runner 或真实打包模型验收。
+
+
+## 2026-10-09 headless 退役与两个 ACP 暂缓公开（User 105）
+
+- 删除 Command Code headless Rust transport/activity、五个专属 Rust owner、两份 Python 探针及模型对照中的 print 请求；ACP/RPC 探针继续保留。
+- Cline 与 Command Code 官方 ACP、System Rule/Mod、权限、工具、恢复、共享 Fleet/进程及历史身份保留；Command 撤回 macOS arm64 Preview，与 Cline 一样全平台 NotQualified。
+- 可见目录统一隐藏两者，覆盖设置、新手引导、队员/Skill 选择、安装引导和监控筛选；保留既有 Run/用量标签与配置，无数据库迁移。
+- 已知缺口分别记录于兼容性清单与两份研究索引。已删代码链接固定到 `2b9a2dbaf8d4312c2f539c91a1aa500c1e5c279e`，失败证据未删除。
+- 本轮不发送真实模型请求，不升级 Runtime、不运行 headless、不恢复 Hub，不触碰用户凭据或原生历史。
+- 首轮验证：Rust workspace 462 passed / 1 个人工 Smoke ignored；相关 Renderer 5 文件 213 项、TypeScript、两个 System Hook Node 测试、文档 10 项及版本/治理门禁、格式检查通过。
+- 合流 `3a83b2b7`（DSH 目标模型思考选项）时保留两套独立语义：Cline/Command 原生默认哨兵与 DSH 目标选项；没有扩大 headless 范围或恢复公开入口。
+- 合流后前端 239 文件 / 2615 项、typecheck、共享 ACP 69 passed / 2 个真实 Smoke ignored、Command 专属 1 项、Cline 专属 3 项、Adapter 25 项通过；桌面/Web 构建和隔离 Electron Runtime Picker（实际菜单隐藏、键盘、IME、双主题/尺寸、DSH 目标选项）通过。
+- 扩展平台证据 owner 首次发现兼容清单新增说明后摘要未同步；按原合同更新当前 register digest，不增加任何 Runtime 的资格，随后复验。用户凭据、原生历史与日常安装没有改动。
+- `562e1bb4` 的默认 workspace 462/1、平台 5 项、CI 与 Windows all-targets 编译通过。检查期间再次合流 main `2256db53`，保留后续 DSH 能力缓存与图片菜单修复；最新合流的默认 workspace 462 passed / 1 ignored、前端 239 文件 / 2616 项、typecheck、文档门禁、桌面构建及隔离 Electron Runtime Picker 复验通过。最终 CI 与 Windows 编译以 PR 当前提交回执为准。
+
+
+## 2026-10-10 两个隐藏 ACP 与最新主干合流
+
+合流 main `0a7e183c8`，保留内部续做请求、DSH 目录迟到响应处理、macOS 进程退出修复及 v0.4.7
+发布内容。Cline/Command 仍保持不公开，headless 专属实现和探针没有恢复。
+主干 188/schema 138 与 Preview 同号收据按实际结构区分，经 190/schema 140 收敛内部请求与保留的
+ACP catalog；旧收据、公开历史、待执行请求和冻结证据保持。既有迁移 owner 扩展两种来源、
+残缺结构拒绝、失败回滚和重开，未新增独立测试。
+
+macOS 主干的 `EPERM` 后退出确认接到现有身份信号路径，保留活跃后代、捕获失败和其他信号错误的
+拒绝语义，不留下被平台条件排除的分支。原进程清理 owner 的正负例全部保留。
+
+本地验证：默认 Rust workspace 463 passed / 1 个人工 Smoke ignored；迁移、续做、Adapter、Cline 与
+平台准入定向通过。DSH catalog 既有 owner 首次因漏记主干上下文字段失败，补齐该字段的输入与断言后
+通过；最终进程清理与 ACP 复验 76 passed / 2 个真实 Smoke ignored。TypeScript、239 文件 / 2616
+Vitest、339 Node 测试、文档通用门禁及 Desktop/Web 构建通过。隔离 Electron 的真实 Runtime 菜单确认
+两个隐藏项均未展示，并通过键盘、IME、双主题/尺寸、缩放与 DSH 迟到目录验证；夹具已清理，未启动
+Core 或真实 Runtime。CI 与 Windows all-targets 编译以 PR 当前提交回执为准。
 
 ## 2026-10-09 消息 Mention 元数据
 

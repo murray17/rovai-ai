@@ -42,5 +42,7 @@ describe('Runtime installation guidance', () => {
   it('links a desktop Runtime to its download page', () => {
     expect(render('antigravity-app', 'macos-arm64')).toContain('前往官网下载')
     expect(runtimeInstallGuide('cursor-agent', 'macos-arm64')).toBeNull()
+    expect(runtimeInstallGuide('cline-cli', 'macos-arm64')).toBeNull()
+    expect(runtimeInstallGuide('command-code-cli', 'macos-arm64')).toBeNull()
   })
 })

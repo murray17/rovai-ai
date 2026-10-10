@@ -9,10 +9,31 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
 
 # Rovai AI 运行监控指标可采集性审计
 
+2026-10-06 [Command MCP 原生/ACP 交付 A/B](../command-code-runtime/mcp-delivery-ab-2026-10-06.md)：
+固定 1.74.1 + sub2api/gpt-6-sol，观察实际 Provider 工具集合；保持生产原生交付，提供上游复现及独立诊断正向对照。
+
+2026-10-06 [Command 原生 MCP / Cline System 补验及 14 轴对照](command-cline-native-system-2026-10-06.md)：
+正常 System Rule、原生配置生命周期、真实 LLM 正反对照和字段边界；不把发现/配置成功冒称 MCP 调用通过。
+
+
 > 2026-10-02：按用户要求撤下全部 Runtime 的输出测速。以下速度、v2/v3、思考计数及旧探针记录均为历史证据，
 > 对应代码保留在 Git 提交 `ee444ab1`。当前只保留原生用量与 Session 上下文，见[执行指标合同](../../contracts/runtime-execution-metrics-v7.md)。
 
 当前执行台的取数范围、隐藏暂停、引用复用与迟到刷新收口见[执行指标读取验收](execution-metrics-refresh-verification-2026-10-01.md)。
+
+2026-10-05 [Command Code / Cline 故障恢复验收](command-cline-fault-recovery-2026-10-05.md)：真实 Runtime/Core/App 强杀、后代回收、排队恢复与错误 Session ID 门禁，保留失败反例。
+
+2026-10-05 [Command Code / Cline 完整 Checklist 与修复](command-cline-checklist-2026-10-05.md)：Command 官方 ACP、受管 System、真实 warm/compact 与 Cline 仍有的上游差异，逐项区分实现和资格。
+
+2026-10-05 [Command Code / Cline 窗口补采](command-cline-context-window-2026-10-05.md)：
+同一 Provider 的版本化模型目录返回 gpt-6-sol 容量；修正普通 `/models` 漏查，Cline 补原生配置窗口采集。
+
+2026-10-05 [Command Code / Cline 编辑与能力差异复核](command-cline-parity-2026-10-05.md)：
+成功补丁片段接入 Command/Files Changed，真实两成员编辑、失败、零发送、原生 Skills/MCP 及重开证据。
+
+2026-10-04 [Command Code 与 Cline 真实模型核验](command-cline-verification-2026-10-04.md)：
+两条链路均取得四个原生 token 桶，Cline 另有可选 reasoning；最新根调用输入产生 Context used，
+窗口、比例和成本仍未知。证据分别到 Core headless transport / ACP Host，不是完整 App 或平台准入。
 
 2026-10-04 [上下文运行中可用性收口](live-context-usability-2026-10-04.md)：输入确认解绑、实际模型窗口复用及 ZCode 事件触发读取。
 

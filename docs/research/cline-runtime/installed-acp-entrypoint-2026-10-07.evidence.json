@@ -1,0 +1,516 @@
+{
+  "schemaVersion": 1,
+  "authority": "research-evidence-only",
+  "observedAt": "2026-10-07T10:42:04.558489+00:00",
+  "requestMessageId": "dcdde17c-198a-467a-86c7-6332be497675",
+  "baselineCommit": "86d6b46b54fead775cc1a8c07acd09ef43f21f4a",
+  "platform": {
+    "os": "Darwin",
+    "architecture": "arm64"
+  },
+  "decision": {
+    "compatibilityStatus": "entry_not_injectable",
+    "scope": "This observed installation; no production detector or overlay shipped",
+    "reason": "The selected Node wrapper spawns a compiled native binary. No loadable ACP entrypoint or verified access to that process’s actual Core.start was found in this installation.",
+    "stockEntrypointRetained": true,
+    "overlayApplied": false,
+    "upstreamCompactionConfig": "unobserved",
+    "nativeCompaction": "not_tested",
+    "preferenceSemantics": "not_evaluated",
+    "minimumVersionPolicy": "unchanged_existing_3.0.65",
+    "existingReadinessBlocker": "runtime_version_below_minimum",
+    "sessionNewCount": 0,
+    "sessionLoadCount": 0,
+    "promptCount": 0,
+    "postStartFallbackOrPromptReplay": false
+  },
+  "normalSelection": {
+    "dailyDatabase": {
+      "access": "mode=ro",
+      "path": "<user-home>/Library/Application Support/Rovai-ai/rovai.sqlite",
+      "clineStartupSettingCount": 0,
+      "clineInstallationCount": 0
+    },
+    "clineBinPathOverridePresent": false,
+    "rovaiClineBinOverridePresent": false,
+    "shellPath": "/opt/homebrew/bin/cline",
+    "wrapperRealpath": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+    "rovaiDiscovery": {
+      "pid": 80397,
+      "coreExecutable": "<user-home>/Library/Application Support/RovaiRuntimeAcceptance/mission-052-cline-20261004-swrfa_xh/Application/Rovai AI.app/Contents/Resources/bin/rovai-core",
+      "core": {
+        "builtinToolCatalogDigest": "sha256:4f905d500bdb2f27659ac936051f5d361750c04bea21a3800ad90d2d150b8334",
+        "builtinToolContractVersion": 35,
+        "builtinToolEvidenceProjectionVersion": 4,
+        "builtinToolIpcProtocolVersion": 2,
+        "dataDir": "<probe-root>/core-data",
+        "ok": true,
+        "readModelSchema": 35,
+        "version": "0.4.3"
+      },
+      "startup": {
+        "configuration": {
+          "environment": [],
+          "programPath": null
+        },
+        "revision": 0,
+        "runtimeKind": "cline-cli"
+      },
+      "inspection": {
+        "executablePath": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+        "reportedVersion": "3.0.3",
+        "searchEnvironment": {
+          "createdAt": "2026-10-07T10:40:42.388722+00:00",
+          "diagnosticCodes": [],
+          "generation": 2,
+          "pathEntryCount": 27,
+          "shell": {
+            "elapsedMillis": 506,
+            "entryCount": 28,
+            "interactive": true,
+            "shellName": "zsh",
+            "status": "captured"
+          }
+        },
+        "status": "recognized"
+      },
+      "installations": [
+        {
+          "adapterKind": "cline-cli",
+          "authScope": "default",
+          "commandName": "cline",
+          "createdAt": "2026-10-07T10:40:43.080469+00:00",
+          "enabled": true,
+          "executablePath": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+          "generation": 1,
+          "id": "adapter-installation-d2a61be0-371e-4b12-b7e4-871d56e0e215",
+          "installationClass": "managed_default",
+          "lastProbeAttempt": null,
+          "memberRuntimeDefaults": null,
+          "modelCatalog": {
+            "expiresAt": null,
+            "observedAt": null,
+            "revalidateAfter": null,
+            "status": "unavailable"
+          },
+          "pathState": "valid",
+          "referencedProfileCount": 0,
+          "relocationHistory": [],
+          "snapshot": {
+            "authenticationStatus": "unknown",
+            "capabilities": [],
+            "executableFingerprint": "sha256:2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+            "lastAttemptedAt": "2026-10-07T10:40:43.080189+00:00",
+            "lastError": "runtime_version_below_minimum",
+            "lastSuccessfulProbeAt": null,
+            "models": [],
+            "nativeSessionCompatibilityKey": null,
+            "observedAt": "2026-10-07T10:40:43.080189+00:00",
+            "permissionOptions": [
+              {
+                "choices": [
+                  {
+                    "label": "act",
+                    "value": "act"
+                  },
+                  {
+                    "label": "plan",
+                    "value": "plan"
+                  }
+                ],
+                "description": "Cline native mode",
+                "key": "mode",
+                "label": "mode",
+                "recommendedValue": "act",
+                "required": true,
+                "risk": "elevated",
+                "scope": "session",
+                "supported": true,
+                "unsupportedReason": null,
+                "valueType": "enum"
+              },
+              {
+                "choices": [
+                  {
+                    "label": "true",
+                    "value": "true"
+                  },
+                  {
+                    "label": "false",
+                    "value": "false"
+                  }
+                ],
+                "description": "Cline native auto_approve",
+                "key": "auto_approve",
+                "label": "auto_approve",
+                "recommendedValue": "true",
+                "required": true,
+                "risk": "elevated",
+                "scope": "session",
+                "supported": true,
+                "unsupportedReason": null,
+                "valueType": "enum"
+              }
+            ],
+            "permissionSchemaDigest": "56a70ce4b234fa62fc601203d5347e641ab745d7ca2df3f4a34d6da8d46e2ae6",
+            "permissionSchemaVersion": 1,
+            "probeStatus": "light_failed",
+            "protocols": [],
+            "reportedVersion": "3.0.3",
+            "staleAt": null
+          },
+          "source": "inherited_path",
+          "updatedAt": "2026-10-07T10:40:43.080469+00:00",
+          "version": 1
+        }
+      ],
+      "stop": {
+        "code": 0,
+        "signal": null,
+        "stderrBytes": 449,
+        "stderrDigest": "18171ae6d3b6497bdcfb5db92dfed715f98762d4b915346b2da12bcdff7184dd"
+      }
+    },
+    "coreExecutableSha256": "5633570f634a82598d77fc080b4406de686df6a25a6c1ac489598fd07438b95d",
+    "coreProvenance": "Unchanged isolated acceptance Rovai Core from prior Mission tests; this is the host, not the Cline runtime."
+  },
+  "installation": {
+    "source": "Homebrew formula cline, bottle",
+    "packageRoot": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline",
+    "wrapperPackage": {
+      "name": "cline",
+      "version": "3.0.3",
+      "description": "Autonomous coding agent CLI - capable of creating/editing files, running commands, using the browser, and more",
+      "license": "Apache-2.0",
+      "keywords": [
+        "cline",
+        "claude",
+        "dev",
+        "mcp",
+        "openrouter",
+        "coding",
+        "agent",
+        "autonomous",
+        "chatgpt",
+        "sonnet",
+        "ai",
+        "llama",
+        "cli"
+      ],
+      "author": {
+        "name": "Cline Bot Inc."
+      },
+      "homepage": "https://cline.bot",
+      "bugs": {
+        "url": "https://github.com/cline/cline/issues"
+      },
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/cline/cline.git",
+        "directory": "sdk/apps/cli"
+      },
+      "bin": {
+        "cline": "./bin/cline"
+      },
+      "scripts": {
+        "postinstall": "node ./postinstall.mjs || true"
+      },
+      "optionalDependencies": {
+        "@cline/cli-darwin-x64": "3.0.3",
+        "@cline/cli-windows-arm64": "3.0.3",
+        "@cline/cli-linux-arm64": "3.0.3",
+        "@cline/cli-windows-x64": "3.0.3",
+        "@cline/cli-darwin-arm64": "3.0.3",
+        "@cline/cli-linux-x64": "3.0.3"
+      }
+    },
+    "platformPackage": {
+      "name": "@cline/cli-darwin-arm64",
+      "version": "3.0.3",
+      "description": "Cline CLI binary for darwin arm64",
+      "os": [
+        "darwin"
+      ],
+      "cpu": [
+        "arm64"
+      ],
+      "repository": {
+        "type": "git",
+        "url": "git+https://github.com/cline/cline.git",
+        "directory": "sdk/apps/cli"
+      },
+      "bin": {
+        "cline": "bin/cline"
+      }
+    },
+    "wrapperCoreLoading": "No Core imports; child_process.spawnSync(target, process.argv.slice(2), {stdio: inherit, env: childEnv})",
+    "resolutionOrder": [
+      "CLINE_BIN_PATH",
+      "bin/.cline",
+      "ancestor node_modules/@cline/cli-<platform>-<arch>/bin/cline"
+    ],
+    "observedResolution": "ancestor_platform_package",
+    "cachedBinaryPresent": false,
+    "binaryPath": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline",
+    "binaryFileType": "Mach-O 64-bit executable arm64",
+    "binaryMagicHex": "cffaedfe",
+    "loadableAcpEntrypointFound": false,
+    "exposedCoreStartEntryFound": false,
+    "adjacentSdkImportAttempted": false,
+    "fileInventoryBefore": {
+      "LICENSE": {
+        "size": 11344,
+        "sha256": "f704446a5f1271608805598b557e4288cf8580477ea038c9c3d8b361f693f6b8",
+        "mode": "0o755"
+      },
+      "README.md": {
+        "size": 14637,
+        "sha256": "96d5695c8bd1808bd30020aa869ac937f1ce1af21d4c1d58eef00fef5475813f",
+        "mode": "0o755"
+      },
+      "bin/cline": {
+        "size": 2841,
+        "sha256": "2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+        "mode": "0o755"
+      },
+      "node_modules/.bin/cline": {
+        "size": 78640930,
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755"
+      },
+      "node_modules/@cline/cli-darwin-arm64/bin/cline": {
+        "size": 78640930,
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755"
+      },
+      "node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js": {
+        "size": 12324,
+        "sha256": "3fa353ee0fa24a42ce9243b912423a265145c3e894f786aa6a1f894a6626a95c",
+        "mode": "0o755"
+      },
+      "node_modules/@cline/cli-darwin-arm64/package.json": {
+        "size": 340,
+        "sha256": "221ac79ad535f10c687f147208fb14d4bbb90cad85b7a22a56cfb2e829a2dbf0",
+        "mode": "0o755"
+      },
+      "package.json": {
+        "size": 1056,
+        "sha256": "62be1862187cc44837d59d76314118ef12070dd73c71eded042bca24b0d39002",
+        "mode": "0o755"
+      },
+      "postinstall.mjs": {
+        "size": 2593,
+        "sha256": "78e422d0bb8a9b392926c39f106f9c9808f96bead9438f12ca204ce0d3b3cacf",
+        "mode": "0o755"
+      }
+    },
+    "fileInventoryAfterAcp": {
+      "LICENSE": {
+        "size": 11344,
+        "sha256": "f704446a5f1271608805598b557e4288cf8580477ea038c9c3d8b361f693f6b8",
+        "mode": "0o755"
+      },
+      "README.md": {
+        "size": 14637,
+        "sha256": "96d5695c8bd1808bd30020aa869ac937f1ce1af21d4c1d58eef00fef5475813f",
+        "mode": "0o755"
+      },
+      "bin/cline": {
+        "size": 2841,
+        "sha256": "2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+        "mode": "0o755"
+      },
+      "node_modules/.bin/cline": {
+        "size": 78640930,
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755"
+      },
+      "node_modules/@cline/cli-darwin-arm64/bin/cline": {
+        "size": 78640930,
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755"
+      },
+      "node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js": {
+        "size": 12324,
+        "sha256": "3fa353ee0fa24a42ce9243b912423a265145c3e894f786aa6a1f894a6626a95c",
+        "mode": "0o755"
+      },
+      "node_modules/@cline/cli-darwin-arm64/package.json": {
+        "size": 340,
+        "sha256": "221ac79ad535f10c687f147208fb14d4bbb90cad85b7a22a56cfb2e829a2dbf0",
+        "mode": "0o755"
+      },
+      "package.json": {
+        "size": 1056,
+        "sha256": "62be1862187cc44837d59d76314118ef12070dd73c71eded042bca24b0d39002",
+        "mode": "0o755"
+      },
+      "postinstall.mjs": {
+        "size": 2593,
+        "sha256": "78e422d0bb8a9b392926c39f106f9c9808f96bead9438f12ca204ce0d3b3cacf",
+        "mode": "0o755"
+      }
+    },
+    "symlinksObservedAfterAcp": {
+      "node_modules/.bin/cline": "../@cline/cli-darwin-arm64/bin/cline"
+    },
+    "versionProbe": {
+      "arguments": [
+        "--version"
+      ],
+      "exitCode": 0,
+      "stdout": "3.0.3\n",
+      "stderr": ""
+    },
+    "helpProbe": {
+      "arguments": [
+        "--help"
+      ],
+      "exitCode": 0,
+      "stdout": "Usage: cline [options] [command] [prompt]\n\nCline CLI - AI coding assistant in your terminal\n\nArguments:\n  prompt                        Your prompt. Default to start in act mode with\n                                auto-approve enabled.\n\nOptions:\n  -V, --version                 Output the version number\n  -p, --plan                    Run in plan mode\n  --json                        Output messages as JSON instead of styled text\n  --auto-approve <boolean>      Set tool auto-approval for all tools (default:\n                                true)\n  -c, --cwd <path>              Working directory\n  --thinking <level>            Set reasoning effort level between\n                                none|low|medium|high|xhigh (default: medium)\n  --compaction <mode>           Context compaction mode: agentic|basic|off\n                                (default: basic)\n  -i, --tui                     Open the terminal user interface (TUI) for\n                                interactive sessions\n  --id <session-id>             Resume an existing session by ID\n  -P, --provider <id>           Provider id (default: cline)\n  -k, --key <api-key>           API key override for this run\n  -m, --model <model-id>        Model to use for the session with the selected\n                                provider\n  -s, --system <system-prompt>  Override the default system prompt\n  -z, --zen                     Start a session that runs in the background hub\n  --retries [value]             Number of maximum consecutive mistakes (retries)\n                                before exiting (default: 6)\n  -t, --timeout <seconds>       Optional timeout in seconds (default: 0 for no\n                                timeout)\n  --acp                         Run in Agent Client Protocol (ACP) mode for\n                                editor integration\n  --config <path>               Configuration directory (default:\n                                ~/.cline/data/settings)\n  --data-dir <path>             Use isolated local state at this directory path\n                                (default: ~/.cline)\n  --hooks-dir <path>            Directory path to additional hooks for runtime\n                                hook injection (default: ~/.cline/hooks)\n  --worktree                    Auto-create a detached git worktree under\n                                ~/.cline/worktrees/ and run the task there\n  --update                      Check for updates and install if available\n  --kanban                      Run the kanban app\n  -v, --verbose                 Show verbose output\n  -h, --help                    display help for command\n\nCommands:\n  auth [options] [provider]     Authenticate a provider and configure what model\n                                is used\n  config [options]              Show current configuration\n  plugin                        Manage Cline Plugins\n  connect [options] [channel]   Connect to an external channel\n  mcp                           Manage MCP servers\n  doctor                        Diagnose and fix configuration issues\n  history|h [options]           List session history or manage saved sessions\n  hook                          Handle a hook payload from stdin\n  schedule                      Manage scheduled tasks\n  hub                           Manage the local hub daemon\n  update [options]              Check for updates and install if available\n  version                       Show Cline CLI version number\n  kanban                        Run the kanban app\n",
+      "stderr": ""
+    }
+  },
+  "acpProbe": {
+    "startedAt": "2026-10-07T10:42:04.231894+00:00",
+    "arguments": [
+      "--acp"
+    ],
+    "requestsSent": [
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1,
+          "clientCapabilities": {
+            "fs": {
+              "readTextFile": true,
+              "writeTextFile": true
+            },
+            "terminal": true
+          },
+          "clientInfo": {
+            "name": "rovai-installation-inspection",
+            "version": "1"
+          }
+        }
+      }
+    ],
+    "responses": [
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": {
+          "protocolVersion": 1,
+          "agentCapabilities": {
+            "loadSession": true,
+            "promptCapabilities": {
+              "image": true,
+              "audio": false,
+              "embeddedContext": false
+            }
+          },
+          "agentInfo": {
+            "name": "cline",
+            "version": "3.0.3"
+          },
+          "authMethods": [
+            {
+              "id": "cline",
+              "name": "Sign in with Cline"
+            },
+            {
+              "id": "openai-codex",
+              "name": "Sign in with ChatGPT Subscription"
+            }
+          ]
+        }
+      }
+    ],
+    "pid": 81123,
+    "initializeReceived": true,
+    "processTree": [
+      {
+        "pid": 81123,
+        "ppid": 81121,
+        "command": "/opt/homebrew/opt/node/bin/node"
+      },
+      {
+        "pid": 81124,
+        "ppid": 81123,
+        "command": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline"
+      }
+    ],
+    "exitCode": 0,
+    "stderr": "\u001b[31merror:\u001b[0m [acp] starting ACP mode over stdio…\n",
+    "stdoutTail": "",
+    "endedAt": "2026-10-07T10:42:04.558489+00:00"
+  },
+  "isolation": {
+    "dataDir": "<probe-root>/core-data",
+    "skillLibraryRoot": "<probe-root>/core-data/managed-skill-library",
+    "mcpPath": "<probe-root>/mcp.json",
+    "nativeHome": "<probe-root>/native-home",
+    "nativeConfig": "<probe-root>/native-config",
+    "nativeData": "<probe-root>/native-data",
+    "workspace": "<probe-root>/workspace",
+    "coreStartupWritesToDailyDatabase": false,
+    "nativeSettingsCopied": false,
+    "runtimeDownloaded": false,
+    "coreReplacement": false,
+    "pluginOrPreloadInjection": false,
+    "nativeHomeConfigDataFilesAfterAcp": []
+  },
+  "protection": {
+    "userSettingsBefore": {
+      "<user-home>/.cline/data/settings/providers.json": {
+        "size": 343,
+        "sha256": "1b3eff25040b2a8d2584060b8b5849ed0ebbbf883fd3d6b0e7be23522e343426",
+        "mode": "0o600"
+      },
+      "<user-home>/.cline/data/settings/global-settings.json": null,
+      "<user-home>/.cline/data/settings/cline_mcp_settings.json": {
+        "size": 30,
+        "sha256": "066cdcc5ea8b813b6d4155783f53887d104e261e0aec7c3aab159a9efed926ff",
+        "mode": "0o644"
+      },
+      "<user-home>/.cline/data/settings/models.json": null
+    },
+    "userSettingsAfterAcp": {
+      "<user-home>/.cline/data/settings/providers.json": {
+        "size": 343,
+        "sha256": "1b3eff25040b2a8d2584060b8b5849ed0ebbbf883fd3d6b0e7be23522e343426",
+        "mode": "0o600"
+      },
+      "<user-home>/.cline/data/settings/global-settings.json": null,
+      "<user-home>/.cline/data/settings/cline_mcp_settings.json": {
+        "size": 30,
+        "sha256": "066cdcc5ea8b813b6d4155783f53887d104e261e0aec7c3aab159a9efed926ff",
+        "mode": "0o644"
+      },
+      "<user-home>/.cline/data/settings/models.json": null
+    },
+    "installUnchangedAfterAcp": true,
+    "userSettingsUnchangedAfterAcp": true,
+    "privateEnvironmentFileRemoved": true,
+    "corePidExited": true,
+    "acpPidsExited": true
+  },
+  "acceptanceNotRun": [
+    "preference default/basic/agentic/off overlay",
+    "upstream compaction object passthrough",
+    "actual native compaction and subsequent model success",
+    "post-compaction cold resume and Session/Binding continuity",
+    "post-compaction System/Skill/MCP/permission/send continuity",
+    "compaction cancellation",
+    "multi-session concurrency",
+    "overflow recovery and retry",
+    "upgrade or source-change re-probe",
+    "other platforms"
+  ],
+  "references": [
+    "https://docs.cline.bot/usage/acp",
+    "https://github.com/cline/cline/blob/main/apps/cli/DISTRIBUTION.md"
+  ]
+}
