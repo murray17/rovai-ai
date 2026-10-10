@@ -4528,6 +4528,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer textarea { caret-color: var(--conversation-action); width: 100%; min-height: 42px; resize: none; border: 0; outline: 0; color: var(--ink); background: transparent; padding: 5px 0 4px; font-size: 13px; line-height: 1.5; }
 .structured-mention-composer { position: relative; width: 100%; min-height: 0; }
 .structured-mention-editor { display: block; width: 100%; min-height: 42px; max-height: min(180px, 26vh); overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 5px 0 4px; outline: 0; color: var(--ink); caret-color: var(--conversation-action); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; cursor: text; }
+.structured-mention-editor[data-composer-atom-selected] { caret-color: transparent; }
 .structured-mention-paragraph { margin: 0; }
 .structured-mention-placeholder { position: absolute; top: 5px; right: 0; left: 0; overflow: hidden; color: var(--faint); font-size: 13px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 .composer-reply-region { display: grid; min-width: 0; gap: 4px; padding: 1px 0 2px; }
@@ -4583,6 +4584,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
   vertical-align: baseline;
   transition: color 110ms ease, background-color 110ms ease, box-shadow 110ms ease;
 }
+.structured-mention-token[data-composer-selected="true"],
 .structured-mention-token.is-interactive:hover,
 .structured-mention-token.is-interactive[data-mention-open="true"] {
   color: var(--mention-ink-hover);

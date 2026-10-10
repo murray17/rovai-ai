@@ -51,10 +51,42 @@ app.whenReady().then(async () => {
   )
   const cases = []
   const failures = []
+  const firstMention = { kind: 'atom', atom: { type: 'member', agentId: 'agent-a' } }
+  const secondMention = { kind: 'atom', atom: { type: 'member', agentId: 'agent-b' } }
 
   async function reset(value) {
     await evaluate(`window.composerTest.reset(${JSON.stringify(value)})`)
     await frames()
+  }
+
+  async function resetMentionPair(gap = ' ') {
+    await reset({ version: 2, segments: [
+      firstMention, ...(gap ? [{ kind: 'text', text: gap }] : []), secondMention, { kind: 'text', text: ' ' }
+    ] })
+    await evaluate(`window.composerTest.setMembers([
+      { agentId: 'agent-a', displayName: '队员甲', mentionable: true },
+      { agentId: 'agent-b', displayName: '队员乙', mentionable: true }
+    ])`)
+    await frames()
+  }
+
+  async function selectLastMention() {
+    await key('ArrowLeft', 37)
+    await key('ArrowLeft', 37)
+    const selected = await state(false)
+    assert.equal(selected.selectionKind, 'node')
+    assert.equal(selected.caret.color, 'rgba(0, 0, 0, 0)', 'NodeSelection must not show a stale text caret')
+  }
+
+  async function expectEditableCaret() {
+    const current = await state(false)
+    assert.equal(current.focused, true)
+    assert.equal(current.selectionKind, 'range')
+    assert.equal(current.caret.count, 1)
+    assert.equal(current.caret.collapsed, true)
+    assert.equal(current.caret.insideEditor, true)
+    assert.equal(current.caret.insideAtom, false)
+    assert.notEqual(current.caret.color, 'rgba(0, 0, 0, 0)')
   }
 
   async function insert(text) {
@@ -312,6 +344,88 @@ app.whenReady().then(async () => {
       await key('Backspace', 8)
       const current = await expectSegments([])
       assert.deepEqual(current.atomTypes, [])
+    })
+
+    await run('arrow navigation restores the caret between consecutive mentions in both directions', async () => {
+      for (const gap of [' ', '']) {
+        await resetMentionPair(gap)
+        await selectLastMention()
+        const highlighted = await evaluate(`getComputedStyle(document.querySelectorAll('[data-composer-atom]')[1]).backgroundColor`)
+        assert.notEqual(highlighted, 'rgba(0, 0, 0, 0)', 'Keyboard-selected Atom must be visible')
+        await key('ArrowLeft', 37)
+        await expectEditableCaret()
+        const navigated = await state(false)
+        assert.equal(navigated.localVersion, 0, 'Moving the caret must not edit the draft')
+        assert.equal(navigated.dirty, false)
+        await insert('中间')
+        await expectSegments([firstMention, { kind: 'text', text: `${gap}中间` }, secondMention, { kind: 'text', text: ' ' }])
+
+        await resetMentionPair(gap)
+        await evaluate('window.composerTest.focusStart()')
+        await key('ArrowRight', 39)
+        assert.equal((await state(false)).selectionKind, 'node')
+        await key('ArrowRight', 39)
+        await expectEditableCaret()
+        await insert('中间')
+        await expectSegments([firstMention, { kind: 'text', text: `中间${gap}` }, secondMention, { kind: 'text', text: ' ' }])
+      }
+    })
+
+    await run('clicking the gap between mentions restores an editable caret after Atom selection', async () => {
+      await resetMentionPair()
+      await selectLastMention()
+      const point = await evaluate(`(() => {
+        const atoms = document.querySelectorAll('[data-composer-atom]')
+        const a = atoms[0].getBoundingClientRect()
+        const b = atoms[1].getBoundingClientRect()
+        return { x: (a.right + b.left) / 2, y: (a.top + a.bottom) / 2 }
+      })()`)
+      await command('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
+      await command('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
+      await frames()
+      await expectEditableCaret()
+      await insert('点击')
+      const current = await state(true)
+      assert.deepEqual(current.content.segments.filter(segment => segment.kind === 'atom'), [firstMention, secondMention])
+      assert.equal(current.content.segments[1].text.trim(), '点击')
+      assert.equal(current.activatedAtom, null, 'Clicking the gap must not activate a member')
+    })
+
+    await run('keyboard-selected mentions support deletion, text, IME and paste replacement', async () => {
+      const actions = [
+        { name: 'Backspace', text: '', run: () => key('Backspace', 8) },
+        { name: 'Delete', text: '', run: () => key('Delete', 46) },
+        { name: 'typing', text: '替换', run: () => insert('替换') },
+        { name: 'IME', text: '你', run: async () => {
+          await command('Input.imeSetComposition', { text: 'ni', selectionStart: 2, selectionEnd: 2 })
+          await insert('你')
+        } },
+        { name: 'paste', text: '粘贴', run: () => evaluate('window.composerTest.paste("粘贴")') },
+        { name: 'Shift Enter', text: '\n', run: () => key('Enter', 13, 8) }
+      ]
+      for (const action of actions) {
+        await resetMentionPair()
+        await selectLastMention()
+        const copied = await evaluate('window.composerTest.copySelection()')
+        assert.equal(copied.plain, '@队员乙', action.name)
+        await action.run()
+        await frames()
+        await expectSegments([firstMention, { kind: 'text', text: ` ${action.text} ` }])
+        await expectEditableCaret()
+        assert.equal((await state(false)).submitCount, 0)
+      }
+    })
+
+    await run('Shift Arrow extends a selected mention and Undo restores text replacement', async () => {
+      await resetMentionPair()
+      await selectLastMention()
+      await key('ArrowLeft', 37, 8)
+      const selected = await evaluate('window.composerTest.copySelection()')
+      assert.equal(selected.plain, ' @队员乙')
+      await insert('替换')
+      await expectSegments([firstMention, { kind: 'text', text: '替换 ' }])
+      await key('z', 90, process.platform === 'darwin' ? 4 : 2, 'KeyZ')
+      await expectSegments([firstMention, { kind: 'text', text: ' ' }, secondMention, { kind: 'text', text: ' ' }])
     })
 
     await run('Undo and redo include Atom insertion in native history', async () => {
