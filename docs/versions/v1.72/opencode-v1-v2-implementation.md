@@ -95,6 +95,9 @@ PR 创建后合入 `origin/main` 的 `4d9285e29`，保留其 Cline／Command Cod
 Core 更新为 0.4.7；重跑 workspace check／Rust PR 层、typecheck、Node 全套、文档基线检查均通过，
 Vitest 为 239 文件／2616 用例，ACP 定向 70 passed／2 ignored，health 22 passed／2 ignored。
 合流实测构建 SHA-256 为 `c167fcd5120ec586ccfb45012c591c89b5e0127fc230f7bdfc457ce2f27dc6c0`。
+该构建重新通过 V1 普通执行／审批／拒绝／运行中取消，V2 原生子会话取消及 MCP 完整 8 调用矩阵。
+V2 协作、公开去重、冷恢复与自动压缩联合样本通过：1 个原生 completed occurrence、1 次 Bootstrap
+补发，requested／acknowledged revision 均为 1，冷恢复前后用量快照一致。
 
 额外启动现有 Windows Runtime CI，首次在既有 Fleet receipt owner 的即时 `tree_is_empty` 断言失败；
 该 fixture 只等待 leader 退出，没有等待 Job 活跃进程归零。沿既有 ManagedProcess 测试做法，在 5 秒有界窗口内
