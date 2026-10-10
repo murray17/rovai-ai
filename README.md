@@ -127,13 +127,13 @@ pnpm dev
 
 [Issues](https://github.com/murray17/rovai-ai/issues) and [pull requests](https://github.com/murray17/rovai-ai/pulls) are welcome. Include the Rovai version, host platform, and steps to reproduce when reporting a problem.
 
+Rovai connects coding agents through native protocols and ACP. See [Agent integration](contributing/agent-integrations.md) for existing adapters, implementation notes, and current gaps.
+
 ## License
 
 [MIT](https://github.com/murray17/rovai-ai/blob/main/LICENSE) — free to use, modify, distribute, and use commercially.
 
 ## Community
-
-Share your workflows, ask questions, and discuss Rovai in our WeChat group.
 
 <p align="center">
   <a href="docs/assets/readme/wechat-group.png"><img src="docs/assets/readme/wechat-group.png" alt="QR code for the Rovai WeChat group" width="320"></a><br>

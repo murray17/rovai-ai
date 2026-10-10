@@ -95,6 +95,7 @@
   };
   function renderDocSection(item, topic) {
     const kind = item.kind ?? (item.steps ? 'steps' : 'prose');
+    if (kind === 'markdown') return `<section class="doc-section doc-markdown">${localize(item.body)}</section>`;
     if (kind === 'aside') return `<aside class="doc-section doc-aside"><p>${docText(localize(item.body))}</p></aside>`;
     const title = docText(localize(item.title));
     let content = '';
