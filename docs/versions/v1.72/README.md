@@ -11,12 +11,14 @@ last_updated: 2026-10-10
 
 # Rovai-ai v1.72：Lark 独立渠道
 
-## 待评审：Send 正文文件输入
+## 已实现：Send 正文文件输入
 
-[正文文件方案与模型上下文对照 r4](model-context-change-send-input-file.md)提出在同一 `--input-file`
+[已确认正文文件方案与模型上下文对照 r5](model-context-change-send-input-file.md)在同一 `--input-file`
 入口支持正文文件，并保留符合现有 Send Schema 的完整 JSON 请求。文档包含 Bootstrap、Send help、
 `cli-operations`、根 help 的精确前后文本及其他上下文入口审计；清理重复指导，不增加 TMP 目录教学，旧格式兼容只留在实现中。
-当前仅为待确认提案，产品实现、现行提示词与合同均未变更。
+User 消息 19 已授权独立 worktree 实施。当前合同为 [Built-in Tool Transport v37](../../contracts/builtin-tool-transport-v37.md)，
+代码与确定性验证已完成；真实模型 Gate、旧 Session 连续发送和回滚实测尚未运行。
+具体结果、测试准入与限制见[实施记录](implementation-plan.md#send-正文文件输入)。
 
 ## 并行交付：OpenCode V1/V2
 

@@ -1,20 +1,25 @@
 ---
 document_type: model-context-change
 version: v1.72
-revision: 4
-confirmation_status: pending
-implementation_status: not_started
+revision: 5
+confirmation_status: confirmed
+confirmed_revision: 5
+confirmed_by: User
+confirmed_at: 2026-10-10T14:49:09Z
+implementation_status: implemented
 source_commit: 70c9214bf47a677d018a7f2448583d6ec3422d22
 last_updated: 2026-10-10
 ---
 
-# Send 正文文件方案与模型上下文对照 r4
+# Send 正文文件方案与模型上下文对照 r5
 
 `rovai send --input-file` 同时支持正文文件和既有 JSON 请求文件：严格通过现有封闭 Send Schema 的 JSON 对象作为完整请求，其余合法文本作为正文。新教学默认演示正文文件；已有合法 JSON 调用和冻结 Session 继续可用。
 
-本稿供 User 审阅完整行为与精确文案。Bootstrap 和 Skill 主文只保留输入规则的帮助入口，具体用法集中在 `send --help`；不新增 TMP 目录教学。本文是待确认方案，不是现行合同或已交付能力。
+Bootstrap 和 Skill 主文只保留输入规则的帮助入口，具体用法集中在 `send --help`；不新增 TMP 目录教学。User 在审阅完整 r4 和三项调整的逐项判断后，明确要求开启 worktree 实施；本文将该确认范围合并记录为 r5。实施状态与验证证据见文末。
 
 r4 经整体检查，删除错误处理段中可能把兼容规则重新引向 help 的表述，并精简 Skill、根 help 与 Send help 的重复指导。旧 JSON 文件的兼容规则只留在实现与测试中；新教学只讲正文文件及发送参数。
+
+r5 只纳入已展示并确认的三项调整：正文帮助明确 `reply text itself` 和 `real newlines`；完整请求文件与直接参数混用时给出具体错误；补充旧 Session 连续验收和已学习新帮助的回滚边界。不开启 JSON 兼容教学，也不改 Skill interface 字段。
 
 ## 范围与依据
 
@@ -27,8 +32,8 @@ r4 经整体检查，删除错误处理段中可能把兼容规则重新引向 h
 | 合法旧调用 | 完整 JSON 请求的字段、寻址、附件、回执与重试语义保留 |
 | Agent 教学 | Send 只教直接参数与正文文件；旧文件格式及兼容处理不进入教学 |
 | 文件位置 | 任何现有权限允许读取的位置；不要求放进 `ROVAI_RUN_TMP` |
-| 本轮交付 | 本方案、完整前后文案、上下文入口审计、实施与验收边界 |
-| 未授权范围 | 本稿未取得实施二次确认；不修改实际提示词、Skill、Schema、产品代码或当前合同 |
+| 本轮交付 | 实现、精简教学、当前规范与验证证据 |
+| 授权范围 | User 消息 19 确认实施 r4 与消息 17 后已展示的三项取舍；不扩展为 UI、寻址或 Schema 修改 |
 
 当前输入解析见 [rovai.rs](../../../crates/rovai-core/src/bin/rovai.rs)，Schema 与正文业务校验见 [team_tool.rs](../../../crates/rovai-core/src/team_tool.rs)，教学真源见 [camp_message_send_teaching.rs](../../../crates/rovai-core/src/camp_message_send_teaching.rs)。本方案遵循[上下文变更治理](../../development/model-context-change-governance.md)和[渐进加载分层](../../development/skill-authoring.md#渐进加载分层)。
 
@@ -119,13 +124,13 @@ r3 的新版提示词已不含旧 JSON 兼容教学，但方案说明仍有一�
 | 寻址、通知、附件、回执与恢复 | 保留现有业务含义；这些决定实际发送效果，不属于旧文件兼容教学 |
 | 其他上下文入口 | 已核对 Skill 索引与元数据、条件 Bootstrap、Runtime/恢复提示、其他 Skill 和测试投影；本次不新增兼容通知、目录约束、编码教程或迁移指导 |
 
-当前源码中的旧 JSON 教学仍存在，因为本轮只修改待评审提案。它们的替换位置已在下文完整列出；其他命令真实支持的 JSON 输入、历史消息和冻结 Bootstrap 不作清除。
+旧 JSON 教学的替换位置已在下文完整列出；其他命令真实支持的 JSON 输入、历史消息和冻结 Bootstrap 不作清除。
 
 ## 变更前
 
 当前 CLI 只把 `--input-file` 解析为 JSON 对象，所有命令均禁止和直接参数混用。帮助首例要求创建 JSON 请求文件。Bootstrap 和 Skill 主文重述输入来源互斥。
 
-下节按每个实际表面提供完整前后文本。通用公共 Charter 展示全部共用文本；条件追加段另行列出，成员身份、Memory 等动态内容不伪造固定样本。文档中的“变更后”均为 r4 提案，不是当前程序输出。
+下节按每个实际表面提供完整前后文本。通用公共 Charter 展示全部共用文本；条件追加段另行列出，成员身份、Memory 等动态内容不伪造固定样本。“变更后”是 r5 确认的实施文本。
 
 ## 变更后
 
@@ -246,7 +251,7 @@ Input: direct flags, or --input-file <path> with send flags except --body.
 
   --body                       field=body type=string
       Use --body for simple single-line text; \n remains literal.
-      For multiline, Markdown, or complex text, use a file-write tool to write the body directly to a UTF-8 file.
+      For multiline, Markdown, or complex text, use a file-write tool to write the reply text itself, with real newlines, to a UTF-8 file.
   --file                       field=files type=array repeatable
       Attach a recipient-facing file or directory at its actual path; repeat to preserve attachment order. Rovai references the current file without copying or changing permissions. Temporary files may become unavailable when their source is cleaned up.
   --to-user                    field=mentionUser type=boolean
@@ -518,12 +523,13 @@ Input: direct flags, JSON stdin/heredoc, or --input-file <path>. Choose exactly 
 | --- | --- | --- |
 | 文件读取、来源或格式输入错误 | `builtin_tool.invalid_input`，`fix_input`，exit 2 | 同左 |
 | 通用 parse 错误消息 | `Command input does not match the accepted arguments.` | 同左 |
+| 完整 Send 请求文件与直接业务参数混用 | 通用 parse 错误 | `The input file matches a complete Send request and cannot be combined with command-line send options.`；其余 code、recovery 与退出码不变 |
 | Schema 字段 issue | 现有有界、安全字段信息 | 同左；针对最终组成的请求 |
 | Core 业务拒绝 | 现有业务 code、safe message、recovery，exit 1 | 同左；不触发正文降级 |
 | 不明提交结果 | `builtin_tool.outcome_indeterminate`、`confirm_outcome` | 同左；不另发新请求试探 |
 | 成功回执 | 原有 `messageId / agentAddressingMode / effectiveRecipients / deliveryIds` 等字段 | 同左；不添加输入格式或文件路径字段 |
 
-本版保留安全通用 parse 错误，不在模型错误中回显本地路径、文件正文或底层 I/O 错误，也不追加旧格式兼容教程。输入冲突测试验证错误 code、退出和零发布，不声称新增详细错误文案。
+仅完整请求文件与直接参数冲突提供上述具体诊断，其余 parse 失败保留安全通用错误。错误不回显本地路径、文件正文或底层 I/O 信息。测试验证这个分支的精确 message、`builtin_tool.invalid_input`、`fix_input`、exit 2 与零发布；不自动删参数、合并或重发。
 
 ### Bootstrap 条件追加段
 
@@ -600,7 +606,7 @@ interface:
 
 以下数值以本稿源码基线为准；当前 Transport v36 文档仍写 Agent Output 9，而源码已为 10。本方案采用源码现状 10，不把旧文档文字当成降级授权。实施时沿用最新已交付输出版本。
 
-| 版本轴 | 基线 | r4 拟实施 |
+| 版本轴 | 基线 | r5 实施 |
 | --- | --- | --- |
 | Built-in Contract / CLI / capability | 36 / 36 / `builtin_cli.transport.v36` | 37 / 37 / `builtin_cli.transport.v37`，标识输入语义扩展 |
 | Session Charter revision | 20 | 21，仅新 Bootstrap 删除通用互斥句 |
@@ -620,6 +626,8 @@ interface:
 
 回滚使用上一份匹配的产品/CLI/Core/受管 Skill 组合，不只回滚解析器而留下新教学；不新增自动回滚或 Session 迁移系统。
 
+回滚产品和受管 Skill 不会撤回已经进入 Native Session 历史的新教学。已学习正文文件用法的 Session 在旧 CLI 下仍可能继续使用该用法并被拒绝，因此不承诺无感回滚。验收记录能否恢复到合法旧 JSON 用法，不预设 Agent 会自动恢复。
+
 ## 实施边界与顺序
 
 1. 在 CLI 内把 Send 文件输入单独分流：先解析参数并处理重复文件与双正文冲突，再读取和分类文件；完整请求与直接业务参数冲突，正文模式合成请求。
@@ -629,17 +637,11 @@ interface:
 5. 确认后同步版本概览、实施计划、当前 Transport/Send 合同与 Built-in 输入不变量，记录请求优先的歧义和有效旧调用兼容边界。按通用文档治理判断版本决定准入，不新增数字 ADR 或功能专属 checker 例外。
 6. 完成确定性验证和真实上下文 Gate，再交付新能力与新教学。实施时以最终确认的 revision 为准；语义调整应更新 revision。
 
-本轮只新增方案与版本入口链接。下一阶段才更新当前规范和产品代码，避免将提案当成已生效规则。
+实施在独立 worktree 的 `rovai/send-input-file` 分支进行，基于已推送方案提交 `33f180460`；产品行为基线仍为上表 source commit。
 
 ## 二次确认
 
-`revision: 4`、`confirmation_status: pending`。User 要求整体检查兼容逻辑与不必要指导；本次据此清理残留表述和重复教学，未取得实施确认。
-
-[核心模型上下文变更治理](../../development/model-context-change-governance.md#二次确认门槛)要求：
-
-> 二次确认必须发生在开发者已经看过完整变更说明之后，并且明确同意实施该 revision。
-
-确认前可以完成调查、提案和验证准备；不得修改实现、Schema、当前合同或执行 clean break。后续真实确认应记录 `confirmed_revision / confirmed_by / confirmed_at` 和确认消息定位，不以“同意方向”或自动检查通过替代。
+User 已查看完整 r4，并收到对三项修改意见的具体判断与替换文本（公开答复 `c02d3950-6d79-4e6a-8341-f6a76859a079`）。随后在 Thread `rvcamp_01m4jf9yngf20v1ev57y1j4npg` 消息 19（`a206aab3-b280-4a0f-9096-3f9f187426b6`）明确要求：“行 那你开启wt实现吧”。该授权覆盖 r4 与上述已展示的调整，合并记录为 `revision: 5`、`confirmed_revision: 5`；时间为确认入档时间，不伪造消息发送时间。
 
 ## 验证
 
@@ -650,7 +652,7 @@ interface:
 - 检查新增教学没有 `ROVAI_RUN_TMP`、目录限制、其他命令文件输入扩展或强制 Session 更新。
 - 核对其他命令 help、description、Schema、summary、条件追加段和其他 Skill 保持原样。
 - 运行 `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=70c9214bf47a677d018a7f2448583d6ec3422d22 pnpm docs:check:ci`，并独立运行 diff-aware 文档治理检查。
-- 待确认文档应如实触发现有确认门禁；不伪造确认、不修改 checker，也不把门禁失败称为已通过。
+- 核对 User 消息 19 与已展示的完整方案及修改判断对应；不修改 checker，也不把自动门禁当成授权来源。
 
 ### 实施后的确定性验收
 
@@ -661,7 +663,7 @@ interface:
 | 原文保留 | 中文、emoji、引号、反斜杠、LF/CRLF、首尾空白、真实换行和字面 `\n`；代码围栏包裹请求 JSON |
 | 请求识别 | 正文、JSON scalar/array、JSONL、普通对象、非法 JSON；未知字段、错误类型、null、数组重复/超限 |
 | Schema 边界 | `{}`、仅 `publicOnly` 命中后业务失败；纯附件 JSON 保持；不过度要求 body |
-| 参数组合 | `--input-file` 在发送参数前后都一致；重复文件、双 body、旧请求与直接参数均拒绝，零发布 |
+| 参数组合 | `--input-file` 在发送参数前后都一致；重复文件、双 body、旧请求与直接参数均拒绝，零发布；最后一类返回上表精确冲突诊断 |
 | 原业务校验 | `publicOnly + to/taskId`、无效收件人、无效附件在命中请求后拒绝，绝不退回正文重发 |
 | 编码与文件 | 一个/两个 BOM、原始 NUL、非法 UTF-8、缺失/不可读文件、目录/设备/FIFO；普通文件 symlink；FIFO 测试有外层超时 |
 | 正文上限 | 32 KiB 边界及超一字节、中文/emoji 字节边界；旧 JSON 文件因转义/缩进大于上限但解码正文合法仍可用 |
@@ -669,6 +671,8 @@ interface:
 | stdin 与其他命令 | 显式来源不触碰保持打开的继承 stdin；JSON stdin 不扩展；其他命令文件+参数仍冲突 |
 | 旧 CLI 兼容 | 合法 JSON 保留全部字段，`--to-principal` 仍可用，重复别名仍拒绝 |
 | 旧 Session | 冻结 Bootstrap 经恢复/补发后字节不变，旧 JSON 能发送；新 Session 保留帮助指引且不再含通用互斥句 |
+| 旧 Session 连续发送 | 恢复旧 Bootstrap → 读取新 Send help → 成功发送；正文、收件人与通知符合原意，无重复发布或参数错误/help 循环；合法旧 JSON 也算通过 |
+| 回滚边界 | 已读取新版帮助的 Session → 切回匹配的旧产品与 CLI → 继续发送；如实记录能否恢复旧 JSON，不作为无感回滚保证 |
 | 文件变化 | exact Run tmp 与源码修改同 Run 时只排除前者；其他允许目录正文文件可读，不扩大排除范围 |
 | 结果与权限 | 成功字段和恢复语义不变，无输入路径回显、隐式删除、额外附件、隐式通知或新增权限 |
 
@@ -680,7 +684,7 @@ interface:
 
 每 campaign 14,400 秒、Case 并行 2、Judge 2,400 秒，最多两次，保留所有失败和 unknown。执行前用现有 freeze plan 固定实际模型、二进制、源码、Judge 及证据目录；缺少有效 Judge 或完整证据不能判通过。通过标准沿用现有硬性规则、任务质量、关键协作项、资源退化和证据要求，不以文案字节变少推断模型效果。
 
-专项文件行为由上表确定性 owner 验证；通用集只验证上下文和协作回归，不能冒充所有文件边界的真实 Runtime 覆盖。本轮仅交付文档，不启动真实模型 Gate。
+专项文件行为由上表确定性 owner 验证；通用集只验证上下文和协作回归，不能冒充所有文件边界的真实 Runtime 覆盖。本次工作区未提供可用的冻结 team/模型和真实 Judge 配置，真实 Gate 尚未运行，不使用仓库的合成 Judge fixture 充当通过证据。
 
 ## 文本开销
 
@@ -689,7 +693,7 @@ interface:
 | 表面 | 前字节 | 后字节 | 字节变化 | 前分词 | 后分词 |
 | --- | --- | --- | --- | --- | --- |
 | 公共 Charter 共用文本（含 section 标记） | 2581 | 2439 | -142 | 374 | 353 |
-| Send help 整页（按需） | 3202 | 3124 | -78 | 409 | 405 |
+| Send help 整页（按需） | 3202 | 3149 | -53 | 409 | 409 |
 | cli-operations 完整主文（按需） | 2653 | 2576 | -77 | 371 | 359 |
 | Send reference 全文（按需） | 1731 | 1731 | +0 | 265 | 265 |
 | 根 help（按需） | 464 | 376 | -88 | 48 | 37 |
@@ -710,10 +714,25 @@ interface:
 | [crates/rovai-core/src/team_tool.rs](../../../crates/rovai-core/src/team_tool.rs) | `401e46bb5c10ec91270da64eb1c4ff401ea36aefdaf35b78dfbac1239492bb4e` |
 | [crates/rovai-core/src/builtin_tool_transport.rs](../../../crates/rovai-core/src/builtin_tool_transport.rs) | `90b3a9e979763bed71faa81a465d9705a24ab6f47c0de0a51c950a7747bf3cd4` |
 
-## 文档交付验证记录
+## r4 文档交付验证记录（实施前历史）
 
 - 16 个完整 fenced block 核对通过：前文与源码/当前只读帮助一致；Bootstrap 只删除一句，Skill 删除旧步骤 2 并顺次编号，根 help 删除输入枚举，Send reference 保持原样；完整新 Send help 不含 JSON 格式或兼容教学，拟修改表面没有新增 TMP 目录教学。
 - `pnpm docs:test`：10/10 通过。
 - `DOCS_BASE_REF=70c9214bf47a677d018a7f2448583d6ec3422d22 node scripts/check-doc-decisions.mjs --require-base`：在仅含 Git 跟踪内容及本次两份文档的临时副本中通过，包含链接与通用治理校验。主工作区同项检查受已忽略的本机 `docs/prototypes` 旧原型失效链接影响；未修改这些原型或 checker。临时副本已清理。
 - `pnpm docs:check` 与 `DOCS_BASE_REF=70c9214bf47a677d018a7f2448583d6ec3422d22 pnpm docs:check:ci`：确认门禁未通过，四项均属于本稿尚无真实实施确认：confirmation_status、confirmed_revision、confirmed_by、confirmed_at。保持 pending，不伪造确认。
 - 本轮仅修改本文与当前版本入口，不修改产品源码、现行 Skill、Schema 或合同；未执行产品功能测试或真实 Runtime Gate。
+
+## r5 实施与验证记录
+
+实现位于独立 worktree `rovai-ai-send-input-file`，分支 `rovai/send-input-file`。User 确认后才修改产品；
+当前 Contract/CLI/capability 为 37，Charter revision 为 21，binding compatibility 仍为 16。
+没有数据库迁移、Bootstrap 重写或 Session 轮换。Send 的领域对象、Schema 与业务链均不变，
+因此 Camp Message Send v26 确认无需改号；新增 Transport v37 拥有文件输入与错误边界。
+当前不变量、架构与导航已同步，取舍记入 V1.72-D33。
+
+确定性验证记录见[实施与验收](implementation-plan.md#send-正文文件输入)。五个上下文表面合计减少
+360 个 UTF-8 字节：其中常驻公共 Bootstrap 减少 142 字节，其他为按需帮助与 Skill；该合计不是单次输入的 token 节省。
+没有增加临时目录或 JSON 兼容教学。Skill interface 的三个字段均未改变。
+
+**未验证的范围：** 真实模型通用 Gate、旧 Native Session 读取新帮助后的连续发送和已学习新帮助后的回滚行为
+均尚未运行；不能由单元/IPC 夹具或冻结字节测试推断通过。Windows 真机文件/Named Pipe 验收也未执行。

@@ -3531,15 +3531,51 @@ mod tests {
     }
 
     #[test]
-    fn public_send_rejects_an_empty_body_without_files() {
+    fn public_send_rejects_empty_and_oversized_bodies_without_publishing() {
         let mut fixture = Fixture::new();
-        let invocation = fixture.public_send_invocation("empty-send", "   ", &[]);
-        let error = TeamToolService::default()
-            .send_public_message(&mut fixture.database, &invocation)
-            .unwrap_err();
-        let error = error.downcast_ref::<TeamToolInvocationError>().unwrap();
-        assert_eq!(error.code, "message.invalid_input");
-        assert!(error.message.contains("body or at least one file"));
+        let message_count = |database: &Database| -> i64 {
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
+                .unwrap()
+        };
+        let before = message_count(&fixture.database);
+        for (body, code, message) in [
+            (
+                String::new(),
+                "message.invalid_input",
+                "body or at least one file",
+            ),
+            (
+                " \r\n\t ".to_string(),
+                "message.invalid_input",
+                "body or at least one file",
+            ),
+            (
+                "x".repeat(CAMP_MESSAGE_SEND_MAX_BODY_BYTES + 1),
+                "message.body_too_large",
+                "32 KiB",
+            ),
+            (
+                "中".repeat(CAMP_MESSAGE_SEND_MAX_BODY_BYTES / 3 + 1),
+                "message.body_too_large",
+                "32 KiB",
+            ),
+            (
+                "🌸".repeat(CAMP_MESSAGE_SEND_MAX_BODY_BYTES / 4 + 1),
+                "message.body_too_large",
+                "32 KiB",
+            ),
+        ] {
+            let invocation = fixture.public_send_invocation("invalid-body-send", &body, &[]);
+            let error = TeamToolService::default()
+                .send_public_message(&mut fixture.database, &invocation)
+                .unwrap_err();
+            let error = error.downcast_ref::<TeamToolInvocationError>().unwrap();
+            assert_eq!(error.code, code);
+            assert!(error.message.contains(message));
+            assert_eq!(message_count(&fixture.database), before);
+        }
     }
 
     #[test]

@@ -24,7 +24,7 @@ use rovai_core::builtin_tool_transport::{
 };
 use rovai_core::camp_message_send_teaching::{
     CAMP_MESSAGE_SEND_BODY_HELP, CAMP_MESSAGE_SEND_FILE_HELP, CAMP_MESSAGE_SEND_HELP_EXAMPLES,
-    CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
+    CAMP_MESSAGE_SEND_INPUT_HELP, CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
     CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP,
 };
 use rovai_core::command::canonical_json_digest;
@@ -556,13 +556,33 @@ impl CliInputFailure {
             details: None,
         }
     }
+
+    fn send_request_file_conflict() -> Self {
+        Self {
+            message: "The input file matches a complete Send request and cannot be combined with command-line send options.".to_string(),
+            details: None,
+        }
+    }
 }
+
+impl std::fmt::Display for CliInputFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CliInputFailure {}
 
 fn parse_and_validate_operation_input(
     description: &BuiltinToolDescription,
     args: &[String],
 ) -> std::result::Result<Value, CliInputFailure> {
-    let input = parse_operation_input(description, args).map_err(|_| CliInputFailure::generic())?;
+    let input = parse_operation_input(description, args).map_err(|error| {
+        // Only deliberately constructed safe diagnostics may reach the Agent.
+        error
+            .downcast::<CliInputFailure>()
+            .unwrap_or_else(|_| CliInputFailure::generic())
+    })?;
     let input = rovai_core::thread_compat::normalize_builtin_input(&description.name, input)
         .map_err(|_| CliInputFailure::generic())?;
     if validate_schema(&input, &description.input_schema).is_err() {
@@ -1162,9 +1182,6 @@ fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) 
         let argument = argument_by_flag
             .get(canonical_flag)
             .with_context(|| format!("unknown argument for {}: {flag}", description.name))?;
-        if input_file.is_some() {
-            bail!("--input-file cannot be combined with direct arguments");
-        }
         let value = if argument.value_kind == "boolean" && inline_value.is_none() {
             match args.get(index + 1) {
                 Some(next) if !next.starts_with("--") => {
@@ -1188,33 +1205,88 @@ fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) 
         index += 1;
     }
 
+    if let Some(path) = input_file {
+        if description.name == "thread.message.send" {
+            if direct.contains_key("body") {
+                bail!("--body and --input-file cannot be supplied together");
+            }
+            return parse_send_file_input(description, Path::new(&path), direct);
+        }
+        if !direct.is_empty() {
+            bail!("--input-file cannot be combined with direct arguments");
+        }
+        let bytes = fs::read(&path).with_context(|| format!("failed to read {path}"))?;
+        return parse_json_object(&bytes, "--input-file");
+    }
+    if !direct.is_empty() {
+        return Ok(Value::Object(direct));
+    }
+
     let mut stdin_text = String::new();
     // Explicit sources win without touching an inherited non-terminal stdin. Some
     // Runtime shells keep stdin open for their own protocol, so probing it here can
     // otherwise block an otherwise complete direct-flag or input-file invocation.
-    if direct.is_empty() && input_file.is_none() && !std::io::stdin().is_terminal() {
+    if !std::io::stdin().is_terminal() {
         std::io::stdin()
             .read_to_string(&mut stdin_text)
             .context("failed to read Built-in Tool input from stdin")?;
     }
     let stdin_text = stdin_text.trim();
-    let sources = usize::from(!direct.is_empty())
-        + usize::from(input_file.is_some())
-        + usize::from(!stdin_text.is_empty());
-    if sources > 1 {
-        bail!("direct arguments, stdin/heredoc, and --input-file are mutually exclusive");
-    }
-    if !direct.is_empty() {
-        return Ok(Value::Object(direct));
-    }
-    if let Some(path) = input_file {
-        let bytes = fs::read(&path).with_context(|| format!("failed to read {path}"))?;
-        return parse_json_object(&bytes, "--input-file");
-    }
     if !stdin_text.is_empty() {
         return parse_json_object(stdin_text.as_bytes(), "stdin");
     }
     Ok(Value::Object(Map::new()))
+}
+
+fn parse_send_file_input(
+    description: &BuiltinToolDescription,
+    path: &Path,
+    mut direct: Map<String, Value>,
+) -> Result<Value> {
+    let text = read_send_body_file(path)?;
+    let request = serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|value| {
+            rovai_core::thread_compat::normalize_builtin_input(&description.name, value).ok()
+        })
+        .filter(|value| validate_schema(value, &description.input_schema).is_ok());
+    if let Some(request) = request {
+        if !direct.is_empty() {
+            return Err(CliInputFailure::send_request_file_conflict().into());
+        }
+        // Business validation belongs to Core. A recognized request must never
+        // fall back to publishing its JSON as body after a downstream failure.
+        return Ok(request);
+    }
+    direct.insert("body".to_string(), Value::String(text));
+    Ok(Value::Object(direct))
+}
+
+fn read_send_body_file(path: &Path) -> Result<String> {
+    if !fs::metadata(path)?.is_file() {
+        bail!("Send input must be a regular file");
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // A regular path replaced by a FIFO between stat and open must not block.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        bail!("Send input must be a regular file");
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)?;
+    if text.contains('\0') {
+        bail!("Send input must not contain NUL");
+    }
+    if text.starts_with('\u{feff}') {
+        text.drain(..'\u{feff}'.len_utf8());
+    }
+    Ok(text)
 }
 
 fn parse_json_object(bytes: &[u8], source: &str) -> Result<Value> {
@@ -1378,7 +1450,7 @@ fn print_root_help() {
 }
 
 fn root_help_text(managed_runtime: bool) -> String {
-    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.\n".to_string();
+    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs.\n".to_string();
     if !managed_runtime {
         text.push_str("\nUser Automation:\n  rovai app --help\n\nAgent operations keep their process-private transport. `rovai app` uses the running Desktop App's separate User Automation transport.\n");
     }
@@ -1514,9 +1586,14 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
     use std::fmt::Write as _;
 
     let mut output = String::new();
+    let input_help = if description.name == "thread.message.send" {
+        CAMP_MESSAGE_SEND_INPUT_HELP
+    } else {
+        "Input: direct flags, JSON stdin/heredoc, or --input-file <path>. Choose exactly one input source."
+    };
     writeln!(
         output,
-        "rovai {}\n{}\n\nInput: direct flags, JSON stdin/heredoc, or --input-file <path>. Choose exactly one input source.\n",
+        "rovai {}\n{}\n\n{input_help}\n",
         description.command.join(" "),
         description.summary
     )
@@ -1537,7 +1614,10 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
         writeln!(output, "\nExamples:").expect("writing help to a String cannot fail");
         for example in examples {
             for line in example.lines() {
-                writeln!(output, "  {line}").expect("writing help to a String cannot fail");
+                if !line.is_empty() {
+                    output.push_str("  ");
+                }
+                writeln!(output, "{line}").expect("writing help to a String cannot fail");
             }
         }
     }
@@ -2492,6 +2572,183 @@ mod tests {
     }
 
     #[test]
+    fn send_file_input_preserves_text_and_complete_schema_requests() {
+        let description = builtin_tool_description("thread.message.send").unwrap();
+        let path = env::temp_dir().join(format!("rovai-send-{}", Uuid::new_v4()));
+        let file_args = vec!["--input-file".into(), path.to_string_lossy().into_owned()];
+        let texts = [
+            "  中文 🌸\r\n# Title\n\n`code` \\\"quotes\\\" $() \\n\t\n".to_string(),
+            "".to_string(),
+            " \r\n\t ".to_string(),
+            r#"{"status":"done","count":3}"#.to_string(),
+            r#"{"body":"done","publicOnly":true,"extra":1}"#.to_string(),
+            r#"{"body":123}"#.to_string(),
+            r#"{"body":null}"#.to_string(),
+            r#"{"body":"done","publicOnly":"true"}"#.to_string(),
+            r#"{"to":["agent_5","agent_5"]}"#.to_string(),
+            serde_json::to_string(&json!({"files": vec!["report.pdf"; 17]})).unwrap(),
+            "{invalid JSON".to_string(),
+            "{\"status\":1}\n{\"status\":2}\n".to_string(),
+            r#""literal\nstring""#.to_string(),
+            "[]".to_string(),
+            "123".to_string(),
+            "null".to_string(),
+            "```json\n{\"body\":\"hello\",\"publicOnly\":true}\n```\n".to_string(),
+        ];
+        for text in texts {
+            fs::write(&path, &text).unwrap();
+            assert_eq!(
+                parse_and_validate_operation_input(&description, &file_args).unwrap(),
+                json!({"body": text})
+            );
+            for args in [
+                [file_args.clone(), vec!["--public-only".into()]].concat(),
+                [vec!["--public-only".into()], file_args.clone()].concat(),
+            ] {
+                assert_eq!(
+                    parse_and_validate_operation_input(&description, &args).unwrap(),
+                    json!({"body": text, "publicOnly": true})
+                );
+            }
+            assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        }
+
+        let requests = [
+            json!({}),
+            json!({"publicOnly": true}),
+            json!({"files": ["report.pdf"]}),
+            json!({"body": "完成\n🌸\\n", "publicOnly": true, "mentionUser": true}),
+            json!({"body": "continue", "to": ["agent_5", "agent_7"], "taskId": "task-1", "files": ["report.pdf"]}),
+            // Recognition preserves business-invalid requests for Core rejection.
+            json!({"body": "bad routing", "publicOnly": true, "to": ["agent_5"]}),
+            json!({"body": "missing attachment", "files": ["does-not-exist.pdf"]}),
+        ];
+        for request in requests {
+            fs::write(&path, serde_json::to_vec(&request).unwrap()).unwrap();
+            assert_eq!(
+                parse_and_validate_operation_input(&description, &file_args).unwrap(),
+                request
+            );
+            for flags in [
+                vec!["--public-only"],
+                vec!["--public-only=false"],
+                vec!["--to-user"],
+                vec!["--to-principal"],
+                vec!["--to", "agent_5"],
+                vec!["--task-id", "task-1"],
+                vec!["--file", "report.pdf"],
+            ] {
+                let flags = flags.into_iter().map(str::to_string).collect::<Vec<_>>();
+                for args in [
+                    [file_args.clone(), flags.clone()].concat(),
+                    [flags, file_args.clone()].concat(),
+                ] {
+                    let error =
+                        parse_and_validate_operation_input(&description, &args).unwrap_err();
+                    assert_eq!(
+                        error.message,
+                        "The input file matches a complete Send request and cannot be combined with command-line send options."
+                    );
+                    assert!(error.details.is_none());
+                }
+            }
+        }
+
+        // Both encodings keep the existing body limit; JSON escaping and outer
+        // whitespace do not impose a new limit on the raw request file.
+        let limit = rovai_core::message_delivery::CAMP_MESSAGE_SEND_MAX_BODY_BYTES;
+        for body in [
+            "x".repeat(limit),
+            "中".repeat(limit / 3),
+            "🌸".repeat(limit / 4),
+        ] {
+            fs::write(&path, &body).unwrap();
+            assert_eq!(
+                parse_and_validate_operation_input(&description, &file_args).unwrap(),
+                json!({"body": body})
+            );
+        }
+        fs::write(&path, "x".repeat(limit + 1)).unwrap();
+        assert!(parse_and_validate_operation_input(&description, &file_args).is_err());
+        let encoded = format!(
+            "  {{\"publicOnly\":true,\"body\":\"{}\"}}  ",
+            "\\u0061".repeat(limit)
+        );
+        fs::write(&path, encoded).unwrap();
+        assert_eq!(
+            parse_and_validate_operation_input(&description, &file_args).unwrap(),
+            json!({"body": "a".repeat(limit), "publicOnly": true})
+        );
+
+        fs::write(&path, "text").unwrap();
+        let flags = vec![
+            "--to".into(),
+            "agent_5".into(),
+            "--to".into(),
+            "agent_7".into(),
+            "--to-principal".into(),
+            "--task-id".into(),
+            "task-1".into(),
+            "--file".into(),
+            "report.pdf".into(),
+        ];
+        assert_eq!(
+            parse_and_validate_operation_input(&description, &[file_args.clone(), flags].concat())
+                .unwrap(),
+            json!({"body":"text", "to":["agent_5","agent_7"], "mentionUser":true, "taskId":"task-1", "files":["report.pdf"]})
+        );
+        for args in [
+            [file_args.clone(), file_args.clone()].concat(),
+            [file_args.clone(), vec!["--body".into(), "other".into()]].concat(),
+            [vec!["--body".into(), "other".into()], file_args.clone()].concat(),
+            [
+                file_args.clone(),
+                vec!["--to-user".into(), "--to-principal".into()],
+            ]
+            .concat(),
+        ] {
+            assert!(parse_and_validate_operation_input(&description, &args).is_err());
+        }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn send_file_reader_accepts_only_regular_utf8_text_and_removes_one_bom() {
+        let directory = env::temp_dir().join(format!("rovai-send-files-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("body.pdf"); // Extension does not select the parser.
+        assert!(read_send_body_file(&path).is_err());
+        assert!(read_send_body_file(&directory).is_err());
+        for bytes in [
+            b"\xff".as_slice(),
+            b"ok\0bad",
+            b"\xef\xbb\xbf\0",
+            b"\xf0\x9f",
+        ] {
+            fs::write(&path, bytes).unwrap();
+            assert!(read_send_body_file(&path).is_err());
+        }
+        for (source, expected) in [
+            ("\u{feff}body\n", "body\n"),
+            ("\u{feff}\u{feff}body", "\u{feff}body"),
+            (" \u{feff}body", " \u{feff}body"),
+            ("\u{feff}{\"body\":\"done\"}", "{\"body\":\"done\"}"),
+        ] {
+            fs::write(&path, source).unwrap();
+            assert_eq!(read_send_body_file(&path).unwrap(), expected);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link = directory.join("link");
+            symlink(&path, &link).unwrap();
+            assert_eq!(read_send_body_file(&link).unwrap(), "{\"body\":\"done\"}");
+            assert!(read_send_body_file(Path::new("/dev/null")).is_err());
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn public_send_help_has_no_agent_supplied_camp_scope() {
         let description = operation_help(&["send".to_string(), "--help".to_string()])
             .unwrap()
@@ -2638,9 +2895,7 @@ mod tests {
         assert_eq!(
             operation_help_examples("thread.message.send"),
             [
-                r#"Write request.json with a file-write tool:
-  {"publicOnly":true,"body":"Result:\n\nUpdated `src/example.rs`."}
-rovai send --input-file request.json"#,
+                "Write reply.md:\n  Result:\n\n  Updated `src/example.rs`.\nAfter the write succeeds:\n  rovai send --public-only --input-file reply.md",
                 "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'",
                 "rovai send --public-only --to-user --body 'Please choose whether to roll back the client or continue the token investigation.'",
             ]
@@ -2663,13 +2918,11 @@ rovai send --input-file request.json"#,
         ));
         assert!(!help.contains("inline Agent addressing"));
         assert!(help.contains(r"Use --body for simple single-line text; \n remains literal."));
-        assert!(help.contains("For multiline text, Markdown, or content containing backticks or $(), write a UTF-8 JSON request with a file-write tool and use --input-file <path>."));
-        assert!(help.contains(
-            r#"Examples:
-  Write request.json with a file-write tool:
-    {"publicOnly":true,"body":"Result:\n\nUpdated `src/example.rs`."}
-  rovai send --input-file request.json"#
-        ));
+        assert!(help.contains(CAMP_MESSAGE_SEND_INPUT_HELP));
+        assert!(help.contains("For multiline, Markdown, or complex text, use a file-write tool to write the reply text itself, with real newlines, to a UTF-8 file."));
+        assert!(!help.contains("JSON"));
+        assert!(!help.contains("ROVAI_RUN_TMP"));
+        assert!(help.contains("Examples:\n  Write reply.md:\n    Result:\n\n    Updated `src/example.rs`.\n  After the write succeeds:\n    rovai send --public-only --input-file reply.md"));
         assert!(help.contains(CAMP_MESSAGE_SEND_FILE_HELP));
         assert!(!help.contains("Rovai privately snapshots"));
         assert!(help.contains("It may be combined with --to-user."));
