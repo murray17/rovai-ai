@@ -4506,10 +4506,15 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .mention-menu button strong, .mention-menu button small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mention-menu button strong { font-size: 12px; }
 .mention-menu button small { color: var(--muted); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.mention-menu button > i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
 .structured-mention-menu { right: auto; width: min(360px, 100%); max-height: min(360px, 46vh); }
 .mention-menu.composer-caret-menu { position: relative; inset: auto; width: 360px; max-width: calc(100vw - 24px); max-height: min(360px, 46vh, var(--radix-popover-content-available-height)); overscroll-behavior: contain; }
 .structured-mention-menu button { grid-template-columns: 28px minmax(0, 1fr) auto; }
+.structured-mention-menu button.has-mention-runtime { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 40%); }
+.mention-option-name { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.mention-option-name .mention-option-state { flex: 0 0 auto; }
+.mention-option-runtime { display: grid; min-width: 0; gap: 2px; color: var(--muted); text-align: right; font-size: 10.5px; line-height: 1.3; }
+.mention-option-runtime > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-menu .mention-option-runtime > small { font: inherit; }
 .structured-mention-menu .is-mention-action { margin-top: 3px; border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .structured-mention-menu .mention-action-avatar { border-color: var(--line); color: var(--muted); background: var(--surface-subtle); }
 .structured-mention-menu .mention-action-avatar svg { width: 16px; height: 16px; }

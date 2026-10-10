@@ -73,6 +73,8 @@ export interface StructuredMentionMember {
   displayName: string
   teamRole: string
   avatarRef?: string | null
+  runtimeLabel?: string
+  modelLabel?: string
   mentionable?: boolean
   inThread?: boolean
 }
@@ -690,10 +692,14 @@ function renderMentionMenu(
           data-agent-id={option.kind === 'member' ? option.member.agentId : undefined}
           aria-selected={selectedIndex === index}
           aria-label={option.kind === 'member'
-            ? `${option.member.displayName}${uiAttribute('，')}${structuredMentionMemberDescription(option.member)}${option.member.inThread === false ? `${uiAttribute('，')}${pendingInviteIds.includes(option.member.agentId) ? uiAttribute('待邀请') : uiAttribute('邀请加入')}` : ''}`
+            ? [option.member.displayName, structuredMentionMemberDescription(option.member),
+              option.member.runtimeLabel, option.member.modelLabel,
+              option.member.inThread === false ? pendingInviteIds.includes(option.member.agentId) ? uiAttribute('待邀请') : uiAttribute('邀请加入') : null
+            ].filter(Boolean).join(uiAttribute('，'))
             : option.kind === 'all_members' ? uiAttribute('所有队员，仅本会话')
               : option.kind === 'invite_other' ? uiAttribute('邀请其他队员') : mission ? uiAttribute('返回本使命') : uiAttribute('返回本会话')}
           className={[selectedIndex === index ? 'active' : '',
+            option.kind === 'member' && option.member.runtimeLabel ? 'has-mention-runtime' : '',
             option.kind === 'member' && option.member.inThread === false ? 'is-invitable' : '',
             option.kind === 'invite_other' || option.kind === 'back_to_camp' ? 'is-mention-action' : ''
           ].filter(Boolean).join(' ')}
@@ -702,22 +708,28 @@ function renderMentionMenu(
           onClick={() => selectIndex(index)}>
           <StructuredMentionOptionAvatar option={option} />
           <span>
-            <strong>{option.kind === 'all_members' ? uiAttribute('所有队员')
+            <span className="mention-option-name"><strong>{option.kind === 'all_members' ? uiAttribute('所有队员')
               : option.kind === 'invite_other' ? uiAttribute('邀请其他队员')
                 : option.kind === 'back_to_camp' ? mission ? uiAttribute('返回本使命') : uiAttribute('返回本会话')
                   : option.member.displayName}</strong>
+              {option.kind === 'member' && option.member.inThread === false
+                && <span className="mention-option-state">{pendingInviteIds.includes(option.member.agentId)
+                  ? <UiText zh={'待邀请'} /> : <UiText zh={'邀请'} />}</span>}
+            </span>
             <small>{option.kind === 'all_members'
               ? uiAttribute('广播给当前全部队员')
               : option.kind === 'invite_other' ? uiAttribute('浏览其他可用队员')
                 : option.kind === 'back_to_camp' ? mission ? uiAttribute('查看当前使命队员') : uiAttribute('查看当前会话队员')
                   : structuredMentionMemberDescription(option.member)}</small>
           </span>
-          {option.kind === 'member' && option.member.inThread === false
-            ? <span className="mention-option-state">{pendingInviteIds.includes(option.member.agentId)
-              ? <UiText zh={'待邀请'} /> : <UiText zh={'邀请'} />}</span>
+          {option.kind === 'member' && option.member.runtimeLabel
+            ? <span className="mention-option-runtime" title={[option.member.runtimeLabel, option.member.modelLabel].filter(Boolean).join(' · ')}>
+              <span>{option.member.runtimeLabel}</span>
+              {option.member.modelLabel && <small>{option.member.modelLabel}</small>}
+            </span>
             : option.kind === 'invite_other'
               ? <svg className="mention-action-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2.5 3.5 3.5L4 9.5" /></svg>
-              : option.kind === 'member' && <i aria-hidden="true" />}
+              : null}
         </button>)}
   </div>
 }
