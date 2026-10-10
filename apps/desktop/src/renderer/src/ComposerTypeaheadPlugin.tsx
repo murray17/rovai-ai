@@ -208,10 +208,11 @@ export function ComposerTypeaheadPlugin({
     if (menu && selected?.id) {
       root.setAttribute('aria-activedescendant', selected.id)
       // Only scroll the list; scrollIntoView also moves clipped dialog/editor ancestors.
+      const scroller = menu.closest<HTMLElement>('.mention-menu') ?? menu
       const bounds = selected.getBoundingClientRect()
-      const top = menu.getBoundingClientRect().top + menu.clientTop
-      if (bounds.top < top) menu.scrollTop += bounds.top - top
-      else if (bounds.bottom > top + menu.clientHeight) menu.scrollTop += bounds.bottom - top - menu.clientHeight
+      const top = scroller.getBoundingClientRect().top + scroller.clientTop
+      if (bounds.top < top) scroller.scrollTop += bounds.top - top
+      else if (bounds.bottom > top + scroller.clientHeight) scroller.scrollTop += bounds.bottom - top - scroller.clientHeight
     } else {
       root.removeAttribute('aria-activedescendant')
     }

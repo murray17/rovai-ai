@@ -1878,6 +1878,8 @@
   "正在检查": "Checking",
   "重新扫描": "Scan again",
   "其他智能体 · {0}": "Other Agents · {0}",
+  "查看 {0} 的智能体与模型": "View {0}’s agent and model",
+  "{0} 的智能体": "{0}’s agent",
   "模型": "Model",
   "从上方选择一个可用的智能体。": "Choose an available Agent above.",
   "还没能完成首次配置": "Setup could not be completed",

@@ -4509,12 +4509,30 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .structured-mention-menu { right: auto; width: min(360px, 100%); max-height: min(360px, 46vh); }
 .mention-menu.composer-caret-menu { position: relative; inset: auto; width: 360px; max-width: calc(100vw - 24px); max-height: min(360px, 46vh, var(--radix-popover-content-available-height)); overscroll-behavior: contain; }
 .structured-mention-menu button { grid-template-columns: 28px minmax(0, 1fr) auto; }
-.structured-mention-menu button.has-mention-runtime { grid-template-columns: 28px minmax(0, 1fr) minmax(0, 40%); }
+.mention-menu-columns { display: grid; grid-template-columns: minmax(0, 1fr); }
+.mention-menu-columns.has-runtime { grid-template-columns: minmax(0, 1fr) 36px; }
+.mention-menu-columns > [role="listbox"] { min-width: 0; }
+.mention-menu-columns > [role="listbox"] > button, .mention-runtime-placeholder { height: 44px; }
+.mention-menu-columns.has-runtime > [role="listbox"] > button { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.mention-runtime-column { min-width: 0; }
+.mention-runtime-placeholder { display: block; }
+.mention-menu .mention-runtime-trigger { display: grid; width: 36px; height: 44px; grid-template-columns: none; place-items: center; padding: 0; border-radius: 0 6px 6px 0; color: var(--muted); }
+.mention-runtime-trigger .member-runtime-glyph, .mention-runtime-product .member-runtime-glyph { display: grid; width: 22px; height: 22px; place-items: center; }
+.mention-runtime-trigger .member-runtime-glyph :is(img, svg), .mention-runtime-product .member-runtime-glyph :is(img, svg) { display: block; width: 18px; height: 18px; object-fit: contain; }
+.mention-runtime-trigger .member-runtime-logo-mask, .mention-runtime-product .member-runtime-logo-mask { --runtime-logo: none; display: block; width: 18px; height: 18px; background: var(--ink); mask: var(--runtime-logo) center / contain no-repeat; }
+.mention-runtime-popover { z-index: 160; width: 260px; max-width: calc(100vw - 24px); max-height: var(--radix-popover-content-available-height); overflow: auto; padding: 10px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-menu); }
+.mention-runtime-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; font-size: 12px; }
+.mention-runtime-heading > strong { overflow-wrap: anywhere; }
+.mention-runtime-heading > button { flex: 0 0 28px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 18px; cursor: pointer; }
+.mention-runtime-heading > button:hover { background: var(--neutral-hover); }
+.mention-runtime-product { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.mention-runtime-popover dl { display: grid; gap: 4px; margin: 12px 0; font-size: 11px; }
+.mention-runtime-popover dt { color: var(--muted); }
+.mention-runtime-popover dd { margin: 0; overflow-wrap: anywhere; }
+.mention-runtime-select { width: 100%; min-height: 32px; margin-top: 8px; padding: 6px 10px; border: 0; border-radius: 6px; background: var(--neutral-selected); color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+.mention-runtime-select:hover { background: var(--neutral-hover); }
 .mention-option-name { display: flex; min-width: 0; align-items: center; gap: 6px; }
 .mention-option-name .mention-option-state { flex: 0 0 auto; }
-.mention-option-runtime { display: grid; min-width: 0; gap: 2px; color: var(--muted); text-align: right; font-size: 10.5px; line-height: 1.3; }
-.mention-option-runtime > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mention-menu .mention-option-runtime > small { font: inherit; }
 .structured-mention-menu .is-mention-action { margin-top: 3px; border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; }
 .structured-mention-menu .mention-action-avatar { border-color: var(--line); color: var(--muted); background: var(--surface-subtle); }
 .structured-mention-menu .mention-action-avatar svg { width: 16px; height: 16px; }

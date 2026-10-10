@@ -8247,6 +8247,7 @@ function mentionPresenceLabel(presence: AgentProfile['presence']): string {
 }
 
 function mentionCandidateRuntime(profile: AgentProfile | undefined, installations: AdapterInstallation[]): {
+  runtimeKind?: NonNullable<AgentProfile['runtimeConfiguration']>['adapterKind']
   runtimeLabel: string
   modelLabel?: string
 } {
@@ -8254,6 +8255,7 @@ function mentionCandidateRuntime(profile: AgentProfile | undefined, installation
   const configuration = profile.runtimeConfiguration
   if (!configuration) return { runtimeLabel: uiAttribute('未配置智能体') }
   return {
+    runtimeKind: configuration.adapterKind,
     runtimeLabel: runtimeAdapterLabel(configuration.adapterKind),
     modelLabel: memberRuntimeConfigurationPresentation(
       configuration, runtimeEditorInstallation(installations, configuration.adapterKind)

@@ -1,6 +1,6 @@
 import { useEditingRecovery } from './camp-client'
 import { useMobileLayout } from './MobileLayout'
-import type { ThreadComposerDraftView, ComposerAtom, ComposerDocument } from '@contracts'
+import type { ThreadComposerDraftView, ComposerAtom, ComposerDocument, AdapterKind } from '@contracts'
 import { LexicalExtensionComposer } from '@lexical/react/LexicalExtensionComposer'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
@@ -36,6 +36,7 @@ import {
 import { ComposerTypeaheadPlugin } from './ComposerTypeaheadPlugin'
 import { MemberAvatar } from './MemberAvatar'
 import { NavigationIcon } from './NavigationIcon'
+import { MentionRuntimeButton } from './MentionRuntimeButton'
 import {
   RovaiComposerExtension,
   setComposerExtensionRuntime,
@@ -73,6 +74,7 @@ export interface StructuredMentionMember {
   displayName: string
   teamRole: string
   avatarRef?: string | null
+  runtimeKind?: AdapterKind
   runtimeLabel?: string
   modelLabel?: string
   mentionable?: boolean
@@ -680,11 +682,13 @@ function renderMentionMenu(
   selectIndex: (index: number) => void,
   mission = false
 ): JSX.Element {
-  return <div id={menuId} className="mention-menu structured-mention-menu" role="listbox"
-    aria-label={inviteLayer ? uiAttribute('可邀请队员') : mission ? uiAttribute('提及队员') : uiAttribute('选择接收队员')}>
+  const hasRuntime = options.some(option => option.kind === 'member' && option.member.runtimeLabel)
+  return <div className="mention-menu structured-mention-menu">
     <div className="mention-menu-heading"><strong>{inviteLayer
       ? <UiText zh={'邀请队员'} />
       : query.trim() ? <UiText zh={'搜索队员'} /> : mission ? <UiText zh={'本使命'} /> : <UiText zh={'本会话'} />}</strong><span><UiText zh={"↑↓ 选择 · Enter 确认"} /></span></div>
+    <div className={`mention-menu-columns${hasRuntime ? ' has-runtime' : ''}`}>
+    <div id={menuId} role="listbox" aria-label={inviteLayer ? uiAttribute('可邀请队员') : mission ? uiAttribute('提及队员') : uiAttribute('选择接收队员')}>
     {options.length === 0
       ? <p className="structured-mention-empty"><UiText zh={"没有匹配的队员"} /></p>
       : options.map((option, index) => <button type="button" role="option" id={`${menuId}-option-${index}`}
@@ -699,7 +703,6 @@ function renderMentionMenu(
             : option.kind === 'all_members' ? uiAttribute('所有队员，仅本会话')
               : option.kind === 'invite_other' ? uiAttribute('邀请其他队员') : mission ? uiAttribute('返回本使命') : uiAttribute('返回本会话')}
           className={[selectedIndex === index ? 'active' : '',
-            option.kind === 'member' && option.member.runtimeLabel ? 'has-mention-runtime' : '',
             option.kind === 'member' && option.member.inThread === false ? 'is-invitable' : '',
             option.kind === 'invite_other' || option.kind === 'back_to_camp' ? 'is-mention-action' : ''
           ].filter(Boolean).join(' ')}
@@ -722,15 +725,19 @@ function renderMentionMenu(
                 : option.kind === 'back_to_camp' ? mission ? uiAttribute('查看当前使命队员') : uiAttribute('查看当前会话队员')
                   : structuredMentionMemberDescription(option.member)}</small>
           </span>
-          {option.kind === 'member' && option.member.runtimeLabel
-            ? <span className="mention-option-runtime" title={[option.member.runtimeLabel, option.member.modelLabel].filter(Boolean).join(' · ')}>
-              <span>{option.member.runtimeLabel}</span>
-              {option.member.modelLabel && <small>{option.member.modelLabel}</small>}
-            </span>
-            : option.kind === 'invite_other'
+          {option.kind === 'invite_other'
               ? <svg className="mention-action-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="m4 2.5 3.5 3.5L4 9.5" /></svg>
               : null}
         </button>)}
+    </div>
+    {hasRuntime && <div className="mention-runtime-column" aria-label={uiAttribute('智能体')}>
+      {options.map((option, index) => option.kind === 'member' && option.member.runtimeLabel
+        ? <MentionRuntimeButton key={option.member.agentId} kind={option.member.runtimeKind}
+            label={option.member.runtimeLabel} model={option.member.modelLabel} memberName={option.member.displayName}
+            active={selectedIndex === index} onHighlight={() => setHighlightedIndex(index)} onSelect={() => selectIndex(index)} />
+        : <span key={option.kind === 'member' ? option.member.agentId : option.kind} className={`mention-runtime-placeholder${option.kind === 'invite_other' || option.kind === 'back_to_camp' ? ' is-mention-action' : ''}`} aria-hidden="true" />)}
+    </div>}
+    </div>
   </div>
 }
 

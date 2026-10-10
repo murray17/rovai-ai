@@ -20,11 +20,28 @@ app.whenReady().then(async () => {
   const key = async (key, code) => {
     for (const type of ['keyDown', 'keyUp']) await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, windowsVirtualKeyCode: code })
   }
+  const click = async selector => {
+    const point = await evaluate(`(() => { const node = document.querySelector(${JSON.stringify(selector)}); const r = node.getBoundingClientRect(); const x = r.x + r.width / 2, y = r.y + r.height / 2; if (!node.contains(document.elementFromPoint(x, y))) throw new Error('Click target is obscured'); return {x, y}; })()`)
+    for (const type of ['mousePressed', 'mouseReleased']) await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', {type, ...point, button:'left', clickCount:1})
+  }
+  let mentionCount = 0
   const mention = async () => {
     await evaluate('invitationTest.focus()')
     await window.webContents.debugger.sendCommand('Input.insertText', { text: '@爱丽丝' })
     await wait(`!!document.querySelector('.structured-mention-menu [role="option"]')`)
-    await key('Enter', 13)
+    const before = await evaluate('invitationTest.state().text')
+    assert.equal(await evaluate(`document.querySelector('.structured-mention-menu').innerText.includes('configured-test-model')`), false)
+    await click('.mention-runtime-trigger')
+    await wait(`!!document.querySelector('.mention-runtime-popover')`)
+    assert.equal(await evaluate(`document.querySelector('.mention-runtime-popover dd').textContent`), 'configured-test-model')
+    assert.equal(await evaluate('invitationTest.state().text'), before)
+    assert.equal(await evaluate('invitationTest.state().atoms'), 0)
+    if (++mentionCount === 1) {
+      await click('.mention-runtime-heading button')
+      await wait(`!document.querySelector('.mention-runtime-popover') && document.activeElement?.id === 'camp-message'`)
+      assert.equal(await evaluate('invitationTest.state().text'), before)
+      await key('Enter', 13)
+    } else await click('.mention-runtime-select')
     await wait('invitationTest.state().invite && !invitationTest.state().button')
   }
   try {
