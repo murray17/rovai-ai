@@ -157,6 +157,28 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
 推理强度 fallback。边界由 [Runtime Launch v55](../contracts/runtime-launch-and-verification-v55.md)拥有。
 
+### 受管执行的原生自动记忆
+
+Rovai 管理的 Claude Code 与 Codex 执行关闭 Runtime 原生自动记忆；Rovai Memory、原生会话连续性和项目工程规则保持不变。
+该策略不删除既有数据，也不控制 Rovai 之外启动的 Runtime。不新增用户开关、Runtime Home 或文件访问隔离。
+
+Claude 在既有私有临时 settings 文件中合入 `env.CLAUDE_CODE_DISABLE_AUTO_MEMORY="1"`，保留 Fast 三态及其他字段；
+普通 Runtime/Built-in 环境合并后，再对该子进程设置同名环境变量。settings 与 Bootstrap 沿用现有文件持有和清理，
+不把 JSON 或敏感载荷放入命令行、不改变 Windows shim 的参数检查。用户及项目原生文件不改写。
+
+Codex 在 App-Server 启动参数中无条件传入 `features.memories=false`、`memories.generate_memories=false`、
+`memories.use_memories=false` 三个 `-c` 覆盖。新 Thread 不作为记忆生成输入，后续 Session 不自动注入原生记忆；
+既有 Thread 的历史资格和历史正文不追溯清理。Thread start/resume 继续追加已有 MCP 配置，不重开记忆开关。
+
+固定修订只进入 Codex Host 的进程兼容摘要，不进入 Native Binding 兼容摘要。旧 Host 按原有空闲替换／Run 完成后退役，
+后继 Host 使用原 Thread ID Resume；Claude 同样保留原 Session ID。新版 Core 新建的子进程开始采用策略，
+旧 Core、运行中的 Run 不热更新，不为此退出日常 App。
+
+CLI/settings 覆盖仍受原生管理策略约束。明确的参数拒绝或配置加载错误沿用现有 Runtime failure，不能撤销覆盖后静默重试，
+也不能清空 Session Binding。已证实的更高优先级冲突明确报告；未知版本或缺少配置字段记为未验证，
+不增加每轮版本检测、配置读取或生产准入门禁。`config/read` 与实际请求的对应关系只在隔离验收中核对，
+版本、平台与未验证项见[兼容性清单](../runtime-compatibility.md#2026-10-10-关闭原生自动记忆)。
+
 <a id="浅检测与按需深检"></a>
 ## 安装发现与真实 Host 验证
 

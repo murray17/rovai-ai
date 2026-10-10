@@ -24,6 +24,18 @@ last_updated: 2026-10-10
 
 验证结果待本轮命令完成后记录。
 
+## 2026-10-10 受管原生自动记忆
+
+按 User 最终确认，仅调整 Claude/Codex 启动配置：保留 Claude settings 文件运输、Fast 三态与 Bootstrap，
+在私有 settings 和最终子进程环境中关闭自动记忆；Codex App-Server 无条件携带三个关闭参数。
+Host 固定策略修订与 Native Binding 兼容性分离，正常替换后继续原 ID Resume。
+不改 Windows shim、数据库、配置管理或其他 Adapter；既有 Runtime failure 不静默降级。
+
+复用现有命令、文件生命周期、Thread、Fleet 与失败测试 owner，未新增 Rust 测试函数；Windows Full check
+补入已有 Claude 扩展测试。隔离对照和实际 Core 执行证据、基线失败、平台边界见
+[原生自动记忆验收](../../research/native-auto-memory/verification-2026-10-10.md)。
+这是固定启动策略的局部实现，未新增通用策略体系或改写历史决策。
+
 ## 2026-10-10 Pi 目录观察与思考强度
 
 按 User 修订实现三个边界：Pi 目录准入、调度、提交、读取独立于健康；目标 Session 激活后避免同模型重复选模；
