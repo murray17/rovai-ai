@@ -217,3 +217,19 @@ V2 协作、公开去重、冷恢复与自动压缩联合样本通过：1 个原
 协议事实依据精确 [v2.0.26 源码](https://github.com/anomalyco/opencode/tree/v2.0.26/packages/cli/src/acp)、
 [ACP 文档](https://opencode.ai/v2/docs/cli/acp/)及[权限规则](https://opencode.ai/v2/docs/permissions/)，
 并通过实际发布包核对；普通执行不依赖版本登记。
+
+### 安装前与最新 main 合流（2026-10-10）
+
+按 User 的合入并安装要求，再合入主线 `48b89e1c3`。保留 Kimi 原生配置、Pi 思考强度、
+受管原生自动记忆策略与界面改动。ACP 冲突保留 OpenCode 代际／补丁升级断言，并调用主线已经
+移除 Kimi provider overlay 的兼容摘要接口；没有恢复旧配置注入。版本概览同时保留各项交付记录。
+
+合流后 `pnpm typecheck`、`pnpm test`、`pnpm test:rust:pr` 与格式检查通过；Vitest 为
+239 文件／2616 用例，Node 为 339 passed／2 skipped，Core 默认层为 419 passed／1 ignored。
+OpenCode 定向 6、ACP 67 passed／2 ignored、health 启动参数 owner 1，以及合流后的
+Runtime model picker 独立 Electron 验收通过。ACP 数量变化来自主线 Kimi overlay owner 退役，
+不是删除 OpenCode 覆盖。
+
+此前 V1／Brew V2 的真实开发版证据仍限于各自记录的构建；本次日常提升须在 PR CI 通过后，
+从合入后的主线构建 `package:mac:daily`，完成新的隔离打包 App 验收与签名门禁，再由
+`install:mac:daily` 保留当前宿主进程并替换日常安装。实际构建身份、验收和安装结果随本次任务交付。
