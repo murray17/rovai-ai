@@ -345,16 +345,17 @@ output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等�
 只清理 Probe 自有资源；原生初始化可能联网或落盘，检查不保证模型生成、余额或任意项目配置。
 自动化回归与真实模型 smoke 继续由调用方提供隔离环境，详见 [Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md)。
 
-仍保留两项独立差异：Kiro 通过临时 `.kiro/agents/rovai.json` 与 `--agent rovai` 追加 MCP；Kimi 通过
-Rovai 专属 env 文件提供进程级模型配置。两者分别评估，本次不改变默认 Agent、MCP 或 Provider 投递机制。
+Kiro 仍通过临时 `.kiro/agents/rovai.json` 与 `--agent rovai` 追加 MCP。Kimi 已按
+[Runtime Launch v56](../contracts/runtime-launch-and-verification-v56.md)退役专属 env 文件，普通 Probe 与正式运行都使用原生配置。
 
 ## Kimi Code 当前边界
 
-`kimi-code-cli` 通过 `kimi acp` 复用 ACP v1 Host。Core 不读取或改写用户 `~/.kimi`，而是从权限收窄的
-`~/.config/rovai/kimi-code.env`（可由 `ROVAI_KIMI_CONFIG` 覆盖）读取严格 allowlist 的
-`KIMI_MODEL_*` provider 字段，并只注入目标子进程。`KIMI_MODEL_CAPABILITIES=thinking` 只声明能力，
-Rovai 不强制关闭 Kimi/MiniMax thinking。未知、重复、缺失、格式错误或权限过宽均在 launch 前
-fail closed；秘密不进入数据库、Evidence、diagnostics 或公开 command。
+`kimi-code-cli` 通过 `kimi acp` 复用 ACP v1 Host。Provider、凭据和默认模型由 Kimi 的官方
+`config.toml` 拥有；Core 不读取、复制、合并或改写它们，也不再读取 `~/.config/rovai/kimi-code.env`
+或 `ROVAI_KIMI_CONFIG`，不从私有文件注入 `KIMI_MODEL_*`。旧 env 文件的内容、格式与权限不影响
+启动、Probe 或 Host 复用；文件保留给用户自行处理，不自动覆盖官方配置。原生进程环境照常继承。
+秘密不进入 Rovai 数据库、Evidence、diagnostics 或公开 command。当前精确边界见
+[Runtime Launch v56](../contracts/runtime-launch-and-verification-v56.md)。
 
 Kimi Code 的 ACP compatibility policy 使用通用 Client Terminal `local_bridged` 模式。初始化真实声明
 `clientCapabilities.terminal=true`，Shell 子进程由上述本地 Bridge 执行；这不是 Kimi 私有 Shell 协议，也不改变
@@ -365,9 +366,9 @@ create/output/wait/kill/release、4 MiB output limit 与 capability-unavailable 
 真实 Camp AgentRun 经两次 Bash 调用读取 workspace cwd 与固定 marker 后成功结束，且未遗留 Kimi/Terminal 子进程。
 
 Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时
-由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session；`KIMI_MODEL_*`
-provider overlay 仍只存在于目标子进程。普通 Deep Probe 同样继承原生 Home，只保留一次性 cwd；不得把 Probe
-Session 写入正式 Binding，其行为不能外推为产品 continuation 证据。自动化 smoke 的测试 Home 由调用方隔离。
+由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session。普通 Deep Probe
+同样继承原生 Home，只保留一次性 cwd；不得把 Probe Session 写入正式 Binding，其行为不能外推为产品
+continuation 证据。自动化 smoke 的测试 Home 由调用方隔离。
 
 Kimi AgentRun 正常结束后，健康、quiescent 且 compatibility digest 完全一致的 Host 进入 warm LRU；后继兼容
 Run 直接复用同一 Host/Session。Host 被停止、淘汰或失效后，后继兼容 Run 在继承同一用户原生 Home 的新 Host

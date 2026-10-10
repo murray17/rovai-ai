@@ -36,6 +36,9 @@ const commands = {
   'antigravity-app': ['agy', 'ROVAI_ANTIGRAVITY_BIN']
 }
 if (!Object.hasOwn(commands, kind)) throw new Error('Select an in-scope Runtime')
+if (kind === 'kimi-code-cli' && !process.env.ROVAI_METRICS_NATIVE_HOME) {
+  throw new Error('Kimi acceptance requires ROVAI_METRICS_NATIVE_HOME containing official config.toml')
+}
 const fixture = await realpath(process.env.ROVAI_METRICS_FIXTURE_ROOT ?? await mkdtemp(join(tmpdir(), `rovai-runtime-metrics-${kind}-`)))
 const data = join(fixture, 'user-data'), workspacePath = join(fixture, 'workspace')
 const rawPath = join(fixture, 'native-shapes.jsonl')
@@ -69,7 +72,7 @@ if (kind === 'pi') {
 if (process.env.ROVAI_METRICS_NATIVE_HOME) {
   const nativeHome = join(fixture, 'native-home')
   await mkdir(nativeHome, { mode: 0o700 })
-  const names = kind === 'grok-build' ? ['config.toml'] : ['settings.yaml', 'cordis.patch.yml']
+  const names = ['grok-build', 'kimi-code-cli'].includes(kind) ? ['config.toml'] : ['settings.yaml', 'cordis.patch.yml']
   for (const name of names) {
     try {
       await copyFile(join(process.env.ROVAI_METRICS_NATIVE_HOME, name), join(nativeHome, name))
@@ -77,6 +80,13 @@ if (process.env.ROVAI_METRICS_NATIVE_HOME) {
     } catch (error) { if (error.code !== 'ENOENT') throw error }
   }
   if (kind === 'grok-build') process.env.GROK_HOME = nativeHome
+  if (kind === 'kimi-code-cli') {
+    // Use the official provider/model configuration in a fixture-owned Home.
+    // OAuth state is optional for BYOK, and no daily sessions are copied.
+    await readFile(join(nativeHome, 'config.toml'))
+    try { await cp(join(process.env.ROVAI_METRICS_NATIVE_HOME, 'oauth'), join(nativeHome, 'oauth'), { recursive: true, dereference: true }) } catch (error) { if (error.code !== 'ENOENT') throw error }
+    process.env.KIMI_CODE_HOME = nativeHome
+  }
   if (kind === 'deepseek-harness') {
     try { await cp(join(process.env.ROVAI_METRICS_NATIVE_HOME, 'profiles'), join(nativeHome, 'profiles'), { recursive: true }) } catch (error) { if (error.code !== 'ENOENT') throw error }
     process.env.DSH_HOME = nativeHome; process.env.DSH_AGENTS_HOME = join(fixture, 'agents-home')
@@ -124,22 +134,6 @@ if (process.env.ROVAI_METRICS_NATIVE_HOME) {
       } catch (error) { if (error.code !== 'ENOENT') throw error }
     }
   }
-}
-if (kind === 'kimi-code-cli' && process.env.ROVAI_METRICS_SUB2API === '1') {
-  const claude = JSON.parse(await readFile(join(homedir(), '.claude/settings.json'), 'utf8')).env
-  const origin = new URL(claude.ANTHROPIC_BASE_URL).origin
-  const token = claude.ANTHROPIC_AUTH_TOKEN ?? claude.ANTHROPIC_API_KEY
-  if (!token || !claude.ANTHROPIC_MODEL) throw new Error('Authorised Claude provider configuration is incomplete')
-  // Core's explicit provider file overrides inherited env. Use its supported
-  // path override instead of accidentally testing the daily MiniMax config.
-  const path = join(fixture, 'kimi-code.env')
-  await writeFile(path, [
-    `KIMI_MODEL_NAME=${claude.ANTHROPIC_MODEL}`,
-    'KIMI_MODEL_PROVIDER_TYPE=openai',
-    `KIMI_MODEL_API_KEY=${token}`,
-    `KIMI_MODEL_BASE_URL=${origin}/v1`
-  ].join('\n') + '\n', { mode: 0o600 })
-  process.env.ROVAI_KIMI_CONFIG = path
 }
 let nativeExecutable = null
 let observerExecutable = null

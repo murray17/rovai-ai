@@ -1899,9 +1899,6 @@ async fn run_acp_probe_with_scope(
             command.arg("--model").arg(model);
         }
     }
-    if kind == AdapterKind::KimiCodeCli {
-        crate::acp::configure_kimi_model_environment(&mut command)?;
-    }
     let grok_byok_configured =
         kind == AdapterKind::GrokBuild && crate::acp::grok_native_byok_configured()?;
     if kind == AdapterKind::GrokBuild {

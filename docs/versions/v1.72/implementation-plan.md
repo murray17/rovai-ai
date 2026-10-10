@@ -8,6 +8,22 @@ last_updated: 2026-10-10
 
 # v1.72 实施与验收
 
+## 2026-10-10 Kimi 官方 Provider 配置
+
+删除正式 ACP Host 与 Probe 的私有 env 注入、加载器和 `kimiProviderEnvironmentDigest`，
+原生 Home、ACP 选模、权限、MCP 与 Session 恢复保持。指标验收脚本改用显式官方配置来源的隔离 Home。
+没有数据迁移或模型上下文变更；旧文件不自动删除，官方配置不被 Rovai 改写。
+
+测试退役：`kimi_provider_configuration_is_allowlisted_and_process_local`、
+`kimi_provider_configuration_rejects_unknown_keys`、`kimi_provider_configuration_rejects_group_readable_secrets`
+随唯一生产解析器和私有配置合同退出。未新增独立 Rust 测试；扩展既有
+`acp_probes_keep_native_homes_without_prompting` 与 `kimi_stopped_host_inherits_native_home_and_exactly_resumes`，
+分别验证默认/自定义原生 Home、旧文件两种入口被忽略、无变量注入、配置原样保留以及精确冷恢复。
+这些 owner 需要隔离子进程证明环境继承，使用假凭据且不调用模型；修复前旧文件会触发拒绝或注入错误 Provider。
+`warm_compatibility_matches_process_inputs_across_acp_adapters` 保留 MCP、Host 配置与 Session mode 边界。
+
+验证结果待本轮命令完成后记录。
+
 ## 2026-10-10 Pi 目录观察与思考强度
 
 按 User 修订实现三个边界：Pi 目录准入、调度、提交、读取独立于健康；目标 Session 激活后避免同模型重复选模；

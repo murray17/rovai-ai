@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Agent Runtime 兼容性清单
@@ -293,6 +293,16 @@ Claude inline settings、默认模型切换及 cooldown 边界参考[原生 Fast
 执行，不能把 fixture 写成 post-fix Runtime smoke。当前每 Run 文件变化卡片只归约该 AgentRun 已落库的可靠
 Runtime Evidence，不使用 Git 或工作区扫描；因此 path-only、标准 Diff 与 exact mutation 的实际覆盖直接决定卡片
 细节，未被 Runtime 报告的 shell 或外部写入不进入卡片。
+
+### 2026-10-10 Kimi Code `2.1.1` 官方 Provider 配置
+
+按 [Runtime Launch v56](contracts/runtime-launch-and-verification-v56.md) 移除 Rovai 私有 env 注入。
+本机 macOS arm64 的真实 `kimi acp` 在独立 Home、临时 workspace 和假凭据下完成 initialize、
+`session/new`、进程退出后 initialize + 指定原 ID 的 `session/resume`。两次响应均选择官方
+`config.toml` 的 `native-fixture`，目录只有配置的原生模型，没有 env 临时模型；TOML 字节保持不变。
+2.1.1 的 resume 成功响应没有 `sessionId` 字段，沿用共享 ACP 对已请求 ID 的处理，不伪造返回字段。
+全程无 `session/prompt`、真实 Key 或模型生成；该结果只证明原生配置、目录与恢复入口，不新增平台资格。
+Core 的旧 env 忽略、变量不注入及正式冷恢复由扩展测试拥有，见[当前实施记录](versions/v1.72/implementation-plan.md#2026-10-10-kimi-官方-provider-配置)。
 
 ### 2026-08-24 Kimi Code macOS x64 准入晋升
 

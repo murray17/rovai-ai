@@ -186,9 +186,24 @@ async fn acp_probes_keep_native_homes_without_prompting() {
                     )
                     .unwrap();
                     fs::set_permissions(&env_file, fs::Permissions::from_mode(0o600)).unwrap();
-                    let kimi_config = root.join("kimi-code.env");
-                    fs::write(&kimi_config, "KIMI_MODEL_NAME=fixture\nKIMI_MODEL_PROVIDER_TYPE=anthropic\nKIMI_MODEL_API_KEY=test-only-key\nKIMI_MODEL_BASE_URL=https://fixture.invalid\n").unwrap();
-                    fs::set_permissions(&kimi_config, fs::Permissions::from_mode(0o600)).unwrap();
+                    let kimi_home = if custom_home {
+                        root.join("custom kimi 中文")
+                    } else {
+                        home.join(".kimi-code")
+                    };
+                    fs::create_dir_all(&kimi_home).unwrap();
+                    let kimi_config = "default_model = \"fixture\"\n[providers.native]\ntype = \"anthropic\"\napi_key = \"test-only-key\"\nbase_url = \"https://fixture.invalid\"\n[models.fixture]\nprovider = \"native\"\nmodel = \"native-model\"\nmax_context_size = 1000\n";
+                    fs::write(kimi_home.join("config.toml"), kimi_config).unwrap();
+                    // Both retired entry points must be ignored, including an
+                    // invalid default file that used to block native launches.
+                    let legacy_dir = home.join(".config/rovai");
+                    fs::create_dir_all(&legacy_dir).unwrap();
+                    let legacy_default = legacy_dir.join("kimi-code.env");
+                    fs::write(&legacy_default, "obsolete provider file\n").unwrap();
+                    let legacy_override = root.join("kimi-code.env");
+                    fs::write(&legacy_override, "KIMI_MODEL_NAME=obsolete\nKIMI_MODEL_PROVIDER_TYPE=anthropic\nKIMI_MODEL_API_KEY=obsolete-key\nKIMI_MODEL_BASE_URL=https://obsolete.invalid\n").unwrap();
+                    fs::set_permissions(&legacy_override, fs::Permissions::from_mode(0o600))
+                        .unwrap();
                     let runtime = root.join("runtime");
                     fs::write(&runtime, r#"#!/bin/sh
 log="$ROVAI_TEST_ACP_PROBE_ROOT"
@@ -197,7 +212,10 @@ printf '%s\n' "$PWD" > "$log/cwd"
 printf '%s\n' "$@" > "$log/argv"
 case "$ROVAI_TEST_ACP_PROBE_CASE" in
   grok-byok) test "$FIXTURE_GROK_API_KEY" = test-only-key || exit 81 ;;
-  kimi) test "$KIMI_MODEL_API_KEY" = test-only-key || exit 82 ;;
+  kimi)
+    test -z "${KIMI_MODEL_NAME+x}${KIMI_MODEL_PROVIDER_TYPE+x}${KIMI_MODEL_API_KEY+x}${KIMI_MODEL_BASE_URL+x}${KIMI_MODEL_MAX_CONTEXT_SIZE+x}${KIMI_MODEL_CAPABILITIES+x}" || exit 82
+    cmp "${KIMI_CODE_HOME:-$HOME/.kimi-code}/config.toml" "$ROVAI_TEST_KIMI_CONFIG" || exit 85
+    ;;
   kiro) cat .kiro/agents/rovai.json > "$log/agent.json" || exit 83 ;;
 esac
 id=0
@@ -239,12 +257,13 @@ done
                             "ROVAI_TEST_ACP_PROBE_REJECT",
                             if rejected { "1" } else { "0" },
                         )
-                        .env("ROVAI_KIMI_CONFIG", &kimi_config)
+                        .env("ROVAI_TEST_KIMI_CONFIG", kimi_home.join("config.toml"))
                         .kill_on_drop(true);
                     if custom_home {
                         command
                             .env("GROK_HOME", &grok_home)
-                            .env("KIMI_CODE_HOME", root.join("custom kimi 中文"))
+                            .env("KIMI_CODE_HOME", &kimi_home)
+                            .env("ROVAI_KIMI_CONFIG", &legacy_override)
                             .env("KIRO_HOME", root.join("custom kiro 中文"));
                     }
                     let output = timeout(Duration::from_secs(15), command.output())
@@ -261,10 +280,13 @@ done
                         fs::read_to_string(grok_home.join("config.toml")).unwrap(),
                         grok_config
                     );
-                    assert!(
-                        env_file.is_file() && kimi_config.is_file(),
-                        "native configuration must survive probe cleanup"
+                    assert_eq!(
+                        fs::read_to_string(kimi_home.join("config.toml")).unwrap(),
+                        kimi_config,
+                        "native configuration must survive probe cleanup unchanged"
                     );
+                    assert!(env_file.is_file());
+                    assert!(legacy_default.is_file() && legacy_override.is_file());
                 }
             }
         }

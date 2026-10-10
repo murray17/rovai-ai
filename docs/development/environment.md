@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: development-environment
-last_updated: 2026-08-24
+last_updated: 2026-10-10
 ---
 
 # 开发环境与依赖
@@ -84,20 +84,13 @@ ROVAI_GROK_BIN
 
 环境变量只改变对应进程的发现输入，不应写入仓库、截图、诊断导出或用户内容。
 
-Kimi Code 的可选 provider 配置默认位于 `~/.config/rovai/kimi-code.env`，也可用
-`ROVAI_KIMI_CONFIG` 指向另一私有文件。Unix 文件必须为 `0600` 或更严格，只允许：
-
-```text
-KIMI_MODEL_NAME
-KIMI_MODEL_PROVIDER_TYPE
-KIMI_MODEL_API_KEY
-KIMI_MODEL_BASE_URL
-KIMI_MODEL_MAX_CONTEXT_SIZE
-KIMI_MODEL_CAPABILITIES
-```
-
-前四项必填。真实 key 不得写入仓库、fixture、命令行、截图或诊断；
-`KIMI_MODEL_CAPABILITIES=thinking` 只声明 provider 能力，Rovai 不强制关闭 Kimi/MiniMax thinking。
+Kimi Code 直接使用所选安装的官方 `config.toml`。已设置 `KIMI_CODE_HOME` 时由 Kimi 从该原生
+Home 读取，未设置时由 Kimi 决定默认目录（2.1.1 为 `~/.kimi-code/config.toml`）。BYOK 的
+`providers`、`models` 与 `default_model` 按[官方配置文档](https://moonshotai.github.io/kimi-code/en/configuration/config-files.html)配置。
+Rovai 不再读取 `~/.config/rovai/kimi-code.env` 或 `ROVAI_KIMI_CONFIG`，也不再注入自有 Provider 变量；
+旧文件保留但不生效。真实 key 不得写入仓库、测试 fixture、命令行、截图或诊断。
+真实 Kimi 指标验收脚本要求显式 `ROVAI_METRICS_NATIVE_HOME` 指向官方配置来源，复制到测试专用 Home
+后运行；不再通过 `ROVAI_METRICS_SUB2API` 从 Claude 配置生成 Kimi env。
 
 Grok Build 直接使用官方 `$GROK_HOME/config.toml`（未设置时为 `~/.grok/config.toml`）。例如：
 
