@@ -651,6 +651,20 @@ impl ClaudeCodeCliRuntimeAdapter {
         let mut inline_settings = serde_json::json!({
             "env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
         });
+        if let Some(overlay) = request
+            .runtime
+            .environment
+            .as_ref()
+            .and_then(|environment| environment.overlay.as_ref())
+        {
+            let env = inline_settings["env"]
+                .as_object_mut()
+                .context("Claude inline environment is invalid")?;
+            for (name, value) in overlay {
+                env.insert(name.clone(), serde_json::json!(value));
+            }
+        }
+
         rovai_core::camp_fast::merge_claude_inline_settings(&mut inline_settings, fast_override)?;
         let effort = claude_model_effort(&request.runtime.model.options)?;
         let mut command = Command::new(executable);
@@ -658,6 +672,10 @@ impl ClaudeCodeCliRuntimeAdapter {
             rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
             &mut command,
         );
+        if let Some(environment) = &request.runtime.environment {
+            environment.validate_claude_routing(request.runtime.reported_version.as_deref())?;
+            environment.apply(&mut command)?;
+        }
         if let Some(config) = &request.builtin_tools {
             config.configure_command(&mut command)?;
         }
@@ -847,6 +865,19 @@ impl ClaudeCodeCliRuntimeAdapter {
             .custom_api
             .as_ref()
             .and_then(|api| api.redactor().ok());
+        let redactor = Some(
+            request
+                .runtime
+                .environment
+                .as_ref()
+                .map(|env| env.redactor())
+                .unwrap_or_else(|| {
+                    rovai_core::runtime_custom_api::CredentialRedactor::from_values(vec![])
+                })
+                .extend(redactor.unwrap_or_else(|| {
+                    rovai_core::runtime_custom_api::CredentialRedactor::from_values(vec![])
+                })),
+        );
         Arc::get_mut(&mut protocol)
             .expect("unshared protocol")
             .set_credential_redactor(redactor);
@@ -2823,6 +2854,7 @@ mod tests {
             },
             permission_semantics: PermissionSemantics::RuntimeManagedV2,
             runtime: FrozenAgentRuntimeConfig {
+                environment: None,
                 custom_api: None,
                 camp_fast: None,
                 adapter_kind: AdapterKind::ClaudeCodeCli,
@@ -3737,6 +3769,7 @@ mod tests {
     printf 'start\n' >> "$0.starts"
     printf '%s\n' "$@" > "$0.argv"
     printf '%s' "$CLAUDE_CODE_DISABLE_AUTO_MEMORY" > "$0.memory-env"
+    printf '%s\n%s' "$ANTHROPIC_BASE_URL" "$ANTHROPIC_API_KEY" > "$0.member-env"
     case "$1" in --version|auth) sleep 30; exit 1;; esac
     previous=''
     for arg in "$@"; do
@@ -3766,6 +3799,29 @@ mod tests {
                 session_id,
             );
             request.runtime.reported_version = None;
+            let member_overlay = explicit && fast == Some(false) && !resume;
+            if member_overlay {
+                let overlay = std::collections::BTreeMap::from([
+                    (
+                        "ANTHROPIC_BASE_URL".into(),
+                        "https://fixture-member.example".into(),
+                    ),
+                    ("ANTHROPIC_API_KEY".into(), "private-key".into()),
+                ]);
+                let mut values = overlay.clone();
+                values.insert("PATH".into(), "/usr/bin:/bin".into());
+                values.insert("HOME".into(), root.to_string_lossy().into_owned());
+                values.insert("CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST".into(), "1".into());
+                request.runtime.reported_version = Some("2.1.287".into());
+                request.runtime.environment =
+                    Some(rovai_core::member_environment::FrozenEnvironment {
+                        plan_id: "fixture".into(),
+                        revision: 1,
+                        identity: "fixture".into(),
+                        values: Some(values),
+                        overlay: Some(overlay),
+                    });
+            }
             request.runtime.camp_fast = Some(rovai_core::camp_fast::FrozenThreadMemberFast {
                 runtime_binding_revision: "test-binding".into(),
                 fast_override: fast,
@@ -3844,6 +3900,16 @@ mod tests {
                 serde_json::from_slice(&std::fs::read(root.join("fake-claude.settings")).unwrap())
                     .unwrap();
             let mut expected = json!({"env": {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}});
+            if member_overlay {
+                expected["env"]["ANTHROPIC_BASE_URL"] = json!("https://fixture-member.example");
+                expected["env"]["ANTHROPIC_API_KEY"] = json!("private-key");
+                assert_eq!(
+                    std::fs::read_to_string(root.join("fake-claude.member-env")).unwrap(),
+                    "https://fixture-member.example\nprivate-key"
+                );
+                assert!(!argv.contains("private-key"));
+                assert!(!diagnostic.contains("private-key"));
+            }
             if let Some(fast) = fast {
                 expected["fastMode"] = json!(fast);
             }

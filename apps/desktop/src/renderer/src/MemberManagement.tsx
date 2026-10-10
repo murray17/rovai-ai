@@ -1,3 +1,5 @@
+import { MemberEnvironmentEditor, useMemberEnvironment } from './MemberEnvironmentEditor'
+import type { MemberEnvironmentEdit } from './member-environment'
 import { MobileBack, useMobileLayout } from './MobileLayout'
 import { assertApplied, commandCodeLabel, submitMemberRuntimeConfiguration } from './member-runtime-commands'
 import { newCommandId } from '../../shared/command-id'
@@ -606,7 +608,8 @@ const MemberEditor = forwardRef<
   const closeRemovalDialog = (): void => setRemoval(null)
   const saveRuntime = async (
     adapterKind: AdapterKind,
-    draft: MemberRuntimeDraft | null
+    draft: MemberRuntimeDraft | null,
+    environment?: MemberEnvironmentEdit
   ): Promise<void> => {
     if (!selectedAgent) return
     await runCommand(
@@ -616,6 +619,7 @@ const MemberEditor = forwardRef<
         agentId: selectedAgent.agentId,
         expectedVersion: selectedAgent.version,
         adapterKind,
+        ...(environment ? { environment } : {}),
         ...(draft
           ? {
               model: draft.model,
@@ -1101,7 +1105,8 @@ export const MemberRuntimeForm = forwardRef<
     onDirtyChange?(dirty: boolean): void
     onSave(
       adapterKind: AdapterKind,
-      draft: MemberRuntimeDraft | null
+      draft: MemberRuntimeDraft | null,
+      environment?: MemberEnvironmentEdit
     ): Promise<void>
     onClear(): Promise<void>
     onReload(): Promise<void>
@@ -1147,8 +1152,10 @@ export const MemberRuntimeForm = forwardRef<
   const persistedRuntimeKeyRef = useRef(persistedRuntimeKey(agent))
   const pendingSubmissionRef = useRef<PendingRuntimeSubmission | null>(null)
   const submittingRef = useRef(false)
+  const [submitting, setSubmitting] = useState(false)
   const currentStateKey = runtimeEditorStateKey({ selectedKind, draft })
-  const dirty = currentStateKey !== baselineStateKey
+  const environment = useMemberEnvironment(agent.agentId, selectedKind, agent.version, draft?.model, hostPlatform === 'windows-x64')
+  const dirty = currentStateKey !== baselineStateKey || environment.dirty
   const availability =
     runtimeAvailability.find((item) => item.runtimeKind === selectedKind) ??
     null
@@ -1189,6 +1196,7 @@ export const MemberRuntimeForm = forwardRef<
   const canSave =
     dirty &&
     !conflict &&
+    (!selectedKind || !environment.loading) &&
     (!selectedKind || draft !== null) &&
     runtimeMutationAllowed
   const runtimeStatus = memberRuntimePresentation(
@@ -1205,6 +1213,7 @@ export const MemberRuntimeForm = forwardRef<
     null
 
   const resetFromAgent = useCallback((): void => {
+    environment.reset()
     const next = runtimeEditorState(agent, installations)
     setSelectedKind(next.selectedKind)
     setDraft(next.draft)
@@ -1264,8 +1273,9 @@ export const MemberRuntimeForm = forwardRef<
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!canSave || busy !== null || submittingRef.current) return
+    if (!canSave || (busy !== null || submitting) || submittingRef.current) return
     submittingRef.current = true
+    setSubmitting(true)
     setSubmitError(null)
     const pendingSubmission: PendingRuntimeSubmission = {
       baseVersion: agent.version,
@@ -1275,7 +1285,8 @@ export const MemberRuntimeForm = forwardRef<
     pendingSubmissionRef.current = pendingSubmission
     try {
       if (selectedKind) {
-        await onSave(selectedKind, draft)
+        await onSave(selectedKind, draft, environment.edit())
+        await environment.savedSuccessfully()
       } else {
         await onClear()
       }
@@ -1289,6 +1300,7 @@ export const MemberRuntimeForm = forwardRef<
       setSubmitError(errorMessage(nextError))
     } finally {
       submittingRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -1302,7 +1314,7 @@ export const MemberRuntimeForm = forwardRef<
           <MemberRuntimePicker
             id={runtimeSelectId}
             value={selectedKind}
-            disabled={busy !== null || persistedRuntimeLocked}
+            disabled={(busy !== null || submitting) || persistedRuntimeLocked}
             isDisabled={(kind) =>
               hostPlatform !== null &&
               !runtimePlatformAdmissionAllowsUse(
@@ -1374,7 +1386,7 @@ export const MemberRuntimeForm = forwardRef<
             adapterKind={selectedKind}
             installation={installation}
             draft={draft}
-            disabled={busy !== null || !runtimeMutationAllowed}
+            disabled={(busy !== null || submitting) || !runtimeMutationAllowed}
             onOpenModelCatalog={(target) => openRuntimeModelCatalog(selectedKind, client.request, false, target)}
             onChange={(nextDraft) => {
               setDraft(nextDraft)
@@ -1382,6 +1394,8 @@ export const MemberRuntimeForm = forwardRef<
             }}
           />
         )}
+
+        {selectedKind && <MemberEnvironmentEditor environment={environment} disabled={(busy !== null || submitting) || !runtimeMutationAllowed}/> }
 
         {conflict && (
           <div className="member-runtime-conflict" role="alert">
@@ -1398,13 +1412,13 @@ export const MemberRuntimeForm = forwardRef<
           <div className="inline-error" role="alert">
             {submitError}
             {submitError === commandCodeLabel('runtime_model_catalog_refresh_required') && (
-              <button className="quiet-button" type="submit" disabled={!canSave || busy !== null}><UiText zh={"重试"} /></button>
+              <button className="quiet-button" type="submit" disabled={!canSave || (busy !== null || submitting)}><UiText zh={"重试"} /></button>
             )}
           </div>
         )}
         <div className={`member-editor-save-row${onApplyToOthers ? ' runtime-apply-save-row' : ''}`}>
           {onApplyToOthers && <button type="button" className="quiet-button runtime-apply-entry" data-apply-entry={agent.agentId}
-            disabled={dirty || conflict || busy !== null || !runtimeMutationAllowed || !agent.runtimeConfiguration}
+            disabled={dirty || conflict || (busy !== null || submitting) || !runtimeMutationAllowed || !agent.runtimeConfiguration}
             title={dirty ? uiAttribute('请先保存当前运行配置') : undefined}
             onClick={() => onApplyToOthers(agent)}>
             <span><UiText zh="应用到其他队员" /></span><RuntimeApplyIcon/>
@@ -1422,13 +1436,13 @@ export const MemberRuntimeForm = forwardRef<
             <button
               className="member-editor-cancel"
               type="button"
-              disabled={!dirty || busy !== null}
+              disabled={!dirty || (busy !== null || submitting)}
               onClick={resetFromAgent}
             ><UiText zh={"放弃更改"} /></button>
             <button
               className="member-editor-primary member-editor-save"
               aria-label={uiAttribute("保存运行配置")}
-              disabled={!canSave || busy !== null}
+              disabled={!canSave || (busy !== null || submitting)}
             >
               <DialogControlIcon name="save" />
               {busy === 'runtime' || busy === 'runtime-clear'

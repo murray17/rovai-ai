@@ -1302,6 +1302,7 @@ struct ZcodeBackgroundRoute {
 }
 
 pub(crate) struct AcpHost {
+    credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     adapter_kind: AdapterKind,
     reported_version: Option<String>,
     opencode_program_identity: Option<String>,
@@ -1439,6 +1440,39 @@ impl AcpHost {
         private_runtime_dir: &Path,
         attachment_access_root: Option<&Path>,
     ) -> Result<Arc<Self>> {
+        rovai_core::runtime_discovery::with_frozen_environment(
+            frozen_runtime.environment.clone(),
+            Self::spawn_in_environment(
+                cwd,
+                workspace,
+                permission_semantics,
+                frozen_runtime,
+                incoming,
+                builtin_tools,
+                compaction_detector_policy,
+                allow_client_fs,
+                external_mcp_servers,
+                private_runtime_dir,
+                attachment_access_root,
+            ),
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn spawn_in_environment(
+        cwd: &Path,
+        workspace: &AgentRunWorkspace,
+        permission_semantics: PermissionSemantics,
+        frozen_runtime: &FrozenAgentRuntimeConfig,
+        incoming: mpsc::UnboundedSender<AcpIncoming>,
+        builtin_tools: Option<BuiltinToolProcessConfig>,
+        compaction_detector_policy: CompactionDetectorPolicy,
+        allow_client_fs: bool,
+        external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+        private_runtime_dir: &Path,
+        attachment_access_root: Option<&Path>,
+    ) -> Result<Arc<Self>> {
         if !runtime_launch_allowed(
             frozen_runtime.adapter_kind,
             RuntimeLaunchPurpose::AgentExecution,
@@ -1470,6 +1504,9 @@ impl AcpHost {
             frozen_runtime.adapter_kind,
             &mut command,
         );
+        if let Some(environment) = &frozen_runtime.environment {
+            environment.apply(&mut command)?;
+        }
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
         }
@@ -1591,6 +1628,10 @@ impl AcpHost {
             (Box::new(stdin), Box::new(stdout))
         };
         let host = Arc::new(Self {
+            credential_redactor: frozen_runtime
+                .environment
+                .as_ref()
+                .map(|env| env.redactor()),
             adapter_kind: frozen_runtime.adapter_kind,
             reported_version: frozen_runtime.reported_version.clone(),
             opencode_program_identity: if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
@@ -1841,6 +1882,9 @@ impl AcpHost {
                                 continue;
                             }
                         };
+                        if let Some(redactor) = &host.credential_redactor {
+                            redactor.value(&mut message);
+                        }
                         if host.adapter_kind == AdapterKind::DeepseekHarness
                             && let Some(root) = host.private_config_root.as_deref()
                             && let Err(error) = crate::dsh::enrich_message(root, &mut message)
@@ -2528,6 +2572,10 @@ impl AcpHost {
             }
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                let line = host
+                    .credential_redactor
+                    .as_ref()
+                    .map_or_else(|| line.clone(), |redactor| redactor.text(&line));
                 if !line.trim().is_empty() {
                     {
                         let mut diagnostic = host.startup_diagnostics.lock().await;
@@ -3308,6 +3356,10 @@ impl AcpHost {
     }
 
     fn send_host_diagnostic(&self, text: String) {
+        let text = self
+            .credential_redactor
+            .as_ref()
+            .map_or_else(|| text.clone(), |redactor| redactor.text(&text));
         let _ = self.incoming.send(AcpIncoming::HostDiagnostic {
             adapter_kind: self.adapter_kind,
             host_instance_id: self.host_instance_id.clone(),
@@ -8342,6 +8394,7 @@ mod tests {
 
     fn frozen_trae_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::TraeCnCli,
@@ -8374,6 +8427,7 @@ mod tests {
 
     fn frozen_kiro_runtime() -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::KiroCli,
@@ -8406,6 +8460,7 @@ mod tests {
 
     fn frozen_cursor_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CursorAgent,
@@ -8445,6 +8500,7 @@ mod tests {
 
     fn frozen_kimi_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::KimiCodeCli,
@@ -8477,6 +8533,7 @@ mod tests {
 
     fn frozen_grok_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::GrokBuild,

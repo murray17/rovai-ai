@@ -128,34 +128,25 @@ continuation、Built-in Tool、Approval、cancel、terminal、process cleanup �
 
 ## 本机启动设置
 
-Runtime Startup Settings 是 Core 拥有的按 Runtime Kind 本机配置，包含可选程序路径与子进程环境。
-Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 managed readiness 失效同事务提交；
-保存后的 immutable Search Environment 供发现和新进程使用，已启动进程不受配置写入影响。
+Runtime Startup Settings 只保存本机程序路径。环境覆盖属于当前 Host 的具体队员实例和 Runtime，
+由 Core 私有存储管理；Host 环境与队员环境同名覆盖、不同名追加，删除队员条目恢复继承。
+已启动进程不受保存影响，旧 Agents 环境不再参与启动/检查，独立只读归档由诊断提供人工迁移参考。
 
-显式程序路径失效时保持缺失，不能换用自动候选；用户恢复自动后再使用原有发现来源。
-草稿浅检不写安装，草稿深检复用 Check Manager 的并发、deadline 与清理 owner，结果只回到编辑器。
-环境只传入对应 Runtime 进程与原生配置读取，既不修改系统环境，也不投影到公共上下文。
-字段、CAS、迁移和错误边界由 [Runtime Launch v55](../contracts/runtime-launch-and-verification-v55.md)拥有。
-
-主动正式检查在后端先读取最新基础环境、加载已保存启动设置，再将不可变环境快照交给 Check Manager。
-刷新后的请求不与旧搜索代数合并；结果写回与保存/刷新共用更新锁并重验代数和程序身份。
-草稿检查只复用读取步骤，在临时快照叠加草稿；不发布全局环境、安装、正式可用性或模型缓存。
-列表和指南共用正式入口；重新检测仍是目录浅检，不是主动检查的前置操作。
-
-保存是一次本地提交：复用已捕获环境，校验目标、字段与版本，写入并返回修订。它不重新读取 Shell/PATH，
-不扫描 Runtime、不查询身份或目录、不重启 Host，也不在返回后自动排队这些操作。显式程序路径只作本地文件校验。
-新配置按原规则失效缓存、冻结与 Host 兼容性；既有 Run 按生命周期完成，后继执行仍需匹配新来源摘要。
-环境捕获与发现文件校验在提交锁外进行，晚到发布重验代次并加载最新设置，不能使保存等待外部任务。
+准入冻结环境计划，执行和重试按不可变私有引用读取；进程及 Native Binding 兼容摘要包含有效环境身份。
+相同环境继续按既有 Warm 范围复用，不因增加队员配置而改为统一逐队员进程。
+值不进入成员资料、公开命令、工具、事件或诊断导出；Owner 管理面使用遮蔽读取及显式查看。
+程序绝对路径仍属于安装发现，不由队员 PATH 偷换。详细字段、CAS、凭据保护、CLI 资格与迁移见
+[Runtime Launch v57](../contracts/runtime-launch-and-verification-v57.md)。
 
 ### Claude Code 与 Codex 原生配置
 
-原生连接编辑已按 User 要求退出。启动设置只拥有程序路径与普通子进程环境，不再读取到表单或编辑
+原生连接编辑已按 User 要求退出。启动设置只拥有程序路径，队员环境由独立私有入口拥有，不再读取到表单或编辑
 原生地址、Key、连接方式和模型列表，不再观察账号或生成原生目录。移除入口不修改任何已有原生配置，
 原生 CLI 继续读取其文件、环境、认证与模型设置。
 
 执行仍保留只读连接摘要、凭据来源引用和输出脱敏，以保持旧快照与 Host/binding 兼容隔离；
 内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
-推理强度 fallback。边界由 [Runtime Launch v55](../contracts/runtime-launch-and-verification-v55.md)拥有。
+推理强度 fallback。边界由 [Runtime Launch v57](../contracts/runtime-launch-and-verification-v57.md)拥有。
 
 ### 受管执行的原生自动记忆
 
@@ -180,6 +171,7 @@ CLI/settings 覆盖仍受原生管理策略约束。明确的参数拒绝或配�
 版本、平台与未验证项见[兼容性清单](../runtime-compatibility.md#2026-10-10-关闭原生自动记忆)。
 
 <a id="浅检测与按需深检"></a>
+
 ## 安装发现与真实 Host 验证
 
 OpenCode 保持一个产品与 Adapter。显式路径或现有发现顺序确定程序后，在启动准备阶段先取得

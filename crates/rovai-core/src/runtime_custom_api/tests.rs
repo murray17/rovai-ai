@@ -144,30 +144,30 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
         assert!(public["configuration"].get("customApi").is_none());
         assert!(!public.to_string().contains("fixture-private-key"));
         let snapshot = saved.configuration.custom_api_snapshot.unwrap();
-        let edit = |name: &str, before: Value, after: &str| FieldEdit {
-            path: vec!["environment".into(), name.into()],
+        let edit = |before: Value, after: Value| FieldEdit {
+            path: vec!["programPath".into()],
             before,
-            after: json!(after),
-            label: name.into(),
+            after,
+            label: "Program".into(),
         };
+        let first_path = json!(context.directory.join("first-cli").to_string_lossy());
+        let second_path = json!(context.directory.join("second-cli").to_string_lossy());
         let prepared =
-            runtime_startup::prepare_save(&db, kind, vec![edit("FIRST", Value::Null, "one")])
+            runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, first_path.clone())])
                 .unwrap();
         let first = runtime_startup::commit_save(&mut db, kind, prepared, 1).unwrap();
         assert!(first.reconnect_required);
         let prepared =
-            runtime_startup::prepare_save(&db, kind, vec![edit("SECOND", Value::Null, "two")])
+            runtime_startup::prepare_save(&db, kind, vec![edit(first_path, second_path.clone())])
                 .unwrap();
         let second = runtime_startup::commit_save(&mut db, kind, prepared, 2).unwrap();
-        assert_eq!(second.configuration.environment.len(), 2);
+        assert!(second.configuration.environment.is_empty());
         let conflict =
-            runtime_startup::prepare_save(&db, kind, vec![edit("FIRST", Value::Null, "different")])
-                .unwrap();
+            runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, Value::Null)]).unwrap();
         assert_eq!(conflict.conflicts.len(), 1);
-        assert_eq!(conflict.conflicts[0].current, "one");
+        assert_eq!(conflict.conflicts[0].current, second_path);
         let prepared =
-            runtime_startup::prepare_save(&db, kind, vec![edit("FIRST", json!("one"), "new")])
-                .unwrap();
+            runtime_startup::prepare_save(&db, kind, vec![edit(second_path, Value::Null)]).unwrap();
         db.connection().execute_batch("CREATE TEMP TRIGGER fail_startup BEFORE UPDATE ON runtime_startup_setting BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END;").unwrap();
         assert!(runtime_startup::commit_save(&mut db, kind, prepared, 3).is_err());
         db.connection()
@@ -189,7 +189,7 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
             .unwrap();
         assert!(!stored.contains("fixture-private-key"));
         assert!(!stored.contains("customApi"));
-        // Legacy secret rows continue to work at launch, but stay absent from editor responses.
+        // Retired environment writes fail without changing the remaining local preference.
         let mut configuration = second.configuration;
         configuration.environment.push(RuntimeEnvironmentVariable {
             name: if kind == AdapterKind::CodexCli {
@@ -200,12 +200,9 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
             .into(),
             value: "legacy-secret".into(),
         });
-        let saved =
-            runtime_startup::save(&mut db, kind, second.revision, configuration, 3).unwrap();
-        assert!(
-            !serde_json::to_string(&runtime_startup::public(saved))
-                .unwrap()
-                .contains("legacy-secret")
-        );
+        assert!(runtime_startup::save(&mut db, kind, second.revision, configuration, 3).is_err());
+        let unchanged = runtime_startup::load(&db, kind).unwrap();
+        assert_eq!(unchanged.revision, second.revision);
+        assert!(unchanged.configuration.environment.is_empty());
     }
 }

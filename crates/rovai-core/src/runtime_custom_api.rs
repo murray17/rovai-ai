@@ -162,7 +162,25 @@ impl CustomApiSnapshot {
 /// Exact scrubbing at private native output boundaries; secrets never enter Debug or serialized state.
 #[derive(Clone)]
 pub struct CredentialRedactor(Vec<String>);
+impl std::fmt::Debug for CredentialRedactor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CredentialRedactor")
+            .field("count", &self.0.len())
+            .finish()
+    }
+}
 impl CredentialRedactor {
+    pub fn from_values(mut values: Vec<String>) -> Self {
+        values.retain(|value| !value.is_empty());
+        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+        values.dedup();
+        Self(values)
+    }
+    pub fn extend(mut self, other: Self) -> Self {
+        self.0.extend(other.0);
+        Self::from_values(self.0)
+    }
     pub fn text(&self, text: &str) -> String {
         self.0
             .iter()

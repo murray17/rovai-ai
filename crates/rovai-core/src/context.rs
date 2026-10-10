@@ -9870,6 +9870,7 @@ mod slow_tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: "agent_1".to_string(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,

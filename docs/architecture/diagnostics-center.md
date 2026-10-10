@@ -62,6 +62,15 @@ export
 - v5 is built from an allowlist and still receives a final recursive redaction pass; raw health/profile/camp objects
   never become export fields.
 
+## 旧智能体环境配置
+
+Agents 环境变量编辑退役后，Core 为每个非空归档生成独立的 `legacy_runtime_environment` 诊断。
+尚未确认的归档进入“需要处理的问题”，明确说明功能已移到 Teammates，需要手动复制仍需使用的变量。
+展开读取属于 Owner 私有接口，默认遮蔽；公开报告只携带数量、状态和归档身份。
+“标记已处理”只记录对应内容身份的持久确认，不执行迁移、删除或连接检查，也不纳入自动修复。
+已处理的归档仍可在该区域展开查阅，后续检查不再重复列为待处理。旧值从升级起停止参与启动，与确认状态无关。
+精确接口及迁移见 [Runtime Launch v57](../contracts/runtime-launch-and-verification-v57.md)。
+
 ## References
 
 - [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)

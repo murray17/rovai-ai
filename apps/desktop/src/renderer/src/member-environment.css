@@ -1,0 +1,37 @@
+.member-environment-disclosure { margin-top: 14px; color: var(--muted); font-size: 12px; }
+.member-environment-entry { display: inline-flex; align-items: center; gap: 6px; width: fit-content; min-height: 32px; list-style: none; cursor: pointer; padding: 3px 0; }
+.member-environment-entry::-webkit-details-marker { display: none; }
+.member-environment-entry:hover { color: var(--ink); }
+.member-environment-entry > svg { width: 12px; height: 12px; transform: rotate(-90deg); transition: transform 120ms; }
+.member-environment-disclosure[open] > summary > svg { transform: rotate(0); }
+.member-environment-entry small { margin-left: 4px; color: var(--muted); font-size: 11px; }
+.member-environment-body { padding-top: 8px; }
+.member-environment-json { display: block; box-sizing: border-box; width: 100%; resize: none; min-height: 104px; max-height: min(360px, 45vh); overflow-y: auto; border: 1px solid var(--settings-field-line); border-radius: 6px; background: var(--input); color: var(--ink); padding: 10px 12px; font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2; caret-color: var(--ink); }
+.member-environment-json::placeholder { color: var(--muted); opacity: 1; }
+.member-environment-json[aria-invalid=true] { border-color: var(--danger); }
+.member-environment-json:is(:focus, :focus-visible), .member-environment-entry:is(:focus, :focus-visible), .legacy-json-view textarea:is(:focus, :focus-visible) { outline: none; box-shadow: none; }
+.environment-caption { display: flex; justify-content: flex-end; align-items: center; gap: 12px; min-height: 34px; line-height: 1.6; }
+.environment-reveal.quiet-button { display: inline-flex; gap: 5px; align-items: center; border: 0; background: transparent; padding: 4px 0; min-height: 30px; font-size: 12px; color: var(--muted); }
+.environment-reveal svg { width: 14px; height: 14px; }
+.environment-secret-hint { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 0 0 6px; }
+.environment-consent { display: flex; gap: 7px; align-items: center; margin: 7px 0; font-size: 12px; color: var(--ink); }
+.environment-consent input { width: 15px; height: 15px; margin: 0; accent-color: var(--conversation-action); }
+.environment-error { color: var(--danger); margin: 7px 0; font-size: 12px; line-height: 1.6; }
+.environment-saved { color: var(--muted); font-size: 12px; margin: 10px 0 0; line-height: 1.6; }
+.legacy-json-view { padding: 9px 0 0; }
+.legacy-json-view textarea { display: block; width: 100%; min-height: 90px; resize: vertical; padding: 12px; background: var(--surface-subtle); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font: 12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.legacy-json-view > div { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; color: var(--muted); font-size: 12px; }
+.legacy-error { grid-column: 2/-1; }
+.diagnostics-section > .section-heading > .health-score { flex-shrink: 0; white-space: nowrap; }
+.handled-environment-archives { margin-top: 16px; color: var(--muted); font-size: 12px; }
+.handled-environment-archives > summary { cursor: pointer; width: fit-content; min-height: 30px; padding-block: 5px; }
+.handled-environment-archives > div { margin-top: 8px; }
+.handled-environment-archives .diagnostics-issue { margin-bottom: 10px; }
+
+@media (max-width: 767px) {
+ .member-environment-entry { min-height: 44px; }
+ .member-environment-json { font-size: 16px; }
+ .environment-caption { flex-wrap: wrap; }
+ .legacy-json-view textarea { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .member-environment-entry > svg { transition: none; } }

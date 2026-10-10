@@ -361,12 +361,38 @@ impl CodexHost {
         incoming: mpsc::UnboundedSender<CodexIncoming>,
         builtin_tools: Option<BuiltinToolProcessConfig>,
         custom_api: Option<rovai_core::runtime_custom_api::CustomApiSnapshot>,
+        environment: Option<rovai_core::member_environment::FrozenEnvironment>,
+    ) -> Result<Arc<Self>> {
+        rovai_core::runtime_discovery::with_frozen_environment(
+            environment.clone(),
+            Self::spawn_in_environment(
+                codex_path,
+                cwd,
+                incoming,
+                builtin_tools,
+                custom_api,
+                environment,
+            ),
+        )
+        .await
+    }
+
+    async fn spawn_in_environment(
+        codex_path: &Path,
+        cwd: &Path,
+        incoming: mpsc::UnboundedSender<CodexIncoming>,
+        builtin_tools: Option<BuiltinToolProcessConfig>,
+        custom_api: Option<rovai_core::runtime_custom_api::CustomApiSnapshot>,
+        environment: Option<rovai_core::member_environment::FrozenEnvironment>,
     ) -> Result<Arc<Self>> {
         let mut command = Command::new(codex_path);
         rovai_core::runtime_discovery::configure_runtime_command(
             rovai_core::agent_profile::AdapterKind::CodexCli,
             &mut command,
         );
+        if let Some(environment) = &environment {
+            environment.apply(&mut command)?;
+        }
         if let Some(api) = &custom_api {
             api.assert_current()?;
         }
@@ -406,7 +432,24 @@ impl CodexHost {
             .context("Codex app-server stderr was unavailable")?;
         let host = Arc::new(Self {
             initialized: tokio::sync::OnceCell::new(),
-            credential_redactor: custom_api.as_ref().and_then(|api| api.redactor().ok()),
+            credential_redactor: Some(
+                environment
+                    .as_ref()
+                    .map(|env| env.redactor())
+                    .unwrap_or_else(|| {
+                        rovai_core::runtime_custom_api::CredentialRedactor::from_values(vec![])
+                    })
+                    .extend(
+                        custom_api
+                            .as_ref()
+                            .and_then(|api| api.redactor().ok())
+                            .unwrap_or_else(|| {
+                                rovai_core::runtime_custom_api::CredentialRedactor::from_values(
+                                    vec![],
+                                )
+                            }),
+                    ),
+            ),
             host_instance_id: uuid::Uuid::new_v4().to_string(),
             #[cfg(windows)]
             windows_job_name: child.windows_job_name().to_owned(),
@@ -1461,6 +1504,7 @@ impl CodexCliRuntimeAdapter {
         let spawn_incoming = self.incoming.clone();
         let spawn_builtin_tools = builtin_tools.clone();
         let spawn_custom_api = frozen_runtime.custom_api.clone();
+        let spawn_environment = frozen_runtime.environment.clone();
         let compatibility =
             RuntimeCompatibilityKey::member(camp_id, agent_id, runtime_compatibility_digest);
         // A different Codex Host can keep the same thread's native writer lock
@@ -1484,6 +1528,7 @@ impl CodexCliRuntimeAdapter {
                         spawn_incoming,
                         Some(spawn_builtin_tools),
                         spawn_custom_api,
+                        spawn_environment,
                     )
                     .await?;
                     Ok(RuntimeProcessHost::Codex(host))
@@ -2307,6 +2352,7 @@ mod tests {
 
     fn process_compatibility_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CodexCli,
@@ -3158,6 +3204,7 @@ for line in sys.stdin:
         )
         .unwrap();
         let runtime_config = FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CodexCli,

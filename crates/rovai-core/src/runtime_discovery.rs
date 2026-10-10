@@ -59,6 +59,7 @@ static ACTIVE_RUNTIME_ENVIRONMENT: OnceLock<
 > = OnceLock::new();
 tokio::task_local! {
     static SCOPED_RUNTIME_COMMAND_PATH: OsString;
+    static FROZEN_ENVIRONMENT: Option<crate::member_environment::FrozenEnvironment>;
     static SCOPED_RUNTIME_ENVIRONMENT: (AdapterKind, crate::runtime_startup::RuntimeStartupConfiguration);
 }
 
@@ -715,6 +716,23 @@ pub fn resolve_active_command_path(name: &str) -> Option<PathBuf> {
 }
 
 pub fn configure_active_runtime_command(command: &mut TokioCommand) {
+    if FROZEN_ENVIRONMENT
+        .try_with(|snapshot| {
+            if let Some(values) = snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.values.as_ref())
+            {
+                crate::member_environment::configure_values(command, values);
+                true
+            } else {
+                false
+            }
+        })
+        .unwrap_or(false)
+    {
+        return;
+    }
+
     configure_runtime_path(command);
     let _ = SCOPED_RUNTIME_ENVIRONMENT.try_with(|(_, configuration)| {
         command.envs(
@@ -776,16 +794,39 @@ fn configured_environment_variable(kind: AdapterKind, key: &str) -> Option<OsStr
 /// Native configuration readers use the same Runtime-local overlay as child commands.
 /// Neither this function nor command configuration writes the process environment.
 pub fn runtime_environment_variable(kind: AdapterKind, key: &str) -> Option<OsString> {
+    if let Ok(Some(values)) = FROZEN_ENVIRONMENT.try_with(|snapshot| {
+        snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.values.clone())
+    }) {
+        return values
+            .into_iter()
+            .find(|(name, _)| {
+                if cfg!(windows) {
+                    name.eq_ignore_ascii_case(key)
+                } else {
+                    name == key
+                }
+            })
+            .map(|(_, value)| value.into());
+    }
     configured_environment_variable(kind, key).or_else(|| env::var_os(key))
 }
 
 pub fn runtime_home_directory(kind: AdapterKind) -> Option<PathBuf> {
-    configured_environment_variable(kind, if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+    runtime_environment_variable(kind, if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
         .or_else(dirs::home_dir)
 }
 
 pub fn runtime_environment(kind: AdapterKind) -> BTreeMap<String, String> {
+    if let Ok(Some(values)) = FROZEN_ENVIRONMENT.try_with(|snapshot| {
+        snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.values.clone())
+    }) {
+        return values;
+    }
     let mut environment = env::vars().collect::<BTreeMap<_, _>>();
     if let Some(configuration) = effective_startup_configuration(kind) {
         for entry in configuration.environment {
@@ -798,7 +839,49 @@ pub fn runtime_environment(kind: AdapterKind) -> BTreeMap<String, String> {
     environment
 }
 
+/// Admission always starts from Host state, even when called from a Run-scoped future.
+pub fn capture_host_runtime_environment() -> BTreeMap<String, String> {
+    let mut values: BTreeMap<String, String> = env::vars_os()
+        .filter_map(|(name, value)| {
+            let name = name.into_string().ok()?;
+            Some((
+                if cfg!(windows) {
+                    name.to_ascii_uppercase()
+                } else {
+                    name
+                },
+                value.into_string().ok()?,
+            ))
+        })
+        .collect();
+    let mut command = TokioCommand::new("unused-environment-capture");
+    configure_runtime_path(&mut command);
+    for (name, value) in command.as_std().get_envs() {
+        if let (Some(name), Some(value)) = (name.to_str(), value.and_then(|value| value.to_str())) {
+            values.insert(name.to_owned(), value.to_owned());
+        }
+    }
+    values
+}
+
 pub fn configure_runtime_command(kind: AdapterKind, command: &mut TokioCommand) {
+    if FROZEN_ENVIRONMENT
+        .try_with(|snapshot| {
+            if let Some(values) = snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.values.as_ref())
+            {
+                crate::member_environment::configure_values(command, values);
+                true
+            } else {
+                false
+            }
+        })
+        .unwrap_or(false)
+    {
+        return;
+    }
+
     configure_runtime_path(command);
     if let Some(configuration) = effective_startup_configuration(kind) {
         command.envs(
@@ -2953,4 +3036,13 @@ mod windows_tests {
             Duration::from_secs(2)
         );
     }
+}
+
+/// Task-local native readers; process entrypoints additionally carry an explicit snapshot
+/// because Tokio tasks do not inherit task locals.
+pub async fn with_frozen_environment<F: Future<Output = T>, T>(
+    environment: Option<crate::member_environment::FrozenEnvironment>,
+    future: F,
+) -> T {
+    FROZEN_ENVIRONMENT.scope(environment, future).await
 }

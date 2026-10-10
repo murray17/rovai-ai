@@ -115,6 +115,10 @@ impl Core {
         let edits = match (params.edits, params.configuration, params.expected_revision) {
             (Some(edits), None, None) => edits,
             (None, Some(configuration), Some(revision)) => {
+                ensure!(
+                    configuration.environment.is_empty(),
+                    "Runtime environment settings moved to Teammates"
+                );
                 let saved = runtime_startup::load(&*self.database.lock().await, kind)?;
                 let same = saved.configuration.program_path == configuration.program_path
                     && saved.configuration.environment == configuration.environment;

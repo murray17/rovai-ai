@@ -148,6 +148,7 @@ fn load_record(
     if let Some(object) = value.as_object_mut() {
         object.remove("_connectionMode");
         object.remove("customApi");
+        object.insert("environment".into(), serde_json::json!([]));
     }
     Ok((u64::try_from(revision)?, serde_json::from_value(value)?))
 }
@@ -184,18 +185,7 @@ pub fn saved_response(settings: RuntimeStartupSettings) -> RuntimeStartupSetting
 
 /// Never return native credential values or legacy secret environment rows.
 pub fn public(mut settings: RuntimeStartupSettings) -> RuntimeStartupSettings {
-    let referenced = settings
-        .configuration
-        .custom_api_snapshot
-        .as_ref()
-        .and_then(|s| match &s.credential_source {
-            native::CredentialSource::Environment { name } => Some(name.clone()),
-            _ => None,
-        });
-    settings.configuration.environment.retain(|entry| {
-        !sensitive_environment(settings.runtime_kind, &entry.name)
-            && referenced.as_deref() != Some(entry.name.as_str())
-    });
+    settings.configuration.environment.clear();
     settings
 }
 pub fn sensitive_environment(kind: AdapterKind, name: &str) -> bool {
@@ -270,15 +260,8 @@ pub fn ordinary_edits(
         })
         .collect()
 }
-fn allowed_edit(edit: &FieldEdit, kind: AdapterKind) -> bool {
-    let p: Vec<_> = edit.path.iter().map(String::as_str).collect();
-    match p.as_slice() {
-        ["programPath"] => true,
-        ["environment", name] => {
-            !sensitive_environment(kind, name) && !name.to_ascii_uppercase().starts_with("ROVAI_")
-        }
-        _ => false,
-    }
+fn allowed_edit(edit: &FieldEdit, _kind: AdapterKind) -> bool {
+    edit.path == ["programPath"]
 }
 pub struct PreparedSave {
     pub current: RuntimeStartupSettings,
@@ -368,6 +351,10 @@ pub fn save(
     configuration: RuntimeStartupConfiguration,
     search_generation: u64,
 ) -> Result<RuntimeStartupSettings> {
+    ensure!(
+        configuration.environment.is_empty(),
+        "Runtime environment settings moved to Teammates"
+    );
     let (revision, previous) = load_record(database.connection(), kind)?;
     if revision > 0 && previous == configuration {
         return load(database, kind);
@@ -427,6 +414,10 @@ fn persist(
     search_generation: u64,
     invalidate: bool,
 ) -> Result<()> {
+    ensure!(
+        configuration.environment.is_empty(),
+        "Runtime environment settings moved to Teammates; migrate the legacy configuration manually"
+    );
     configuration = configuration.validated(cfg!(windows))?;
     let (current, _) = load_record(database.connection(), kind)?;
     configuration.custom_api_snapshot = None;
@@ -473,6 +464,10 @@ pub fn resolve_draft(
     kind: AdapterKind,
     mut configuration: RuntimeStartupConfiguration,
 ) -> Result<RuntimeStartupConfiguration> {
+    ensure!(
+        configuration.environment.is_empty(),
+        "Runtime environment settings moved to Teammates; migrate the legacy configuration manually"
+    );
     configuration = configuration.validated(cfg!(windows))?;
     configuration.custom_api_snapshot = native_snapshot(kind, &configuration, database.path());
     Ok(configuration)
@@ -514,16 +509,65 @@ mod tests {
                     after: serde_json::json!("fixture-key"),
                     label: String::new(),
                 };
-                assert_eq!(allowed_edit(&edit, kind), !restricted);
+                assert!(!allowed_edit(&edit, kind));
                 let public = public(RuntimeStartupSettings {
                     runtime_kind: kind,
                     revision: 0,
                     configuration,
                     reconnect_required: false,
                 });
-                assert_eq!(public.configuration.environment.is_empty(), restricted);
+                assert!(public.configuration.environment.is_empty());
             }
         }
+        for text in [
+            r#"{"A":"x","\u0041":"y"}"#,
+            r#"{"Path":"x","PATH":"y"}"#,
+            r#"{"X":1}"#,
+            r#"{"CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST":"1"}"#,
+        ] {
+            assert!(crate::member_environment::parse(text, true).is_err());
+        }
+        assert_eq!(
+            crate::member_environment::parse(
+                r#"{"X":"$HOME \n ~ $(echo never)","EMPTY":""}"#,
+                false
+            )
+            .unwrap()["EMPTY"],
+            ""
+        );
+        let overlay = crate::member_environment::parse(
+            r#"{"anthropic_base_url":"https://fixture.example","anthropic_api_key":"fixture-key"}"#,
+            true,
+        )
+        .unwrap();
+        assert!(overlay.contains_key("ANTHROPIC_BASE_URL"));
+        let mut frozen = crate::member_environment::FrozenEnvironment {
+            plan_id: "fixture".into(),
+            revision: 1,
+            identity: "fixture".into(),
+            values: Some(overlay.clone()),
+            overlay: Some(overlay),
+        };
+        assert!(
+            frozen
+                .validate_claude_routing(Some("2.1.287 (Claude Code)"))
+                .is_ok()
+        );
+        assert!(frozen.validate_claude_routing(Some("2.1.286")).is_err());
+        assert!(frozen.validate_claude_routing(None).is_err());
+        frozen
+            .values
+            .as_mut()
+            .unwrap()
+            .insert("ANTHROPIC_AUTH_TOKEN".into(), "fixture-other-key".into());
+        assert!(frozen.validate_claude_routing(Some("2.1.287")).is_err());
+        frozen
+            .values
+            .as_mut()
+            .unwrap()
+            .remove("ANTHROPIC_AUTH_TOKEN");
+        frozen.values.as_mut().unwrap().remove("ANTHROPIC_API_KEY");
+        assert!(frozen.validate_claude_routing(Some("2.1.287")).is_err());
         for retired in ["customApi", "customApiSnapshot", "apiKey"] {
             let input = serde_json::json!({"programPath":null,"environment":[],retired:{"value":"fake-key"}});
             assert!(serde_json::from_value::<RuntimeStartupConfiguration>(input).is_err());

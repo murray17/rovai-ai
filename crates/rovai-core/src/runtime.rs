@@ -7522,6 +7522,7 @@ mod tests {
             purpose: "resume safely".to_string(),
             effective_config: json!({}),
             runtime: FrozenAgentRuntimeConfig {
+                environment: None,
                 custom_api: None,
                 camp_fast: None,
                 adapter_kind: AdapterKind::CodexCli,

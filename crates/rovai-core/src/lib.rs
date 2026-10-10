@@ -76,6 +76,7 @@ pub mod mcp;
 pub mod mcp_import;
 pub mod mcp_projection;
 pub mod member_avatar;
+pub mod member_environment;
 pub mod member_studio;
 pub mod member_tool;
 pub mod memory;

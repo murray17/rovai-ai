@@ -1500,6 +1500,7 @@ dependencies = [
  "plist",
  "pulldown-cmark",
  "reqwest",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

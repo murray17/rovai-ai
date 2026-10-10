@@ -3542,6 +3542,21 @@ mod tests {
             .release("run-b", 1, FleetReleaseDisposition::Reusable)
             .await;
 
+        let mut different_environment = request("run-env", "camp-b", "agent-b", "workspace-a");
+        different_environment
+            .compatibility
+            .runtime_compatibility_digest = "pi-digest-other-environment".into();
+        let isolated = fleet
+            .acquire(different_environment, || async {
+                Ok(fake_host("pi-host-other-environment"))
+            })
+            .await
+            .unwrap();
+        assert_eq!(isolated.host.process_id(), "pi-host-other-environment");
+        fleet
+            .release("run-env", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
         let other_workspace = fleet
             .acquire(
                 request("run-other", "camp-other", "agent-other", "workspace-b"),

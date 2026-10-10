@@ -462,6 +462,8 @@ pub struct ResolvedModelSelection {
 #[serde(rename_all = "camelCase")]
 pub struct FrozenAgentRuntimeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<crate::member_environment::FrozenEnvironment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_api: Option<crate::runtime_custom_api::CustomApiSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camp_fast: Option<crate::camp_fast::FrozenThreadMemberFast>,
@@ -900,6 +902,8 @@ impl DomainCommand for SetAgentProfileAvatarCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetMemberRuntimeConfigurationCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_update: Option<crate::member_environment::EnvironmentUpdateReceipt>,
     pub agent_id: String,
     pub expected_version: i64,
     pub adapter_kind: AdapterKind,
@@ -1627,6 +1631,8 @@ impl AgentProfileService {
             Err(blocker) => return Ok(Err(blocker)),
         };
         // Re-probing may change executable evidence, never the admitted Run's Camp intent.
+        rebound.environment = frozen.environment.clone();
+        crate::member_environment::incorporate_identity(&mut rebound)?;
         rebound.camp_fast = frozen.camp_fast.clone();
         if frozen.adapter_kind == AdapterKind::CodexCli
             && frozen.camp_fast.is_some()
@@ -2720,6 +2726,19 @@ impl AgentProfileService {
         database: &mut Database,
         envelope: &CommandEnvelope<SetMemberRuntimeConfigurationCommand>,
     ) -> Result<CommandExecution> {
+        self.set_runtime_with_environment(database, envelope, None)
+    }
+
+    pub fn set_runtime_with_environment(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SetMemberRuntimeConfigurationCommand>,
+        environment: Option<&crate::member_environment::PreparedEnvironment>,
+    ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            envelope.payload.environment_update.is_some() == environment.is_some(),
+            "Private environment update is unavailable"
+        );
         self.gateway.execute(database, envelope, |transaction| {
             let Some((version, presence)) =
                 profile_version_and_presence(transaction, &envelope.payload.agent_id)?
@@ -2811,6 +2830,13 @@ impl AgentProfileService {
                 &validation_binding,
             )? {
                 return Ok(CommandHandlerResult::rejected(issue.code, issue.payload));
+            }
+            if let Some(environment) = environment {
+                environment.commit(transaction)?;
+            } else {
+                crate::member_environment::validate_saved_model(
+                    transaction, &envelope.payload.agent_id, binding.adapter_kind, &binding.model,
+                )?;
             }
             let now = chrono::Utc::now().to_rfc3339();
             transaction.execute(
@@ -4446,8 +4472,15 @@ pub fn resolve_frozen_runtime(
             }),
         )));
     }
-    let mut result = resolve_frozen_runtime_binding(transaction, &binding)?;
+    let member_environment =
+        crate::member_environment::has_values(transaction, agent_id, binding.adapter_kind)?;
+    let mut result = if member_environment {
+        resolve_frozen_runtime_binding_with_snapshot(transaction, &binding, Some(None))?
+    } else {
+        resolve_frozen_runtime_binding(transaction, &binding)?
+    };
     if let Ok(runtime) = &mut result {
+        crate::member_environment::freeze(transaction, agent_id, runtime)?;
         crate::camp_fast::freeze(transaction, conversation_id, agent_id, runtime)?;
     }
     Ok(result)
@@ -4598,6 +4631,7 @@ fn resolve_frozen_runtime_binding_with_snapshot(
         }
     };
     let mut frozen = FrozenAgentRuntimeConfig {
+        environment: None,
         custom_api,
         camp_fast: None,
         adapter_kind,
@@ -6449,6 +6483,7 @@ mod slow_tests {
                     &user_command(
                         "expired-catalog-runtime-default",
                         SetMemberRuntimeConfigurationCommand {
+                            environment_update: None,
                             agent_id: profile.agent_id.clone(),
                             expected_version: profile.version,
                             adapter_kind: kind,
@@ -6473,6 +6508,7 @@ mod slow_tests {
                     &user_command(
                         "expired-catalog-explicit-model",
                         SetMemberRuntimeConfigurationCommand {
+                            environment_update: None,
                             agent_id: configured.agent_id,
                             expected_version: configured.version,
                             adapter_kind: kind,
@@ -6736,6 +6772,7 @@ mod slow_tests {
                 &user_command(
                     "set-runtime",
                     SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: profile_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
@@ -7171,6 +7208,7 @@ mod slow_tests {
                 &user_command(
                     "set-mismatched-runtime",
                     SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: profile.agent_id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CopilotCli,
@@ -7224,6 +7262,7 @@ mod slow_tests {
                 &user_command(
                     "explicit-runtime-config",
                     SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
@@ -7272,6 +7311,7 @@ mod slow_tests {
                 &user_command(
                     "invalid-runtime-config",
                     SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: profile.agent_id.clone(),
                         expected_version: configured.version,
                         adapter_kind: AdapterKind::CodexCli,
@@ -7402,6 +7442,7 @@ mod slow_tests {
                     &user_command(
                         &format!("retain-model-{index}"),
                         SetMemberRuntimeConfigurationCommand {
+                            environment_update: None,
                             agent_id: profile.agent_id.clone(),
                             expected_version: if stale_version { version - 1 } else { version },
                             adapter_kind: AdapterKind::CodexCli,
@@ -7446,6 +7487,7 @@ mod slow_tests {
                 &user_command(
                     "select-unresolved-codex",
                     SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
@@ -7664,6 +7706,7 @@ mod slow_tests {
                     &user_command(
                         "configure-detected",
                         SetMemberRuntimeConfigurationCommand {
+                            environment_update: None,
                             agent_id: profile.agent_id.clone(),
                             expected_version: profile.version,
                             adapter_kind: kind,
@@ -7689,6 +7732,7 @@ mod slow_tests {
                             &user_command(
                                 &uuid::Uuid::new_v4().to_string(),
                                 SetMemberRuntimeConfigurationCommand {
+                                    environment_update: None,
                                     agent_id: profile.agent_id,
                                     expected_version: profile.version,
                                     adapter_kind: kind,
@@ -7735,6 +7779,7 @@ mod slow_tests {
                                 &user_command(
                                     &uuid::Uuid::new_v4().to_string(),
                                     SetMemberRuntimeConfigurationCommand {
+                                        environment_update: None,
                                         agent_id: profile.agent_id,
                                         expected_version: profile.version,
                                         adapter_kind: kind,
@@ -7807,6 +7852,7 @@ mod slow_tests {
                         &user_command(
                             "save-after-catalog-failure",
                             SetMemberRuntimeConfigurationCommand {
+                                environment_update: None,
                                 agent_id: profile.agent_id.clone(),
                                 expected_version: after_failure.version,
                                 adapter_kind: kind,
@@ -7997,6 +8043,7 @@ mod slow_tests {
                 &user_command(
                     "select-managed-codex",
                     SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: profile.agent_id,
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::CodexCli,
@@ -8257,6 +8304,7 @@ mod slow_tests {
                 &user_command(
                     "configure-light-qwen",
                     SetMemberRuntimeConfigurationCommand {
+                        environment_update: None,
                         agent_id: profile.agent_id.clone(),
                         expected_version: profile.version,
                         adapter_kind: AdapterKind::QwenCode,

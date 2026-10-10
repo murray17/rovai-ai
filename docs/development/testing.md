@@ -119,6 +119,23 @@ ACP 的 `command_code_acp.rs`、System Mod、Cline、共享 ACP、文件证据�
 `cargo test -p rovai-core --features extended-tests --lib cline::tests::`，以及相关 Renderer/Node 测试、typecheck 与文档门禁。
 以下 2026-10-04 的 headless owner/命令是退役前历史，不能作为当前测试入口。
 
+## 队员运行环境 owner（2026-10-11）
+
+复用 `runtime_startup::tests::environment_validation_preserves_values_and_rejects_ambiguous_or_reserved_names`
+拥有变量边界和智能体旧入口关闭，`runtime_fleet::tests::workspace_hosts_reuse_across_camps_and_track_the_current_invalidation_scope`
+拥有原复用范围和环境不兼容分支。新增 `member_environment::tests` 扩展层 owner：私有版本事务、密钥遮蔽与加密、
+冻结计划重开、真实子进程并行环境、旧配置确认与迁移失败回滚。这些涉及 SQLite、私有文件或进程，
+现有纯解析/内存 fleet fixture 无法证明这些失败路径，全部进入 `extended-tests`。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib member_environment::tests`、
+`cargo test -p rovai-core --features extended-tests --lib runtime_startup::tests`、
+`cargo test -p rovai-core --features extended-tests --lib workspace_hosts_reuse_across_camps`。
+不删除原有 owner，数据库当前 admission 矩阵继续覆盖完整 receipt 和未知未来 schema。
+用户退役 Agents 环境编辑后，旧 `runtime_custom_api::tests::startup_saves_preserve_native_files_and_merge_only_local_preferences`
+与 `application::runtime_check_environment::tests` 的可写环境断言改为拒绝；程序路径 CAS、回滚、原生文件不变、
+草稿隔离和旧检查不能覆盖新检查继续由这些 owner 负责。后者使用 `--features slow-tests --lib runtime_check_environment::tests`。
+完整 Core 私有 RPC seam 使用 `node scripts/smoke-member-environment.mjs`（先构建 Core）；临时 Host/Skill Library/MCP
+全隔离，凭据与 CLI 都是合成 fixture，不触达真实账号。
+
 ## 主干 / Preview Migration 合流（2026-10-08）
 
 扩展既有 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts`，保留 schema 133

@@ -1,3 +1,4 @@
+import { LegacyEnvironmentIssue } from './LegacyEnvironmentIssue'
 import { useThreadClient, type ThreadClient } from './camp-client'
 import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
@@ -292,7 +293,9 @@ export function DiagnosticsCenter({
             {issues.length === 0
               ? <div className="diagnostics-issues-empty"><span aria-hidden="true"><DiagnosticStatusIcon status="ok" /></span><div><strong><UiText zh={"当前没有需要处理的问题"} /></strong><p><UiText zh={"暂时无法确认的项目仍保留在摘要和完整检查结果中。"} /></p></div></div>
               : <div className="diagnostics-issue-list">{issues.map((check) => (
-                  <DiagnosticIssue
+                  check.subjectKind === 'legacy_runtime_environment'
+                    ? <LegacyEnvironmentIssue key={check.id} check={check} disabled={disabled} onHandled={async () => setReport(await readReport(client))}/>
+                    : <DiagnosticIssue
                     key={check.id}
                     check={check}
                     action={diagnosticActionForCheck(check)}
@@ -302,6 +305,7 @@ export function DiagnosticsCenter({
                     legacyCleanupResult={check.id === 'legacy-skill-entries' ? legacyCleanupResult : null}
                   />
                 ))}</div>}
+            {report.checks.some(check => check.subjectKind === 'legacy_runtime_environment' && check.status === 'ok') && <details className="handled-environment-archives"><summary><UiText zh={"已处理的旧环境配置"}/></summary><div>{report.checks.filter(check => check.subjectKind === 'legacy_runtime_environment' && check.status === 'ok').map(check => <LegacyEnvironmentIssue key={check.id} check={check} disabled={disabled} onHandled={async () => {}}/>)}</div></details>}
           </section>
 
           <DiagnosticsResults
@@ -536,6 +540,9 @@ export function diagnosticIssueCopy(check: DiagnosticCheck): { title: string; re
 }
 
 export function diagnosticCheckDetail(check: DiagnosticCheck): string {
+  if (check.subjectKind === 'legacy_runtime_environment') return check.status === 'ok'
+    ? uiAttribute('{0} 项旧配置仍保留，可按需查阅。', String(factValue(check, 'variableCount') ?? '0'))
+    : uiAttribute('环境变量配置已从“智能体”页移至“队员”页。保留的 {0} 项旧配置已停用，请将仍需使用的变量手动复制到相应队员的“环境变量”中并保存。', String(factValue(check, 'variableCount') ?? '0'))
   if (check.id === 'core') return uiAttribute("Core {0} 可用", String(factValue(check, 'version') ?? '')).replace('  ', ' ')
   if (check.id === 'data-directory') return check.status === 'ok' ?uiAttribute("当前 Core 可访问且可写") : check.status === 'attention' ?uiAttribute("数据目录不可写") :uiAttribute("本次无法确认")
   if (check.code === 'runtime_not_in_use') return uiAttribute("当前未使用 · {0}", String(factValue(check, 'availabilityStatus') ?? uiAttribute('未检测')))

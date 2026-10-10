@@ -66,6 +66,11 @@ export const WEB_OPERATIONS = [
   'mcp.import.scan',
   'mcp.import.commit',
   'runtime.startup.get',
+  'member.runtimeEnvironment.get',
+  'runtime.environmentLegacy.list',
+  'runtime.environmentLegacy.get',
+  'runtime.environmentLegacy.acknowledge',
+
   'runtime.startup.save',
   'runtime.startup.inspect',
   'runtime.startup.check',

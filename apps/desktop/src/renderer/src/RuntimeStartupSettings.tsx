@@ -1,4 +1,3 @@
-import { newCommandId } from '../../shared/command-id'
 import { useThreadClient } from './camp-client'
 import { useEffect, useId, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -6,7 +5,7 @@ import type { AdapterKind, HealthStatus, RuntimeStartupInspection } from '@contr
 import { configurationFromSnapshot, conflictValue, editableSnapshot, withSnapshotValue, type FieldConflict, type RuntimeStartupConfiguration, type RuntimeStartupSettings as StartupSettings } from './runtime-startup-editor'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader, DialogControlIcon } from './AppDialog'
 import { adapterLabel, PRODUCT_RUNTIME_LOGOS } from './runtime-products'
-import { normalizedStartupConfiguration, runtimeEnvironmentErrors, runtimeStartupKey, startupEdits } from './runtime-startup-draft'
+import { normalizedStartupConfiguration, runtimeStartupKey, startupEdits } from './runtime-startup-draft'
 import { readErrorMessage } from './error-message'
 import { UiText, uiAttribute } from './interface-language'
 
@@ -22,13 +21,10 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   const client = useThreadClient()
   const [saved, setSaved] = useState<StartupSettings | null>(null)
   const [draft, setDraft] = useState<RuntimeStartupConfiguration>(EMPTY)
-  const [rowIds, setRowIds] = useState<string[]>([])
-  const [revealed, setRevealed] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState<'load' | 'save' | 'pick' | 'inspect' | 'check' | null>('load')
   const [error, setError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [conflicts, setConflicts] = useState<FieldConflict[]>([])
-  const [errors, setErrors] = useState<Record<number, string>>({})
   const [inspection, setInspection] = useState<RuntimeStartupInspection | null>(null)
   const [confirmAction, setConfirmAction] = useState<'back' | null>(null)
   const [loadAttempt, setLoadAttempt] = useState(0)
@@ -47,9 +43,6 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   const applySaved = (settings: StartupSettings): void => {
     setSaved(settings)
     setDraft(settings.configuration)
-    setRowIds(settings.configuration.environment.map(() => newCommandId()))
-    setRevealed(new Set())
-    setErrors({})
     setConflicts([])
   }
 
@@ -85,19 +78,9 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
     setDraft(next)
     setInspection(null)
     setError(null)
-    setErrors({})
-  }
-
-  const validate = (next: RuntimeStartupConfiguration): boolean => {
-    const nextErrors = runtimeEnvironmentErrors(next, health?.hostPlatform === 'windows-x64', runtimeKind)
-    setErrors(nextErrors)
-    return Object.keys(nextErrors).length === 0
   }
 
   const inspect = async (next: RuntimeStartupConfiguration, deep = false): Promise<void> => {
-    const nextErrors = runtimeEnvironmentErrors(next, health?.hostPlatform === 'windows-x64', runtimeKind)
-    setErrors(nextErrors)
-    if (Object.keys(nextErrors).length) return
     const request = ++sequence.current
     setBusy(deep ? 'check' : 'inspect')
     setError(null)
@@ -129,7 +112,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
   }
 
   const save = async (): Promise<void> => {
-    if (!saved || !canSave || busy || !validate(draft)) return
+    if (!saved || !canSave || busy) return
     const next = normalizedStartupConfiguration(draft)
     setBusy('save')
     setSaveCompleted(false)
@@ -145,7 +128,6 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
         const rebased = configurationFromSnapshot(merged)
         setSaved(response.latest)
         setDraft(rebased)
-        setRowIds(rebased.environment.map(variable => rowIds[next.environment.findIndex(row => row.name === variable.name)] ?? newCommandId()))
         setConflicts(response.conflicts)
         return
       }
@@ -213,27 +195,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack }: {
         </div>
         {environmentIncomplete && <p className="runtime-startup-result is-warning" role="status"><UiText zh={"部分查找来源不可用，本次结果使用已读取的可用环境。"} /></p>}
       </section>
-      <section className="runtime-startup-section runtime-startup-environment-section">
-        <div className="runtime-startup-section-heading"><h2><UiText zh={"环境变量"} /></h2><button className="quiet-button" type="button" disabled={locked || draft.environment.length >= 128}
-          onClick={() => { setRowIds([...rowIds, newCommandId()]); change({ ...draft, environment: [...draft.environment, { name: '', value: '' }] }) }}><DialogControlIcon name="plus" /><UiText zh={"添加变量"} /></button></div>
-        {draft.environment.length > 0 && <div className="runtime-startup-environment">
-          <div className="runtime-environment-labels" aria-hidden="true"><span><UiText zh={"变量名"} /></span><span><UiText zh={"值"} /></span></div>
-          {draft.environment.map((variable, index) => <div key={rowIds[index]} className="runtime-environment-row">
-            <input aria-label={uiAttribute("变量名 {0}", String(index + 1))} autoComplete="off" spellCheck={false} disabled={locked} value={variable.name}
-              aria-invalid={Boolean(errors[index])} aria-describedby={errors[index] ? `${id}-error-${index}` : undefined}
-              onChange={(event) => change({ ...draft, environment: draft.environment.map((entry, position) => position === index ? { ...entry, name: event.target.value } : entry) })} />
-            <div className="runtime-environment-value"><input aria-label={uiAttribute("变量值 {0}", String(index + 1))} autoComplete="off" spellCheck={false} disabled={locked}
-              type={revealed.has(rowIds[index]) ? 'text' : 'password'} value={variable.value}
-              onChange={(event) => change({ ...draft, environment: draft.environment.map((entry, position) => position === index ? { ...entry, value: event.target.value } : entry) })} />
-              <button className="quiet-button runtime-startup-icon" type="button" disabled={locked} aria-label={uiAttribute("{0}变量值 {1}", String(revealed.has(rowIds[index]) ? uiAttribute("隐藏") : uiAttribute("显示")), String(index + 1))} aria-pressed={revealed.has(rowIds[index])}
-                onClick={() => setRevealed((current) => { const next = new Set(current); if (next.has(rowIds[index])) next.delete(rowIds[index]); else next.add(rowIds[index]); return next })}><DialogControlIcon name={revealed.has(rowIds[index]) ? 'eye-off' : 'eye'} /></button></div>
-            <button className="quiet-button runtime-startup-icon" type="button" disabled={locked} aria-label={uiAttribute("删除变量 {0}", String(index + 1))} onClick={() => {
-              setRowIds(rowIds.filter((_, position) => position !== index)); change({ ...draft, environment: draft.environment.filter((_, position) => position !== index) })
-            }}><DialogControlIcon name="trash" /></button>
-            {errors[index] && <p className="runtime-environment-error" id={`${id}-error-${index}`} role="alert">{errors[index]}</p>}
-          </div>)}
-        </div>}
-      </section>
+
       {saved && error && <p className="inline-error" role="alert">{error}</p>}
       {conflicts.map((conflict) => <div className="runtime-save-conflict" role="alert" key={JSON.stringify(conflict.path)}>
         <p>{conflict.label}<UiText zh={"也在外部修改过，请选择保留哪一项。其他编辑已保留。"} /></p>

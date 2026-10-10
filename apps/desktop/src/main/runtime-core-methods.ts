@@ -5,6 +5,11 @@ export const RUNTIME_RENDERER_CORE_METHODS = [
   'runtime.product.ensure',
   'runtime.product.check',
   'runtime.startup.get',
+  'member.runtimeEnvironment.get',
+  'runtime.environmentLegacy.list',
+  'runtime.environmentLegacy.get',
+  'runtime.environmentLegacy.acknowledge',
+
   'runtime.startup.inspect',
   'runtime.startup.check',
   'runtime.startup.save',

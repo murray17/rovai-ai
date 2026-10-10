@@ -4301,6 +4301,29 @@ impl Core {
         {
             let database = self.database.lock().await;
             checks.push(database_integrity_check(&database));
+            match rovai_core::member_environment::legacy_list(database.connection()) {
+                Ok(legacy) => {
+                    for item in legacy.as_array().into_iter().flatten() {
+                        let kind = item["runtimeKind"].as_str().unwrap_or_default();
+                        checks.push(DiagnosticCheck::new(format!("legacy-environment:{kind}"), DiagnosticGroup::ManagedContent,
+                        "legacy_runtime_environment", kind,
+                        if item["handled"]==true {DiagnosticStatus::Ok} else {DiagnosticStatus::Attention},
+                        "runtime_environment_moved_to_members", "Environment settings moved from Agents to Teammates; manually migrate the values still needed")
+                        .with_subject_id(kind)
+                        .with_fact("variableCount",item["count"].to_string())
+                        .with_fact("identity",item["identity"].as_str().unwrap_or_default()));
+                    }
+                }
+                Err(_) => checks.push(DiagnosticCheck::new(
+                    "legacy-environment",
+                    DiagnosticGroup::ManagedContent,
+                    "legacy_runtime_environment_unavailable",
+                    "environment",
+                    DiagnosticStatus::Unknown,
+                    "runtime_environment_legacy_unavailable",
+                    "Legacy environment archive could not be read",
+                )),
+            }
 
             match SkillProjectionReconciler.legacy_entry_count(&database) {
                 Ok(0) => checks.push(
@@ -8918,8 +8941,18 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "members.runtime.set" => {
-                let params: UserCommandParams<SetMemberRuntimeConfigurationCommand> =
+                let mut params: UserCommandParams<SetMemberRuntimeConfigurationCommand> =
                     serde_json::from_value(request.params.clone())?;
+                let environment_edit = request
+                    .params
+                    .get("command")
+                    .and_then(|command| command.get("environment"))
+                    .cloned()
+                    .map(serde_json::from_value::<rovai_core::member_environment::EnvironmentEdit>)
+                    .transpose()
+                    .map_err(|_| anyhow::anyhow!("Member environment input is invalid"))?;
+                // The receipt is Host-derived. Client environment values never enter the domain command.
+                params.command.environment_update = None;
                 if let Some(blocker) = current_runtime_platform_blocker(params.command.adapter_kind)
                 {
                     return Ok(serde_json::to_value(blocker)?);
@@ -8927,9 +8960,23 @@ impl Core {
                 let agent_id = params.command.agent_id.clone();
                 let execution = {
                     let mut database = self.database.lock().await;
-                    let execution = AgentProfileService::default().set_runtime(
+                    let environment = environment_edit
+                        .map(|edit| {
+                            rovai_core::member_environment::prepare(
+                                database.connection(),
+                                &agent_id,
+                                params.command.adapter_kind,
+                                &params.command.model,
+                                edit,
+                            )
+                        })
+                        .transpose()?;
+                    params.command.environment_update =
+                        environment.as_ref().map(|update| update.receipt.clone());
+                    let execution = AgentProfileService::default().set_runtime_with_environment(
                         &mut database,
                         &user_command_envelope(params.command_id, params.command),
+                        environment.as_ref(),
                     )?;
                     if execution.result.status == CommandResultStatus::Applied {
                         self.mark_skill_projections_dirty_best_effort(&mut database, true);
@@ -11297,6 +11344,57 @@ impl Core {
             | "runtime.startup.save") => {
                 self.handle_runtime_startup(method, request.params.clone())
                     .await
+            }
+            "member.runtimeEnvironment.get" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Params {
+                    member_id: String,
+                    adapter_kind: AdapterKind,
+                    #[serde(default)]
+                    reveal: bool,
+                }
+                let params: Params = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                rovai_core::member_environment::get(
+                    database.connection(),
+                    &params.member_id,
+                    params.adapter_kind,
+                    params.reveal,
+                )
+            }
+            "runtime.environmentLegacy.list" => {
+                let database = self.database.lock().await;
+                rovai_core::member_environment::legacy_list(database.connection())
+            }
+            "runtime.environmentLegacy.get" | "runtime.environmentLegacy.acknowledge" => {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Params {
+                    runtime_kind: AdapterKind,
+                    #[serde(default)]
+                    reveal: bool,
+                    identity: Option<String>,
+                }
+                let params: Params = serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                if request.method.ends_with(".get") {
+                    rovai_core::member_environment::legacy_get(
+                        database.connection(),
+                        params.runtime_kind,
+                        params.reveal,
+                    )
+                } else {
+                    rovai_core::member_environment::legacy_acknowledge(
+                        database.connection(),
+                        params.runtime_kind,
+                        params
+                            .identity
+                            .as_deref()
+                            .context("Legacy identity is required")?,
+                    )?;
+                    Ok(json!({"handled":true}))
+                }
             }
             "runtime.discovery.rescan" => {
                 let params: RuntimeDiscoveryRescanParams =
@@ -14623,6 +14721,29 @@ impl Core {
         runtime: FrozenAgentRuntimeConfig,
         workspace: &AgentRunWorkspace,
     ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
+        let mut runtime = runtime;
+        if let Some(environment) = &mut runtime.environment {
+            environment
+                .hydrate(self.database.lock().await.connection())
+                .map_err(|error| RuntimeDispatchFailure {
+                    code: "runtime_environment_unavailable".into(),
+                    error,
+                    effective_version: None,
+                })?;
+        }
+        rovai_core::runtime_discovery::with_frozen_environment(
+            runtime.environment.clone(),
+            self.prepare_runtime_for_dispatch_in_environment(candidate, runtime, workspace),
+        )
+        .await
+    }
+
+    async fn prepare_runtime_for_dispatch_in_environment(
+        &self,
+        candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+        runtime: FrozenAgentRuntimeConfig,
+        workspace: &AgentRunWorkspace,
+    ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
         if let Some(blocker) = current_runtime_platform_blocker(runtime.adapter_kind) {
             return Err(RuntimeDispatchFailure {
                 code: blocker.code,
@@ -14999,6 +15120,32 @@ impl Core {
     }
 
     async fn launch_agent_run(
+        self: &Arc<Self>,
+        execution: &AgentRunExecution,
+        attachment_admission: &ThreadAttachmentReadAdmission,
+        attachment_authorization: &ThreadOutputDirectory,
+        output: &mpsc::UnboundedSender<String>,
+        launch_permit: &mut ExecutionLaunchPermit,
+    ) -> Result<()> {
+        let mut resolved = execution.clone();
+        if let Some(environment) = &mut resolved.runtime.environment {
+            environment.hydrate(self.database.lock().await.connection())?;
+        }
+        let environment = resolved.runtime.environment.clone();
+        rovai_core::runtime_discovery::with_frozen_environment(
+            environment,
+            self.launch_agent_run_in_environment(
+                &resolved,
+                attachment_admission,
+                attachment_authorization,
+                output,
+                launch_permit,
+            ),
+        )
+        .await
+    }
+
+    async fn launch_agent_run_in_environment(
         self: &Arc<Self>,
         execution: &AgentRunExecution,
         attachment_admission: &ThreadAttachmentReadAdmission,
@@ -32224,6 +32371,7 @@ for line in sys.stdin:
             "#!/bin/sh\ntrap '' TERM\nread -r line\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nwhile read -r line; do :; done\n",
         );
         let runtime_config = FrozenAgentRuntimeConfig {
+            environment: None,
             custom_api: None,
             camp_fast: None,
             adapter_kind: AdapterKind::CodexCli,

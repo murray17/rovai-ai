@@ -2,7 +2,7 @@
 //! The capture seam never reads a developer's PATH, registry, shell or accounts.
 use super::*;
 use crate::application::{RuntimeCheckOutcome, RuntimeCheckTrigger, RuntimeLaunchPurpose};
-use rovai_core::runtime_startup::{RuntimeEnvironmentVariable, RuntimeStartupConfiguration};
+use rovai_core::runtime_startup::RuntimeStartupConfiguration;
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -187,24 +187,10 @@ async fn check(core: Arc<Core>) -> RuntimeCheckOutcome {
     .unwrap()
 }
 
-fn configuration(
-    path: Option<&Path>,
-    value: &str,
-    process_path: &Path,
-) -> RuntimeStartupConfiguration {
+fn configuration(path: Option<&Path>) -> RuntimeStartupConfiguration {
     RuntimeStartupConfiguration {
-        custom_api_snapshot: None,
         program_path: path.map(|path| path.to_string_lossy().to_string()),
-        environment: vec![
-            RuntimeEnvironmentVariable {
-                name: "CHECK_REFRESH_VALUE".into(),
-                value: value.into(),
-            },
-            RuntimeEnvironmentVariable {
-                name: "PATH".into(),
-                value: process_path.to_string_lossy().to_string(),
-            },
-        ],
+        ..Default::default()
     }
 }
 
@@ -237,7 +223,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     fixture.check().await;
     assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 3.0.0");
 
-    let saved = configuration(Some(&old), "saved-private", new.parent().unwrap());
+    let saved = configuration(Some(&old));
     fixture.save(0, &saved).await;
     fixture.check().await;
     assert_eq!(
@@ -245,7 +231,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
         "codex-cli 1.0.0",
         "process PATH does not select the main executable"
     );
-    assert_eq!(
+    assert_ne!(
         std::fs::read_to_string(old.parent().unwrap().join("environment.txt"))
             .unwrap()
             .trim(),
@@ -253,7 +239,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     );
     let public_before = fixture.public_state().await;
     let settings_before = fixture.settings().await;
-    let draft = configuration(Some(&new), "draft-private", old.parent().unwrap());
+    let draft = configuration(Some(&new));
     let preview = fixture
         .core
         .handle_runtime_startup(
@@ -265,7 +251,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
         .await
         .unwrap();
     assert_eq!(preview["reportedVersion"], "codex-cli 3.0.0");
-    assert_eq!(
+    assert_ne!(
         std::fs::read_to_string(new.parent().unwrap().join("environment.txt"))
             .unwrap()
             .trim(),
@@ -277,7 +263,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     // private preview must reject the mixed identity without touching public state.
     fixture.program("new", "3.1.0", true);
     let draft_core = fixture.core.clone();
-    let changed_draft = configuration(Some(&new), "draft-private", old.parent().unwrap());
+    let changed_draft = configuration(Some(&new));
     let changing_preview = tokio::spawn(async move {
         draft_core
             .handle_runtime_startup(
@@ -309,7 +295,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     );
     assert_eq!(fixture.settings().await, settings_before);
 
-    let other = configuration(None, "other-private", new.parent().unwrap());
+    let other = configuration(None);
     fixture
         .core
         .handle_runtime_startup(
@@ -323,7 +309,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     let latest = fixture.program("latest", "4.0.0", false);
     *fixture.paths.lock().unwrap() = vec![latest.parent().unwrap().into()];
     let public_before = fixture.public_state().await;
-    let automatic = configuration(None, "draft-auto", old.parent().unwrap());
+    let automatic = configuration(None);
     let preview = fixture
         .core
         .handle_runtime_startup(
@@ -423,11 +409,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     let native_home = fixture.root.join("settings-native");
     std::fs::create_dir_all(&native_home).unwrap();
     std::fs::write(native_home.join("config.toml"), "model_provider='relay'\nmodel='local-model'\n[model_providers.relay]\nbase_url='https://local.example'\nexperimental_bearer_token='local-fake-key'\n").unwrap();
-    let mut startup = configuration(Some(&stalled), "local", stalled.parent().unwrap());
-    startup.environment.push(RuntimeEnvironmentVariable {
-        name: "CODEX_HOME".into(),
-        value: native_home.to_string_lossy().into_owned(),
-    });
+    let startup = configuration(Some(&stalled));
     {
         let mut db = fixture.core.database.lock().await;
         let before = rovai_core::runtime_startup::load(&db, KIND).unwrap();
@@ -440,15 +422,12 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     assert!(local.get("credential").is_none());
     assert!(!local.to_string().contains("local-fake-key"));
     assert!(!stalled.parent().unwrap().join("environment.txt").exists());
-    let saved = tokio::time::timeout(Duration::from_secs(2), fixture.core.handle_runtime_startup("runtime.startup.save", json!({
+    let rejected = tokio::time::timeout(Duration::from_secs(2), fixture.core.handle_runtime_startup("runtime.startup.save", json!({
         "runtimeKind":KIND,"edits":[{"path":["environment","VISIBLE_SETTING"],"before":null,"after":"on","label":""}]
-    }))).await.unwrap().unwrap();
+    }))).await.unwrap();
     assert!(
-        saved["configuration"]["environment"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|e| e["name"] == "VISIBLE_SETTING")
+        rejected.is_err(),
+        "retired environment field edits are rejected"
     );
     let original = std::fs::read(native_home.join("config.toml")).unwrap();
     let error = tokio::time::timeout(Duration::from_secs(2), fixture.core.handle_runtime_startup("runtime.startup.save", json!({
@@ -479,12 +458,7 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
         .await
         .unwrap();
         if save_configuration {
-            fixture
-                .save(
-                    0,
-                    &configuration(Some(&new), "new-saved", old.parent().unwrap()),
-                )
-                .await;
+            fixture.save(0, &configuration(Some(&new))).await;
         } else {
             *fixture.paths.lock().unwrap() = vec![new.parent().unwrap().into()];
         }
@@ -567,19 +541,7 @@ async fn local_saves_finish_while_environment_capture_is_held_and_never_launch_w
             json!({"keep_unknown":42,"env":{"ANTHROPIC_BASE_URL":"https://offline.invalid","ANTHROPIC_AUTH_TOKEN":"fixture-key"}}).to_string()
         };
         std::fs::write(&file, initial).unwrap();
-        let configuration = RuntimeStartupConfiguration {
-            program_path: Some(program.to_string_lossy().into_owned()),
-            environment: vec![RuntimeEnvironmentVariable {
-                name: if kind == AdapterKind::CodexCli {
-                    "CODEX_HOME"
-                } else {
-                    "CLAUDE_CONFIG_DIR"
-                }
-                .into(),
-                value: home.to_string_lossy().into_owned(),
-            }],
-            ..Default::default()
-        };
+        let configuration = configuration(Some(&program));
         rovai_core::runtime_startup::save(
             &mut *fixture.core.database.lock().await,
             kind,
@@ -588,24 +550,23 @@ async fn local_saves_finish_while_environment_capture_is_held_and_never_launch_w
             1,
         )
         .unwrap();
-        let old = rovai_core::runtime_startup::load(&*fixture.core.database.lock().await, kind)
+        let context = rovai_core::runtime_custom_api::native::NativeContext {
+            kind,
+            directory: home,
+            artifact_root: fixture.root.join("unused-native-artifacts"),
+            launcher: None,
+            codex_source: None,
+            environment: Default::default(),
+        };
+        let old = rovai_core::runtime_custom_api::native::read(&context, None)
             .unwrap()
-            .configuration
-            .custom_api_snapshot
-            .unwrap();
+            .snapshot(&context, false);
         let original = std::fs::read(&file).unwrap();
-        for (path, before, after) in [
-            (
-                json!(["environment", "VISIBLE_LOCAL"]),
-                Value::Null,
-                json!("updated"),
-            ),
-            (
-                json!(["programPath"]),
-                json!(program.to_string_lossy()),
-                Value::Null,
-            ),
+        for (before, after) in [
+            (json!(program.to_string_lossy()), Value::Null),
+            (Value::Null, json!(program.to_string_lossy())),
         ] {
+            let path = json!(["programPath"]);
             let saved = tokio::time::timeout(Duration::from_secs(2), fixture.core.handle_runtime_startup("runtime.startup.save", json!({
                 "runtimeKind":kind,"edits":[{"path":path,"before":before,"after":after,"label":"fixture"}]
             }))).await.expect("a blocked reader must not delay local commit").unwrap();
@@ -644,14 +605,15 @@ async fn local_saves_finish_while_environment_capture_is_held_and_never_launch_w
     let published = refresh.await.unwrap().unwrap();
     assert!(published.generation() > generation);
     for kind in [AdapterKind::ClaudeCodeCli, AdapterKind::CodexCli] {
-        assert!(
+        assert_eq!(
             published
                 .startup_configuration(kind)
-                .environment
-                .iter()
-                .any(|entry| entry.name == "VISIBLE_LOCAL" && entry.value == "updated"),
-            "late refresh must merge the latest saved configuration"
+                .program_path
+                .as_deref(),
+            program.to_str(),
+            "late refresh must merge the latest saved path"
         );
+        assert!(published.startup_configuration(kind).environment.is_empty());
     }
     fixture.close().await;
 }
