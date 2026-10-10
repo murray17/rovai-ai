@@ -2964,7 +2964,10 @@ mod tests {
     }
 
     async fn wait_for_claude_fixture(predicate: impl Fn() -> bool) {
-        tokio::time::timeout(Duration::from_secs(5), async {
+        // The Windows fixture starts cmd.exe and cold PowerShell processes on
+        // shared CI runners; this is a test startup budget, not a Runtime policy.
+        let startup_budget = Duration::from_secs(if cfg!(windows) { 15 } else { 5 });
+        tokio::time::timeout(startup_budget, async {
             while !predicate() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
