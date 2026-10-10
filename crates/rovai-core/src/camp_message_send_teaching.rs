@@ -2,8 +2,11 @@ pub const CAMP_MESSAGE_SEND_SUMMARY: &str = "Publish one public Thread message. 
 
 pub const CAMP_MESSAGE_SEND_FILE_HELP: &str = "Attach a recipient-facing file or directory at its actual path; repeat to preserve attachment order. Rovai references the current file without copying or changing permissions. Temporary files may become unavailable when their source is cleaned up.";
 
+pub const CAMP_MESSAGE_SEND_INPUT_HELP: &str =
+    "Input: direct flags, or --input-file <path> with send flags except --body.";
+
 pub const CAMP_MESSAGE_SEND_BODY_HELP: &str = "Use --body for simple single-line text; \\n remains literal.\n\
-     For multiline text, Markdown, or content containing backticks or $(), write a UTF-8 JSON request with a file-write tool and use --input-file <path>.";
+     For multiline, Markdown, or complex text, use a file-write tool to write the reply text itself, with real newlines, to a UTF-8 file.";
 
 pub const CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION: &str = "Guarantee that this public Thread message addresses no Agent. When true, explicit Agent recipients and taskId are invalid, effectiveRecipients and deliveryIds are empty, and no Agent is woken. This may be combined with mentionUser because User attention is not Agent routing.";
 
@@ -28,7 +31,7 @@ Ordinary public Thread messages are already visible to the User. Use this flag o
 It creates no Agent Delivery, does not represent approval, and may be combined with --public-only. User attention is message-local and is never inherited by replies, Tasks, or downstream A2A work.";
 
 pub const CAMP_MESSAGE_SEND_HELP_EXAMPLES: [&str; 3] = [
-    "Write request.json with a file-write tool:\n  {\"publicOnly\":true,\"body\":\"Result:\\n\\nUpdated `src/example.rs`.\"}\nrovai send --input-file request.json",
+    "Write reply.md:\n  Result:\n\n  Updated `src/example.rs`.\nAfter the write succeeds:\n  rovai send --public-only --input-file reply.md",
     "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'",
     "rovai send --public-only --to-user --body 'Please choose whether to roll back the client or continue the token investigation.'",
 ];
@@ -89,9 +92,8 @@ mod tests {
     #[test]
     fn examples_keep_public_agent_and_principal_attention_separate() {
         assert_eq!(CAMP_MESSAGE_SEND_HELP_EXAMPLES.len(), 3);
-        assert!(CAMP_MESSAGE_SEND_HELP_EXAMPLES[0].contains("\"publicOnly\":true"));
-        assert!(CAMP_MESSAGE_SEND_HELP_EXAMPLES[0].contains("--input-file request.json"));
-        assert!(!CAMP_MESSAGE_SEND_HELP_EXAMPLES[0].contains("--public-only"));
+        assert!(CAMP_MESSAGE_SEND_HELP_EXAMPLES[0].contains("--input-file reply.md"));
+        assert!(CAMP_MESSAGE_SEND_HELP_EXAMPLES[0].contains("--public-only"));
         assert!(CAMP_MESSAGE_SEND_HELP_EXAMPLES[1].contains("--to agent_5"));
         assert!(!CAMP_MESSAGE_SEND_HELP_EXAMPLES[1].contains("--to-user"));
         assert!(CAMP_MESSAGE_SEND_HELP_EXAMPLES[2].contains("--public-only"));

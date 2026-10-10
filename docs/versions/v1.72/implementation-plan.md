@@ -8,6 +8,57 @@ last_updated: 2026-10-10
 
 # v1.72 实施与验收
 
+## Send 正文文件输入
+
+按 User 消息 19 确认的 [r5](model-context-change-send-input-file.md)实施：Send 文件按现有 Schema
+识别完整请求，否则保留 UTF-8 原文作为正文；只有正文文件可与发送参数组合。同步精简 Bootstrap、
+Send help、根 help 和 cli-operations。正文文件目录不受新增限制，Skill interface 元数据保持原样。
+
+Worktree：`rovai-ai-send-input-file`；分支：`rovai/send-input-file`；基线方案提交：`33f180460`，
+产品源码基线：`70c9214bf47a677d018a7f2448583d6ec3422d22`（已 fetch 确认仍为 origin/main）。
+状态：代码与确定性验证完成，保留 worktree 供评审；未合入或安装日常 App。
+
+### 测试准入
+
+新增两个 CLI 单元 owner：`send_file_input_preserves_text_and_complete_schema_requests` 拥有新文件分流、
+原文保留、完整字段与参数冲突；`send_file_reader_accepts_only_regular_utf8_text_and_removes_one_bom`
+拥有普通文件、编码和 BOM 准入。修复前原始正文文件不能发送，非法类型可能被普通 serde struct 接受；
+现有 help owner 只有一个合法 JSON 文件案例，无法保护这些新边界。最低层临时文件夹具即可验证，
+无需 SQLite 或真实 Runtime。更新教学、版本与 Charter owner。旧空正文 owner 扩展并改名为
+`public_send_rejects_empty_and_oversized_bodies_without_publishing`，保留原空白拒绝并加入 ASCII/中文/emoji
+超限与数据库消息数量不变；没有删除或永久禁用可执行测试。新增 CLI 进程边界 owner
+`scripts/lib/send-file-input.test.mjs` 复用生产 CLI 和本地 IPC 夹具，验证 stdin/FIFO/零 IPC，
+不能被纯 parser 代替；不把它误报为真实模型或 Core 发布验证。
+
+最小命令：`cargo test -p rovai-core --bin rovai send_file_` 和 `pnpm test:send-input-file`。
+
+### 验证结果
+
+| 验证 | 结果 |
+| --- | --- |
+| `cargo test --workspace` | 465 通过，1 个既有 ignored；含 31 项 CLI 测试及新增两个 owner |
+| 最后修改后 `cargo test -p rovai-core --bin rovai` | 31 通过 |
+| `cargo test -p rovai-core --features extended-tests --lib context::tests::` | 9 通过 |
+| `cargo check --workspace` / `cargo fmt --all --check` / `git diff --check` | 全部通过 |
+| `--features slow-tests --lib` 的 8 个定向 owner | Charter 全文、冻结 Bootstrap、补发冻结、正文空白/字节超限零发布、publicOnly 寻址、原子发布/重放、User 通知、纯附件；全部通过 |
+| `pnpm test:send-input-file` | 独立 CLI 进程及本地 IPC 验证通过；有外层 5 秒退出上限，未启动 App、Core 或真实 Runtime |
+| Full check 接入 | `full` scope 的 `Rust full` job 显式执行 `pnpm test:send-input-file` 一次；本地命令及 YAML/前置工具顺序检查通过，尚未执行远端完整 workflow |
+| 真实 Core / 原生 Codex 专项 | 基线旧 JSON → 候选恢复旧 JSON 并读新帮助 → 正文文件；3 次 Run、3 条消息，逐字读回、原 Native Binding 与冻结 Bootstrap 保留，使用脚本 Provider，详见[证据](../../research/send-input-file/README.md) |
+| `pnpm skills:check` / `pnpm skills:test` | 12 个 Skill 校验、3 项治理测试通过 |
+| `pnpm docs:test` / `pnpm docs:check` / 带真实 base 的 `pnpm docs:check:ci` | 10 项治理测试、版本与决定/链接门禁通过 |
+| 完整教学对照 | 五组前后文本和九个基线源码摘要核对；新二进制 Send/root help 与 r5 全文逐字一致，其余 29 个命令 help 与当前 v36 CLI 逐字一致；Send reference、Schema、索引描述与 interface 元数据未改 |
+
+慢速 Charter owner 首次运行发现一条旧断言仍要求 Bootstrap 出现 `--input-file`，已按确认文本修正并重跑通过。
+IPC 夹具初次错误读取了请求的 `requestId` 而非既有 wire `request_id`，修正夹具后通过；生产 wire 未修改。
+
+真实模型 12 Case Gate 缺少本次可用的冻结 team/模型和真实 Judge 配置，尚未执行。旧 Session
+恢复、读取新帮助再发送已补原生 Codex + 真实 Core 的脚本驱动验收；不能据此宣称真实模型会自行
+选择正确用法，或不会重复发送、循环查询帮助。真实模型连续发送、已学习新帮助后的旧版回滚、
+其他 Runtime 与 Windows 真机专项仍未运行。默认 Node/Rust 回归和自动 PR gate 不包含 CLI 进程测试，
+它由手动 Full check 稳定调用，不把其他入口通过当作该项通过。
+旧 `smoke:builtin-cli` 仍有与本次无关的 Gather/Principal 过时断言；本次只同步相关输入教学断言，
+检查脚本语法，不宣称该历史 Smoke 整体通过。
+
 ## 2026-10-10 Kimi 官方 Provider 配置
 
 删除正式 ACP Host 与 Probe 的私有 env 注入、加载器和 `kimiProviderEnvironmentDigest`，

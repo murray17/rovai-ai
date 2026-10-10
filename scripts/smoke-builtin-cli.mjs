@@ -1186,7 +1186,7 @@ STEP=version
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
-printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.")}
+printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run an Agent operation's exact `--help` for its closed inputs.")}
 send_help="$("$CLI" send --help)"
 printf '%s\n' "$send_help" | grep -Fq -- '--public-only'
 printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'
@@ -1199,10 +1199,11 @@ printf '%s\n' "$send_help" | grep -Fq -- 'Agent addressing schedules concrete co
 printf '%s\n' "$send_help" | grep -Fq -- 'Always inspect agentAddressingMode, effectiveRecipients, and deliveryIds.'
 printf '%s\n' "$send_help" | grep -Fq -- 'Principal attention is message-local and is never inherited'
 printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('Use --body for simple single-line text; \\n remains literal.')}
-printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('For multiline text, Markdown, or content containing backticks or $(), write a UTF-8 JSON request with a file-write tool and use --input-file <path>.')}
-printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('  Write request.json with a file-write tool:')}
-printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('    {"publicOnly":true,"body":"Result:\\n\\nUpdated `src/example.rs`."}')}
-printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('  rovai send --input-file request.json')}
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('For multiline, Markdown, or complex text, use a file-write tool to write the reply text itself, with real newlines, to a UTF-8 file.')}
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('Input: direct flags, or --input-file <path> with send flags except --body.')}
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('  Write reply.md:')}
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('  After the write succeeds:')}
+printf '%s\n' "$send_help" | grep -Fq -- ${shellQuote('    rovai send --public-only --input-file reply.md')}
 printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'"
 printf '%s\n' "$send_help" | grep -Fq -- "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'"
 gather_help="$("$CLI" gather --help)"

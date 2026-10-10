@@ -11,7 +11,7 @@ last_updated: 2026-10-07
 人类用户的主称呼、双别名、结构化搜索与冻结投影边界见 [User Naming v1](../contracts/user-naming-v1.md)。
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v36](../contracts/builtin-tool-transport-v36.md)、
+[Built-in Tool Transport v37](../contracts/builtin-tool-transport-v37.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History v11](../contracts/camp-history-v11.md)、
 [Durable Task v5](../contracts/durable-task-v5.md) 和
@@ -674,7 +674,9 @@ request/receipt 有显式可验证关联，它作为同一 Activity 的 supporti
 Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Shell 子进程共享当前 Run 身份，但
 系统不声称能够证明模型主观意图。
 
-- CLI 先从 direct flags、JSON stdin/heredoc 或 `--input-file` 三种互斥来源构造一个对象；所有来源共用
+- CLI 从 direct flags、JSON stdin/heredoc 或 `--input-file` 构造一个对象。Send 文件按
+  [Transport v37](../contracts/builtin-tool-transport-v37.md)分流，只有正文文件可与除 `--body` 外的发送参数组合；
+  完整请求文件和其他 operation 保持来源互斥。所有来源共用
   catalog canonical input Schema validator，只有通过后才加载 lease/context 并发送 IPC。`camp.read`
   直接发送 `messageId | thread | before | limit` 的合法组合，不补写模式或方向，也不接受旧字段。
   Core 不感知输入来源，继续拥有默认 limit、cursor 与组合约束的权威校验；
@@ -682,7 +684,8 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   `2`。Schema failure 最多返回 4 条确定性字段 issue，顺序为 missing required、当前 mode 不允许、
   enum/const、type、numeric bounds、string/array bounds；合法 mode 只解释选中 branch。Issue 只含
   operation、field/flag、reason、合法值/边界，不含用户正文、input-file path、Schema
-  path、Rust error、IPC endpoint、lease 或凭据；其他 parse、IPC/lease/catalog preflight 失败继续使用安全
+  path、Rust error、IPC endpoint、lease 或凭据。完整 Send 请求文件与直接参数混用时给出 v37 的具体冲突消息；
+  其他 parse、IPC/lease/catalog preflight 失败继续使用安全
   通用 structured error，退出码 `2`；
 - Core 业务拒绝：完整 Envelope 记录在 Core/Evidence，Agent stdout 输出业务 `error`，退出码 `1`；
 - 响应丢失：CLI 对同一 request identity 有界重试，Core 执行 Replay；Projection 不暴露 request

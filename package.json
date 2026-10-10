@@ -28,6 +28,7 @@
     "check:rust": "cargo check --workspace --all-targets",
     "test:rust:lib": "cargo test -p rovai-core --lib",
     "test:rust:cli": "cargo test -p rovai-core --bin rovai",
+    "test:send-input-file": "cargo build -p rovai-core --bin rovai && node --test scripts/lib/send-file-input.test.mjs",
     "test:rust:core": "cargo test -p rovai-core --lib",
     "test:rust:workspace-default": "cargo test --workspace",
     "test:rust:extended": "cargo test --workspace --features extended-tests",

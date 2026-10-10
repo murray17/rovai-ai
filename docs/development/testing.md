@@ -11,6 +11,13 @@ last_updated: 2026-10-10
 
 ## Rust 测试准入与退役门槛
 
+Send 文件输入改动先运行 `cargo test -p rovai-core --bin rovai send_file_`，再运行
+`pnpm test:send-input-file`。后者构建当前 CLI，以隔离临时目录和本地 IPC 夹具验证请求传递、
+业务拒绝不降级、输入失败零 IPC、继承 stdin 不阻塞和 Unix FIFO/设备/权限拒绝；不启动 Core 或模型。
+Core 的正文、寻址与发布合同继续由 `team_tool::tests` 拥有，真实 Session 行为单独验收。
+该进程测试接入手动 `Full check` 的 `full` scope，由 `Rust full` job 准备 Node/pnpm 后显式执行一次。
+`pnpm test`、`cargo test --workspace` 和自动 PR `CI / gate` 不包含它；这些入口通过不能替代该项结果。
+
 测试总数不是质量指标，本仓库不设置“每个功能必须新增几项测试”或“每个 PR 最多新增几项测试”的
 固定配额。评审门槛是每项测试是否拥有清晰、唯一且值得长期维护的合同；相同覆盖应优先扩展既有
 owner，而不是继续增加平行 fixture 和断言。

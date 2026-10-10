@@ -8,7 +8,7 @@ last_updated: 2026-10-10
 
 User 的主称呼、结构化提及及冻结恢复见 [User Naming v1](user-naming-v1.md)。
 
-公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)；当前模型与 CLI 版本见 [ContextManifest v33](context-manifest-evidence-v33.md)、[Built-in Tool Transport v36](builtin-tool-transport-v36.md)。
+公开命名与历史合同的关系见 [Thread Naming v1](thread-naming-v1.md)；当前模型与 CLI 版本见 [ContextManifest v33](context-manifest-evidence-v33.md)、[Built-in Tool Transport v37](builtin-tool-transport-v37.md)。
 
 本目录保存跨版本、字段级且可由测试直接验证的接口合同。[Version Decisions](../decisions/README.md)解释为什么选择某个边界，
 Architecture 解释组件如何组成，Version 概览记录交付范围；它们都不复制本目录的完整 wire shape。
@@ -357,7 +357,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Memory Capture v3（当前）](memory-capture-v3.md) | v2 边界加 complete exact-Scope View、copyable Revision target、active body aggregate quota、64 KiB production projection limit 与 Memory-domain clean break |
 | [Memory Capture v2 (historical)](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 flat Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
 | [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
-| [Built-in Tool Transport v36（当前）](builtin-tool-transport-v36.md) | 封闭 member list/get/update、Core PATCH、复合图片与现有请求幂等；无 Runtime 或成员关系扩权 |
+| [Built-in Tool Transport v37（当前）](builtin-tool-transport-v37.md) | Send 正文文件、严格旧请求识别、输入冲突诊断及冻结 Session 兼容；其他操作输入和 Core Send 合同不变 |
+| [Built-in Tool Transport v36（历史）](builtin-tool-transport-v36.md) | 封闭 member list/get/update、Core PATCH、复合图片与现有请求幂等；无 Runtime 或成员关系扩权 |
 | [Built-in Tool Transport v35（历史）](builtin-tool-transport-v35.md) | thread.runs、read addressing、Agent Output 8；旧 Session 和 Bootstrap 保持 |
 | [Built-in Tool Transport v34（历史）](builtin-tool-transport-v34.md) | User 主称呼与双别名；新 Agent Output 7，旧 receipt 原字节复用 |
 | [Built-in Tool Transport v33（历史）](builtin-tool-transport-v33.md) | Thread 命名与冻结 Session 身份保持 |

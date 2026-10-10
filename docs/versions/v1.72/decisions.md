@@ -717,6 +717,26 @@ D30 的唯一官方 ACP 后端保持，已有实现和正负证据保留，后�
 本轮优先调查 Command Code 模型目录与 BYOK 切换，不把两个 Runtime 的成功范围相互代用。
 
 
+<a id="v1-72-d33"></a>
+## V1.72-D33：Send 单一文件入口兼容请求，教学只教正文
+
+- 状态：accepted
+- 日期：2026-10-10
+- 确认：User 消息 19，`a206aab3-b280-4a0f-9096-3f9f187426b6`
+- 当前权威：[Built-in 运输不变量](../../architecture/foundational-invariants.md#skills-builtin-transport)、[Transport v37](../../contracts/builtin-tool-transport-v37.md)
+
+### 背景与选择
+
+Agent 为复杂正文另包 JSON 增加了转义工作和教学开销，旧 Session 又持有冻结的 JSON 文件说明。
+沿用唯一 `--input-file`：CLI 复用完整封闭 Send Schema 识别旧请求，否则将合法文本作为正文。
+新教学只演示正文文件，既有 Session 保留原 Bootstrap；兼容细节由实现负责，仅在发生具体冲突时诊断。
+
+### 后果与替代方案
+
+接受裸 JSON 同时可作示例和请求的歧义，由严格请求匹配优先；不承诺无效旧请求保持旧报错行为。
+拒绝另加 `--body-file` 或格式开关，以免引入第二套调用入口和选择教学；拒绝重写旧 Bootstrap，
+避免把轻量输入改进变成 Session 迁移。输入文件不新增目录约束或发送后自动删除，现有生命周期继续拥有临时文件。
+
 <a id="v1-72-d32"></a>
 ## V1.72-D32：Kimi Provider 配置回归官方来源
 

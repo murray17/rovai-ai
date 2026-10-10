@@ -29,9 +29,8 @@ Choose the smallest object that fully serves the request. Tasks own durable resp
 ## Coordinate operations
 
 1. Read the authoritative state needed for the decision.
-2. Use one supported input source per call, following that operation's help.
-3. Inspect the committed business result before taking the next step.
-4. Publish any required Thread-visible answer before ending the Run.
+2. Inspect the committed business result before taking the next step.
+3. Publish any required Thread-visible answer before ending the Run.
 
 A successful operation proves its own commit, not downstream execution, validation or completion of the user's objective.
 
