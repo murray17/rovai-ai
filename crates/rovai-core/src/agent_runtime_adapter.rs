@@ -2872,10 +2872,10 @@ fn opencode_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "permission".to_string(),
         label: "permission".to_string(),
-        description: "OpenCode's native tool permission policy for this Agent Host.".to_string(),
+        description: "Default OpenCode policy, also applied to build/plan. Shell and Skill remain allowed; custom and child agents retain native overrides.".to_string(),
         value_type: "enum".to_string(),
         choices: vec![
-            choice("allow", "allow (no prompts)"),
+            choice("allow", "allow"),
             choice("ask", "ask"),
             choice("deny", "deny"),
         ],
@@ -3311,14 +3311,21 @@ fn resolve_acp_runtime(
         }
         Ok(Value::Object(values))
     };
-    let binding_compatibility_digest = canonical_json_digest(&json!({
+    let mut binding_compatibility = json!({
         "adapterKind": expected_kind,
         "installationId": input.installation_id,
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
         "sessionPermissions": scoped_values(RuntimeOptionScope::Session)?,
         "contextContract": native_binding_context_contract(),
-    }))?;
+    });
+    if expected_kind == AdapterKind::OpencodeCli
+        && crate::opencode_compat::Generation::from_version(input.reported_version)
+            == Some(crate::opencode_compat::Generation::V2)
+    {
+        binding_compatibility["opencodeGeneration"] = json!(2);
+    }
+    let binding_compatibility_digest = canonical_json_digest(&binding_compatibility)?;
     let host_config_digest = canonical_json_digest(&json!({
         "adapterKind": expected_kind,
         "installationId": input.installation_id,

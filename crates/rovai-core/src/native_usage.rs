@@ -483,10 +483,16 @@ impl OpenCodeUsageReader {
         if !safe_identity(session_id) {
             return None;
         }
-        let data = std::env::var_os("XDG_DATA_HOME")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))?;
+        let data = crate::runtime_discovery::runtime_environment_variable(
+            AdapterKind::OpencodeCli,
+            "XDG_DATA_HOME",
+        )
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            crate::runtime_discovery::runtime_home_directory(AdapterKind::OpencodeCli)
+                .map(|home| home.join(".local/share"))
+        })?;
         if !data.is_absolute() {
             return None;
         }

@@ -1295,6 +1295,7 @@ struct ZcodeBackgroundRoute {
 pub(crate) struct AcpHost {
     adapter_kind: AdapterKind,
     reported_version: Option<String>,
+    opencode_program_identity: Option<String>,
     client_terminal_mode: AcpClientTerminalMode,
     client_terminal_bridge: Option<AcpClientTerminalBridge>,
     host_instance_id: String,
@@ -1309,6 +1310,7 @@ pub(crate) struct AcpHost {
     ingress_fence: Mutex<()>,
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
+    opencode_open_children: Mutex<HashSet<(String, String)>>,
     zcode_background: std::sync::Mutex<HashMap<(String, String), ZcodeBackgroundRoute>>,
     zcode_detached_prompts: RwLock<HashMap<String, AcpSessionRoute>>,
     zcode_cleanup_confirmed: AtomicBool,
@@ -1394,6 +1396,10 @@ impl AcpHost {
         .context("failed to configure ACP Runtime command")?;
         let detector_config_root = if compaction_detector_policy
             == CompactionDetectorPolicy::BestEffort
+            && !(frozen_runtime.adapter_kind == AdapterKind::OpencodeCli
+                && crate::opencode_compat::Generation::from_version(
+                    frozen_runtime.reported_version.as_deref(),
+                ) == Some(crate::opencode_compat::Generation::V2))
         {
             match builtin_tools.as_ref() {
                 Some(builtin_tools) => match configure_compaction_detector_command(
@@ -1487,6 +1493,11 @@ impl AcpHost {
         let host = Arc::new(Self {
             adapter_kind: frozen_runtime.adapter_kind,
             reported_version: frozen_runtime.reported_version.clone(),
+            opencode_program_identity: if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
+                Some(crate::opencode_compat::program_identity(frozen_runtime)?)
+            } else {
+                None
+            },
             client_terminal_mode,
             client_terminal_bridge,
             host_instance_id,
@@ -1501,6 +1512,7 @@ impl AcpHost {
             ingress_fence: Mutex::new(()),
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
+            opencode_open_children: Mutex::new(HashSet::new()),
             zcode_background: std::sync::Mutex::new(HashMap::new()),
             zcode_detached_prompts: RwLock::new(HashMap::new()),
             zcode_cleanup_confirmed: AtomicBool::new(false),
@@ -1576,9 +1588,28 @@ impl AcpHost {
                 "github.com/copilot": {"events": ["assistant.usage", "assistant.intent"]}
             });
         }
+        if host.is_opencode_v2() {
+            // V2 children may outlive a root prompt. Their native lifecycle
+            // determines whether the existing Fleet may safely reuse this Host.
+            initialize_params["clientCapabilities"]["_meta"] =
+                json!({"opencode/child-session-updates": true});
+        }
         let initialized = host.rpc("initialize", initialize_params).await;
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
+                if host.adapter_kind == AdapterKind::OpencodeCli
+                    && let Some(version) =
+                        result.pointer("/agentInfo/version").and_then(Value::as_str)
+                    && crate::opencode_compat::Generation::require(
+                        host.reported_version.as_deref(),
+                    )?
+                    .conflicts_with(version)
+                {
+                    host.shutdown().await;
+                    bail!(
+                        "OpenCode initialize identity conflicts with the prepared launch contract (reported {version}); task input was not sent"
+                    );
+                }
                 *host.initialize_result.write().await = Some(result.clone());
                 let auth_method = match frozen_runtime.adapter_kind {
                     AdapterKind::CursorAgent => Ok(Some(("cursor_login", "Cursor"))),
@@ -1701,6 +1732,17 @@ impl AcpHost {
                                 host.complete_pending(id, pending, message).await;
                             }
                             continue;
+                        }
+                        if host.is_opencode_v2()
+                            && message["method"] == "opencode/session/child_update"
+                            && message.get("id").is_none()
+                        {
+                            let Some(projected) =
+                                host.project_opencode_child_update(&message).await
+                            else {
+                                continue;
+                            };
+                            message = projected;
                         }
                         let method = message.get("method").and_then(Value::as_str);
                         if host.client_terminal_mode.is_available()
@@ -2401,7 +2443,9 @@ impl AcpHost {
                 || (self.adapter_kind == AdapterKind::GrokBuild
                     && grok_compaction_completed_occurrence_id(message).is_some())
                 || (self.adapter_kind == AdapterKind::ZcodeApp
-                    && message["method"] == "_zcode/compaction"))
+                    && message["method"] == "_zcode/compaction")
+                || (self.adapter_kind == AdapterKind::OpencodeCli
+                    && crate::opencode_compat::completed_compaction(message).is_some()))
                 && self
                     .compaction_observers
                     .read()
@@ -2653,6 +2697,12 @@ impl AcpHost {
         surface: AcpCompactionSignalSurface,
         display_owner: Option<AcpRuntimeOwner>,
     ) {
+        if self.adapter_kind == AdapterKind::OpencodeCli
+            && crate::opencode_compat::Generation::from_version(self.reported_version.as_deref())
+                != Some(crate::opencode_compat::Generation::V2)
+        {
+            return;
+        }
         let Some(detected) = detect_acp_compaction_signal(self.adapter_kind, message, surface)
         else {
             return;
@@ -2874,6 +2924,60 @@ impl AcpHost {
         self.alive.load(Ordering::Acquire)
     }
 
+    pub(crate) fn opencode_version_for_program(&self, identity: &str) -> Option<String> {
+        (self.is_alive()
+            && !self.protocol_violated.load(Ordering::Acquire)
+            && self.opencode_program_identity.as_deref() == Some(identity))
+        .then(|| self.reported_version.clone())
+        .flatten()
+    }
+
+    fn is_opencode_v2(&self) -> bool {
+        self.adapter_kind == AdapterKind::OpencodeCli
+            && crate::opencode_compat::Generation::from_version(self.reported_version.as_deref())
+                == Some(crate::opencode_compat::Generation::V2)
+    }
+
+    async fn project_opencode_child_update(&self, message: &Value) -> Option<Value> {
+        let params = message.get("params")?;
+        let root = params["rootSessionId"].as_str()?;
+        let child = params["childSessionId"].as_str()?;
+        if child.is_empty() || !self.known_sessions.read().await.contains(root) {
+            return None;
+        }
+        let key = (root.to_string(), child.to_string());
+        if params["type"] == "status" {
+            let mut children = self.opencode_open_children.lock().await;
+            match params["status"].as_str()? {
+                "completed" | "failed" | "interrupted" => {
+                    children.remove(&key);
+                }
+                _ => {
+                    children.insert(key);
+                }
+            }
+            return None;
+        }
+        if params["type"] != "update" {
+            return None;
+        }
+        let mut update = params.get("update")?.clone();
+        if !update.is_object()
+            || update
+                .get("_meta")
+                .is_some_and(|meta| !meta.is_null() && !meta.is_object())
+        {
+            return None;
+        }
+        // Keep child tools in the existing activity projection, while excluding
+        // child text, Usage and compaction from root-session evidence.
+        update["_meta"]["opencode/child-session"] = json!({
+            "id": child, "parentID": params["parentSessionId"], "depth": params["depth"]
+        });
+        Some(json!({"jsonrpc":"2.0", "method":"session/update",
+            "params":{"sessionId":root,"update":update}}))
+    }
+
     async fn shutdown(&self) {
         self.shutdown_and_reap().await;
     }
@@ -2887,6 +2991,7 @@ impl AcpHost {
             && !self.protocol_violated.load(Ordering::Acquire)
             && self.pending.lock().await.is_empty()
             && self.routes.read().await.is_empty()
+            && self.opencode_open_children.lock().await.is_empty()
             && terminals_are_empty
     }
 
@@ -3275,6 +3380,13 @@ fn detect_acp_compaction_signal(
                 .or_else(|| value.as_i64().map(|value| value.to_string()))
         });
     match adapter_kind {
+        AdapterKind::OpencodeCli => Some(DetectedAcpCompactionSignal {
+            source_signal: "opencode.acp.compaction.completed.v2",
+            admission_point: "completed",
+            runtime_occurrence_id: Some(
+                crate::opencode_compat::completed_compaction(message)?.to_string(),
+            ),
+        }),
         AdapterKind::ZcodeApp
             if method == "_zcode/compaction" && message["params"]["status"] == "completed" =>
         {
@@ -4161,13 +4273,21 @@ impl AcpRuntime {
             }
             _ => None,
         };
-        *self.native_usage.lock().await = tokio::task::spawn_blocking(move || {
-            NativeUsageReader::for_prompt(kind, &workspace, &native_session, context_model)
-                .map(|reader| Arc::new(std::sync::Mutex::new(reader)))
-        })
-        .await
-        .ok()
-        .flatten();
+        let terminal_usage = kind == AdapterKind::OpencodeCli
+            && crate::opencode_compat::Generation::from_version(
+                self.host.reported_version.as_deref(),
+            ) == Some(crate::opencode_compat::Generation::V2);
+        *self.native_usage.lock().await = if terminal_usage {
+            None
+        } else {
+            tokio::task::spawn_blocking(move || {
+                NativeUsageReader::for_prompt(kind, &workspace, &native_session, context_model)
+                    .map(|reader| Arc::new(std::sync::Mutex::new(reader)))
+            })
+            .await
+            .ok()
+            .flatten()
+        };
         *self.active_observation.lock().await = Some(AcpPromptObservation::new(
             prepared.prompt_id.clone(),
             delivery_id.to_string(),
@@ -5095,6 +5215,9 @@ pub(crate) fn freeze_native_session_compatibility(
     mut frozen_runtime: FrozenAgentRuntimeConfig,
     workspace: &AgentRunWorkspace,
 ) -> Result<FrozenAgentRuntimeConfig> {
+    if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
+        return crate::opencode_compat::freeze(frozen_runtime, workspace);
+    }
     if !matches!(
         frozen_runtime.adapter_kind,
         AdapterKind::TraeCnCli
@@ -5254,26 +5377,10 @@ fn configure_runtime_command(
             let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && workspace.access == "read_only";
             let effective = if legacy_read_only { "deny" } else { configured };
-            let mut permission_rules = serde_json::Map::new();
-            permission_rules.insert("*".to_string(), json!(effective));
-            // Project Skills remain a native, read-only discovery mechanism even
-            // when the AgentRun workspace denies ordinary tools. Loading a Skill
-            // cannot widen the Runtime's Shell, filesystem, or network policy.
-            permission_rules.insert("skill".to_string(), json!("allow"));
-            permission_rules.insert("bash".to_string(), json!("allow"));
-            let permission_rules = Value::Object(permission_rules);
-            health::configure_acp_command(command, runtime.adapter_kind, false);
-            command.env(
-                "OPENCODE_CONFIG_CONTENT",
-                serde_json::to_string(&json!({
-                    "autoupdate": false,
-                    "permission": permission_rules,
-                    "agent": {
-                        "build": {"permission": permission_rules},
-                        "plan": {"permission": permission_rules}
-                    }
-                }))?,
-            );
+            let generation =
+                crate::opencode_compat::Generation::require(runtime.reported_version.as_deref())?;
+            generation.configure_command(command);
+            crate::opencode_compat::configure_permissions(generation, command, effective)?;
             // OpenCode receives Rovai servers through ACP session/new or
             // session/load while preserving its native configuration roots.
         }
@@ -5285,7 +5392,12 @@ fn configure_runtime_command(
                 == "on"
                 && !(permission_semantics == PermissionSemantics::CoreEnforcedV1
                     && workspace.access == "read_only");
-            health::configure_acp_command(command, runtime.adapter_kind, allow_all);
+            health::configure_acp_command(
+                command,
+                runtime.adapter_kind,
+                allow_all,
+                runtime.reported_version.as_deref(),
+            )?;
             if let Some(root) = attachment_access_root {
                 command.arg("--add-dir").arg(root);
             }
@@ -5319,7 +5431,12 @@ fn configure_runtime_command(
                 == "on"
                 && !(permission_semantics == PermissionSemantics::CoreEnforcedV1
                     && workspace.access == "read_only");
-            health::configure_acp_command(command, runtime.adapter_kind, trust_all_tools);
+            health::configure_acp_command(
+                command,
+                runtime.adapter_kind,
+                trust_all_tools,
+                runtime.reported_version.as_deref(),
+            )?;
             // Kiro discovers the Rovai Agent from the Host process working
             // directory. Native mcp.json sources remain enabled and the Agent
             // adds the Rovai definitions with whole-definition precedence.
@@ -5340,7 +5457,12 @@ fn configure_runtime_command(
                     .context("Qwen Code Runtime requires approval_mode")?,
                 _ => unreachable!(),
             };
-            health::configure_acp_command(command, runtime.adapter_kind, false);
+            health::configure_acp_command(
+                command,
+                runtime.adapter_kind,
+                false,
+                runtime.reported_version.as_deref(),
+            )?;
             let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && workspace.access == "read_only";
             match runtime.adapter_kind {
@@ -5388,7 +5510,12 @@ fn configure_runtime_command(
                 .get("permission_mode")
                 .and_then(Value::as_str)
                 .context("TRAE CLI requires permission_mode")?;
-            health::configure_acp_command(command, runtime.adapter_kind, false);
+            health::configure_acp_command(
+                command,
+                runtime.adapter_kind,
+                false,
+                runtime.reported_version.as_deref(),
+            )?;
             let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && workspace.access == "read_only";
             command.arg("--permission-mode").arg(if legacy_read_only {
@@ -5411,7 +5538,12 @@ fn configure_runtime_command(
                 .get("approval_policy")
                 .and_then(Value::as_str)
                 .context("Cursor Agent Runtime requires approval_policy")?;
-            health::configure_acp_command(command, runtime.adapter_kind, false);
+            health::configure_acp_command(
+                command,
+                runtime.adapter_kind,
+                false,
+                runtime.reported_version.as_deref(),
+            )?;
             let read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && workspace.access == "read_only";
             let mode = if read_only { "plan" } else { execution_mode };
@@ -5445,7 +5577,12 @@ fn configure_runtime_command(
             if !matches!(permission_mode, "default" | "plan" | "auto" | "yolo") {
                 bail!("Kimi Code permission_mode is invalid");
             }
-            health::configure_acp_command(command, runtime.adapter_kind, false);
+            health::configure_acp_command(
+                command,
+                runtime.adapter_kind,
+                false,
+                runtime.reported_version.as_deref(),
+            )?;
             // Formal AgentRun hosts inherit the user's KIMI_CODE_HOME, or
             // Kimi's native default when it is unset. The provider overlay is
             // process-local and must not replace Kimi's state/config home.
@@ -8000,6 +8137,106 @@ while IFS= read -r ignored; do :; done
             .await;
         }
         std::fs::remove_dir_all(copilot_root).unwrap();
+    }
+
+    // A real pipe/process is necessary: config generation alone cannot prove
+    // the conflicting handshake is stopped before any business input is sent.
+    #[tokio::test]
+    async fn opencode_host_keeps_prepared_generation_and_stops_conflicting_handshakes() {
+        for advertised in ["2.0.26", "2.99.1", "dev", "1.18.32", "3.0.0"] {
+            let root = std::env::temp_dir()
+                .join(format!("rovai-opencode-identity-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("selected-opencode");
+            let log = root.join("protocol.jsonl");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'opencode v2.0.26\n'; exit 0; fi
+IFS= read -r request || exit 1
+printf '%s\n' "$request" > '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentInfo":{{"name":"OpenCode","version":"{advertised}"}}}}}}'
+while IFS= read -r request; do printf '%s\n' "$request" >> '{}'; done
+"#,
+                    log.display(),
+                    log.display()
+                ),
+            );
+            let mut frozen = frozen_trae_runtime(&executable);
+            frozen.adapter_kind = AdapterKind::OpencodeCli;
+            frozen.permissions.adapter_kind = AdapterKind::OpencodeCli;
+            frozen.permissions.values = json!({"permission":"deny"});
+            frozen.reported_version =
+                Some(health::read_opencode_version(&executable).await.unwrap());
+            let identity = crate::opencode_compat::program_identity(&frozen).unwrap();
+            let (incoming, _receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string()),
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::BestEffort,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
+                None,
+            )
+            .await;
+            if advertised.starts_with('2') || advertised == "dev" {
+                let host = host.unwrap();
+                assert!(
+                    host.detector_config_root.is_none(),
+                    "V2 must never generate the V1 plugin"
+                );
+                assert_eq!(
+                    host.opencode_version_for_program(&identity),
+                    frozen.reported_version
+                );
+                assert_eq!(host.opencode_version_for_program("another-program"), None);
+                host.known_sessions.write().await.insert("root".to_string());
+                assert!(host.is_quiescent().await);
+                let mut child = json!({"params":{
+                    "rootSessionId":"root", "childSessionId":"child", "parentSessionId":"root",
+                    "depth":1, "type":"status", "status":"created"
+                }});
+                assert!(host.project_opencode_child_update(&child).await.is_none());
+                assert!(
+                    !host.is_quiescent().await,
+                    "live native children forbid warm reuse"
+                );
+                child["params"]["type"] = json!("update");
+                child["params"]["update"] = json!({"sessionUpdate":"agent_message_chunk", "content":{"type":"text","text":"child output"}});
+                let projected = host.project_opencode_child_update(&child).await.unwrap();
+                assert!(!crate::runtime::is_root_output(
+                    &projected["params"]["update"]
+                ));
+                child["params"]["type"] = json!("status");
+                child["params"]["status"] = json!("completed");
+                assert!(host.project_opencode_child_update(&child).await.is_none());
+                assert!(
+                    host.is_quiescent().await,
+                    "settled native children permit warm reuse"
+                );
+                host.shutdown().await;
+                assert_eq!(host.opencode_version_for_program(&identity), None);
+            } else {
+                assert!(
+                    host.err()
+                        .unwrap()
+                        .to_string()
+                        .contains("identity conflicts")
+                );
+            }
+            let protocol = std::fs::read_to_string(log).unwrap();
+            assert!(!protocol.contains("session/prompt"));
+            assert!(!protocol.contains("elicitation"));
+            assert!(!protocol.contains("compaction"));
+            assert!(protocol.contains("opencode/child-session-updates"));
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[tokio::test]
@@ -11075,6 +11312,57 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn acp_compaction_detectors_admit_only_runtime_completion_signals() {
+        let native = json!({"method": "session/update", "params": {
+            "sessionId": "root", "update": {"sessionUpdate": "session_info_update",
+                "_meta": {"opencode/compaction": {"status": "completed", "messageId": "compaction-1", "reason": "auto"}}}}});
+        let signal = detect_acp_compaction_signal(
+            AdapterKind::OpencodeCli,
+            &native,
+            AcpCompactionSignalSurface::SessionMetadata,
+        )
+        .unwrap();
+        assert_eq!(signal.source_signal, "opencode.acp.compaction.completed.v2");
+        assert_eq!(
+            signal.runtime_occurrence_id.as_deref(),
+            Some("compaction-1")
+        );
+        for status in ["started", "failed", "cancelled"] {
+            let mut frame = native.clone();
+            frame["params"]["update"]["_meta"]["opencode/compaction"]["status"] = json!(status);
+            assert!(
+                detect_acp_compaction_signal(
+                    AdapterKind::OpencodeCli,
+                    &frame,
+                    AcpCompactionSignalSurface::SessionMetadata
+                )
+                .is_none()
+            );
+        }
+        for marker in [
+            json!({"opencode/child-session": {"sessionId": "child"}}),
+            json!({"replay": true}),
+        ] {
+            let mut frame = native.clone();
+            frame["params"]["_meta"] = marker;
+            assert!(
+                detect_acp_compaction_signal(
+                    AdapterKind::OpencodeCli,
+                    &frame,
+                    AcpCompactionSignalSurface::SessionMetadata
+                )
+                .is_none()
+            );
+        }
+        let mut missing_id = native;
+        missing_id["params"]["update"]["_meta"]["opencode/compaction"]["messageId"] = Value::Null;
+        assert!(
+            detect_acp_compaction_signal(
+                AdapterKind::OpencodeCli,
+                &missing_id,
+                AcpCompactionSignalSurface::SessionMetadata
+            )
+            .is_none()
+        );
         assert!(
             detect_acp_compaction_signal(
                 AdapterKind::OpencodeCli,
@@ -11085,7 +11373,7 @@ while IFS= read -r ignored; do :; done
                 AcpCompactionSignalSurface::ActivePrompt,
             )
             .is_none(),
-            "OpenCode's ACP server does not expose its native event stream; the isolated Runtime plugin owns this signal"
+            "V1's internal event name is not a native ACP completion notification"
         );
 
         let kiro_completed = json!({
@@ -11417,6 +11705,52 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn opencode_detector_plugin_is_additive_to_runtime_config() {
+        for generation in [
+            crate::opencode_compat::Generation::V1,
+            crate::opencode_compat::Generation::V2,
+        ] {
+            for mode in ["allow", "ask", "deny"] {
+                let mut command = Command::new("/selected/opencode");
+                command.env("OPENCODE_CONFIG_CONTENT", "{model:'test/model', agent:{custom:{permission:'ask'}}, agents:{custom:{permissions:[{action:'*',resource:'*',effect:'deny'}]},build:{model:'test/other'}}, plugin:['user-plugin']}");
+                crate::opencode_compat::configure_permissions(generation, &mut command, mode)
+                    .unwrap();
+                let (_, content) = command
+                    .as_std()
+                    .get_envs()
+                    .find(|(key, _)| *key == "OPENCODE_CONFIG_CONTENT")
+                    .unwrap();
+                let config: Value =
+                    serde_json::from_str(content.unwrap().to_str().unwrap()).unwrap();
+                assert_eq!(config["model"], "test/model");
+                assert_eq!(config["plugin"], json!(["user-plugin"]));
+                assert_eq!(config["agent"]["custom"]["permission"], "ask");
+                assert_eq!(
+                    config["agents"]["custom"]["permissions"][0]["effect"],
+                    "deny"
+                );
+                assert_eq!(config["agents"]["build"]["model"], "test/other");
+                if generation == crate::opencode_compat::Generation::V1 {
+                    assert_eq!(
+                        config["permission"],
+                        json!({"*":mode,"skill":"allow","bash":"allow"})
+                    );
+                    assert_eq!(config["agent"]["plan"]["permission"], config["permission"]);
+                } else {
+                    assert_eq!(
+                        config["permissions"],
+                        json!([
+                            {"action":"*","resource":"*","effect":mode},
+                            {"action":"shell","resource":"*","effect":"allow"},
+                            {"action":"skill","resource":"*","effect":"allow"}
+                        ])
+                    );
+                    assert_eq!(
+                        config["agents"]["plan"]["permissions"],
+                        config["permissions"]
+                    );
+                }
+            }
+        }
         let mut config = json!({
             "autoupdate": false,
             "permission": {"*": "ask"},
@@ -11641,6 +11975,37 @@ while IFS= read -r ignored; do :; done
         make_executable(&executable, "#!/bin/sh\nexit 0\n");
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let frozen = frozen_trae_runtime(&executable);
+        let mut opencode = frozen.clone();
+        opencode.adapter_kind = AdapterKind::OpencodeCli;
+        opencode.permissions.adapter_kind = AdapterKind::OpencodeCli;
+        opencode.permissions.values = json!({"permission":"ask"});
+        opencode.reported_version = Some("1.18.32".to_string());
+        let v1 = freeze_native_session_compatibility(opencode.clone(), &workspace).unwrap();
+        opencode.reported_version = Some("2.0.26".to_string());
+        let v2 = freeze_native_session_compatibility(opencode.clone(), &workspace).unwrap();
+        assert_ne!(
+            v1.binding_compatibility_digest,
+            v2.binding_compatibility_digest
+        );
+        assert_ne!(
+            v1.native_session_compatibility_key,
+            v2.native_session_compatibility_key
+        );
+        opencode.reported_version = Some("2.0.27".to_string());
+        opencode.executable_fingerprint = "sha256:new-patch".to_string();
+        opencode.installation_generation += 1;
+        let patch = freeze_native_session_compatibility(opencode.clone(), &workspace).unwrap();
+        assert_eq!(
+            v2.binding_compatibility_digest,
+            patch.binding_compatibility_digest
+        );
+        assert_eq!(
+            v2.native_session_compatibility_key,
+            patch.native_session_compatibility_key
+        );
+        assert_ne!(v2.host_config_digest, patch.host_config_digest);
+        opencode.reported_version = None;
+        assert!(freeze_native_session_compatibility(opencode, &workspace).is_err());
         let first = runtime_compatibility_digest_with_provider_environment(
             &frozen,
             &workspace,

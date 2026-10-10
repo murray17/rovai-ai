@@ -1,5 +1,7 @@
 export async function configureProductRuntime(request, adapterKind, agentIds) {
-  const allowsExecutionDeferredVerification = adapterKind === 'trae-cn-cli'
+  const allowsExecutionDeferredVerification = ['trae-cn-cli', 'opencode-cli'].includes(adapterKind)
+  const acceptedSnapshotStates = allowsExecutionDeferredVerification
+    ? ['ready', 'light_ready', 'installed_unverified'] : ['ready']
   for (const agentId of agentIds) {
     let resolved = null
     for (let attempt = 0; attempt < 240; attempt += 1) {
@@ -57,9 +59,7 @@ export async function configureProductRuntime(request, adapterKind, agentIds) {
       && candidate.installationClass === 'managed_default'
       && candidate.authScope === 'default'
   )
-  if (installation?.snapshot?.probeStatus !== 'ready'
-      && (!allowsExecutionDeferredVerification
-        || installation?.snapshot?.probeStatus !== 'installed_unverified')) {
+  if (!acceptedSnapshotStates.includes(installation?.snapshot?.probeStatus)) {
     throw new Error(`Managed Product Runtime is not ready: ${JSON.stringify({
       adapterKind,
       installation

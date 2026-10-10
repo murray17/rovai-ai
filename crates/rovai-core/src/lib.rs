@@ -9,6 +9,7 @@ mod claude;
 mod claude_control;
 mod codex;
 mod health;
+mod opencode_compat;
 mod pi;
 mod runtime_fleet;
 mod runtime_mcp;

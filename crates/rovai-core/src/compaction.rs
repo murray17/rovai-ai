@@ -889,7 +889,10 @@ fn qualified_admission(
             source_signal == "preCompact" && admission_point == "imminent_edge"
         }
         AdapterKind::OpencodeCli => {
-            source_signal == "session.compacted" && admission_point == "completed"
+            matches!(
+                source_signal,
+                "session.compacted" | "opencode.acp.compaction.completed.v2"
+            ) && admission_point == "completed"
         }
         AdapterKind::KiroCli => {
             source_signal == "_kiro.dev/compaction/status" && admission_point == "completed"

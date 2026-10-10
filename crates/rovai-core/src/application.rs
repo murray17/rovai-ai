@@ -14400,6 +14400,40 @@ impl Core {
         }
     }
 
+    async fn prepare_runtime_identity(
+        &self,
+        mut runtime: FrozenAgentRuntimeConfig,
+    ) -> std::result::Result<FrozenAgentRuntimeConfig, RuntimeDispatchFailure> {
+        if runtime.adapter_kind == AdapterKind::OpencodeCli {
+            let prepared = async {
+                let identity = crate::opencode_compat::program_identity(&runtime)?;
+                if let Some(version) = self
+                    .runtime_fleet
+                    .opencode_version_for_program(&identity)
+                    .await
+                {
+                    runtime.reported_version = Some(version);
+                } else if crate::opencode_compat::Generation::from_version(
+                    runtime.reported_version.as_deref(),
+                )
+                .is_none()
+                {
+                    runtime.reported_version = Some(
+                        health::read_opencode_version(Path::new(&runtime.executable_path)).await?,
+                    );
+                }
+                anyhow::Ok(())
+            }
+            .await;
+            prepared.map_err(|error| RuntimeDispatchFailure {
+                code: "runtime_initialization_failed".to_string(),
+                error,
+                effective_version: None,
+            })?;
+        }
+        Ok(runtime)
+    }
+
     async fn prepare_runtime_for_dispatch(
         &self,
         candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
@@ -14448,8 +14482,9 @@ impl Core {
                 effective_version: None,
             })? {
             RuntimeIntegrityPreflight::Verified => {
+                let prepared_runtime = self.prepare_runtime_identity(runtime.clone()).await?;
                 let effective_runtime =
-                    acp::freeze_native_session_compatibility(runtime.clone(), workspace).map_err(
+                    acp::freeze_native_session_compatibility(prepared_runtime, workspace).map_err(
                         |error| RuntimeDispatchFailure {
                             code: "runtime_configuration_invalid".to_string(),
                             error,
@@ -14604,6 +14639,7 @@ impl Core {
             error: anyhow::anyhow!("{}", blocker.payload),
             effective_version: None,
         })?;
+        let effective_runtime = self.prepare_runtime_identity(effective_runtime).await?;
         let effective_runtime =
             acp::freeze_native_session_compatibility(effective_runtime, workspace).map_err(
                 |error| RuntimeDispatchFailure {
@@ -22123,6 +22159,11 @@ async fn process_agent_run_acp_approval_request(
         }
     };
     if execution.permission_semantics == PermissionSemantics::RuntimeManagedV2
+        // V2 already resolves the global/build/plan policy. A remaining native
+        // request can come from an explicitly narrower custom or child agent.
+        && !(execution.runtime.adapter_kind == AdapterKind::OpencodeCli
+            && crate::opencode_compat::Generation::from_version(execution.runtime.reported_version.as_deref())
+                == Some(crate::opencode_compat::Generation::V2))
         && acp::automatically_allows_permission_requests(
             execution.runtime.adapter_kind,
             &execution.runtime.permissions.values,

@@ -6,10 +6,17 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-08
+last_updated: 2026-10-10
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 并行交付：OpenCode V1/V2
+
+按 User 的可用性优先、最小必要改动意见，单一 OpenCode Adapter 在配置冻结前识别所选程序，
+分流原生权限、旧压缩插件与用量来源，复用既有 Host、Session、Bootstrap 和工具授权。
+范围、必要决定与逐版本验证见 [OpenCode V1/V2 实施记录](opencode-v1-v2-implementation.md)。
+不增加版本资格门禁或安装管理，不变更数据库 schema、版本指针或模型上下文格式。
 
 ## 普通执行默认无时间上限
 

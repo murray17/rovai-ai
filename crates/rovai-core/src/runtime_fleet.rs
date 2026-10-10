@@ -1406,6 +1406,25 @@ impl AgentRuntimeFleetManager {
         }
     }
 
+    pub(crate) async fn opencode_version_for_program(&self, identity: &str) -> Option<String> {
+        self.state
+            .lock()
+            .await
+            .processes
+            .values()
+            .find_map(|entry| {
+                if entry.retire_after_run {
+                    return None;
+                }
+                match &entry.host {
+                    Some(RuntimeProcessHost::Acp(host)) => {
+                        host.opencode_version_for_program(identity)
+                    }
+                    _ => None,
+                }
+            })
+    }
+
     pub(crate) async fn acquire<F, Fut>(
         &self,
         request: FleetAcquireRequest,
