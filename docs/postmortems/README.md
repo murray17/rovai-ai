@@ -1,7 +1,7 @@
 ---
 document_type: postmortem-index
 authority: incident-history
-last_updated: 2026-08-31
+last_updated: 2026-10-10
 ---
 
 # 事故复盘
@@ -44,3 +44,5 @@ last_updated: 2026-08-31
 | 2026-08-27 | [Camp 附件发布等待活跃 AgentRun，阻断带附件 A2A](2026-08-27-camp-attachment-publication-blocked-a2a.md) | 主链修复已实现；完整隔离与合并门禁仍在收口 |
 | 2026-08-27 | [Camp Composer 剪切事务未托管导致原生输入快照串接](2026-08-27-composer-cut-stale-dom-duplicate-input.md) | 主路径修复已合入；CI 门禁、属性名对齐与补充场景覆盖待跟踪 |
 | 2026-08-31 | [渠道轮询回调永久写库导致磁盘持续占用，升级路径放大为整库复制](2026-08-31-channel-poll-receipt-storage-growth.md) | 主链修复在 channel 分支完成；历史数据治理与合入 main 待跟踪 |
+| 2026-10-09 | [Windows Claude Code 回复完成后，后继 Run 长期排队](2026-10-09-windows-claude-queue-cleanup-stall.md) | 已确认缺陷已修复并纳入 v0.4.7；补充平台与模型覆盖待跟踪 |
+| 2026-10-09—10 | [DSH 模型配置不可见、思考档位错配与加载结果被覆盖](2026-10-09-dsh-model-configuration-and-reasoning.md) | 已确认缺陷已修复并纳入 v0.4.7；安装版 Windows 交互与独立来源重选问题继续跟踪 |
