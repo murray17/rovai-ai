@@ -2,7 +2,7 @@
 document_type: ui-contract
 authority: mission-renderer-presentation
 status: accepted
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Mission board
@@ -219,6 +219,13 @@ clipboard and keyboard behavior. `@` and the footer mention button open current-
 “邀请其他队员”; names and roles can search outsiders directly. Enter selects a candidate when open and otherwise
 inserts a line; Escape dismisses the candidate menu. No broadcast or Skill selector appears in a Mission.
 Plain pasted `@name` stays text. Member atoms delete as a unit and remain tied to their IDs after rename.
+
+Candidates reuse the conversation's compact name/role rows and agent product icons. Clicking the icon opens
+the shared agent/model details without inserting a mention; closing returns to the description caret.
+The existing installation catalog supplies configured model display names, with configured IDs or the native
+default policy as fallbacks. Hover covers the whole row, including its icon; “邀请／待邀请” sits immediately
+before the icon and is vertically centered. Action rows retain their full width. Desktop and Mobile share
+the same structure, with at least 44px icon targets on Mobile; no availability dot or persistent model line appears.
 
 The candidate menu anchors to the description caret, prefers opening below it, and flips or constrains its
 height at the viewport edge. It portals into the owning Mission dialog outside the clipped writing plane,

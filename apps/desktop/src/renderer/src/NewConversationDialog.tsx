@@ -7,6 +7,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import * as Popover from '@radix-ui/react-popover'
 import type {
+  AdapterInstallation,
   AgentProfile,
   ThreadCreationPreflight,
   CreateThreadRequest,
@@ -55,6 +56,7 @@ export function NewConversationDialog({
   missionTagCatalog = [],
   preflight,
   agents,
+  installations,
   busy: creationBusy,
   projectAccessReady,
   onOpenChange,
@@ -73,6 +75,7 @@ export function NewConversationDialog({
   missionTagCatalog?: string[]
   preflight: ThreadCreationPreflight
   agents: AgentProfile[]
+  installations?: AdapterInstallation[]
   busy: boolean
   projectAccessReady: boolean
   onOpenChange(open: boolean): void
@@ -330,7 +333,7 @@ export function NewConversationDialog({
             <div className={`compact-body camp-fields${isMission ? ' mission-editor-body' : ''}`}>
               {attentionMessage && <p className="compact-inline-note" role="status">{attentionMessage}</p>}
               {recovery && !busy && <p className="compact-inline-note" role="status"><UiText zh={"上次创建结果尚未确认。"} /><button type="button" className="mission-source-link" onClick={() => { setName(recovery.title); setDescriptionContent(missionDescriptionContent(recovery.description, recovery.descriptionContent)); setTags(recovery.tags); setAttachments(recoveryAttachments.map(({id, file, kindHint}) => ({kind:'local', id, file, kindHint}))); setWorkspace(recovery.projectBindingKind === 'directory' ? {name:projects.find(p=>p.projectPath===recovery.projectPath)?.name ?? recovery.projectPath,projectPath:recovery.projectPath} : null); setSelectedMemberIds(recovery.memberAgentIds); setLeadId(recovery.defaultLeadAgentId); setSubmitError(null) }}><UiText zh={"恢复上次内容以重试"} /></button></p>}
-              {isMission && <MissionWritingPlane ref={missionEditorRef} titleInputRef={nameInputRef} title={name} descriptionContent={descriptionContent} agents={agents} memberAgentIds={selectedMemberIds} unavailableAgentIds={unavailableIds} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={!normalizedName ? undefined : nameLength > 200 ? uiAttribute("使命名称最多 200 个字符。") : undefined} descriptionError={unavailableIds.length ? uiAttribute('提及的队员已不可用，请移除提及或选择其他队员。') : Array.from(description).length > 12000 ? uiAttribute("使命描述最多 12,000 个字符。") : undefined} onTitleChange={setName} onDescriptionChange={setDescriptionContent} onAttachmentsChange={setAttachments} onNotify={setSubmitError}/>}
+              {isMission && <MissionWritingPlane ref={missionEditorRef} titleInputRef={nameInputRef} title={name} descriptionContent={descriptionContent} agents={agents} installations={installations} memberAgentIds={selectedMemberIds} unavailableAgentIds={unavailableIds} attachments={attachments} disabled={busy} attachmentsDisabled={!client.missionAttachments} titleError={!normalizedName ? undefined : nameLength > 200 ? uiAttribute("使命名称最多 200 个字符。") : undefined} descriptionError={unavailableIds.length ? uiAttribute('提及的队员已不可用，请移除提及或选择其他队员。') : Array.from(description).length > 12000 ? uiAttribute("使命描述最多 12,000 个字符。") : undefined} onTitleChange={setName} onDescriptionChange={setDescriptionContent} onAttachmentsChange={setAttachments} onNotify={setSubmitError}/>}
               {!isMission && <><div className="compact-row">
                 <span id="new-camp-workspace-label"><UiText zh={"工作目录"} /></span>
                 <NewConversationPicker mobile={mobile} open={projectMenuOpen} onOpenChange={setProjectMenuOpen} busy={busy} title={uiAttribute("选择工作目录")}
