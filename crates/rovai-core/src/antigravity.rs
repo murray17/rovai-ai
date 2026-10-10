@@ -2592,7 +2592,8 @@ printf '%s\n' '{{"event":"result","result":{{"conversation_id":"{session}","stat
             assert!(
                 adapter
                     .wait_for_agent_run_quiescence(&run_id, 1, Duration::from_secs(3))
-                    .await
+                    .await,
+                "input gate mode {mode} did not finish process cleanup"
             );
             std::fs::remove_dir_all(root).unwrap();
         }

@@ -7028,6 +7028,25 @@ body:has(.composer-image-attachment[data-context-open="true"]) .image-action-not
 .runtime-model-picker-trigger small { overflow: hidden; color: var(--faint); font-size: 9.5px; font-weight: 500; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
 .runtime-model-picker-trigger > svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: var(--faint); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; transition: transform 120ms ease; }
 .runtime-model-picker-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.runtime-model-picker-trigger[aria-busy="true"]::after {
+  content: '';
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  flex: 0 0 14px;
+  order: 1;
+  margin-left: auto;
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--muted);
+  border-right-color: var(--muted);
+  border-radius: 50%;
+  animation: runtime-parameter-spin .85s linear infinite;
+}
+.runtime-model-picker-trigger[aria-busy="true"] > svg { order: 2; }
+@keyframes runtime-parameter-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .runtime-model-picker-trigger[aria-busy="true"]::after { animation: none; border-style: dotted; }
+}
 .runtime-model-picker-menu {
   z-index: 120;
   width: max(var(--radix-dropdown-menu-trigger-width), 280px);

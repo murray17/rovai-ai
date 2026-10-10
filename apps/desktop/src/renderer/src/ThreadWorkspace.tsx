@@ -5157,6 +5157,7 @@ export function ThreadWorkspace({
                     && samePublicMessageSegment(groupingMessage(campMessage), groupingMessage(nextItem.message))
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.deliveryKind === 'public_a2a'
+                    && !delivery.continuationRequest
                     && delivery.messageId === campMessage.id
                   )
                   const userMessageRuns = campMessage.authorType === 'user'
@@ -6652,7 +6653,7 @@ export function executionDeliveryQueueBatches(
   return [...byBatch.values()].map((batch) => ({
     agentId: batch[0].recipientAgentId,
     deliveries: batch,
-    messageIds: [...new Set(batch.map((delivery) => delivery.messageId))],
+    messageIds: [...new Set(batch.flatMap((delivery) => delivery.inputMessageIds ?? [delivery.messageId]))],
     createdAt: batch.at(-1)?.createdAt ?? ''
   })).sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt) || left.agentId.localeCompare(right.agentId))

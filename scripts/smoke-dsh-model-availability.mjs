@@ -196,15 +196,21 @@ for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, () => child.kill(
 child.on('close', code => process.exit(code ?? 1))
 `)
   await chmod(executable, 0o700)
+  let launchExecutable = executable
+  if (process.platform === 'win32') {
+    launchExecutable = join(root, 'recording-dsh.cmd')
+    await writeFile(launchExecutable, `@echo off\r\n"${process.execPath}" "${executable}" %*\r\n`)
+  }
   Object.assign(process.env, { DSH_HOME: home, DSH_AGENTS_HOME: join(root, 'agents'),
     DSH_TELEMETRY_DISABLED: '1', NATIVE_FIXTURE_KEY: 'native-synthetic', WEB_FIXTURE_KEY: 'web-synthetic',
     DEEPSEEK_API_KEY: 'native-synthetic' })
-  core = startQualificationCore({ coreExecutable: join(repository, 'target/debug/rovai-core'),
+  core = startQualificationCore({ coreExecutable: process.env.ROVAI_DSH_SMOKE_CORE
+    ?? join(repository, 'target/debug', process.platform === 'win32' ? 'rovai-core.exe' : 'rovai-core'),
     dataDirectory: data, workingDirectory: repository, runtimeCacheDirectory: join(root, 'cache'),
     mcpConfigPath: join(root, 'mcp.json'), onNotification: message => events.push(message) })
   await core.request('health.check')
   await core.request('runtime.startup.save', { runtimeKind: 'deepseek-harness', expectedRevision: 0,
-    configuration: { programPath: executable, environment: [] } })
+    configuration: { programPath: launchExecutable, environment: [] } })
   const models = await refresh()
   assert(models.some(model => model.id === modelId('relay')))
   assert(!models.some(model => model.id === modelId('disabled')))

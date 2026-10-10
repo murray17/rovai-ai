@@ -100,7 +100,10 @@ fn configuration_digest_for_workdir(home: &Path, cwd: Option<&Path>) -> Result<S
 /// the native digest without including that randomly named directory. This is
 /// local observation only; it neither starts DSH nor changes Host reuse rules.
 pub fn model_options_context(executable: &Path) -> Result<String> {
-    let mut command = Command::new(executable);
+    // Probe canonicalization adds a Windows verbatim prefix that catalog
+    // commits remove. Both observations must identify the same executable.
+    let executable = crate::runtime_discovery::runtime_visible_path(executable.canonicalize()?);
+    let mut command = Command::new(&executable);
     crate::runtime_discovery::configure_runtime_command(AdapterKind::DeepseekHarness, &mut command);
     let mut environment =
         crate::runtime_discovery::runtime_environment(AdapterKind::DeepseekHarness);
@@ -112,7 +115,7 @@ pub fn model_options_context(executable: &Path) -> Result<String> {
             );
         }
     }
-    let identity = crate::agent_runtime_adapter::observe_executable_file_identity(executable)?;
+    let identity = crate::agent_runtime_adapter::observe_executable_file_identity(&executable)?;
     canonical_json_digest(&json!({
         "configuration": configuration_digest_for_workdir(&native_home()?, None)?,
         "executable": executable,
@@ -651,6 +654,75 @@ mod tests {
         fs::remove_file(root.join("settings.yaml")).unwrap();
         fs::create_dir(root.join("settings.yaml")).unwrap();
         assert!(configuration_digest(&root, &root).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn dsh_model_options_context_normalizes_paths_and_preserves_invalidation() {
+        use crate::runtime_discovery::{
+            RuntimeSearchEnvironment, runtime_visible_path, with_runtime_configuration,
+        };
+        use crate::runtime_startup::{RuntimeEnvironmentVariable, RuntimeStartupConfiguration};
+
+        let root = std::env::temp_dir().join(format!("rovai-dsh-context-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let executable = root.join("dsh.cmd");
+        fs::write(&executable, "fixture-executable").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let canonical = executable.canonicalize().unwrap();
+        let visible = runtime_visible_path(canonical.clone());
+        #[cfg(windows)]
+        assert_ne!(canonical, visible, "exercise both Windows path spellings");
+        let kind = AdapterKind::DeepseekHarness;
+        let configuration = RuntimeStartupConfiguration {
+            environment: vec![RuntimeEnvironmentVariable {
+                name: "DSH_HOME".to_string(),
+                value: root.to_string_lossy().into_owned(),
+            }],
+            ..Default::default()
+        };
+        let search = RuntimeSearchEnvironment::for_test_paths(1, vec![])
+            .with_startup_configuration(kind, configuration.clone());
+        let original = with_runtime_configuration(kind, &search, async {
+            let original = model_options_context(&visible).unwrap();
+            assert_eq!(original, model_options_context(&canonical).unwrap());
+            fs::write(root.join("settings.yaml"), "fixture-model-configuration").unwrap();
+            let configured = model_options_context(&visible).unwrap();
+            assert_ne!(
+                original, configured,
+                "model configuration still invalidates"
+            );
+            assert_eq!(configured, model_options_context(&canonical).unwrap());
+            fs::write(&executable, "changed-fixture-executable-with-new-size").unwrap();
+            let replaced = model_options_context(&visible).unwrap();
+            assert_ne!(
+                configured, replaced,
+                "executable identity still invalidates"
+            );
+            assert_eq!(replaced, model_options_context(&canonical).unwrap());
+            replaced
+        })
+        .await;
+        let mut changed_environment = configuration;
+        changed_environment
+            .environment
+            .push(RuntimeEnvironmentVariable {
+                name: "ROVAI_DSH_CONTEXT_FIXTURE".to_string(),
+                value: "changed".to_string(),
+            });
+        let changed_search = search.with_startup_configuration(kind, changed_environment);
+        with_runtime_configuration(kind, &changed_search, async {
+            assert_ne!(original, model_options_context(&visible).unwrap());
+            assert_eq!(
+                model_options_context(&visible).unwrap(),
+                model_options_context(&canonical).unwrap()
+            );
+        })
+        .await;
         fs::remove_dir_all(root).unwrap();
     }
 

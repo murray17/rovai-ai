@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # 测试与 Smoke Test
@@ -286,6 +286,14 @@ Preview/137 缺索引，main/136 有索引但缺 Cline/Command catalog；后者�
 完整迁移回归另发现 v104/v105 的旧目录 fixture 从当前 ALL 枚举意外带入 Cline/Command；
 只从其旧来源中排除后加入的两项，原迁移结果、Skill 分配及自定义范围断言不变。
 
+2026-10-10 合流内部续做请求后，主干 188/schema 138 与 Preview 同号收据也按完整结构区分，
+190/schema 140 收敛队列与 ACP catalog。扩展既有
+`db::run_continuation::tests::continuation_migration_rolls_back_and_preserves_frozen_evidence`：
+覆盖主干已具备内部请求但缺 catalog、Preview 139 仍使用消息来源、部分结构拒绝、失败回滚、旧 188
+收据与冻结证据保留及重开。既有 `delivery_queue::tests::user_continuation_preserves_source_and_claims_independent_fifo_batches`
+拥有带历史消息/排队数据的转换。没有新增或退役 Rust owner；最小命令为
+`cargo test -p rovai-core --features extended-tests --lib continuation_`，并复验 Mention 与 catalog migration owner。
+
 
 
 macOS 采用一个内核身份树，保留主干取消时捕获与本分支的可选持久 ledger。既有
@@ -314,6 +322,13 @@ binding/epoch/native turn 不匹配矩阵；既有 unknown、取消、Task 关�
 新增 `antigravity::tests::stream_input_waits_for_exact_session_and_dispatch_authority` 拥有真实 pipe 的初始化／
 输入边界；输出 parser owner 无法证明输入尚未发送，覆盖明确缺失、非缺失身份冲突、门禁取消、调用方 abort
 和释放后原始字节。使用本地受控子进程，不访问模型或真实用户数据，属于扩展层。
+
+macOS `killpg` 的已退出进程组修正扩展既有
+`managed_process::tests::cancellation_reaps_captured_detached_children_after_parent_exit`，不新增独立 owner：
+复用原真实后代 fixture，检查活跃树、根退出但 detached child 仍活跃、整树确认退出后的 `EPERM`，
+以及其他错误和不完整捕获仍拒绝放行；无关进程存活断言保留。旧错误策略在确认整树退出的正向输入上失败。
+最小命令为 `cargo test -p rovai-core --lib managed_process::tests::cancellation_reaps_captured_detached_children_after_parent_exit -- --exact`；
+随后运行整个 `managed_process`、`antigravity::tests::` 和默认 workspace。未删除、禁用或放宽现有测试。
 
 最小命令：`cargo test -p rovai-core --features extended-tests --lib` 后分别过滤以上 owner，以及
 `managed_process::`、`claude::`、`antigravity::`、`acp::`、`planned_shutdown::`、`continuation_`。

@@ -4069,6 +4069,10 @@ describe('task event projections', () => {
       agentId: 'agent_2',
       messageIds: ['message-waiting-1', 'message-waiting-2']
     }])
+    expect(executionDeliveryQueueBatches([{
+      ...waitingDelivery, continuationRequest: true,
+      inputMessageIds: ['original-a', 'original-b']
+    }])).toMatchObject([{ messageIds: ['original-a', 'original-b'] }])
     expect(executionDeliveryQueueBatches([waitingDelivery, { ...secondWaitingDelivery, continuationRequest: true },
       { ...secondWaitingDelivery, id: 'after', createdAt: '2026-07-28T06:04:00Z' }])).toHaveLength(3)
     expect(executionDeliveryQueueBatches([
@@ -5258,6 +5262,17 @@ describe('task event projections', () => {
         onStop: () => undefined
       }))
     const markup = renderWorkspace(snapshot)
+    const continuedMarkup = renderWorkspace({
+      ...snapshot,
+      messageDeliveries: [...snapshot.messageDeliveries,
+        { ...failedDelivery, id: 'continued-waiting', status: 'waiting', continuationRequest: true,
+          inputMessageIds: [publicMessage.id] },
+        { ...failedDelivery, id: 'continued-terminal', continuationRequest: true,
+          inputMessageIds: [publicMessage.id] }
+      ]
+    })
+    expect(continuedMarkup.match(/<footer class="message-delivery-footer"[\s\S]*?<\/footer>/)?.[0])
+      .toBe(markup.match(/<footer class="message-delivery-footer"[\s\S]*?<\/footer>/)?.[0])
 
     for (const authorType of ['user', 'external_principal'] as const) {
       const humanMarkup = renderWorkspace({

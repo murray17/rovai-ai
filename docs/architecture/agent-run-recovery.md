@@ -99,8 +99,10 @@ Fleet 的小型释放结果区分复用、回收、租约不存在和回收未�
 
 ## 8. 用户授权的独立续做
 
-[AgentRun Continuation v2](../contracts/agent-run-continuation-v2.md) 是新的 User 授权。
-命令事务持久化系统操作、来源事实和普通 waiting Delivery；唯一 Scheduler 在旧执行清理完成后领取。
+[AgentRun Continuation v3](../contracts/agent-run-continuation-v3.md) 是新的 User 授权。
+命令事务持久化内部授权、来源事实和 waiting Delivery；续做来源没有 message 外键，
+不创建消息记录或推进公开消息序号。独立队列序号保持 FIFO，已生成的公开记录保留原样；
+唯一 Scheduler 在旧执行清理完成后领取。
 原 Run 的业务输入集合限定范围，现有 Context builder 重建当前平台事实，不追加证据或恢复教学。
 同一来源可以多次主动继续，状态互不关联；幂等只绑定单次请求。会话兼容时复用当前绑定，换会话保留工作区。
 点击继续直接授权新执行，无需单独确认新会话。领取时未知 native turn 自动轮换；后续同一绑定的可信

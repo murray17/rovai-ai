@@ -461,10 +461,19 @@ function ModelFields({
     : null
   const targetKey = dshOptionReadKey(identity, draft.model)
   const [optionRead, setOptionRead] = useState<{ key: string; status: 'loading' | 'ready' | 'failed' } | null>(null)
+  const [optionLoadingKey, setOptionLoadingKey] = useState<string | null>(null)
   const [optionRetry, setOptionRetry] = useState(0)
   const pendingModelSwitch = useRef<{ key: string; model: string } | null>(null)
   const latest = useRef({ draft, onChange, onOpenModelCatalog, selectedModel })
   latest.current = { draft, onChange, onOpenModelCatalog, selectedModel }
+
+  const updateCatalog = (catalog: RuntimeModelCatalogView): void => {
+    // The model menu and selected-model options read can finish out of order.
+    // A late catalog snapshot must not erase newer reasoning capabilities.
+    setLive(current => current?.identity === identity
+      && !liveCatalogIsAtLeastAsRecent(catalog, current.catalog.cache)
+      ? current : { identity, catalog })
+  }
 
   useEffect(() => {
     // Saving freezes the submitted draft. A later capability result may update
@@ -472,6 +481,8 @@ function ModelFields({
     if (disabled) pendingModelSwitch.current = null
     if (!isDsh || draft.model.mode !== 'explicit' || disabled || !pageActive) return
     let active = true
+    let loadingTimer: ReturnType<typeof setTimeout> | undefined
+    setOptionLoadingKey(null)
     const target = { modelId: draft.model.modelId, dshSource: draft.model.dshSource }
     const accept = (model: ModelDescriptor): void => {
       if (!active) return
@@ -494,13 +505,13 @@ function ModelFields({
       setOptionRead({ key: targetKey, status: 'failed' })
       return () => { active = false }
     }
-    const publish = (catalog: RuntimeModelCatalogView): ModelDescriptor => {
+    const publish = (catalog: RuntimeModelCatalogView): ModelDescriptor | null => {
       if (catalog.runtimeKind !== 'deepseek-harness' || catalog.selectedModelId !== target.modelId) {
         throw new Error('Model options identity changed')
       }
-      const model = catalog.models.find((candidate) => candidate.id === target.modelId)
-      if (!model) throw new Error('Model options unavailable')
-      if (active) setLive({ identity, catalog })
+      const model = catalog.models.find((candidate) => candidate.id === target.modelId) ?? null
+      // A cache miss is not evidence that the native target is unavailable.
+      if (active && model) updateCatalog(catalog)
       return model
     }
     // Every visit checks local configuration, even inside the freshness window.
@@ -508,20 +519,25 @@ function ModelFields({
     void read({ ...target, cacheOnly: true }).then(async (cached) => {
       if (!active) return
       const cachedModel = publish(cached)
-      if (cached.refreshStatus === 'not_required' && dshModelOptionsResolved(cachedModel, target.dshSource)) {
+      if (cachedModel && cached.refreshStatus === 'not_required' && dshModelOptionsResolved(cachedModel, target.dshSource)) {
         accept(cachedModel)
         return
       }
+      // Fast cache hits never flash a loading indicator; only the actual read can show one.
+      loadingTimer = setTimeout(() => { if (active) setOptionLoadingKey(targetKey) }, 240)
       const catalog = await read(target)
       if (!active) return
       const model = publish(catalog)
-      if (!['completed', 'not_required'].includes(catalog.refreshStatus)
+      if (!model || !['completed', 'not_required'].includes(catalog.refreshStatus)
         || !dshModelOptionsResolved(model, target.dshSource)) throw new Error('Model options unavailable')
       accept(model)
     }).catch(() => {
       if (active) setOptionRead({ key: targetKey, status: 'failed' })
+    }).finally(() => {
+      clearTimeout(loadingTimer)
+      if (active) setOptionLoadingKey(null)
     })
-    return () => { active = false }
+    return () => { active = false; clearTimeout(loadingTimer) }
   }, [isDsh, targetKey, installation.modelCatalog.observedAt, optionRetry, disabled, pageActive])
 
   useEffect(() => {
@@ -568,7 +584,7 @@ function ModelFields({
         disabled={disabled}
         onOpenModelCatalog={onOpenModelCatalog}
         onChange={changeModel}
-        onCatalogChange={(catalog) => setLive({ identity, catalog })}
+        onCatalogChange={updateCatalog}
       />
 
       {explicit && optionKey && (isDsh ? !optionsKnown || option || optionValue : option || optionValue) && (
@@ -577,6 +593,8 @@ function ModelFields({
           value={optionValue}
           disabled={disabled}
           onChange={setOption}
+          loadingLabel={isDsh && pageActive && !disabled && readStatus === 'loading' && optionLoadingKey === targetKey
+            ? uiAttribute('正在读取可选思考强度，当前选择仍可保存') : undefined}
           defaultChoice={{ value: '', label: isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
           choices={[
             ...(optionInvalid ? [{ value: optionValue, label: optionsKnown

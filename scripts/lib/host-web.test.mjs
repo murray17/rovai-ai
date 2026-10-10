@@ -612,7 +612,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
 
 // This process owner proves that both Host entrances drive persisted schedules
 // without a Renderer tick. The ordinary Delivery scheduler may leave the work
-// waiting, claim it into an AgentRun, or record the missing Runtime configuration;
+// waiting, claim it into an AgentRun, or settle the missing Runtime configuration;
 // domain tests own execution and recovery.
 test('Host clock consumes scheduled occurrences with Web stopped and in standalone mode', { timeout: 180_000 }, async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-host-clock-')))
@@ -682,7 +682,13 @@ test('Host clock consumes scheduled occurrences with Web stopped and in standalo
       const runs = rows(id)
       assert.equal(runs.length, 1)
       assert.notEqual(runs[0].reason, 'missed', 'a live Host must claim the due occurrence')
-      assert.equal(runs[0].status, 'running')
+      // Event-driven scheduling may settle the missing-Runtime execution before
+      // this read. Accept only that exact terminal outcome, not arbitrary failure.
+      assert.ok(['running', 'failed'].includes(runs[0].status), JSON.stringify(runs[0]))
+      if (runs[0].status === 'failed') {
+        assert.equal(runs[0].reason, 'execution_failed', JSON.stringify(runs[0]))
+        assert.equal(runs[0].delivery_status, 'failed', JSON.stringify(runs[0]))
+      }
       assert.ok(runs[0].camp_id, 'an admitted occurrence owns a Camp')
       assert.ok(runs[0].trigger_message_id, 'an admitted occurrence owns its system message')
       assert.ok(runs[0].trigger_delivery_id, 'an admitted occurrence owns its Delivery')

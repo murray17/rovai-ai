@@ -2233,6 +2233,7 @@
   "跟随模型默认值": "Model default",
   "模型默认": "Model default",
   "正在读取思考强度…": "Reading reasoning options…",
+  "正在读取可选思考强度，当前选择仍可保存": "Reading reasoning options. Your current selection can still be saved.",
   "暂时无法读取思考强度，已保留当前选择。": "Unable to read reasoning options. Your current selection is preserved.",
   "该模型未提供可选思考档位。": "This model offers no selectable reasoning levels.",
   "正在获取模型列表…": "Fetching models…",

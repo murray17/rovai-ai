@@ -3875,7 +3875,7 @@ mod tests {
         let session = json!({"configOptions":[{"id":"model","options":[
             {"group":"native","options":[{"value":native_id,"name":"Same"}]},
             {"group":"web","options":[{"value":web_id,"name":"Same"}]}
-        ]}],"_meta":{"rovaiDshModels":{"webProviders":["web"],"rejectedProviders":[],"diagnostics":[]}}});
+        ]}],"_meta":{"rovaiDshOptionsContext":"context-a","rovaiDshModels":{"webProviders":["web"],"rejectedProviders":[],"diagnostics":[]}}});
         let models = acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &session).unwrap();
         assert_eq!(models.len(), 2);
         assert_eq!(
@@ -3884,7 +3884,7 @@ mod tests {
                 .find(|model| model.id == web_id)
                 .unwrap()
                 .runtime_metadata,
-            Some(json!({"dshSource":"web"}))
+            Some(json!({"dshSource":"web","dshOptionsContext":"context-a"}))
         );
         assert_eq!(
             models
@@ -3909,11 +3909,8 @@ mod tests {
         let native =
             acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &rejected).unwrap();
         assert_eq!(native.len(), 2);
-        assert!(
-            native
-                .iter()
-                .all(|model| model.runtime_metadata == Some(json!({"dshSource":"native"})))
-        );
+        assert!(native.iter().all(|model| model.runtime_metadata
+            == Some(json!({"dshSource":"native","dshOptionsContext":"context-a"}))));
         let model = r#"["deepseek-official","deepseek-v4-flash"]"#;
         let session = json!({"configOptions":[{"id":"model","category":"model","type":"select","currentValue":model,"options":[{"group":"deepseek-official","name":"DeepSeek","options":[{"value":model,"name":"DeepSeek-V4-Flash"}]}]}]});
         let models = acp_model_catalog_from_session(&session).unwrap();

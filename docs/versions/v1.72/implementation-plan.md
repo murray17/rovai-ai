@@ -1281,6 +1281,24 @@ Claude 34、DSH 5 与模型目录 owner 通过。前端类型、239 文件／261
 - `562e1bb4` 的默认 workspace 462/1、平台 5 项、CI 与 Windows all-targets 编译通过。检查期间再次合流 main `2256db53`，保留后续 DSH 能力缓存与图片菜单修复；最新合流的默认 workspace 462 passed / 1 ignored、前端 239 文件 / 2616 项、typecheck、文档门禁、桌面构建及隔离 Electron Runtime Picker 复验通过。最终 CI 与 Windows 编译以 PR 当前提交回执为准。
 
 
+## 2026-10-10 两个隐藏 ACP 与最新主干合流
+
+合流 main `0a7e183c8`，保留内部续做请求、DSH 目录迟到响应处理、macOS 进程退出修复及 v0.4.7
+发布内容。Cline/Command 仍保持不公开，headless 专属实现和探针没有恢复。
+主干 188/schema 138 与 Preview 同号收据按实际结构区分，经 190/schema 140 收敛内部请求与保留的
+ACP catalog；旧收据、公开历史、待执行请求和冻结证据保持。既有迁移 owner 扩展两种来源、
+残缺结构拒绝、失败回滚和重开，未新增独立测试。
+
+macOS 主干的 `EPERM` 后退出确认接到现有身份信号路径，保留活跃后代、捕获失败和其他信号错误的
+拒绝语义，不留下被平台条件排除的分支。原进程清理 owner 的正负例全部保留。
+
+本地验证：默认 Rust workspace 463 passed / 1 个人工 Smoke ignored；迁移、续做、Adapter、Cline 与
+平台准入定向通过。DSH catalog 既有 owner 首次因漏记主干上下文字段失败，补齐该字段的输入与断言后
+通过；最终进程清理与 ACP 复验 76 passed / 2 个真实 Smoke ignored。TypeScript、239 文件 / 2616
+Vitest、339 Node 测试、文档通用门禁及 Desktop/Web 构建通过。隔离 Electron 的真实 Runtime 菜单确认
+两个隐藏项均未展示，并通过键盘、IME、双主题/尺寸、缩放与 DSH 迟到目录验证；夹具已清理，未启动
+Core 或真实 Runtime。CI 与 Windows all-targets 编译以 PR 当前提交回执为准。
+
 ## 2026-10-09 消息 Mention 元数据
 
 按[确认稿 r1](model-context-change-message-mentions.md)实施公开 batch/read 的公共目标投影，
@@ -1410,3 +1428,31 @@ macOS arm64 验证结果：
 `docs/prototypes/` 原型断链使直接文档检查失败，未修改这些原型。没有新增缓存表、服务或定时扫描。
 未实测 Windows、Linux、macOS x64、打包 App 及真实中转；付费请求为零。本轮只提交并推送
 `rovai/dsh-web-models`，不创建 PR、合并、安装或修改日常 DSH 配置。
+
+#### Windows DSH 能力指纹路径归一修复
+
+Windows 探测路径经 `canonicalize()` 带有长路径前缀，提交目录使用去前缀路径；同一程序的两种写法
+不能被当作配置变化。`model_options_context()` 在共同入口复用 `runtime_visible_path()` 归一真实路径，
+命令环境观察、文件身份观察和指纹计算使用同一路径；真实文件、模型配置或环境变化仍使能力失效。
+不修改首次检查状态机、Host 复用、权限、会话恢复或 Cleanup，不包含同 ID 模型来源切换的 UI 修复。
+
+默认层回归 `cargo test -p rovai-core --lib dsh` 使用隔离 Home 与 task-local 环境，覆盖普通/长路径
+指纹相等及程序、配置、环境变化失效。`scripts/smoke-dsh-model-availability.mjs` 为 Windows 使用
+`.cmd` 记录入口，`ROVAI_DSH_SMOKE_CORE` 可指定本次构建 Core；既有隔离协议、合成凭据与本地
+HTTP 场景验证首次完整检查、重复刷新和投递，无真实中转请求，不改日常 DSH 配置。
+
+## 2026-10-09 续做公屏记录移除
+
+User 按 [r3](model-context-change-quiet-continuation.md) 授权新续做不新增消息记录、PR 合入 main 并本机安装；
+已生成的记录保留原样。Migration 188 / schema 138 调整既有 Delivery 来源与独立序号；公共读取、FIFO 和原输入证据由
+`delivery_queue::tests::user_continuation_preserves_source_and_claims_independent_fifo_batches` 扩展覆盖。
+未新增平行 SQLite fixture 或独立 Rust 测试；既有正负向测试保留。既有 migration owner 验证
+188 回滚；填充后的队列 fixture 验证旧续做来源转换、旧消息、公开序号与冻结证据保持。
+thread.runs 按实际输入次数统计 queued 数量并取队首原文；Desktop 复用输入 ID 和既有锚点，
+消息发送对象页脚排除续做，避免原 A2A 收件人重复。
+
+2026-10-10 本地验证：TypeScript、完整 pnpm test（239 文件／2613 Vitest，337 Node 通过、2 既有跳过）、
+Rust workspace（460 通过、1 既有忽略）、continuation 扩展 5 项、thread_runs 扩展 4 项通过。
+最终页脚调整的既有 App owner 181 项、生产继续按钮交互与基于 main 的文档治理均通过。
+真实 Runtime 与安装产物证据随 PR 交付记录；缺少固定 snapshot Judge 配置，未完成通用 12 Case
+基线／候选语义 Gate，专项验证不替代该 Gate。

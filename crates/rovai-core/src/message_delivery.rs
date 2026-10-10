@@ -464,7 +464,6 @@ pub fn persist_queued_agent_message(
         transaction,
         request.camp_id,
         &message_id,
-        camp_sequence,
         &effective_recipients,
         &now,
     )?;

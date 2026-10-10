@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Managed Runtime Process v2
@@ -197,6 +197,11 @@ macOS 信号只发给核验后的身份；Claude、Antigravity 和普通 ACP 的
 ACP 可在同一内存所有权树上启用上述持久 ledger，不建立第二棵互不一致的清理树；未启用的临时 Probe
 仍保留内核身份与取消回收，但不宣称 Core 崩溃后的持久恢复。
 这不承诺捕获前已脱离祖先链的未知后台服务；不按进程名扫杀，也不把进程退出当作原生 turn 终态。
+
+macOS 在信号处理期间仍可能返回 `EPERM`；当前只走上述核验身份的信号路径，不再额外调用 `killpg`。
+该错误不能单独证明成功：只有捕获完整，且按生命周期身份确认根进程及全部已捕获后代均已退出或
+成为不再执行用户代码的 zombie，才允许继续根进程 reap。仍有活跃后代、捕获不完整、查询失败
+或其他信号错误时保留原清理门禁；不增加超时，不把原生输入失败改成成功。
 
 User Automation 的 `rovai app` 防误调用由 CLI 入口拥有，见 [User Automation v5](user-automation-v5.md)。
 该检查不形成同 UID 恶意进程隔离，不是 Managed Process 的启动前置条件。

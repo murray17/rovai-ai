@@ -61,7 +61,7 @@ Logical active state does not prove process liveness, Agent availability, old-ex
 
 Select public Runs before deriving count, status or preview. Resolve Thread ownership through `agent_run.camp_id`, falling back to the associated historical `camp_turn.camp_id`. Exclude both Single Chat invocation and private Conversation rows entirely.
 
-Each Thread/Agent's current waiting Deliveries produce at most one queued item. Its count is the entire waiting set, and its creation time and preview source come from the current head by queue_sequence. Its start, end and cancellation timestamps are null. This is a query view: queued messages may be split across future Runs, and no batch is fixed in advance.
+Each Thread/Agent's current waiting Deliveries produce at most one queued item. Its count sums business input occurrences across the entire waiting set: an ordinary Delivery counts as one; a [continuation request](agent-run-continuation-v3.md) counts its source Run's full input set, with repeated requests counted separately. Its creation time comes from the current head by queue_sequence, and its preview source is that request's first business input. Its start, end and cancellation timestamps are null. This is a query view: queued messages may be split across future Runs, and no batch is fixed in advance.
 
 For an actual Run, count all frozen `agent_run_input` associations before checking preview visibility. Select the first input by ordinal, never by anchor, trigger, last input or logs. A legacy Run without a provable input set has null count; an unprovable first input has null preview. A current batch missing its required frozen inputs is a read failure, not an empty or legacy result.
 

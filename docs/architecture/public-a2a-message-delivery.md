@@ -101,7 +101,7 @@ Single Chat Pending 接续与 non-batch Run 由自己的提交后通知推进，
 ## 终态、停止与恢复
 
 Run 终态按输入 Delivery 分别写入 `settled | failed | cancelled`。普通 Stop 以精确 `agentRunId + version` CAS，只停止被点击
-的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v2](../contracts/agent-run-continuation-v2.md) 提交新的独立授权。Runtime 明确未接受且无
+的 Run；它不暂停 lane，不取消 waiting Delivery，也不能误停 successor。User 继续入口按 [AgentRun Continuation v3](../contracts/agent-run-continuation-v3.md) 提交新的独立授权。Runtime 明确未接受且无
 副作用风险时，可以恢复同一冻结 Run 的运输；accepted/unknown 永不作为未执行重新投递。
 
 Run 显示失败不等于旧执行已隔离。Scheduler 在 claim 前分别检查同一 Camp+Agent 的旧执行隔离和实际共享

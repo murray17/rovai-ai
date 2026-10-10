@@ -1255,14 +1255,13 @@ Pending 行只展示正文，不展示附件或附件数量；纯附件摘要留
 ## 用户主动继续执行
 
 公开 batch Run 的失败／停止卡片沿用现有布局，在折叠操作旁提供 24×24 的纯图标按钮。
-title 和 aria-label 为“继续执行”，键盘可达；提交中禁用。系统操作记录、waiting 请求和新 Run 使用
+title 和 aria-label 为“继续执行”，键盘可达；提交中禁用。续做新请求不产生公屏系统消息，也不进入消息历史、搜索与定位；已生成的记录保留原样。waiting 请求和新 Run 使用
 现有时间线／执行区；原卡片终态与输出不变，受理后仍可再次点击，各次 Run 不显示关联状态。
-已知必须更换会话时一次确认“原会话无法恢复，将使用新会话继续。当前工作区会保留。”
-实际恢复失败后当前 Run 明确失败，再由用户选择新会话；无恢复向导。合同见
+会话自动选择遵循下节规则；无恢复向导。合同见
 [Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)。
 
 ### 继续执行的会话选择
 
 失败／停止卡片的 24×24 继续图标直接提交，Core 自动复用或选择新会话，不显示会话确认弹窗。
 提交中保持原尺寸并禁用；受理后恢复可点，原 Run 状态和工作区保留。响应未知时沿用同一 commandId 核对。
-恢复失败的投递前降级由 [AgentRun Continuation v2](../../contracts/agent-run-continuation-v2.md) 拥有。
+恢复失败的投递前降级由 [AgentRun Continuation v3](../../contracts/agent-run-continuation-v3.md) 拥有。

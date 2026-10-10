@@ -18,7 +18,7 @@ export function RuntimePickerChevron(): React.JSX.Element {
 }
 
 /** Short Runtime enums share the model picker surface; only model catalogs need search. */
-export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance }: {
+export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loadingLabel }: {
   label: string
   value: string
   choices: RuntimeParameterChoice[]
@@ -26,6 +26,7 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
   disabled: boolean
   recommendedValue?: string
   menuGuidance?: string
+  loadingLabel?: string
   onChange(value: string): void
 }): React.JSX.Element {
   const id = useId()
@@ -40,6 +41,8 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
       <Menu.Trigger asChild>
         <button id={id} type="button" className="runtime-model-picker-trigger" disabled={disabled}
           aria-label={[label, selected?.label ?? value, selected?.description, selected && recommendation(selected)].filter(Boolean).join('，')}
+          aria-busy={loadingLabel ? true : undefined}
+          aria-description={loadingLabel}
           title={[selected?.label ?? value, selected?.description].filter(Boolean).join('\n')}>
           <span><strong>{selected?.label ?? value}</strong>{selected?.description && <small>{selected.description}</small>}</span><RuntimePickerChevron />
         </button>

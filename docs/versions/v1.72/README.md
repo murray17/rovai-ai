@@ -22,6 +22,9 @@ Cline ACP 自动压缩仍未接通；Command ACP 自定义 BYOK 目录/切换、
 MCP 实际调用仍有缺口。精确版本、通过范围与未知项见[兼容性清单](../../runtime-compatibility.md)。
 这是公开范围收敛，没有更换 Runtime 或新增后备链路；下文 Preview/headless 是实施历史。
 
+2026-10-10 合流主干内部续做请求等后续修复；190/schema 140 兼容主干与 Preview 的同号旧收据，
+保留用户历史与 ACP 身份，不改变上述隐藏范围。迁移与验证见[实施计划](implementation-plan.md#2026-10-10-两个隐藏-acp-与最新主干合流)。
+
 ## Cline 暂缓公开（2026-10-09）
 
 User 99 因原生 ACP 自动 compaction 缺口要求暂不对外暴露 Cline。所有平台回到 NotQualified，
@@ -130,10 +133,16 @@ Automation 超时与恢复隔离保持。既有冻结预算不改写，预算等
 Automation、预算和文本收尾按业务 deadline／实际失败退避等待。保留普通 Delivery 的单一 Scheduler 与原有
 低频恢复，不新增持久队列或调度框架。原消费者、计时器和验证边界见[验收记录](heartbeat-removal-verification.md)。
 
+## 续做操作退出公开消息
+
+User 已授权停止发布新的续做公屏记录并合入、安装；最新范围见 [r3 输入／历史对照](model-context-change-quiet-continuation.md)。
+续做不新增消息，Migration 188 / schema 138 仅调整内部队列来源及独立 FIFO 序号；
+已生成的记录、原输入、现有锚点、清理与冻结证据保持。
+
 ## 并行实施：用户主动继续执行
 
 User 已确认 [r2 输入对照](model-context-change-run-continuation.md) 并授权独立 worktree 实现、推送。
-[AgentRun Continuation v2](../../contracts/agent-run-continuation-v2.md) 将新授权接入现有 waiting lane；
+[AgentRun Continuation v3](../../contracts/agent-run-continuation-v3.md) 将新授权接入现有 waiting lane；
 每次完整选择原业务输入，现有 builder 重建当前上下文，同一来源可多次独立执行。按钮为 24×24 纯图标，
 原卡片状态不关联新 Run。Migration 184 / schema 134 增量保留旧证据；实现与验证见
 [续做实施记录](run-continuation-implementation.md)。

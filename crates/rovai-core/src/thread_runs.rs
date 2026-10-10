@@ -363,21 +363,29 @@ const CANDIDATES_SQL: &str = r#"
               AND (?5 IS NULL OR (created_key, 1, r.id) < (?5, ?6, ?7))
             ORDER BY created_key DESC, r.id DESC LIMIT ?8
         ), waiting AS (
-            SELECT recipient_agent_id AS agent_id, COUNT(*) AS message_count, MIN(queue_sequence) AS head
+            SELECT recipient_agent_id AS agent_id,
+                   SUM(CASE WHEN continuation.delivery_id IS NULL THEN 1 ELSE (
+                     SELECT COUNT(*) FROM agent_run_input WHERE agent_run_id = continuation.source_agent_run_id
+                   ) END) AS message_count, MIN(queue_sequence) AS head
             FROM camp_message_delivery
+            LEFT JOIN camp_run_continuation AS continuation ON continuation.delivery_id = camp_message_delivery.id
             WHERE camp_id = ?1 AND status = 'waiting'
               AND (?2 IS NULL OR recipient_agent_id = ?2) AND (?3 IS NULL OR ?3 = 'queued')
             GROUP BY recipient_agent_id
         ), queued AS (
             SELECT NULL AS run_id, waiting.agent_id, 'queued' AS status, 0 AS batch,
                    delivery.created_at, NULL AS started_at, NULL AS ended_at, NULL AS cancel_requested_at,
-                   waiting.message_count, delivery.message_id AS first_message,
+                   waiting.message_count, COALESCE(delivery.message_id, (
+                     SELECT message_id FROM agent_run_input
+                     WHERE agent_run_id = continuation.source_agent_run_id ORDER BY ordinal LIMIT 1
+                   )) AS first_message,
                    rovai_thread_run_time_key(delivery.created_at) AS created_key,
                    0 AS source, waiting.agent_id AS identity
             -- Drive head lookups from the aggregate, not from every waiting delivery.
             FROM waiting CROSS JOIN camp_message_delivery delivery
               ON delivery.camp_id = ?1 AND delivery.recipient_agent_id = waiting.agent_id
              AND delivery.queue_sequence = waiting.head AND delivery.status = 'waiting'
+            LEFT JOIN camp_run_continuation AS continuation ON continuation.delivery_id = delivery.id
             WHERE ?5 IS NULL OR (created_key, 0, waiting.agent_id) < (?5, ?6, ?7)
             ORDER BY created_key DESC, waiting.agent_id DESC LIMIT ?8
         )
@@ -608,7 +616,8 @@ mod read_tests {
             CREATE TABLE context_manifest(id TEXT, agent_run_id TEXT, global_public_message_boundary INTEGER, history_fence_version INTEGER);
             CREATE TABLE agent_run_input(agent_run_id TEXT, ordinal INTEGER, message_id TEXT);
             CREATE TABLE camp_message_delivery(camp_id TEXT, recipient_agent_id TEXT, status TEXT,
-                queue_sequence INTEGER, created_at TEXT, message_id TEXT);
+                queue_sequence INTEGER, created_at TEXT, message_id TEXT, id TEXT PRIMARY KEY);
+            CREATE TABLE camp_run_continuation(delivery_id TEXT PRIMARY KEY, source_agent_run_id TEXT);
             CREATE INDEX camp_message_delivery_waiting_idx
                 ON camp_message_delivery(camp_id, recipient_agent_id, queue_sequence) WHERE status = 'waiting';
             CREATE TABLE camp_message(id TEXT, camp_id TEXT, sequence INTEGER, author_type TEXT DEFAULT 'user',
@@ -695,7 +704,7 @@ mod read_tests {
         // Insertion order and anchor cannot replace the frozen ordinal.
         connection.execute_batch("INSERT INTO agent_run_input VALUES ('actual-queued',1,'anchor'),('actual-queued',0,'first');").unwrap();
         for (id, sequence) in [("q1", 3), ("q2", 4), ("q3", 5)] {
-            connection.execute("INSERT INTO camp_message_delivery VALUES(?1,'agent_1','waiting',?2,'2026-10-03T13:00:00Z',?3)", params![THREAD,sequence,id]).unwrap();
+            connection.execute("INSERT INTO camp_message_delivery(camp_id,recipient_agent_id,status,queue_sequence,created_at,message_id) VALUES(?1,'agent_1','waiting',?2,'2026-10-03T13:00:00Z',?3)", params![THREAD,sequence,id]).unwrap();
         }
         let run = AuthenticatedTeamToolRun {
             camp_id: THREAD.into(),
@@ -778,6 +787,17 @@ mod read_tests {
         .unwrap();
         let cursor = page["nextCursor"].as_str().unwrap().to_owned();
         assert_eq!(page["items"][0]["messageCount"], 3);
+        // Continuation requests count all original inputs, including repeated requests,
+        // while the FIFO head still selects the first business message preview.
+        connection.execute("INSERT INTO camp_message_delivery VALUES(?1,'agent_1','waiting',1,'2026-10-03T13:00:00Z',NULL,'continuation-a')", [THREAD]).unwrap();
+        connection.execute("INSERT INTO camp_message_delivery VALUES(?1,'agent_1','waiting',2,'2026-10-03T13:00:00Z',NULL,'continuation-b')", [THREAD]).unwrap();
+        connection.execute_batch("INSERT INTO camp_run_continuation VALUES ('continuation-a','actual-queued'),('continuation-b','actual-queued');").unwrap();
+        let continued = read(&mut connection, ThreadRunsInput::default()).unwrap();
+        assert_eq!(continued["items"][0]["messageCount"], 7);
+        assert_eq!(
+            continued["items"][0]["messagePreview"]["messageId"],
+            "first"
+        );
         // The queue vanishes between pages. Its cursor is still a value, not a row lookup.
         connection
             .execute("DELETE FROM camp_message_delivery", [])
@@ -894,7 +914,7 @@ mod read_tests {
         "#, [OTHER]).unwrap();
         connection.execute(r#"
             WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 2000)
-            INSERT INTO camp_message_delivery
+            INSERT INTO camp_message_delivery(camp_id,recipient_agent_id,status,queue_sequence,created_at,message_id)
             SELECT ?1, CASE WHEN n % 2 = 0 THEN 'agent_1' ELSE 'agent_2' END, 'waiting', n,
                    '2026-10-03T12:00:00.000025000Z', printf('message-%d', n) FROM numbers
         "#, [THREAD]).unwrap();
@@ -991,7 +1011,7 @@ mod read_tests {
             plan.contains("SEARCH r USING INDEX agent_run_a2a_turn_idx (camp_turn_id=?)"),
             "{plan}"
         );
-        assert!(plan.contains("SEARCH camp_message_delivery USING COVERING INDEX camp_message_delivery_waiting_idx (camp_id=?)"), "{plan}");
+        assert!(plan.contains("SEARCH camp_message_delivery USING INDEX camp_message_delivery_waiting_idx (camp_id=?)"), "{plan}");
         assert!(plan.contains("SEARCH delivery USING INDEX camp_message_delivery_waiting_idx (camp_id=? AND recipient_agent_id=? AND queue_sequence=?)"), "{plan}");
         assert!(!plan.contains("SCAN r"), "{plan}");
         assert_eq!(tx.total_changes(), before);
