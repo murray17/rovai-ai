@@ -734,5 +734,9 @@ User 已查看完整 r4，并收到对三项修改意见的具体判断与替换
 360 个 UTF-8 字节：其中常驻公共 Bootstrap 减少 142 字节，其他为按需帮助与 Skill；该合计不是单次输入的 token 节省。
 没有增加临时目录或 JSON 兼容教学。Skill interface 的三个字段均未改变。
 
-**未验证的范围：** 真实模型通用 Gate、旧 Native Session 读取新帮助后的连续发送和已学习新帮助后的回滚行为
-均尚未运行；不能由单元/IPC 夹具或冻结字节测试推断通过。Windows 真机文件/Named Pipe 验收也未执行。
+审查后已将 CLI 进程测试接入手动 `Full check / Rust full`；另补[真实 Core 与原生 Codex 专项](../../research/send-input-file/README.md)，
+完成基线旧 JSON、候选恢复后旧 JSON + 新帮助、正文文件发送和逐字读回，3 次 Run 无额外发布，原绑定与冻结 Bootstrap 保留。
+该专项使用脚本 Provider，不代表模型自主决策验收。
+
+**未验证的范围：** 真实模型通用 Gate、真实模型在旧 Native Session 读取新帮助后的连续发送、已学习新帮助后的回滚行为、
+其他 Runtime 与 Windows 真机文件/Named Pipe 验收仍未执行；不能由单元、IPC 或脚本驱动的原生执行推断通过。

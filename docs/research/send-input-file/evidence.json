@@ -1,0 +1,89 @@
+{
+  "platform": "macOS-26.6-arm64-arm-64bit",
+  "provider": "scripted loopback; no real model or credentials",
+  "codexVersion": "codex-cli 0.162.1",
+  "binarySha256": {
+    "baselineCore": "85af35aea8b535d4c3a6305b41f38841b3f943cc32c6f84e61674ad5b75a76ad",
+    "candidateCore": "df2dcbfd2e3a0bd71f6c77acbdaf8aca2ab196bb23945922b2e52500ad0eb1be",
+    "baselineCli": "514a8df4af4191bab652bd441e74d9f5aa1345336f5f90d315a5cc90a6494eac",
+    "candidateCli": "27ee275d5a73128d21aef85e4f06251e39a46fdf191883eeaa63043f4af0d2d3",
+    "codex": "74c6a6d263f40d65f99c27a815275f5b4ed0bcc2baecc396b4cf3255498bdfc0"
+  },
+  "phases": [
+    {
+      "phase": "baseline-json",
+      "status": "succeeded",
+      "sameNativeBinding": true,
+      "sameFrozenBootstrap": true,
+      "nativeSessionId": "01a12678-815d-7bf0-acd4-112ec0e19195",
+      "nativeBindingId": "f9bf05f1-c6a2-453d-a04f-d3191ce04dc7",
+      "nativeBindingGeneration": 1,
+      "bootstrapEvidenceId": "38b645e7-36f3-4659-ae77-96e598f50559",
+      "sessionCharterDigest": "sha256:1cb64463decb149165343c7df838cfbe5a40017a16ae9397d24832adf1406ac6",
+      "exactBodyReadback": true,
+      "publishedCount": 1,
+      "receiptMessageId": "3054a796-46c7-4cf4-9acf-f70d3fd09f7d",
+      "bodySha256": "7ebb7918e39429c58c877e9a04d891a35b736442e42f49ecf5b7f99fe73e4e39",
+      "providerRequests": [
+        {
+          "oldCharter": true,
+          "newHelp": false
+        },
+        {
+          "oldCharter": true,
+          "newHelp": false
+        }
+      ]
+    },
+    {
+      "phase": "restored-json-and-new-help",
+      "status": "succeeded",
+      "sameNativeBinding": true,
+      "sameFrozenBootstrap": true,
+      "nativeSessionId": "01a12678-815d-7bf0-acd4-112ec0e19195",
+      "nativeBindingId": "f9bf05f1-c6a2-453d-a04f-d3191ce04dc7",
+      "nativeBindingGeneration": 1,
+      "bootstrapEvidenceId": "38b645e7-36f3-4659-ae77-96e598f50559",
+      "sessionCharterDigest": "sha256:1cb64463decb149165343c7df838cfbe5a40017a16ae9397d24832adf1406ac6",
+      "exactBodyReadback": true,
+      "publishedCount": 2,
+      "receiptMessageId": "f6b173ed-b098-412f-9f5a-e136d6c72e91",
+      "bodySha256": "668e1a9a4783af77cc0c11b4c03ee6aebc8ef955200381c4bac94080cf7bf305",
+      "providerRequests": [
+        {
+          "oldCharter": true,
+          "newHelp": false
+        },
+        {
+          "oldCharter": true,
+          "newHelp": true
+        }
+      ]
+    },
+    {
+      "phase": "body-after-help",
+      "status": "succeeded",
+      "sameNativeBinding": true,
+      "sameFrozenBootstrap": true,
+      "nativeSessionId": "01a12678-815d-7bf0-acd4-112ec0e19195",
+      "nativeBindingId": "f9bf05f1-c6a2-453d-a04f-d3191ce04dc7",
+      "nativeBindingGeneration": 1,
+      "bootstrapEvidenceId": "38b645e7-36f3-4659-ae77-96e598f50559",
+      "sessionCharterDigest": "sha256:1cb64463decb149165343c7df838cfbe5a40017a16ae9397d24832adf1406ac6",
+      "exactBodyReadback": true,
+      "publishedCount": 3,
+      "receiptMessageId": "aaf82a25-fa00-4695-8661-3d8fe4b29481",
+      "bodySha256": "1713b396fd8ac32aa71404ad7c16b46efe123243399f8039d80e51a1ec5e84b6",
+      "providerRequests": [
+        {
+          "oldCharter": true,
+          "newHelp": true
+        },
+        {
+          "oldCharter": true,
+          "newHelp": true
+        }
+      ]
+    }
+  ]
+}

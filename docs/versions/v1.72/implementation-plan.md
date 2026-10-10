@@ -42,6 +42,8 @@ Worktree：`rovai-ai-send-input-file`；分支：`rovai/send-input-file`；基�
 | `cargo check --workspace` / `cargo fmt --all --check` / `git diff --check` | 全部通过 |
 | `--features slow-tests --lib` 的 8 个定向 owner | Charter 全文、冻结 Bootstrap、补发冻结、正文空白/字节超限零发布、publicOnly 寻址、原子发布/重放、User 通知、纯附件；全部通过 |
 | `pnpm test:send-input-file` | 独立 CLI 进程及本地 IPC 验证通过；有外层 5 秒退出上限，未启动 App、Core 或真实 Runtime |
+| Full check 接入 | `full` scope 的 `Rust full` job 显式执行 `pnpm test:send-input-file` 一次；本地命令及 YAML/前置工具顺序检查通过，尚未执行远端完整 workflow |
+| 真实 Core / 原生 Codex 专项 | 基线旧 JSON → 候选恢复旧 JSON 并读新帮助 → 正文文件；3 次 Run、3 条消息，逐字读回、原 Native Binding 与冻结 Bootstrap 保留，使用脚本 Provider，详见[证据](../../research/send-input-file/README.md) |
 | `pnpm skills:check` / `pnpm skills:test` | 12 个 Skill 校验、3 项治理测试通过 |
 | `pnpm docs:test` / `pnpm docs:check` / 带真实 base 的 `pnpm docs:check:ci` | 10 项治理测试、版本与决定/链接门禁通过 |
 | 完整教学对照 | 五组前后文本和九个基线源码摘要核对；新二进制 Send/root help 与 r5 全文逐字一致，其余 29 个命令 help 与当前 v36 CLI 逐字一致；Send reference、Schema、索引描述与 interface 元数据未改 |
@@ -50,8 +52,10 @@ Worktree：`rovai-ai-send-input-file`；分支：`rovai/send-input-file`；基�
 IPC 夹具初次错误读取了请求的 `requestId` 而非既有 wire `request_id`，修正夹具后通过；生产 wire 未修改。
 
 真实模型 12 Case Gate 缺少本次可用的冻结 team/模型和真实 Judge 配置，尚未执行。旧 Session
-恢复后读取新帮助再发送、已学习新帮助后的旧版回滚场景也未执行；只确认冻结证据机制和合法旧输入
-的确定性兼容，不能据此宣称真实模型不会重复发送或循环查询帮助。Windows 真机专项未运行。
+恢复、读取新帮助再发送已补原生 Codex + 真实 Core 的脚本驱动验收；不能据此宣称真实模型会自行
+选择正确用法，或不会重复发送、循环查询帮助。真实模型连续发送、已学习新帮助后的旧版回滚、
+其他 Runtime 与 Windows 真机专项仍未运行。默认 Node/Rust 回归和自动 PR gate 不包含 CLI 进程测试，
+它由手动 Full check 稳定调用，不把其他入口通过当作该项通过。
 旧 `smoke:builtin-cli` 仍有与本次无关的 Gather/Principal 过时断言；本次只同步相关输入教学断言，
 检查脚本语法，不宣称该历史 Smoke 整体通过。
 
