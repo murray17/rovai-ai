@@ -3,7 +3,7 @@ import { missionMentionIds } from './mission-description'
 import { MemberAvatar } from './MemberAvatar'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ButtonHTMLAttributes, type DragEvent, type ReactNode, type RefObject } from 'react'
 import * as Popover from '@radix-ui/react-popover'
-import type { AgentProfile, MissionDescriptionContent, ThreadMessageAttachmentView, LocalAttachmentSourceView, MissionAttachmentDraft } from '@contracts'
+import type { AdapterInstallation, AgentProfile, MissionDescriptionContent, ThreadMessageAttachmentView, LocalAttachmentSourceView, MissionAttachmentDraft } from '@contracts'
 import { newCommandId } from '../../shared/command-id'
 import { AttachmentCard, ComposerAttachmentStrip } from './AttachmentCard'
 import { Icon, TagColorDot, tagStyle } from './MissionControls'
@@ -108,6 +108,7 @@ export const MissionWritingPlane = forwardRef<MissionWritingPlaneHandle, {
   title: string
   descriptionContent: MissionDescriptionContent
   agents: AgentProfile[]
+  installations?: AdapterInstallation[]
   memberAgentIds: string[]
   unavailableAgentIds?: readonly string[]
   attachments: MissionDraftAttachment[]
@@ -122,7 +123,7 @@ export const MissionWritingPlane = forwardRef<MissionWritingPlaneHandle, {
   onAttachmentsChange(value: MissionDraftAttachment[]): void
   onNotify(message: string): void
 }>(({
-  title, descriptionContent, agents, memberAgentIds, unavailableAgentIds, attachments, disabled, attachmentsDisabled = false, titleInputRef, titleError, descriptionError,
+  title, descriptionContent, agents, installations, memberAgentIds, unavailableAgentIds, attachments, disabled, attachmentsDisabled = false, titleInputRef, titleError, descriptionError,
   mission, onTitleChange, onDescriptionChange, onAttachmentsChange, onNotify
 }, ref) => {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -157,7 +158,7 @@ export const MissionWritingPlane = forwardRef<MissionWritingPlaneHandle, {
       {attachments.map((attachment, index) => <MissionAttachmentItem key={attachmentIdentity(attachment)} attachment={attachment} mission={mission} disabled={disabled || attachmentsDisabled} onNotify={onNotify} onRemove={() => onAttachmentsChange(attachments.filter((_, candidate) => candidate !== index))}/>) }
     </ComposerAttachmentStrip>}
     <label className="sr-only" htmlFor="mission-editor-description"><UiText zh={"使命描述"} /></label>
-    <MissionDescriptionComposer ref={descriptionRef} content={descriptionContent} agents={agents} memberAgentIds={memberAgentIds} unavailableAgentIds={unavailableAgentIds} disabled={disabled} identity={mission ? `mission-description:${mission.missionId}` : 'mission-description:new'} onChange={onDescriptionChange} onPasteFiles={files => addFiles(files.map(file => ({file, kindHint:'file'})))}/>
+    <MissionDescriptionComposer ref={descriptionRef} content={descriptionContent} agents={agents} installations={installations} memberAgentIds={memberAgentIds} unavailableAgentIds={unavailableAgentIds} disabled={disabled} identity={mission ? `mission-description:${mission.missionId}` : 'mission-description:new'} onChange={onDescriptionChange} onPasteFiles={files => addFiles(files.map(file => ({file, kindHint:'file'})))}/>
     {!!pending.length && <div className="mission-pending-members" aria-label={uiAttribute('待加入队员')}><span>{mission ? uiAttribute('保存时加入') : uiAttribute('新建时加入')}</span>{pending.map(id => {
       const member = agents.find(agent => agent.agentId === id)
       return <span className="mission-pending-member" key={id}><MemberAvatar agentId={id} displayName={member?.displayName ?? uiAttribute('不可用队员')} avatarRef={member?.avatarRef ?? null} size="mention" decorative/><span>{member?.displayName ?? uiAttribute('不可用队员')}</span><button type="button" disabled={disabled} aria-label={uiAttribute('取消邀请 {0}', member?.displayName ?? id)} onClick={() => onDescriptionChange(descriptionContent.filter(segment => segment.kind !== 'member_mention' || segment.agentId !== id))}>×</button></span>

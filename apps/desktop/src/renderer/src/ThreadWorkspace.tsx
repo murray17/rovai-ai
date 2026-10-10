@@ -151,6 +151,7 @@ import { formatThreadTitle } from './camp-title'
 import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
+import { mentionCandidateRuntime } from './mention-runtime'
 import { SafeMarkdown } from './SafeMarkdown'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
@@ -8244,23 +8245,6 @@ function MentionAllMembersPopover({
 
 function mentionPresenceLabel(presence: AgentProfile['presence']): string {
   return ({ present:uiAttribute("在队"), away:uiAttribute("暂离"), removed:uiAttribute("已移除") })[presence]
-}
-
-function mentionCandidateRuntime(profile: AgentProfile | undefined, installations: AdapterInstallation[]): {
-  runtimeKind?: NonNullable<AgentProfile['runtimeConfiguration']>['adapterKind']
-  runtimeLabel: string
-  modelLabel?: string
-} {
-  if (!profile) return { runtimeLabel: uiAttribute('智能体未载入') }
-  const configuration = profile.runtimeConfiguration
-  if (!configuration) return { runtimeLabel: uiAttribute('未配置智能体') }
-  return {
-    runtimeKind: configuration.adapterKind,
-    runtimeLabel: runtimeAdapterLabel(configuration.adapterKind),
-    modelLabel: memberRuntimeConfigurationPresentation(
-      configuration, runtimeEditorInstallation(installations, configuration.adapterKind)
-    ).model
-  }
 }
 
 function mentionRuntimeLabel(profile: AgentProfile): string {
