@@ -6,10 +6,18 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Pi 思考强度与目录观察（2026-10-10）
+
+按 User 批复收紧为目录准入/提交/读取解耦、同模型续接避免重复选模、目录观察非破坏性使用。
+复用表、Check Manager、临时探测 Host、整目录缓存和任务租约，不新增缓存、Provider 健康或默认值管理系统。
+能力由 Core 解析为 thinking_level，既有控件与 Run 冻结历史消费；保存不依赖目录健康。
+当前字段和执行顺序见 [Runtime Launch v55](../../contracts/runtime-launch-and-verification-v55.md)，
+验证与边界见[实施计划](implementation-plan.md#2026-10-10-pi-目录观察与思考强度)。
 
 ## Cline / Command Code 保留 ACP，暂缓公开（2026-10-09，User 105）
 

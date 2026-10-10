@@ -1,0 +1,296 @@
+{
+  "version": "0.84.4",
+  "root": "<isolated-temp-root>",
+  "profile": "<isolated-temp-root>/pi-agent",
+  "modelA": {
+    "provider": "anthropic",
+    "id": "claude-haiku-4-5"
+  },
+  "modelB": {
+    "provider": "anthropic",
+    "id": "claude-haiku-4-5-20251001"
+  },
+  "coldStartupMs": 233,
+  "catalogMs": 0,
+  "catalogEntries": 13,
+  "rpcHostStarts": 2,
+  "generationRequests": 0,
+  "nativeSettingsChanged": false,
+  "scenarios": [
+    {
+      "case": "native repeated same-model selection",
+      "before": "high",
+      "after": "medium"
+    },
+    {
+      "case": "exact resume, same model, unspecified",
+      "thinking": "high",
+      "requested": null,
+      "exact": true,
+      "commands": [
+        "get_state"
+      ]
+    },
+    {
+      "case": "same model, explicit off",
+      "thinking": "off",
+      "requested": "off",
+      "exact": true,
+      "commands": [
+        "set_thinking_level",
+        "get_state"
+      ]
+    },
+    {
+      "case": "clear override, same model",
+      "thinking": "off",
+      "requested": null,
+      "exact": true,
+      "commands": [
+        "get_state"
+      ]
+    },
+    {
+      "case": "same model, explicit low",
+      "thinking": "low",
+      "requested": "low",
+      "exact": true,
+      "commands": [
+        "set_thinking_level",
+        "get_state"
+      ]
+    },
+    {
+      "case": "different model, unspecified",
+      "thinking": "medium",
+      "requested": null,
+      "exact": true,
+      "commands": [
+        "set_model",
+        "get_state"
+      ]
+    },
+    {
+      "case": "different model, explicit high",
+      "thinking": "high",
+      "requested": "high",
+      "exact": true,
+      "commands": [
+        "set_model",
+        "set_thinking_level",
+        "get_state"
+      ]
+    },
+    {
+      "case": "native clamp must be rejected by Rovai",
+      "thinking": "high",
+      "requested": "max",
+      "exact": false,
+      "commands": [
+        "set_thinking_level",
+        "get_state"
+      ]
+    },
+    {
+      "case": "new Session, unspecified",
+      "thinking": "medium",
+      "requested": null,
+      "exact": true,
+      "commands": [
+        "get_state"
+      ]
+    },
+    {
+      "case": "warm Host, exact restored Session",
+      "thinking": "high",
+      "requested": null,
+      "exact": true,
+      "commands": [
+        "get_state"
+      ]
+    },
+    {
+      "case": "cold Host, exact restored Session",
+      "thinking": "high",
+      "requested": null,
+      "exact": true,
+      "commands": [
+        "get_state"
+      ]
+    }
+  ],
+  "trace": [
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_available_models"
+    },
+    {
+      "host": 1,
+      "command": "set_model",
+      "provider": "anthropic",
+      "modelId": "claude-haiku-4-5"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "switch_session",
+      "sessionPath": "<isolated-temp-root>/sessions/restored-session.jsonl"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "set_thinking_level",
+      "level": "off"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "set_thinking_level",
+      "level": "low"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "set_model",
+      "provider": "anthropic",
+      "modelId": "claude-haiku-4-5-20251001"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "set_model",
+      "provider": "anthropic",
+      "modelId": "claude-haiku-4-5"
+    },
+    {
+      "host": 1,
+      "command": "set_thinking_level",
+      "level": "high"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "set_thinking_level",
+      "level": "max"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "set_thinking_level",
+      "level": "high"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "new_session"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "switch_session",
+      "sessionPath": "<isolated-temp-root>/sessions/restored-session.jsonl"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 1,
+      "command": "get_state"
+    },
+    {
+      "host": 2,
+      "command": "get_state"
+    },
+    {
+      "host": 2,
+      "command": "get_state"
+    },
+    {
+      "host": 2,
+      "command": "get_state"
+    }
+  ],
+  "managedHostSmoke": "pi::host::tests::real_pi_machine_ready_smoke: passed with isolated PI_CODING_AGENT_DIR and fixture credential",
+  "observedFiles": [
+    "pi-agent/auth.json (empty object)",
+    "pi-agent/models-store.json (empty object)",
+    "pi-agent/settings.json (unchanged)",
+    "sessions/*.jsonl (synthetic native history, appended model/thinking changes)"
+  ]
+}

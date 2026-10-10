@@ -3,10 +3,24 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # v1.72 实施与验收
+
+## 2026-10-10 Pi 目录观察与思考强度
+
+按 User 修订实现三个边界：Pi 目录准入、调度、提交、读取独立于健康；目标 Session 激活后避免同模型重复选模；
+目录只作有效观察且不破坏 Pi 已选模型/强度。复用原表与 metadata，无 schema 迁移、新缓存或 Provider 管理系统。
+单一 Core 解析器输出 thinking_level，现有控件、配置摘要和 Run 历史消费；显式值由目标任务 Host 严格回读。
+
+当前规范：[Runtime Launch v55](../../contracts/runtime-launch-and-verification-v55.md)、
+[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#pi-coding-agent-当前边界)、
+[队员配置](../../ui/components/member-identity.md)。这是局部实现修正，未新增需要长期取舍治理的 Version Decision。
+
+验收、两个新增 Rust owner 的准入理由、Pi 0.84.4 原生无生成对照、复现脚本和明确未测边界见
+[Pi 思考强度验收](../../research/pi-thinking-level-2026-10-10/README.md)。默认 workspace 与定向 Rust、前端、Electron 交互、
+typecheck 与桌面构建通过；扩展筛选中的两项既有失败已在独立基线构建复现，保留原样，不报告全套通过。
 
 ## 实施切片
 
