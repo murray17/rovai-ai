@@ -1,0 +1,1151 @@
+{
+  "schemaVersion": 1,
+  "authority": "research-evidence-only",
+  "status": "verified-with-limitations",
+  "recordedAt": "2026-10-05T17:07:25.317655+00:00",
+  "baseCommit": "9a59550570669a3abf510a09eebdd021bb8893da",
+  "implementationRef": "same commit as this evidence; baseCommit is the pre-change baseline",
+  "platform": "macos-arm64",
+  "versions": {
+    "command-code": "1.74.1",
+    "cline": "3.0.65"
+  },
+  "latestNpmVersionsObserved": {
+    "command-code": "1.74.1",
+    "cline": "3.0.68"
+  },
+  "model": "sub2api/gpt-6-sol",
+  "qualification": "preview",
+  "isolation": {
+    "separateApp": true,
+    "separateUserData": true,
+    "separateSkillLibrary": true,
+    "separateNativeHomes": true,
+    "dailyAppModified": false
+  },
+  "initialPackagedHostSha256": "f079a33260fabf927836cf2b0a4f7d0d28dcbfb7587e85300ca5597056dd184f",
+  "buildCoverage": "first 11 App Runs use initialPackagedHostSha256; next two use guardRefinementPackagedHostSha256; final two use packagedHostSha256 after synchronizing the compatibility-register evidence revision",
+  "packagedHostSha256": "c032615948b76f462165f416846dab2a14fc4242f783fcf03599ed968eb307e4",
+  "clineSystem": {
+    "deliveryMode": "managed_system_prompt",
+    "turns": [
+      {
+        "label": "a-first",
+        "pid": 1732,
+        "sid": "1791217666206_Apg1y_cli",
+        "reply": "BOOTSTRAP60_ROSE_A"
+      },
+      {
+        "label": "b-first",
+        "pid": 1732,
+        "sid": "1791217666207_3Yw8G_cli",
+        "reply": "BOOTSTRAP60_ROSE_B"
+      },
+      {
+        "label": "a-return",
+        "pid": 1732,
+        "sid": "1791217666206_Apg1y_cli",
+        "reply": "BOOTSTRAP60_ROSE_A MEMORY_A60"
+      },
+      {
+        "label": "a-cold",
+        "pid": 2057,
+        "sid": "1791217666206_Apg1y_cli",
+        "reply": "BOOTSTRAP60_ROSE_A MEMORY_A60"
+      }
+    ],
+    "systemWitness": [
+      {
+        "root": true,
+        "a": 1,
+        "b": 0,
+        "userA": 0,
+        "userB": 0
+      },
+      {
+        "root": true,
+        "a": 0,
+        "b": 1,
+        "userA": 0,
+        "userB": 0
+      },
+      {
+        "root": true,
+        "a": 1,
+        "b": 0,
+        "userA": 0,
+        "userB": 0
+      },
+      {
+        "root": true,
+        "a": 1,
+        "b": 0,
+        "userA": 0,
+        "userB": 0
+      }
+    ],
+    "witnessScope": "beforeModel root call; userA/userB count only role=user, not assistant replies",
+    "requiredPluginGateAdded": false,
+    "nativeCompactionEnabled": false
+  },
+  "commandDirectNativeMcp": {
+    "label": "native-mcp-first",
+    "pid": 459,
+    "sessionId": "9734ed0f-89e5-4155-80a6-adc75ef25724",
+    "stopReason": "end_turn",
+    "usage": {
+      "inputTokens": 50903,
+      "outputTokens": 203,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0
+    },
+    "context": [
+      {
+        "sessionUpdate": "usage_update",
+        "used": 17164,
+        "size": 272000
+      }
+    ],
+    "actualMcpCalls": 0,
+    "successfulSearchToolCalls": 2
+  },
+  "packagedApp": {
+    "threadId": "rvcamp_01m43m54h1f8sapwyz6fkq8dj8",
+    "runCount": 15,
+    "allRunsReachedSucceeded": true,
+    "note": "Run succeeded means terminal and public delivery; it does not certify semantic MCP invocation or exact file bytes.",
+    "runs": [
+      {
+        "id": "8f2dfce6-cf67-4700-8c7e-09ffdaf721b9",
+        "runtime_adapter_kind": "cline-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:32:29.175377+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+            "native_binding_generation": 13,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 29263,
+            "cache_read_tokens": 5120,
+            "cache_write_tokens": 0,
+            "output_tokens": 643,
+            "reasoning_output_tokens": 106,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "cline-first-files-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "rovai_wins",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "c7983198-0cbb-4292-a992-6c1c624a2dfb",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:32:29.336638+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "aaf34562-7ba6-4071-be16-29fa68675c5a",
+            "native_binding_generation": 18,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 91995,
+            "cache_read_tokens": 43648,
+            "cache_write_tokens": 0,
+            "output_tokens": 811,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-native-mcp-discovery-no-invocation",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "skipped_native_name_conflict",
+                "reason": "native_mcp_name_conflict"
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "5ffa8e74-b3db-48a6-9bc9-ac94610d93a9",
+        "runtime_adapter_kind": "cline-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:33:48.268356+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+            "native_binding_generation": 13,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 32010,
+            "cache_read_tokens": 13312,
+            "cache_write_tokens": 0,
+            "output_tokens": 906,
+            "reasoning_output_tokens": 471,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "cline-warm-send-newline-counterexample",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "rovai_wins",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "ae872299-5260-425e-a0e0-7e85b3de79c0",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:33:48.500486+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "aaf34562-7ba6-4071-be16-29fa68675c5a",
+            "native_binding_generation": 18,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 37376,
+            "cache_read_tokens": 89216,
+            "cache_write_tokens": 0,
+            "output_tokens": 715,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-warm-files-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "skipped_native_name_conflict",
+                "reason": "native_mcp_name_conflict"
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "18ad98d8-6d8d-4258-979d-cfbb045fc602",
+        "runtime_adapter_kind": "cline-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:35:31.230549+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+            "native_binding_generation": 13,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 2000,
+            "cache_read_tokens": 12672,
+            "cache_write_tokens": 0,
+            "output_tokens": 127,
+            "reasoning_output_tokens": 24,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "cline-exact-cold-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "rovai_wins",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "unassigned",
+                "reason": null
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "7d7dc86a-3c93-479d-b89e-96db9d8a7ca2",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:35:31.417708+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "aaf34562-7ba6-4071-be16-29fa68675c5a",
+            "native_binding_generation": 18,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 32146,
+            "cache_read_tokens": 12032,
+            "cache_write_tokens": 0,
+            "output_tokens": 153,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-exact-cold-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:8ec9fce12462cb0832ce760ad5d9baae53de3ba79b006afc0dc32387f0c34e74",
+                "status": "skipped_native_name_conflict",
+                "reason": "native_mcp_name_conflict"
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "3d749bc8-8fd9-4d8a-aa62-e5368e413034",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:36:04.311187+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "aaf34562-7ba6-4071-be16-29fa68675c5a",
+            "native_binding_generation": 18,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 33244,
+            "cache_read_tokens": 12032,
+            "cache_write_tokens": 0,
+            "output_tokens": 104,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-native-mcp-update",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:385cae9960ea549b6e4fe4cb0c892ccc25c0c0d3596a1e3859aaf948e7ef784d",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:385cae9960ea549b6e4fe4cb0c892ccc25c0c0d3596a1e3859aaf948e7ef784d",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:385cae9960ea549b6e4fe4cb0c892ccc25c0c0d3596a1e3859aaf948e7ef784d",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:385cae9960ea549b6e4fe4cb0c892ccc25c0c0d3596a1e3859aaf948e7ef784d",
+                "status": "skipped_native_name_conflict",
+                "reason": "native_mcp_name_conflict"
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "e23df36e-3c4d-4a14-b042-eb6f3cff2ab0",
+        "runtime_adapter_kind": "cline-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:37:05.103605+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+            "native_binding_generation": 13,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 24500,
+            "cache_read_tokens": 7808,
+            "cache_write_tokens": 0,
+            "output_tokens": 247,
+            "reasoning_output_tokens": 17,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "cline-same-servers-positive-control",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "rovai_wins",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+                "status": "ready",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+                "status": "disabled",
+                "reason": null
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "f23adb81-a55f-4e25-b7db-624abca34f79",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:37:05.269285+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "aaf34562-7ba6-4071-be16-29fa68675c5a",
+            "native_binding_generation": 18,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 34211,
+            "cache_read_tokens": 12032,
+            "cache_write_tokens": 0,
+            "output_tokens": 86,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-mcp-unassigned",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": [
+              {
+                "serverId": "6a2d15e4-a111-4f0f-9c9d-578d8d3da17c",
+                "name": "command_native60",
+                "runtimeName": "command_native60",
+                "transport": "stdio",
+                "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "4570b4b0-6dd8-4c34-ae9c-da3b212a84fb",
+                "name": "http_native60",
+                "runtimeName": "http_native60",
+                "transport": "streamable_http",
+                "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+                "status": "unassigned",
+                "reason": null
+              },
+              {
+                "serverId": "3e606e9e-78e6-49ec-94db-0257cb9f0e3a",
+                "name": "native_same60",
+                "runtimeName": "native_same60",
+                "transport": "stdio",
+                "configDigest": "sha256:39f492bd15d99e327267cec21dc0612a022fc9a072bc9479702a85b1187a9079",
+                "status": "disabled",
+                "reason": null
+              }
+            ]
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "734de1ae-06ae-4123-a0ea-c92cf4218f34",
+        "runtime_adapter_kind": "cline-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:42:31.239187+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+            "native_binding_generation": 13,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 4962,
+            "cache_read_tokens": 10880,
+            "cache_write_tokens": 0,
+            "output_tokens": 81,
+            "reasoning_output_tokens": 9,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "cline-cleanup-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "rovai_wins",
+            "warnings": [],
+            "servers": []
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "2acae680-0a32-4c2f-b4b3-87e5dc348cdc",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:42:31.517563+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "e30028b3-a606-4198-a9c0-d88ccb3853b2",
+            "native_binding_generation": 19,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 26105,
+            "cache_read_tokens": 30080,
+            "cache_write_tokens": 0,
+            "output_tokens": 326,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-cleanup-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": []
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "9cc392e5-4f17-4131-be70-fe639913a2ca",
+        "runtime_adapter_kind": "cline-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:57:09.075421+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+            "native_binding_generation": 13,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 2756,
+            "cache_read_tokens": 14208,
+            "cache_write_tokens": 0,
+            "output_tokens": 59,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "cline-final-package-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "rovai_wins",
+            "warnings": [],
+            "servers": []
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "736984fd-bf5f-4840-9ef9-818a4b768abf",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T16:57:13.882340+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "e30028b3-a606-4198-a9c0-d88ccb3853b2",
+            "native_binding_generation": 19,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 27031,
+            "cache_read_tokens": 12032,
+            "cache_write_tokens": 0,
+            "output_tokens": 100,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-final-package-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": []
+          }
+        ],
+        "publicMessageCount": 1
+      },
+      {
+        "id": "f57653df-484e-41fb-9c6d-8722de939c89",
+        "runtime_adapter_kind": "cline-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T17:06:21.818362+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+            "native_binding_generation": 13,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 2716,
+            "cache_read_tokens": 15360,
+            "cache_write_tokens": 0,
+            "output_tokens": 59,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "cline-final-admission-package-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "rovai_wins",
+            "warnings": [],
+            "servers": []
+          }
+        ],
+        "publicMessageCount": 1,
+        "publicReply": "叮叮：最终包发送复验通过"
+      },
+      {
+        "id": "f56969e3-a496-45d1-910d-610f1f6fade0",
+        "runtime_adapter_kind": "command-code-cli",
+        "status": "succeeded",
+        "last_error_code": null,
+        "created_at": "2026-10-05T17:06:25.121837+00:00",
+        "bootstrap": [
+          {
+            "native_binding_id": "e30028b3-a606-4198-a9c0-d88ccb3853b2",
+            "native_binding_generation": 19,
+            "delivery_mode": "managed_system_prompt",
+            "bootstrap_redelivery_present": 0
+          }
+        ],
+        "usage": [
+          {
+            "uncached_input_tokens": 14279,
+            "cache_read_tokens": 25856,
+            "cache_write_tokens": 0,
+            "output_tokens": 92,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        ],
+        "scenario": "command-final-admission-package-send",
+        "mcpExposure": [
+          {
+            "schemaVersion": 2,
+            "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+            "configStatus": "ready",
+            "projectionMode": "additive_per_run",
+            "sameNamePolicy": "native_wins_skip",
+            "warnings": [],
+            "servers": []
+          }
+        ],
+        "publicMessageCount": 1,
+        "publicReply": "芝士：最终包发送复验通过"
+      }
+    ],
+    "warmBindings": [
+      {
+        "agent_id": "agent_2",
+        "native_session_id": "28d1d0f0-c6f4-4da9-aed3-c58abb78c2ef",
+        "native_binding_id": "aaf34562-7ba6-4071-be16-29fa68675c5a",
+        "native_binding_generation": 18
+      },
+      {
+        "agent_id": "agent_1",
+        "native_session_id": "1791217949748_FrXN__cli",
+        "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+        "native_binding_generation": 13
+      }
+    ],
+    "coldBindings": [
+      {
+        "agent_id": "agent_2",
+        "native_session_id": "28d1d0f0-c6f4-4da9-aed3-c58abb78c2ef",
+        "native_binding_id": "aaf34562-7ba6-4071-be16-29fa68675c5a",
+        "native_binding_generation": 18
+      },
+      {
+        "agent_id": "agent_1",
+        "native_session_id": "1791217949748_FrXN__cli",
+        "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+        "native_binding_generation": 13
+      }
+    ],
+    "warmColdBindingUnchanged": true,
+    "finalBindings": [
+      {
+        "agent_id": "agent_2",
+        "native_session_id": "cb18f75a-6fd8-4861-803c-6b2db36fd7d7",
+        "native_binding_id": "e30028b3-a606-4198-a9c0-d88ccb3853b2",
+        "native_binding_generation": 19
+      },
+      {
+        "agent_id": "agent_1",
+        "native_session_id": "1791217949748_FrXN__cli",
+        "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+        "native_binding_generation": 13
+      }
+    ],
+    "finalContext": [
+      {
+        "runtime_kind": "cline-cli",
+        "native_session_id": "1791217949748_FrXN__cli",
+        "native_binding_id": "301e9573-3a00-4ee3-b84e-7150067f5128",
+        "native_binding_generation": 13,
+        "context_used_tokens": 9104,
+        "context_window_tokens": 272000,
+        "source": "runtime_private_extension"
+      },
+      {
+        "runtime_kind": "command-code-cli",
+        "native_session_id": "cb18f75a-6fd8-4861-803c-6b2db36fd7d7",
+        "native_binding_id": "e30028b3-a606-4198-a9c0-d88ccb3853b2",
+        "native_binding_generation": 19,
+        "context_used_tokens": 20136,
+        "context_window_tokens": 272000,
+        "source": "runtime_event"
+      }
+    ],
+    "nativeConfigRestorationRotatedCommandBindingToGeneration": 19,
+    "finalPackageBindingUnchanged": true
+  },
+  "nativeMcp": {
+    "delivery": "private native mcp.json; ACP session mcpServers empty",
+    "stdioStartupSources": [
+      "NATIVE60_V1",
+      "NATIVE60_V1",
+      "NATIVE60_V2",
+      "NATIVE60_V2"
+    ],
+    "stdioCwdCorrect": true,
+    "literalEnvironmentPreserved": true,
+    "httpMethods": [
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "initialize",
+      "notifications/initialized",
+      "tools/list",
+      "tools/call"
+    ],
+    "allHttpHeadersCorrect": true,
+    "nativeSameNameSources": [
+      "NATIVE_SAME60",
+      "NATIVE_SAME60",
+      "NATIVE_SAME60",
+      "NATIVE_SAME60"
+    ],
+    "assignedSameNameStarted": false,
+    "appCommandActualMcpCalls": 0,
+    "appClineActualStdioMcpCalls": 1,
+    "appClineActualHttpMcpCalls": 1,
+    "positiveControlReplies": [
+      "NATIVE60_V2:CLINE_NATIVE60",
+      "HTTP60:CLINE_NATIVE60"
+    ],
+    "revocation": "next Command Run snapshot unassigned; cleanup Run snapshots empty; obsolete idle Hosts remain in normal 30-minute TTL pool until reap/shutdown",
+    "originalNativeConfigRestored": true
+  },
+  "files": {
+    "cline.txt": {
+      "contentCorrect": false,
+      "sha256": "0010db2720a00eac49e6f294f7923914ed20d757cd0ab8ce0d144827c6c44d85",
+      "twoLinesCorrect": true,
+      "endsWithNewline": false
+    },
+    "command.txt": {
+      "contentCorrect": true,
+      "sha256": "83441401f83cd673588cef0b38e5d296cba4337003c36499f4993e56e231d5e2",
+      "twoLinesCorrect": true,
+      "endsWithNewline": true
+    }
+  },
+  "ui": {
+    "method": "native accessibility click and screenshot on isolated packaged App",
+    "cline": {
+      "file": "验收60/cline.txt",
+      "clickOpensDiff": true,
+      "deleted": "before60",
+      "added": "after60",
+      "additions": 1,
+      "deletions": 1
+    },
+    "command": {
+      "file": "验收60/command.txt",
+      "clickOpensDiff": true,
+      "deleted": "before60",
+      "added": "after60",
+      "additions": 1,
+      "deletions": 1
+    }
+  },
+  "cleanup": {
+    "appPid": 18266,
+    "fixtureDescendantProcessesRemaining": [],
+    "httpFixtureAlive": false
+  },
+  "validation": {
+    "rustWorkspace": {
+      "passed": 456,
+      "ignored": 2,
+      "finalRerunAfterRegisterDigestSync": "passed"
+    },
+    "acpExtendedOwner": {
+      "passed": 69,
+      "ignored": 2
+    },
+    "clineExtendedOwner": {
+      "passed": 2
+    },
+    "commandNativeOverlayOwner": {
+      "passed": 1
+    },
+    "compactionExtendedOwner": {
+      "passed": 3
+    },
+    "charterDeliveryOwner": {
+      "passed": 1
+    },
+    "nodeBootstrapObserverOwners": {
+      "passed": 3
+    },
+    "typecheck": "passed",
+    "packageMac": "passed",
+    "signatureVerification": "ad-hoc source and isolated installed App passed",
+    "documentationGates": {
+      "docsTestPassed": 10,
+      "docsCheck": "passed",
+      "docsCheckWithBase": "passed"
+    },
+    "formatAndDiffCheck": "passed",
+    "admissionEvidenceOwner": {
+      "passed": 5
+    },
+    "intermediateFailures": [
+      {
+        "check": "Rust workspace after compatibility register documentation update",
+        "passed": 411,
+        "failed": 1,
+        "ignored": 2,
+        "cause": "compatibility register source bytes changed; evidence revision digest had not been synchronized",
+        "resolution": "synchronized only the bound compatibility-register digest; platform admission unchanged; owner 5 and final workspace 456 passed"
+      }
+    ]
+  },
+  "secretsScan": {
+    "credentialValuesChecked": 2,
+    "matchedChangedFiles": 0
+  },
+  "remaining": [
+    "Command current custom BYOK deferred MCP tools discovered but not invoked",
+    "Command custom native default model absent from ACP explicit model catalog",
+    "Command structured internal nonzero exit code, reasoning tokens and run-attributable native cost not available",
+    "Cline official ACP does not enable SDK compaction",
+    "Cline apply_patch omitted trailing LF despite model claim; exact byte check failed",
+    "Full multi-platform, concurrency/LRU, all network/retry and credential rotation matrices not rerun"
+  ],
+  "guardRefinementPackagedHostSha256": "8bf746e404714601f6bdc58a3f34d49636b9d9746f08cdc22500624bd55c2677"
+}

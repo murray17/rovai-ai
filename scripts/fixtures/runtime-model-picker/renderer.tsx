@@ -101,6 +101,7 @@ function Fixture(): React.JSX.Element {
             options: values.length ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
               values: values.map((value: string) => ({ value, label: value })) }] : [] }
           state.dshPublished = view('completed')
+          if (state.dshNextObservation) state.dshPublished.cache.observedAt = state.dshNextObservation
           if (state.dshMissingActual) state.dshPublished.models = state.dshPublished.models.filter((item: { id: string }) => item.id !== target.modelId)
           resolve(state.dshPublished)
         }
@@ -111,6 +112,11 @@ function Fixture(): React.JSX.Element {
       state.dshPending[pendingKey] = pending
       void pending.then(() => { delete state.dshPending[pendingKey] }, () => { delete state.dshPending[pendingKey] })
       return pending
+    }
+    if (kind === 'deepseek-harness' && state.holdDshCatalog) {
+      const captured = { runtimeKind: kind, cache: { ...installation.modelCatalog },
+        models: installation.snapshot!.models, refreshStatus: 'not_required' as const, diagnosticCode: null }
+      return new Promise(resolve => { state.resolveDshCatalog = () => resolve(captured) })
     }
     if (kind === 'deepseek-harness' && state.dshPublished) return Promise.resolve(state.dshPublished)
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))

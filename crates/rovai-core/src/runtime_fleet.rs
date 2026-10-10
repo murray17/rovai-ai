@@ -3851,6 +3851,15 @@ mod tests {
                     .success()
             );
             // Even an observable empty Job is not a cross-Core exit receipt.
+            // Leader exit and the Job's zero-active-process observation are
+            // separate barriers; wait for the fixture's actual empty Job.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !child.tree_is_empty().unwrap() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("receipt fixture Job did not become empty after leader exit");
             assert!(child.tree_is_empty().unwrap());
             let handshake = root.join("live.pid");
             let mut live_command = tokio::process::Command::new(std::env::current_exe().unwrap());

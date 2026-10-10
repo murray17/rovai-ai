@@ -172,3 +172,8 @@ Base checkout 各自定向复现相同错误（authority_contract_changed / thin
 
 真实模型 Gate：**not_run**。本次没有冻结新旧产品执行计划；发现的既有 Judge 配置使用
 `catalog_bound_alias`，不具备固定模型快照的完整 Gate 证据。不借用旧 campaign 结果，不声称真实模型回归通过。
+
+合流说明（2026-10-09，PR #662）：以上 187/schema 137 是本方案主干交付时的编号。
+Preview 分支已使用同一收据号保存 Mission 描述，合流现通过 189/schema 139 保留或补齐 v33；
+已有 v33 来源不重建格式表、旧 187 收据不改写。具体来源与验证 owner 见
+[当前版本的数据合流说明](README.md#主干与-preview-数据合流2026-10-08)。本说明不改变模型投影方案或确认范围。

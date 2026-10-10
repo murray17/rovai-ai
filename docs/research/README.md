@@ -43,6 +43,7 @@ observation into a stronger claim.
 
 - [`camp.read` latest reads and withdrawn markers](camp-read-latest-and-withdrawn.md) — design input for explicit read/search visibility, withdrawal markers and publication boundaries; current contract is Camp History v10.
 - [Agent governance vision: memory, context evaluation, documentation and member growth](agent-governance-vision.md) — pre-implementation scope and discussion boundaries.
+- [Command Code Runtime research](command-code-runtime/README.md) — native CLI protocol, FirstPayload candidate and parity gaps; not qualified.
 - [Dual-track evaluation and daily Trace analysis](context-evaluation-and-trace-analysis.md) — source audit, metric boundaries, CLI integration, charts and regression/Judge candidates.
 - [Cursor Agent Runtime research](cursor-agent-runtime-research.md)
 - [DeepSeek Harness Runtime research](deepseek-harness-runtime/README.md)

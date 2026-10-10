@@ -21896,7 +21896,6 @@ mod tests {
                 &transaction,
                 &camp_id,
                 "channel-a2a-message",
-                a2a_sequence,
                 &["agent_2".to_string()],
                 &a2a_at,
             )
@@ -22071,7 +22070,6 @@ mod tests {
                 &transaction,
                 &camp_id,
                 "channel-a2a-return",
-                return_sequence,
                 &["agent_1".to_string()],
                 &return_at,
             )
@@ -23780,12 +23778,12 @@ mod tests {
                 "topic-agent-present",
             )
             .unwrap();
-        let (source_message_id, source_sequence): (String, i64) = database
+        let source_message_id: String = database
             .connection()
             .query_row(
-                "SELECT id, sequence FROM camp_message WHERE camp_id = ?1 ORDER BY sequence LIMIT 1",
+                "SELECT id FROM camp_message WHERE camp_id = ?1 ORDER BY sequence LIMIT 1",
                 [camp_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
         let leaving_delivery_id = {
@@ -23794,7 +23792,6 @@ mod tests {
                 &transaction,
                 camp_id,
                 &source_message_id,
-                source_sequence,
                 &["agent_2".to_string()],
                 &Utc::now().to_rfc3339(),
             )

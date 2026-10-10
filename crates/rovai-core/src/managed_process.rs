@@ -522,7 +522,7 @@ fn remove_environment(environment: &mut BTreeMap<OsString, OsString>, key: &std:
 pub struct ManagedProcess {
     #[cfg(unix)]
     child: Child,
-    #[cfg(unix)]
+    #[cfg(all(unix, not(target_os = "macos")))]
     process_group_id: Option<i32>,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     owned_tree: process_tree::ProcessTree,
@@ -554,6 +554,7 @@ impl ManagedProcess {
             )?;
             Ok(Self {
                 child,
+                #[cfg(not(target_os = "macos"))]
                 process_group_id,
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
                 owned_tree,
@@ -643,6 +644,22 @@ impl ManagedProcess {
         None
     }
 
+    pub fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        #[cfg(unix)]
+        {
+            return self.child.try_wait();
+        }
+        #[cfg(windows)]
+        {
+            return self.child.try_wait();
+        }
+        #[allow(unreachable_code)]
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "managed process is unsupported on this host",
+        ))
+    }
+
     pub async fn wait(&mut self) -> io::Result<ExitStatus> {
         #[cfg(unix)]
         {
@@ -660,9 +677,15 @@ impl ManagedProcess {
     }
 
     pub fn request_graceful_termination(&mut self) -> io::Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            let captured = self.capture_descendants();
+            let signaled = self.owned_tree.signal(libc::SIGTERM);
+            return captured.and(signaled);
+        }
         #[cfg(target_os = "linux")]
         let descendants = self.signal_captured_descendants(libc::SIGTERM);
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "macos")))]
         if let Some(process_group_id) = self.process_group_id.filter(|value| *value > 1) {
             // SAFETY: the process was created as the leader of a fresh group by
             // this module; the ID cannot name Rovai's own process group.
@@ -675,7 +698,7 @@ impl ManagedProcess {
             }
             return Err(io::Error::last_os_error());
         }
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "macos")))]
         {
             return self.child.start_kill();
         }
@@ -702,6 +725,30 @@ impl ManagedProcess {
     #[cfg(target_os = "macos")]
     pub(crate) fn tree_is_empty(&self) -> io::Result<bool> {
         self.captured_tree_is_empty()
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn track_descendants(&mut self, directory: &Path) -> io::Result<()> {
+        self.owned_tree.track(directory)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn recover_descendants(directory: &Path) -> io::Result<()> {
+        process_tree::recover(directory)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn recover_runtime_descendants(runtime_directory: &Path) -> io::Result<()> {
+        if !runtime_directory.exists() {
+            return Ok(());
+        }
+        for entry in std::fs::read_dir(runtime_directory)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                process_tree::recover(&entry.path().join("owned-processes"))?;
+            }
+        }
+        Ok(())
     }
 
     /// Preserve descendants before a native cancellation protocol can sever
@@ -740,31 +787,54 @@ impl ManagedProcess {
         if !self.descendants_captured {
             return Ok(false);
         }
-        self.owned_tree.is_empty()
+        let empty = self.owned_tree.is_empty()?;
+        #[cfg(target_os = "macos")]
+        if empty {
+            self.owned_tree.retire()?;
+        }
+        Ok(empty)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_signal_already_complete(&self, error: &io::Error) -> io::Result<bool> {
+        // Darwin may report EPERM after signaling has stopped this launch.
+        // The error alone proves nothing: require the complete captured tree
+        // (including the root) to have no remaining user execution before reap.
+        if error.raw_os_error() == Some(libc::EPERM) {
+            self.captured_tree_is_empty()
+        } else {
+            Ok(false)
+        }
     }
 
     pub fn force_terminate_tree(&mut self) -> io::Result<()> {
         // Capture before killing the root: native tools may own a different
         // process group and are reparented as soon as their parent exits.
         #[cfg(target_os = "macos")]
-        let descendants = {
+        {
             let captured = self.capture_descendants();
             let signalled = self.owned_tree.signal(libc::SIGKILL);
-            captured.and(signalled)
-        };
+            captured?;
+            if let Err(error) = signalled {
+                if !self.macos_signal_already_complete(&error)? {
+                    return Err(error);
+                }
+            }
+            self.tree_termination_requested = true;
+            return Ok(());
+        }
+        #[cfg(not(target_os = "macos"))]
         if self.tree_termination_requested {
-            #[cfg(target_os = "macos")]
-            descendants?;
             return Ok(());
         }
         #[cfg(target_os = "linux")]
         let descendants = self.signal_captured_descendants(libc::SIGKILL);
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "macos")))]
         if let Some(process_group_id) = self.process_group_id.filter(|value| *value > 1) {
             // SAFETY: the process group is created and owned by this instance.
             let result = unsafe { libc::killpg(process_group_id, libc::SIGKILL) };
             if result == 0 {
-                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                #[cfg(target_os = "linux")]
                 descendants?;
                 self.tree_termination_requested = true;
                 return Ok(());
@@ -774,9 +844,9 @@ impl ManagedProcess {
                 return Err(error);
             }
         }
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "macos")))]
         {
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            #[cfg(target_os = "linux")]
             descendants?;
             return match self.child.start_kill() {
                 Ok(()) => {
@@ -1126,6 +1196,13 @@ mod tests {
             .unwrap()
             .unwrap();
         process.capture_descendants().unwrap();
+        #[cfg(target_os = "macos")]
+        assert!(
+            !process
+                .macos_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                .unwrap(),
+            "a live managed tree cannot turn a signal permission error into cleanup"
+        );
         let detached_pid: i32 = line.trim().parse().unwrap();
         let detached = tokio::time::timeout(Duration::from_secs(3), async {
             // The handshake observes the actual setsid boundary, not a sleep
@@ -1159,6 +1236,13 @@ mod tests {
             !process.captured_tree_is_empty().unwrap(),
             "root exit does not reap a detached child"
         );
+        #[cfg(target_os = "macos")]
+        assert!(
+            !process
+                .macos_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                .unwrap(),
+            "root exit is insufficient while a captured detached child is alive"
+        );
         process.force_terminate_tree().unwrap();
         tokio::time::timeout(Duration::from_secs(3), async {
             while !process.captured_tree_is_empty().unwrap() {
@@ -1167,6 +1251,28 @@ mod tests {
         })
         .await
         .expect("captured child must exit even after reparenting");
+        #[cfg(target_os = "macos")]
+        {
+            assert!(
+                process
+                    .macos_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                    .unwrap(),
+                "confirmed identity-bound tree exit must permit root reap after EPERM"
+            );
+            assert!(
+                !process
+                    .macos_signal_already_complete(&io::Error::from_raw_os_error(libc::EACCES))
+                    .unwrap(),
+                "other errors retain their ordinary failure semantics"
+            );
+            process.descendant_capture_failed = true;
+            assert!(
+                process
+                    .macos_signal_already_complete(&io::Error::from_raw_os_error(libc::EPERM))
+                    .is_err(),
+                "an incomplete capture cannot be repaired by a later empty observation"
+            );
+        }
         assert!(
             control.try_wait().unwrap().is_none(),
             "unrelated same-UID processes must survive"

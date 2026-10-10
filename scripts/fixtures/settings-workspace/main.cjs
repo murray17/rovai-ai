@@ -181,6 +181,12 @@ app.whenReady().then(async () => {
     }
     await navigate('general')
     window.setContentSize(1440, 920)
+    await navigate('runtime')
+    await click('.runtime-product-settings[aria-label="Cline 启动设置"]')
+    await waitFor("document.querySelector('.runtime-startup-form')")
+    assert.equal(await run("document.querySelectorAll('.cline-native-login').length"), 0)
+    await navigate('general')
+    window.setContentSize(1440, 920)
     console.error('settings fixture: runtime regression passed')
     await run("document.documentElement.dataset.theme='day'")
     assert.equal(await run("document.querySelectorAll('.general-save-row .dialog-glyph').length"), 1)

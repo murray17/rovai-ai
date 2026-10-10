@@ -1,0 +1,369 @@
+{
+  "observedAt": "2026-10-08T15:27:23.790644+00:00",
+  "scope": "User 97 authorized installed Cline upgrade and ACP restore/compaction verification",
+  "platform": "macos-arm64",
+  "admission": "preview",
+  "rovaiSourceCommit": "b60579662664bc8a6fb9192d64e4ba4c1360c1f4",
+  "packagedExecutionCodeCommit": "9b8fa131d77e8b98feb79667d4a74c699bca0336",
+  "installation": {
+    "wrapper": "/opt/homebrew/lib/node_modules/cline/bin/cline",
+    "version": "3.0.70",
+    "binary": "/opt/homebrew/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline",
+    "sha256": "3ae76234a92f4de4fe6f9bf22635ac656994b29af83ea6d5c144b7eeea5a9ae7",
+    "command": "/opt/homebrew/bin/cline",
+    "source": "official npm global",
+    "previousSource": "Homebrew 3.0.3; keg retained, bin unlinked",
+    "latestStableAtCheck": "3.0.70",
+    "upstreamCommit": "0322bc5d510000a33ef5eadc3b4c84df7fcef285",
+    "credentialsCopied": false,
+    "nativeBinaryPatched": false
+  },
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "promptCapabilities": {
+        "image": true,
+        "audio": false,
+        "embeddedContext": false
+      }
+    },
+    "agentInfo": {
+      "name": "cline",
+      "version": "3.0.70"
+    },
+    "authMethods": [
+      {
+        "id": "cline",
+        "name": "Sign in with Cline"
+      },
+      {
+        "id": "cline-pass",
+        "name": "Sign in with ClinePass"
+      },
+      {
+        "id": "openai-codex",
+        "name": "Sign in with ChatGPT Subscription"
+      }
+    ]
+  },
+  "capabilityProbeModelRequests": 0,
+  "product": {
+    "account": {
+      "passed": true,
+      "provider": "openai-codex",
+      "authentication": "native-account-no-static-key",
+      "readiness": {
+        "status": "ready",
+        "protocols": [
+          "acp-v1"
+        ],
+        "version": "3.0.70"
+      },
+      "packagedRendererToCore": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "5f740f6d-7391-45c5-b397-cfa5b7cb422c",
+          "status": "succeeded",
+          "host": "b5fbc40f-d145-401a-bd2e-86832b928d72",
+          "session": "1791472739772_dcjxP_cli",
+          "bindingId": "e5e41ae7-ca52-4a2b-8a4e-f87a2723e33e",
+          "bindingGeneration": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryMarkerPresent": true,
+          "actions": 2,
+          "approvals": 0,
+          "fileProjectionStatus": "no_changes",
+          "fileCount": 0,
+          "usage": {
+            "runtime_version": "3.0.70",
+            "usage_source": "runtime_private_extension",
+            "usage_quality": "runtime_reported",
+            "model_key": "cline-cli://runtime-default",
+            "provider_key": null,
+            "prompt_input_total_tokens": 26528,
+            "output_tokens": 159,
+            "cache_read_tokens": 16000,
+            "cache_write_tokens": 0,
+            "reasoning_output_tokens": 32,
+            "cost_amount_decimal": null
+          }
+        },
+        {
+          "label": "warm",
+          "runId": "7d4d2c96-882d-4fbf-8889-2f709eab00ab",
+          "status": "succeeded",
+          "host": "b5fbc40f-d145-401a-bd2e-86832b928d72",
+          "session": "1791472739772_dcjxP_cli",
+          "bindingId": "e5e41ae7-ca52-4a2b-8a4e-f87a2723e33e",
+          "bindingGeneration": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryMarkerPresent": true,
+          "actions": 1,
+          "approvals": 0,
+          "fileProjectionStatus": "no_changes",
+          "fileCount": 0,
+          "usage": {
+            "runtime_version": "3.0.70",
+            "usage_source": "runtime_private_extension",
+            "usage_quality": "runtime_reported",
+            "model_key": "cline-cli://runtime-default",
+            "provider_key": null,
+            "prompt_input_total_tokens": 19440,
+            "output_tokens": 109,
+            "cache_read_tokens": 18176,
+            "cache_write_tokens": 0,
+            "reasoning_output_tokens": null,
+            "cost_amount_decimal": null
+          }
+        },
+        {
+          "label": "cold",
+          "runId": "0f23ceca-716a-42c3-990f-1292d884a787",
+          "status": "succeeded",
+          "host": "c6fb48a4-d219-4650-a541-a91070ca18e1",
+          "session": "1791472739772_dcjxP_cli",
+          "bindingId": "e5e41ae7-ca52-4a2b-8a4e-f87a2723e33e",
+          "bindingGeneration": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryMarkerPresent": true,
+          "actions": 1,
+          "approvals": 0,
+          "fileProjectionStatus": "no_changes",
+          "fileCount": 0,
+          "usage": {
+            "runtime_version": "3.0.70",
+            "usage_source": "runtime_private_extension",
+            "usage_quality": "runtime_reported",
+            "model_key": "cline-cli://runtime-default",
+            "provider_key": null,
+            "prompt_input_total_tokens": 18932,
+            "output_tokens": 119,
+            "cache_read_tokens": 12800,
+            "cache_write_tokens": 0,
+            "reasoning_output_tokens": 28,
+            "cost_amount_decimal": null
+          }
+        }
+      ],
+      "warmSameHost": true,
+      "coldDifferentHost": true,
+      "sameSession": true,
+      "sameBinding": true,
+      "sameGeneration": true,
+      "priorUsageUnchangedAfterLoad": true,
+      "priorFilesUnchangedAfterLoad": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceFilesUnchanged": true,
+      "processes": [
+        {
+          "pid": 33319,
+          "code": 0,
+          "signal": null
+        },
+        {
+          "pid": 33588,
+          "code": 0,
+          "signal": null
+        }
+      ],
+      "screenshotSha256": "08f7f1322e5d5c4330adf4b9287db4d90160a76081a712d3d8aa0b0244a9698d"
+    },
+    "byok": {
+      "passed": true,
+      "provider": "openai-compatible",
+      "authentication": "byok",
+      "readiness": {
+        "status": "ready",
+        "protocols": [
+          "acp-v1"
+        ],
+        "version": "3.0.70"
+      },
+      "packagedRendererToCore": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "5c2600c1-27a0-4ae2-9220-0c2d3ea0326b",
+          "status": "succeeded",
+          "host": "6a4d2bd9-c694-4f2a-ba42-57d21f8b19de",
+          "session": "1791472822622_k0qTT_cli",
+          "bindingId": "aa979d54-d0b3-4b78-985f-1f358d488ee0",
+          "bindingGeneration": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryMarkerPresent": true,
+          "actions": 2,
+          "approvals": 0,
+          "fileProjectionStatus": "no_changes",
+          "fileCount": 0,
+          "usage": {
+            "runtime_version": "3.0.70",
+            "usage_source": "runtime_private_extension",
+            "usage_quality": "runtime_reported",
+            "model_key": "cline-cli://runtime-default",
+            "provider_key": null,
+            "prompt_input_total_tokens": 13205,
+            "output_tokens": 146,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_output_tokens": 68,
+            "cost_amount_decimal": null
+          }
+        },
+        {
+          "label": "warm",
+          "runId": "eb51a5b2-4278-4411-b326-a362e01dbb29",
+          "status": "succeeded",
+          "host": "6a4d2bd9-c694-4f2a-ba42-57d21f8b19de",
+          "session": "1791472822622_k0qTT_cli",
+          "bindingId": "aa979d54-d0b3-4b78-985f-1f358d488ee0",
+          "bindingGeneration": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryMarkerPresent": true,
+          "actions": 1,
+          "approvals": 0,
+          "fileProjectionStatus": "no_changes",
+          "fileCount": 0,
+          "usage": {
+            "runtime_version": "3.0.70",
+            "usage_source": "runtime_private_extension",
+            "usage_quality": "runtime_reported",
+            "model_key": "cline-cli://runtime-default",
+            "provider_key": null,
+            "prompt_input_total_tokens": 10519,
+            "output_tokens": 111,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_output_tokens": 27,
+            "cost_amount_decimal": null
+          }
+        },
+        {
+          "label": "cold",
+          "runId": "0758c6df-1000-46d8-87b5-bfd678070f91",
+          "status": "succeeded",
+          "host": "d4e12ea2-01f4-4828-8012-19ce36303014",
+          "session": "1791472822622_k0qTT_cli",
+          "bindingId": "aa979d54-d0b3-4b78-985f-1f358d488ee0",
+          "bindingGeneration": 1,
+          "publicMessages": 1,
+          "committedBuiltinSends": 1,
+          "identityMarkerPresent": true,
+          "earlyMemoryMarkerPresent": true,
+          "actions": 1,
+          "approvals": 0,
+          "fileProjectionStatus": "no_changes",
+          "fileCount": 0,
+          "usage": {
+            "runtime_version": "3.0.70",
+            "usage_source": "runtime_private_extension",
+            "usage_quality": "runtime_reported",
+            "model_key": "cline-cli://runtime-default",
+            "provider_key": null,
+            "prompt_input_total_tokens": 9998,
+            "output_tokens": 105,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_output_tokens": 26,
+            "cost_amount_decimal": null
+          }
+        }
+      ],
+      "warmSameHost": true,
+      "coldDifferentHost": true,
+      "sameSession": true,
+      "sameBinding": true,
+      "sameGeneration": true,
+      "priorUsageUnchangedAfterLoad": true,
+      "priorFilesUnchangedAfterLoad": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceFilesUnchanged": true,
+      "processes": [
+        {
+          "pid": 34135,
+          "code": 0,
+          "signal": null
+        },
+        {
+          "pid": 34460,
+          "code": 0,
+          "signal": null
+        }
+      ],
+      "screenshotSha256": "154c7e0d9cf174c99f311ea63161bb247b9522db98a177aef72d81fe254162a9"
+    }
+  },
+  "sourceAudit": {
+    "apps/cli/src/acp/acpAgent.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/apps/cli/src/acp/acpAgent.ts",
+      "sha256": "39f68873abc43f80a858dbdbdfb7b6d3f3d29fb7fdf96157d229c7a71084a165"
+    },
+    "apps/cli/src/acp/index.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/apps/cli/src/acp/index.ts",
+      "sha256": "2356ba0d6d74d84b25eee9c9e18795a3b4458e7bbce32222d620757d59332449"
+    },
+    "apps/cli/src/acp/session-load.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/apps/cli/src/acp/session-load.ts",
+      "sha256": "60ce949bc0bb61da5476a29485143461c93524d415fbb552d13f44456deb68dd"
+    },
+    "apps/cli/src/main.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/apps/cli/src/main.ts",
+      "sha256": "fb55ddb82cf0acce64f372ed3a95ed4076cf5f23cc92d815e1a0f8f4018d0447"
+    },
+    "apps/cli/src/session/session.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/apps/cli/src/session/session.ts",
+      "sha256": "ec68e0939543e74d14f114a3c4ef6b29fdc12cec67129504e6a8ddb9a2876b59"
+    },
+    "apps/cli/src/utils/compaction-mode.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/apps/cli/src/utils/compaction-mode.ts",
+      "sha256": "835bfeafbf11466f416b96525115586074b972a115c5dc6c1d2987ce2ed39c2d"
+    },
+    "sdk/packages/core/src/extensions/context/compaction.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/sdk/packages/core/src/extensions/context/compaction.ts",
+      "sha256": "50534c940f999797fbe5cacf821739ff99d81610e042aab9c9269ee15dedc696"
+    },
+    "sdk/packages/core/src/runtime/host/local-runtime-host.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/sdk/packages/core/src/runtime/host/local-runtime-host.ts",
+      "sha256": "1df5feac2079db8c527907307a713330bedb779fde6c575b08e5aa18072c9379"
+    },
+    "sdk/packages/core/src/services/local-runtime-bootstrap.ts": {
+      "url": "https://github.com/cline/cline/blob/0322bc5d510000a33ef5eadc3b4c84df7fcef285/sdk/packages/core/src/services/local-runtime-bootstrap.ts",
+      "sha256": "cccfdfaaec5eca541e4e71c5225fffba7b9df3a7d76d3f94ecd39af7380b9b5f"
+    }
+  },
+  "notQualifiedThisRound": [
+    "automatic-compaction-real-trigger",
+    "overflow-recovery",
+    "long-history",
+    "post-compaction-cold",
+    "full-first-login",
+    "credential-refresh",
+    "external-concurrent-refresh",
+    "all-provider-and-platform-matrix"
+  ],
+  "compaction": {
+    "ordinaryCliDefault": "agentic",
+    "ordinaryCliEnableConfig": "source-confirmed",
+    "acpBuildConfigProvidesCompaction": false,
+    "coreRequiresExplicitEnabledTrue": true,
+    "acpAgentShaMatchesPrevious3_0_65Through3_0_68": true,
+    "latestLongContextExperimentPerformed": false,
+    "qualification": "ordinary-acp-auto-compaction-still-not-wired",
+    "specialImportedHistoryAndExistingSidecarExcludedFromClaim": true
+  }
+}

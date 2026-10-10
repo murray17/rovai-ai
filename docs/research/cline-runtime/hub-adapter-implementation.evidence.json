@@ -1,0 +1,2297 @@
+{
+  "schemaVersion": 1,
+  "authority": "research-evidence-only",
+  "observedAt": "2026-10-07T15:45:59.200339+00:00",
+  "baselineCommit": "d9b76dbdfe6e829018005e791c9ba47407dfb892",
+  "userMessageId": "c023f19a-9f1c-4558-b4d4-1bbab3ddffe9",
+  "platform": "macos-arm64",
+  "status": "preview",
+  "selectedCli": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+  "cliVersion": "3.0.3",
+  "hubBuildId": "0.0.41",
+  "protocol": "cline-hub-v1",
+  "protectedFiles": [
+    {
+      "scope": "settings",
+      "name": "cline_mcp_settings.json",
+      "sha256": "066cdcc5ea8b813b6d4155783f53887d104e261e0aec7c3aab159a9efed926ff",
+      "mode": "0o644",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "settings",
+      "name": "cli-default-instance.json",
+      "sha256": "280c6a4556ee1561343b970bd2406f90bd5f5bdf226f7ba190bf5cc0bf85dcc6",
+      "mode": "0o644",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "settings",
+      "name": "providers.json",
+      "sha256": "1b3eff25040b2a8d2584060b8b5849ed0ebbbf883fd3d6b0e7be23522e343426",
+      "mode": "0o600",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "hubFiles",
+      "name": "owners/hub-9869705ea029.json",
+      "sha256": "33491d53d5063fead78684a4c98c01543d1824ca271761da62c73aec6fbdabff",
+      "mode": "0o600",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "LICENSE",
+      "sha256": "f704446a5f1271608805598b557e4288cf8580477ea038c9c3d8b361f693f6b8",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "README.md",
+      "sha256": "96d5695c8bd1808bd30020aa869ac937f1ce1af21d4c1d58eef00fef5475813f",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "package.json",
+      "sha256": "62be1862187cc44837d59d76314118ef12070dd73c71eded042bca24b0d39002",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "postinstall.mjs",
+      "sha256": "78e422d0bb8a9b392926c39f106f9c9808f96bead9438f12ca204ce0d3b3cacf",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "bin/cline",
+      "sha256": "2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "node_modules/.bin/cline",
+      "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "node_modules/@cline/cli-darwin-arm64/package.json",
+      "sha256": "221ac79ad535f10c687f147208fb14d4bbb90cad85b7a22a56cfb2e829a2dbf0",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "node_modules/@cline/cli-darwin-arm64/bin/cline",
+      "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    },
+    {
+      "scope": "installation",
+      "name": "node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js",
+      "sha256": "3fa353ee0fa24a42ce9243b912423a265145c3e894f786aa6a1f894a6626a95c",
+      "mode": "0o755",
+      "unchangedFromNativeResearch": true
+    }
+  ],
+  "existingUserHubAlive": {
+    "pid": 68550,
+    "alive": true
+  },
+  "authorizedAcceptanceSource": {
+    "priorResearchProviderSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+    "currentProviderSha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+    "modelSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+    "earliestProductCopies": [
+      {
+        "fixture": 1,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 2,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 3,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 4,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 5,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 6,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 7,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 8,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 9,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 10,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      },
+      {
+        "fixture": 11,
+        "sha256": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf"
+      }
+    ],
+    "priorResearchProviderDigestMatches": false,
+    "interpretation": "The isolated authorized source differs from the prior research snapshot. Its current bytes match all retained first product copies and final before/after verification. Exact intervening cause is unproven; no source restoration was attempted. The final adapter passes private Host provider/preferences copies to native CLI."
+  },
+  "productFixtures": [
+    {
+      "fixture": 16,
+      "scope": "extended",
+      "wholeFixturePassed": false,
+      "includedPrefixOnly": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "f3ef222e-b9d5-4544-9ca1-b5a4eedec0bd",
+          "status": "succeeded",
+          "nativeSessionId": "1791384563057_y0vxs",
+          "bindingId": "b08a1e47-04e6-44e3-b4d4-f006b1ce8ecd",
+          "generation": 1,
+          "host": {
+            "run": "f3ef222e-b9d5-4544-9ca1-b5a4eedec0bd",
+            "host": "9282b831-2f37-4a17-a30e-4d1229db3be7",
+            "session": "1791384563057_y0vxs",
+            "nativeRun": "run_wJg3BPaU"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 13101,
+            "outputTokens": 151,
+            "cacheReadTokens": 7040,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "member-b",
+          "runId": "ac753fad-12a9-4c69-b3e6-1d105f7a43bb",
+          "status": "succeeded",
+          "nativeSessionId": "1791384575652_6y2jo",
+          "bindingId": "5b072b95-6b78-426e-abe7-6366e7d8d1dc",
+          "generation": 1,
+          "host": {
+            "run": "ac753fad-12a9-4c69-b3e6-1d105f7a43bb",
+            "host": "4b196ce2-8436-49b9-bca0-807dfd707cbf",
+            "session": "1791384575652_6y2jo",
+            "nativeRun": "run_xTmuP5ri"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 12980,
+            "outputTokens": 115,
+            "cacheReadTokens": 6912,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "warm",
+          "runId": "c10608f0-6c85-4774-a3f5-1daa4496c7a0",
+          "status": "succeeded",
+          "nativeSessionId": "1791384563057_y0vxs",
+          "bindingId": "b08a1e47-04e6-44e3-b4d4-f006b1ce8ecd",
+          "generation": 1,
+          "host": {
+            "run": "c10608f0-6c85-4774-a3f5-1daa4496c7a0",
+            "host": "9282b831-2f37-4a17-a30e-4d1229db3be7",
+            "session": "1791384563057_y0vxs",
+            "nativeRun": "run_WJr44M2t"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 2,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 10338,
+            "outputTokens": 80,
+            "cacheReadTokens": 4608,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "cold",
+          "runId": "8a4a717d-24e3-48ce-ac08-f899379adf3c",
+          "status": "succeeded",
+          "nativeSessionId": "1791384563057_y0vxs",
+          "bindingId": "b08a1e47-04e6-44e3-b4d4-f006b1ce8ecd",
+          "generation": 1,
+          "host": {
+            "run": "8a4a717d-24e3-48ce-ac08-f899379adf3c",
+            "host": "4595010c-c450-4c86-a343-28074596d916",
+            "session": "1791384563057_y0vxs",
+            "nativeRun": "run_CjvM6xxl"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 2,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 11397,
+            "outputTokens": 61,
+            "cacheReadTokens": 4608,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "files",
+          "runId": "097f1994-60cf-4a8f-94fc-4bec12574398",
+          "status": "succeeded",
+          "nativeSessionId": "1791384563057_y0vxs",
+          "bindingId": "b08a1e47-04e6-44e3-b4d4-f006b1ce8ecd",
+          "generation": 1,
+          "host": {
+            "run": "097f1994-60cf-4a8f-94fc-4bec12574398",
+            "host": "4595010c-c450-4c86-a343-28074596d916",
+            "session": "1791384563057_y0vxs",
+            "nativeRun": "run_KOT4SRvq"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 7,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 44976,
+            "outputTokens": 294,
+            "cacheReadTokens": 22528,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "complete",
+            "file_count": 1,
+            "operation_count": 2,
+            "additions": 1,
+            "deletions": 1
+          }
+        },
+        {
+          "label": "allow",
+          "runId": "17d58025-6866-4a9c-83aa-6e5a7177a17e",
+          "status": "succeeded",
+          "nativeSessionId": "1791384681959_d3a3u",
+          "bindingId": "b728f594-a9f7-457f-a5f3-90849cc40c50",
+          "generation": 2,
+          "host": {
+            "run": "17d58025-6866-4a9c-83aa-6e5a7177a17e",
+            "host": "7348daf7-18e2-4406-821c-fc3c05f2c6fa",
+            "session": "1791384681959_d3a3u",
+            "nativeRun": "run_SPWcBJOk"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "allow_once",
+            "allow_once",
+            "allow_once",
+            "allow_once"
+          ],
+          "nativeModelCalls": 5,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 22868,
+            "outputTokens": 294,
+            "cacheReadTokens": 13696,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "complete",
+            "file_count": 1,
+            "operation_count": 1,
+            "additions": null,
+            "deletions": null
+          }
+        }
+      ],
+      "hostTempRemaining": [],
+      "coreExitCodes": [
+        0,
+        0
+      ],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true,
+      "configurationIntegrity": null,
+      "mcpActualCallCount": null,
+      "nativeSkillMarkerObserved": null
+    },
+    {
+      "fixture": 20,
+      "scope": "lifecycle",
+      "wholeFixturePassed": true,
+      "includedPrefixOnly": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "91908f80-a346-45bb-9df0-785dc1935fa5",
+          "status": "succeeded",
+          "nativeSessionId": "1791385349776_nyac0",
+          "bindingId": "61ae501f-18db-4d6b-b1fc-51dc5a0e7809",
+          "generation": 1,
+          "host": {
+            "run": "91908f80-a346-45bb-9df0-785dc1935fa5",
+            "host": "f12e6d3e-f5bd-4997-a552-2060d5da1a5c",
+            "session": "1791385349776_nyac0",
+            "nativeRun": "run_EcXJ3vW1"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 13096,
+            "outputTokens": 163,
+            "cacheReadTokens": 4608,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "deny",
+          "runId": "1c3f2719-4779-4106-9e02-bb39957821c9",
+          "status": "succeeded",
+          "nativeSessionId": "1791385371789_4g8tk",
+          "bindingId": "08d642a7-a430-47db-baf3-b8d181ad030d",
+          "generation": 2,
+          "host": {
+            "run": "1c3f2719-4779-4106-9e02-bb39957821c9",
+            "host": "f62f5b82-8cf0-46dc-8595-3c3c89dd8163",
+            "session": "1791385371789_4g8tk",
+            "nativeRun": "run_UsFILZXb"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "deny",
+            "allow_once",
+            "allow_once"
+          ],
+          "nativeModelCalls": 4,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 17159,
+            "outputTokens": 132,
+            "cacheReadTokens": 9216,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "cancel",
+          "runId": "9d59894e-ee59-42d6-aa18-0a81b6ac5dfb",
+          "status": "cancelled",
+          "nativeSessionId": "1791385371789_4g8tk",
+          "bindingId": "08d642a7-a430-47db-baf3-b8d181ad030d",
+          "generation": 2,
+          "host": {
+            "run": "9d59894e-ee59-42d6-aa18-0a81b6ac5dfb",
+            "host": "f62f5b82-8cf0-46dc-8595-3c3c89dd8163",
+            "session": "1791385371789_4g8tk",
+            "nativeRun": "run_lTGJw-fu"
+          },
+          "committedBuiltinSends": 0,
+          "approvalKinds": [
+            "allow_once"
+          ],
+          "nativeModelCalls": 1,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 5136,
+            "outputTokens": 33,
+            "cacheReadTokens": 2304,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "after-cancel",
+          "runId": "59104b6d-1ffd-4840-a46d-a028be6b3bdb",
+          "status": "succeeded",
+          "nativeSessionId": "1791385371789_4g8tk",
+          "bindingId": "08d642a7-a430-47db-baf3-b8d181ad030d",
+          "generation": 2,
+          "host": {
+            "run": "59104b6d-1ffd-4840-a46d-a028be6b3bdb",
+            "host": "c1a85b82-5c2f-4eb2-b236-1cff5bf41dbb",
+            "session": "1791385371789_4g8tk",
+            "nativeRun": "run_sQ5k7w1v"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "allow_once",
+            "allow_once"
+          ],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 18647,
+            "outputTokens": 227,
+            "cacheReadTokens": 8320,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        }
+      ],
+      "hostTempRemaining": [],
+      "coreExitCodes": [
+        0
+      ],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true,
+      "configurationIntegrity": null,
+      "mcpActualCallCount": null,
+      "nativeSkillMarkerObserved": null
+    },
+    {
+      "fixture": 21,
+      "scope": "extensions",
+      "wholeFixturePassed": true,
+      "includedPrefixOnly": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "ed4c5b71-4edd-413b-8e54-0db3e9385a14",
+          "status": "succeeded",
+          "nativeSessionId": "1791385375248_92hb7",
+          "bindingId": "16e24665-3ca4-4e56-a2c3-8f84f8cb9072",
+          "generation": 1,
+          "host": {
+            "run": "ed4c5b71-4edd-413b-8e54-0db3e9385a14",
+            "host": "abb77727-c054-49ef-b795-d52ecfbe7bb4",
+            "session": "1791385375248_92hb7",
+            "nativeRun": "run_a3H-L3R4"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 13112,
+            "outputTokens": 162,
+            "cacheReadTokens": 3712,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "mcp",
+          "runId": "4b238888-1f6b-454e-ae28-5e325e968b90",
+          "status": "succeeded",
+          "nativeSessionId": "1791385375248_92hb7",
+          "bindingId": "16e24665-3ca4-4e56-a2c3-8f84f8cb9072",
+          "generation": 1,
+          "host": {
+            "run": "4b238888-1f6b-454e-ae28-5e325e968b90",
+            "host": "168232be-1b56-432e-9f9a-5a9bfb989f89",
+            "session": "1791385375248_92hb7",
+            "nativeRun": "run_ZDrPLBjp"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 15767,
+            "outputTokens": 111,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "skill",
+          "runId": "1a34423a-8833-497e-b82e-caabf6abbccd",
+          "status": "succeeded",
+          "nativeSessionId": "1791385375248_92hb7",
+          "bindingId": "16e24665-3ca4-4e56-a2c3-8f84f8cb9072",
+          "generation": 1,
+          "host": {
+            "run": "1a34423a-8833-497e-b82e-caabf6abbccd",
+            "host": "168232be-1b56-432e-9f9a-5a9bfb989f89",
+            "session": "1791385375248_92hb7",
+            "nativeRun": "run_2SPjOp0F"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 17831,
+            "outputTokens": 90,
+            "cacheReadTokens": 4992,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        }
+      ],
+      "hostTempRemaining": [],
+      "coreExitCodes": [
+        0
+      ],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true,
+      "configurationIntegrity": null,
+      "mcpActualCallCount": 1,
+      "nativeSkillMarkerObserved": true
+    },
+    {
+      "fixture": 22,
+      "scope": "extended",
+      "wholeFixturePassed": true,
+      "includedPrefixOnly": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "931f63c2-aa84-468e-a108-f1a63a55b90a",
+          "status": "succeeded",
+          "nativeSessionId": "1791386458803_pdtn7",
+          "bindingId": "a5d73875-aab7-4f95-9dd6-af75561fef7d",
+          "generation": 1,
+          "host": {
+            "run": "931f63c2-aa84-468e-a108-f1a63a55b90a",
+            "host": "b79e9da7-0182-486c-8635-6400959ed814",
+            "session": "1791386458803_pdtn7",
+            "nativeRun": "run_D0ZrgSub"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 13071,
+            "outputTokens": 159,
+            "cacheReadTokens": 7168,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "member-b",
+          "runId": "d85c5c91-0e09-4359-8446-b7071e22852a",
+          "status": "succeeded",
+          "nativeSessionId": "1791386475642_ms095",
+          "bindingId": "c9afec0c-6bff-4448-ad07-e1b438792521",
+          "generation": 1,
+          "host": {
+            "run": "d85c5c91-0e09-4359-8446-b7071e22852a",
+            "host": "a4fb2835-1122-4bb6-9d5a-7ec0e941757a",
+            "session": "1791386475642_ms095",
+            "nativeRun": "run_Axz9vZlT"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 12981,
+            "outputTokens": 100,
+            "cacheReadTokens": 6912,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "warm",
+          "runId": "84333c7b-2aa3-4164-b79e-4752d2e42304",
+          "status": "succeeded",
+          "nativeSessionId": "1791386458803_pdtn7",
+          "bindingId": "a5d73875-aab7-4f95-9dd6-af75561fef7d",
+          "generation": 1,
+          "host": {
+            "run": "84333c7b-2aa3-4164-b79e-4752d2e42304",
+            "host": "b79e9da7-0182-486c-8635-6400959ed814",
+            "session": "1791386458803_pdtn7",
+            "nativeRun": "run_5Ot00g7M"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 2,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 10320,
+            "outputTokens": 86,
+            "cacheReadTokens": 7296,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "cold",
+          "runId": "f844f7c9-1a49-474a-bb65-abef6d062bbc",
+          "status": "succeeded",
+          "nativeSessionId": "1791386458803_pdtn7",
+          "bindingId": "a5d73875-aab7-4f95-9dd6-af75561fef7d",
+          "generation": 1,
+          "host": {
+            "run": "f844f7c9-1a49-474a-bb65-abef6d062bbc",
+            "host": "e64d2869-daa5-44e5-b6bc-055bf4a23d3b",
+            "session": "1791386458803_pdtn7",
+            "nativeRun": "run_mAE5A6--"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 2,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 11383,
+            "outputTokens": 61,
+            "cacheReadTokens": 2304,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "files",
+          "runId": "dc76e8b7-7702-4879-92a1-7b09777d764f",
+          "status": "succeeded",
+          "nativeSessionId": "1791386458803_pdtn7",
+          "bindingId": "a5d73875-aab7-4f95-9dd6-af75561fef7d",
+          "generation": 1,
+          "host": {
+            "run": "dc76e8b7-7702-4879-92a1-7b09777d764f",
+            "host": "e64d2869-daa5-44e5-b6bc-055bf4a23d3b",
+            "session": "1791386458803_pdtn7",
+            "nativeRun": "run_CnrMAB4t"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 7,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 44948,
+            "outputTokens": 325,
+            "cacheReadTokens": 28672,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "complete",
+            "file_count": 1,
+            "operation_count": 2,
+            "additions": 1,
+            "deletions": 1
+          }
+        },
+        {
+          "label": "allow",
+          "runId": "18b2cc96-8a8c-4736-bb55-7b36e963fe43",
+          "status": "succeeded",
+          "nativeSessionId": "1791386569041_c7cl5",
+          "bindingId": "55efcbff-d37b-44a1-bcee-54d558c39ce6",
+          "generation": 2,
+          "host": {
+            "run": "18b2cc96-8a8c-4736-bb55-7b36e963fe43",
+            "host": "14e8faee-8703-46b0-83c5-615a293a4b77",
+            "session": "1791386569041_c7cl5",
+            "nativeRun": "run_m0Sw3tWi"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "allow_once",
+            "allow_once",
+            "allow_once",
+            "allow_once"
+          ],
+          "nativeModelCalls": 5,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 21430,
+            "outputTokens": 286,
+            "cacheReadTokens": 13184,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "complete",
+            "file_count": 1,
+            "operation_count": 1,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "deny",
+          "runId": "cb858a8e-7622-4603-89e4-7f89f8fbf922",
+          "status": "succeeded",
+          "nativeSessionId": "1791386569041_c7cl5",
+          "bindingId": "55efcbff-d37b-44a1-bcee-54d558c39ce6",
+          "generation": 2,
+          "host": {
+            "run": "cb858a8e-7622-4603-89e4-7f89f8fbf922",
+            "host": "14e8faee-8703-46b0-83c5-615a293a4b77",
+            "session": "1791386569041_c7cl5",
+            "nativeRun": "run_E63Ibt9b"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "deny",
+            "allow_once"
+          ],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 16187,
+            "outputTokens": 92,
+            "cacheReadTokens": 8448,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "cancel",
+          "runId": "4ee88346-6567-4f18-b4cf-2e25bcea5fa2",
+          "status": "cancelled",
+          "nativeSessionId": "1791386569041_c7cl5",
+          "bindingId": "55efcbff-d37b-44a1-bcee-54d558c39ce6",
+          "generation": 2,
+          "host": {
+            "run": "4ee88346-6567-4f18-b4cf-2e25bcea5fa2",
+            "host": "14e8faee-8703-46b0-83c5-615a293a4b77",
+            "session": "1791386569041_c7cl5",
+            "nativeRun": "run_-w1fCyuk"
+          },
+          "committedBuiltinSends": 0,
+          "approvalKinds": [
+            "allow_once"
+          ],
+          "nativeModelCalls": 1,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 5883,
+            "outputTokens": 33,
+            "cacheReadTokens": 5120,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "after-cancel",
+          "runId": "396a7295-b01d-40fd-a799-085aa0141b3f",
+          "status": "succeeded",
+          "nativeSessionId": "1791386569041_c7cl5",
+          "bindingId": "55efcbff-d37b-44a1-bcee-54d558c39ce6",
+          "generation": 2,
+          "host": {
+            "run": "396a7295-b01d-40fd-a799-085aa0141b3f",
+            "host": "aa1c5059-7b26-407a-9e38-a566da29891c",
+            "session": "1791386569041_c7cl5",
+            "nativeRun": "run_YwaN8Vfw"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "allow_once",
+            "allow_once"
+          ],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 19518,
+            "outputTokens": 241,
+            "cacheReadTokens": 4608,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        }
+      ],
+      "hostTempRemaining": [],
+      "coreExitCodes": [
+        0,
+        0
+      ],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true,
+      "configurationIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true
+        },
+        {
+          "scope": "fixture-native-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true
+        },
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true
+        }
+      ],
+      "mcpActualCallCount": null,
+      "nativeSkillMarkerObserved": null
+    },
+    {
+      "fixture": 24,
+      "scope": "extended",
+      "wholeFixturePassed": true,
+      "includedPrefixOnly": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "d745b171-41a9-40d0-9c74-fee647c1fe09",
+          "status": "succeeded",
+          "nativeSessionId": "1791387778708_ye0w2",
+          "bindingId": "6e804f28-a061-407d-a3b1-26d87e8003e6",
+          "generation": 1,
+          "host": {
+            "run": "d745b171-41a9-40d0-9c74-fee647c1fe09",
+            "host": "448585de-2c26-4695-9ec2-559665fd0b93",
+            "session": "1791387778708_ye0w2",
+            "nativeRun": "run_bb5VqKxx"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 13069,
+            "outputTokens": 157,
+            "cacheReadTokens": 7040,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "member-b",
+          "runId": "9bfd60fd-c02e-4da8-aee8-81aa570a0542",
+          "status": "succeeded",
+          "nativeSessionId": "1791387793809_ul42b",
+          "bindingId": "7c813a9a-c2b3-4434-b5f5-e40511686c62",
+          "generation": 1,
+          "host": {
+            "run": "9bfd60fd-c02e-4da8-aee8-81aa570a0542",
+            "host": "644a2eac-5ca6-4256-99a0-572cf1e5b000",
+            "session": "1791387793809_ul42b",
+            "nativeRun": "run_2awTcYqY"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 12997,
+            "outputTokens": 92,
+            "cacheReadTokens": 7040,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "warm",
+          "runId": "c3a00cac-817e-44f9-a7bb-49fc6508623a",
+          "status": "succeeded",
+          "nativeSessionId": "1791387778708_ye0w2",
+          "bindingId": "6e804f28-a061-407d-a3b1-26d87e8003e6",
+          "generation": 1,
+          "host": {
+            "run": "c3a00cac-817e-44f9-a7bb-49fc6508623a",
+            "host": "448585de-2c26-4695-9ec2-559665fd0b93",
+            "session": "1791387778708_ye0w2",
+            "nativeRun": "run_Xv4BONIw"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 2,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 10278,
+            "outputTokens": 89,
+            "cacheReadTokens": 7296,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "cold",
+          "runId": "d54fbbef-ba21-41d7-8a1d-6fca38df7f96",
+          "status": "succeeded",
+          "nativeSessionId": "1791387778708_ye0w2",
+          "bindingId": "6e804f28-a061-407d-a3b1-26d87e8003e6",
+          "generation": 1,
+          "host": {
+            "run": "d54fbbef-ba21-41d7-8a1d-6fca38df7f96",
+            "host": "ddde0f6b-dae9-4e7f-af7e-ae91ab66529a",
+            "session": "1791387778708_ye0w2",
+            "nativeRun": "run_myD-NI71"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 2,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 11308,
+            "outputTokens": 57,
+            "cacheReadTokens": 6016,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "files",
+          "runId": "fb5c1cd7-2fa0-4c7a-8e65-f3c35d87758c",
+          "status": "succeeded",
+          "nativeSessionId": "1791387778708_ye0w2",
+          "bindingId": "6e804f28-a061-407d-a3b1-26d87e8003e6",
+          "generation": 1,
+          "host": {
+            "run": "fb5c1cd7-2fa0-4c7a-8e65-f3c35d87758c",
+            "host": "ddde0f6b-dae9-4e7f-af7e-ae91ab66529a",
+            "session": "1791387778708_ye0w2",
+            "nativeRun": "run_RrLnhgFS"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 8,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 51596,
+            "outputTokens": 363,
+            "cacheReadTokens": 31616,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "complete",
+            "file_count": 1,
+            "operation_count": 2,
+            "additions": 1,
+            "deletions": 1
+          }
+        },
+        {
+          "label": "allow",
+          "runId": "ceb68344-34e7-4f96-8371-8fa28cc4dd7c",
+          "status": "succeeded",
+          "nativeSessionId": "1791387863431_k4sog",
+          "bindingId": "d11754b7-05fd-4587-8058-fc9b36c7bd29",
+          "generation": 2,
+          "host": {
+            "run": "ceb68344-34e7-4f96-8371-8fa28cc4dd7c",
+            "host": "f0af7ce6-cbc4-4c48-b7ad-71d6d0060859",
+            "session": "1791387863431_k4sog",
+            "nativeRun": "run_GkqIqROX"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "allow_once",
+            "allow_once",
+            "allow_once"
+          ],
+          "nativeModelCalls": 4,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 17245,
+            "outputTokens": 224,
+            "cacheReadTokens": 10624,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "complete",
+            "file_count": 1,
+            "operation_count": 1,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "deny",
+          "runId": "6218a361-b999-4f2e-8927-f1522c51f731",
+          "status": "succeeded",
+          "nativeSessionId": "1791387863431_k4sog",
+          "bindingId": "d11754b7-05fd-4587-8058-fc9b36c7bd29",
+          "generation": 2,
+          "host": {
+            "run": "6218a361-b999-4f2e-8927-f1522c51f731",
+            "host": "f0af7ce6-cbc4-4c48-b7ad-71d6d0060859",
+            "session": "1791387863431_k4sog",
+            "nativeRun": "run_13RAW1m-"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "deny",
+            "allow_once"
+          ],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 15918,
+            "outputTokens": 92,
+            "cacheReadTokens": 10624,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "cancel",
+          "runId": "2a29f447-7bd4-483e-9763-ed1644ba6766",
+          "status": "cancelled",
+          "nativeSessionId": "1791387863431_k4sog",
+          "bindingId": "d11754b7-05fd-4587-8058-fc9b36c7bd29",
+          "generation": 2,
+          "host": {
+            "run": "2a29f447-7bd4-483e-9763-ed1644ba6766",
+            "host": "f0af7ce6-cbc4-4c48-b7ad-71d6d0060859",
+            "session": "1791387863431_k4sog",
+            "nativeRun": "run_pkwEjM6z"
+          },
+          "committedBuiltinSends": 0,
+          "approvalKinds": [
+            "allow_once"
+          ],
+          "nativeModelCalls": 1,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 5785,
+            "outputTokens": 33,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "after-cancel",
+          "runId": "bb09349b-cee5-43db-ae4d-8f5add4ba7af",
+          "status": "succeeded",
+          "nativeSessionId": "1791387863431_k4sog",
+          "bindingId": "d11754b7-05fd-4587-8058-fc9b36c7bd29",
+          "generation": 2,
+          "host": {
+            "run": "bb09349b-cee5-43db-ae4d-8f5add4ba7af",
+            "host": "c2c9467b-ec7c-4514-809e-e08ff906aba0",
+            "session": "1791387863431_k4sog",
+            "nativeRun": "run_6jNAianE"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [
+            "allow_once",
+            "allow_once"
+          ],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 19248,
+            "outputTokens": 258,
+            "cacheReadTokens": 12544,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        }
+      ],
+      "hostTempRemaining": [],
+      "coreExitCodes": [
+        0,
+        0
+      ],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true,
+      "configurationIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true
+        },
+        {
+          "scope": "fixture-native-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true
+        },
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true
+        }
+      ],
+      "mcpActualCallCount": null,
+      "nativeSkillMarkerObserved": null
+    },
+    {
+      "fixture": 25,
+      "scope": "extensions",
+      "wholeFixturePassed": true,
+      "includedPrefixOnly": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "aa452eb6-b7d8-4e8f-af32-6577026ff8dc",
+          "status": "succeeded",
+          "nativeSessionId": "1791387802617_8ctbk",
+          "bindingId": "bd045e10-f65b-4a75-8d8d-e48e212e8893",
+          "generation": 1,
+          "host": {
+            "run": "aa452eb6-b7d8-4e8f-af32-6577026ff8dc",
+            "host": "56eaa135-a400-4c3c-9aa2-d49c0e7f24be",
+            "session": "1791387802617_8ctbk",
+            "nativeRun": "run_JnIW3tdy"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 13114,
+            "outputTokens": 136,
+            "cacheReadTokens": 2304,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "mcp",
+          "runId": "b54803d2-4710-42b6-9dd8-f8d880954fcc",
+          "status": "succeeded",
+          "nativeSessionId": "1791387802617_8ctbk",
+          "bindingId": "bd045e10-f65b-4a75-8d8d-e48e212e8893",
+          "generation": 1,
+          "host": {
+            "run": "b54803d2-4710-42b6-9dd8-f8d880954fcc",
+            "host": "ff083539-715f-433b-9ce0-64fe953bbefc",
+            "session": "1791387802617_8ctbk",
+            "nativeRun": "run_nkw7m2VD"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 15746,
+            "outputTokens": 114,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        },
+        {
+          "label": "skill",
+          "runId": "89e40f94-93d1-40c2-a6b7-880dc17d15e1",
+          "status": "succeeded",
+          "nativeSessionId": "1791387802617_8ctbk",
+          "bindingId": "bd045e10-f65b-4a75-8d8d-e48e212e8893",
+          "generation": 1,
+          "host": {
+            "run": "89e40f94-93d1-40c2-a6b7-880dc17d15e1",
+            "host": "ff083539-715f-433b-9ce0-64fe953bbefc",
+            "session": "1791387802617_8ctbk",
+            "nativeRun": "run_RVWEMMfX"
+          },
+          "committedBuiltinSends": 1,
+          "approvalKinds": [],
+          "nativeModelCalls": 3,
+          "nativeTotalsEqualCore": true,
+          "totals": {
+            "inputTokens": 17809,
+            "outputTokens": 91,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "reasoning": null,
+          "cost": null,
+          "observedModel": {
+            "modelId": "gpt-6-sol"
+          },
+          "fileProjection": {
+            "status": "no_changes",
+            "file_count": 0,
+            "operation_count": 0,
+            "additions": null,
+            "deletions": null
+          }
+        }
+      ],
+      "hostTempRemaining": [],
+      "coreExitCodes": [
+        0
+      ],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true,
+      "configurationIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true
+        },
+        {
+          "scope": "fixture-native-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true
+        },
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true
+        }
+      ],
+      "mcpActualCallCount": 1,
+      "nativeSkillMarkerObserved": true
+    }
+  ],
+  "negativeEvidence": [
+    {
+      "fixture": 12,
+      "outcome": "native failure without actual send or final output"
+    },
+    {
+      "fixture": 13,
+      "outcome": "member B committed builtin send, but empty native final failed runtime_missing_final_output; no synthesized final/replay"
+    },
+    {
+      "fixture": 14,
+      "outcome": "warm rebuilt Host due to Run-local digest; stable configuration digest fixed and guarded by same-host assertion"
+    },
+    {
+      "fixture": 15,
+      "outcome": "native apply_patch produced two without requested trailing newline; later fixture explicitly requests those exact bytes"
+    },
+    {
+      "fixture": 16,
+      "outcome": "six successful turns; seventh native failure before any approval with zero native metrics, Core unknown counts remain NULL; not a complete extended pass"
+    },
+    {
+      "fixture": 17,
+      "outcome": "Core denial prevented write, but duplicate observed action violated uniqueness; denied native tool is now evidence only, real lifecycle retest passed"
+    },
+    {
+      "fixture": 18,
+      "outcome": "harness used nullable threadTurnId; changed to exact agentRuns.cancel with bounded version-conflict refresh"
+    },
+    {
+      "fixture": 19,
+      "outcome": "new MCP server was disabled in harness; explicit Core enable added before assignment"
+    },
+    {
+      "fixture": 23,
+      "outcome": "pre-main helper waited for member Ready although current Core correctly returns installed_unverified; stopped before any Run, updated only acceptance harness to current contract"
+    }
+  ],
+  "limits": [
+    "BYOK only; OAuth/subscription unverified",
+    "product long-context threshold/overflow/retry and compaction cancellation unverified",
+    "native basic has no observed lifecycle notification",
+    "managed Skill index after compaction unverified",
+    "MCP HTTP/update/revoke matrix unverified",
+    "full crash/network/TTL/load and credential rotation matrices unverified",
+    "other platforms and fresh packaged App qualification unverified",
+    "reasoning and cost remain unknown"
+  ],
+  "additionalOwnedFixtureCleanup": {
+    "earlyNativeProbes": [
+      {
+        "fixture": "XovptJ",
+        "pid": 56976,
+        "authenticatedShutdownStatus": 202,
+        "exitConfirmed": true,
+        "providerCopyRemoved": true,
+        "hostDirectoryRemoved": true
+      },
+      {
+        "fixture": "55vRUe",
+        "pid": 58228,
+        "authenticatedShutdownStatus": 202,
+        "exitConfirmed": true,
+        "providerCopyRemoved": true,
+        "hostDirectoryRemoved": true
+      }
+    ],
+    "firstProductFixtures": [
+      {
+        "fixture": 1,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 2,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 3,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 4,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 5,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 6,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 7,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 8,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 9,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 10,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      },
+      {
+        "fixture": 11,
+        "providerCopyRemoved": true,
+        "runtimeFilesRemoved": true
+      }
+    ]
+  },
+  "verification": {
+    "pnpm test:rust:staged": {
+      "status": "passed",
+      "route": "workspace-default",
+      "passed": 458,
+      "ignored": 2
+    },
+    "targetedExtendedRust": {
+      "status": "passed",
+      "passed": 52
+    },
+    "explicitInstalledHubSmoke": {
+      "status": "passed",
+      "passed": 1
+    },
+    "pnpm typecheck": {
+      "status": "passed"
+    },
+    "pnpm test": {
+      "status": "passed",
+      "vitestPassed": 2589,
+      "nodePassed": 337,
+      "nodeSkipped": 2
+    },
+    "cargo fmt --all --check": {
+      "status": "passed"
+    },
+    "documentation": {
+      "docs:test": 10,
+      "docs:check": "passed",
+      "docs:check:ci": "passed",
+      "base": "d9b76dbdfe6e829018005e791c9ba47407dfb892"
+    }
+  },
+  "mainIntegration": {
+    "mainCommit": "51c8b346",
+    "implementationCommit": "46127e9278cfc7a6c4bbe460f4cf4d35cf91ad18",
+    "status": "verified",
+    "productFixtures": [
+      24,
+      25
+    ],
+    "modelCalls": 38,
+    "configurationSourcesUnchanged": true,
+    "readiness": "member installed_unverified is not a launch gate; diagnostics remain separate",
+    "legacyAcpGate": "actual initialize agentInfo.version must satisfy >=3.0.65",
+    "decisions": "Mission D12-D18 renumbered to D16-D22, preserving main D12-D15",
+    "contract": "runtime-launch-and-verification-v52",
+    "lossProjectionFix": "accepted unknown input failure uses an explicit cleanup reason so cancellation compatibility projection cannot mislabel it as user cancellation",
+    "verification": {
+      "workspaceDefault": {
+        "passed": 459,
+        "ignored": 2
+      },
+      "acpExtended": {
+        "passed": 69,
+        "ignored": 2
+      },
+      "vitest": {
+        "passed": 2605
+      },
+      "node": {
+        "passed": 337,
+        "skipped": 2
+      },
+      "typecheck": "passed",
+      "documentation": "passed against origin/main",
+      "acceptedInputRecoveryOwners": {
+        "passed": 2
+      },
+      "actionLossSlowOwners": {
+        "passed": 2
+      }
+    },
+    "coreVersion": "0.4.6",
+    "diagnosticCrashRecovery": {
+      "kind": "interrupted-native-hub-diagnostic-recovery",
+      "modelInputs": 0,
+      "ownershipRecorded": true,
+      "corePid": 70130,
+      "nativePid": 70171,
+      "nativeAliveBeforeRestart": true,
+      "restartReapedNative": true,
+      "privateHostRemoved": true,
+      "normalDiagnosticAfterRecovery": "ready",
+      "sourceUnchanged": true,
+      "passed": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "privateProviderCopyRemoved": true
+    }
+  },
+  "reviewFollowUp": {
+    "userMessageId": "b70db5df-d6eb-4d76-aadb-a88f32b8e5d9",
+    "date": "2026-10-08",
+    "status": "preview-with-explicit-limits",
+    "legacyClineAcpRemoved": true,
+    "windowsChecks": [
+      {
+        "conclusion": "success",
+        "headSha": "25705105cf786e54141eb1d4b2a69769be991f12",
+        "url": "https://github.com/murray17/rovai-ai/actions/runs/37657700179"
+      }
+    ],
+    "packagedMainFlow": {
+      "scope": "extended",
+      "passed": true,
+      "runs": [
+        {
+          "label": "first",
+          "id": "31c010cd-470e-49b9-aab3-eac8820ae5b7",
+          "status": "succeeded"
+        },
+        {
+          "label": "member-b",
+          "id": "a5b56b70-c998-413f-a95c-0ec0b9fa104e",
+          "status": "succeeded"
+        },
+        {
+          "label": "warm",
+          "id": "b9ee87df-87e5-4e81-89ee-cf6e4a88584d",
+          "status": "succeeded"
+        },
+        {
+          "label": "cold",
+          "id": "d8d8bd73-f6d7-47d0-8d43-621e3beae3d9",
+          "status": "succeeded"
+        },
+        {
+          "label": "files",
+          "id": "96a7a675-0f1c-409f-a0c2-9f25c7d17e3e",
+          "status": "succeeded"
+        },
+        {
+          "label": "allow",
+          "id": "71303d61-b312-41bd-843f-73e8c52b5703",
+          "status": "succeeded"
+        },
+        {
+          "label": "deny",
+          "id": "d157cb28-6469-4e1a-9aca-bc1218b6d29c",
+          "status": "succeeded"
+        },
+        {
+          "label": "cancel",
+          "id": "a6f309df-7782-43a8-a9f3-cb8db47e0db1",
+          "status": "cancelled"
+        },
+        {
+          "label": "after-cancel",
+          "id": "a3eab438-dba2-4c1d-8a1b-8bc280d0ed3d",
+          "status": "succeeded"
+        }
+      ],
+      "sameNativeProtocol": true,
+      "configurationSourcesUnchanged": true,
+      "privateHostsRemaining": [],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true
+    },
+    "productLongContext": {
+      "scope": "long-context",
+      "passed": true,
+      "runs": [
+        {
+          "label": "first",
+          "id": "d56c2237-2d29-4dd5-a9df-a23e9f9f5ec5",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-1",
+          "id": "94a87986-40cb-425c-bab9-fce55d8fe2b6",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-2",
+          "id": "26f6a68a-5b9e-4c6d-8cfa-1c5e8d388e5c",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-3",
+          "id": "87adeb1c-d9fb-4be8-94b9-f4cc8dc9dd84",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-4",
+          "id": "3a4e99d0-2d31-4016-bd11-b83ee99d0937",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-5",
+          "id": "d84c79cd-9ef4-4400-9b4b-16a5f226ab96",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-6",
+          "id": "507617d6-1265-4614-93a3-42c44105b71e",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-7",
+          "id": "97c7b370-92a6-4855-81aa-7573c988b32b",
+          "status": "succeeded"
+        },
+        {
+          "label": "long-cold",
+          "id": "39f60e25-bf57-42a9-9f03-b5b65935ce0d",
+          "status": "succeeded"
+        }
+      ],
+      "sameNativeProtocol": true,
+      "configurationSourcesUnchanged": true,
+      "privateHostsRemaining": [],
+      "privateProviderCopyRemoved": true,
+      "runtimeFilesRemoved": true
+    },
+    "coreDiagnostics": {
+      "kind": "interrupted-native-hub-diagnostic-recovery",
+      "modelInputs": 0,
+      "ownershipRecorded": true,
+      "nativeAliveBeforeRestart": true,
+      "restartReapedNative": true,
+      "privateHostRemoved": true,
+      "normalDiagnosticAfterRecovery": "ready",
+      "preparationFailureCleanedTwice": true,
+      "noApiKeyExplicitlyUnsupported": true,
+      "sourceUnchanged": true,
+      "passed": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "privateProviderCopyRemoved": true
+    },
+    "packagedDiagnostics": {
+      "kind": "packaged-hub-diagnostics",
+      "modelInputs": 0,
+      "packagedRendererToCore": true,
+      "normalDiagnosticAfterRecovery": "ready",
+      "preparationFailureCleanedTwice": true,
+      "noApiKeyExplicitlyUnsupported": true,
+      "sourceUnchanged": true,
+      "passed": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "privateProviderCopyRemoved": true
+    },
+    "protectedFiles": [
+      {
+        "scope": "settings",
+        "name": "cline_mcp_settings.json",
+        "sha256": "066cdcc5ea8b813b6d4155783f53887d104e261e0aec7c3aab159a9efed926ff",
+        "mode": "0o644",
+        "unchanged": true
+      },
+      {
+        "scope": "settings",
+        "name": "cli-default-instance.json",
+        "sha256": "280c6a4556ee1561343b970bd2406f90bd5f5bdf226f7ba190bf5cc0bf85dcc6",
+        "mode": "0o644",
+        "unchanged": true
+      },
+      {
+        "scope": "settings",
+        "name": "providers.json",
+        "sha256": "1b3eff25040b2a8d2584060b8b5849ed0ebbbf883fd3d6b0e7be23522e343426",
+        "mode": "0o600",
+        "unchanged": true
+      },
+      {
+        "scope": "hubFiles",
+        "name": "owners/hub-9869705ea029.json",
+        "sha256": "33491d53d5063fead78684a4c98c01543d1824ca271761da62c73aec6fbdabff",
+        "mode": "0o600",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "LICENSE",
+        "sha256": "f704446a5f1271608805598b557e4288cf8580477ea038c9c3d8b361f693f6b8",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "README.md",
+        "sha256": "96d5695c8bd1808bd30020aa869ac937f1ce1af21d4c1d58eef00fef5475813f",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "package.json",
+        "sha256": "62be1862187cc44837d59d76314118ef12070dd73c71eded042bca24b0d39002",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "postinstall.mjs",
+        "sha256": "78e422d0bb8a9b392926c39f106f9c9808f96bead9438f12ca204ce0d3b3cacf",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "bin/cline",
+        "sha256": "2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/.bin/cline",
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/@cline/cli-darwin-arm64/package.json",
+        "sha256": "221ac79ad535f10c687f147208fb14d4bbb90cad85b7a22a56cfb2e829a2dbf0",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/@cline/cli-darwin-arm64/bin/cline",
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755",
+        "unchanged": true
+      },
+      {
+        "scope": "installation",
+        "name": "node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js",
+        "sha256": "3fa353ee0fa24a42ce9243b912423a265145c3e894f786aa6a1f894a6626a95c",
+        "mode": "0o755",
+        "unchanged": true
+      }
+    ],
+    "nativeProtocol": {
+      "modelExecutions": 0,
+      "knownMissingSessionFailure": "cline_hub_native_session_not_found",
+      "inputReplayBlocked": true,
+      "coldRestore1MiB": "passed: same ID and canonical complete-history digest",
+      "coldCreate15MiB": "failed: no complete reply within 45 seconds; outcome unknown; not replayed",
+      "coldCreate17MiBBeforeGuard": "failed: transport broke during send; not replayed",
+      "coldCreate17MiBAfterGuard": "controlled local refusal: cline_hub_history_restore_limit_exceeded, before sending",
+      "maximumIncomingFrameAndMessageBytes": 67108864,
+      "maximumEncodedRequestBytes": 16777216,
+      "nativeHistoryTruncationByRovai": false,
+      "paginationSupportedByInspectedNativeApi": false
+    },
+    "longContextReduction": {
+      "rounds": [
+        {
+          "batch": 1,
+          "before": {
+            "bytes": 8145,
+            "count": 6,
+            "sha256": "eb8c494888959b927e01dcbc087227b73984bd90ef6d8b8766ea0526df21da18",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 4695
+          },
+          "after": {
+            "bytes": 149293,
+            "count": 14,
+            "sha256": "9f986f76880123cf7e5ecf1c8708f224b2ddd43a167716ea3949d3c0cf6c0e54",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 95807
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 2,
+          "before": {
+            "bytes": 149293,
+            "count": 14,
+            "sha256": "9f986f76880123cf7e5ecf1c8708f224b2ddd43a167716ea3949d3c0cf6c0e54",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 95807
+          },
+          "after": {
+            "bytes": 289407,
+            "count": 20,
+            "sha256": "191e9f412f7c15196c4cc9376d9bcbd903463452a40c18f0a4d92bdb9e8d8728",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 186865
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 3,
+          "before": {
+            "bytes": 289407,
+            "count": 20,
+            "sha256": "191e9f412f7c15196c4cc9376d9bcbd903463452a40c18f0a4d92bdb9e8d8728",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 186865
+          },
+          "after": {
+            "bytes": 429613,
+            "count": 26,
+            "sha256": "ed2b180398db44254b0a5b84038e690568d525c03dbc9688ede84f3b2709ca17",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 277706
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 4,
+          "before": {
+            "bytes": 429613,
+            "count": 26,
+            "sha256": "ed2b180398db44254b0a5b84038e690568d525c03dbc9688ede84f3b2709ca17",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 277706
+          },
+          "after": {
+            "bytes": 569862,
+            "count": 32,
+            "sha256": "88753fac39d79292dd8b9e3e3c6cdd511758cfb61b679151ac83aaacfe8e1359",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 368830
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 5,
+          "before": {
+            "bytes": 569862,
+            "count": 32,
+            "sha256": "88753fac39d79292dd8b9e3e3c6cdd511758cfb61b679151ac83aaacfe8e1359",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 368830
+          },
+          "after": {
+            "bytes": 710219,
+            "count": 38,
+            "sha256": "5e727d96ed489283b2ca3771d8b5e1f95377a798cc8a5ddac653fa6f2dbd86db",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 459765
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 6,
+          "before": {
+            "bytes": 710219,
+            "count": 38,
+            "sha256": "5e727d96ed489283b2ca3771d8b5e1f95377a798cc8a5ddac653fa6f2dbd86db",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 459765
+          },
+          "after": {
+            "bytes": 850669,
+            "count": 44,
+            "sha256": "ae85e2e31c947ccdc081aefa2f670b1a7f4972b49371fdc1c46696e79e121aae",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 550771
+          },
+          "historyReduced": false
+        },
+        {
+          "batch": 7,
+          "before": {
+            "bytes": 850669,
+            "count": 44,
+            "sha256": "ae85e2e31c947ccdc081aefa2f670b1a7f4972b49371fdc1c46696e79e121aae",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 550771
+          },
+          "after": {
+            "bytes": 846911,
+            "count": 41,
+            "sha256": "947229be279d5f10c4a38a862eba1c4610df456765373138ae0a223d6767f136",
+            "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "lastInputTokens": 550341
+          },
+          "historyReduced": true
+        }
+      ],
+      "coldContinuity": true,
+      "finalHistory": {
+        "bytes": 712229,
+        "count": 40,
+        "sha256": "1fc550dc3955c3d8b09d6a466ed310166e49e9ac12ff3e2c09db0446fc9054bc",
+        "persistedSystemSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "lastInputTokens": 460213
+      },
+      "nativeLifecycleNotifications": "not available in selected basic runtime",
+      "modelWindow": 272000,
+      "modelWindowChanged": false
+    },
+    "negativeEvidence": [
+      "First packaged fixture made its health request during bootstrap; zero Runs. Fixed fixture to wait for full Core.",
+      "Initial four-Run long-context fixture completed, but message-ID replacement alone is not compaction evidence; excluded from compaction qualification.",
+      "First extended diagnostic fixture read last-known-good snapshot instead of lastProbeAttempt; corrected and repeated. This exposed missing shared diagnostic failure forwarding, now fixed.",
+      "15 MiB and initial 17 MiB native history attempts did not complete; neither counts as restoration success."
+    ],
+    "checks": {
+      "rustWorkspace": {
+        "passed": 461,
+        "ignored": 2
+      },
+      "clineExtended": {
+        "passed": 6,
+        "ignored": 2
+      },
+      "acpExtended": {
+        "passed": 68,
+        "ignored": 1
+      },
+      "runtimeDiff": 17,
+      "adapterRegistry": 25,
+      "vitest": 2605,
+      "node": {
+        "passed": 335,
+        "skipped": 2
+      },
+      "typecheck": true,
+      "allTargetsAllFeaturesCheck": true,
+      "macArm64Package": true,
+      "adHocSignatureVerified": true
+    },
+    "limits": [
+      "macOS arm64 BYOK Preview only; OAuth/subscription without native API key is unsupported.",
+      "Model selection enumerates only the selected provider's persisted native catalog; remote/cross-provider discovery not qualified.",
+      "Large native history can fail below the client resource ceiling; 15 MiB timed out.",
+      "Overflow/retry, compaction cancellation, managed Skill after compaction, HTTP MCP/update/revocation, full failure/stress/credential rotation and other Cline platform qualification remain open.",
+      "Command Code BYOK deferred MCP invocation remains an independent unresolved gap."
+    ]
+  }
+}

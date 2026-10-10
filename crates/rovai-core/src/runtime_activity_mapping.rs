@@ -21,7 +21,7 @@ pub struct RuntimeActivityMappingDescriptor {
     pub registry_entry: &'static str,
 }
 
-pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 16] = [
+pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 18] = [
     descriptor(
         AdapterKind::CodexCli,
         "codex-app-server",
@@ -51,6 +51,8 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 16] = [
     descriptor(AdapterKind::CursorAgent, "acp-v1", "run_level", "acp"),
     descriptor(AdapterKind::KimiCodeCli, "acp-v1", "run_level", "acp"),
     descriptor(AdapterKind::GrokBuild, "acp-v1", "run_level", "acp"),
+    descriptor(AdapterKind::ClineCli, "acp-v1", "run_level", "cline"),
+    descriptor(AdapterKind::CommandCodeCli, "acp-v1", "run_level", "acp"),
     descriptor(
         AdapterKind::DeepseekHarness,
         "acp-v1",
@@ -285,6 +287,10 @@ mod tests {
         let expected = AdapterKind::ALL.into_iter().collect::<BTreeSet<_>>();
         assert_eq!(registered, expected);
         assert_eq!(RUNTIME_ACTIVITY_MAPPINGS.len(), AdapterKind::ALL.len());
+        assert_eq!(
+            descriptor_for(AdapterKind::ClineCli).protocol_family,
+            "acp-v1"
+        );
     }
 
     #[test]

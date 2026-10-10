@@ -7,6 +7,7 @@ import copilotLogo from './assets/runtime-logos/copilot-color.svg'
 import cursorLogo from './assets/runtime-logos/cursor.svg'
 import grokLogo from './assets/runtime-logos/grok.svg'
 import deepseekLogo from './assets/runtime-logos/deepseek-color.svg'
+import clineLogo from './assets/runtime-logos/cline.svg'
 import zcodeLogo from './assets/runtime-logos/zcode.png'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
 import kimiLogo from './assets/runtime-logos/kimi.svg'
@@ -30,13 +31,16 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'kimi-code-cli',
   'grok-build',
   'deepseek-harness',
+  'cline-cli',
+  'command-code-cli',
   'zcode-app',
   'antigravity-app',
   'pi'
 ]
 
-export const VISIBLE_PRODUCT_RUNTIMES = PRODUCT_RUNTIMES.filter(
-  (runtimeKind) => runtimeKind !== 'cursor-agent'
+export const VISIBLE_PRODUCT_RUNTIMES: AdapterKind[] = PRODUCT_RUNTIMES.filter(
+  // Keep deferred ACP identities readable without advertising them for new use.
+  (runtimeKind) => !['cursor-agent', 'cline-cli', 'command-code-cli'].includes(runtimeKind)
 )
 
 export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
@@ -54,6 +58,8 @@ export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'kimi-code-cli': kimiLogo,
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
+  'cline-cli': clineLogo,
+  'command-code-cli': new URL('./assets/runtime-logos/command-code.ico', import.meta.url).href,
   'zcode-app': zcodeLogo,
   'antigravity-app': antigravityLogo
 }
@@ -74,6 +80,8 @@ export function adapterLabel(kind: AdapterKind): string {
     'kimi-code-cli': 'Kimi Code',
     'grok-build': 'Grok Build',
     'deepseek-harness': 'DeepSeek Harness',
+    'cline-cli': 'Cline',
+    'command-code-cli': 'Command Code',
     'zcode-app': 'ZCode',
     'antigravity-app': 'Antigravity'
   }[kind]

@@ -1,0 +1,1705 @@
+{
+  "observedAt": "2026-10-09",
+  "platform": "macos-arm64",
+  "productAdmissionChanged": false,
+  "controlled": {
+    "command-1741-routing": {
+      "syntheticProvider": true,
+      "runtime": "command",
+      "program": "<official-npm-install>/command-code/dist/cli.mjs",
+      "cases": [
+        {
+          "case": "default",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            },
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-a/model-a",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/model-a"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-a/model-a",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-a/model-a",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/model-a"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-a/model-a",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-b/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-b/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-b/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-b/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-b/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-b/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-a/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-a/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-a/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-a/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-missing/absent",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-missing/absent"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-missing/absent",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-missing/absent",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-missing/absent"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-missing/absent",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "second-session-default",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "first-session-return",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            },
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "cold-load",
+          "ok": true
+        },
+        {
+          "case": "cold-request",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-a/model-a",
+          "exitCode": 0,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-b/vendor/shared",
+          "exitCode": 0,
+          "requests": [
+            {
+              "provider": "b",
+              "path": "/b/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-a/vendor/shared",
+          "exitCode": 0,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        }
+      ],
+      "scriptSha256": "a357cb446702d0adf9aa726745f3b5d4f2428e3915498be90fd7533593969b9b",
+      "initialize": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "audio": false,
+            "image": true,
+            "embeddedContext": true
+          },
+          "mcpCapabilities": {
+            "http": true,
+            "sse": false
+          },
+          "sessionCapabilities": {
+            "list": {},
+            "resume": {},
+            "close": {}
+          }
+        },
+        "authMethods": [
+          {
+            "id": "command-code-cli",
+            "name": "Command Code CLI login",
+            "description": "Sign in once with `cmd login` in a terminal; this session reuses that account."
+          }
+        ],
+        "agentInfo": {
+          "name": "Command Code",
+          "version": "1.74.1"
+        }
+      },
+      "cliListedCustomModels": {
+        "rovai-a/model-a": true,
+        "rovai-a/vendor/shared": true,
+        "rovai-b/vendor/shared": true
+      },
+      "nativeAuthSourceUnchanged": true,
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "b",
+          "path": "/b/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        }
+      ],
+      "rawSummarySha256": "4a3fe765a56baa133c02131a3d1aabc54434595919b6e53aaf221d761bf6cae5",
+      "modelCatalog": {
+        "current": "rovai-a/model-a",
+        "configCurrent": "rovai-a/model-a",
+        "advertisedCount": 85,
+        "customIds": []
+      }
+    },
+    "command-1791-routing": {
+      "syntheticProvider": true,
+      "runtime": "command",
+      "program": "<official-npm-install>/command-code/dist/cli.mjs",
+      "cases": [
+        {
+          "case": "default",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-a/model-a",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/model-a"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-a/model-a",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            },
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-a/model-a",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/model-a"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-a/model-a",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-b/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-b/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-b/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-b/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-b/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-b/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-a/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-a/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-a/vendor/shared",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-a/vendor/shared"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-a/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-missing/absent",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-missing/absent"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-missing/absent",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-missing/absent",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Unknown model: rovai-missing/absent"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-missing/absent",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "second-session-default",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "first-session-return",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            },
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "cold-load",
+          "ok": true
+        },
+        {
+          "case": "cold-request",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-a/model-a",
+          "exitCode": 0,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-b/vendor/shared",
+          "exitCode": 0,
+          "requests": [
+            {
+              "provider": "b",
+              "path": "/b/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-a/vendor/shared",
+          "exitCode": 0,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        }
+      ],
+      "scriptSha256": "a357cb446702d0adf9aa726745f3b5d4f2428e3915498be90fd7533593969b9b",
+      "initialize": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "audio": false,
+            "image": true,
+            "embeddedContext": true
+          },
+          "mcpCapabilities": {
+            "http": true,
+            "sse": false
+          },
+          "sessionCapabilities": {
+            "list": {},
+            "resume": {},
+            "close": {}
+          }
+        },
+        "authMethods": [
+          {
+            "id": "command-code-cli",
+            "name": "Command Code CLI login",
+            "description": "Sign in once with `cmd login` in a terminal; this session reuses that account."
+          }
+        ],
+        "agentInfo": {
+          "name": "Command Code",
+          "version": "1.79.1"
+        }
+      },
+      "cliListedCustomModels": {
+        "rovai-a/model-a": true,
+        "rovai-a/vendor/shared": true,
+        "rovai-b/vendor/shared": true
+      },
+      "nativeAuthSourceUnchanged": true,
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "b",
+          "path": "/b/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        }
+      ],
+      "rawSummarySha256": "7c771b20f797feafd742c4430095f3c566f13537b6edaf11c03d897797d907b7",
+      "modelCatalog": {
+        "current": "rovai-a/model-a",
+        "configCurrent": "rovai-a/model-a",
+        "advertisedCount": 87,
+        "customIds": []
+      }
+    },
+    "opencode": {
+      "syntheticProvider": true,
+      "runtime": "opencode",
+      "program": "/Users/<user>/.opencode/bin/opencode",
+      "cases": [
+        {
+          "case": "default",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            },
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-a/model-a",
+          "ok": true
+        },
+        {
+          "case": "after:session/set_model:rovai-a/model-a",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-a/model-a",
+          "ok": true
+        },
+        {
+          "case": "after:session/set_config_option:rovai-a/model-a",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-b/vendor/shared",
+          "ok": true
+        },
+        {
+          "case": "after:session/set_model:rovai-b/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "b",
+              "path": "/b/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-b/vendor/shared",
+          "ok": true
+        },
+        {
+          "case": "after:session/set_config_option:rovai-b/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "b",
+              "path": "/b/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-a/vendor/shared",
+          "ok": true
+        },
+        {
+          "case": "after:session/set_model:rovai-a/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-a/vendor/shared",
+          "ok": true
+        },
+        {
+          "case": "after:session/set_config_option:rovai-a/vendor/shared",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_model",
+          "model": "rovai-missing/absent",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Invalid params: model not found: rovai-missing/absent"
+          }
+        },
+        {
+          "case": "after:session/set_model:rovai-missing/absent",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "session/set_config_option",
+          "model": "rovai-missing/absent",
+          "ok": false,
+          "error": {
+            "code": -32602,
+            "message": "Invalid params: model not found: rovai-missing/absent"
+          }
+        },
+        {
+          "case": "after:session/set_config_option:rovai-missing/absent",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "second-session-default",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            },
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "first-session-return",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "cold-load",
+          "ok": true
+        },
+        {
+          "case": "cold-request",
+          "ok": true,
+          "stopReason": "end_turn",
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        }
+      ],
+      "scriptSha256": "b53e37da7c1b43e4f0884ff7555a887958c46fecfad963e607beb315513fda3e",
+      "initialize": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "mcpCapabilities": {
+            "http": true,
+            "sse": true
+          },
+          "promptCapabilities": {
+            "embeddedContext": true,
+            "image": true
+          },
+          "sessionCapabilities": {
+            "close": {},
+            "fork": {},
+            "list": {},
+            "resume": {}
+          }
+        },
+        "authMethods": [
+          {
+            "description": "Run `opencode auth login` in the terminal",
+            "name": "Login with opencode",
+            "id": "opencode-login"
+          }
+        ],
+        "agentInfo": {
+          "name": "OpenCode",
+          "version": "1.18.32"
+        }
+      },
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "b",
+          "path": "/b/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "b",
+          "path": "/b/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        }
+      ],
+      "rawSummarySha256": "7277988d51c2dd90e9d014681962fd8875072eba62aa89eb9fe642c79cd28bb3",
+      "modelCatalog": {
+        "current": null,
+        "configCurrent": "rovai-a/model-a",
+        "advertisedCount": 4,
+        "customIds": [
+          "rovai-a/model-a",
+          "rovai-a/vendor/shared",
+          "rovai-b/model-a",
+          "rovai-b/vendor/shared"
+        ]
+      }
+    },
+    "pi-resume": {
+      "syntheticProvider": true,
+      "runtime": "pi",
+      "program": "/opt/homebrew/bin/pi",
+      "cases": [
+        {
+          "case": "default",
+          "ok": true,
+          "stopReason": null,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "set_model",
+          "model": "rovai-a/model-a",
+          "ok": true
+        },
+        {
+          "case": "after:set_model:rovai-a/model-a",
+          "ok": true,
+          "stopReason": null,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "model-a",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "set_model",
+          "model": "rovai-b/vendor/shared",
+          "ok": true
+        },
+        {
+          "case": "after:set_model:rovai-b/vendor/shared",
+          "ok": true,
+          "stopReason": null,
+          "requests": [
+            {
+              "provider": "b",
+              "path": "/b/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "set_model",
+          "model": "rovai-a/vendor/shared",
+          "ok": true
+        },
+        {
+          "case": "after:set_model:rovai-a/vendor/shared",
+          "ok": true,
+          "stopReason": null,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "select",
+          "method": "set_model",
+          "model": "rovai-missing/absent",
+          "ok": false,
+          "error": "Model not found: rovai-missing/absent"
+        },
+        {
+          "case": "after:set_model:rovai-missing/absent",
+          "ok": true,
+          "stopReason": null,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        },
+        {
+          "case": "cold-request",
+          "ok": true,
+          "stopReason": null,
+          "requests": [
+            {
+              "provider": "a",
+              "path": "/a/v1/chat/completions",
+              "model": "vendor/shared",
+              "authMatched": true
+            }
+          ]
+        }
+      ],
+      "scriptSha256": "0f6e4204a5bea5d614590fc615534be31a535b6e1e1018d2a4ba65174fa1e7f5",
+      "initialize": {},
+      "coldModel": {
+        "provider": "rovai-a",
+        "id": "vendor/shared"
+      },
+      "requests": [
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "model-a",
+          "authMatched": true
+        },
+        {
+          "provider": "b",
+          "path": "/b/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        },
+        {
+          "provider": "a",
+          "path": "/a/v1/chat/completions",
+          "model": "vendor/shared",
+          "authMatched": true
+        }
+      ],
+      "rawSummarySha256": "cdaa65c88544410650139642a1c293c91fbf97d392d7146444fb0b5d11ec9c91",
+      "modelCatalog": {
+        "current": null,
+        "configCurrent": null,
+        "advertisedCount": 4,
+        "customIds": [
+          "rovai-a/model-a",
+          "rovai-a/vendor/shared",
+          "rovai-b/model-a",
+          "rovai-b/vendor/shared"
+        ]
+      }
+    },
+    "command-1791-routing-no-auth": {
+      "syntheticProvider": true,
+      "runtime": "command",
+      "program": "<official-npm-install>/command-code/dist/cli.mjs",
+      "cases": [
+        {
+          "case": "native-cli-model",
+          "model": "rovai-a/model-a",
+          "exitCode": 3,
+          "requests": []
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-b/vendor/shared",
+          "exitCode": 3,
+          "requests": []
+        },
+        {
+          "case": "native-cli-model",
+          "model": "rovai-a/vendor/shared",
+          "exitCode": 3,
+          "requests": []
+        }
+      ],
+      "scriptSha256": "a357cb446702d0adf9aa726745f3b5d4f2428e3915498be90fd7533593969b9b",
+      "initialize": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "loadSession": true,
+          "promptCapabilities": {
+            "audio": false,
+            "image": true,
+            "embeddedContext": true
+          },
+          "mcpCapabilities": {
+            "http": true,
+            "sse": false
+          },
+          "sessionCapabilities": {
+            "list": {},
+            "resume": {},
+            "close": {}
+          }
+        },
+        "authMethods": [
+          {
+            "id": "command-code-cli",
+            "name": "Command Code CLI login",
+            "description": "Sign in once with `cmd login` in a terminal; this session reuses that account."
+          }
+        ],
+        "agentInfo": {
+          "name": "Command Code",
+          "version": "1.79.1"
+        }
+      },
+      "failure": {
+        "type": "RuntimeError",
+        "message": "{\"ok\": false, \"error\": {\"code\": -32000, \"message\": \"Not authenticated. Run `cmd login` in a terminal first.\"}}"
+      },
+      "cliListedCustomModels": {
+        "rovai-a/model-a": true,
+        "rovai-a/vendor/shared": true,
+        "rovai-b/vendor/shared": true
+      },
+      "requests": [],
+      "rawSummarySha256": "edb05a77540384feb96d7b3f2d4fcb6d3d0cb76a7db7fc30f7309fc70a57546d",
+      "modelCatalog": {
+        "current": null,
+        "configCurrent": null,
+        "advertisedCount": 0,
+        "customIds": []
+      }
+    }
+  },
+  "real": {
+    "real-1741": {
+      "realModel": true,
+      "program": "<official-npm-install>/command-code/dist/cli.mjs",
+      "programSha256": "a0727482bfd108c6bae498bc7ce29938e9d975244ee7776e505a9e61a0fda082",
+      "providerModel": "sub2api/gpt-6-sol",
+      "turns": [
+        {
+          "label": "first",
+          "ok": true,
+          "errorCode": null,
+          "stopReason": "end_turn",
+          "expectedMarkerObserved": true,
+          "pid": 56155
+        },
+        {
+          "label": "warm",
+          "ok": true,
+          "errorCode": null,
+          "stopReason": "end_turn",
+          "expectedMarkerObserved": true,
+          "pid": 56155
+        },
+        {
+          "label": "cold",
+          "ok": true,
+          "errorCode": null,
+          "stopReason": "end_turn",
+          "expectedMarkerObserved": true,
+          "pid": 56188
+        }
+      ],
+      "agentVersion": "1.74.1",
+      "sessionId": "79ab6d5f-6594-4ee9-a96c-84ecdb302a0f",
+      "currentModelId": "sub2api/gpt-6-sol",
+      "byokListed": false,
+      "select": [
+        {
+          "method": "session/set_model",
+          "ok": false,
+          "errorCode": -32602,
+          "unknownModel": true
+        },
+        {
+          "method": "session/set_config_option",
+          "ok": false,
+          "errorCode": -32602,
+          "unknownModel": true
+        }
+      ],
+      "coldLoadOk": true,
+      "nativeSourcesUnchanged": true
+    },
+    "real-1791": {
+      "realModel": true,
+      "program": "<official-npm-install>/command-code/dist/cli.mjs",
+      "programSha256": "3193c12205bc9c03ae33b7676e7b840dd9d4ae1af955558470d147da50e7705a",
+      "providerModel": "sub2api/gpt-6-sol",
+      "turns": [
+        {
+          "label": "first",
+          "ok": true,
+          "errorCode": null,
+          "stopReason": "end_turn",
+          "expectedMarkerObserved": true,
+          "pid": 56211
+        },
+        {
+          "label": "warm",
+          "ok": true,
+          "errorCode": null,
+          "stopReason": "end_turn",
+          "expectedMarkerObserved": true,
+          "pid": 56211
+        },
+        {
+          "label": "cold",
+          "ok": true,
+          "errorCode": null,
+          "stopReason": "end_turn",
+          "expectedMarkerObserved": true,
+          "pid": 56244
+        }
+      ],
+      "agentVersion": "1.79.1",
+      "sessionId": "7c14988a-c9b1-4fec-9904-b181dc4c41a5",
+      "currentModelId": "sub2api/gpt-6-sol",
+      "byokListed": false,
+      "select": [
+        {
+          "method": "session/set_model",
+          "ok": false,
+          "errorCode": -32602,
+          "unknownModel": true
+        },
+        {
+          "method": "session/set_config_option",
+          "ok": false,
+          "errorCode": -32602,
+          "unknownModel": true
+        }
+      ],
+      "coldLoadOk": true,
+      "nativeSourcesUnchanged": true
+    }
+  },
+  "productClosure": {
+    "app": {
+      "sourceCommit": "11dfcae91af5789848db798db9daed998df7f252",
+      "channel": "isolated packaged macOS arm64 App",
+      "coreSha256": "e70c592113efa10d903e8e5abe8011087c8ae384ede96409687ebe0cf764db40",
+      "signature": "codesign --verify --deep --strict passed (ad-hoc)",
+      "contract": "v1.72",
+      "projectionSchema": 138,
+      "receipt188": true,
+      "catalog": {
+        "rows": [
+          "Claude Code",
+          "Codex CLI",
+          "GitHub Copilot",
+          "OpenCode",
+          "Kiro",
+          "Qoder",
+          "CodeBuddy",
+          "Qwen Code",
+          "TRAE CLI",
+          "Kimi Code",
+          "Grok Build",
+          "DeepSeek Harness",
+          "Command Code",
+          "ZCode",
+          "Antigravity",
+          "PI"
+        ],
+        "clineVisible": false,
+        "commandCodeVisible": true,
+        "clineAdmission": [
+          {
+            "evidenceRevision": null,
+            "platform": "macos-arm64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          },
+          {
+            "evidenceRevision": null,
+            "platform": "macos-x64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          },
+          {
+            "evidenceRevision": null,
+            "platform": "windows-x64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          },
+          {
+            "evidenceRevision": null,
+            "platform": "linux-x64",
+            "reasonCode": "runtime_platform.qualification_evidence_missing",
+            "runtimeKind": "cline-cli",
+            "status": "not_qualified"
+          }
+        ],
+        "hostPlatform": "macos-arm64"
+      },
+      "observedOwnedProcessCount": 5,
+      "ownedProcessesRemainingAfterQuit": [],
+      "dailyAppRestarted": false,
+      "realModelRunsInThisAppSmoke": 0
+    },
+    "rustWorkspace": {
+      "passed": 464,
+      "ignored": 2
+    },
+    "vitest": {
+      "files": 239,
+      "passed": 2615
+    },
+    "typecheck": "passed",
+    "windowsCompile": {
+      "commit": "11dfcae91af5789848db798db9daed998df7f252",
+      "result": "success",
+      "url": "https://github.com/murray17/rovai-ai/actions/runs/37811369379"
+    },
+    "prCI": {
+      "commit": "11dfcae91af5789848db798db9daed998df7f252",
+      "result": "success",
+      "url": "https://github.com/murray17/rovai-ai/actions/runs/37811367066"
+    },
+    "credentialScan": {
+      "filesScanned": 155,
+      "sensitiveReferencesChecked": 4,
+      "matchingFiles": [],
+      "rawValuesPrinted": false
+    }
+  }
+}

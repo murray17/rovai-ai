@@ -27,3 +27,7 @@ axis and read shape in [Transport v36](builtin-tool-transport-v36.md); transport
 builtin_cli.transport.v36, IPC **2**, Envelope/receipt **1**, and Native Binding compatibility stay fixed.
 The per-operation current output Schema and model-facing description explain IDs, names, fixed user and
 the distinction from execution state. Other operation inputs/results are unchanged.
+
+New continuation requests create only internal Delivery authorization, with no message row or public
+message sequence. [Continuation v3](agent-run-continuation-v3.md) therefore adds nothing to read or search results.
+Previously published records and frozen historical tool results remain unchanged.

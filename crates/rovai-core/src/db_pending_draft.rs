@@ -57,7 +57,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
-            DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 133
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.contract_version == "v1.72" && marker.projection_schema_version == 133
         ),
         "Pending draft retention migration failed schema admission"
     );
@@ -67,7 +68,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(connection: &Connection) {
-    run_continuation::downgrade_for_test(connection);
+    downgrade_cline_catalog_for_test(connection);
     if !connection
         .table_exists(None, "pending_camp_draft_presence")
         .unwrap()

@@ -23,19 +23,23 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
         .connection
         .transaction_with_behavior(TransactionBehavior::Immediate)?;
     anyhow::ensure!(
-        matches!(classify_database_contract(&tx)?, DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.contract_version=="v1.72" && marker.projection_schema_version==134),
-        "Mission descriptions require v1.72/schema 134"
+        matches!(classify_database_contract(&tx)?, DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.contract_version=="v1.72" && marker.projection_schema_version==136),
+        "Mission descriptions require v1.72/schema 136"
     );
-    tx.execute_batch(TABLE)?;
-    tx.execute_batch("INSERT INTO mission_description SELECT id, CASE WHEN description='' THEN '[]' ELSE json_array(json_object('kind','text','text',description)) END FROM mission;
-        INSERT INTO schema_migration VALUES(185,datetime('now'));
-        UPDATE rovai_data_contract SET projection_schema_version=135,updated_at=datetime('now') WHERE singleton=1;")?;
+    // Main's receipt 185 already owns this exact table and its structured atoms.
+    // Preserve those rows; only Preview sources need the text-only backfill.
+    if !schema_matches(&tx)? {
+        tx.execute_batch(TABLE)?;
+        tx.execute_batch("INSERT INTO mission_description SELECT id, CASE WHEN description='' THEN '[]' ELSE json_array(json_object('kind','text','text',description)) END FROM mission;")?;
+    }
+    tx.execute_batch("INSERT INTO schema_migration VALUES(187,datetime('now'));
+        UPDATE rovai_data_contract SET projection_schema_version=137,updated_at=datetime('now') WHERE singleton=1;")?;
     validate_migration_foreign_keys(&tx, &["mission_description"])?;
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
             DatabaseContractClassification::SupportedMigrationSource(ref marker)
-                if marker.projection_schema_version == 135
+                if marker.projection_schema_version == 137
         ),
         "Mission description schema admission failed"
     );
@@ -54,8 +58,8 @@ pub(super) fn downgrade_for_test(connection: &Connection) {
     }
     connection
         .execute_batch(
-            "DROP TABLE mission_description; DELETE FROM schema_migration WHERE version=185;
-        UPDATE rovai_data_contract SET projection_schema_version=134 WHERE singleton=1;",
+            "DROP TABLE mission_description; DELETE FROM schema_migration WHERE version=187;
+        UPDATE rovai_data_contract SET projection_schema_version=136 WHERE singleton=1;",
         )
         .unwrap();
 }
@@ -74,10 +78,10 @@ mod tests {
         downgrade_for_test(database.connection());
         let evidence =
             public_history_claim_preserved_evidence_digest(database.connection()).unwrap();
-        database.connection().execute_batch("CREATE TEMP TRIGGER reject_description_migration BEFORE INSERT ON schema_migration WHEN NEW.version=185 BEGIN SELECT RAISE(ABORT,'fixture migration failure'); END;").unwrap();
+        database.connection().execute_batch("CREATE TEMP TRIGGER reject_description_migration BEFORE INSERT ON schema_migration WHEN NEW.version=187 BEGIN SELECT RAISE(ABORT,'fixture migration failure'); END;").unwrap();
         assert!(migrate(&mut database).is_err());
         assert!(!schema_matches(database.connection()).unwrap());
-        assert!(!database.schema_migration_applied(185).unwrap());
+        assert!(!database.schema_migration_applied(187).unwrap());
         assert_eq!(
             database
                 .connection()
@@ -87,7 +91,7 @@ mod tests {
                     |r| r.get::<_, i64>(0)
                 )
                 .unwrap(),
-            134
+            136
         );
         database
             .connection()

@@ -4344,7 +4344,6 @@ fn queue_camp_message_and_runs(
             transaction,
             input.camp_id,
             input.camp_message_id,
-            camp_sequence,
             &addressed_agent_ids,
             input.now,
         )?

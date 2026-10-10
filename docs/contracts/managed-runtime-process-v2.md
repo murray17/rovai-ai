@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # Managed Runtime Process v2
@@ -159,6 +159,26 @@ Unix 直接启动目标进程并保留 process group、stdio、环境快照与�
 handle list 与受控 entrypoint。所有 Runtime/Probe/derived child 都不经过 Rovai 的 `sandbox-exec` 包装。
 Runtime 可以自行创建原生沙箱，其可用性由 Runtime 配置和实际宿主环境决定。
 
+ACP Host 同时观察受管 leader 的退出和协议管道结束。leader 退出后先终止持有管道的后代，给 reader
+有界时间消费已到达的权威结果，再精确一次通知 owner；不能仅等待 stdout EOF，也不能丢弃退出前的完成帧。
+
+<a id="macos-acp-descendants"></a>
+### macOS ACP 后代与重启回收
+
+macOS ACP 在 Managed Process 内记录同 UID 后代的 kernel unique identity、parent unique identity 和 PID version。
+Native shell 可创建独立进程组，回收不能只依赖 `killpg`。Darwin audit-token signal 在内核校验 PID version，
+不能退化为按名称、路径或裸 PID 扫描补杀。跨 `exec` 仅刷新同一 unique identity 的版本。
+
+每个 Host 在现有 Runtime 私有目录保存 mode 0600 的原子 ownership ledger，父目录 mode 0700；记录
+boot session、Core owner 和已观测祖先，不保存 argv、Prompt、凭据或工具输出。运行时采集与显式清理复用
+同一 ledger。确认整棵已捕获树不再运行才移除记录；读写、身份或信号失败保留未确认状态。
+Core 在开放 readiness 前处理前代 ledger；仅同次系统启动且原 owner 已消失时回收，失败则关闭启动准入。
+旧 boot 的记录只清除文件，不向可能复用 PID 的新进程发信号。
+
+这是既有 Unix 回收的补强，不是 Windows Job/cgroup：未观测且已消失的中间祖先、跨 UID 后代、Core 停止后
+直到再次启动前的空窗不受此记录保证。macOS 使用 XNU libproc 的固定结构与 PID-version signal 接口，
+字段大小/能力不符即失败；平台与目标版本仍必须分别验收。选择理由见 [V1.72-D26](../versions/v1.72/decisions.md#v1-72-d26)。
+
 Linux ACP Host 在原生 cancel、graceful stop 或强制回收之前，先由 Managed Process 捕获同 UID 后代的
 父子关系与启动身份，并持有 pidfd。原生取消使父进程退出或后代重新挂靠后，仍通过已捕获的 pidfd 终止后代；
 不得按进程名或裸 PID 补杀。根进程退出不能替代已捕获后代退出的确认，查询失败保持回收未确认。
@@ -171,9 +191,17 @@ Unix 显式回收仍等待其组退出报告；不能把两种确认方式混用
 
 macOS 显式 Stop 在祖先关系断开前捕获当前受管树，使用 libproc 的进程生命周期身份保留归属，
 以 audit-token PID version 核验后发送信号，包含独立 process group 中的已捕获工具子进程。
-保留既有进程组回收，Claude、Antigravity 和普通 ACP 的清理确认还必须等待已捕获后代退出；
+所有 Managed Process 在 spawn 时捕获根生命周期身份，取消前重新读取后代，不能复用早于最近 fork 的快照。
+macOS 信号只发给核验后的身份；Claude、Antigravity 和普通 ACP 的清理确认还必须等待已捕获后代退出；
 身份查询或终止能力不可用时保持未确认并保留清理句柄。ZCode 保留自己的 ledger 确认路径。
+ACP 可在同一内存所有权树上启用上述持久 ledger，不建立第二棵互不一致的清理树；未启用的临时 Probe
+仍保留内核身份与取消回收，但不宣称 Core 崩溃后的持久恢复。
 这不承诺捕获前已脱离祖先链的未知后台服务；不按进程名扫杀，也不把进程退出当作原生 turn 终态。
+
+macOS 在信号处理期间仍可能返回 `EPERM`；当前只走上述核验身份的信号路径，不再额外调用 `killpg`。
+该错误不能单独证明成功：只有捕获完整，且按生命周期身份确认根进程及全部已捕获后代均已退出或
+成为不再执行用户代码的 zombie，才允许继续根进程 reap。仍有活跃后代、捕获不完整、查询失败
+或其他信号错误时保留原清理门禁；不增加超时，不把原生输入失败改成成功。
 
 User Automation 的 `rovai app` 防误调用由 CLI 入口拥有，见 [User Automation v5](user-automation-v5.md)。
 该检查不形成同 UID 恶意进程隔离，不是 Managed Process 的启动前置条件。

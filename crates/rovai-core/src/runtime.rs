@@ -335,6 +335,9 @@ pub enum MissingSendRecoveryBoundary {
     AntigravityPrintStdout,
     AcpEndTurnAssistantSuffix,
     PiAgentSettled,
+    /// Passive decoding of pre-ACP receipts; never admitted for a new result.
+    #[serde(rename = "cline_hub_run_result")]
+    RetiredClineHubRunResult,
     ZcodeCompletedTurn,
 }
 
@@ -346,19 +349,23 @@ impl MissingSendRecoveryBoundary {
             Self::AntigravityPrintStdout => "antigravity_print_stdout",
             Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
             Self::PiAgentSettled => "pi_agent_settled",
+            Self::RetiredClineHubRunResult => "cline_hub_run_result",
             Self::ZcodeCompletedTurn => "zcode_completed_turn",
         }
     }
 
-    fn is_compatible_with(self, adapter_kind: AdapterKind) -> bool {
+    fn is_compatible_with(self, adapter_kind: AdapterKind, protocol: Option<&str>) -> bool {
         match self {
             Self::CodexCompletedTurn => matches!(adapter_kind, AdapterKind::CodexCli),
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
             Self::AcpEndTurnAssistantSuffix => {
-                adapter_kind.uses_acp() && adapter_kind != AdapterKind::ZcodeApp
+                adapter_kind.uses_acp()
+                    && adapter_kind != AdapterKind::ZcodeApp
+                    && (adapter_kind != AdapterKind::ClineCli || protocol == Some("acp-v1"))
             }
             Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
+            Self::RetiredClineHubRunResult => false,
             Self::ZcodeCompletedTurn => matches!(adapter_kind, AdapterKind::ZcodeApp),
         }
     }
@@ -4932,7 +4939,9 @@ fn settle_failed_agent_run_in_tx(
             END,
             cancel_reason_code = CASE
                 WHEN ?11 THEN COALESCE(cancel_reason_code,
-                    CASE WHEN ?9 IS NULL THEN 'runtime_terminal_unconfirmed'
+                    CASE WHEN ?2 = 'accepted_input_outcome_unknown'
+                         THEN 'accepted_input_outcome_unknown'
+                         WHEN ?9 IS NULL THEN 'runtime_terminal_unconfirmed'
                          ELSE 'runtime_terminal_host_failed' END
                 )
                 ELSE cancel_reason_code
@@ -5502,7 +5511,15 @@ fn decide_missing_send_recovery(
     let Some(adapter_kind) = adapter_kind else {
         return Ok(outcome("skipped_boundary_mismatch", None, None));
     };
-    if !candidate.boundary.is_compatible_with(adapter_kind) {
+    let protocol: Option<String> = transaction.query_row(
+        "SELECT runtime_protocol_version FROM agent_run WHERE id = ?1",
+        [&target.agent_run_id],
+        |row| row.get(0),
+    )?;
+    if !candidate
+        .boundary
+        .is_compatible_with(adapter_kind, protocol.as_deref())
+    {
         return Ok(outcome("skipped_boundary_mismatch", None, None));
     }
     if candidate.body.trim().is_empty() {
@@ -5935,6 +5952,35 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
     actor: &ActorRef,
     now: &str,
 ) -> Result<AbortiveRunSettlement> {
+    settle_interrupted_run_in_tx(transaction, agent_run_id, reason_code, actor, now, false)
+}
+
+/// A lost accepted/possibly accepted public input must fail without replay.
+/// Cleanup acknowledgement remains a separate, adapter-owned isolation fact.
+pub(crate) fn settle_lost_agent_run_in_tx(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+    actor: &ActorRef,
+    now: &str,
+) -> Result<AbortiveRunSettlement> {
+    settle_interrupted_run_in_tx(
+        transaction,
+        agent_run_id,
+        "accepted_input_outcome_unknown",
+        actor,
+        now,
+        true,
+    )
+}
+
+fn settle_interrupted_run_in_tx(
+    transaction: &Transaction<'_>,
+    agent_run_id: &str,
+    reason_code: &str,
+    actor: &ActorRef,
+    now: &str,
+    runtime_lost: bool,
+) -> Result<AbortiveRunSettlement> {
     struct RunFacts {
         camp_id: String,
         camp_turn_id: String,
@@ -5998,6 +6044,16 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
         });
     }
     let reason_code = previous_reason.as_deref().unwrap_or(reason_code);
+    // A user cancellation committed first retains its cancellation outcome.
+    let runtime_lost = runtime_lost && requested_at.is_none();
+    let terminal_status = if runtime_lost { "failed" } else { "cancelled" };
+    let terminal_code = if runtime_lost {
+        "agent_run.failed"
+    } else {
+        "agent_run.cancelled"
+    };
+    let error_code = runtime_lost.then_some(reason_code);
+
     let (accepted_input_preserved, action_effect_evidence, runtime_delivery_evidence): (
         bool,
         bool,
@@ -6020,7 +6076,11 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
         transaction,
         agent_run_id,
         now,
-        AbortiveEffectClosureReason::cancellation(),
+        if runtime_lost {
+            AbortiveEffectClosureReason::runtime_loss()
+        } else {
+            AbortiveEffectClosureReason::cancellation()
+        },
     )?;
     transaction.execute(
         "UPDATE agent_run SET status = ?2, wait_reason = NULL, wait_deadline_at = NULL,
@@ -6033,10 +6093,10 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
          WHERE id = ?1 AND status IN ('queued', 'running', 'waiting')",
         params![
             agent_run_id,
-            "cancelled",
+            terminal_status,
             now,
             reason_code,
-            Option::<&str>::None,
+            error_code,
             Option::<&str>::None,
             (!runtime_cleanup_required).then_some(now),
         ],
@@ -6054,13 +6114,13 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
     }
     append_domain_event(
         transaction,
-        "agent_run.cancelled",
+        terminal_code,
         &camp_id,
         ("agent_run", agent_run_id),
         actor,
         Some(execution_epoch),
         &json!({
-            "reasonCode": reason_code, "resolutionSource": "cancellation_transaction",
+            "reasonCode": reason_code, "resolutionSource": if runtime_lost { "runtime_loss" } else { "cancellation_transaction" },
             "acceptedInputPreserved": accepted_input_preserved,
             "externalEffectEvidencePreserved": external_effect_evidence_preserved,
             "automaticRetryAllowed": false,
@@ -6073,7 +6133,7 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
         transaction,
         AgentRunDeliverySettlement {
             agent_run_id,
-            agent_run_status: "cancelled",
+            agent_run_status: terminal_status,
             agent_run_error_code: Some(reason_code),
             terminal_resolution_source: None,
             terminal_reason_code: None,
@@ -6086,9 +6146,20 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
         settle_run_deliveries(
             transaction,
             agent_run_id,
-            "cancelled",
+            terminal_status,
             Some(reason_code),
             now,
+        )?;
+    }
+    if runtime_lost {
+        transaction.execute(
+            "UPDATE conversation SET native_adapter_installation_id = NULL, native_session_id = NULL,
+                 native_binding_compatibility_digest = NULL, native_installation_generation = NULL,
+                 native_session_compatibility_key = NULL, native_binding_id = NULL,
+                 native_binding_secret_digest = NULL, native_charter_digest = NULL,
+                 native_collaboration_state_digest = NULL, version = version + 1, updated_at = ?2
+             WHERE id = ?1",
+            params![conversation_id, now],
         )?;
     }
     Ok(AbortiveRunSettlement {
@@ -6097,8 +6168,8 @@ pub(crate) fn settle_abortive_agent_run_in_tx(
         camp_turn_id,
         conversation_id,
         execution_epoch,
-        terminal_status: "cancelled".into(),
-        terminal_code: "agent_run.cancelled".into(),
+        terminal_status: terminal_status.into(),
+        terminal_code: terminal_code.into(),
         runtime_cleanup_required,
         external_effect_evidence_preserved,
     })
@@ -7217,6 +7288,7 @@ fn entity_ref(entity_type: &str, entity_id: &str) -> EntityReference {
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests {
     use super::*;
+    use crate::test_support::insert_test_runtime_input;
     use crate::{
         agent_profile::{
             AdapterKind, AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
@@ -7258,15 +7330,33 @@ mod tests {
                 MissingSendRecoveryBoundary::AntigravityPrintStdout,
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
                 MissingSendRecoveryBoundary::PiAgentSettled,
+                MissingSendRecoveryBoundary::RetiredClineHubRunResult,
                 MissingSendRecoveryBoundary::ZcodeCompletedTurn,
             ] {
                 assert_eq!(
-                    boundary.is_compatible_with(adapter_kind),
+                    boundary.is_compatible_with(adapter_kind, Some("acp-v1")),
                     boundary == expected,
                     "{} must accept only its frozen recovery boundary",
                     adapter_kind.as_str(),
                 );
             }
+        }
+        for (protocol, acp, hub) in [
+            (None, false, false),
+            (Some("unknown"), false, false),
+            (Some("acp-v1"), true, false),
+            (Some("cline-hub-v1"), false, false),
+        ] {
+            assert_eq!(
+                MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix
+                    .is_compatible_with(AdapterKind::ClineCli, protocol),
+                acp
+            );
+            assert_eq!(
+                MissingSendRecoveryBoundary::RetiredClineHubRunResult
+                    .is_compatible_with(AdapterKind::ClineCli, protocol),
+                hub
+            );
         }
     }
 
@@ -7485,6 +7575,25 @@ mod tests {
             resume_execution(Some("session-v1"), Some("session-v2"), 1, 2)
                 .native_session_resume_disposition(),
             NativeSessionResumeDisposition::New
+        );
+        // Retired backend keys are passive data; even the same installation
+        // generation must create an ACP Binding, never load the old Hub ID.
+        let mut retired = resume_execution(
+            Some("cline-cli:native-hub-v1:old"),
+            Some("cline-cli:history-restore-v1:current"),
+            1,
+            1,
+        );
+        retired.runtime.adapter_kind = AdapterKind::ClineCli;
+        retired.runtime.protocol_version = "acp-v1".into();
+        assert_eq!(
+            retired.native_session_resume_disposition(),
+            NativeSessionResumeDisposition::New
+        );
+        assert_eq!(
+            retired.native_session_id.as_deref(),
+            Some("session-existing"),
+            "classification must not delete historical identity"
         );
         assert_eq!(
             resume_execution(Some("session-v1"), None, 1, 2).native_session_resume_disposition(),
@@ -8194,57 +8303,6 @@ mod tests {
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    fn insert_test_runtime_input(
-        database: &Database,
-        agent_run_id: &str,
-        execution_epoch: i64,
-        status: &str,
-    ) {
-        let now = chrono::Utc::now().to_rfc3339();
-        database
-            .connection()
-            .execute_batch("PRAGMA foreign_keys = OFF;")
-            .unwrap();
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO runtime_input_delivery(
-                    id, agent_run_id, execution_epoch, context_manifest_id,
-                    native_binding_id, native_binding_generation,
-                    boundary_camp_message_sequence, dynamic_payload_digest,
-                    status, native_input_id, prepared_at, accepted_at,
-                    resolved_at, updated_at,
-                    runtime_attachment_auth_receipt_version,
-                    runtime_attachment_auth_receipt_json,
-                    runtime_attachment_auth_receipt_digest,
-                    runtime_request_digest
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7, ?8, ?9, ?10, ?10, ?9,
-                    1, '{"schemaVersion":1}', 'sha256:test-auth', 'sha256:test-request'
-                )
-                "#,
-                params![
-                    format!("test-input-{agent_run_id}-{execution_epoch}"),
-                    agent_run_id,
-                    execution_epoch,
-                    format!("test-manifest-{agent_run_id}-{execution_epoch}"),
-                    format!("test-binding-{agent_run_id}-{execution_epoch}"),
-                    format!("sha256:{agent_run_id}:{execution_epoch}"),
-                    status,
-                    (status == "accepted")
-                        .then(|| format!("native-input-{agent_run_id}-{execution_epoch}")),
-                    now,
-                    (status == "accepted").then_some(now.as_str()),
-                ],
-            )
-            .unwrap();
-        database
-            .connection()
-            .execute_batch("PRAGMA foreign_keys = ON;")
-            .unwrap();
     }
 
     // Owns the live Host-loss transaction, which startup and transport-retry
@@ -9229,36 +9287,84 @@ mod tests {
 
     #[test]
     fn startup_recovery_terminalizes_an_accepted_unknown_input_without_a_waiting_blocker() {
-        let (directory, mut database, _camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
-            claimed_run_for_planned_shutdown("required");
-        insert_test_runtime_input(&database, &agent_run_id, execution_epoch, "accepted");
-        database
-            .connection()
-            .execute(
-                r#"
+        for (input_status, startup) in [
+            ("accepted", true),
+            ("delivery_unknown", true),
+            ("prepared", false),
+        ] {
+            let (directory, mut database, camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
+                claimed_run_for_planned_shutdown("required");
+            insert_test_runtime_input(&database, &agent_run_id, execution_epoch, input_status);
+            if input_status == "prepared" {
+                database.connection().execute("UPDATE runtime_input_delivery SET dispatch_started_at = prepared_at WHERE agent_run_id = ?1", [&agent_run_id]).unwrap();
+            }
+            database
+                .connection()
+                .execute(
+                    r#"
                 UPDATE conversation
                 SET last_accepted_public_boundary_sequence = 12
                 WHERE id = (
                     SELECT conversation_id FROM agent_run WHERE id = ?1
                 )
                 "#,
-                [&agent_run_id],
-            )
-            .unwrap();
-        let recovery = database.prepare_v2_recovery().unwrap();
-        assert_eq!(recovery.accepted_input_recovery_blockers_created, 1);
-        let state: (
-            String,
-            Option<String>,
-            i64,
-            Option<String>,
-            Option<String>,
-            String,
-            i64,
-        ) = database
-            .connection()
-            .query_row(
-                r#"
+                    [&agent_run_id],
+                )
+                .unwrap();
+            if startup {
+                let recovery = database.prepare_v2_recovery().unwrap();
+                assert_eq!(recovery.accepted_input_recovery_blockers_created, 1);
+            } else {
+                let version = database
+                    .connection()
+                    .query_row(
+                        "SELECT version FROM agent_run WHERE id = ?1",
+                        [&agent_run_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let recovery = crate::action::ActionSafetyService::default()
+                    .reconcile_runtime_loss(
+                        &mut database,
+                        &CommandEnvelope {
+                            command_id: "runtime-loss-owner".into(),
+                            actor: ActorRef::System {
+                                component_id: "runtime-recovery-coordinator".into(),
+                            },
+                            camp_id: Some(camp_id.clone()),
+                            expected_versions: vec![],
+                            execution_epoch: None,
+                            payload: crate::action::ReconcileRuntimeLossCommand {
+                                agent_run_id: agent_run_id.clone(),
+                                expected_version: version,
+                                execution_epoch,
+                                reason: "fixture-native-exit".into(),
+                            },
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(recovery.result.code, "agent_run.failed");
+            }
+            // Recovery is idempotent and cannot requeue the unknown input.
+            assert_eq!(
+                database
+                    .prepare_v2_recovery()
+                    .unwrap()
+                    .accepted_input_recovery_blockers_created,
+                0
+            );
+            let state: (
+                String,
+                Option<String>,
+                i64,
+                Option<String>,
+                Option<String>,
+                String,
+                i64,
+            ) = database
+                .connection()
+                .query_row(
+                    r#"
                 SELECT agent_run.status, agent_run.wait_reason,
                        agent_run.runtime_recovery_required,
                        agent_run.last_error_code, agent_run.cancel_requested_at,
@@ -9270,33 +9376,49 @@ mod tests {
                 JOIN conversation ON conversation.id = agent_run.conversation_id
                 WHERE agent_run.id = ?1
                 "#,
-                [&agent_run_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                        row.get(6)?,
-                    ))
-                },
-            )
-            .unwrap();
-        assert_eq!(state.0, "failed");
-        assert!(state.1.is_none());
-        assert_eq!(state.2, 0);
-        assert_eq!(state.3.as_deref(), Some("accepted_input_outcome_unknown"));
-        assert!(
-            state.4.is_some(),
-            "cleanup remains explicitly unacknowledged"
-        );
-        assert_eq!(state.5, "failed");
-        assert_eq!(state.6, 12);
+                    [&agent_run_id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                        ))
+                    },
+                )
+                .unwrap();
+            assert_eq!(state.0, "failed");
+            assert!(state.1.is_none());
+            assert_eq!(state.2, 0);
+            assert_eq!(state.3.as_deref(), Some("accepted_input_outcome_unknown"));
+            assert!(
+                state.4.is_some(),
+                "cleanup remains explicitly unacknowledged"
+            );
+            assert_eq!(state.5, "failed");
+            assert_eq!(state.6, 12);
 
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
+            // Cleanup uses cancellation bookkeeping, but runtime loss must remain
+            // a failure in the public view rather than a legacy user cancellation.
+            let snapshot = ReadModelService
+                .camp_snapshot(&mut database, &camp_id)
+                .unwrap();
+            let projected = snapshot
+                .agent_runs
+                .iter()
+                .find(|run| run.id == agent_run_id)
+                .unwrap();
+            assert_eq!(projected.status, "failed");
+            assert!(projected.wait_reason.is_none());
+            assert!(projected.cancel_acknowledged_at.is_none());
+            assert!(!projected.has_unsettled_external_effects);
+
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]

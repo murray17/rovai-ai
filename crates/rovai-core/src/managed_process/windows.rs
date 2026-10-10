@@ -259,6 +259,18 @@ impl WindowsManagedProcess {
         self.stderr.take()
     }
 
+    pub(super) fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        if let Some(exit_code) = self.exit_code {
+            return Ok(Some(ExitStatus::from_raw(exit_code)));
+        }
+        if !process_has_exited(&self.process)? {
+            return Ok(None);
+        }
+        let exit_code = process_exit_code(&self.process)?;
+        self.exit_code = Some(exit_code);
+        Ok(Some(ExitStatus::from_raw(exit_code)))
+    }
+
     pub(super) async fn wait(&mut self) -> io::Result<ExitStatus> {
         if let Some(exit_code) = self.exit_code {
             return Ok(ExitStatus::from_raw(exit_code));
@@ -726,7 +738,6 @@ fn process_exit_code(process: &OwnedHandle) -> io::Result<u32> {
     }
 }
 
-#[cfg(test)]
 fn process_has_exited(process: &OwnedHandle) -> io::Result<bool> {
     match unsafe {
         // SAFETY: process is an owned process handle.

@@ -1,0 +1,3344 @@
+{
+  "date": "2026-10-05",
+  "platform": "macos-arm64",
+  "baselineCommit": "59a43b52",
+  "scope": "Native real-LLM probes, shared Core control/gate smoke, isolated packaged App; no raw prompts, history, credentials or provider configuration.",
+  "commandCode": {
+    "version": "1.74.1",
+    "transport": "official ACP over stdio",
+    "model": "sub2api/gpt-6-sol",
+    "bootstrapMode": "managed_system_prompt",
+    "nativeDefaultByokWorks": true,
+    "explicitCustomSetModelRejected": true,
+    "coreControl": {
+      "test": "isolated_command_code_acp_bootstrap_gate_and_resident_sessions",
+      "passed": true,
+      "pid": 65764,
+      "sessionIds": [
+        "970b921b-4779-4b77-8fcf-c3a511cd3aaa",
+        "df811549-65d4-4c86-9ac3-103a28c5a5e3"
+      ],
+      "sameHostABA": true,
+      "modesAccepted": [
+        "default",
+        "auto-accept",
+        "plan",
+        "dont-ask",
+        "bypass"
+      ],
+      "changedBindingRejected": true,
+      "missingBindingStoppedHostBeforeProvider": true
+    },
+    "nativeModelTurns": [
+      {
+        "label": "A-first",
+        "pid": 68884,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 16760,
+          "outputTokens": 7,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 16768,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [],
+        "toolTransitions": []
+      },
+      {
+        "label": "B-first",
+        "pid": 68884,
+        "sessionId": "b3dc1d97-ce21-4ff6-878e-32aed674c96c",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 16761,
+          "outputTokens": 7,
+          "cacheReadTokens": 6016,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 16769,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [],
+        "toolTransitions": []
+      },
+      {
+        "label": "A-return",
+        "pid": 68884,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 16790,
+          "outputTokens": 10,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 16802,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [
+          "SYSTEM_A50",
+          "MEMORY_A50"
+        ],
+        "toolTransitions": []
+      },
+      {
+        "label": "read-edit-command",
+        "pid": 68884,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 85713,
+          "outputTokens": 427,
+          "cacheReadTokens": 56320,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 17402,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [],
+        "toolTransitions": [
+          {
+            "sessionUpdate": "tool_call",
+            "kind": "read",
+            "status": "pending"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "in_progress"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "completed"
+          },
+          {
+            "sessionUpdate": "tool_call",
+            "kind": "edit",
+            "status": "pending"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "in_progress"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "completed"
+          },
+          {
+            "sessionUpdate": "tool_call",
+            "kind": "read",
+            "status": "pending"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "in_progress"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "completed"
+          },
+          {
+            "sessionUpdate": "tool_call",
+            "kind": "execute",
+            "status": "pending"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "in_progress"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "in_progress"
+          },
+          {
+            "sessionUpdate": "tool_call_update",
+            "status": "completed"
+          }
+        ]
+      },
+      {
+        "label": "manual-compact",
+        "pid": 68884,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": null,
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 17402,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [],
+        "nativeCompactionMessage": "Nothing to compact yet.",
+        "toolTransitions": []
+      },
+      {
+        "label": "after-compact",
+        "pid": 68884,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 17423,
+          "outputTokens": 10,
+          "cacheReadTokens": 16896,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 17435,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [
+          "SYSTEM_A50",
+          "MEMORY_A50"
+        ],
+        "toolTransitions": []
+      },
+      {
+        "label": "cold-after-compact",
+        "pid": 69999,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 17455,
+          "outputTokens": 10,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 17467,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [
+          "SYSTEM_A50",
+          "MEMORY_A50"
+        ],
+        "toolTransitions": []
+      }
+    ],
+    "manualCompaction": [
+      {
+        "label": "large-history",
+        "pid": 83029,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 114436,
+          "outputTokens": 8,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 114446,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [],
+        "toolTransitions": []
+      },
+      {
+        "label": "tail",
+        "pid": 83029,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 114460,
+          "outputTokens": 7,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 114469,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [],
+        "toolTransitions": []
+      },
+      {
+        "label": "manual-compact-large",
+        "pid": 83029,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": null,
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 114265,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [],
+        "nativeCompactionMessage": "Compacted 22 messages to 5, freeing about 204 tokens.",
+        "toolTransitions": []
+      },
+      {
+        "label": "after-real-compact",
+        "pid": 83029,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 114158,
+          "outputTokens": 10,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 114170,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [
+          "SYSTEM_A50",
+          "MEMORY_A50"
+        ],
+        "toolTransitions": []
+      },
+      {
+        "label": "cold-after-real-compact",
+        "pid": 83241,
+        "sessionId": "57c933aa-49d6-4653-abc0-db02edbce173",
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 114185,
+          "outputTokens": 10,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        },
+        "context": [
+          {
+            "sessionUpdate": "usage_update",
+            "used": 114197,
+            "size": 272000
+          }
+        ],
+        "observedMarkers": [
+          "SYSTEM_A50",
+          "MEMORY_A50"
+        ],
+        "toolTransitions": []
+      }
+    ],
+    "autoCompaction": {
+      "testWindowOnly": 65536,
+      "events": [
+        {
+          "type": "compaction_start"
+        },
+        {
+          "type": "compaction_outcome",
+          "outcome": "too-small",
+          "tokensBefore": 20969,
+          "tokensAfter": 20969,
+          "contextLimit": 65536
+        },
+        {
+          "type": "compaction_start"
+        },
+        {
+          "type": "compaction_outcome",
+          "outcome": "too-small",
+          "tokensBefore": 25105,
+          "tokensAfter": 25105,
+          "contextLimit": 65536
+        },
+        {
+          "type": "compaction_start"
+        },
+        {
+          "type": "compaction_outcome",
+          "outcome": "too-small",
+          "tokensBefore": 29286,
+          "tokensAfter": 29286,
+          "contextLimit": 65536
+        },
+        {
+          "type": "compaction_start"
+        },
+        {
+          "type": "compaction_outcome",
+          "outcome": "too-small",
+          "tokensBefore": 33467,
+          "tokensAfter": 33467,
+          "contextLimit": 65536
+        },
+        {
+          "type": "compaction_start"
+        },
+        {
+          "type": "compaction_done",
+          "tokensSaved": 3813
+        },
+        {
+          "type": "compaction_outcome",
+          "outcome": "summarized",
+          "tokensBefore": 37648,
+          "tokensAfter": 33835,
+          "contextLimit": 65536
+        },
+        {
+          "type": "compaction_start"
+        },
+        {
+          "type": "compaction_outcome",
+          "outcome": "too-small",
+          "tokensBefore": 33874,
+          "tokensAfter": 33874,
+          "contextLimit": 65536
+        }
+      ],
+      "finalTurn": [
+        {
+          "label": "after-auto",
+          "pid": 90299,
+          "sessionId": "89738be4-0502-4377-94f2-b0d874311f77",
+          "stopReason": "end_turn",
+          "usage": {
+            "inputTokens": 92736,
+            "outputTokens": 11,
+            "cacheReadTokens": 16640,
+            "cacheWriteTokens": 0
+          },
+          "context": [
+            {
+              "sessionUpdate": "usage_update",
+              "used": 92750,
+              "size": 65536
+            }
+          ],
+          "observedMarkers": [
+            "AUTO_SYSTEM50",
+            "AUTO_MEMORY50"
+          ],
+          "toolTransitions": []
+        }
+      ]
+    },
+    "nativeOutput": [
+      {
+        "id": "call_y9Wc7Gm3K3buGMsFIvfJPQ9a",
+        "status": "completed",
+        "keys": [
+          "sessionUpdate",
+          "toolCallId",
+          "status",
+          "content"
+        ],
+        "outputBytes": 24,
+        "out": true,
+        "err": true,
+        "large": false,
+        "prefix": "Exit code: 7\nOUT50\nERR50"
+      },
+      {
+        "id": "call_WLSKX3XdqZ6uXbMqCy9uwHaG",
+        "status": "completed",
+        "keys": [
+          "sessionUpdate",
+          "toolCallId",
+          "status",
+          "content"
+        ],
+        "outputBytes": 11,
+        "out": false,
+        "err": false,
+        "large": false,
+        "prefix": "(no output)"
+      },
+      {
+        "id": "call_etJ91TZS1LCP0XMv2alcuiGm",
+        "status": "completed",
+        "keys": [
+          "sessionUpdate",
+          "toolCallId",
+          "status",
+          "content"
+        ],
+        "outputBytes": 16001,
+        "out": false,
+        "err": false,
+        "large": true,
+        "prefix": "LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_LARGE50_"
+      }
+    ],
+    "nativeCancellation": {
+      "turns": [
+        {
+          "label": "approval-allow",
+          "pid": 16348,
+          "sessionId": "441fdfed-cc4f-4c73-83fe-b54483f9beda",
+          "stopReason": "end_turn",
+          "usage": {
+            "inputTokens": 33592,
+            "outputTokens": 98,
+            "cacheReadTokens": 12032,
+            "cacheWriteTokens": 0
+          },
+          "context": [
+            {
+              "sessionUpdate": "usage_update",
+              "used": 16835,
+              "size": 272000
+            }
+          ],
+          "observedMarkers": [],
+          "toolTransitions": [
+            {
+              "sessionUpdate": "tool_call",
+              "kind": "execute",
+              "status": "pending"
+            },
+            {
+              "sessionUpdate": "tool_call_update",
+              "status": "in_progress"
+            },
+            {
+              "sessionUpdate": "tool_call_update",
+              "status": "in_progress"
+            },
+            {
+              "sessionUpdate": "tool_call_update",
+              "status": "completed"
+            }
+          ]
+        },
+        {
+          "label": "approval-deny",
+          "pid": 16348,
+          "sessionId": "441fdfed-cc4f-4c73-83fe-b54483f9beda",
+          "stopReason": "end_turn",
+          "usage": {
+            "inputTokens": 16874,
+            "outputTokens": 57,
+            "cacheReadTokens": 6016,
+            "cacheWriteTokens": 0
+          },
+          "context": [
+            {
+              "sessionUpdate": "usage_update",
+              "used": 16957,
+              "size": 272000
+            }
+          ],
+          "observedMarkers": [],
+          "toolTransitions": [
+            {
+              "sessionUpdate": "tool_call",
+              "kind": "execute",
+              "status": "pending"
+            },
+            {
+              "sessionUpdate": "tool_call_update",
+              "status": "failed"
+            }
+          ]
+        },
+        {
+          "label": "running-tool-cancel",
+          "pid": 16348,
+          "sessionId": "441fdfed-cc4f-4c73-83fe-b54483f9beda",
+          "stopReason": "cancelled",
+          "usage": {
+            "inputTokens": 16977,
+            "outputTokens": 103,
+            "cacheReadTokens": 16640,
+            "cacheWriteTokens": 0
+          },
+          "context": [
+            {
+              "sessionUpdate": "usage_update",
+              "used": 17175,
+              "size": 272000
+            }
+          ],
+          "observedMarkers": [],
+          "toolTransitions": [
+            {
+              "sessionUpdate": "tool_call",
+              "kind": "execute",
+              "status": "pending"
+            },
+            {
+              "sessionUpdate": "tool_call_update",
+              "status": "in_progress"
+            },
+            {
+              "sessionUpdate": "tool_call_update",
+              "status": "failed"
+            }
+          ]
+        },
+        {
+          "label": "after-cancel",
+          "pid": 16348,
+          "sessionId": "441fdfed-cc4f-4c73-83fe-b54483f9beda",
+          "stopReason": "end_turn",
+          "usage": {
+            "inputTokens": 17174,
+            "outputTokens": 10,
+            "cacheReadTokens": 6016,
+            "cacheWriteTokens": 0
+          },
+          "context": [
+            {
+              "sessionUpdate": "usage_update",
+              "used": 17185,
+              "size": 272000
+            }
+          ],
+          "observedMarkers": [
+            "CANCEL_RECOVERED50"
+          ],
+          "toolTransitions": []
+        }
+      ],
+      "permissions": [
+        {
+          "method": "session/request_permission",
+          "decision": "reject_once",
+          "optionKinds": [
+            "allow_once",
+            "allow_always",
+            "reject_once",
+            "reject_always"
+          ]
+        }
+      ],
+      "allowPrintfDidNotRequireApproval": true,
+      "deniedSideEffect": false,
+      "cancelledSideEffect": false
+    },
+    "executableSha256": "a0727482bfd108c6bae498bc7ce29938e9d975244ee7776e505a9e61a0fda082",
+    "missingFields": {
+      "reasoningTokens": "not_reported",
+      "runCost": "only_session_cumulative_cost_exposed; no safe Run baseline",
+      "exitCode": "nonzero is text-only; native completed status retained"
+    },
+    "mcpKnownLimit": "Editor stdio/HTTP projection, connection and schema discovery verified. Custom BYOK model remains deferred in upstream supportsDeferredTools; search_tools returns schema text without registering it into the next model request. Repeated real search observed, actual echo not invoked; Run cancelled. Do not label MCP invocation verified."
+  },
+  "cline": {
+    "version": "3.0.65",
+    "model": "gpt-6-sol",
+    "bootstrapMode": "first_payload",
+    "systemRuleEvidence": "command-cline-checklist-2026-10-05.evidence.json#cline.ruleProbe",
+    "requiredPluginGate": "Missing plugin still allows model request; no verified ACP pre-model readiness interface",
+    "compactionProbe": {
+      "sessionId": "1791186429431_cavXC_cli",
+      "explicitGlobalEnable": true,
+      "realModelRequestCount": 2,
+      "compactionEvents": [],
+      "sourceFinding": "ACP buildConfig omits compaction; SDK requires config.compaction.enabled === true"
+    },
+    "providerFailureRecovery": "App overload before send was retryable; after committed send was not blindly retryable; following zero-tool Run recovered."
+  },
+  "app": {
+    "isolated": true,
+    "members": {
+      "agent_1": "cline-cli",
+      "agent_2": "command-code-cli"
+    },
+    "schemaVersion": 135,
+    "threadId": "rvcamp_01m43m54h1f8sapwyz6fkq8dj8",
+    "coldBefore": [
+      {
+        "id": "74e30826-f072-4773-b2f1-054ad5e70955",
+        "agent_id": "agent_1",
+        "native_session_id": "1791178505153_gIxXE_cli",
+        "native_binding_id": "18b74931-ac44-4796-8118-a9e551e330a5",
+        "native_binding_generation": 3,
+        "native_session_compatibility_key": "cline-cli:history-restore-v1:97972a184e9060f06c7ba63d260673b718610fce07f40a0a9a38954d268adff5"
+      },
+      {
+        "id": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+        "agent_id": "agent_2",
+        "native_session_id": "68c8f864-2efd-4f94-b85e-e82c82c0f3c7",
+        "native_binding_id": "fc63e3bb-e289-481d-97a2-19b0497a1dee",
+        "native_binding_generation": 4,
+        "native_session_compatibility_key": "command-code-cli:history-restore-v1:61dcbfa663a2dbfcc08ef24beba2d5834e35ab789c9299eac91c9cbdee78e9ce"
+      }
+    ],
+    "coldAfter": [
+      {
+        "id": "74e30826-f072-4773-b2f1-054ad5e70955",
+        "agent_id": "agent_1",
+        "native_session_id": "1791178505153_gIxXE_cli",
+        "native_binding_id": "18b74931-ac44-4796-8118-a9e551e330a5",
+        "native_binding_generation": 3,
+        "native_session_compatibility_key": "cline-cli:history-restore-v1:97972a184e9060f06c7ba63d260673b718610fce07f40a0a9a38954d268adff5"
+      },
+      {
+        "id": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+        "agent_id": "agent_2",
+        "native_session_id": "68c8f864-2efd-4f94-b85e-e82c82c0f3c7",
+        "native_binding_id": "fc63e3bb-e289-481d-97a2-19b0497a1dee",
+        "native_binding_generation": 4,
+        "native_session_compatibility_key": "command-code-cli:history-restore-v1:61dcbfa663a2dbfcc08ef24beba2d5834e35ab789c9299eac91c9cbdee78e9ce"
+      }
+    ],
+    "runs": [
+      {
+        "id": "08efd012-72c6-4be5-a3e4-3dc9eb115d7c",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:26:12.282012+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "APP_COMMAND_MEMORY50",
+          "COMMAND_APP50_OK"
+        ],
+        "fileChanges": [
+          {
+            "additions": 1,
+            "agentRunId": "08efd012-72c6-4be5-a3e4-3dc9eb115d7c",
+            "completedAt": "2026-10-05T08:27:16.256535+00:00",
+            "deletions": 1,
+            "executionEpoch": 1,
+            "fileCount": 1,
+            "files": [
+              {
+                "additions": 1,
+                "changeKind": "update",
+                "deletions": 1,
+                "evidenceFileId": "ef_01a10b2c9fa772a39ab55a7c01d816e9",
+                "operationCount": 1,
+                "path": "验收50/中文 编辑.txt",
+                "presentationKind": "reported_mutations"
+              }
+            ],
+            "isStale": false,
+            "operationCount": 1,
+            "revision": 1,
+            "schemaVersion": 3,
+            "sourceChangeSequence": 32
+          }
+        ],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "08efd012-72c6-4be5-a3e4-3dc9eb115d7c",
+              "cacheReadTokens": 66560,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:27:16.256535+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:27:16.231684+00:00",
+              "outputTokens": 670,
+              "promptInputTotalTokens": 131008
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T05:41:26.643Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 5295,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:27:16.229113+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 19584,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Edit",
+          "Read",
+          "Shell",
+          "thread.message.send"
+        ]
+      },
+      {
+        "id": "d2909c41-bd57-4924-9ced-0b44af22be72",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:28:00.180532+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "APP_COMMAND_MEMORY50",
+          "COMMAND_WARM50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "d2909c41-bd57-4924-9ced-0b44af22be72",
+              "cacheReadTokens": 24576,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:28:14.873421+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:28:14.852940+00:00",
+              "outputTokens": 162,
+              "promptInputTotalTokens": 40197
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T05:41:26.643Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 5295,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:28:14.851552+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 20200,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell",
+          "thread.message.send"
+        ]
+      },
+      {
+        "id": "0640bd19-c1ae-436e-a13f-c17f357a6703",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T08:30:25.715569+00:00",
+        "status": "failed",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "failure": {
+          "code": "runtime_prompt_runtime_error",
+          "origin": "runtime",
+          "phase": "execution",
+          "retryable": true
+        },
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "0640bd19-c1ae-436e-a13f-c17f357a6703",
+              "cacheReadTokens": null,
+              "cacheWriteTokens": null,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:30:30.930362+00:00",
+              "inputOutputComplete": false,
+              "lastObservedAt": null,
+              "outputTokens": null,
+              "promptInputTotalTokens": null
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:30:30.841Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": null,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:28:14.851552+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 20200,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": []
+      },
+      {
+        "id": "4e244c77-1a51-408c-befa-70129e7bde0c",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:31:40.772946+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "APP_COMMAND_MEMORY50",
+          "COMMAND_COLD50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "4e244c77-1a51-408c-befa-70129e7bde0c",
+              "cacheReadTokens": 20480,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:32:05.914238+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:32:05.890980+00:00",
+              "outputTokens": 167,
+              "promptInputTotalTokens": 41388
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:30:30.841Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": null,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:32:05.887479+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 20801,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell",
+          "thread.message.send"
+        ]
+      },
+      {
+        "id": "4b1216c7-ae85-4d96-9e97-1dc016bf0e55",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:32:51.895506+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_CAPABILITIES50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "ready",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "4b1216c7-ae85-4d96-9e97-1dc016bf0e55",
+              "cacheReadTokens": 44928,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:33:50.910818+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:33:50.887070+00:00",
+              "outputTokens": 593,
+              "promptInputTotalTokens": 152544
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:30:30.841Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": null,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:33:50.884127+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 30957,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell",
+          "activate_skill",
+          "search_tools",
+          "thread.message.send"
+        ]
+      },
+      {
+        "id": "76a1f454-9576-4c09-8d90-ede4f8591b76",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T08:36:18.195366+00:00",
+        "status": "failed",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "CLINE_APP50_OK"
+        ],
+        "failure": {
+          "code": "runtime_prompt_runtime_error",
+          "origin": "runtime",
+          "phase": "execution",
+          "retryable": false
+        },
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "unassigned",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "76a1f454-9576-4c09-8d90-ede4f8591b76",
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:36:37.241808+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:36:35.457Z",
+              "outputTokens": 215,
+              "promptInputTotalTokens": 12427
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:36:37.109Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": null,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:33:50.884127+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 30957,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "read_files",
+          "run_commands",
+          "thread.message.send"
+        ]
+      },
+      {
+        "id": "840023b0-797e-48dd-a9b6-f105f112e855",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:40:12.735824+00:00",
+        "status": "cancelled",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "ready",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "840023b0-797e-48dd-a9b6-f105f112e855",
+              "cacheReadTokens": null,
+              "cacheWriteTokens": null,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:42:32.512002+00:00",
+              "inputOutputComplete": false,
+              "lastObservedAt": null,
+              "outputTokens": null,
+              "promptInputTotalTokens": null
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:36:37.109Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": null,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:33:50.884127+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 30957,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "activate_skill",
+          "search_tools"
+        ]
+      },
+      {
+        "id": "66c837c6-919d-4020-ab69-63cc8e4ebc05",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T08:45:23.287720+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "CLINE_RECOVERED50"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "unassigned",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "66c837c6-919d-4020-ab69-63cc8e4ebc05",
+              "cacheReadTokens": 6144,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:45:36.561773+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:45:36.330Z",
+              "outputTokens": 10,
+              "promptInputTotalTokens": 6865
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:33:50.884127+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_event",
+              "usedTokens": 30957,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": []
+      },
+      {
+        "id": "e5661673-ef43-4962-9cff-e4fa93894bb1",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:47:23.256130+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_APPROVE50_DONE"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "ready",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "e5661673-ef43-4962-9cff-e4fa93894bb1",
+              "cacheReadTokens": 12032,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:47:45.666286+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:47:45.638464+00:00",
+              "outputTokens": 295,
+              "promptInputTotalTokens": 36500
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:47:45.636518+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 5,
+              "source": "runtime_event",
+              "usedTokens": 18294,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "813f7519-b28d-4b03-92c5-e34b2f20c2c2",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:51:13.735766+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_APPROVE50_DONE"
+        ],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "60f26a45-baaa-4288-8008-542950522fb9",
+            "status": "approved",
+            "resolutionCode": "user_selected_allow",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "ready",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "813f7519-b28d-4b03-92c5-e34b2f20c2c2",
+              "cacheReadTokens": 12032,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:51:31.800259+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:51:31.782240+00:00",
+              "outputTokens": 76,
+              "promptInputTotalTokens": 37509
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:51:31.776593+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 5,
+              "source": "runtime_event",
+              "usedTokens": 18801,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "14363611-bf73-473c-b49d-525e703cafdf",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:52:42.831360+00:00",
+        "status": "failed",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "failure": {
+          "code": "runtime_missing_final_output",
+          "origin": "runtime",
+          "phase": "execution",
+          "retryable": false
+        },
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "7a446fbb-4eba-4794-86ca-291d11f7bbea",
+            "status": "denied",
+            "resolutionCode": "user_selected_deny",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "ready",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "14363611-bf73-473c-b49d-525e703cafdf",
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:52:49.104954+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:52:49.078035+00:00",
+              "outputTokens": 70,
+              "promptInputTotalTokens": 19223
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:52:49.076803+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 5,
+              "source": "runtime_event",
+              "usedTokens": 19286,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "9670a401-2b61-4a4b-8cbc-958a46d9cb28",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:54:16.083916+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_MCP_UPDATED50"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:76c92e75fe4629f804b1b01a3864602951b52b1b09cbdf25945f63b8be2da82c",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "ready",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "9670a401-2b61-4a4b-8cbc-958a46d9cb28",
+              "cacheReadTokens": 12032,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:54:34.883961+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:54:34.866394+00:00",
+              "outputTokens": 97,
+              "promptInputTotalTokens": 36607
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:54:34.865397+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 6,
+              "source": "runtime_event",
+              "usedTokens": 18406,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "search_tools"
+        ]
+      },
+      {
+        "id": "8a551a53-f561-4625-9d7a-14cfb3ef6732",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:55:41.548084+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_MCP_UPDATED50"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:507ed750e32bfbd3b48ccf1960b1afa7c08def6b202ba2af9238ba41462e4bfd",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:507ed750e32bfbd3b48ccf1960b1afa7c08def6b202ba2af9238ba41462e4bfd",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "ready",
+              "transport": "stdio"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "8a551a53-f561-4625-9d7a-14cfb3ef6732",
+              "cacheReadTokens": 12032,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:56:01.024422+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:56:00.993003+00:00",
+              "outputTokens": 78,
+              "promptInputTotalTokens": 37789
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:56:00.989834+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 6,
+              "source": "runtime_event",
+              "usedTokens": 18989,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "search_tools"
+        ]
+      },
+      {
+        "id": "172809cd-d302-4d46-907b-0261016f4e88",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T08:57:48.004816+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_HTTP_DISCOVERY50"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:9e63edb6a33371c200ca92296f220f5c98112cc18904609259d1a9499e1edf61",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:9e63edb6a33371c200ca92296f220f5c98112cc18904609259d1a9499e1edf61",
+              "name": "command_parity50",
+              "reason": "native_mcp_name_conflict",
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "skipped_native_name_conflict",
+              "transport": "stdio"
+            },
+            {
+              "configDigest": "sha256:9e63edb6a33371c200ca92296f220f5c98112cc18904609259d1a9499e1edf61",
+              "name": "http_parity50",
+              "reason": null,
+              "runtimeName": "http_parity50",
+              "serverId": "386f67cc-420a-421a-9b60-b7ae015ec0e7",
+              "status": "ready",
+              "transport": "streamable_http"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "172809cd-d302-4d46-907b-0261016f4e88",
+              "cacheReadTokens": 12032,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T08:58:02.555817+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T08:58:02.528844+00:00",
+              "outputTokens": 124,
+              "promptInputTotalTokens": 36734
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:58:02.525566+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 7,
+              "source": "runtime_event",
+              "usedTokens": 18518,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "search_tools"
+        ]
+      },
+      {
+        "id": "ce8d6a80-ba92-46e2-94e8-5165dce8b9c2",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T09:04:42.415701+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_REVOKED50"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:25094765d61b94da161c116260321b83fa19414053209c92b912fd41466ca08b",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:25094765d61b94da161c116260321b83fa19414053209c92b912fd41466ca08b",
+              "name": "command_parity50",
+              "reason": null,
+              "runtimeName": "command_parity50",
+              "serverId": "82d77283-e771-4c54-a198-350491f75325",
+              "status": "disabled",
+              "transport": "stdio"
+            },
+            {
+              "configDigest": "sha256:25094765d61b94da161c116260321b83fa19414053209c92b912fd41466ca08b",
+              "name": "http_parity50",
+              "reason": null,
+              "runtimeName": "http_parity50",
+              "serverId": "386f67cc-420a-421a-9b60-b7ae015ec0e7",
+              "status": "disabled",
+              "transport": "streamable_http"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "ce8d6a80-ba92-46e2-94e8-5165dce8b9c2",
+              "cacheReadTokens": 12032,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:05:07.125179+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:05:07.097700+00:00",
+              "outputTokens": 242,
+              "promptInputTotalTokens": 36872
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:05:07.094996+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 18797,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "search_tools"
+        ]
+      },
+      {
+        "id": "e1db1684-7c70-41e1-926f-bbda4f09e9b0",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T09:09:48.463045+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_FINAL50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "e1db1684-7c70-41e1-926f-bbda4f09e9b0",
+              "cacheReadTokens": 43008,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:10:27.131039+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:10:27.109346+00:00",
+              "outputTokens": 426,
+              "promptInputTotalTokens": 78575
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T08:45:36.330Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 6865,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell",
+          "thread.message.send"
+        ]
+      },
+      {
+        "id": "c6abaa87-624b-4cfe-9ff4-1e6ab4817db5",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:19:07.616094+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "CLINE_HTTP_REAL50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:113d10764661d92c2c9b63d61481082081ee4a3576af77576322fd2a04eec194",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [
+            {
+              "configDigest": "sha256:113d10764661d92c2c9b63d61481082081ee4a3576af77576322fd2a04eec194",
+              "name": "http_parity50",
+              "reason": null,
+              "runtimeName": "http_parity50",
+              "serverId": "e9fd10ce-8b42-4a83-bfbd-9db182b89dfd",
+              "status": "ready",
+              "transport": "streamable_http"
+            }
+          ],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "c6abaa87-624b-4cfe-9ff4-1e6ab4817db5",
+              "cacheReadTokens": 7168,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:19:20.077090+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:19:19.952Z",
+              "outputTokens": 64,
+              "promptInputTotalTokens": 14673
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:19:19.952Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 3,
+              "source": "runtime_private_extension",
+              "usedTokens": 7369,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "http_parity50__echo_http50"
+        ]
+      },
+      {
+        "id": "970d09c9-a8bb-4b67-bacd-89f919796b8e",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:19:51.031175+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "970d09c9-a8bb-4b67-bacd-89f919796b8e",
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:20:05.597666+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:20:05.482Z",
+              "outputTokens": 187,
+              "promptInputTotalTokens": 3874
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:20:05.482Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 3874,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": []
+      },
+      {
+        "id": "8e22b505-640f-489c-ba00-0a1d266114ad",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:21:17.201524+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "CLINE_APPROVE50_DONE"
+        ],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "f4f4494a-b880-4d00-a5a5-d539764c7312",
+            "status": "approved",
+            "resolutionCode": "user_selected_allow",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "8e22b505-640f-489c-ba00-0a1d266114ad",
+              "cacheReadTokens": 0,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:21:29.734479+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:21:29.627Z",
+              "outputTokens": 188,
+              "promptInputTotalTokens": 8784
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:21:29.627Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 4448,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "11da5c3c-545e-46f8-95b9-2d5e333d52c6",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:22:13.760820+00:00",
+        "status": "cancelled",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "07361f09-e54e-48cc-9581-5453467d2c77",
+            "status": "denied",
+            "resolutionCode": "user_selected_deny",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "11da5c3c-545e-46f8-95b9-2d5e333d52c6",
+              "cacheReadTokens": 4224,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:30:46.199936+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:22:20.473Z",
+              "outputTokens": 83,
+              "promptInputTotalTokens": 4883
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:22:20.473Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 4883,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "241933cf-741b-4eae-9e51-bc3ef5fbc4d8",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:36:40.157113+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "241933cf-741b-4eae-9e51-bc3ef5fbc4d8",
+              "cacheReadTokens": 3712,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:36:56.186034+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:36:56.088Z",
+              "outputTokens": 192,
+              "promptInputTotalTokens": 5411
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:36:56.088Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 5411,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": []
+      },
+      {
+        "id": "8d73ae2e-fa93-48f1-a7df-6facfcb4de7c",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:38:10.185552+00:00",
+        "status": "cancelled",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "c9c98fba-a938-425e-8e14-4d8caf1644f6",
+            "status": "denied",
+            "resolutionCode": "user_selected_deny",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "8d73ae2e-fa93-48f1-a7df-6facfcb4de7c",
+              "cacheReadTokens": null,
+              "cacheWriteTokens": null,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:44:30.973273+00:00",
+              "inputOutputComplete": false,
+              "lastObservedAt": null,
+              "outputTokens": null,
+              "promptInputTotalTokens": null
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:36:56.088Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 5411,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "420ee090-03d4-4acb-a11d-508969e1d8d2",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:47:05.808333+00:00",
+        "status": "cancelled",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "9c986580-7055-47eb-bb8f-5ac5c3da7480",
+            "status": "denied",
+            "resolutionCode": "user_selected_deny",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "420ee090-03d4-4acb-a11d-508969e1d8d2",
+              "cacheReadTokens": null,
+              "cacheWriteTokens": null,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:52:36.715607+00:00",
+              "inputOutputComplete": false,
+              "lastObservedAt": null,
+              "outputTokens": null,
+              "promptInputTotalTokens": null
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:36:56.088Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 5411,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "1d633037-d57b-4ee0-bfe7-0beca9dbfdfd",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:56:01.358491+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "CLINE_DENY50_DONE"
+        ],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "50e3bb41-8001-4e52-8f63-ff994c2f965f",
+            "status": "denied",
+            "resolutionCode": "user_selected_deny",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "1d633037-d57b-4ee0-bfe7-0beca9dbfdfd",
+              "cacheReadTokens": 4736,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:56:17.004729+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:56:16.914Z",
+              "outputTokens": 87,
+              "promptInputTotalTokens": 14202
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:56:16.914Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 7157,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "0cbfc8c8-56e9-449a-bb51-78423ef7c68f",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:56:50.710837+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "CLINE_AFTER_DENY50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "0cbfc8c8-56e9-449a-bb51-78423ef7c68f",
+              "cacheReadTokens": 6912,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T09:56:53.915928+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T09:56:53.813Z",
+              "outputTokens": 27,
+              "promptInputTotalTokens": 7544
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:10:27.108372+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 8,
+              "source": "runtime_event",
+              "usedTokens": 20130,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T09:56:53.813Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 4,
+              "source": "runtime_private_extension",
+              "usedTokens": 7544,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": []
+      },
+      {
+        "id": "c1e9518f-882c-4bb8-82e2-2e66ef86d882",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T09:56:55.391069+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "bf808441-2662-4812-beed-a2e37612f981",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T09:56:55.797502+00:00",
+        "status": "cancelled",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "d75c9bea-f8ba-4278-8f75-83841d5ae6d2",
+            "status": "cancelled",
+            "resolutionCode": "agent_run_cancelled",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "873764df-fe1b-46f5-b9dc-63e7b8c9eaff",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T10:11:21.758438+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "6d4c864e-e6cd-4d2e-9a2c-804612fd6a08",
+            "status": "approved",
+            "resolutionCode": "user_selected_allow",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "fb33ab35-279c-4678-a1c4-3819f8e18024",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T10:11:38.770034+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "b6061843-8620-4f4d-9279-21cf6467b739",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T10:11:54.181113+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [
+          {
+            "id": "e1733247-b719-4ccb-b6e9-fa15fbc77512",
+            "status": "approved",
+            "resolutionCode": "user_selected_allow",
+            "permissionSemantics": "runtime_managed_v2",
+            "nativeMethod": "session/request_permission"
+          }
+        ],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "b387dc85-4f5e-463e-ae91-4b67d54330bb",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T10:12:13.458698+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "7012e58e-5442-4156-a382-174d0cb096b0",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T10:12:51.857624+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "c56c38f0-9bca-4975-826a-d2755092553f",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T10:12:52.285340+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "8a458900-df25-4a5a-9530-eced73924f20",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T10:15:30.361151+00:00",
+        "status": "cancelled",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "Shell"
+        ]
+      },
+      {
+        "id": "4f58cefc-8ce7-4ecb-a840-71b0e000c070",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T10:15:30.764558+00:00",
+        "status": "cancelled",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 0,
+        "observedMarkers": [],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "observedToolTitles": [
+          "run_commands"
+        ]
+      },
+      {
+        "id": "14325670-a3ec-4c1b-8630-ae33a9c3bb2b",
+        "agentId": "agent_2",
+        "createdAt": "2026-10-05T10:17:39.360351+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "command-code-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "COMMAND_AFTER_SHUTDOWN50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "native_wins_skip",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "14325670-a3ec-4c1b-8630-ae33a9c3bb2b",
+              "cacheReadTokens": 18048,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T10:17:53.046047+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T10:17:53.028870+00:00",
+              "outputTokens": 94,
+              "promptInputTotalTokens": 39692
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T10:15:36.094Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 7,
+              "source": "runtime_private_extension",
+              "usedTokens": 5031,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T10:17:53.027907+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 10,
+              "source": "runtime_event",
+              "usedTokens": 19922,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "Shell",
+          "thread.message.send"
+        ]
+      },
+      {
+        "id": "7cf58f43-259f-4ee4-86ba-ed533c58409f",
+        "agentId": "agent_1",
+        "createdAt": "2026-10-05T10:17:54.110570+00:00",
+        "status": "succeeded",
+        "executionEpoch": 1,
+        "runtimeKind": "cline-cli",
+        "publicReplyCount": 1,
+        "observedMarkers": [
+          "CLINE_AFTER_SHUTDOWN50_OK"
+        ],
+        "fileChanges": [],
+        "approvals": [],
+        "mcpExposure": {
+          "configDigest": "sha256:1fd4cd4c18a168dbd74f22bef1061a988fb3e036986be7ec99245e4f58ece652",
+          "configStatus": "ready",
+          "projectionMode": "additive_per_run",
+          "sameNamePolicy": "rovai_wins",
+          "schemaVersion": 2,
+          "servers": [],
+          "warnings": []
+        },
+        "metrics": {
+          "runs": [
+            {
+              "agentRunId": "7cf58f43-259f-4ee4-86ba-ed533c58409f",
+              "cacheReadTokens": 6656,
+              "cacheWriteTokens": 0,
+              "executionEpoch": 1,
+              "finalizedAt": "2026-10-05T10:18:07.807558+00:00",
+              "inputOutputComplete": true,
+              "lastObservedAt": "2026-10-05T10:18:07.714Z",
+              "outputTokens": 80,
+              "promptInputTotalTokens": 11362
+            }
+          ],
+          "schemaVersion": 1,
+          "sessions": [
+            {
+              "agentId": "agent_1",
+              "conversationId": "74e30826-f072-4773-b2f1-054ad5e70955",
+              "dialectId": "cline-plugin-model-context-v1",
+              "modelKey": "gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T10:18:07.714Z",
+              "runtimeKind": "cline-cli",
+              "sessionGeneration": 7,
+              "source": "runtime_private_extension",
+              "usedTokens": 5752,
+              "windowTokens": 272000
+            },
+            {
+              "agentId": "agent_2",
+              "conversationId": "fea741fd-c1c1-4077-9eca-468bb86e7d41",
+              "dialectId": "acp-session-context-gauge-v1",
+              "modelKey": "sub2api/gpt-6-sol",
+              "nativeRatio": null,
+              "observedAt": "2026-10-05T10:17:53.027907+00:00",
+              "runtimeKind": "command-code-cli",
+              "sessionGeneration": 10,
+              "source": "runtime_event",
+              "usedTokens": 19922,
+              "windowTokens": 272000
+            }
+          ]
+        },
+        "observedToolTitles": [
+          "run_commands",
+          "thread.message.send"
+        ]
+      }
+    ],
+    "ui": {
+      "filesChangedClicked": true,
+      "commandEditRowExpanded": true,
+      "diffText": [
+        "- before50",
+        "+ after50"
+      ],
+      "semantics": "reported_mutations",
+      "screenshots": [
+        "command50-file-diff.png",
+        "command50-command-diff.png"
+      ]
+    },
+    "mcp": {
+      "command50-mcp-started.txt": "command-app50-v2",
+      "command50-mcp-native-started.txt": "command-native50",
+      "httpRequests": [
+        {
+          "method": "initialize",
+          "headerCorrect": true
+        },
+        {
+          "method": "notifications/initialized",
+          "headerCorrect": true
+        },
+        {
+          "method": "tools/list",
+          "headerCorrect": true
+        }
+      ],
+      "actualEchoCallCount": 0
+    },
+    "approval_allow2": {
+      "approvalId": "60f26a45-baaa-4288-8008-542950522fb9",
+      "agentRunId": "813f7519-b28d-4b03-92c5-e34b2f20c2c2",
+      "kind": "shell_command",
+      "optionKind": "allow_once",
+      "resultStatus": "applied"
+    },
+    "approval_deny": {
+      "approvalId": "7a446fbb-4eba-4794-86ca-291d11f7bbea",
+      "agentRunId": "14363611-bf73-473c-b49d-525e703cafdf",
+      "kind": "shell_command",
+      "optionKind": "deny",
+      "resultStatus": "applied"
+    },
+    "deniedFileAbsent": true,
+    "explorationNotes": {
+      "initialMcpUpdateAttempt": "The initial MCP update script failed before mutation; its model reply is not update evidence. Use 8a551a53-f561-4625-9d7a-14cfb3ef6732.",
+      "e5661673-ef43-4962-9cff-e4fa93894bb1": "Read-only printf did not require approval; not allow evidence.",
+      "970d09c9-a8bb-4b67-bacd-89f919796b8e": "Prompt named unavailable execute_command; model declined without tools. Not permission evidence.",
+      "241933cf-741b-4eae-9e51-bc3ef5fbc4d8": "Repeated denied operation intentionally not retried by the model; no new approval. Not denial-fix evidence.",
+      "8d73ae2e-fa93-48f1-a7df-6facfcb4de7c": "Intermediate fix still consumed pairing on the permission denial before the final native result; cancelled for cleanup.",
+      "420ee090-03d4-4acb-a11d-508969e1d8d2": "Intermediate fix retained metadata but audited permission notice and native result twice, causing an idempotency conflict; cancelled for cleanup.",
+      "11da5c3c-545e-46f8-95b9-2d5e333d52c6": "Before fix: native denial acked and no file created, but pending-to-failed without tool_call made the paired observer stop. Run remained waiting beyond 200 seconds; explicitly cancelled for cleanup. Fixed by retaining pending metadata and admitting repeated failures.",
+      "shutdownSetupAttempts": "The original setup exposed Cline stale Host auto-approval. A second setup was rejected by Command Code leading-sleep policy and timed out under Cline default 30 seconds. Neither is counted as shutdown success; final fixture starts a bounded Node child, verifies its PID, then quits the isolated App."
+    },
+    "clineApproval_allow": {
+      "approvalId": "f4f4494a-b880-4d00-a5a5-d539764c7312",
+      "agentRunId": "8e22b505-640f-489c-ba00-0a1d266114ad",
+      "kind": "runtime_permission_grant",
+      "optionKind": "allow_once",
+      "resultStatus": "applied"
+    },
+    "clineApproval_deny": {
+      "approvalId": "07361f09-e54e-48cc-9581-5453467d2c77",
+      "agentRunId": "11da5c3c-545e-46f8-95b9-2d5e333d52c6",
+      "kind": "runtime_permission_grant",
+      "optionKind": "deny",
+      "resultStatus": "applied"
+    },
+    "clineApproval_deny-after-fix": {
+      "approvalId": "c9c98fba-a938-425e-8e14-4d8caf1644f6",
+      "agentRunId": "8d73ae2e-fa93-48f1-a7df-6facfcb4de7c",
+      "kind": "runtime_permission_grant",
+      "optionKind": "deny",
+      "resultStatus": "applied"
+    },
+    "clineApproval_deny-final": {
+      "approvalId": "9c986580-7055-47eb-bb8f-5ac5c3da7480",
+      "agentRunId": "420ee090-03d4-4acb-a11d-508969e1d8d2",
+      "kind": "runtime_permission_grant",
+      "optionKind": "deny",
+      "resultStatus": "applied"
+    },
+    "clineApproval_deny-complete": {
+      "approvalId": "50e3bb41-8001-4e52-8f63-ff994c2f965f",
+      "agentRunId": "1d633037-d57b-4ee0-bfe7-0beca9dbfdfd",
+      "kind": "runtime_permission_grant",
+      "optionKind": "deny",
+      "resultStatus": "applied"
+    },
+    "clineHttpMcpRequests": [
+      {
+        "method": "initialize",
+        "headerCorrect": true
+      },
+      {
+        "method": "notifications/initialized",
+        "headerCorrect": true
+      },
+      {
+        "method": "tools/list",
+        "headerCorrect": true
+      },
+      {
+        "method": "tools/call",
+        "headerCorrect": true
+      }
+    ],
+    "clineDeniedFilesAbsent": {
+      "cline-denied50.txt": true,
+      "cline-denied-final50.txt": true,
+      "cline-denied-final7-50.txt": true,
+      "cline-denied-final8-50.txt": true
+    },
+    "permissionRefresh": {
+      "scenario": "manual approval then Run-local auto mode on resident hosts",
+      "passed": true,
+      "runs": [
+        {
+          "agentId": "agent_1",
+          "mode": "manual",
+          "runId": "873764df-fe1b-46f5-b9dc-63e7b8c9eaff",
+          "status": "succeeded",
+          "fileContentsVerified": true,
+          "approvalCount": 1,
+          "observedClinePids": [
+            58632
+          ]
+        },
+        {
+          "agentId": "agent_1",
+          "mode": "auto",
+          "runId": "fb33ab35-279c-4678-a1c4-3819f8e18024",
+          "status": "succeeded",
+          "fileContentsVerified": true,
+          "approvalCount": 0,
+          "observedClinePids": [
+            58632
+          ]
+        },
+        {
+          "agentId": "agent_2",
+          "mode": "manual",
+          "runId": "b6061843-8620-4f4d-9279-21cf6467b739",
+          "status": "succeeded",
+          "fileContentsVerified": true,
+          "approvalCount": 1,
+          "observedClinePids": [
+            58632
+          ]
+        },
+        {
+          "agentId": "agent_2",
+          "mode": "auto",
+          "runId": "b387dc85-4f5e-463e-ae91-4b67d54330bb",
+          "status": "succeeded",
+          "fileContentsVerified": true,
+          "approvalCount": 0,
+          "observedClinePids": [
+            58632
+          ]
+        }
+      ]
+    },
+    "plannedShutdown": {
+      "scenario": "planned App shutdown during actual shell tools, both runtimes",
+      "runs": [
+        {
+          "agentId": "agent_2",
+          "runId": "8a458900-df25-4a5a-9530-eced73924f20",
+          "marker": "COMMAND_SHUTDOWN52_LATE",
+          "filename": "command-shutdown-late52.txt",
+          "startedPid": 61006,
+          "lateSideEffect": false,
+          "statusAfterRestart": "cancelled",
+          "failure": null
+        },
+        {
+          "agentId": "agent_1",
+          "runId": "4f58cefc-8ce7-4ecb-a840-71b0e000c070",
+          "marker": "CLINE_SHUTDOWN52_LATE",
+          "filename": "cline-shutdown-late52.txt",
+          "startedPid": 60955,
+          "lateSideEffect": false,
+          "statusAfterRestart": "cancelled",
+          "failure": null
+        }
+      ],
+      "passed": true,
+      "runningShellPids": {
+        "agent_2": [
+          61006
+        ],
+        "agent_1": [
+          60955
+        ]
+      },
+      "ownedProcessCountBefore": 12,
+      "remainingOwnedPidsAfter": []
+    },
+    "packagedCoreSha256": "4da02793a9b72234328f5d2de8f99632355fe98b068fc178f0717820bf231d80"
+  },
+  "tests": {
+    "pnpmTest": {
+      "vitestPassed": 2589,
+      "nodePassed": 336,
+      "nodeSkipped": 2,
+      "failed": 0
+    },
+    "defaultRustWorkspace": {
+      "passed": 456,
+      "ignored": 2,
+      "failed": 0
+    },
+    "addedNativeConfigurationRegression": {
+      "passed": 1,
+      "failed": 0
+    },
+    "permissionOnlyDenialRegression": {
+      "passed": 1,
+      "failed": 0
+    },
+    "frozenRunPermissionsOnResidentHostRegression": {
+      "passed": 1,
+      "failed": 0
+    },
+    "extendedTargeted": [
+      "monitoring runtime sparse usage / cache semantics",
+      "application ACP tool public fields and mutation boundaries",
+      "model catalog default sentinel",
+      "migration 184/185 rollback and row preservation"
+    ],
+    "typecheck": "passed",
+    "docsGates": "pnpm docs:test; pnpm docs:check; DOCS_BASE_REF=59a43b52 pnpm docs:check:ci passed",
+    "packageMac": "passed"
+  },
+  "remainingQualification": [
+    "Cline required System plugin readiness",
+    "Cline ACP compaction configuration",
+    "Command custom-model deferred MCP invocation",
+    "Command explicit custom model selection and structured nonzero exit status",
+    "Reasoning/Run-cost sparse availability",
+    "Full LRU pressure, overflow/retry, crash and other platform matrices"
+  ],
+  "admission": {
+    "command-code-cli": "macos-arm64 preview",
+    "cline-cli": "macos-arm64 preview",
+    "otherPlatforms": "not_qualified",
+    "firstClassClaimed": false
+  }
+}

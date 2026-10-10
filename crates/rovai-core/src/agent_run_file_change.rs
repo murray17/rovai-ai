@@ -18,8 +18,8 @@ use crate::{
     },
     runtime_diff::{
         exact_mutation_fragment, fragment_line_count, normalize_reported_path_for_display,
-        split_unified_diff_sections, unified_diff_counts, unified_diff_from_complete_states,
-        unified_diff_section_identity,
+        reported_mutation_diff, split_unified_diff_sections, unified_diff_counts,
+        unified_diff_from_complete_states, unified_diff_section_identity,
     },
 };
 
@@ -123,6 +123,11 @@ enum ObservedSemantics {
     ExactMutation {
         old_text: String,
         new_text: String,
+    },
+    ReportedMutation {
+        diff: String,
+        additions: u64,
+        deletions: u64,
     },
     OperationOnly,
 }
@@ -1074,6 +1079,21 @@ fn append_diff_changes(
             .and_then(Value::as_str)
             .or_else(|| diff.get("semanticKind").and_then(Value::as_str));
         let observed = match semantics {
+            Some("reported_mutation") => {
+                let Some((diff, additions, deletions)) = reported_mutation_diff(entry) else {
+                    continue;
+                };
+                ObservedChange {
+                    sequence,
+                    path,
+                    change_kind: "update".to_string(),
+                    semantics: ObservedSemantics::ReportedMutation {
+                        diff,
+                        additions,
+                        deletions,
+                    },
+                }
+            }
             Some("full_before_after" | "complete_before_after") => {
                 let Some(before) =
                     optional_text(entry.get("before").or_else(|| entry.get("oldText")))
@@ -1362,6 +1382,12 @@ fn file_detail_from_diff_operations(
     let exact_only = operations
         .iter()
         .all(|operation| matches!(operation.semantics, ObservedSemantics::ExactMutation { .. }));
+    let reported_only = operations.iter().all(|operation| {
+        matches!(
+            operation.semantics,
+            ObservedSemantics::ReportedMutation { .. }
+        )
+    });
     let change_kind = combined_change_kind(&operations);
     let blocks = operations.iter().map(operation_block).collect::<Vec<_>>();
     let (additions, deletions) = sum_known_counts(
@@ -1375,6 +1401,8 @@ fn file_detail_from_diff_operations(
         change_kind,
         presentation_kind: if exact_only {
             "exact_mutations"
+        } else if reported_only {
+            "reported_mutations"
         } else {
             "operation_history"
         }
@@ -1461,6 +1489,21 @@ fn continuous_full_state_detail(
 }
 
 fn operation_block(operation: &ObservedChange) -> AgentRunFileChangeBlockView {
+    if let ObservedSemantics::ReportedMutation {
+        diff,
+        additions,
+        deletions,
+    } = &operation.semantics
+    {
+        return AgentRunFileChangeBlockView {
+            sequence: operation.sequence,
+            semantics: "reported_mutation".to_string(),
+            change_kind: operation.change_kind.clone(),
+            additions: Some(*additions),
+            deletions: Some(*deletions),
+            diff: Some(diff.clone()),
+        };
+    }
     if let ObservedSemantics::ExactMutation { old_text, new_text } = &operation.semantics {
         return AgentRunFileChangeBlockView {
             sequence: operation.sequence,
@@ -1479,7 +1522,9 @@ fn operation_block(operation: &ObservedChange) -> AgentRunFileChangeBlockView {
         ObservedSemantics::UnifiedDiffSnapshot { diff } => {
             ("unified_diff_snapshot", Some(diff.clone()))
         }
-        ObservedSemantics::ExactMutation { .. } => unreachable!(),
+        ObservedSemantics::ExactMutation { .. } | ObservedSemantics::ReportedMutation { .. } => {
+            unreachable!()
+        }
         ObservedSemantics::OperationOnly => ("operation_only", None),
     };
     let (additions, deletions) = diff
@@ -1742,6 +1787,24 @@ mod tests {
 
     #[test]
     fn exact_mutations_remain_chronological_fragments_with_known_totals() {
+        let reported = aggregate_evidence("run-reported", 1, "2026-10-05T00:00:00Z", Path::new("/repo"), &[
+            evidence(1, json!({"runtimeDiff":{"status":"available","semanticKind":"reported_mutation","entries":[{
+                "semantics":"reported_mutation","path":"src/a.ts","fragments":[{"oldText":"A","newText":"B"},{"oldText":"second","newText":"changed"}]
+            }]}})),
+            evidence(2, json!({"runtimeDiff":{"status":"available","semanticKind":"reported_mutation","entries":[{
+                "semantics":"reported_mutation","path":"src/a.ts","fragments":[{"oldText":"B","newText":"A"}]
+            }]}})),
+        ]).unwrap();
+        let file = &reported.details.files[0];
+        assert_eq!(file.presentation_kind, "reported_mutations");
+        assert_eq!(file.operation_count, 2);
+        assert_eq!((file.additions, file.deletions), (Some(3), Some(3)));
+        assert_eq!(file.blocks[0].semantics, "reported_mutation");
+        assert_eq!(
+            file.blocks[0].diff.as_deref(),
+            Some("-A\n+B\n-second\n+changed\n")
+        );
+        assert!(!file.blocks[0].diff.as_ref().unwrap().contains("@@"));
         let projection = aggregate_evidence(
             "run-1",
             1,

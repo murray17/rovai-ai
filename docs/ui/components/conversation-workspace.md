@@ -739,9 +739,9 @@ standalone raw Evidence、Envelope JSON 或独立
 
 ### Runtime 终态文件变更与 AgentRun 文件变化
 
-只有 [Runtime File Change Observation v6](../../contracts/runtime-file-change-observation-v6.md)准入的可靠
+只有 [Runtime File Change Observation v7](../../contracts/runtime-file-change-observation-v7.md)准入的可靠
 Evidence 才进入文件操作呈现。成功 read 的可靠单路径显示为不可展开的 `阅读 <basename>`；成功 write 的可靠
-单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot 或 exact mutation 时，每个文件作为同一
+单路径显示 `编辑 <basename>`。有完整 before/after、unified snapshot、exact mutation 或已准入 reported mutation 时，每个文件作为同一
 Canonical Activity 的 presentation row，明确 add 显示“新增”，其他显示“编辑”；没有可靠内容时不显示
 `+A −D` 或空 disclosure。read 只属于过程事实，永不进入 AgentRun `Files Changed`。
 
@@ -765,6 +765,10 @@ Canonical Activity 计算。每行复用既有 File Tool 图标，顶格占满�
 Claude Code `Edit` 的 exact mutation 展开只显示 `− oldText / + newText` 片段，不显示 `@@`、旧/新文件行号或
 推测上下文。同一文件连续 Edit 在 Command View 中仍按各 Tool 时序分别显示；Write、NotebookEdit、ApplyPatch、
 失败/缺失 result 与 `replace_all=true` 保持普通 Tool Activity。
+
+Cline 已确认成功的 Update 补丁或 editor 替换用 `reported_mutation` 展示“补丁片段”，复用无行号片段布局。
+提示说明原生匹配可能调整文本、统计来自补丁；Command 和 Review 都保留该来源区别，不合成为完整文件净差异。
+失败、未知语法、创建/移动/删除等未准入内容保持原有文件行回退。
 
 每个 terminal `agentRunId + executionEpoch` 可以在对应 Run 的会话位置追加一张独立卡片，标题固定为
 `Files Changed`。卡片位于来源 Run 最后一条公开消息后的结果区域；同 Run 有入队卡片时，顺序固定为
@@ -1251,14 +1255,13 @@ Pending 行只展示正文，不展示附件或附件数量；纯附件摘要留
 ## 用户主动继续执行
 
 公开 batch Run 的失败／停止卡片沿用现有布局，在折叠操作旁提供 24×24 的纯图标按钮。
-title 和 aria-label 为“继续执行”，键盘可达；提交中禁用。系统操作记录、waiting 请求和新 Run 使用
+title 和 aria-label 为“继续执行”，键盘可达；提交中禁用。续做新请求不产生公屏系统消息，也不进入消息历史、搜索与定位；已生成的记录保留原样。waiting 请求和新 Run 使用
 现有时间线／执行区；原卡片终态与输出不变，受理后仍可再次点击，各次 Run 不显示关联状态。
-已知必须更换会话时一次确认“原会话无法恢复，将使用新会话继续。当前工作区会保留。”
-实际恢复失败后当前 Run 明确失败，再由用户选择新会话；无恢复向导。合同见
+会话自动选择遵循下节规则；无恢复向导。合同见
 [Run Process Detail Surface v46](../../contracts/run-process-detail-surface-v46.md)。
 
 ### 继续执行的会话选择
 
 失败／停止卡片的 24×24 继续图标直接提交，Core 自动复用或选择新会话，不显示会话确认弹窗。
 提交中保持原尺寸并禁用；受理后恢复可点，原 Run 状态和工作区保留。响应未知时沿用同一 commandId 核对。
-恢复失败的投递前降级由 [AgentRun Continuation v2](../../contracts/agent-run-continuation-v2.md) 拥有。
+恢复失败的投递前降级由 [AgentRun Continuation v3](../../contracts/agent-run-continuation-v3.md) 拥有。

@@ -17,8 +17,9 @@ pub const BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_FORMATTER_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v1.28";
 
-const POLICY_ADAPTERS: [AdapterKind; 10] = [
+const POLICY_ADAPTERS: [AdapterKind; 11] = [
     AdapterKind::CopilotCli,
+    AdapterKind::ClineCli,
     AdapterKind::OpencodeCli,
     AdapterKind::KiroCli,
     AdapterKind::QoderCli,
@@ -73,10 +74,13 @@ impl DesiredCompactionDetectorPolicies {
             let policy = match std::env::var(key) {
                 Ok(value) => match CompactionDetectorPolicy::parse(&value) {
                     Some(CompactionDetectorPolicy::BestEffort)
-                        if adapter_kind == AdapterKind::AntigravityApp =>
+                        if matches!(
+                            adapter_kind,
+                            AdapterKind::AntigravityApp | AdapterKind::ClineCli
+                        ) =>
                     {
                         diagnostics.push(format!(
-                            "{key} cannot enable the Antigravity compaction detector in {BOOTSTRAP_REDELIVERY_POLICY_RELEASE}; the detector is disabled"
+                            "{key} cannot enable Bootstrap redelivery for {}; the detector is disabled", adapter_kind.as_str()
                         ));
                         CompactionDetectorPolicy::Disabled
                     }
@@ -123,11 +127,13 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::GrokBuild
         | AdapterKind::ZcodeApp => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
+        | AdapterKind::ClineCli
         | AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
+        | AdapterKind::CommandCodeCli
         | AdapterKind::CursorAgent => CompactionDetectorPolicy::Disabled,
     }
 }
@@ -135,6 +141,7 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
 pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'static str {
     match adapter_kind {
         AdapterKind::CopilotCli => "ROVAI_INTERNAL_COPILOT_COMPACTION_DETECTOR_POLICY",
+        AdapterKind::ClineCli => "ROVAI_INTERNAL_CLINE_COMPACTION_DETECTOR_POLICY",
         AdapterKind::OpencodeCli => "ROVAI_INTERNAL_OPENCODE_COMPACTION_DETECTOR_POLICY",
         AdapterKind::KiroCli => "ROVAI_INTERNAL_KIRO_COMPACTION_DETECTOR_POLICY",
         AdapterKind::QoderCli => "ROVAI_INTERNAL_QODER_COMPACTION_DETECTOR_POLICY",
@@ -149,6 +156,7 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
+        | AdapterKind::CommandCodeCli
         | AdapterKind::CursorAgent => "ROVAI_INTERNAL_UNUSED_COMPACTION_DETECTOR_POLICY",
     }
 }
@@ -885,6 +893,7 @@ fn qualified_admission(
     admission_point: &str,
 ) -> bool {
     match adapter_kind {
+        AdapterKind::ClineCli => false,
         AdapterKind::CopilotCli => {
             source_signal == "preCompact" && admission_point == "imminent_edge"
         }
@@ -920,6 +929,7 @@ fn qualified_admission(
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp
         | AdapterKind::TraeCnCli
+        | AdapterKind::CommandCodeCli
         | AdapterKind::CursorAgent => false,
     }
 }
@@ -968,6 +978,12 @@ mod tests {
 
     #[test]
     fn release_policy_matrix_keeps_protected_and_antigravity_disabled() {
+        // Keep Cline in startup reconciliation to fence the previous
+        // first_payload observer when upgrading to the protected System Rule.
+        assert_eq!(
+            release_policies().policy_for(AdapterKind::ClineCli),
+            Some(CompactionDetectorPolicy::Disabled)
+        );
         assert_eq!(
             release_default_policy(AdapterKind::CopilotCli),
             CompactionDetectorPolicy::BestEffort

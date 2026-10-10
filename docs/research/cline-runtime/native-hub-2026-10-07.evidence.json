@@ -1,0 +1,4664 @@
+{
+  "schemaVersion": 1,
+  "authority": "research-evidence-only",
+  "userMessageId": "537efdf5-963f-4def-9f88-9c088eb1f4ee",
+  "observedAt": "2026-10-07T11:51:17.121947+00:00",
+  "platform": "macos-arm64",
+  "baselineCommit": "ca58d8d3843d88eeb39414c45cdfbeb75fea4bd8",
+  "classification": {
+    "hubConnectable": "verified",
+    "sessionConfigDelivered": "verified",
+    "nativeThresholdBasic": "verified-native-persisted-history-and-next-model-success",
+    "overflowRecovery": "unverified",
+    "exactColdResume": "verified-same-backend-native-cli-readMessages-start-sequence",
+    "productAdapter": "not-implemented-pending-product-contracts-and-existing-admission-review",
+    "productionBackend": "acp-unchanged"
+  },
+  "discovery": {
+    "startup": {
+      "configuration": {
+        "environment": [],
+        "programPath": null
+      },
+      "revision": 0,
+      "runtimeKind": "cline-cli"
+    },
+    "inspection": {
+      "executablePath": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+      "reportedVersion": "3.0.3",
+      "searchEnvironment": {
+        "createdAt": "2026-10-07T11:08:34.116672+00:00",
+        "diagnosticCodes": [],
+        "generation": 2,
+        "pathEntryCount": 27,
+        "shell": {
+          "elapsedMillis": 808,
+          "entryCount": 28,
+          "interactive": true,
+          "shellName": "zsh",
+          "status": "captured"
+        }
+      },
+      "status": "recognized"
+    },
+    "core": {
+      "builtinToolCatalogDigest": "sha256:4f905d500bdb2f27659ac936051f5d361750c04bea21a3800ad90d2d150b8334",
+      "builtinToolContractVersion": 35,
+      "builtinToolEvidenceProjectionVersion": 4,
+      "builtinToolIpcProtocolVersion": 2,
+      "dataDir": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-cline76-hub-f7ql4y9r/core-data",
+      "ok": true,
+      "readModelSchema": 35,
+      "version": "0.4.3"
+    },
+    "coreExecutable": "/Users/murray.xue/Library/Application Support/RovaiRuntimeAcceptance/mission-052-cline-20261004-swrfa_xh/Application/Rovai AI.app/Contents/Resources/bin/rovai-core",
+    "stop": {
+      "code": 0,
+      "signal": null,
+      "stderrBytes": 449,
+      "stderrDigest": "8c953392c71e5ff5361cae2b50e4100091a41616982dfd6817db5db6685e3d40"
+    }
+  },
+  "selectedInstallation": {
+    "cliVersion": "3.0.3",
+    "hubBuildId": "0.0.41",
+    "protocol": "v1",
+    "filesBefore": {
+      "LICENSE": {
+        "sha256": "f704446a5f1271608805598b557e4288cf8580477ea038c9c3d8b361f693f6b8",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/LICENSE"
+      },
+      "README.md": {
+        "sha256": "96d5695c8bd1808bd30020aa869ac937f1ce1af21d4c1d58eef00fef5475813f",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/README.md"
+      },
+      "package.json": {
+        "sha256": "62be1862187cc44837d59d76314118ef12070dd73c71eded042bca24b0d39002",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/package.json"
+      },
+      "postinstall.mjs": {
+        "sha256": "78e422d0bb8a9b392926c39f106f9c9808f96bead9438f12ca204ce0d3b3cacf",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/postinstall.mjs"
+      },
+      "bin/cline": {
+        "sha256": "2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline"
+      },
+      "node_modules/.bin/cline": {
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline"
+      },
+      "node_modules/@cline/cli-darwin-arm64/package.json": {
+        "sha256": "221ac79ad535f10c687f147208fb14d4bbb90cad85b7a22a56cfb2e829a2dbf0",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/package.json"
+      },
+      "node_modules/@cline/cli-darwin-arm64/bin/cline": {
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline"
+      },
+      "node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js": {
+        "sha256": "3fa353ee0fa24a42ce9243b912423a265145c3e894f786aa6a1f894a6626a95c",
+        "mode": "0o755",
+        "resolved": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js"
+      }
+    },
+    "minimumVersionUnchanged": "3.0.65",
+    "newVersionAllowlist": false
+  },
+  "stageA": {
+    "daemonPid": 4924,
+    "daemonExecutable": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline",
+    "protocolVersion": "v1",
+    "buildId": "0.0.41",
+    "hubId": "hub_1791371443467_55egm",
+    "url": "ws://127.0.0.1:60295/hub",
+    "discoveryMode": "600",
+    "health": {
+      "pid": 4924,
+      "hubId": "hub_1791371443467_55egm",
+      "buildId": "0.0.41",
+      "protocolVersion": "v1"
+    },
+    "auth": [
+      {
+        "label": "missing",
+        "connected": false
+      },
+      {
+        "label": "wrong",
+        "connected": false
+      },
+      {
+        "label": "correct",
+        "connected": true
+      }
+    ],
+    "registration": {
+      "version": "v1",
+      "requestId": "05ed3947-64d6-498d-8d87-82cb589eeac0",
+      "ok": true,
+      "payload": {
+        "clientId": "rovai-research-3d65ef7e-aebc-417a-b089-917f4ac0851f"
+      }
+    },
+    "sessions": {
+      "version": "v1",
+      "requestId": "607c048c-75cb-4a6f-97f6-9a7af1431736",
+      "ok": true,
+      "payload": {
+        "sessions": []
+      }
+    },
+    "settingsRead": {
+      "version": "v1",
+      "requestId": "467265fb-9ba7-4215-afef-56446bdf876b",
+      "ok": false,
+      "error": {
+        "code": "not_implemented",
+        "message": "settings.get is not implemented yet."
+      }
+    },
+    "unauthorizedShutdownStatuses": [
+      401,
+      401
+    ],
+    "existingUserHubs": [
+      {
+        "name": "owners/hub-9869705ea029.json",
+        "pid": 68550,
+        "executable": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline",
+        "alive": true,
+        "discoveryUnchanged": true
+      }
+    ],
+    "privateRootSymlinkEscape": false
+  },
+  "authenticationRecheck": {
+    "observedAt": "2026-10-07T12:01:14.010Z",
+    "daemonPid": 33180,
+    "daemonExecutable": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline",
+    "executableSha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+    "hubId": "hub_1791374359724_sflkd",
+    "protocolVersion": "v1",
+    "buildId": "0.0.41",
+    "discoveryMode": "600",
+    "addresses": [
+      "127.0.0.1:65399"
+    ],
+    "auth": [
+      {
+        "label": "missing",
+        "connected": false
+      },
+      {
+        "label": "wrong",
+        "connected": false
+      },
+      {
+        "label": "correct",
+        "connected": true
+      }
+    ],
+    "unauthorizedShutdownStatuses": [
+      401,
+      401
+    ],
+    "privateRootSymlinkEscape": false,
+    "registration": {
+      "version": "v1",
+      "requestId": "4e8d4f3a-667d-4cb5-af62-3288fedcfa77",
+      "ok": true,
+      "payload": {
+        "clientId": "rovai-research-7a903fc6-8799-48a8-8991-a66a8fe6df0f"
+      }
+    },
+    "settingsRead": {
+      "version": "v1",
+      "requestId": "98ed1d87-5eb1-4848-997d-fff571b9b009",
+      "ok": false,
+      "error": {
+        "code": "not_implemented",
+        "message": "settings.get is not implemented yet."
+      }
+    }
+  },
+  "firstRestart": {
+    "before": {
+      "hubId": "hub_1791371443467_55egm",
+      "pid": 4924,
+      "url": "ws://127.0.0.1:60295/hub"
+    },
+    "after": {
+      "hubId": "hub_1791372810357_q3pqo",
+      "pid": 22154,
+      "url": "ws://127.0.0.1:63354/hub"
+    },
+    "oldProcessExited": true,
+    "tokenRotated": true,
+    "expectedDaemon": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline",
+    "persistedSessionReadAfterHubRestart": {
+      "sessionId": "1791372041928_3dbzl",
+      "ok": true,
+      "messageCount": 20
+    }
+  },
+  "configuration": {
+    "providerSource": "Previously authorized Cline native settings in isolated mission-052 acceptance directory; not another Runtime auth",
+    "providerSourceSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+    "modelSourceSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+    "currentUserDefaultProvider": "cline",
+    "probeProvider": "openai-compatible",
+    "probeModel": "gpt-6-sol",
+    "readOnlySettingsCommand": "settings.get: not_implemented",
+    "nativeCliModeDefault": "basic",
+    "actualInstallationMapping": {
+      "unset": "enabled basic",
+      "basic": "enabled basic",
+      "agentic": "enabled agentic",
+      "off": "disabled"
+    },
+    "mappingEvidence": "read-only inspection of selected installed binary and native CLI help, not an exported runtime setting resolver",
+    "settingsWrites": 0,
+    "clientCompactionContributions": 0,
+    "installationPatches": 0,
+    "runtimeReplacement": false,
+    "rosterOrDailyAppWrites": 0
+  },
+  "matrix": [
+    {
+      "variant": "basic",
+      "sessionId": "1791372829439_l963j",
+      "hub": {
+        "hubId": "hub_1791372810357_q3pqo",
+        "pid": 22154,
+        "protocolVersion": "v1",
+        "buildId": "0.0.41"
+      },
+      "clientId": "rovai-research-331d6a21-7626-4f04-94eb-a6883a3142cb",
+      "startedAt": "2026-10-07T11:33:49.418Z",
+      "endedAt": "2026-10-07T11:37:14.639Z",
+      "compaction": {
+        "enabled": true,
+        "strategy": "basic"
+      },
+      "knownModelsDelivered": true,
+      "reportedModelWindows": [
+        272000
+      ],
+      "providerId": "openai-compatible",
+      "modelId": "gpt-6-sol",
+      "configuredWindow": 272000,
+      "providerFileSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+      "modelFileSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+      "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090",
+      "allRealTurnsCompleted": true,
+      "actualModelMatches": true,
+      "identityRetained": true,
+      "earlyMemoryRetained": true,
+      "firstPersistedUserContainsEarlyMemory": true,
+      "persistedSessionIdMatches": true,
+      "persistedSystemMatchesEveryTurn": true,
+      "nativeCompactionNotices": [],
+      "nativeProjectedEventCounts": {
+        "session.updated": 128,
+        "session.created": 1,
+        "run.started": 32,
+        "iteration.started": 32,
+        "assistant.delta": 149,
+        "usage.updated": 32,
+        "assistant.finished": 32,
+        "iteration.finished": 32,
+        "agent.done": 32,
+        "run.completed": 32,
+        "ui.notify": 31
+      },
+      "turns": [
+        {
+          "label": "first",
+          "promptSha256": "8f6aff17ad471f6c81b946ff83404d55a733ea3f4a4475020877b09a5b010196",
+          "promptBytes": 128,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:33:49.519Z",
+          "endedAt": "2026-10-07T11:33:52.502Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 80,
+            "outputTokens": 66,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": null,
+          "after": {
+            "sha256": "4f456dda397df9467f5e12b5d186f3bf0d6cdf92496c4171873d2c80974ca152",
+            "bytes": 1181,
+            "count": 2,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": null
+        },
+        {
+          "label": "block-01",
+          "promptSha256": "eee5a0849e46a31369331c6b9ae00bdd2b75ef95b3b389c23bf16569da336e70",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:33:52.562Z",
+          "endedAt": "2026-10-07T11:33:56.213Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 21019,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "4f456dda397df9467f5e12b5d186f3bf0d6cdf92496c4171873d2c80974ca152",
+            "bytes": 1181,
+            "count": 2,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "f963196f578f98baf5fabd2fe4379e5d7a7dd90f5e9c994c196ae1da2181edd6",
+            "bytes": 33491,
+            "count": 4,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-02",
+          "promptSha256": "0e6b7d6ac1f8ccf8e28af6d92c9fa9e6c1c0feedd3a4f25682411299e4189db0",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:33:56.294Z",
+          "endedAt": "2026-10-07T11:33:58.371Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 42086,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "f963196f578f98baf5fabd2fe4379e5d7a7dd90f5e9c994c196ae1da2181edd6",
+            "bytes": 33491,
+            "count": 4,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "ccca732e5b5c54b758642822d827ed737f010371f82293a64b4136997022e0e1",
+            "bytes": 65801,
+            "count": 6,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-03",
+          "promptSha256": "80e24dad44cdf0852c912451e46f816faf9f314f08dbf40881f3ea148e72f851",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:33:58.431Z",
+          "endedAt": "2026-10-07T11:34:00.734Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 63111,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "ccca732e5b5c54b758642822d827ed737f010371f82293a64b4136997022e0e1",
+            "bytes": 65801,
+            "count": 6,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "54cf4bce6181fc8171fddf5a4c8913f8bb8363208cbec9141fb4aed2bd7ea94f",
+            "bytes": 98111,
+            "count": 8,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-04",
+          "promptSha256": "8343ed350f36c0aa765808a94b38a63682f78caaf51b29e19789d3ebbfb1b5bc",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:00.787Z",
+          "endedAt": "2026-10-07T11:34:03.431Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 84136,
+            "outputTokens": 8,
+            "cacheReadTokens": 41856,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "54cf4bce6181fc8171fddf5a4c8913f8bb8363208cbec9141fb4aed2bd7ea94f",
+            "bytes": 98111,
+            "count": 8,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "7af8e0d0fe9b00bd93835e5482e28c985382a4504bed42241bd275bf6e17ce5f",
+            "bytes": 130425,
+            "count": 10,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-05",
+          "promptSha256": "644b35304fcfc8b8daddfa7871937a48f61c58633fd151a641ac449728dbe8a7",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:03.506Z",
+          "endedAt": "2026-10-07T11:34:06.386Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 105114,
+            "outputTokens": 8,
+            "cacheReadTokens": 62976,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "7af8e0d0fe9b00bd93835e5482e28c985382a4504bed42241bd275bf6e17ce5f",
+            "bytes": 130425,
+            "count": 10,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "6bd46389da40e428a84cc4d11bea7375847d421222d28696be62812e2fece1e4",
+            "bytes": 162740,
+            "count": 12,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-06",
+          "promptSha256": "b5e226f7720266320b908635849e9bd374c4e09920fbe20ade4d63540b8b6a31",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:06.458Z",
+          "endedAt": "2026-10-07T11:34:10.713Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 126222,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "6bd46389da40e428a84cc4d11bea7375847d421222d28696be62812e2fece1e4",
+            "bytes": 162740,
+            "count": 12,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "f54986ef037b3dc129149ce7799c47633803616dc31713e67b7f765583816a5d",
+            "bytes": 195052,
+            "count": 14,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-07",
+          "promptSha256": "d14433be7e664cd357b3d1e326d1198793f9c6d4345d9785fd90f51e8603e690",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:10.786Z",
+          "endedAt": "2026-10-07T11:34:15.398Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 147234,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "f54986ef037b3dc129149ce7799c47633803616dc31713e67b7f765583816a5d",
+            "bytes": 195052,
+            "count": 14,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "7049e2e5fbe9e40015a166f981dabc8a0a576b35e9ff43f5c143ae9c9675d268",
+            "bytes": 227364,
+            "count": 16,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-08",
+          "promptSha256": "6b7a024dbc03d0ac359c835e2d3f8dec31534bb395d469e4138d626db77bab1e",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:15.464Z",
+          "endedAt": "2026-10-07T11:34:20.917Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 168276,
+            "outputTokens": 8,
+            "cacheReadTokens": 104960,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "7049e2e5fbe9e40015a166f981dabc8a0a576b35e9ff43f5c143ae9c9675d268",
+            "bytes": 227364,
+            "count": 16,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "89b494238f3aa046510c043265aa08ec8af61fc0b94c9332d6818939fe097df2",
+            "bytes": 259681,
+            "count": 18,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-09",
+          "promptSha256": "7365c7a8363bffa1a046860fdc393b6c7c068da12ab71702d0d5ffd31ea7fa11",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:21.005Z",
+          "endedAt": "2026-10-07T11:34:25.032Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 189311,
+            "outputTokens": 8,
+            "cacheReadTokens": 41856,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "89b494238f3aa046510c043265aa08ec8af61fc0b94c9332d6818939fe097df2",
+            "bytes": 259681,
+            "count": 18,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "cf765f94a3a4526626866c1a0efa152e9cd4035c6a8d2308a98515dea8d1921a",
+            "bytes": 291997,
+            "count": 20,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-10",
+          "promptSha256": "790470abadfd6525866ff05e88934a2fa399ee25e726785a4743919940ac376e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:25.097Z",
+          "endedAt": "2026-10-07T11:34:28.008Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 210342,
+            "outputTokens": 8,
+            "cacheReadTokens": 189184,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "cf765f94a3a4526626866c1a0efa152e9cd4035c6a8d2308a98515dea8d1921a",
+            "bytes": 291997,
+            "count": 20,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "e3e2abd886c321e72a47545fc084dab232ec58646edec0b2ee640f5f3d523f9d",
+            "bytes": 324315,
+            "count": 22,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-11",
+          "promptSha256": "d381692bfc9063c94df9cffab794686d4ff84aad37729ba074ce9061c51c807e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:28.089Z",
+          "endedAt": "2026-10-07T11:34:33.779Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 231346,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "e3e2abd886c321e72a47545fc084dab232ec58646edec0b2ee640f5f3d523f9d",
+            "bytes": 324315,
+            "count": 22,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "95441feba127d8eff77817c73caec583f58acdbb0e0324368b123c0a39ecbff3",
+            "bytes": 356628,
+            "count": 24,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-12",
+          "promptSha256": "42ec267029673c887942f1135a4bebc6b583c338b7ac17db8ad72a2378f2b67b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:33.869Z",
+          "endedAt": "2026-10-07T11:34:38.443Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 252412,
+            "outputTokens": 8,
+            "cacheReadTokens": 210176,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "95441feba127d8eff77817c73caec583f58acdbb0e0324368b123c0a39ecbff3",
+            "bytes": 356628,
+            "count": 24,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "e930fd70b933fb5b45c40757eb585031aec00ead932d65e32ca2fbec530c4874",
+            "bytes": 388946,
+            "count": 26,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-13",
+          "promptSha256": "2aa08fe70d3b218d2f263a0120f2e1ad641f06dd3460046bcb3b46a1f4b60f4b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:38.524Z",
+          "endedAt": "2026-10-07T11:34:45.018Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 273417,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "e930fd70b933fb5b45c40757eb585031aec00ead932d65e32ca2fbec530c4874",
+            "bytes": 388946,
+            "count": 26,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "4897feaa8de5246f738d4c5f940c9365c0230fb4a73ad8c31850b3c0f6860dc2",
+            "bytes": 421259,
+            "count": 28,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-14",
+          "promptSha256": "8b50dba409ab67be18de08f6ecb48e65e457926ed363bada242554646b68b6c8",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:45.097Z",
+          "endedAt": "2026-10-07T11:34:50.469Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 294496,
+            "outputTokens": 8,
+            "cacheReadTokens": 231168,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "4897feaa8de5246f738d4c5f940c9365c0230fb4a73ad8c31850b3c0f6860dc2",
+            "bytes": 421259,
+            "count": 28,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "0ae5f6aacaa5e108694b1dcee621fc2076512688630194f582582cf0ce71cad4",
+            "bytes": 453577,
+            "count": 30,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-15",
+          "promptSha256": "f35a9bbd7918542c5cd25d8784bf7b107994d11cc41f57c17a0870b51c342aa5",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:50.523Z",
+          "endedAt": "2026-10-07T11:34:58.314Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 315575,
+            "outputTokens": 8,
+            "cacheReadTokens": 104960,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "0ae5f6aacaa5e108694b1dcee621fc2076512688630194f582582cf0ce71cad4",
+            "bytes": 453577,
+            "count": 30,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "0b94d526daf44219b3d994fc653b2d726611a1e24e94f9e9b3c71b00df84bf27",
+            "bytes": 485895,
+            "count": 32,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-16",
+          "promptSha256": "1173c4b054e41541c1b2581a02472862ecc63817ee1ffbad3ff52fda07b8542b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:34:58.384Z",
+          "endedAt": "2026-10-07T11:35:05.229Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 336586,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "0b94d526daf44219b3d994fc653b2d726611a1e24e94f9e9b3c71b00df84bf27",
+            "bytes": 485895,
+            "count": 32,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "35b484d8f09f2ab2b45c68fdcac9749487947deb12f70d4a06a44ab7b0a2d509",
+            "bytes": 518208,
+            "count": 34,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-17",
+          "promptSha256": "b559c957e5b18104709ba442b6d6d1a93f1744a7732c93accd2cc7f95dd4228e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:05.313Z",
+          "endedAt": "2026-10-07T11:35:09.935Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 357603,
+            "outputTokens": 8,
+            "cacheReadTokens": 294272,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "35b484d8f09f2ab2b45c68fdcac9749487947deb12f70d4a06a44ab7b0a2d509",
+            "bytes": 518208,
+            "count": 34,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "5d6c65e92d98f33751d4adc271f6a3e38079c8cde14f34937ad74685d6bd3935",
+            "bytes": 550526,
+            "count": 36,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-18",
+          "promptSha256": "43392316e6a0f0fb4a58057c4d72bccf09082c4ea2c0d3b3042b5957fdb9b352",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:10.008Z",
+          "endedAt": "2026-10-07T11:35:13.535Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 378553,
+            "outputTokens": 8,
+            "cacheReadTokens": 357376,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "5d6c65e92d98f33751d4adc271f6a3e38079c8cde14f34937ad74685d6bd3935",
+            "bytes": 550526,
+            "count": 36,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "e5abb444489a2425e7acc923c385e1eb18269e51b096b243df5036c19acd2f08",
+            "bytes": 582844,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-19",
+          "promptSha256": "b261ca52ebd8cc633d47f2b9c84f652be0797aebdc839f7e661034a4035e2ed3",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:13.636Z",
+          "endedAt": "2026-10-07T11:35:18.050Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 399581,
+            "outputTokens": 8,
+            "cacheReadTokens": 315392,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "e5abb444489a2425e7acc923c385e1eb18269e51b096b243df5036c19acd2f08",
+            "bytes": 582844,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "585a382d53b9c7f65b05651d3785329a03d6067a820eeb769226b1896258c359",
+            "bytes": 615162,
+            "count": 40,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-20",
+          "promptSha256": "1023a439d03a5725ce92f7805bf199691e19e85171e6d4e8036d8ede35736126",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:18.146Z",
+          "endedAt": "2026-10-07T11:35:27.485Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 420572,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "585a382d53b9c7f65b05651d3785329a03d6067a820eeb769226b1896258c359",
+            "bytes": 615162,
+            "count": 40,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "738158cea73fa18355f5d902e80c08ae58728cf9b31fd2dabfbd4a830306a76e",
+            "bytes": 647475,
+            "count": 42,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-21",
+          "promptSha256": "5e7658c825eab04c550addba0fcb81183cb1eab7a88f176135a5d4999bc6b5de",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:27.572Z",
+          "endedAt": "2026-10-07T11:35:33.362Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 441567,
+            "outputTokens": 8,
+            "cacheReadTokens": 357376,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "738158cea73fa18355f5d902e80c08ae58728cf9b31fd2dabfbd4a830306a76e",
+            "bytes": 647475,
+            "count": 42,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "347e6bc72e8d263043aced0db93b6df2e720b74a8ecb15402235c07307d738bc",
+            "bytes": 679793,
+            "count": 44,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-22",
+          "promptSha256": "2d7f9fc7655f39736a70f0b53d41bfc6a8fdd391f71aba27163f87d997d04a1c",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:33.438Z",
+          "endedAt": "2026-10-07T11:35:40.830Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 462689,
+            "outputTokens": 8,
+            "cacheReadTokens": 231168,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "347e6bc72e8d263043aced0db93b6df2e720b74a8ecb15402235c07307d738bc",
+            "bytes": 679793,
+            "count": 44,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "d6e4e57c7f0ffa7c78540c16d8e3cfdb4372cb25432bfcf3a5419d09892cefd3",
+            "bytes": 712111,
+            "count": 46,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-23",
+          "promptSha256": "4baca974449141ab0150d8c527f9abd734d05cdeaf08f75db5892b1b51774344",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:40.928Z",
+          "endedAt": "2026-10-07T11:35:45.438Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 483748,
+            "outputTokens": 8,
+            "cacheReadTokens": 420352,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "d6e4e57c7f0ffa7c78540c16d8e3cfdb4372cb25432bfcf3a5419d09892cefd3",
+            "bytes": 712111,
+            "count": 46,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "b38010cb7b3186efb241004f1ad0431421305fdf8c0424bc9cf7ed812d23424c",
+            "bytes": 744429,
+            "count": 48,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-24",
+          "promptSha256": "20462267df234d8733031f6ae39cbe6e121a625f018c6fb33f2dcf3c85390e9a",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:45.541Z",
+          "endedAt": "2026-10-07T11:35:55.874Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504607,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "b38010cb7b3186efb241004f1ad0431421305fdf8c0424bc9cf7ed812d23424c",
+            "bytes": 744429,
+            "count": 48,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "499ef54ab9b91cd646da97dc6ffa2c7917512c8061382855517039fd32be065c",
+            "bytes": 771371,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-25",
+          "promptSha256": "7ad5a455af8e276184ed8d15533cb85f789c0827692387586f224317818d1e6d",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:35:55.962Z",
+          "endedAt": "2026-10-07T11:36:06.624Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504516,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "499ef54ab9b91cd646da97dc6ffa2c7917512c8061382855517039fd32be065c",
+            "bytes": 771371,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "dbf6e3adf461db97b2610df959a84fad556766ba2ceec0d766da0d2f1c2b9d1f",
+            "bytes": 766444,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-26",
+          "promptSha256": "de888e08c78a3b8730de9f772ddae24308d054ecf1e001d189272a29a71b3dd7",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:36:06.730Z",
+          "endedAt": "2026-10-07T11:36:18.519Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504389,
+            "outputTokens": 21,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "dbf6e3adf461db97b2610df959a84fad556766ba2ceec0d766da0d2f1c2b9d1f",
+            "bytes": 766444,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "223667c169b0a1001aff4a48dbc61954d656ab3564a5ac79665773495710f025",
+            "bytes": 766447,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-27",
+          "promptSha256": "d5ffc87c7daeaeac29f1020d0254d39866ed59a6e033e0ff07eeadb0ff262aff",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:36:18.592Z",
+          "endedAt": "2026-10-07T11:36:29.254Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504426,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "223667c169b0a1001aff4a48dbc61954d656ab3564a5ac79665773495710f025",
+            "bytes": 766447,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "99f4f128e233a3158d4a0ac4d2eafa4abe09e3e3b4009ca190c85e2c9c324d4a",
+            "bytes": 766449,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-28",
+          "promptSha256": "2075fb99183b2c410d154f5ea445c2822b60a8931b0ba4ad92a07f7162f2c260",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:36:29.388Z",
+          "endedAt": "2026-10-07T11:36:42.597Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504441,
+            "outputTokens": 19,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "99f4f128e233a3158d4a0ac4d2eafa4abe09e3e3b4009ca190c85e2c9c324d4a",
+            "bytes": 766449,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "4cab272ba32316f951274e16188a9410531fadf40a67000a2228d7cfb69f842a",
+            "bytes": 766451,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-29",
+          "promptSha256": "a3ffa8398f5189f8507cc8f90eb1043e07cfecb45496f96c2412819e6bb5b3af",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:36:42.680Z",
+          "endedAt": "2026-10-07T11:36:53.157Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504440,
+            "outputTokens": 22,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "4cab272ba32316f951274e16188a9410531fadf40a67000a2228d7cfb69f842a",
+            "bytes": 766451,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "2bbf2a59ffc3f5224a9fb73caca38fe627dfabdf69eead06cdf7033b82fa3b40",
+            "bytes": 766454,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-30",
+          "promptSha256": "3315ec873526b32534d93c5ce7c0aa3fd71005672218216e51a32dc53a3c7ca7",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:36:53.262Z",
+          "endedAt": "2026-10-07T11:37:04.255Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504316,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "2bbf2a59ffc3f5224a9fb73caca38fe627dfabdf69eead06cdf7033b82fa3b40",
+            "bytes": 766454,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "eb8d15f8755f7ac0e0f3b6dbcadfd7c7f87005c4ef399c6d0a987ba13fbc58ac",
+            "bytes": 766454,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "continuity",
+          "promptSha256": "a8cdf3aef9e6bf0a004e61a77315d9e3b8ae76e6b61f08085d46098de948ef9c",
+          "promptBytes": 121,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:04.336Z",
+          "endedAt": "2026-10-07T11:37:14.566Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 483341,
+            "outputTokens": 18,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "eb8d15f8755f7ac0e0f3b6dbcadfd7c7f87005c4ef399c6d0a987ba13fbc58ac",
+            "bytes": 766454,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "79af61d399985dac5610f02692f97b8367514b86a39f96466163869ab60eafc3",
+            "bytes": 734956,
+            "count": 27,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": null
+        }
+      ],
+      "transportRetries": 0
+    },
+    {
+      "variant": "default",
+      "sessionId": "1791373034721_30pa9",
+      "hub": {
+        "hubId": "hub_1791372810357_q3pqo",
+        "pid": 22154,
+        "protocolVersion": "v1",
+        "buildId": "0.0.41"
+      },
+      "clientId": "rovai-research-5e8e2e22-ad5f-4572-92dc-17146403caae",
+      "startedAt": "2026-10-07T11:37:14.700Z",
+      "endedAt": "2026-10-07T11:39:29.743Z",
+      "compaction": null,
+      "knownModelsDelivered": true,
+      "reportedModelWindows": [
+        272000
+      ],
+      "providerId": "openai-compatible",
+      "modelId": "gpt-6-sol",
+      "configuredWindow": 272000,
+      "providerFileSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+      "modelFileSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+      "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090",
+      "allRealTurnsCompleted": true,
+      "actualModelMatches": true,
+      "identityRetained": true,
+      "earlyMemoryRetained": true,
+      "firstPersistedUserContainsEarlyMemory": true,
+      "persistedSessionIdMatches": true,
+      "persistedSystemMatchesEveryTurn": true,
+      "nativeCompactionNotices": [],
+      "nativeProjectedEventCounts": {
+        "session.updated": 128,
+        "session.created": 1,
+        "run.started": 32,
+        "iteration.started": 32,
+        "assistant.delta": 148,
+        "usage.updated": 32,
+        "assistant.finished": 32,
+        "iteration.finished": 32,
+        "agent.done": 32,
+        "run.completed": 32,
+        "ui.notify": 32
+      },
+      "turns": [
+        {
+          "label": "first",
+          "promptSha256": "8f6aff17ad471f6c81b946ff83404d55a733ea3f4a4475020877b09a5b010196",
+          "promptBytes": 128,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:14.791Z",
+          "endedAt": "2026-10-07T11:37:17.180Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 80,
+            "outputTokens": 59,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": null,
+          "after": {
+            "sha256": "746d329c84a84bcabdfc57b498e0938eefee5392948db095813ff847bbcca0a4",
+            "bytes": 1178,
+            "count": 2,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": null
+        },
+        {
+          "label": "block-01",
+          "promptSha256": "eee5a0849e46a31369331c6b9ae00bdd2b75ef95b3b389c23bf16569da336e70",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:17.257Z",
+          "endedAt": "2026-10-07T11:37:19.002Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 21018,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "746d329c84a84bcabdfc57b498e0938eefee5392948db095813ff847bbcca0a4",
+            "bytes": 1178,
+            "count": 2,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "9bbbbd4199dd9232e1facf9aa7a8e1c7146c1c28899b40bfc37c5e5602cae342",
+            "bytes": 33489,
+            "count": 4,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-02",
+          "promptSha256": "0e6b7d6ac1f8ccf8e28af6d92c9fa9e6c1c0feedd3a4f25682411299e4189db0",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:19.053Z",
+          "endedAt": "2026-10-07T11:37:21.477Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 42085,
+            "outputTokens": 8,
+            "cacheReadTokens": 20864,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "9bbbbd4199dd9232e1facf9aa7a8e1c7146c1c28899b40bfc37c5e5602cae342",
+            "bytes": 33489,
+            "count": 4,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "418f6c0153d4feef9fd67e4a5259c052b15cd34da1f11581bea1fa45f0a616f9",
+            "bytes": 65804,
+            "count": 6,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-03",
+          "promptSha256": "80e24dad44cdf0852c912451e46f816faf9f314f08dbf40881f3ea148e72f851",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:21.533Z",
+          "endedAt": "2026-10-07T11:37:23.706Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 63110,
+            "outputTokens": 8,
+            "cacheReadTokens": 62976,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "418f6c0153d4feef9fd67e4a5259c052b15cd34da1f11581bea1fa45f0a616f9",
+            "bytes": 65804,
+            "count": 6,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "2439e071225ae37b7b4516093a54ad8e051b0e278c91fa6cb6cabc8966850708",
+            "bytes": 98119,
+            "count": 8,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-04",
+          "promptSha256": "8343ed350f36c0aa765808a94b38a63682f78caaf51b29e19789d3ebbfb1b5bc",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:23.759Z",
+          "endedAt": "2026-10-07T11:37:26.177Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 84135,
+            "outputTokens": 8,
+            "cacheReadTokens": 62976,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "2439e071225ae37b7b4516093a54ad8e051b0e278c91fa6cb6cabc8966850708",
+            "bytes": 98119,
+            "count": 8,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "f99743c8f4d357f5b86a8a52214fd33419c45601e650f3843d5d91f7c9a38f85",
+            "bytes": 130434,
+            "count": 10,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-05",
+          "promptSha256": "644b35304fcfc8b8daddfa7871937a48f61c58633fd151a641ac449728dbe8a7",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:26.261Z",
+          "endedAt": "2026-10-07T11:37:29.247Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 105113,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "f99743c8f4d357f5b86a8a52214fd33419c45601e650f3843d5d91f7c9a38f85",
+            "bytes": 130434,
+            "count": 10,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "657dff2849a63a8c5e6f19d0963c1e08a35c5204099d6d987e25ee40a6e0694c",
+            "bytes": 162746,
+            "count": 12,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-06",
+          "promptSha256": "b5e226f7720266320b908635849e9bd374c4e09920fbe20ade4d63540b8b6a31",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:29.301Z",
+          "endedAt": "2026-10-07T11:37:31.946Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 126221,
+            "outputTokens": 8,
+            "cacheReadTokens": 126080,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "657dff2849a63a8c5e6f19d0963c1e08a35c5204099d6d987e25ee40a6e0694c",
+            "bytes": 162746,
+            "count": 12,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "09abadc77b9710509cbf46aa00d38f1ccc1a3f6da6f14c3438c40e0606f92a38",
+            "bytes": 195063,
+            "count": 14,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-07",
+          "promptSha256": "d14433be7e664cd357b3d1e326d1198793f9c6d4345d9785fd90f51e8603e690",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:32.000Z",
+          "endedAt": "2026-10-07T11:37:35.081Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 147233,
+            "outputTokens": 8,
+            "cacheReadTokens": 62976,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "09abadc77b9710509cbf46aa00d38f1ccc1a3f6da6f14c3438c40e0606f92a38",
+            "bytes": 195063,
+            "count": 14,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "a1abef45cf8c3a44a8da94e9960ad4ad4ac911141b685510c864c7d0d703e44e",
+            "bytes": 227379,
+            "count": 16,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-08",
+          "promptSha256": "6b7a024dbc03d0ac359c835e2d3f8dec31534bb395d469e4138d626db77bab1e",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:35.134Z",
+          "endedAt": "2026-10-07T11:37:40.068Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 168275,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "a1abef45cf8c3a44a8da94e9960ad4ad4ac911141b685510c864c7d0d703e44e",
+            "bytes": 227379,
+            "count": 16,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "898952834c74dd88457c719f36bd2a2493ddd1c5b5f00c9ba4f6560546f08ceb",
+            "bytes": 259691,
+            "count": 18,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-09",
+          "promptSha256": "7365c7a8363bffa1a046860fdc393b6c7c068da12ab71702d0d5ffd31ea7fa11",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:40.130Z",
+          "endedAt": "2026-10-07T11:37:42.635Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 189310,
+            "outputTokens": 8,
+            "cacheReadTokens": 189184,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "898952834c74dd88457c719f36bd2a2493ddd1c5b5f00c9ba4f6560546f08ceb",
+            "bytes": 259691,
+            "count": 18,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "5b75ad4d73e7b83ff871bc56a391c57ec9fa87300261be1060b9cd940a845b72",
+            "bytes": 292008,
+            "count": 20,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-10",
+          "promptSha256": "790470abadfd6525866ff05e88934a2fa399ee25e726785a4743919940ac376e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:42.720Z",
+          "endedAt": "2026-10-07T11:37:45.863Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 210341,
+            "outputTokens": 8,
+            "cacheReadTokens": 168064,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "5b75ad4d73e7b83ff871bc56a391c57ec9fa87300261be1060b9cd940a845b72",
+            "bytes": 292008,
+            "count": 20,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "57905ee599a6aca0bc5da886f2b8134c24e880fb8b74787db0223ffc02dd1919",
+            "bytes": 324326,
+            "count": 22,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-11",
+          "promptSha256": "d381692bfc9063c94df9cffab794686d4ff84aad37729ba074ce9061c51c807e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:45.927Z",
+          "endedAt": "2026-10-07T11:37:48.154Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 231345,
+            "outputTokens": 8,
+            "cacheReadTokens": 231168,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "57905ee599a6aca0bc5da886f2b8134c24e880fb8b74787db0223ffc02dd1919",
+            "bytes": 324326,
+            "count": 22,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "54dfa0fc19f38e98e35e9ae26a1154cb7e197323a93704656d9c2d16ddce90e8",
+            "bytes": 356644,
+            "count": 24,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-12",
+          "promptSha256": "42ec267029673c887942f1135a4bebc6b583c338b7ac17db8ad72a2378f2b67b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:48.213Z",
+          "endedAt": "2026-10-07T11:37:52.466Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 252411,
+            "outputTokens": 8,
+            "cacheReadTokens": 231168,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "54dfa0fc19f38e98e35e9ae26a1154cb7e197323a93704656d9c2d16ddce90e8",
+            "bytes": 356644,
+            "count": 24,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "03d60b49d276e08bc77728d48836e8dbad6860e952901578d86605ac382b68cb",
+            "bytes": 388962,
+            "count": 26,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-13",
+          "promptSha256": "2aa08fe70d3b218d2f263a0120f2e1ad641f06dd3460046bcb3b46a1f4b60f4b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:52.525Z",
+          "endedAt": "2026-10-07T11:37:55.721Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 273416,
+            "outputTokens": 8,
+            "cacheReadTokens": 252288,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "03d60b49d276e08bc77728d48836e8dbad6860e952901578d86605ac382b68cb",
+            "bytes": 388962,
+            "count": 26,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "82719e30634a87d120de5f5ce384acc4543c29567e4cb8f1e4324123fd2a0327",
+            "bytes": 421280,
+            "count": 28,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-14",
+          "promptSha256": "8b50dba409ab67be18de08f6ecb48e65e457926ed363bada242554646b68b6c8",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:37:55.792Z",
+          "endedAt": "2026-10-07T11:38:00.696Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 294495,
+            "outputTokens": 8,
+            "cacheReadTokens": 104960,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "82719e30634a87d120de5f5ce384acc4543c29567e4cb8f1e4324123fd2a0327",
+            "bytes": 421280,
+            "count": 28,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "63ac88b44d38f5ac53915790399af6ba08c0c19801b1ae73a68bc7c711503af1",
+            "bytes": 453598,
+            "count": 30,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-15",
+          "promptSha256": "f35a9bbd7918542c5cd25d8784bf7b107994d11cc41f57c17a0870b51c342aa5",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:00.767Z",
+          "endedAt": "2026-10-07T11:38:05.396Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 315574,
+            "outputTokens": 8,
+            "cacheReadTokens": 294272,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "63ac88b44d38f5ac53915790399af6ba08c0c19801b1ae73a68bc7c711503af1",
+            "bytes": 453598,
+            "count": 30,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "547e0cee9471acac4b16b3fc33dcbca9e1e3df88479ce4916c9104419cfcb279",
+            "bytes": 485916,
+            "count": 32,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-16",
+          "promptSha256": "1173c4b054e41541c1b2581a02472862ecc63817ee1ffbad3ff52fda07b8542b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:05.501Z",
+          "endedAt": "2026-10-07T11:38:11.297Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 336585,
+            "outputTokens": 8,
+            "cacheReadTokens": 231168,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "547e0cee9471acac4b16b3fc33dcbca9e1e3df88479ce4916c9104419cfcb279",
+            "bytes": 485916,
+            "count": 32,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "d8a7493be36df3dfc9888203fea47476c167401c3353ccb3bb77beeee6ae8847",
+            "bytes": 518234,
+            "count": 34,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-17",
+          "promptSha256": "b559c957e5b18104709ba442b6d6d1a93f1744a7732c93accd2cc7f95dd4228e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:11.360Z",
+          "endedAt": "2026-10-07T11:38:14.239Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 357602,
+            "outputTokens": 8,
+            "cacheReadTokens": 357376,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "d8a7493be36df3dfc9888203fea47476c167401c3353ccb3bb77beeee6ae8847",
+            "bytes": 518234,
+            "count": 34,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "6de73d3094f8a3a263356fc9f7ec2c52f9ea4efdbf9fb6f4359a37f5068687db",
+            "bytes": 550552,
+            "count": 36,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-18",
+          "promptSha256": "43392316e6a0f0fb4a58057c4d72bccf09082c4ea2c0d3b3042b5957fdb9b352",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:14.338Z",
+          "endedAt": "2026-10-07T11:38:17.765Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 378552,
+            "outputTokens": 8,
+            "cacheReadTokens": 357376,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "6de73d3094f8a3a263356fc9f7ec2c52f9ea4efdbf9fb6f4359a37f5068687db",
+            "bytes": 550552,
+            "count": 36,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "404efe8299468aa54ccd34a118d4072f7067d70dc17cf2fafd90c49ac80c146e",
+            "bytes": 582870,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-19",
+          "promptSha256": "b261ca52ebd8cc633d47f2b9c84f652be0797aebdc839f7e661034a4035e2ed3",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:17.852Z",
+          "endedAt": "2026-10-07T11:38:21.329Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 399580,
+            "outputTokens": 8,
+            "cacheReadTokens": 399360,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "404efe8299468aa54ccd34a118d4072f7067d70dc17cf2fafd90c49ac80c146e",
+            "bytes": 582870,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "910abe99ec03ce5e4898517ab1c588294b9a02cc53456dea570eb2a01afb43eb",
+            "bytes": 615188,
+            "count": 40,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-20",
+          "promptSha256": "1023a439d03a5725ce92f7805bf199691e19e85171e6d4e8036d8ede35736126",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:21.418Z",
+          "endedAt": "2026-10-07T11:38:24.859Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 420571,
+            "outputTokens": 8,
+            "cacheReadTokens": 378368,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "910abe99ec03ce5e4898517ab1c588294b9a02cc53456dea570eb2a01afb43eb",
+            "bytes": 615188,
+            "count": 40,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "2c85d23370887a8186a77c651b2dffc2ac423d837c8cd8fd781113100cbaead1",
+            "bytes": 647506,
+            "count": 42,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-21",
+          "promptSha256": "5e7658c825eab04c550addba0fcb81183cb1eab7a88f176135a5d4999bc6b5de",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:24.938Z",
+          "endedAt": "2026-10-07T11:38:28.873Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 441566,
+            "outputTokens": 8,
+            "cacheReadTokens": 399360,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "2c85d23370887a8186a77c651b2dffc2ac423d837c8cd8fd781113100cbaead1",
+            "bytes": 647506,
+            "count": 42,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "c941fcc69261358546370d8834e835f2e6a34602fafb8b1dd1fc99c2b64ad43e",
+            "bytes": 679824,
+            "count": 44,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-22",
+          "promptSha256": "2d7f9fc7655f39736a70f0b53d41bfc6a8fdd391f71aba27163f87d997d04a1c",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:28.942Z",
+          "endedAt": "2026-10-07T11:38:41.399Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 462688,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "c941fcc69261358546370d8834e835f2e6a34602fafb8b1dd1fc99c2b64ad43e",
+            "bytes": 679824,
+            "count": 44,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "73b39a388711177d2213bad1f861c686660a44eb34c32255b10638b5fb399a92",
+            "bytes": 712138,
+            "count": 46,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-23",
+          "promptSha256": "4baca974449141ab0150d8c527f9abd734d05cdeaf08f75db5892b1b51774344",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:41.478Z",
+          "endedAt": "2026-10-07T11:38:44.744Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 483747,
+            "outputTokens": 8,
+            "cacheReadTokens": 462464,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "73b39a388711177d2213bad1f861c686660a44eb34c32255b10638b5fb399a92",
+            "bytes": 712138,
+            "count": 46,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "125e3d88883d9c9e6d848a6d3d8a2a84bfaf7dafec217c0bf438a9590d6cae5c",
+            "bytes": 744457,
+            "count": 48,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-24",
+          "promptSha256": "20462267df234d8733031f6ae39cbe6e121a625f018c6fb33f2dcf3c85390e9a",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:44.843Z",
+          "endedAt": "2026-10-07T11:38:51.063Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504737,
+            "outputTokens": 8,
+            "cacheReadTokens": 378368,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "125e3d88883d9c9e6d848a6d3d8a2a84bfaf7dafec217c0bf438a9590d6cae5c",
+            "bytes": 744457,
+            "count": 48,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "30f283b9f67485abc2fee58306d262c63ef5b37fbdfb4eef98506a73d3cbb58c",
+            "bytes": 776776,
+            "count": 50,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-25",
+          "promptSha256": "7ad5a455af8e276184ed8d15533cb85f789c0827692387586f224317818d1e6d",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:51.168Z",
+          "endedAt": "2026-10-07T11:38:55.909Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 525684,
+            "outputTokens": 8,
+            "cacheReadTokens": 483584,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "30f283b9f67485abc2fee58306d262c63ef5b37fbdfb4eef98506a73d3cbb58c",
+            "bytes": 776776,
+            "count": 50,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "8a0546b6c8b3dc526cd5bf0b90078909b912bd4a16b136e5a58b433cc1aca20a",
+            "bytes": 809095,
+            "count": 52,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-26",
+          "promptSha256": "de888e08c78a3b8730de9f772ddae24308d054ecf1e001d189272a29a71b3dd7",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:56.009Z",
+          "endedAt": "2026-10-07T11:38:59.754Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 546624,
+            "outputTokens": 8,
+            "cacheReadTokens": 525568,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "8a0546b6c8b3dc526cd5bf0b90078909b912bd4a16b136e5a58b433cc1aca20a",
+            "bytes": 809095,
+            "count": 52,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "dec9efe3f2bac92bc1f4b32e7329e6a4f1a4263dfd2078f0e9f03a586ffa0bee",
+            "bytes": 841414,
+            "count": 54,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-27",
+          "promptSha256": "d5ffc87c7daeaeac29f1020d0254d39866ed59a6e033e0ff07eeadb0ff262aff",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:38:59.837Z",
+          "endedAt": "2026-10-07T11:39:09.510Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 567686,
+            "outputTokens": 8,
+            "cacheReadTokens": 294272,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "dec9efe3f2bac92bc1f4b32e7329e6a4f1a4263dfd2078f0e9f03a586ffa0bee",
+            "bytes": 841414,
+            "count": 54,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "4aa0c580cb5cd29322c8b89ee210169a251a8673ebfcf377e2472c4d095062b4",
+            "bytes": 873733,
+            "count": 56,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-28",
+          "promptSha256": "2075fb99183b2c410d154f5ea445c2822b60a8931b0ba4ad92a07f7162f2c260",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:09.603Z",
+          "endedAt": "2026-10-07T11:39:13.821Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 588726,
+            "outputTokens": 8,
+            "cacheReadTokens": 588544,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "4aa0c580cb5cd29322c8b89ee210169a251a8673ebfcf377e2472c4d095062b4",
+            "bytes": 873733,
+            "count": 56,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "6f8657a36e6a14c13d0ef4cd6fc6f56da69e87440f08166389db4dd5da5f8a92",
+            "bytes": 906052,
+            "count": 58,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-29",
+          "promptSha256": "a3ffa8398f5189f8507cc8f90eb1043e07cfecb45496f96c2412819e6bb5b3af",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:13.930Z",
+          "endedAt": "2026-10-07T11:39:19.423Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 609703,
+            "outputTokens": 8,
+            "cacheReadTokens": 567552,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "6f8657a36e6a14c13d0ef4cd6fc6f56da69e87440f08166389db4dd5da5f8a92",
+            "bytes": 906052,
+            "count": 58,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "0bdad5c30ba1c74fedc126f5ee3eeda58be13513913db64d947f8ac8bac51a48",
+            "bytes": 938371,
+            "count": 60,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-30",
+          "promptSha256": "3315ec873526b32534d93c5ce7c0aa3fd71005672218216e51a32dc53a3c7ca7",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:19.522Z",
+          "endedAt": "2026-10-07T11:39:24.120Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 630687,
+            "outputTokens": 8,
+            "cacheReadTokens": 630528,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "0bdad5c30ba1c74fedc126f5ee3eeda58be13513913db64d947f8ac8bac51a48",
+            "bytes": 938371,
+            "count": 60,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "eaaf4b110cf6eb6a83d6258f60a750f75886971b000e6ce1747429d270e36e20",
+            "bytes": 970690,
+            "count": 62,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "continuity",
+          "promptSha256": "a8cdf3aef9e6bf0a004e61a77315d9e3b8ae76e6b61f08085d46098de948ef9c",
+          "promptBytes": 121,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:24.227Z",
+          "endedAt": "2026-10-07T11:39:29.632Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 630724,
+            "outputTokens": 18,
+            "cacheReadTokens": 630528,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "eaaf4b110cf6eb6a83d6258f60a750f75886971b000e6ce1747429d270e36e20",
+            "bytes": 970690,
+            "count": 62,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "57384fd0839ba6c05217e1719962f95e4572a83393d2b8cca1b3aab368b4a34e",
+            "bytes": 971511,
+            "count": 64,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": null
+        }
+      ],
+      "transportRetries": 0
+    },
+    {
+      "variant": "off",
+      "sessionId": "1791373169821_j3bn5",
+      "hub": {
+        "hubId": "hub_1791372810357_q3pqo",
+        "pid": 22154,
+        "protocolVersion": "v1",
+        "buildId": "0.0.41"
+      },
+      "clientId": "rovai-research-621f0c5f-2592-4ae6-828b-31cdd61f430a",
+      "startedAt": "2026-10-07T11:39:29.801Z",
+      "endedAt": "2026-10-07T11:42:10.715Z",
+      "compaction": {
+        "enabled": false
+      },
+      "knownModelsDelivered": true,
+      "reportedModelWindows": [
+        272000
+      ],
+      "providerId": "openai-compatible",
+      "modelId": "gpt-6-sol",
+      "configuredWindow": 272000,
+      "providerFileSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+      "modelFileSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+      "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090",
+      "allRealTurnsCompleted": true,
+      "actualModelMatches": true,
+      "identityRetained": true,
+      "earlyMemoryRetained": true,
+      "firstPersistedUserContainsEarlyMemory": true,
+      "persistedSessionIdMatches": true,
+      "persistedSystemMatchesEveryTurn": true,
+      "nativeCompactionNotices": [],
+      "nativeProjectedEventCounts": {
+        "session.updated": 128,
+        "session.created": 1,
+        "run.started": 32,
+        "iteration.started": 32,
+        "assistant.delta": 148,
+        "usage.updated": 32,
+        "assistant.finished": 32,
+        "iteration.finished": 32,
+        "agent.done": 32,
+        "run.completed": 32,
+        "ui.notify": 31
+      },
+      "turns": [
+        {
+          "label": "first",
+          "promptSha256": "8f6aff17ad471f6c81b946ff83404d55a733ea3f4a4475020877b09a5b010196",
+          "promptBytes": 128,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:29.890Z",
+          "endedAt": "2026-10-07T11:39:32.122Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 80,
+            "outputTokens": 38,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": null,
+          "after": {
+            "sha256": "42b9805b8fe151649498c98dff5fe264b1cb2d81f488793fe852d9c4362f1fb6",
+            "bytes": 1179,
+            "count": 2,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": null
+        },
+        {
+          "label": "block-01",
+          "promptSha256": "eee5a0849e46a31369331c6b9ae00bdd2b75ef95b3b389c23bf16569da336e70",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:32.209Z",
+          "endedAt": "2026-10-07T11:39:38.608Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 21018,
+            "outputTokens": 20,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "42b9805b8fe151649498c98dff5fe264b1cb2d81f488793fe852d9c4362f1fb6",
+            "bytes": 1179,
+            "count": 2,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "bc419162cae1899aa0d310816413bbb77556d8772e75e28572db50342ece4f23",
+            "bytes": 33492,
+            "count": 4,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-02",
+          "promptSha256": "0e6b7d6ac1f8ccf8e28af6d92c9fa9e6c1c0feedd3a4f25682411299e4189db0",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:38.678Z",
+          "endedAt": "2026-10-07T11:39:42.029Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 42085,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "bc419162cae1899aa0d310816413bbb77556d8772e75e28572db50342ece4f23",
+            "bytes": 33492,
+            "count": 4,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "76c8c315cf95d86ed3b596ce1207a3a3156b8ae34eb57b6c2869320af2771419",
+            "bytes": 65804,
+            "count": 6,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-03",
+          "promptSha256": "80e24dad44cdf0852c912451e46f816faf9f314f08dbf40881f3ea148e72f851",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:42.106Z",
+          "endedAt": "2026-10-07T11:39:44.567Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 63110,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "76c8c315cf95d86ed3b596ce1207a3a3156b8ae34eb57b6c2869320af2771419",
+            "bytes": 65804,
+            "count": 6,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "01c8779c7ba16f66cebe12c3e9aeab9269f73b2e700164f3f685c616d7f79e38",
+            "bytes": 98116,
+            "count": 8,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-04",
+          "promptSha256": "8343ed350f36c0aa765808a94b38a63682f78caaf51b29e19789d3ebbfb1b5bc",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:44.642Z",
+          "endedAt": "2026-10-07T11:39:47.509Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 84135,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "01c8779c7ba16f66cebe12c3e9aeab9269f73b2e700164f3f685c616d7f79e38",
+            "bytes": 98116,
+            "count": 8,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "aafc950e336c170808b9690b4c7c937f343afa5f242001b1a44130c0105dc4f3",
+            "bytes": 130428,
+            "count": 10,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-05",
+          "promptSha256": "644b35304fcfc8b8daddfa7871937a48f61c58633fd151a641ac449728dbe8a7",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:47.563Z",
+          "endedAt": "2026-10-07T11:39:50.810Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 105113,
+            "outputTokens": 8,
+            "cacheReadTokens": 41856,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "aafc950e336c170808b9690b4c7c937f343afa5f242001b1a44130c0105dc4f3",
+            "bytes": 130428,
+            "count": 10,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "7e23e58268c4850e093b6759ca8f83fe867b46a8a665c62da00b752b1589c54a",
+            "bytes": 162745,
+            "count": 12,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-06",
+          "promptSha256": "b5e226f7720266320b908635849e9bd374c4e09920fbe20ade4d63540b8b6a31",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:50.888Z",
+          "endedAt": "2026-10-07T11:39:53.249Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 126221,
+            "outputTokens": 8,
+            "cacheReadTokens": 126080,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "7e23e58268c4850e093b6759ca8f83fe867b46a8a665c62da00b752b1589c54a",
+            "bytes": 162745,
+            "count": 12,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "27261ff2a535db8f126e457dddc7576011aec7829922cbb79a3f403bbb429b34",
+            "bytes": 195063,
+            "count": 14,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-07",
+          "promptSha256": "d14433be7e664cd357b3d1e326d1198793f9c6d4345d9785fd90f51e8603e690",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:53.334Z",
+          "endedAt": "2026-10-07T11:39:55.586Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 147233,
+            "outputTokens": 8,
+            "cacheReadTokens": 126080,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "27261ff2a535db8f126e457dddc7576011aec7829922cbb79a3f403bbb429b34",
+            "bytes": 195063,
+            "count": 14,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "9eae7c46f9d7213bd318f06a394beea3948795b0f2d69ed640637be208509a51",
+            "bytes": 227381,
+            "count": 16,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-08",
+          "promptSha256": "6b7a024dbc03d0ac359c835e2d3f8dec31534bb395d469e4138d626db77bab1e",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:55.637Z",
+          "endedAt": "2026-10-07T11:39:58.441Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 168275,
+            "outputTokens": 8,
+            "cacheReadTokens": 126080,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "9eae7c46f9d7213bd318f06a394beea3948795b0f2d69ed640637be208509a51",
+            "bytes": 227381,
+            "count": 16,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "4aa8677da73695ec378d979650e8475b42ba7df9ca198cf21fe72a1ba6fac12a",
+            "bytes": 259699,
+            "count": 18,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-09",
+          "promptSha256": "7365c7a8363bffa1a046860fdc393b6c7c068da12ab71702d0d5ffd31ea7fa11",
+          "promptBytes": 31293,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:39:58.742Z",
+          "endedAt": "2026-10-07T11:40:01.424Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 189310,
+            "outputTokens": 8,
+            "cacheReadTokens": 147072,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "4aa8677da73695ec378d979650e8475b42ba7df9ca198cf21fe72a1ba6fac12a",
+            "bytes": 259699,
+            "count": 18,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "01353422546ba67fc62fb2cbb70352155d72574acc6e87e69fd2c0d6611e4da5",
+            "bytes": 292017,
+            "count": 20,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-10",
+          "promptSha256": "790470abadfd6525866ff05e88934a2fa399ee25e726785a4743919940ac376e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:01.499Z",
+          "endedAt": "2026-10-07T11:40:04.777Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 210341,
+            "outputTokens": 8,
+            "cacheReadTokens": 168064,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "01353422546ba67fc62fb2cbb70352155d72574acc6e87e69fd2c0d6611e4da5",
+            "bytes": 292017,
+            "count": 20,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "757ffba2da8b3c9028b037d77ccc66dc8a2793473c94c6fe2d6bbab184ca55eb",
+            "bytes": 324336,
+            "count": 22,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-11",
+          "promptSha256": "d381692bfc9063c94df9cffab794686d4ff84aad37729ba074ce9061c51c807e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:04.866Z",
+          "endedAt": "2026-10-07T11:40:08.055Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 231345,
+            "outputTokens": 8,
+            "cacheReadTokens": 189184,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "757ffba2da8b3c9028b037d77ccc66dc8a2793473c94c6fe2d6bbab184ca55eb",
+            "bytes": 324336,
+            "count": 22,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "ad7f917313029675f11daf4e00a7359cd17668b580a41e84482d709568bb1863",
+            "bytes": 356655,
+            "count": 24,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-12",
+          "promptSha256": "42ec267029673c887942f1135a4bebc6b583c338b7ac17db8ad72a2378f2b67b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:08.113Z",
+          "endedAt": "2026-10-07T11:40:11.196Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 252411,
+            "outputTokens": 8,
+            "cacheReadTokens": 210176,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "ad7f917313029675f11daf4e00a7359cd17668b580a41e84482d709568bb1863",
+            "bytes": 356655,
+            "count": 24,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "0b82b71a78ad23c03c8e4758d219e3c27f24e560d378802cfee943b7a788a819",
+            "bytes": 388974,
+            "count": 26,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-13",
+          "promptSha256": "2aa08fe70d3b218d2f263a0120f2e1ad641f06dd3460046bcb3b46a1f4b60f4b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:11.272Z",
+          "endedAt": "2026-10-07T11:40:15.542Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 273416,
+            "outputTokens": 8,
+            "cacheReadTokens": 231168,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "0b82b71a78ad23c03c8e4758d219e3c27f24e560d378802cfee943b7a788a819",
+            "bytes": 388974,
+            "count": 26,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "fc6917bf150def3a5f2187c5adf578780929698255414b5859de0053b72f4695",
+            "bytes": 421293,
+            "count": 28,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-14",
+          "promptSha256": "8b50dba409ab67be18de08f6ecb48e65e457926ed363bada242554646b68b6c8",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:15.626Z",
+          "endedAt": "2026-10-07T11:40:20.565Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 294495,
+            "outputTokens": 8,
+            "cacheReadTokens": 168064,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "fc6917bf150def3a5f2187c5adf578780929698255414b5859de0053b72f4695",
+            "bytes": 421293,
+            "count": 28,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "e117d8d591dedf03985f52e12db6bbe55894bb16bb1c11cef921fb571664b85b",
+            "bytes": 453612,
+            "count": 30,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-15",
+          "promptSha256": "f35a9bbd7918542c5cd25d8784bf7b107994d11cc41f57c17a0870b51c342aa5",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:20.626Z",
+          "endedAt": "2026-10-07T11:40:26.806Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 315574,
+            "outputTokens": 8,
+            "cacheReadTokens": 62976,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "e117d8d591dedf03985f52e12db6bbe55894bb16bb1c11cef921fb571664b85b",
+            "bytes": 453612,
+            "count": 30,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "7f08a4ac0db7380329d2b781620f0768003b3d8a8a1b4aef714e833ab85123e9",
+            "bytes": 485930,
+            "count": 32,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-16",
+          "promptSha256": "1173c4b054e41541c1b2581a02472862ecc63817ee1ffbad3ff52fda07b8542b",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:26.875Z",
+          "endedAt": "2026-10-07T11:40:30.746Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 336585,
+            "outputTokens": 8,
+            "cacheReadTokens": 294272,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "7f08a4ac0db7380329d2b781620f0768003b3d8a8a1b4aef714e833ab85123e9",
+            "bytes": 485930,
+            "count": 32,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "865c9395d93386d5c9aba53afe0c97189b4ec4b94660e64e296a86ca5f2d6bb9",
+            "bytes": 518249,
+            "count": 34,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-17",
+          "promptSha256": "b559c957e5b18104709ba442b6d6d1a93f1744a7732c93accd2cc7f95dd4228e",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:30.841Z",
+          "endedAt": "2026-10-07T11:40:40.536Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 357602,
+            "outputTokens": 8,
+            "cacheReadTokens": 147072,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "865c9395d93386d5c9aba53afe0c97189b4ec4b94660e64e296a86ca5f2d6bb9",
+            "bytes": 518249,
+            "count": 34,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "e33be1152cea842d2cfba7c4e20c29ed0b23fe522c1b881e90d3b402b47c30de",
+            "bytes": 550568,
+            "count": 36,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-18",
+          "promptSha256": "43392316e6a0f0fb4a58057c4d72bccf09082c4ea2c0d3b3042b5957fdb9b352",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:40.618Z",
+          "endedAt": "2026-10-07T11:40:45.352Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 378552,
+            "outputTokens": 8,
+            "cacheReadTokens": 252288,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "e33be1152cea842d2cfba7c4e20c29ed0b23fe522c1b881e90d3b402b47c30de",
+            "bytes": 550568,
+            "count": 36,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "10ac9c5c13f4a7f0899a70013618b8bd9fbb33b01b33578d18941212a824e0d8",
+            "bytes": 582887,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-19",
+          "promptSha256": "b261ca52ebd8cc633d47f2b9c84f652be0797aebdc839f7e661034a4035e2ed3",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:45.437Z",
+          "endedAt": "2026-10-07T11:40:51.164Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 399580,
+            "outputTokens": 8,
+            "cacheReadTokens": 399360,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "10ac9c5c13f4a7f0899a70013618b8bd9fbb33b01b33578d18941212a824e0d8",
+            "bytes": 582887,
+            "count": 38,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "3ed977c018ea07e012b29ba57a6c8e8fab2c1e19639187797a934e86a35f4af0",
+            "bytes": 615206,
+            "count": 40,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-20",
+          "promptSha256": "1023a439d03a5725ce92f7805bf199691e19e85171e6d4e8036d8ede35736126",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:51.248Z",
+          "endedAt": "2026-10-07T11:40:59.231Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 420571,
+            "outputTokens": 8,
+            "cacheReadTokens": 273280,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "3ed977c018ea07e012b29ba57a6c8e8fab2c1e19639187797a934e86a35f4af0",
+            "bytes": 615206,
+            "count": 40,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "06af577608794fbbf8535ce15d24d8902b3db72423eb3960eb63cdc1df95d082",
+            "bytes": 647525,
+            "count": 42,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-21",
+          "promptSha256": "5e7658c825eab04c550addba0fcb81183cb1eab7a88f176135a5d4999bc6b5de",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:40:59.452Z",
+          "endedAt": "2026-10-07T11:41:03.240Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 441566,
+            "outputTokens": 8,
+            "cacheReadTokens": 441344,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "06af577608794fbbf8535ce15d24d8902b3db72423eb3960eb63cdc1df95d082",
+            "bytes": 647525,
+            "count": 42,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "123996dcc82412ed01586d6f72a63f455408df0bd7453c23070e3c780d8121be",
+            "bytes": 679844,
+            "count": 44,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-22",
+          "promptSha256": "2d7f9fc7655f39736a70f0b53d41bfc6a8fdd391f71aba27163f87d997d04a1c",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:03.327Z",
+          "endedAt": "2026-10-07T11:41:06.613Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 462688,
+            "outputTokens": 8,
+            "cacheReadTokens": 441344,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "123996dcc82412ed01586d6f72a63f455408df0bd7453c23070e3c780d8121be",
+            "bytes": 679844,
+            "count": 44,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "5039e07a83ce91291d0a35f1c0affd48c8f1ac8d601ac5be84d5a57b4ee83205",
+            "bytes": 712163,
+            "count": 46,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-23",
+          "promptSha256": "4baca974449141ab0150d8c527f9abd734d05cdeaf08f75db5892b1b51774344",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:06.695Z",
+          "endedAt": "2026-10-07T11:41:10.061Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 483747,
+            "outputTokens": 8,
+            "cacheReadTokens": 483584,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "5039e07a83ce91291d0a35f1c0affd48c8f1ac8d601ac5be84d5a57b4ee83205",
+            "bytes": 712163,
+            "count": 46,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "b264d34db9712a2b24abeb2790f6519864dba12f96d1b2a060b8a6eefc6f125a",
+            "bytes": 744482,
+            "count": 48,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-24",
+          "promptSha256": "20462267df234d8733031f6ae39cbe6e121a625f018c6fb33f2dcf3c85390e9a",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:10.157Z",
+          "endedAt": "2026-10-07T11:41:14.861Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 504737,
+            "outputTokens": 8,
+            "cacheReadTokens": 504576,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "b264d34db9712a2b24abeb2790f6519864dba12f96d1b2a060b8a6eefc6f125a",
+            "bytes": 744482,
+            "count": 48,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "a58670804dcc16c554ceec457daa5d054c7f876dfdc2d8fb908424ccd65845c7",
+            "bytes": 776801,
+            "count": 50,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-25",
+          "promptSha256": "7ad5a455af8e276184ed8d15533cb85f789c0827692387586f224317818d1e6d",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:14.945Z",
+          "endedAt": "2026-10-07T11:41:19.578Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 525684,
+            "outputTokens": 8,
+            "cacheReadTokens": 483584,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "a58670804dcc16c554ceec457daa5d054c7f876dfdc2d8fb908424ccd65845c7",
+            "bytes": 776801,
+            "count": 50,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "c29b7d3f787b7f6649e0dcddae93df34d77edc645acf605920751f4ff275a25e",
+            "bytes": 809120,
+            "count": 52,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-26",
+          "promptSha256": "de888e08c78a3b8730de9f772ddae24308d054ecf1e001d189272a29a71b3dd7",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:19.656Z",
+          "endedAt": "2026-10-07T11:41:28.018Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 546624,
+            "outputTokens": 8,
+            "cacheReadTokens": 336384,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "c29b7d3f787b7f6649e0dcddae93df34d77edc645acf605920751f4ff275a25e",
+            "bytes": 809120,
+            "count": 52,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "52e6ff321dddb24fb34d194a59685c17c2be5eabea37ee0341a4c4e44511cac9",
+            "bytes": 841439,
+            "count": 54,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": false
+        },
+        {
+          "label": "block-27",
+          "promptSha256": "d5ffc87c7daeaeac29f1020d0254d39866ed59a6e033e0ff07eeadb0ff262aff",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:28.110Z",
+          "endedAt": "2026-10-07T11:41:32.212Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 567686,
+            "outputTokens": 8,
+            "cacheReadTokens": 525568,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "52e6ff321dddb24fb34d194a59685c17c2be5eabea37ee0341a4c4e44511cac9",
+            "bytes": 841439,
+            "count": 54,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "4b7a61c94aa3fe6633600de3d9cead205c2e299eab19e1b7a5546dd6f48507a8",
+            "bytes": 873758,
+            "count": 56,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-28",
+          "promptSha256": "2075fb99183b2c410d154f5ea445c2822b60a8931b0ba4ad92a07f7162f2c260",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:32.289Z",
+          "endedAt": "2026-10-07T11:41:47.719Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 588726,
+            "outputTokens": 8,
+            "cacheReadTokens": 0,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "4b7a61c94aa3fe6633600de3d9cead205c2e299eab19e1b7a5546dd6f48507a8",
+            "bytes": 873758,
+            "count": 56,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "330dcbe1c3a8513d016ab6cbb67c151fc4b273933f8c1ff525476644857bda2c",
+            "bytes": 906072,
+            "count": 58,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-29",
+          "promptSha256": "a3ffa8398f5189f8507cc8f90eb1043e07cfecb45496f96c2412819e6bb5b3af",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:47.832Z",
+          "endedAt": "2026-10-07T11:41:57.877Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 609703,
+            "outputTokens": 8,
+            "cacheReadTokens": 525568,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "330dcbe1c3a8513d016ab6cbb67c151fc4b273933f8c1ff525476644857bda2c",
+            "bytes": 906072,
+            "count": 58,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "68298efb72edbba4f31bd165ada7457d2eb95c482f3a501e84589db98fb169d8",
+            "bytes": 938391,
+            "count": 60,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "block-30",
+          "promptSha256": "3315ec873526b32534d93c5ce7c0aa3fd71005672218216e51a32dc53a3c7ca7",
+          "promptBytes": 31294,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:41:57.951Z",
+          "endedAt": "2026-10-07T11:42:04.599Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 630687,
+            "outputTokens": 8,
+            "cacheReadTokens": 504576,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "68298efb72edbba4f31bd165ada7457d2eb95c482f3a501e84589db98fb169d8",
+            "bytes": 938391,
+            "count": 60,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "fce792efb1fac97580dadb2f4a84d06f73ef4fd76cf0bd4ed8c79f551f6a9882",
+            "bytes": 970710,
+            "count": 62,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": true
+        },
+        {
+          "label": "continuity",
+          "promptSha256": "a8cdf3aef9e6bf0a004e61a77315d9e3b8ae76e6b61f08085d46098de948ef9c",
+          "promptBytes": 121,
+          "replyOk": true,
+          "finishReason": "completed",
+          "startedAt": "2026-10-07T11:42:04.684Z",
+          "endedAt": "2026-10-07T11:42:10.640Z",
+          "model": {
+            "id": "gpt-6-sol",
+            "provider": "openai-compatible",
+            "info": {
+              "id": "gpt-6-sol",
+              "name": "GPT-6 Sol",
+              "supportsReasoning": true,
+              "contextWindow": 272000
+            }
+          },
+          "assistantMetrics": {
+            "inputTokens": 630724,
+            "outputTokens": 18,
+            "cacheReadTokens": 546432,
+            "cacheWriteTokens": 0
+          },
+          "before": {
+            "sha256": "fce792efb1fac97580dadb2f4a84d06f73ef4fd76cf0bd4ed8c79f551f6a9882",
+            "bytes": 970710,
+            "count": 62,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "after": {
+            "sha256": "7ff63f6231023a09f99884f637ef5cf540f36b34c031b43416bd15833cfc301f",
+            "bytes": 971531,
+            "count": 64,
+            "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090"
+          },
+          "expectedAck": null
+        }
+      ],
+      "transportRetries": 0
+    }
+  ],
+  "preliminaryMatrix": [
+    {
+      "variant": "basic",
+      "sessionId": "1791372041928_3dbzl",
+      "hub": {
+        "hubId": "hub_1791371443467_55egm",
+        "pid": 4924,
+        "protocolVersion": "v1",
+        "buildId": "0.0.41"
+      },
+      "clientId": "rovai-research-57082a2d-98f6-4981-99dc-64517fcf37e8",
+      "startedAt": "2026-10-07T11:20:41.909Z",
+      "endedAt": "2026-10-07T11:23:58.694Z",
+      "compaction": {
+        "enabled": true,
+        "strategy": "basic"
+      },
+      "knownModelsDelivered": false,
+      "reportedModelWindows": [],
+      "providerId": "openai-compatible",
+      "modelId": "gpt-6-sol",
+      "configuredWindow": 272000,
+      "providerFileSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+      "modelFileSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+      "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090",
+      "allRealTurnsCompleted": true,
+      "actualModelMatches": true,
+      "identityRetained": true,
+      "earlyMemoryRetained": true,
+      "firstPersistedUserContainsEarlyMemory": true,
+      "persistedSessionIdMatches": true,
+      "persistedSystemMatchesEveryTurn": true,
+      "nativeCompactionNotices": [],
+      "transportRetries": 0
+    },
+    {
+      "variant": "default",
+      "sessionId": "1791372287786_im9z7",
+      "hub": {
+        "hubId": "hub_1791371443467_55egm",
+        "pid": 4924,
+        "protocolVersion": "v1",
+        "buildId": "0.0.41"
+      },
+      "clientId": "rovai-research-7db0419e-b9d1-450b-a30b-94d11f4686ff",
+      "startedAt": "2026-10-07T11:24:47.769Z",
+      "endedAt": "2026-10-07T11:28:17.611Z",
+      "compaction": null,
+      "knownModelsDelivered": false,
+      "reportedModelWindows": [],
+      "providerId": "openai-compatible",
+      "modelId": "gpt-6-sol",
+      "configuredWindow": 272000,
+      "providerFileSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+      "modelFileSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+      "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090",
+      "allRealTurnsCompleted": true,
+      "actualModelMatches": true,
+      "identityRetained": true,
+      "earlyMemoryRetained": true,
+      "firstPersistedUserContainsEarlyMemory": true,
+      "persistedSessionIdMatches": true,
+      "persistedSystemMatchesEveryTurn": true,
+      "nativeCompactionNotices": [],
+      "transportRetries": 0
+    },
+    {
+      "variant": "off",
+      "sessionId": "1791372497725_jfqd2",
+      "hub": {
+        "hubId": "hub_1791371443467_55egm",
+        "pid": 4924,
+        "protocolVersion": "v1",
+        "buildId": "0.0.41"
+      },
+      "clientId": "rovai-research-399ac35d-baca-4cd5-9544-160df83c16b6",
+      "startedAt": "2026-10-07T11:28:17.704Z",
+      "endedAt": "2026-10-07T11:31:12.273Z",
+      "compaction": {
+        "enabled": false
+      },
+      "knownModelsDelivered": false,
+      "reportedModelWindows": [],
+      "providerId": "openai-compatible",
+      "modelId": "gpt-6-sol",
+      "configuredWindow": 272000,
+      "providerFileSha256": "194415e6c4a1ba9265cce238ed6ded3ed7e4795a3aa459d1efa5e3750759e87d",
+      "modelFileSha256": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+      "systemSha256": "98e1f3d70decb6ff06bc43898c779a672f0ab860fd6f4d140abf82772ae7e090",
+      "allRealTurnsCompleted": true,
+      "actualModelMatches": true,
+      "identityRetained": true,
+      "earlyMemoryRetained": true,
+      "firstPersistedUserContainsEarlyMemory": true,
+      "persistedSessionIdMatches": true,
+      "persistedSystemMatchesEveryTurn": true,
+      "nativeCompactionNotices": [],
+      "transportRetries": 0
+    }
+  ],
+  "preliminaryMatrixCaveat": "knownModels not delivered; result.model.info has no reported contextWindow. The installed implementation has a 200000-token fallback, but this is source evidence, not a directly reported window. These 96 successful turns do not qualify the intended 272000 window.",
+  "cold": {
+    "startedAt": "2026-10-07T11:44:42.048Z",
+    "oldProcessExited": true,
+    "tokenRotated": true,
+    "previous": {
+      "hubId": "hub_1791372810357_q3pqo",
+      "pid": 22154
+    },
+    "current": {
+      "hubId": "hub_1791373481866_mk5au",
+      "pid": 27277
+    },
+    "events": [
+      {
+        "event": "session.attached",
+        "eventId": "hevt_1791373482059_bqgq6",
+        "sessionId": "1791372829439_l963j",
+        "timestamp": 1791373482059,
+        "envelopeKeys": [
+          "version",
+          "event",
+          "eventId",
+          "sessionId",
+          "timestamp",
+          "payload"
+        ],
+        "payloadKeys": [
+          "session"
+        ]
+      },
+      {
+        "event": "run.started",
+        "eventId": "hevt_1791373482069_sde7b",
+        "sessionId": "1791372829439_l963j",
+        "timestamp": 1791373482069,
+        "envelopeKeys": [
+          "version",
+          "event",
+          "eventId",
+          "sessionId",
+          "timestamp"
+        ],
+        "payloadKeys": []
+      },
+      {
+        "event": "run.failed",
+        "eventId": "hevt_1791373482069_g8yb7",
+        "sessionId": "1791372829439_l963j",
+        "timestamp": 1791373482069,
+        "envelopeKeys": [
+          "version",
+          "event",
+          "eventId",
+          "sessionId",
+          "timestamp",
+          "payload"
+        ],
+        "payloadKeys": [
+          "reason",
+          "error"
+        ]
+      }
+    ],
+    "promptSubmissions": 1,
+    "retries": 0,
+    "sessionId": "1791372829439_l963j",
+    "attach": {
+      "ok": true,
+      "sessionId": "1791372829439_l963j"
+    },
+    "messages": {
+      "ok": true,
+      "count": 27
+    },
+    "run": {
+      "ok": false,
+      "error": {
+        "code": "command_failed",
+        "message": "session not found: 1791372829439_l963j"
+      }
+    },
+    "identityRetained": false,
+    "memoryRetained": false,
+    "endedAt": "2026-10-07T11:44:42.071Z"
+  },
+  "readOnlyHooks": {
+    "sessionId": "1791373561713_34be2",
+    "run": {
+      "ok": true,
+      "finishReason": "completed",
+      "text": "HUB76_HOOK_IDENTITY"
+    },
+    "expectedSystemSha256": "a119ba20f3073cc06ee1d89667e5804350eff9ed5baaa8c9ffdb0126584666f7",
+    "responseErrors": [],
+    "retries": 0,
+    "clientCompactionContributions": 0,
+    "hookCounts": {
+      "rovai.research.beforeRun": 1,
+      "rovai.research.onEvent": 14,
+      "rovai.research.beforeModel": 1,
+      "rovai.research.afterModel": 1,
+      "rovai.research.afterRun": 1
+    },
+    "nativeRunIds": [
+      "run_ZAu3GwbR"
+    ],
+    "beforeModel": [
+      {
+        "name": "rovai.research.beforeModel",
+        "sessionId": "1791373561713_34be2",
+        "requestId": "capreq_1791373561786_5csgy",
+        "contextKeys": [
+          "snapshot",
+          "request"
+        ],
+        "requestKeys": [
+          "systemPrompt",
+          "messages",
+          "tools",
+          "signal"
+        ],
+        "snapshot": {
+          "agentId": "agent_1791373561776_x5158v",
+          "conversationId": "conv_1791373561781_4uika68",
+          "runId": "run_ZAu3GwbR",
+          "iteration": 1
+        },
+        "systemBytes": 72,
+        "systemSha256": "a119ba20f3073cc06ee1d89667e5804350eff9ed5baaa8c9ffdb0126584666f7",
+        "workingMessageCount": 1
+      }
+    ],
+    "nativeEventTypes": [
+      "assistant-message",
+      "assistant-text-delta",
+      "message-added",
+      "run-finished",
+      "run-started",
+      "turn-finished",
+      "turn-started",
+      "usage-updated"
+    ],
+    "responseControl": "empty object; no message changes",
+    "systemMatches": true
+  },
+  "nativePluginFileWitness": {
+    "path": "persistent/config/plugins/rovai-hub-witness/witness.js",
+    "outputObserved": false,
+    "qualification": "not-observed; native client hook contribution tested separately"
+  },
+  "notVerified": [
+    "agentic threshold/long-context behavior",
+    "overflow recovery + native retry",
+    "compaction cancellation",
+    "MCP/Skills/tools/permissions after compaction",
+    "native System Rule in Hub",
+    "Rovai Binding and AgentRun mapping",
+    "multi-Session interleaving",
+    "approval disconnect/expiry",
+    "Rovai restart",
+    "user upgrade/redetection in Hub adapter",
+    "other platforms",
+    "Rovai product cold recovery and ACP-to-Hub migration",
+    "native resume across all compaction strategies"
+  ],
+  "productionBindings": null,
+  "protectionAndCleanup": {
+    "observedAt": "2026-10-07T12:01:52.788Z",
+    "shutdownStatus": 202,
+    "ownedHubPids": [
+      4924,
+      22154,
+      27277,
+      33180
+    ],
+    "allOwnedHubsExited": true,
+    "installationFiles": [
+      {
+        "name": "LICENSE",
+        "unchanged": true,
+        "sha256": "f704446a5f1271608805598b557e4288cf8580477ea038c9c3d8b361f693f6b8",
+        "mode": "0o755"
+      },
+      {
+        "name": "README.md",
+        "unchanged": true,
+        "sha256": "96d5695c8bd1808bd30020aa869ac937f1ce1af21d4c1d58eef00fef5475813f",
+        "mode": "0o755"
+      },
+      {
+        "name": "package.json",
+        "unchanged": true,
+        "sha256": "62be1862187cc44837d59d76314118ef12070dd73c71eded042bca24b0d39002",
+        "mode": "0o755"
+      },
+      {
+        "name": "postinstall.mjs",
+        "unchanged": true,
+        "sha256": "78e422d0bb8a9b392926c39f106f9c9808f96bead9438f12ca204ce0d3b3cacf",
+        "mode": "0o755"
+      },
+      {
+        "name": "bin/cline",
+        "unchanged": true,
+        "sha256": "2f1a6cc26501d5cdc6121935b64638c3b9359251be5e65724c4fc069d007c329",
+        "mode": "0o755"
+      },
+      {
+        "name": "node_modules/.bin/cline",
+        "unchanged": true,
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755"
+      },
+      {
+        "name": "node_modules/@cline/cli-darwin-arm64/package.json",
+        "unchanged": true,
+        "sha256": "221ac79ad535f10c687f147208fb14d4bbb90cad85b7a22a56cfb2e829a2dbf0",
+        "mode": "0o755"
+      },
+      {
+        "name": "node_modules/@cline/cli-darwin-arm64/bin/cline",
+        "unchanged": true,
+        "sha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+        "mode": "0o755"
+      },
+      {
+        "name": "node_modules/@cline/cli-darwin-arm64/extensions/plugin-sandbox-bootstrap.js",
+        "unchanged": true,
+        "sha256": "3fa353ee0fa24a42ce9243b912423a265145c3e894f786aa6a1f894a6626a95c",
+        "mode": "0o755"
+      }
+    ],
+    "nativeSettings": [
+      {
+        "name": "cline_mcp_settings.json",
+        "unchanged": true,
+        "sha256": "066cdcc5ea8b813b6d4155783f53887d104e261e0aec7c3aab159a9efed926ff",
+        "mode": "0o644"
+      },
+      {
+        "name": "cli-default-instance.json",
+        "unchanged": true,
+        "sha256": "280c6a4556ee1561343b970bd2406f90bd5f5bdf226f7ba190bf5cc0bf85dcc6",
+        "mode": "0o644"
+      },
+      {
+        "name": "providers.json",
+        "unchanged": true,
+        "sha256": "1b3eff25040b2a8d2584060b8b5849ed0ebbbf883fd3d6b0e7be23522e343426",
+        "mode": "0o600"
+      }
+    ],
+    "userHubs": [
+      {
+        "name": "owners/hub-9869705ea029.json",
+        "pid": 68550,
+        "alive": true,
+        "discoveryUnchanged": true
+      }
+    ],
+    "persistentSessionsPreserved": true,
+    "previouslyAbsentSettingsStillAbsent": true,
+    "privateProviderCopiesRemoved": 1,
+    "hostTempRemoved": true,
+    "persistentSessionCount": 8,
+    "ephemeralCoreRuntimeFilesRootRemoved": false,
+    "sourceProviderUnchanged": true,
+    "sourceModelsUnchanged": true,
+    "privateProviderCopiesRemovedTotal": 2,
+    "ephemeralCoreRuntimeFilesRootRemovedEarlier": true
+  },
+  "rawEvidenceRoot": "/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-cline76-hub-f7ql4y9r",
+  "inputSequenceIdentical": true,
+  "nativeResume": {
+    "sessionId": "1791372829439_l963j",
+    "hubId": "hub_1791374359724_sflkd",
+    "pid": 33180,
+    "promptSubmissions": 1,
+    "retries": 0,
+    "events": [
+      {
+        "event": "session.updated",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374421332_tlxhp"
+      },
+      {
+        "event": "session.created",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374421336_hi1ij"
+      },
+      {
+        "event": "session.updated",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374421342_hk3vl"
+      },
+      {
+        "event": "run.started",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374421351_3il67"
+      },
+      {
+        "event": "iteration.started",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374421378_skccj"
+      },
+      {
+        "event": "session.updated",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374421421_fnrjc"
+      },
+      {
+        "event": "session.updated",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374421425_fey2o"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374431912_xf58u"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374431913_1rpjn"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374431913_f3zzj"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374431913_whwv8"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374431913_19qk9"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374431942_c6xog"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432092_4qelp"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432201_inqg9"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432249_t3zuf"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432249_a2j38"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432272_j8n8n"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432272_4rqgy"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432272_g6ot3"
+      },
+      {
+        "event": "assistant.delta",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432272_a201v"
+      },
+      {
+        "event": "usage.updated",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432306_kfihl"
+      },
+      {
+        "event": "assistant.finished",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432307_9i61d"
+      },
+      {
+        "event": "iteration.finished",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432309_jxs5m"
+      },
+      {
+        "event": "agent.done",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432329_0dbxy"
+      },
+      {
+        "event": "session.updated",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432373_jupxv"
+      },
+      {
+        "event": "session.updated",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432378_4vrm2"
+      },
+      {
+        "event": "run.completed",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432387_jv39u"
+      },
+      {
+        "event": "ui.notify",
+        "sessionId": "1791372829439_l963j",
+        "eventId": "hevt_1791374432393_oijnd"
+      }
+    ],
+    "messagesBefore": 27,
+    "messagesBeforeSha256": "e607825b21f76d6dc4a10fa49496cb1043398c7be88ad3ee6ae28f92f646d4eb",
+    "protocolHistoryMatchesDisk": false,
+    "protocolHistoryDiffOnlyNativeModeWrapper": true,
+    "resume": {
+      "ok": true,
+      "sessionId": "1791372829439_l963j"
+    },
+    "persistedBytesUnchangedBeforePrompt": true,
+    "messagesUnchangedBeforePrompt": true,
+    "systemUnchangedBeforePrompt": true,
+    "run": {
+      "ok": true,
+      "finishReason": "completed",
+      "text": "HUB76_IDENTITY HUB76_MEMORY_4e1bc952",
+      "model": {
+        "id": "gpt-6-sol",
+        "provider": "openai-compatible",
+        "info": {
+          "id": "gpt-6-sol",
+          "name": "GPT-6 Sol",
+          "supportsReasoning": true,
+          "contextWindow": 272000
+        }
+      },
+      "inputTokens": 483393
+    },
+    "identityRetained": true,
+    "memoryRetained": true,
+    "messagesAfter": 29,
+    "endedAt": "2026-10-07T12:00:32.405Z"
+  },
+  "nativeResumeStart": {
+    "pid": 33180,
+    "hubId": "hub_1791374359724_sflkd",
+    "executable": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/node_modules/@cline/cli-darwin-arm64/bin/cline",
+    "protocol": "v1",
+    "buildId": "0.0.41"
+  },
+  "nativeResumeInitialGuard": {
+    "sessionId": "1791372829439_l963j",
+    "hubId": "hub_1791374359724_sflkd",
+    "pid": 33180,
+    "promptSubmissions": 0,
+    "retries": 0,
+    "events": [],
+    "messagesBefore": 27,
+    "messagesBeforeSha256": "e607825b21f76d6dc4a10fa49496cb1043398c7be88ad3ee6ae28f92f646d4eb",
+    "protocolHistoryMatchesDisk": false,
+    "error": "Native protocol history does not match native persisted messages",
+    "endedAt": "2026-10-07T11:59:20.064Z"
+  },
+  "nativeResumeSourceEvidence": {
+    "source": "same installed binary; read-only inspection, not imported/executed extracted code",
+    "module": "/$bunfs/root/chunk-t3am64gc.js",
+    "nativeSequence": "interactive manager ao -> core.readMessages(exact id); fc resume -> core.start({ config: {...config, sessionId: exact id}, initialMessages }); Hub host maps these to session.messages and session.create",
+    "historyTransport": "unmodified native protocol response; no historical prompt replay",
+    "dataDifference": "native session.messages removes user_input mode=act wrapper; all other message fields and text equal the persisted history"
+  },
+  "validation": {
+    "evidenceAssertions": {
+      "three_equal_sequences": true,
+      "96_completed_exact_window": true,
+      "native_basic_history": true,
+      "controls_no_compaction": true,
+      "cold_attach_negative_preserved": true,
+      "native_resume_exact_identity": true,
+      "native_resume_no_history_edit": true,
+      "native_resume_real_success": true,
+      "no_retries": true,
+      "source_auth_cleanup": true,
+      "no_product_claim": true
+    },
+    "nodeSyntaxFiles": 7,
+    "docsTestsPassed": 10,
+    "docsCheckPassed": true,
+    "docsCheckCiBase": "ca58d8d3843d88eeb39414c45cdfbeb75fea4bd8"
+  }
+}

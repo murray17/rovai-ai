@@ -26,13 +26,13 @@ last_updated: 2026-10-09
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含十六种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前包含十八种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 当前不展示 Settings Preview row。DeepSeek Harness 通过官方 ACP profile 接入；macOS arm64、macOS x64、
 Windows x64 与 Linux x64 分别绑定平台专属证据并取得 qualified。
 产品目录的机器可判数量、全量检查、诊断分母和
-普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
+普通执行仍只来自逐平台 Admission。Cursor 与暂缓公开的 Cline、Command Code 保留 closed identity 和历史 reader，但不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
-selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
+selector 同样不展示 Cursor、Cline 与 Command Code；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
 `qualified` 与 `preview` 可以进入 Product Runtime Availability；`preview` 保留缺失资格证据，检查详情说明记录未齐备。
 `qualified` 行只在有实际 reported version 时显示版本副文案，否则仅显示居中的产品名，不再回退到静态
@@ -40,6 +40,69 @@ selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并�
 `not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，`unsupported` 显示平台不支持。
 后两者不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
 可以原样读取并在修改无关队员字段时原样保留，但不能修改 Runtime 子对象、重新保存默认值或执行。
+
+<a id="command-code-研究接入边界"></a>
+## Command Code ACP 实施边界
+
+`command-code-cli` 使用官方 `command-code acp`（最低 1.74.1），复用共享 ACP Host/Fleet、精确 Native
+Session、模型/权限、Action、取消和终态路径；不建立另一套进程池。Migration 185 将 schema 134 升为 135，
+原子扩展 Runtime 与 Skill group `command_code` 的闭合集合。按
+[V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)曾仅在 macOS arm64 开放开发 Preview。
+2026-10-09 按 User 105 撤回 Preview，所有平台为 NotQualified；Settings、新手引导、成员/Skill 选择、
+安装引导与监控筛选不提供 Command Code。ACP 实现、既有配置和历史 reader 保留；没有 qualification
+evidence，不声称 First-Class。headless 传输、事件归约器、专属测试及探针已删除，历史报告指向退役前固定提交。
+
+Bootstrap 使用 `managed_system_prompt`，完整交付语义见[revision 5](../versions/v1.72/model-context-change-command-code-acp.md)。
+Host 私有 Home 保留原生 auth/provider/Skill/Mod/Session 路径，仅覆盖私有 settings 的 `mods.paths` 与原生 `mcp.json`，通过
+官方 `appendSystemPrompt({state})` 按 `state.sessionId` 读取完整冻结 Bootstrap。工厂注册完成后写入带
+随机 nonce/当前 PID 的 readiness；Core 在 initialize 后校验，缺失则关闭 Host 且不发 prompt。每次
+hook 检查绑定、摘要和预算，异常直接停止进程，避免上游捕获普通异常后继续。A/B 不共享 active Bootstrap 指针，
+cold Host 重新绑定原冻结字节。原生 System 保留并追加 B，用户 prompt 只含 P；不改项目 AGENTS.md。
+
+配置 digest 覆盖原生认证/provider/settings、Mod 源、环境与 MCP；项目 MCP 按原生 projects 下的具名
+配置文件保守失效，不读取历史。显式模型来自 ACP 真实目录；原生配置中的默认 BYOK ID 若不在目录中，
+以 runtime-default 哨兵保留默认选择。该 ID 不伪装成 session/set_model 可选项，实际模型仍按原生 Session 记录。
+原生五种权限原值传给 session/set_mode，默认 bypass，审批响应仍由共享 ACP 原生请求路径承载。
+External MCP 合入 Host 私有 Home 的原生 `mcp.json`，session mcpServers 保持空；保留原生定义、工作目录和已解析的环境/请求头，同名采用已存在的 `native_wins_skip`，先通过官方 `mcp list`
+发现有效名称并冻结冲突结果。发现失败/格式漂移阻断投影；不把被原生遮蔽的 Assignment 标为可用。
+原生连接失败可能继续建立 Session，因此握手和配置可见性不是 MCP 调用成功证明。
+
+此前 1.74.1 共享 Core Host 门禁和同 PID 成员 A→B→A 控制面已过；以原生默认 sub2api/gpt-6-sol 完成
+真实生成、exact cold、文件工具、原生 allow/deny/cancel、手动及自动压缩后连续性。这不是跨模型切换证据。隔离 App 的首次/warm/
+Core 重启、CLI 公开发送、文件 +/− 与 272000 Context 窗口通过。费用与非零命令状态等未取得结构化字段的
+边界保持未知，不提升 First-Class；详见[完整 Checklist 对照](../research/runtime-monitoring/command-cline-checklist-2026-10-05.md)。
+
+未完成项：1.74.1/1.79.1 ACP 模型目录不包含自定义 BYOK，`session/set_model` 和
+`session/set_config_option` 拒绝这些 ID；1.79.1 `acp --model` 接受参数但未用于会话，不能绕过此缺口。
+已测 BYOK 的 MCP 发现成功但实际调用未通过；费用、部分命令状态等原生缺失字段仍未知。
+[模型选择调查](../research/command-code-runtime/model-selection-2026-10-09.md)与
+[兼容性清单](../runtime-compatibility.md)分别保存原生失败和验收范围。
+
+## Cline 实施边界
+
+Cline 仅使用用户选中或正常发现的官方 `cline --acp`，协议 `acp-v1`，复用共享 ACP Client/Host/Fleet。
+Native Hub、WebSocket、discovery、私有登录后端、完整历史搬运和 compaction 注入已退出。
+无固定版本门槛、认证 Provider/字段白名单、凭据副本、独占锁或账号强制 cold。
+用户原生来源由同一安装认证与刷新；必要静态 Key 参数仅做原生 BYOK 适配，Rovai 不变更端点或凭据。
+
+冻结 Bootstrap 仍由原生不可变 System Rule 提供，user 只有 Dynamic Context；原生只读观察保留稀疏数值。
+同名 MCP 按既有策略只投影一条路径；当前安装未使用 ACP mcpServers，保留 Host 私有原生配置。
+成功 apply_patch/editor 仍为 reported_mutation，run_commands 原生失败不伪报成功；不扫磁盘补造 Diff。
+
+warm 使用正常 Fleet，cold 按广告能力 session/load/resume，重放进入共享 quarantine 后才允许新 prompt。
+旧 Hub Binding 通过不兼容替换推进 generation，公开历史和原生历史保留，不迁移隐含上下文、不重发旧输入。
+通用进程账本仍可回收退役后端的已确认自有进程，但不保留可启动 Hub 的兼容实现。
+
+2026-10-09 按 User 99 暂缓公开：撤回 macOS arm64 Preview，所有平台为 NotQualified；Settings、
+新手引导、成员/Skill 选择、安装引导与监控筛选均不提供 Cline。既有身份、配置、公开历史及证据可读，不迁移或删除用户数据。
+保留官方 ACP 实现供后续补齐原生能力，普通发现、检查和执行仍服从共享 Admission。
+原因是已安装 3.0.70 的 ACP 仍未交付原生 compaction 配置；普通 CLI 的自动压缩不能当作 ACP 能力。
+方法、Rule、认证、模型请求与冷恢复的既有证据按实际安装保留。当前范围见
+[Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)、
+[ACP 退役验收](../research/cline-runtime/acp-retirement-2026-10-08.md)及
+[输入说明](../versions/v1.72/model-context-change-cline-acp.md)，理由见
+[V1.72-D30](../versions/v1.72/decisions.md#v1-72-d30)与
+[V1.72-D31](../versions/v1.72/decisions.md#v1-72-d31)。
 
 ## 可执行准入
 
@@ -72,7 +135,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 显式程序路径失效时保持缺失，不能换用自动候选；用户恢复自动后再使用原有发现来源。
 草稿浅检不写安装，草稿深检复用 Check Manager 的并发、deadline 与清理 owner，结果只回到编辑器。
 环境只传入对应 Runtime 进程与原生配置读取，既不修改系统环境，也不投影到公共上下文。
-字段、CAS、迁移和错误边界由 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)拥有。
+字段、CAS、迁移和错误边界由 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)拥有。
 
 主动正式检查在后端先读取最新基础环境、加载已保存启动设置，再将不可变环境快照交给 Check Manager。
 刷新后的请求不与旧搜索代数合并；结果写回与保存/刷新共用更新锁并重验代数和程序身份。
@@ -92,7 +155,7 @@ Desktop 只编辑草稿，不拥有第二份有效配置。SQLite 保存与旧 m
 
 执行仍保留只读连接摘要、凭据来源引用和输出脱敏，以保持旧快照与 Host/binding 兼容隔离；
 内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
-推理强度 fallback。边界由 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)拥有。
+推理强度 fallback。边界由 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)拥有。
 
 <a id="浅检测与按需深检"></a>
 ## 安装发现与真实 Host 验证

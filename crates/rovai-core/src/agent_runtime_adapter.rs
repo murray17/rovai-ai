@@ -391,11 +391,13 @@ pub enum SkillDeliveryGroupKey {
     Kimi,
     Grok,
     Dsh,
+    Cline,
+    CommandCode,
     Zcode,
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 18] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
@@ -411,6 +413,8 @@ impl SkillDeliveryGroupKey {
         Self::Kimi,
         Self::Grok,
         Self::Dsh,
+        Self::Cline,
+        Self::CommandCode,
         Self::Zcode,
     ];
 
@@ -431,6 +435,8 @@ impl SkillDeliveryGroupKey {
             Self::Kimi => "kimi",
             Self::Grok => "grok",
             Self::Dsh => "dsh",
+            Self::Cline => "cline",
+            Self::CommandCode => "command_code",
             Self::Zcode => "zcode",
         }
     }
@@ -452,6 +458,8 @@ impl SkillDeliveryGroupKey {
             Self::Kimi => Path::new(".kimi-code/skills"),
             Self::Grok => Path::new(".grok/skills"),
             Self::Dsh => Path::new(".dsh/skills"),
+            Self::Cline => Path::new(".cline/skills"),
+            Self::CommandCode => Path::new(".commandcode/skills"),
             Self::Zcode => Path::new(".zcode/skills"),
         }
     }
@@ -477,6 +485,8 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "kimi" => Ok(Self::Kimi),
             "grok" => Ok(Self::Grok),
             "dsh" => Ok(Self::Dsh),
+            "cline" => Ok(Self::Cline),
+            "command_code" => Ok(Self::CommandCode),
             "zcode" => Ok(Self::Zcode),
             _ => anyhow::bail!("unsupported Skill delivery group: {value}"),
         }
@@ -801,7 +811,12 @@ impl AgentRuntimeAdapterRegistry {
                 ),
             };
         }
-        if kind == AdapterKind::CursorAgent {
+        // Deferred products retain their ACP implementation and persisted identity.
+        // Cline ACP compaction and Command Code BYOK selection remain incomplete.
+        if matches!(
+            kind,
+            AdapterKind::CursorAgent | AdapterKind::ClineCli | AdapterKind::CommandCodeCli
+        ) {
             return RuntimePlatformAdmission::not_qualified(
                 kind,
                 platform,
@@ -891,6 +906,8 @@ impl AgentRuntimeAdapterRegistry {
             }),
             AdapterKind::Pi => json!({}),
             AdapterKind::ZcodeApp => json!({"permission_mode": "yolo"}),
+            AdapterKind::ClineCli => json!({"mode":"act", "auto_approve":"true"}),
+            AdapterKind::CommandCodeCli => json!({"permission_mode":"bypass"}),
             AdapterKind::DeepseekHarness => {
                 json!({"sandbox_mode":"danger-full-access", "approval_policy":"never"})
             }
@@ -957,12 +974,22 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::KimiCodeCli
             | AdapterKind::GrokBuild
             | AdapterKind::ZcodeApp
-            | AdapterKind::DeepseekHarness => resolve_acp_runtime(kind, input),
+            | AdapterKind::DeepseekHarness
+            | AdapterKind::CommandCodeCli => resolve_acp_runtime(kind, input),
+            AdapterKind::ClineCli => resolve_acp_runtime(kind, input),
         }
     }
 
     pub fn skill_discovery(&self, kind: AdapterKind) -> SkillDiscoveryCapability {
         match kind {
+            AdapterKind::CommandCodeCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::CommandCode],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            AdapterKind::ClineCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Cline],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             AdapterKind::DeepseekHarness => native_skill_discovery(
                 [SkillDeliveryGroupKey::Dsh],
                 SkillDiscoveryVerification::Verified,
@@ -1030,10 +1057,9 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::TraeCnCli
             | AdapterKind::KimiCodeCli
             | AdapterKind::ZcodeApp
-            | AdapterKind::DeepseekHarness => {
-                additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
-            }
-            AdapterKind::GrokBuild => {
+            | AdapterKind::DeepseekHarness
+            | AdapterKind::ClineCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
+            AdapterKind::GrokBuild | AdapterKind::CommandCodeCli => {
                 additive_native_mcp_projection(McpSameNamePolicy::NativeWinsSkip)
             }
             AdapterKind::CursorAgent => unsupported_external_mcp_projection(),
@@ -1052,6 +1078,12 @@ impl AgentRuntimeAdapterRegistry {
         observation: AcpProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         match observation.adapter_kind {
+            AdapterKind::CommandCodeCli => {
+                acp_capability_snapshot(observation, command_code_permission_options())
+            }
+            AdapterKind::ClineCli => {
+                acp_capability_snapshot(observation, cline_permission_options())
+            }
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
             }
@@ -1111,6 +1143,8 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KimiCodeCli => kimi_permission_options(),
             AdapterKind::GrokBuild => grok_permission_options(),
             AdapterKind::DeepseekHarness => dsh_permission_options(),
+            AdapterKind::ClineCli => cline_permission_options(),
+            AdapterKind::CommandCodeCli => command_code_permission_options(),
             AdapterKind::ZcodeApp => zcode_permission_options(),
         }
     }
@@ -1128,6 +1162,8 @@ impl AgentRuntimeAdapterRegistry {
             && !grok_build_minimum_version_satisfied(reported_version.as_deref());
         let dsh_version_unsupported = kind == AdapterKind::DeepseekHarness
             && !crate::dsh::supported_version(reported_version.as_deref());
+        let command_code_version_unsupported = kind == AdapterKind::CommandCodeCli
+            && !crate::command_code_acp::supported_version(reported_version.as_deref());
         let pi_version_unsupported =
             kind == AdapterKind::Pi && !pi_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
@@ -1137,6 +1173,7 @@ impl AgentRuntimeAdapterRegistry {
             probe_status: if grok_version_unsupported
                 || pi_version_unsupported
                 || dsh_version_unsupported
+                || command_code_version_unsupported
             {
                 "light_failed".to_string()
             } else {
@@ -1154,7 +1191,8 @@ impl AgentRuntimeAdapterRegistry {
             stale_at: None,
             last_error: (grok_version_unsupported
                 || pi_version_unsupported
-                || dsh_version_unsupported)
+                || dsh_version_unsupported
+                || command_code_version_unsupported)
                 .then(|| "runtime_version_below_minimum".to_string()),
             native_session_compatibility_key: None,
         })
@@ -2364,7 +2402,10 @@ fn acp_capability_snapshot(
                 "session.new",
                 "context.charter.first_payload",
             ]
-        } else if adapter_kind == AdapterKind::DeepseekHarness {
+        } else if matches!(
+            adapter_kind,
+            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+        ) {
             &[
                 "acp.initialize",
                 "session.new",
@@ -2637,6 +2678,31 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
+    if matches!(
+        adapter_kind,
+        AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+    ) && acp_runtime_model_id_from_session(session_result).is_some()
+        && !models.iter().any(|model| model.is_default)
+    {
+        // Native configuration can select a custom BYOK model omitted from
+        // ACP's switchable catalog. Keep the shared native-default sentinel;
+        // do not advertise that custom ID as explicitly selectable (the
+        // official set_model RPC rejects it). Actual Run model is observed
+        // from the Session independently of this picker placeholder.
+        models.insert(
+            0,
+            ModelDescriptor {
+                description: None,
+                runtime_metadata: None,
+                id: format!("{}://runtime-default", adapter_kind.as_str()),
+                display_name: format!("{} runtime default", adapter_kind.display_name()),
+                is_default: true,
+                hidden: false,
+                deprecated: false,
+                options: Vec::new(),
+            },
+        );
+    }
     if adapter_kind == AdapterKind::DeepseekHarness {
         if let Some(option) = session_result
             .get("configOptions")
@@ -2828,6 +2894,55 @@ fn acp_model_option(option: &Value) -> Option<ModelOptionDescriptor> {
             .map(str::to_string),
         scope: RuntimeOptionScope::Run,
     })
+}
+
+fn command_code_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".into(),
+        label: "permission_mode".into(),
+        description: "Command Code native permission mode".into(),
+        value_type: "enum".into(),
+        choices: ["default", "auto-accept", "plan", "dont-ask", "bypass"]
+            .into_iter()
+            .map(|v| choice(v, v))
+            .collect(),
+        recommended_value: json!("bypass"),
+        scope: RuntimeOptionScope::Session,
+        risk: "elevated".into(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn cline_permission_options() -> Vec<PermissionOptionDescriptor> {
+    [
+        (
+            "mode",
+            vec![choice("act", "act"), choice("plan", "plan")],
+            "act",
+        ),
+        (
+            "auto_approve",
+            vec![choice("true", "true"), choice("false", "false")],
+            "true",
+        ),
+    ]
+    .into_iter()
+    .map(|(key, choices, default)| PermissionOptionDescriptor {
+        key: key.into(),
+        label: key.into(),
+        description: format!("Cline native {key}"),
+        value_type: "enum".into(),
+        choices,
+        recommended_value: json!(default),
+        scope: RuntimeOptionScope::Session,
+        risk: "elevated".into(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    })
+    .collect()
 }
 
 fn dsh_permission_options() -> Vec<PermissionOptionDescriptor> {
@@ -3270,24 +3385,33 @@ fn resolve_pi_runtime(
 }
 
 fn resolve_acp_runtime(
+    kind: AdapterKind,
+    input: AdapterRuntimeResolutionInput<'_>,
+) -> Result<AdapterRuntimeProjection> {
+    resolve_session_runtime(
+        kind,
+        if kind == AdapterKind::ZcodeApp {
+            crate::zcode::PROTOCOL
+        } else {
+            "acp-v1"
+        },
+        input,
+    )
+}
+
+fn resolve_session_runtime(
     expected_kind: AdapterKind,
+    required_protocol: &str,
     input: AdapterRuntimeResolutionInput<'_>,
 ) -> Result<AdapterRuntimeProjection> {
     if input.permissions.adapter_kind != expected_kind {
-        anyhow::bail!("ACP permission configuration belongs to another Adapter");
+        anyhow::bail!("Runtime permission configuration belongs to another Adapter");
     }
     let protocol_version = input
         .protocols
         .iter()
-        .find(|protocol| {
-            protocol.as_str()
-                == if expected_kind == AdapterKind::ZcodeApp {
-                    crate::zcode::PROTOCOL
-                } else {
-                    "acp-v1"
-                }
-        })
-        .context("ACP installation does not advertise ACP v1")?
+        .find(|protocol| protocol.as_str() == required_protocol)
+        .context("Runtime installation does not advertise the required protocol")?
         .clone();
     let permission_values = input
         .permissions
@@ -3666,6 +3790,23 @@ mod tests {
 
     #[test]
     fn grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs() {
+        let custom = json!({"models":{"currentModelId":"private-provider/custom-model","availableModels":[{"modelId":"builtin-model","name":"Builtin"}]}});
+        let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();
+        assert_eq!(command[0].id, "command-code-cli://runtime-default");
+        assert!(command[0].is_default);
+        let cline = acp_model_catalog_for_adapter(AdapterKind::ClineCli, &custom).unwrap();
+        assert_eq!(cline[0].id, "cline-cli://runtime-default");
+        assert!(cline[0].is_default);
+        assert!(
+            !cline
+                .iter()
+                .any(|model| model.id == "private-provider/custom-model")
+        );
+        assert!(
+            command
+                .iter()
+                .all(|model| model.id != "private-provider/custom-model")
+        );
         let native_id = r#"["native","same-model"]"#;
         let web_id = r#"["web","same-model"]"#;
         let initial = json!({"configOptions":[
@@ -3741,7 +3882,7 @@ mod tests {
         let session = json!({"configOptions":[{"id":"model","options":[
             {"group":"native","options":[{"value":native_id,"name":"Same"}]},
             {"group":"web","options":[{"value":web_id,"name":"Same"}]}
-        ]}],"_meta":{"rovaiDshModels":{"webProviders":["web"],"rejectedProviders":[],"diagnostics":[]}}});
+        ]}],"_meta":{"rovaiDshOptionsContext":"context-a","rovaiDshModels":{"webProviders":["web"],"rejectedProviders":[],"diagnostics":[]}}});
         let models = acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &session).unwrap();
         assert_eq!(models.len(), 2);
         assert_eq!(
@@ -3750,7 +3891,7 @@ mod tests {
                 .find(|model| model.id == web_id)
                 .unwrap()
                 .runtime_metadata,
-            Some(json!({"dshSource":"web"}))
+            Some(json!({"dshSource":"web","dshOptionsContext":"context-a"}))
         );
         assert_eq!(
             models
@@ -3775,11 +3916,8 @@ mod tests {
         let native =
             acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &rejected).unwrap();
         assert_eq!(native.len(), 2);
-        assert!(
-            native
-                .iter()
-                .all(|model| model.runtime_metadata == Some(json!({"dshSource":"native"})))
-        );
+        assert!(native.iter().all(|model| model.runtime_metadata
+            == Some(json!({"dshSource":"native","dshOptionsContext":"context-a"}))));
         let model = r#"["deepseek-official","deepseek-v4-flash"]"#;
         let session = json!({"configOptions":[{"id":"model","category":"model","type":"select","currentValue":model,"options":[{"group":"deepseek-official","name":"DeepSeek","options":[{"value":model,"name":"DeepSeek-V4-Flash"}]}]}]});
         let models = acp_model_catalog_from_session(&session).unwrap();
@@ -4973,6 +5111,16 @@ mod tests {
             &[SkillDeliveryGroupKey],
             SkillDiscoveryVerification,
         )] = &[
+            (
+                AdapterKind::ClineCli,
+                &[SkillDeliveryGroupKey::Cline],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            (
+                AdapterKind::CommandCodeCli,
+                &[SkillDeliveryGroupKey::CommandCode],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             (
                 AdapterKind::DeepseekHarness,
                 &[SkillDeliveryGroupKey::Dsh],

@@ -1525,9 +1525,9 @@ describe('task event projections', () => {
       expect(agentRunFileChangesSummaryLabel(changes)).toBe('1 file · 1 change')
       expect(agentRunFileChangesSummaryLabel({ ...changes, fileCount: 4, operationCount: 5 })).toBe('4 files · 5 changes')
       expect(agentRunFileChangesSummaryLabel({ ...changes, additions: 1, deletions: 2 })).toBe('1 file · +1 −2')
-      expect((['full_net_diff', 'exact_mutations', 'operation_history', 'operation_only'] as const)
+      expect((['full_net_diff', 'exact_mutations', 'reported_mutations', 'operation_history', 'operation_only'] as const)
         .map(agentRunFileChangeModeLabel)).toEqual([
-          'Full diff', 'Edit fragments', 'Operation history', 'File operations only'
+          'Full diff', 'Edit fragments', 'Patch fragments', 'Operation history', 'File operations only'
         ])
       expect(agentRunFilePathParts('README.md').directory).toBe('Current directory')
     } finally {
@@ -1670,7 +1670,7 @@ describe('task event projections', () => {
           diff: '-old\n+new'
         }, {
           sequence: 5,
-          semantics: 'exact_mutation',
+          semantics: 'reported_mutation',
           changeKind: 'update',
           diff: '-before\n+after'
         }]
@@ -1716,6 +1716,8 @@ describe('task event projections', () => {
     expect(historyMarkup).not.toContain('修改 3')
     expect(historyMarkup).toContain('>old<')
     expect(historyMarkup).toContain('>new<')
+    expect(historyMarkup).toContain('补丁片段')
+    expect(historyMarkup).toContain('已执行补丁的原生修改片段，匹配时可能调整；增删统计来自补丁。')
     expect(historyMarkup).toContain('>before<')
     expect(historyMarkup).toContain('>after<')
     expect(historyMarkup).not.toContain('这次文件操作没有可靠的差异内容')
@@ -4067,6 +4069,10 @@ describe('task event projections', () => {
       agentId: 'agent_2',
       messageIds: ['message-waiting-1', 'message-waiting-2']
     }])
+    expect(executionDeliveryQueueBatches([{
+      ...waitingDelivery, continuationRequest: true,
+      inputMessageIds: ['original-a', 'original-b']
+    }])).toMatchObject([{ messageIds: ['original-a', 'original-b'] }])
     expect(executionDeliveryQueueBatches([waitingDelivery, { ...secondWaitingDelivery, continuationRequest: true },
       { ...secondWaitingDelivery, id: 'after', createdAt: '2026-07-28T06:04:00Z' }])).toHaveLength(3)
     expect(executionDeliveryQueueBatches([
@@ -5256,6 +5262,17 @@ describe('task event projections', () => {
         onStop: () => undefined
       }))
     const markup = renderWorkspace(snapshot)
+    const continuedMarkup = renderWorkspace({
+      ...snapshot,
+      messageDeliveries: [...snapshot.messageDeliveries,
+        { ...failedDelivery, id: 'continued-waiting', status: 'waiting', continuationRequest: true,
+          inputMessageIds: [publicMessage.id] },
+        { ...failedDelivery, id: 'continued-terminal', continuationRequest: true,
+          inputMessageIds: [publicMessage.id] }
+      ]
+    })
+    expect(continuedMarkup.match(/<footer class="message-delivery-footer"[\s\S]*?<\/footer>/)?.[0])
+      .toBe(markup.match(/<footer class="message-delivery-footer"[\s\S]*?<\/footer>/)?.[0])
 
     for (const authorType of ['user', 'external_principal'] as const) {
       const humanMarkup = renderWorkspace({
@@ -6912,7 +6929,7 @@ describe('task event projections', () => {
     expect(progress.items[0].step.fileChangeSemantics).toBeUndefined()
   })
 
-  it('renders consecutive Claude Edit mutations as separate rows without inferred hunk line numbers', () => {
+  it.each(['exact_mutation', 'reported_mutation'] as const)('renders %s as separate rows without inferred hunk line numbers', (semanticKind) => {
     const exactEdit = (
       toolCallId: string,
       oldText: string,
@@ -6940,7 +6957,7 @@ describe('task event projections', () => {
           revision: 1,
           sourceEvidenceIds: [`evidence-${toolCallId}`],
           status: 'available',
-          semanticKind: 'exact_mutation',
+          semanticKind,
           entries: [{
             path: 'apps/desktop/src/renderer/src/ThreadWorkspace.tsx',
             changeKind: 'update',
@@ -6961,11 +6978,11 @@ describe('task event projections', () => {
     expect(progress.items).toMatchObject([
       {
         key: 'tool:toolu-edit-1',
-        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: semanticKind }
       },
       {
         key: 'tool:toolu-edit-2',
-        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: 'exact_mutation' }
+        step: { title: '编辑 ThreadWorkspace.tsx', fileChangeSemantics: semanticKind }
       }
     ])
 
@@ -6991,7 +7008,7 @@ describe('task event projections', () => {
     expect(markup.match(/modified-file-diff is-exact-mutation/g)).toHaveLength(2)
     expect(markup.match(/class="tool-activity-group status-completed"/g)).toHaveLength(1)
     expect(markup).toContain('aria-label="已完成 2 个步骤"')
-    expect(markup).toContain('ThreadWorkspace.tsx 的修改片段')
+    expect(markup).toContain(semanticKind === 'reported_mutation' ? 'ThreadWorkspace.tsx 的补丁片段' : 'ThreadWorkspace.tsx 的修改片段')
     expect(markup).not.toContain('const enabled = false')
     expect(markup).not.toContain('const enabled = ready')
     expect(markup).not.toContain('@@')
@@ -8102,6 +8119,8 @@ describe('task event projections', () => {
     expect(markup).toContain('TRAE CLI')
     expect(markup).toContain('DeepSeek Harness')
     expect(markup).not.toContain('Cursor Agent')
+    expect(markup).not.toContain('Cline')
+    expect(markup).not.toContain('Command Code')
     expect(markup).not.toContain('待支持')
     expect(markup).not.toContain('尚未开放')
     expect(markup).toContain(`当前平台：${platformLabel}`)
@@ -8117,9 +8136,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
     expect(markup).not.toMatch(/稳定|测试|实验性/)
-    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(15)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(13)
-    expect(markup.match(/检查状态/g)).toHaveLength(13)
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length - 2)
+    expect(markup.match(/检查状态/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length - 2)
     expect(markup).toContain('Claude Code 登录指南')
     expect(markup).toContain('Antigravity 安装指南')
     expect(markup).toContain('aria-expanded="false"')
@@ -8159,7 +8178,7 @@ describe('task event projections', () => {
           ? `<strong>Codex CLI</strong><small title="${subtitle}">${subtitle}</small>`
           : '<strong>Codex CLI</strong></div>')
         expect(versionMarkup).toContain('status-available">可用</span>')
-        expect(versionMarkup.match(/检查状态/g)).toHaveLength(15)
+        expect(versionMarkup.match(/检查状态/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length)
         expect(versionMarkup).toContain('DeepSeek Harness')
         expect(versionMarkup).not.toMatch(/测试|试运行|实验性/)
         expect(versionMarkup).toContain('<strong>ZCode</strong></div>')
@@ -8195,8 +8214,8 @@ describe('task event projections', () => {
       onReload: async () => undefined
     }))
 
-    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(15)
-    expect(markup.match(/不可检查/g)).toHaveLength(15)
+    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length)
+    expect(markup.match(/不可检查/g)).toHaveLength(VISIBLE_PRODUCT_RUNTIMES.length)
     expect(markup).not.toContain('检查状态')
     expect(markup).toContain('当前平台尚无可检测的智能体')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
@@ -8335,11 +8354,13 @@ function runtimeAdmissionRows(
     'kimi-code-cli',
     'grok-build',
     'deepseek-harness',
+    'cline-cli',
+    'command-code-cli',
     'zcode-app',
     'antigravity-app'
   ]
   return runtimeKinds.map((runtimeKind) => {
-    const effectiveStatus = runtimeKind === 'cursor-agent' && status === 'qualified'
+    const effectiveStatus = ['cursor-agent', 'cline-cli', 'command-code-cli'].includes(runtimeKind) && status === 'qualified'
         ? 'not_qualified'
         : status
     return {

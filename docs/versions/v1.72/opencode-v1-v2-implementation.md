@@ -88,6 +88,18 @@ V2 也会生成旧插件。既有 capability owner 只验证 initialize 参数�
 CLI lease 2、usage parser 1、旧 Session compatibility 1；这些集合有重叠，不合计为独立覆盖数量。
 文档执行 `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=1126875f0 pnpm docs:check:ci`。
 
+## 与当前主干合流
+
+PR 创建后合入 `origin/main` 的 `4d9285e29`，保留其 Cline／Command Code ACP、迁移与进程清理改动。
+初始工作区自带的 `1126875f0` DSH 打开菜单测试仍保留；合流只合并其结果文案，不删除既有断言。
+Core 更新为 0.4.7；重跑 workspace check／Rust PR 层、typecheck、Node 全套、文档基线检查均通过，
+Vitest 为 239 文件／2616 用例，ACP 定向 70 passed／2 ignored，health 22 passed／2 ignored。
+合流实测构建 SHA-256 为 `c167fcd5120ec586ccfb45012c591c89b5e0127fc230f7bdfc457ce2f27dc6c0`。
+
+额外启动现有 Windows Runtime CI，首次在既有 Fleet receipt owner 的即时 `tree_is_empty` 断言失败；
+该 fixture 只等待 leader 退出，没有等待 Job 活跃进程归零。沿既有 ManagedProcess 测试做法，在 5 秒有界窗口内
+等待真实 Job 为空后再验证收据，不放宽最终断言，也不改生产回收逻辑。它仍不替代真实 Windows OpenCode 模型验收。
+
 协议事实依据精确 [v2.0.26 源码](https://github.com/anomalyco/opencode/tree/v2.0.26/packages/cli/src/acp)、
 [ACP 文档](https://opencode.ai/v2/docs/cli/acp/)及[权限规则](https://opencode.ai/v2/docs/permissions/)，
 并通过实际发布包核对；普通执行不依赖版本登记。

@@ -3960,20 +3960,20 @@ mod tests {
                 json!({"type":"stream_event","session_id":session_id,
                 "event":{"type":"message_start","message":{"id":"message-with-thinking"}}}),
             );
-            for kind in ["content_block_start", "content_block_stop"] {
+            for (kind, private_event) in [
+                ("content_block_start", "agent.thought.started"),
+                ("content_block_stop", "agent.thought.completed"),
+            ] {
                 let events = emit(
                     &mut state,
                     json!({"type":"stream_event","session_id":session_id,
-                    "event":{"type":kind,"index":0,"content_block":{"type":"thinking"}}}),
+                        "event":{"type":kind,"index":0,"content_block":{"type":"thinking"}}}),
                 );
                 assert_eq!(events.len(), 1);
+                assert_eq!(events[0].event_type, private_event);
                 assert_eq!(
-                    events[0].event_type,
-                    if kind == "content_block_start" {
-                        "agent.thought.started"
-                    } else {
-                        "agent.thought.completed"
-                    }
+                    events[0].payload,
+                    json!({"itemId":"claude-thinking:message-with-thinking:0"})
                 );
                 assert!(!events[0].payload.to_string().contains("PRIVATE"));
             }

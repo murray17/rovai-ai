@@ -123,8 +123,8 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Runtime execution 与 Security
 
-- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Planned Shutdown v8](../contracts/planned-shutdown-v8.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)、[Runtime Launch and Verification v53](../contracts/runtime-launch-and-verification-v53.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)和[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md)。
-- Claude Code `--print` 的原生双向控制、请求与工具 ID 绑定及审批回填理由：[V1.72-D06](../versions/v1.72/decisions.md#v1-72-d06)；当前边界见[Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)和[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)。
+- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Planned Shutdown v8](../contracts/planned-shutdown-v8.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)、[Runtime Launch and Verification v54](../contracts/runtime-launch-and-verification-v54.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)和[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md)。
+- Claude Code `--print` 的原生双向控制、请求与工具 ID 绑定及审批回填理由：[V1.72-D06](../versions/v1.72/decisions.md#v1-72-d06)；当前边界见[Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)和[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)。
 - Windows 以本次 Job 的当前活跃数归零解除后继执行门禁、将可信原生终态与清理分别结算的理由：[V1.72-D20](../versions/v1.72/decisions.md#v1-72-d20)；当前边界见[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md#4-ownership-and-termination)、[Windows Platform](../architecture/windows-desktop-platform.md#3-managed-processes-and-shutdown)及[Camp 会话工作区](../ui/components/conversation-workspace.md#public-camp-v160-当前边界)。
 - 同一 Core generation 内采用固定退避、只有明确未接收的 ACP 输入才由 Rovai 接管，并让 native retry 与 Rovai 保持单一 owner 的理由：[V1.53-D04](../versions/v1.53/decisions.md#v1-53-d04)。
 - Runtime 安装缺失只进入 Availability、optional subsystem 只覆盖 Adapter 自有初始化的当前边界与理由：
@@ -178,10 +178,10 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Evidence、Runtime Activity 与 Usage
 
-- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)、[Run Process Detail Surface v46](../contracts/run-process-detail-surface-v46.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md)、[Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。生命周期、Blob 与文件投影理由分别见 [V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)、[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)与 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)；普通输出永久有界理由见 [V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。
+- 当前规范：[Evidence/Activity 基础不变量](../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v7](../contracts/runtime-file-change-observation-v7.md)、[Run Process Detail Surface v46](../contracts/run-process-detail-surface-v46.md)、[Runtime Monitoring](../architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v8](../contracts/runtime-usage-monitoring-v8.md)、[Runtime Execution Metrics v7](../contracts/runtime-execution-metrics-v7.md)、[Runtime Activity Registry](../runtime-activity/registry.md)。生命周期、Blob 与文件投影理由分别见 [V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)、[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)与 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)；补丁片段的来源区别见 [V1.72-D24](../versions/v1.72/decisions.md#v1-72-d24)；普通输出永久有界理由见 [V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。
 - Pi 成功 edit 的 path-bound 原生 patch、activity-v4 cutover、Migration 147 与历史 classifier 冻结理由：[V1.55-D02](../versions/v1.55/decisions.md#v1-55-d02)。
 - 理由来源：[v0.17](../versions/v0.17/decisions.md)、[v0.41](../versions/v0.41/decisions.md)、[v0.96](../versions/v0.96/decisions.md)、[v0.99](../versions/v0.99/decisions.md)、[V1.28-D12](../versions/v1.28/decisions.md#v1-28-d12)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.29-D14](../versions/v1.29/decisions.md#v1-29-d14)。
-- Pi terminal assistant model-call Usage、原生 Action lifecycle 与 `agent_start` admission 的当前字段边界由 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)继承并收敛，接入理由见 [V1.39-D01](../versions/v1.39/decisions.md#v1-39-d01)和[V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)。
+- Pi terminal assistant model-call Usage、原生 Action lifecycle 与 `agent_start` admission 的当前字段边界由 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)继承并收敛，接入理由见 [V1.39-D01](../versions/v1.39/decisions.md#v1-39-d01)和[V1.48-D01](../versions/v1.48/decisions.md#v1-48-d01)。
 
 ## Qualification 与 Benchmark
 
@@ -218,7 +218,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## 官方 ZCode 接入
 
-- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v6](../contracts/runtime-file-change-observation-v6.md)。
+- 当前规范：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#官方-zcode-当前边界)、[Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)、[Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)、[File Change v7](../contracts/runtime-file-change-observation-v7.md)。
 - 理由：[V1.57-D01](../versions/v1.57/decisions.md#v1-57-d01)、[V1.57-D02](../versions/v1.57/decisions.md#v1-57-d02)。
 
 ## 双轨执行评测
@@ -249,11 +249,37 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 - 当前规范：[Member Creation Flow v1](../contracts/member-creation-flow-v1.md)、[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md#ai-队员创建)、[队员身份与图像](../ui/components/member-identity.md#添加队员与名册排序)。
 - 独立静态回执及窗口内草稿的取舍：[V1.72-D09](../versions/v1.72/decisions.md#v1-72-d09)。
 
-- 安装发现与真实 Host 验证的解耦理由：[V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12)；当前规范：[Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)。
+Command Code 的旧 headless `first_payload` 差异由 [V1.72-D22](../versions/v1.72/decisions.md#v1-72-d22) 记录；[完整 revision 4](../versions/v1.72/model-context-change-command-code.md)保留原确认，运行时范围由 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md#command-code-研究接入边界) 拥有。
 
-自定义 API 编辑按 User 要求退出，当前边界见 [Runtime Launch v53](../contracts/runtime-launch-and-verification-v53.md)；已退出编辑器的历史取舍见 [V1.72-D14](../versions/v1.72/decisions.md#v1-72-d14)，保存切换及移除运行覆盖的取舍见 [V1.72-D15](../versions/v1.72/decisions.md#v1-72-d15)。
+Cline 的旧 macOS arm64 开发预览由 [V1.72-D23](../versions/v1.72/decisions.md#v1-72-d23) 记录；因 ACP 自动压缩缺口暂缓公开的理由见 [V1.72-D31](../versions/v1.72/decisions.md#v1-72-d31)。当前范围由 [Cline 实施边界](../architecture/runtime-catalog-boundaries.md#cline-实施边界)与 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有。
+
+Command Code 官方 ACP、System 门禁及此前的 macOS arm64 Preview 由 [V1.72-D25](../versions/v1.72/decisions.md#v1-72-d25)
+记录；当前范围由 [Command Code ACP 边界](../architecture/runtime-catalog-boundaries.md#command-code-acp-实施边界)
+及 [revision 5 输入说明](../versions/v1.72/model-context-change-command-code-acp.md)拥有。User 105 已暂停公开，
+与 Cline 一样保留 ACP、撤回 Preview，并删除 headless 实验代码；范围见[当前版本](../versions/v1.72/README.md)。
+
+
+macOS ACP detached 后代与 Core 重启回收当前规范见
+[Managed Runtime Process v2](../contracts/managed-runtime-process-v2.md#macos-acp-descendants)，
+内核身份、私有 ledger 和不增加常驻代理的取舍见 [V1.72-D26](../versions/v1.72/decisions.md#v1-72-d26)。
+
+Cline 正常 System Rule 与 Command 原生 MCP 由 [V1.72-D27](../versions/v1.72/decisions.md#v1-72-d27)记录；当前交付边界由 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)及 [Cline System 输入说明](../versions/v1.72/model-context-change-cline-system.md)拥有。
+
+
+Cline 唯一官方 ACP 与 Native Hub 退役见 [V1.72-D30](../versions/v1.72/decisions.md#v1-72-d30)；
+当前权威为 [Cline 实施边界](../architecture/runtime-catalog-boundaries.md#cline-实施边界)、
+[Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)与
+[ACP 输入说明](../versions/v1.72/model-context-change-cline-acp.md)。D25/D26 保存此前方案理由，不能作为当前后端。
+
+- 安装发现与真实 Host 验证的解耦理由：[V1.72-D12](../versions/v1.72/decisions.md#v1-72-d12)；当前规范：[Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)。
+
+自定义 API 编辑按 User 要求退出，当前边界见 [Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md)；已退出编辑器的历史取舍见 [V1.72-D14](../versions/v1.72/decisions.md#v1-72-d14)，保存切换及移除运行覆盖的取舍见 [V1.72-D15](../versions/v1.72/decisions.md#v1-72-d15)。
 
 ## 用户主动继续执行
 
-- 当前规范：[AgentRun Continuation v2](../contracts/agent-run-continuation-v2.md)、[Camp Message Send v25](../contracts/camp-message-send-v25.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Run Process Detail Surface v46](../contracts/run-process-detail-surface-v46.md)。
+- 当前规范：[AgentRun Continuation v3](../contracts/agent-run-continuation-v3.md)、[Camp Message Send v25](../contracts/camp-message-send-v25.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Run Process Detail Surface v46](../contracts/run-process-detail-surface-v46.md)。
 - 理由：[V1.72-D16](../versions/v1.72/decisions.md#v1-72-d16)：新授权接入唯一 lane，原业务输入复用与旧投递不重放分开，允许同一来源多次独立执行。
+
+Cline 认证交还原生、撤销 D25 后续的专属认证独占与强制 cold：
+[V1.72-D29](../versions/v1.72/decisions.md#v1-72-d29)，当前合同为
+[Runtime Launch v54](../contracts/runtime-launch-and-verification-v54.md#cline-official-acp)。

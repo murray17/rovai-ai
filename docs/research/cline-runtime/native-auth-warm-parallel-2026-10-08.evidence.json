@@ -1,0 +1,613 @@
+{
+  "baseline": "60dba4a8f444f467eb76833f8be132f35c381763",
+  "implementationCommit": "b9a43fb97553cff218be8c2c14a97031de016185",
+  "installation": {
+    "cli": "/opt/homebrew/Cellar/cline/3.0.3/libexec/lib/node_modules/cline/bin/cline",
+    "source": "Homebrew / installed @cline/cli-darwin-arm64",
+    "version": "3.0.3",
+    "nativeSha256": "1be9d0ad68b753b5efaf573b58dd7d48dc98db7475cc17d415dab9bd1071f574",
+    "platform": "macOS arm64",
+    "unchangedAfterAcceptance": true
+  },
+  "cases": {
+    "account": {
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "a6ca586c-1b8b-4b76-a933-0c3fdc9e971e",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "7e1fb1c5-0c05-4fba-a67c-244bb7b598e6",
+          "nativeSessionId": "1791441274127_ynvxd",
+          "approvalCount": 0
+        },
+        {
+          "label": "member-b",
+          "runId": "34e022ca-efb7-4c7e-917f-ee677112aed6",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "fe0d5f2e-16eb-48c4-9113-582d38e6c8f7",
+          "nativeSessionId": "1791441285204_me2ab",
+          "approvalCount": 0
+        },
+        {
+          "label": "warm",
+          "runId": "b6afdf3c-2c96-43fe-b138-05eef354d919",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "7e1fb1c5-0c05-4fba-a67c-244bb7b598e6",
+          "nativeSessionId": "1791441274127_ynvxd",
+          "approvalCount": 0
+        },
+        {
+          "label": "cold",
+          "runId": "63d7bb24-50bc-45dd-b384-07e2d1180d02",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "863d53fd-412e-467c-a501-d5b5ddc51384",
+          "nativeSessionId": "1791441274127_ynvxd",
+          "approvalCount": 0
+        },
+        {
+          "label": "parallel-A",
+          "runId": "2de21e34-e3ff-4568-ba1c-9518746407c0",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "2fc1fc17-911c-491e-a46d-29a6b1c77007",
+          "nativeSessionId": "1791441310455_o4w8k",
+          "approvalCount": 3
+        },
+        {
+          "label": "parallel-B",
+          "runId": "559de954-d462-4aed-a339-2bc8c937fdcb",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "cca5ee30-4d75-44ac-ac41-c46983c3607e",
+          "nativeSessionId": "1791441311166_yjp0h",
+          "approvalCount": 3
+        },
+        {
+          "label": "cancel",
+          "runId": "cccc17df-c8c3-47b7-991c-d5b136dbf7fc",
+          "status": "cancelled",
+          "failureCode": null,
+          "hostId": "2fc1fc17-911c-491e-a46d-29a6b1c77007",
+          "nativeSessionId": "1791441310455_o4w8k",
+          "approvalCount": 1
+        },
+        {
+          "label": "after-cancel",
+          "runId": "0fe96a92-f54b-4b01-952c-8ff493cc8dc0",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "1c0e2103-0322-4cfe-b0f1-6109992490a8",
+          "nativeSessionId": "1791441310455_o4w8k",
+          "approvalCount": 1
+        }
+      ],
+      "parallel": {
+        "source": "same-native-provider-file",
+        "separateHosts": true,
+        "barrierPassed": true,
+        "runIds": [
+          "2de21e34-e3ff-4568-ba1c-9518746407c0",
+          "559de954-d462-4aed-a339-2bc8c937fdcb"
+        ],
+        "separateApprovalsAndSends": true
+      },
+      "competingDiagnostic": {
+        "activeRunId": "cccc17df-c8c3-47b7-991c-d5b136dbf7fc",
+        "ready": true,
+        "modelInputs": 0
+      },
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "31a148a0f16811c7b94064331da98cd2414a4dba973c919a2d301d8d3a15a90d",
+          "after": "31a148a0f16811c7b94064331da98cd2414a4dba973c919a2d301d8d3a15a90d",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": null,
+          "after": null,
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ],
+      "privateReportSha256": "795cbe40f5ef0ad82f56d1b1c5c81cbdcfde941fd9af07be54873ab354aa6e78"
+    },
+    "byok": {
+      "passed": false,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "f0dba156-684e-42ed-941a-f9a80d3293a2",
+          "status": "failed",
+          "failureCode": "runtime_prompt_failed",
+          "hostId": "e824c7be-b91a-41bc-bcfd-2796daed15b1",
+          "nativeSessionId": "1791441274113_8tjqd",
+          "approvalCount": 0
+        }
+      ],
+      "parallel": null,
+      "competingDiagnostic": null,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ],
+      "privateReportSha256": "a4c21fffe19b8993f1f8f1e8b052e04c9c6cc67d5426e99b8fe6b3b142336066"
+    },
+    "byok-2": {
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "7af5c8ab-6b12-4524-bb57-52014ad5b966",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "afaa9f6f-e34b-4b68-b876-e85d88659599",
+          "nativeSessionId": "1791441663842_ioudn",
+          "approvalCount": 0
+        },
+        {
+          "label": "warm",
+          "runId": "bf4ea3c7-e8d3-4eb1-a34c-1ad8853aeb61",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "afaa9f6f-e34b-4b68-b876-e85d88659599",
+          "nativeSessionId": "1791441663842_ioudn",
+          "approvalCount": 0
+        },
+        {
+          "label": "cold",
+          "runId": "374722b0-eb80-4809-a538-681ab0c0ea52",
+          "status": "succeeded",
+          "failureCode": null,
+          "hostId": "9e5b598b-47f3-4e2a-b5fa-1c828c69c2f8",
+          "nativeSessionId": "1791441663842_ioudn",
+          "approvalCount": 0
+        }
+      ],
+      "parallel": null,
+      "competingDiagnostic": null,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ],
+      "privateReportSha256": "c9658cfb1ddcd5840542aa4bdd4804971201a6d73d0c99400e3a17ce97b2d2f6"
+    },
+    "recovery": {
+      "kind": "interrupted-native-hub-diagnostic-recovery",
+      "modelInputs": 3,
+      "ownershipRecorded": true,
+      "corePid": 56633,
+      "nativePid": 56789,
+      "nativeAliveBeforeRestart": true,
+      "restartReapedNative": true,
+      "privateHostRemoved": true,
+      "normalDiagnosticAfterRecovery": "ready",
+      "preparationFailureCleanedTwice": true,
+      "zeroModelProbeDoesNotClaimAuthentication": true,
+      "failures": [
+        {
+          "label": "unlogged",
+          "status": "failed",
+          "code": "cline_hub_native_credentials_unavailable",
+          "retryable": false,
+          "runCount": 1
+        },
+        {
+          "label": "authentication-rejected",
+          "status": "failed",
+          "code": "cline_hub_native_authentication_failed",
+          "retryable": false,
+          "runCount": 1
+        },
+        {
+          "label": "service-unavailable",
+          "status": "failed",
+          "code": "cline_hub_native_service_unavailable",
+          "retryable": false,
+          "runCount": 1
+        }
+      ],
+      "loopbackFailureRequests": 4,
+      "loginObservation": {
+        "status": "running",
+        "outputBytes": 72,
+        "syntheticLinkPresent": true
+      },
+      "loginFixture": {
+        "packagedRendererToCore": false,
+        "selectedAbsoluteProgram": true,
+        "explicitStart": true,
+        "privateOutputRedacted": true,
+        "input": true,
+        "cancel": true,
+        "subsequentCompletion": true,
+        "realOAuth": false,
+        "shutdownActiveLogin": true
+      },
+      "sourceChanged": false,
+      "nativeWriteAuthorized": true,
+      "passed": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "privateReportSha256": "0fc8781cdc788d091a07db042c98a332d897a70b7315ba50fe46966a6f5166a7"
+    },
+    "account-app-final": {
+      "sourceCommit": "b9a43fb97553cff218be8c2c14a97031de016185",
+      "transport": "Renderer/preload/Core",
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "73d11636-62b3-49e0-b3b2-cd7298909be4",
+          "status": "succeeded",
+          "hostId": "7c04e541-d036-4750-911c-d6988f6bc866",
+          "nativeSessionId": "1791443269911_anzhs",
+          "bindingId": "c826d73d-1cec-4b60-a088-c1a27ace3648",
+          "bindingGeneration": 1,
+          "approvalCount": 0
+        },
+        {
+          "label": "member-b",
+          "runId": "d41858e3-240b-4196-b6c5-cf295ce7def0",
+          "status": "succeeded",
+          "hostId": "cd65f797-b647-445e-bf38-2f4705cfcda5",
+          "nativeSessionId": "1791443281389_n9dfk",
+          "bindingId": "b2a9b76f-4516-474f-a83a-7d9e5064f56d",
+          "bindingGeneration": 1,
+          "approvalCount": 0
+        },
+        {
+          "label": "warm",
+          "runId": "047a7def-dec6-400a-95e6-b53ab5bdc523",
+          "status": "succeeded",
+          "hostId": "7c04e541-d036-4750-911c-d6988f6bc866",
+          "nativeSessionId": "1791443269911_anzhs",
+          "bindingId": "c826d73d-1cec-4b60-a088-c1a27ace3648",
+          "bindingGeneration": 1,
+          "approvalCount": 0
+        },
+        {
+          "label": "cold",
+          "runId": "86d99838-75d2-47e0-963c-c45b7b3276f9",
+          "status": "succeeded",
+          "hostId": "427d763b-c85b-4804-a706-ebac0d3fba37",
+          "nativeSessionId": "1791443269911_anzhs",
+          "bindingId": "c826d73d-1cec-4b60-a088-c1a27ace3648",
+          "bindingGeneration": 1,
+          "approvalCount": 0
+        },
+        {
+          "label": "parallel-B",
+          "runId": "eea9d0d2-4f70-4b2a-ac33-06f91f545a9c",
+          "status": "succeeded",
+          "hostId": "87edf3c1-1b7d-4a1d-b4d7-25fbe1126831",
+          "nativeSessionId": "1791443313962_8aaqh",
+          "bindingId": "ce9ed936-290d-47de-abc8-b1b450e1eb9e",
+          "bindingGeneration": 2,
+          "approvalCount": 4
+        },
+        {
+          "label": "parallel-A",
+          "runId": "c935804f-f4a9-4eb9-8f13-7f72554b06ef",
+          "status": "succeeded",
+          "hostId": "21cb39d1-29b8-4383-8129-4dc84b8a1c55",
+          "nativeSessionId": "1791443313117_sz9tx",
+          "bindingId": "65fa24c2-f01d-48d0-9ee9-6c75a34e7df0",
+          "bindingGeneration": 2,
+          "approvalCount": 3
+        },
+        {
+          "label": "cancel",
+          "runId": "03d79d46-5c3a-4cb5-9bb9-8ae61ca603a1",
+          "status": "cancelled",
+          "hostId": "21cb39d1-29b8-4383-8129-4dc84b8a1c55",
+          "nativeSessionId": "1791443313117_sz9tx",
+          "bindingId": "65fa24c2-f01d-48d0-9ee9-6c75a34e7df0",
+          "bindingGeneration": 2,
+          "approvalCount": 1
+        },
+        {
+          "label": "after-cancel",
+          "runId": "8e264239-fe6a-4a16-a2da-7d0e79a3b022",
+          "status": "succeeded",
+          "hostId": "1c78ac2f-92e3-4904-8014-1060f3eec4c5",
+          "nativeSessionId": "1791443313117_sz9tx",
+          "bindingId": "65fa24c2-f01d-48d0-9ee9-6c75a34e7df0",
+          "bindingGeneration": 2,
+          "approvalCount": 1
+        }
+      ],
+      "parallel": {
+        "source": "same-native-provider-file",
+        "separateHosts": true,
+        "barrierPassed": true,
+        "runIds": [
+          "c935804f-f4a9-4eb9-8f13-7f72554b06ef",
+          "eea9d0d2-4f70-4b2a-ac33-06f91f545a9c"
+        ],
+        "separateApprovalsAndSends": true
+      },
+      "competingDiagnostic": {
+        "activeRunId": "03d79d46-5c3a-4cb5-9bb9-8ae61ca603a1",
+        "ready": true,
+        "modelInputs": 0
+      },
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "31a148a0f16811c7b94064331da98cd2414a4dba973c919a2d301d8d3a15a90d",
+          "after": "31a148a0f16811c7b94064331da98cd2414a4dba973c919a2d301d8d3a15a90d",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": null,
+          "after": null,
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ],
+      "privateReportSha256": "e7fccf8467351d791230fddcf2a2435c39803d754dcc4cd70cd98aa1043d11e2"
+    },
+    "byok-final": {
+      "sourceCommit": "b9a43fb97553cff218be8c2c14a97031de016185",
+      "transport": "Packaged Core direct",
+      "passed": true,
+      "turns": [
+        {
+          "label": "first",
+          "runId": "e88f7144-dd23-48d1-9b8c-7474299eabc9",
+          "status": "succeeded",
+          "hostId": "c4c9a3b0-73dc-4a6a-94f3-60cceab54461",
+          "nativeSessionId": "1791443269708_v033d",
+          "bindingId": "50c6e9f7-9bbf-4c9d-9fd1-bc1a9769f06b",
+          "bindingGeneration": 1,
+          "approvalCount": 0
+        },
+        {
+          "label": "warm",
+          "runId": "57545c60-080b-49d1-aaf2-ca4a995b4bf9",
+          "status": "succeeded",
+          "hostId": "c4c9a3b0-73dc-4a6a-94f3-60cceab54461",
+          "nativeSessionId": "1791443269708_v033d",
+          "bindingId": "50c6e9f7-9bbf-4c9d-9fd1-bc1a9769f06b",
+          "bindingGeneration": 1,
+          "approvalCount": 0
+        },
+        {
+          "label": "cold",
+          "runId": "e37c872d-7cb3-40e8-86bd-ceaee4dd500d",
+          "status": "succeeded",
+          "hostId": "0fd40711-ffb7-4397-92c4-3906b6b496ca",
+          "nativeSessionId": "1791443269708_v033d",
+          "bindingId": "50c6e9f7-9bbf-4c9d-9fd1-bc1a9769f06b",
+          "bindingGeneration": 1,
+          "approvalCount": 0
+        }
+      ],
+      "parallel": null,
+      "competingDiagnostic": null,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceIntegrity": [
+        {
+          "scope": "fixture-native-source",
+          "file": "global-settings.json",
+          "before": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "after": "a5e4f6d9224d93ad27ced7a2f43560cc87e60ba690f48b0d52d119cbcbedcf43",
+          "unchanged": true,
+          "nativeWriteAuthorized": false
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "providers.json",
+          "before": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "after": "fa2cb6dc2030c1d3ec18e54ae485ae3151ba88483385e9306dd336695befceaf",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        },
+        {
+          "scope": "authorized-settings-source",
+          "file": "models.json",
+          "before": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "after": "a62f976a1eb93d254f911e23660d7a91db7ee0289dbe6fecab50b0cc02cc36cc",
+          "unchanged": true,
+          "nativeWriteAuthorized": true
+        }
+      ],
+      "privateReportSha256": "2c01b3bae1f81ef49a475aa765bf421f377f6981c6861d153ad1e4509376635b"
+    },
+    "diagnostic-app-final": {
+      "kind": "packaged-hub-diagnostics",
+      "modelInputs": 3,
+      "packagedRendererToCore": true,
+      "appPid": 234,
+      "normalDiagnosticAfterRecovery": "ready",
+      "preparationFailureCleanedTwice": true,
+      "zeroModelProbeDoesNotClaimAuthentication": true,
+      "failures": [
+        {
+          "label": "unlogged",
+          "status": "failed",
+          "code": "cline_hub_native_credentials_unavailable",
+          "retryable": false,
+          "runCount": 1
+        },
+        {
+          "label": "authentication-rejected",
+          "status": "failed",
+          "code": "cline_hub_native_authentication_failed",
+          "retryable": false,
+          "runCount": 1
+        },
+        {
+          "label": "service-unavailable",
+          "status": "failed",
+          "code": "cline_hub_native_service_unavailable",
+          "retryable": false,
+          "runCount": 1
+        }
+      ],
+      "loopbackFailureRequests": 4,
+      "loginObservation": {
+        "status": "running",
+        "outputBytes": 72,
+        "syntheticLinkPresent": true
+      },
+      "loginFixture": {
+        "packagedRendererToCore": true,
+        "selectedAbsoluteProgram": true,
+        "explicitStart": true,
+        "privateOutputRedacted": true,
+        "input": true,
+        "cancel": true,
+        "subsequentCompletion": true,
+        "realOAuth": false,
+        "shutdownActiveLogin": true
+      },
+      "sourceChanged": false,
+      "nativeWriteAuthorized": true,
+      "passed": true,
+      "hostTempRemaining": [],
+      "runtimeFilesRemoved": true,
+      "providerCopiesCreated": false,
+      "sourceCommit": "b9a43fb97553cff218be8c2c14a97031de016185",
+      "privateReportSha256": "dfef4a6773880b7e3ed3318c5409d9b76215348c3fe12b257a55aa4e04fa0dda"
+    }
+  },
+  "unverified": [
+    "first complete OAuth authorization",
+    "actual credential refresh",
+    "concurrent refresh with external Cline",
+    "other authentication Providers and platforms",
+    "previously unverified compaction and history axes"
+  ],
+  "authSimplificationCommit": "4e635b78bfe7f0c89792b9e625674e7d441c3ac4",
+  "mergedMain": "a77b537d",
+  "initialCasesScope": "Development iterations before the final merge; final packaged cases below own current-source qualification.",
+  "checks": {
+    "rustWorkspace": {
+      "passed": 464,
+      "ignored": 2
+    },
+    "clineExtended": {
+      "passed": 8,
+      "ignored": 2
+    },
+    "allTargetsAllFeatures": "passed",
+    "typecheck": "passed",
+    "vitest": {
+      "passed": 2607
+    },
+    "node": {
+      "passed": 335,
+      "skipped": 2
+    },
+    "settingsWorkspace": "passed",
+    "packagedAppSignature": "passed",
+    "ubuntuCI": "https://github.com/murray17/rovai-ai/actions/runs/37740978566",
+    "windowsCompile": "https://github.com/murray17/rovai-ai/actions/runs/37741195908"
+  },
+  "packagedBinaries": {
+    "rovai-core": "174f72db739f3572a73198be7771a5e5c5ccc698a0d17500a9c59c43c8c6ce8d",
+    "rovai-host": "9f1b634067492ae0eb7c429d4f8497b0dbd8dc2cbc420cbbb6d94e84aa15b409",
+    "rovai": "dc4eb8e698890d14cf6cd7295d2898e7c982ea9472629c3ab4974964b9c9b7c4"
+  },
+  "cleanup": {
+    "noRemainingFixtureProcesses": true,
+    "nativeInstallationUnchanged": true
+  },
+  "secretScan": {
+    "filesScanned": {
+      "public": 60,
+      "acceptance": 945
+    },
+    "credentialMatches": []
+  }
+}

@@ -46,14 +46,62 @@ struct BatchPrefixSelection {
     has_additional_public_messages: bool,
 }
 
+enum DeliverySource<'a> {
+    Message(&'a str),
+    Continuation,
+}
+
 pub(crate) fn enqueue_message_deliveries(
     transaction: &Transaction<'_>,
     camp_id: &str,
     message_id: &str,
-    message_sequence: i64,
     recipient_agent_ids: &[String],
     now: &str,
 ) -> Result<Vec<EnqueuedDelivery>> {
+    enqueue_deliveries(
+        transaction,
+        camp_id,
+        DeliverySource::Message(message_id),
+        recipient_agent_ids,
+        now,
+    )
+}
+
+pub(crate) fn enqueue_continuation_delivery(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    agent_id: String,
+    now: &str,
+) -> Result<EnqueuedDelivery> {
+    enqueue_deliveries(
+        transaction,
+        camp_id,
+        DeliverySource::Continuation,
+        &[agent_id],
+        now,
+    )?
+    .into_iter()
+    .next()
+    .context("Continuation did not enqueue its Delivery")
+}
+
+fn enqueue_deliveries(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    source: DeliverySource<'_>,
+    recipient_agent_ids: &[String],
+    now: &str,
+) -> Result<Vec<EnqueuedDelivery>> {
+    if recipient_agent_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (source_kind, message_id) = match source {
+        DeliverySource::Message(id) => ("message", Some(id)),
+        DeliverySource::Continuation => ("continuation", None),
+    };
+    let queue_sequence: i64 = transaction.query_row(
+        "UPDATE camp SET last_delivery_sequence=last_delivery_sequence+1 WHERE id=?1 RETURNING last_delivery_sequence",
+        [camp_id], |row|row.get(0))?;
     let mut deliveries = Vec::with_capacity(recipient_agent_ids.len());
     for recipient_agent_id in recipient_agent_ids {
         let membership_version = transaction
@@ -76,11 +124,11 @@ pub(crate) fn enqueue_message_deliveries(
         transaction.execute(
             r#"
             INSERT INTO camp_message_delivery(
-                id, camp_id, message_id, recipient_agent_id,
+                id, camp_id, message_id, source_kind, recipient_agent_id,
                 recipient_membership_version_at_admission, queue_sequence,
                 status, claimed_agent_run_id, failure_code, version,
                 created_at, claimed_at, ended_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'waiting', NULL, NULL, 1,
+            ) VALUES (?1, ?2, ?3, ?8, ?4, ?5, ?6, 'waiting', NULL, NULL, 1,
                       ?7, NULL, NULL, ?7)
             "#,
             params![
@@ -89,8 +137,9 @@ pub(crate) fn enqueue_message_deliveries(
                 message_id,
                 recipient_agent_id,
                 membership_version,
-                message_sequence,
+                queue_sequence,
                 now,
+                source_kind,
             ],
         )?;
         deliveries.push(EnqueuedDelivery {
@@ -202,7 +251,7 @@ pub fn has_waiting_delivery_batch_work(database: &Database) -> Result<bool> {
 }
 
 /// Converts waiting Delivery lanes into immutable, ordered multi-input AgentRuns.
-/// Waiting rows carry only message responsibility. Runtime, model and permissions are
+/// Waiting rows carry message responsibility or explicit continuation authorization. Runtime, model and permissions are
 /// resolved here. Workspace is also frozen unless an unprepared Mission must first
 /// establish its exact execution directory at the execution-preparing boundary.
 pub fn claim_waiting_delivery_batches(database: &mut Database, limit: i64) -> Result<Vec<String>> {
@@ -359,7 +408,7 @@ pub fn claim_waiting_delivery_batches(database: &mut Database, limit: i64) -> Re
                 continue;
             }
             let camp_public_tail: i64 = transaction.query_row(
-                "SELECT last_message_sequence FROM camp WHERE id = ?1",
+                "SELECT last_message_sequence FROM camp WHERE id=?1",
                 [&camp_id],
                 |row| row.get(0),
             )?;
@@ -516,6 +565,15 @@ fn batch_workspace_for_claim(
     }))
 }
 
+enum QueuedSource {
+    Message(WaitingDelivery),
+    Continuation {
+        delivery_id: String,
+        source_run_id: String,
+        use_new_session: bool,
+    },
+}
+
 fn load_waiting_prefix(
     transaction: &Transaction<'_>,
     camp_id: &str,
@@ -526,10 +584,10 @@ fn load_waiting_prefix(
         SELECT delivery.id, message.id, message.sequence,
                message.structured_content_json, message.content_digest,
                recipient.display_name, continuation.source_agent_run_id,
-               COALESCE(continuation.use_new_session, 0)
+               COALESCE(continuation.use_new_session, 0), delivery.source_kind
         FROM camp_message_delivery AS delivery
         LEFT JOIN camp_run_continuation AS continuation ON continuation.delivery_id=delivery.id
-        JOIN camp_message AS message ON message.id = delivery.message_id
+        LEFT JOIN camp_message AS message ON message.id = delivery.message_id
         LEFT JOIN agent_profile AS recipient
           ON message.address_mode = 'default'
          AND json_array_length(message.addressed_agent_ids_json) = 1
@@ -537,28 +595,42 @@ fn load_waiting_prefix(
         WHERE delivery.camp_id = ?1
           AND delivery.recipient_agent_id = ?2
           AND delivery.status = 'waiting'
-          AND message.tombstoned_at IS NULL
-          AND message.recall_state <> 'withdrawn'
+          AND ((delivery.source_kind='message' AND message.tombstoned_at IS NULL
+                AND message.recall_state <> 'withdrawn')
+            OR (delivery.source_kind='continuation' AND continuation.delivery_id IS NOT NULL))
         ORDER BY delivery.queue_sequence
         "#,
     )?;
     let mut waiting = statement
         .query_map(params![camp_id, agent_id], |row| {
-            Ok(WaitingDelivery {
-                id: row.get(0)?,
-                message_id: row.get(1)?,
-                sequence: row.get(2)?,
-                structured_content_json: row.get(3)?,
-                content_digest: row.get(4)?,
-                default_recipient_display_name: row.get(5)?,
-                continuation_source_run_id: row.get(6)?,
-                use_new_session: row.get(7)?,
-            })
+            if row.get::<_, String>(8)? == "continuation" {
+                Ok(QueuedSource::Continuation {
+                    delivery_id: row.get(0)?,
+                    source_run_id: row.get(6)?,
+                    use_new_session: row.get(7)?,
+                })
+            } else {
+                Ok(QueuedSource::Message(WaitingDelivery {
+                    id: row.get(0)?,
+                    message_id: row.get(1)?,
+                    sequence: row.get(2)?,
+                    structured_content_json: row.get(3)?,
+                    content_digest: row.get(4)?,
+                    default_recipient_display_name: row.get(5)?,
+                    continuation_source_run_id: None,
+                    use_new_session: false,
+                }))
+            }
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut expired = 0;
     for first in &waiting {
-        let Some(source_id) = first.continuation_source_run_id.as_deref() else {
+        let QueuedSource::Continuation {
+            delivery_id,
+            source_run_id: source_id,
+            ..
+        } = first
+        else {
             break;
         };
         if crate::run_continuation::eligible_source(transaction, camp_id, source_id)?.is_some() {
@@ -567,12 +639,12 @@ fn load_waiting_prefix(
         // Admission can expire while waiting; never turn its system operation into business input.
         transaction.execute("UPDATE camp_message_delivery SET status='cancelled',failure_code='agent_run.continuation_unavailable',
                 ended_at=?2,updated_at=?2,version=version+1 WHERE id=?1 AND status='waiting'",
-                params![first.id,chrono::Utc::now().to_rfc3339()])?;
+                params![delivery_id,chrono::Utc::now().to_rfc3339()])?;
         crate::collaboration::append_domain_event(
             transaction,
             "agent_run.continuation_cancelled",
             Some(camp_id),
-            Some(("camp_message_delivery", &first.id)),
+            Some(("camp_message_delivery", delivery_id)),
             &crate::command::ActorRef::System {
                 component_id: "delivery-batch".into(),
             },
@@ -583,9 +655,14 @@ fn load_waiting_prefix(
     }
     waiting.drain(..expired);
     let Some(first) = waiting.first() else {
-        return Ok(waiting);
+        return Ok(Vec::new());
     };
-    if let Some(source_id) = first.continuation_source_run_id.as_deref() {
+    if let QueuedSource::Continuation {
+        delivery_id,
+        source_run_id: source_id,
+        use_new_session,
+    } = first
+    {
         let mut statement=transaction.prepare("SELECT input.message_id,input.message_sequence,message.structured_content_json,
             input.message_content_digest,input.default_recipient_display_name
             FROM agent_run_input AS input JOIN camp_message AS message ON message.id=input.message_id
@@ -593,25 +670,26 @@ fn load_waiting_prefix(
         return Ok(statement
             .query_map([source_id], |row| {
                 Ok(WaitingDelivery {
-                    id: first.id.clone(),
+                    id: delivery_id.clone(),
                     message_id: row.get(0)?,
                     sequence: row.get(1)?,
                     structured_content_json: row.get(2)?,
                     content_digest: row.get(3)?,
                     default_recipient_display_name: row.get(4)?,
-                    continuation_source_run_id: first.continuation_source_run_id.clone(),
-                    use_new_session: first.use_new_session,
+                    continuation_source_run_id: Some(source_id.clone()),
+                    use_new_session: *use_new_session,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?);
     }
-    if let Some(boundary) = waiting
-        .iter()
-        .position(|delivery| delivery.continuation_source_run_id.is_some())
-    {
-        waiting.truncate(boundary);
-    }
-    Ok(waiting)
+    Ok(waiting
+        .into_iter()
+        .take_while(|source| matches!(source, QueuedSource::Message(_)))
+        .filter_map(|source| match source {
+            QueuedSource::Message(message) => Some(message),
+            _ => None,
+        })
+        .collect())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1211,7 +1289,6 @@ mod tests {
                 &transaction,
                 camp_id,
                 message_id,
-                sequence,
                 &["agent_1".to_string()],
                 &now,
             )
@@ -1424,6 +1501,10 @@ mod tests {
         let mut second = envelope("continue-2");
         second.payload.use_new_session = true;
         fixture.enqueue("earlier-message", "排在续做前面的普通消息");
+        let before_continuation: (i64, i64, i64) = fixture.database.connection().query_row(
+            "SELECT (SELECT count(*) FROM camp_message WHERE camp_id=?1), last_message_sequence,
+              (SELECT count(*) FROM event_log WHERE camp_id=?1 AND entity_type='camp_message')
+             FROM camp WHERE id=?1", [&fixture.camp_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         // A failed transaction does not consume the authorization or publish an operation.
         fixture.database.connection().execute_batch("CREATE TRIGGER fail_continuation BEFORE INSERT ON camp_run_continuation BEGIN SELECT RAISE(ABORT,'fixture'); END;").unwrap();
         assert!(continue_agent_run(&mut fixture.database, &first).is_err());
@@ -1455,6 +1536,30 @@ mod tests {
             accepted.result.payload["deliveryId"],
             another.result.payload["deliveryId"]
         );
+        assert!(accepted.result.payload.get("messageId").is_none());
+        assert!(another.result.payload.get("messageId").is_none());
+        let unchanged: (i64, i64, i64) = fixture.database.connection().query_row(
+            "SELECT (SELECT count(*) FROM camp_message WHERE camp_id=?1), last_message_sequence,
+              (SELECT count(*) FROM event_log WHERE camp_id=?1 AND entity_type='camp_message')
+             FROM camp WHERE id=?1", [&fixture.camp_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(
+            unchanged, before_continuation,
+            "continuing does not create a message, sequence or publication"
+        );
+        let internal: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT count(*) FROM camp_message_delivery WHERE id IN (?1,?2)
+             AND source_kind='continuation' AND message_id IS NULL",
+                params![
+                    accepted.result.payload["deliveryId"].as_str().unwrap(),
+                    another.result.payload["deliveryId"].as_str().unwrap()
+                ],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(internal, 2);
         fixture.enqueue("later-message", "排在续做后面的普通消息");
         assert_eq!(fixture.batch_run_count(), 1);
         assert!(
@@ -1473,6 +1578,65 @@ mod tests {
                 .count(),
             2
         );
+        for delivery in projected
+            .message_deliveries
+            .iter()
+            .filter(|d| d.continuation_request == Some(true))
+        {
+            assert_eq!(delivery.message_id, "original-a");
+            assert_eq!(delivery.input_message_ids, ["original-a", "original-b"]);
+        }
+        assert_eq!(projected.messages.len(), 4);
+        let public_ids = [
+            "original-a",
+            "original-b",
+            "earlier-message",
+            "later-message",
+        ]
+        .map(str::to_string);
+        {
+            let tx = fixture.database.connection_mut().transaction().unwrap();
+            assert!(
+                !has_additional_public_messages(
+                    &tx,
+                    &fixture.camp_id,
+                    "agent_1",
+                    0,
+                    6,
+                    &public_ids
+                )
+                .unwrap()
+            );
+            assert!(
+                has_additional_public_messages(
+                    &tx,
+                    &fixture.camp_id,
+                    "agent_1",
+                    0,
+                    6,
+                    &public_ids[..2]
+                )
+                .unwrap()
+            );
+        }
+        fixture.publish_visible_without_delivery("other-system", "system", "ordinary-system");
+        // Existing published continuation records stay unchanged. This feature
+        // has not shipped, so the structural migration must not rewrite messages.
+        fixture.publish_visible_without_delivery(
+            "legacy-continuation",
+            "system",
+            "run-continuation",
+        );
+        fixture
+            .database
+            .connection()
+            .execute_batch(
+                "UPDATE camp_message
+            SET body='你继续了爱丽丝的执行。',origin_kind='system',
+                structured_content_json='[{\"kind\":\"text\",\"text\":\"你继续了爱丽丝的执行。\"}]'
+            WHERE id='legacy-continuation';",
+            )
+            .unwrap();
         fixture
             .database
             .connection()
@@ -1483,6 +1647,22 @@ mod tests {
             .unwrap();
         // The requests remain durable across a database reopen before the first claim.
         fixture.database = Database::open(&fixture._directory).unwrap();
+        let legacy: (String, Option<String>, i64) = fixture.database.connection().query_row(
+            "SELECT body,tombstoned_at,version FROM camp_message WHERE id='legacy-continuation'",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(legacy, ("你继续了爱丽丝的执行。".into(), None, 1));
+        let page = crate::read_model::ReadModelService
+            .camp_messages_page(&mut fixture.database, &fixture.camp_id, 100, 0, 100)
+            .unwrap();
+        assert_eq!(page.messages.len(), 6);
+        assert!(!page.has_more);
+        for id in ["original-a", "original-b"] {
+            let around = crate::read_model::ReadModelService
+                .camp_messages_around(&mut fixture.database, &fixture.camp_id, id)
+                .unwrap();
+            assert!(around.source_available);
+            assert!(around.messages.iter().any(|message| message.id == id));
+        }
         let source_before:serde_json::Value=fixture.database.connection().query_row("SELECT json_object('status',status,'version',version,'endedAt',ended_at,'epoch',execution_epoch,'workspace',workspace_json) FROM agent_run WHERE id=?1",[&source],|r|r.get::<_,String>(0)).map(|s|serde_json::from_str(&s).unwrap()).unwrap();
         let old_delivery_before: (String, Option<String>, i64) = fixture
             .database
@@ -1566,6 +1746,48 @@ mod tests {
                 assert!(context.rendered_payload.contains(&task_title));
                 assert!(!context.rendered_payload.contains(&source));
                 assert!(!context.rendered_payload.contains("continuation"));
+                use crate::{
+                    camp_history::{
+                        HistorySearchInput, ThreadHistoryService, ThreadReadInput,
+                        ThreadSearchInput,
+                    },
+                    team_tool::AuthenticatedTeamToolRun,
+                };
+                let reader = AuthenticatedTeamToolRun {
+                    camp_id: fixture.camp_id.clone(),
+                    agent_id: "agent_1".into(),
+                    agent_run_id: run.clone(),
+                    execution_epoch: 1,
+                };
+                let history = ThreadHistoryService
+                    .read(
+                        &mut fixture.database,
+                        &reader,
+                        &serde_json::from_value::<ThreadReadInput>(json!({"limit":100})).unwrap(),
+                    )
+                    .unwrap();
+                assert_eq!(history["items"].as_array().unwrap().len(), 6);
+                for (query, expected_count) in [("继续了", 1), ("原目标", 2)] {
+                    let found = ThreadHistoryService
+                        .search_camp(
+                            &mut fixture.database,
+                            &reader,
+                            &serde_json::from_value::<ThreadSearchInput>(json!({"query":query}))
+                                .unwrap(),
+                        )
+                        .unwrap();
+                    assert_eq!(found["results"].as_array().unwrap().len(), expected_count);
+                    let found = ThreadHistoryService
+                        .search_history(
+                            &mut fixture.database,
+                            &reader,
+                            &serde_json::from_value::<HistorySearchInput>(json!({"query":query}))
+                                .unwrap(),
+                        )
+                        .unwrap();
+                    // history.search deliberately excludes the current Thread.
+                    assert!(found["results"].as_array().unwrap().is_empty());
+                }
             }
             fixture
                 .database
@@ -1612,7 +1834,58 @@ mod tests {
         assert_eq!(old_digest, frozen_source.rendered_payload_digest);
 
         let system_messages:i64=fixture.database.connection().query_row("SELECT count(*) FROM camp_message WHERE author_type='system' AND author_id='run-continuation'",[],|r|r.get(0)).unwrap();
-        assert_eq!(system_messages, 2);
+        assert_eq!(system_messages, 1);
+        // Previously published operation rows and normal messages remain readable.
+        {
+            let tx = fixture.database.connection_mut().transaction().unwrap();
+            for id in [
+                "original-a",
+                "original-b",
+                "other-system",
+                "legacy-continuation",
+            ] {
+                crate::collaboration::append_domain_event(
+                    &tx,
+                    "camp_message.sent",
+                    Some(&fixture.camp_id),
+                    Some(("camp_message", id)),
+                    &ActorRef::User {
+                        user_id: "local_user".into(),
+                    },
+                    None,
+                    &json!({}),
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let observer_camp = fixture.add_camp_lane("history-reader");
+        fixture.enqueue_for(&observer_camp, "history-request", "检查旧会话");
+        let observer_run = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .pop()
+            .unwrap();
+        fixture.materialize_run(&observer_run);
+        let reader = crate::team_tool::AuthenticatedTeamToolRun {
+            camp_id: observer_camp,
+            agent_id: "agent_1".into(),
+            agent_run_id: observer_run,
+            execution_epoch: 1,
+        };
+        for (query, count) in [("继续了", 1), ("原目标", 2), ("visible history", 1)] {
+            let result = crate::camp_history::ThreadHistoryService
+                .search_history(
+                    &mut fixture.database,
+                    &reader,
+                    &serde_json::from_value(json!({"query":query})).unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                result["results"].as_array().unwrap().len(),
+                count,
+                "{result}"
+            );
+        }
         assert_eq!(
             fixture
                 .database
@@ -1624,6 +1897,20 @@ mod tests {
                 )
                 .unwrap(),
             0
+        );
+        fixture.publish_visible_without_delivery("legacy-second", "system", "run-continuation");
+        crate::db::assert_legacy_request_upgrade(
+            &mut fixture.database,
+            &[
+                (
+                    accepted.result.payload["deliveryId"].as_str().unwrap(),
+                    "legacy-continuation",
+                ),
+                (
+                    another.result.payload["deliveryId"].as_str().unwrap(),
+                    "legacy-second",
+                ),
+            ],
         );
     }
 

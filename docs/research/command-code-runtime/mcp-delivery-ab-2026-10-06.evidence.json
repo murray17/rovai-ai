@@ -1,0 +1,2023 @@
+{
+  "schemaVersion": 1,
+  "kind": "command-code-mcp-delivery-ab",
+  "date": "2026-10-06",
+  "sourceMessageId": "b0c08164-e693-490c-8999-937acc7d0522",
+  "decision": "retain_native_delivery_and_prepare_upstream_reproduction",
+  "productionRuntimeChanged": false,
+  "qualification": "raw official ACP sessions; not product AgentRun acceptance",
+  "fixed": {
+    "commandVersion": "1.74.1",
+    "commandCliSha256": "a0727482bfd108c6bae498bc7ce29938e9d975244ee7776e505a9e61a0fda082",
+    "repositoryCommit": "be9bdd3c06cbdaaf3421a5e73a8361b710700022",
+    "probeSha256": "9b13043f7b52033b6469d1b778e29e98e4edcd163b4c097ebdbfa5fc30b239ee",
+    "observerSha256": "6e38f931899cb98fc721761871b0d84cc89a713ef060b38b1a397486b6b25964",
+    "bootstrapModSha256": "315dd6da39163e341af2c93d9cd6088e0ca8b35df1708fc6454d2a78b37e8bbd",
+    "model": "sub2api/gpt-6-sol",
+    "permissionMode": "bypass",
+    "prompt": "Use the MCP tool issue_receipt on server rovai_delivery64 to request one fresh receipt. If necessary, call search_tools once to load its schema, then invoke the target tool once with {}. Do not use shell, filesystem, web, other tools, or additional searches. Reply only with the receipt returned by this invocation. If the target tool is unavailable, reply UNAVAILABLE. Never invent a result.",
+    "bootstrap": "You are an isolated MCP delivery acceptance session. Follow the user request and report the actual tool result accurately.",
+    "cwd": "shared empty isolated workspace",
+    "observation": "Loopback proxy forwards original request JSON and provider response bytes; no header, endpoint, full prompt or argument logging"
+  },
+  "toolSets": {
+    "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf": [
+      {
+        "name": "read_file",
+        "schemaSha256": "1a9039891aff5304b42acbc26c9eab46749b5744f2ce61784879cf6346b125e4",
+        "schemaType": "object",
+        "properties": [
+          "default_exclude",
+          "exclude",
+          "file_path",
+          "git_ignore",
+          "limit",
+          "offset",
+          "paths",
+          "target_directory"
+        ],
+        "required": [
+          "file_path"
+        ]
+      },
+      {
+        "name": "write_file",
+        "schemaSha256": "13e1ed295309b31ded13bd50ad07b39d07c7247b1027ba9f07f2ef20b8db775a",
+        "schemaType": "object",
+        "properties": [
+          "content",
+          "file_path"
+        ],
+        "required": [
+          "content",
+          "file_path"
+        ]
+      },
+      {
+        "name": "edit_file",
+        "schemaSha256": "b3d756890309341c25ca3162e251434ec90b788c00d9067f068eaf77ad8dd92a",
+        "schemaType": "object",
+        "properties": [
+          "file_path",
+          "new_string",
+          "old_string",
+          "replace_all",
+          "replacement_count"
+        ],
+        "required": [
+          "file_path",
+          "new_string",
+          "old_string"
+        ]
+      },
+      {
+        "name": "read_directory",
+        "schemaSha256": "66fef04b7a34907edaf653c04f093d4b8a7a2ec81872bc9ddf04f4421cbc5f84",
+        "schemaType": "object",
+        "properties": [
+          "exclude",
+          "path"
+        ],
+        "required": [
+          "path"
+        ]
+      },
+      {
+        "name": "glob",
+        "schemaSha256": "8c83eb0fd761d1d68ebcd2ae615b582e2b15d0a19d1b75b9a5cc39428d1c8cfa",
+        "schemaType": "object",
+        "properties": [
+          "limit",
+          "offset",
+          "path",
+          "pattern"
+        ],
+        "required": [
+          "pattern"
+        ]
+      },
+      {
+        "name": "grep",
+        "schemaSha256": "337ce1450172ce537b35b21e08fb3a1840e299c9c6cf87b388a150105a68644d",
+        "schemaType": "object",
+        "properties": [
+          "-A",
+          "-B",
+          "-C",
+          "-i",
+          "-n",
+          "context",
+          "glob",
+          "head_limit",
+          "multiline",
+          "offset",
+          "output_mode",
+          "path",
+          "pattern",
+          "type"
+        ],
+        "required": [
+          "pattern"
+        ]
+      },
+      {
+        "name": "shell_command",
+        "schemaSha256": "a1d5aa7840b77c905ef49fefb64f7fa31f4a9cea727195bd5a7e94c6af764b99",
+        "schemaType": "object",
+        "properties": [
+          "args",
+          "command",
+          "cwd",
+          "description",
+          "run_in_background",
+          "timeout"
+        ],
+        "required": [
+          "command"
+        ]
+      },
+      {
+        "name": "schedule_wakeup",
+        "schemaSha256": "0271143d6d278ac3792f760d5fc8c74e21a6e608a5c2b924280c92ae5855ed70",
+        "schemaType": "object",
+        "properties": [
+          "delay_seconds",
+          "noop",
+          "prompt",
+          "reason",
+          "stop"
+        ],
+        "required": []
+      },
+      {
+        "name": "activate_skill",
+        "schemaSha256": "90bbc99662ee545e39194a581cb383e7d4c6ed4790267b8c0baae0172a9a1f31",
+        "schemaType": "object",
+        "properties": [
+          "arguments",
+          "name"
+        ],
+        "required": [
+          "name"
+        ]
+      },
+      {
+        "name": "agent",
+        "schemaSha256": "2a2551604fd5358d7517265be69c65c6cfab919346279f4a5d51c5b400d19e8d",
+        "schemaType": "object",
+        "properties": [
+          "description",
+          "model",
+          "prompt",
+          "run_in_background",
+          "subagent_type"
+        ],
+        "required": [
+          "description",
+          "prompt"
+        ]
+      },
+      {
+        "name": "agent_output",
+        "schemaSha256": "23e95dd22d90f23e0092c8793af902384bbde786c2d0472c62013ea208ee4ab4",
+        "schemaType": "object",
+        "properties": [
+          "action",
+          "agent_id"
+        ],
+        "required": []
+      },
+      {
+        "name": "ask_user_question",
+        "schemaSha256": "24437135036b0f2428389916aa422da0186d6272eef28653aadcd17080496ac8",
+        "schemaType": "object",
+        "properties": [
+          "metadata",
+          "questions"
+        ],
+        "required": [
+          "questions"
+        ]
+      },
+      {
+        "name": "search_tools",
+        "schemaSha256": "5c6cd741e36e3da05f387da95655d46c2d492229416729754530db597d686d93",
+        "schemaType": "object",
+        "properties": [
+          "max_results",
+          "query"
+        ],
+        "required": [
+          "query"
+        ]
+      }
+    ]
+  },
+  "cases": [
+    {
+      "label": "native-stdio",
+      "probeRunId": "5d713380-b2c7-4b88-9a1b-2cfa5b08c1d7",
+      "sessionId": "7ea116b3-722b-4610-baa7-cbd6400e7264",
+      "pid": 34647,
+      "stopReason": "end_turn",
+      "providerRequests": 4,
+      "searchCalls": 3,
+      "requestsAfterSearchSchema": 3,
+      "targetInRequestCount": 0,
+      "targetModelCallCount": 0,
+      "mcpInitialized": true,
+      "mcpDiscovered": true,
+      "actualTargetCalls": 0,
+      "issuedReceipts": [],
+      "returnedReceipts": [],
+      "fullChainPassed": false,
+      "finalUnavailable": true,
+      "observationErrors": 0,
+      "systemModReady": true,
+      "bootstrapSha256": "7511af1f429e4e951958250f0e97a8f2fbb19e5d4a5f9d1fc31781ec699c1a9a",
+      "hostStopped": true,
+      "delivery": {
+        "path": "native",
+        "nativeServerCount": 1,
+        "sessionServerCount": 0,
+        "transport": "stdio",
+        "sessionMethod": "session/new",
+        "absoluteLauncher": true,
+        "explicitCwd": false
+      },
+      "mcpEvents": [
+        {
+          "time": "2026-10-06T14:44:15.224Z",
+          "method": "initialize"
+        },
+        {
+          "time": "2026-10-06T14:44:15.225Z",
+          "method": "notifications/initialized"
+        },
+        {
+          "time": "2026-10-06T14:44:15.227Z",
+          "method": "tools/list"
+        }
+      ],
+      "providerRequestsDetail": [
+        {
+          "time": "2026-10-06T14:44:15.307Z",
+          "requestId": 1,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": false,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:19.619Z",
+          "requestId": 2,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:22.678Z",
+          "requestId": 3,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:26.312Z",
+          "requestId": 4,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        }
+      ],
+      "providerResponses": [
+        {
+          "time": "2026-10-06T14:44:19.582Z",
+          "requestId": 1,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_ddjAv0XWmGaeqfYoI8zyjVEX",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:44:22.616Z",
+          "requestId": 2,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_5e44ae513cb74cc9ad1164085127ada9",
+              "name": "search_tools",
+              "argumentsSha256": "78c281ad842b3734f194c8b43b57292f226fcb947008edd5f063610a7d576387",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:44:26.252Z",
+          "requestId": 3,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_61a9682b840a41af824385d29ee63be3",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:44:29.428Z",
+          "requestId": 4,
+          "status": 200,
+          "toolCalls": [],
+          "finishReasons": [
+            "stop"
+          ],
+          "receipts": [],
+          "unavailable": true,
+          "parseErrors": 0
+        }
+      ],
+      "acpToolUpdates": [
+        {
+          "time": "2026-10-06T14:44:19.586Z",
+          "update": "tool_call",
+          "toolCallId": "call_ddjAv0XWmGaeqfYoI8zyjVEX",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:19.594Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_ddjAv0XWmGaeqfYoI8zyjVEX",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:19.600Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_ddjAv0XWmGaeqfYoI8zyjVEX",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:22.621Z",
+          "update": "tool_call",
+          "toolCallId": "call_5e44ae513cb74cc9ad1164085127ada9",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:22.628Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_5e44ae513cb74cc9ad1164085127ada9",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:22.633Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_5e44ae513cb74cc9ad1164085127ada9",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:26.257Z",
+          "update": "tool_call",
+          "toolCallId": "call_61a9682b840a41af824385d29ee63be3",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:26.264Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_61a9682b840a41af824385d29ee63be3",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:26.269Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_61a9682b840a41af824385d29ee63be3",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        }
+      ],
+      "final": {
+        "receipts": [],
+        "unavailable": true
+      }
+    },
+    {
+      "label": "acp-stdio",
+      "probeRunId": "d954ad65-04bd-439c-8d0c-3bfac30cb734",
+      "sessionId": "e22a785f-c4fe-45d4-b9c0-d5916c77b810",
+      "pid": 34781,
+      "stopReason": "end_turn",
+      "providerRequests": 10,
+      "searchCalls": 9,
+      "requestsAfterSearchSchema": 9,
+      "targetInRequestCount": 0,
+      "targetModelCallCount": 0,
+      "mcpInitialized": true,
+      "mcpDiscovered": true,
+      "actualTargetCalls": 0,
+      "issuedReceipts": [],
+      "returnedReceipts": [],
+      "fullChainPassed": false,
+      "finalUnavailable": true,
+      "observationErrors": 0,
+      "systemModReady": true,
+      "bootstrapSha256": "7511af1f429e4e951958250f0e97a8f2fbb19e5d4a5f9d1fc31781ec699c1a9a",
+      "hostStopped": true,
+      "delivery": {
+        "path": "acp",
+        "nativeServerCount": 0,
+        "sessionServerCount": 1,
+        "transport": "stdio",
+        "sessionMethod": "session/new",
+        "absoluteLauncher": true,
+        "explicitCwd": false
+      },
+      "mcpEvents": [
+        {
+          "time": "2026-10-06T14:44:30.212Z",
+          "method": "initialize"
+        },
+        {
+          "time": "2026-10-06T14:44:30.217Z",
+          "method": "notifications/initialized"
+        },
+        {
+          "time": "2026-10-06T14:44:30.220Z",
+          "method": "tools/list"
+        }
+      ],
+      "providerRequestsDetail": [
+        {
+          "time": "2026-10-06T14:44:30.311Z",
+          "requestId": 1,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": false,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:35.581Z",
+          "requestId": 2,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:39.213Z",
+          "requestId": 3,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:42.436Z",
+          "requestId": 4,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:47.169Z",
+          "requestId": 5,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:44:51.584Z",
+          "requestId": 6,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:00.179Z",
+          "requestId": 7,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:04.291Z",
+          "requestId": 8,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:08.286Z",
+          "requestId": 9,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:14.510Z",
+          "requestId": 10,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        }
+      ],
+      "providerResponses": [
+        {
+          "time": "2026-10-06T14:44:35.503Z",
+          "requestId": 1,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_gXNhi5j9WHCY1SZwHoYIYyIX",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:44:39.151Z",
+          "requestId": 2,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_2d5f9ae672a4468fad0934672ac46cbd",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:44:42.376Z",
+          "requestId": 3,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_170304f9918c4300804198b761462541",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:44:47.109Z",
+          "requestId": 4,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_oNN2a02MF8T6zAVT1HcBEQyU",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:44:51.522Z",
+          "requestId": 5,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_402e70a6bcc3491bb38bee51d35d0c41",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:00.119Z",
+          "requestId": 6,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_a28f0cc8d4964f6cbf1fffc1df0ef32d",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:04.229Z",
+          "requestId": 7,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_cb4a7fd7770c477b9a7740255e56ad0b",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:08.225Z",
+          "requestId": 8,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_ZRiuCiYYE7BT7mMUVLhospWs",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:14.450Z",
+          "requestId": 9,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_8xL6de09WL1LjbuBQQ8QCeUy",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:18.009Z",
+          "requestId": 10,
+          "status": 200,
+          "toolCalls": [],
+          "finishReasons": [
+            "stop"
+          ],
+          "receipts": [],
+          "unavailable": true,
+          "parseErrors": 0
+        }
+      ],
+      "acpToolUpdates": [
+        {
+          "time": "2026-10-06T14:44:35.525Z",
+          "update": "tool_call",
+          "toolCallId": "call_gXNhi5j9WHCY1SZwHoYIYyIX",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:35.531Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_gXNhi5j9WHCY1SZwHoYIYyIX",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:35.535Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_gXNhi5j9WHCY1SZwHoYIYyIX",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:39.157Z",
+          "update": "tool_call",
+          "toolCallId": "call_2d5f9ae672a4468fad0934672ac46cbd",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:39.164Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_2d5f9ae672a4468fad0934672ac46cbd",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:39.168Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_2d5f9ae672a4468fad0934672ac46cbd",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:42.380Z",
+          "update": "tool_call",
+          "toolCallId": "call_170304f9918c4300804198b761462541",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:42.388Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_170304f9918c4300804198b761462541",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:42.393Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_170304f9918c4300804198b761462541",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:47.113Z",
+          "update": "tool_call",
+          "toolCallId": "call_oNN2a02MF8T6zAVT1HcBEQyU",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:47.120Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_oNN2a02MF8T6zAVT1HcBEQyU",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:47.125Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_oNN2a02MF8T6zAVT1HcBEQyU",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:51.526Z",
+          "update": "tool_call",
+          "toolCallId": "call_402e70a6bcc3491bb38bee51d35d0c41",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:51.536Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_402e70a6bcc3491bb38bee51d35d0c41",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:44:51.544Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_402e70a6bcc3491bb38bee51d35d0c41",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:00.123Z",
+          "update": "tool_call",
+          "toolCallId": "call_a28f0cc8d4964f6cbf1fffc1df0ef32d",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:00.131Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_a28f0cc8d4964f6cbf1fffc1df0ef32d",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:00.135Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_a28f0cc8d4964f6cbf1fffc1df0ef32d",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:04.234Z",
+          "update": "tool_call",
+          "toolCallId": "call_cb4a7fd7770c477b9a7740255e56ad0b",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:04.242Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_cb4a7fd7770c477b9a7740255e56ad0b",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:04.247Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_cb4a7fd7770c477b9a7740255e56ad0b",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:08.230Z",
+          "update": "tool_call",
+          "toolCallId": "call_ZRiuCiYYE7BT7mMUVLhospWs",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:08.238Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_ZRiuCiYYE7BT7mMUVLhospWs",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:08.243Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_ZRiuCiYYE7BT7mMUVLhospWs",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:14.454Z",
+          "update": "tool_call",
+          "toolCallId": "call_8xL6de09WL1LjbuBQQ8QCeUy",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:14.462Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_8xL6de09WL1LjbuBQQ8QCeUy",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:14.467Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_8xL6de09WL1LjbuBQQ8QCeUy",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        }
+      ],
+      "final": {
+        "receipts": [],
+        "unavailable": false
+      }
+    },
+    {
+      "label": "native-http",
+      "probeRunId": "71212e53-45f9-4f3a-aa4e-66430dce22aa",
+      "sessionId": "a8604372-7054-4f97-aaa6-526ed937e65d",
+      "pid": 34998,
+      "stopReason": "end_turn",
+      "providerRequests": 5,
+      "searchCalls": 4,
+      "requestsAfterSearchSchema": 4,
+      "targetInRequestCount": 0,
+      "targetModelCallCount": 0,
+      "mcpInitialized": true,
+      "mcpDiscovered": true,
+      "actualTargetCalls": 0,
+      "issuedReceipts": [],
+      "returnedReceipts": [],
+      "fullChainPassed": false,
+      "finalUnavailable": true,
+      "observationErrors": 0,
+      "systemModReady": true,
+      "bootstrapSha256": "7511af1f429e4e951958250f0e97a8f2fbb19e5d4a5f9d1fc31781ec699c1a9a",
+      "hostStopped": true,
+      "delivery": {
+        "path": "native",
+        "nativeServerCount": 1,
+        "sessionServerCount": 0,
+        "transport": "http",
+        "sessionMethod": "session/new",
+        "absoluteLauncher": false,
+        "explicitCwd": false
+      },
+      "mcpEvents": [
+        {
+          "time": "2026-10-06T14:45:18.696Z",
+          "method": "initialize"
+        },
+        {
+          "time": "2026-10-06T14:45:18.699Z",
+          "method": "notifications/initialized"
+        },
+        {
+          "time": "2026-10-06T14:45:18.704Z",
+          "method": "tools/list"
+        }
+      ],
+      "providerRequestsDetail": [
+        {
+          "time": "2026-10-06T14:45:18.777Z",
+          "requestId": 1,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": false,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:23.735Z",
+          "requestId": 2,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:30.987Z",
+          "requestId": 3,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:34.820Z",
+          "requestId": 4,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:39.437Z",
+          "requestId": 5,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        }
+      ],
+      "providerResponses": [
+        {
+          "time": "2026-10-06T14:45:23.669Z",
+          "requestId": 1,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_KIy8XjFLPYl3Uy5odaS12Jox",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:30.926Z",
+          "requestId": 2,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_a2df69fd17c04395a7d33a24d94094f5",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:34.762Z",
+          "requestId": 3,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_51af3ca24fc146239b8203314189de57",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:39.376Z",
+          "requestId": 4,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_4hMZ4bskYxdAR6kCk4vzVetN",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:46.878Z",
+          "requestId": 5,
+          "status": 200,
+          "toolCalls": [],
+          "finishReasons": [
+            "stop"
+          ],
+          "receipts": [],
+          "unavailable": true,
+          "parseErrors": 0
+        }
+      ],
+      "acpToolUpdates": [
+        {
+          "time": "2026-10-06T14:45:23.679Z",
+          "update": "tool_call",
+          "toolCallId": "call_KIy8XjFLPYl3Uy5odaS12Jox",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:23.685Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_KIy8XjFLPYl3Uy5odaS12Jox",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:23.692Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_KIy8XjFLPYl3Uy5odaS12Jox",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:30.931Z",
+          "update": "tool_call",
+          "toolCallId": "call_a2df69fd17c04395a7d33a24d94094f5",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:30.939Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_a2df69fd17c04395a7d33a24d94094f5",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:30.943Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_a2df69fd17c04395a7d33a24d94094f5",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:34.766Z",
+          "update": "tool_call",
+          "toolCallId": "call_51af3ca24fc146239b8203314189de57",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:34.773Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_51af3ca24fc146239b8203314189de57",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:34.778Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_51af3ca24fc146239b8203314189de57",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:39.380Z",
+          "update": "tool_call",
+          "toolCallId": "call_4hMZ4bskYxdAR6kCk4vzVetN",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:39.388Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_4hMZ4bskYxdAR6kCk4vzVetN",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:39.400Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_4hMZ4bskYxdAR6kCk4vzVetN",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        }
+      ],
+      "final": {
+        "receipts": [],
+        "unavailable": true
+      }
+    },
+    {
+      "label": "acp-http",
+      "probeRunId": "7c34d113-95ec-41c9-88c2-5377a82815ec",
+      "sessionId": "0e27c1f9-9e86-474e-b1e1-1349a45f7beb",
+      "pid": 35467,
+      "stopReason": "end_turn",
+      "providerRequests": 9,
+      "searchCalls": 8,
+      "requestsAfterSearchSchema": 8,
+      "targetInRequestCount": 0,
+      "targetModelCallCount": 0,
+      "mcpInitialized": true,
+      "mcpDiscovered": true,
+      "actualTargetCalls": 0,
+      "issuedReceipts": [],
+      "returnedReceipts": [],
+      "fullChainPassed": false,
+      "finalUnavailable": true,
+      "observationErrors": 0,
+      "systemModReady": true,
+      "bootstrapSha256": "7511af1f429e4e951958250f0e97a8f2fbb19e5d4a5f9d1fc31781ec699c1a9a",
+      "hostStopped": true,
+      "delivery": {
+        "path": "acp",
+        "nativeServerCount": 0,
+        "sessionServerCount": 1,
+        "transport": "http",
+        "sessionMethod": "session/new",
+        "absoluteLauncher": false,
+        "explicitCwd": false
+      },
+      "mcpEvents": [
+        {
+          "time": "2026-10-06T14:45:47.586Z",
+          "method": "initialize"
+        },
+        {
+          "time": "2026-10-06T14:45:47.590Z",
+          "method": "notifications/initialized"
+        },
+        {
+          "time": "2026-10-06T14:45:47.595Z",
+          "method": "tools/list"
+        }
+      ],
+      "providerRequestsDetail": [
+        {
+          "time": "2026-10-06T14:45:47.683Z",
+          "requestId": 1,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": false,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:51.547Z",
+          "requestId": 2,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:45:54.657Z",
+          "requestId": 3,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:46:00.095Z",
+          "requestId": 4,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:46:03.988Z",
+          "requestId": 5,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:46:08.361Z",
+          "requestId": 6,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:46:15.937Z",
+          "requestId": 7,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:46:21.001Z",
+          "requestId": 8,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        },
+        {
+          "time": "2026-10-06T14:46:25.118Z",
+          "requestId": 9,
+          "model": "gpt-6-sol",
+          "stream": true,
+          "toolChoice": "auto",
+          "parallelToolCalls": null,
+          "targetCallable": false,
+          "targetSchemaInToolResult": true,
+          "inputReceipts": [],
+          "toolSetSha256": "f21600349c73edcdace2fe164fb09da15c9daab505eb25c7fe99b3b8d6b1efbf"
+        }
+      ],
+      "providerResponses": [
+        {
+          "time": "2026-10-06T14:45:51.512Z",
+          "requestId": 1,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_N7yCglwOttKrr4wcavRv8NXQ",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:45:54.626Z",
+          "requestId": 2,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_aebe2a4a58c64710ad9033499a211c49",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:46:00.064Z",
+          "requestId": 3,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_kc522g5dGIHGzJlHBbDAHCOC",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:46:03.958Z",
+          "requestId": 4,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_2f8465a29d294f51bbb1644da37cb043",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:46:08.300Z",
+          "requestId": 5,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_SRG3mxnABR2Z9XV3RthWzDpc",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:46:15.903Z",
+          "requestId": 6,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_llPKEOxle1rGehvzpyinU5a9",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:46:20.939Z",
+          "requestId": 7,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_0kyaH3UZVEu0YkPaX2iduUVi",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:46:25.059Z",
+          "requestId": 8,
+          "status": 200,
+          "toolCalls": [
+            {
+              "id": "call_WFZZFOp51m9ISrezNaShrdCp",
+              "name": "search_tools",
+              "argumentsSha256": "e5a5903b9debbd0e86d9bd3846eeec2af276075d6e76a6ee6073f05ec4d3ae2d",
+              "emptyArguments": false
+            }
+          ],
+          "finishReasons": [
+            "tool_calls"
+          ],
+          "receipts": [],
+          "unavailable": false,
+          "parseErrors": 0
+        },
+        {
+          "time": "2026-10-06T14:46:34.517Z",
+          "requestId": 9,
+          "status": 200,
+          "toolCalls": [],
+          "finishReasons": [
+            "stop"
+          ],
+          "receipts": [],
+          "unavailable": true,
+          "parseErrors": 0
+        }
+      ],
+      "acpToolUpdates": [
+        {
+          "time": "2026-10-06T14:45:51.516Z",
+          "update": "tool_call",
+          "toolCallId": "call_N7yCglwOttKrr4wcavRv8NXQ",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:51.523Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_N7yCglwOttKrr4wcavRv8NXQ",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:51.529Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_N7yCglwOttKrr4wcavRv8NXQ",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:54.627Z",
+          "update": "tool_call",
+          "toolCallId": "call_aebe2a4a58c64710ad9033499a211c49",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:54.632Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_aebe2a4a58c64710ad9033499a211c49",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:45:54.636Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_aebe2a4a58c64710ad9033499a211c49",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:00.065Z",
+          "update": "tool_call",
+          "toolCallId": "call_kc522g5dGIHGzJlHBbDAHCOC",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:00.073Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_kc522g5dGIHGzJlHBbDAHCOC",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:00.078Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_kc522g5dGIHGzJlHBbDAHCOC",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:03.959Z",
+          "update": "tool_call",
+          "toolCallId": "call_2f8465a29d294f51bbb1644da37cb043",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:03.967Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_2f8465a29d294f51bbb1644da37cb043",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:03.974Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_2f8465a29d294f51bbb1644da37cb043",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:08.304Z",
+          "update": "tool_call",
+          "toolCallId": "call_SRG3mxnABR2Z9XV3RthWzDpc",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:08.311Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_SRG3mxnABR2Z9XV3RthWzDpc",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:08.317Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_SRG3mxnABR2Z9XV3RthWzDpc",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:15.905Z",
+          "update": "tool_call",
+          "toolCallId": "call_llPKEOxle1rGehvzpyinU5a9",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:15.913Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_llPKEOxle1rGehvzpyinU5a9",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:15.918Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_llPKEOxle1rGehvzpyinU5a9",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:20.943Z",
+          "update": "tool_call",
+          "toolCallId": "call_0kyaH3UZVEu0YkPaX2iduUVi",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:20.951Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_0kyaH3UZVEu0YkPaX2iduUVi",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:20.956Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_0kyaH3UZVEu0YkPaX2iduUVi",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:25.062Z",
+          "update": "tool_call",
+          "toolCallId": "call_WFZZFOp51m9ISrezNaShrdCp",
+          "status": "pending",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:25.069Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_WFZZFOp51m9ISrezNaShrdCp",
+          "status": "in_progress",
+          "targetSchemaPresent": false,
+          "receipts": []
+        },
+        {
+          "time": "2026-10-06T14:46:25.074Z",
+          "update": "tool_call_update",
+          "toolCallId": "call_WFZZFOp51m9ISrezNaShrdCp",
+          "status": "completed",
+          "targetSchemaPresent": true,
+          "receipts": []
+        }
+      ],
+      "final": {
+        "receipts": [],
+        "unavailable": true
+      }
+    }
+  ],
+  "providerPositiveControl": {
+    "diagnosticOnly": true,
+    "commandAcpAcceptance": false,
+    "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+    "sessionId": "provider-control-7804c3dc-555c-44af-b93a-4386eb862c41",
+    "scriptSha256": "06e8fae3d7c835a0c5324a86ba9417e9eeaf0c4d9fffb3bb5abc77d7ee0caa78",
+    "model": "sub2api/gpt-6-sol",
+    "controlPassed": true,
+    "actualTargetCalls": 1,
+    "receipt": "RCP_5bcc0e3e-d0f7-4480-9fa4-c31cec9a3a62",
+    "modelReturnedReceipt": true,
+    "providerRequests": 2,
+    "scope": "Diagnostic provider/MCP client, not Command ACP or Rovai AgentRun; direct request contains the actual schema, auto tool choice, one tool.",
+    "events": [
+      {
+        "time": "2026-10-06T14:47:59.308Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "mcp",
+        "method": "initialize"
+      },
+      {
+        "time": "2026-10-06T14:47:59.310Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "mcp",
+        "method": "notifications/initialized"
+      },
+      {
+        "time": "2026-10-06T14:47:59.321Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "mcp",
+        "method": "tools/list"
+      },
+      {
+        "time": "2026-10-06T14:47:59.324Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "sessionId": "provider-control-7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "provider_request",
+        "requestId": 1,
+        "model": "gpt-6-sol",
+        "stream": true,
+        "tools": [
+          {
+            "name": "mcp__rovai_delivery64__issue_receipt",
+            "schemaSha256": "ff1b2d8857c8e4a2cd87b566a798c5d1cd937fe8a13363e59a51231b4b328939",
+            "schemaType": "object",
+            "properties": [],
+            "required": []
+          }
+        ],
+        "toolChoice": "auto",
+        "parallelToolCalls": null,
+        "targetCallable": true,
+        "targetSchemaInToolResult": false,
+        "inputReceipts": []
+      },
+      {
+        "time": "2026-10-06T14:48:01.862Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "sessionId": "provider-control-7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "provider_response",
+        "requestId": 1,
+        "status": 200,
+        "toolCalls": [
+          {
+            "id": "call_b1aTVfQmD5E4LbcqmYel05ow",
+            "name": "mcp__rovai_delivery64__issue_receipt",
+            "argumentsSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "emptyArguments": true
+          }
+        ],
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "receipts": [],
+        "unavailable": false,
+        "parseErrors": 0
+      },
+      {
+        "time": "2026-10-06T14:48:01.872Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "mcp",
+        "method": "tools/call",
+        "target": true
+      },
+      {
+        "time": "2026-10-06T14:48:01.880Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "receipt",
+        "receipt": "RCP_5bcc0e3e-d0f7-4480-9fa4-c31cec9a3a62"
+      },
+      {
+        "time": "2026-10-06T14:48:01.889Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "sessionId": "provider-control-7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "provider_request",
+        "requestId": 2,
+        "model": "gpt-6-sol",
+        "stream": true,
+        "tools": [
+          {
+            "name": "mcp__rovai_delivery64__issue_receipt",
+            "schemaSha256": "ff1b2d8857c8e4a2cd87b566a798c5d1cd937fe8a13363e59a51231b4b328939",
+            "schemaType": "object",
+            "properties": [],
+            "required": []
+          }
+        ],
+        "toolChoice": "auto",
+        "parallelToolCalls": null,
+        "targetCallable": true,
+        "targetSchemaInToolResult": false,
+        "inputReceipts": [
+          "RCP_5bcc0e3e-d0f7-4480-9fa4-c31cec9a3a62"
+        ]
+      },
+      {
+        "time": "2026-10-06T14:48:06.948Z",
+        "probeRunId": "7804c3dc-555c-44af-b93a-4386eb862c41",
+        "sessionId": "provider-control-7804c3dc-555c-44af-b93a-4386eb862c41",
+        "kind": "provider_response",
+        "requestId": 2,
+        "status": 200,
+        "toolCalls": [],
+        "finishReasons": [
+          "stop"
+        ],
+        "receipts": [
+          "RCP_5bcc0e3e-d0f7-4480-9fa4-c31cec9a3a62"
+        ],
+        "unavailable": false,
+        "parseErrors": 0
+      }
+    ]
+  },
+  "reusedEvidence": [
+    "../runtime-monitoring/command-cline-completion-2026-10-05.evidence.json",
+    "../runtime-monitoring/command-cline-native-system-2026-10-06.evidence.json"
+  ],
+  "notRetested": [
+    "ACP cold resume/load candidate delivery",
+    "ACP native-name collision priority",
+    "ACP cwd and literal env/headers",
+    "ACP assignment update/revoke and warm/cold fencing",
+    "product Session/Run receipt association; Command never reached tools/call",
+    "other Runtime full checklist and SIGKILL matrix"
+  ],
+  "notRetestedReason": "No production switch: the first controlled layer already fails identically on both channels; these are prerequisites for any future ACP adoption, not passed tests.",
+  "verification": {
+    "nodeProbeTests": {
+      "passed": 5,
+      "failed": 0
+    },
+    "documentationTests": {
+      "passed": 10,
+      "failed": 0
+    },
+    "documentationVersionAndDecisionGates": "passed",
+    "documentationCiBase": "be9bdd3c06cbdaaf3421a5e73a8361b710700022",
+    "publicCredentialValueMatches": 0,
+    "commandBinaryUnmodified": true,
+    "remainingProbeProcessGroupMembers": 0,
+    "temporaryAuthAndProviderCopiesRemoved": true,
+    "dailyAppAndSourceHomeModified": false,
+    "productionRuntimeFilesChanged": false
+  }
+}

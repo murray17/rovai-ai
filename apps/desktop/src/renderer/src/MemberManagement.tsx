@@ -1178,7 +1178,7 @@ export const MemberRuntimeForm = forwardRef<
     : persistedAdmission
   const persistedRuntimeLocked =
     agent.runtimeConfiguration !== null &&
-    (agent.runtimeConfiguration.adapterKind === 'cursor-agent' ||
+    (!VISIBLE_PRODUCT_RUNTIMES.includes(agent.runtimeConfiguration.adapterKind) ||
       (hostPlatform !== null &&
         !runtimePlatformAdmissionAllowsUse(persistedAdmission)))
   const runtimeMutationAllowed =
