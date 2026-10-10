@@ -151,6 +151,7 @@ import { formatThreadTitle } from './camp-title'
 import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
+import { mentionCandidateRuntime } from './mention-runtime'
 import { SafeMarkdown } from './SafeMarkdown'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
@@ -207,7 +208,7 @@ import {
   type GroupedExecutionProgressItem,
   type ToolProgressItem
 } from './execution-tool-grouping'
-import { UiText, getInterfaceLanguage, uiAttribute, useUiText } from './interface-language'
+import { UiText, getInterfaceLanguage, uiAttribute, useInterfaceLanguage, useUiText } from './interface-language'
 
 function localizedAgentRunPresentation(
   run: Parameters<typeof agentRunPresentation>[0],
@@ -1754,6 +1755,7 @@ export function ThreadWorkspace({
   onNotifyError?(message: string): void
 }): JSX.Element {
   const client = useThreadClient()
+  const interfaceLanguage = useInterfaceLanguage()
   const { profile: currentUserProfile } = useCurrentUserProfile()
   const currentUserName = currentUserDisplayName(currentUserProfile)
   const filePreview = useOptionalFilePreview()
@@ -2199,9 +2201,10 @@ export function ThreadWorkspace({
       displayName: member.displayName,
       teamRole: member.teamRole,
       avatarRef: member.avatarRef,
+      ...mentionCandidateRuntime(profileById.get(member.agentId), installations),
       mentionable: member.membershipStatus === 'active' && member.profilePresence === 'present'
     })),
-    [snapshot.members]
+    [snapshot.members, profileById, installations, interfaceLanguage]
   )
   const canInviteFromComposer = snapshot.thread.activationState === 'pending' || Boolean(onAddMembers)
   const composerMentionCandidates = useMemo(() => {
@@ -2217,11 +2220,12 @@ export function ThreadWorkspace({
         displayName: agent.displayName,
         teamRole: agent.teamRole,
         avatarRef: agent.avatarRef,
+        ...mentionCandidateRuntime(agent, installations),
         mentionable: true,
         inThread: false
       }))
     return [...current, ...outside]
-  }, [agents, canInviteFromComposer, composerRosterMembers, snapshot.members])
+  }, [agents, canInviteFromComposer, composerRosterMembers, snapshot.members, installations, interfaceLanguage])
   useEffect(() => {
     let cancelled = false
     let requestSequence = 0

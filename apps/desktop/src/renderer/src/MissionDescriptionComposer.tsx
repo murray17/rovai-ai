@@ -1,21 +1,24 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
-import type { AgentProfile, MissionDescriptionContent } from '@contracts'
+import type { AdapterInstallation, AgentProfile, MissionDescriptionContent } from '@contracts'
 import { StructuredMentionComposer, type StructuredMentionComposerHandle } from './StructuredMentionComposer'
 import { missionContentFromDocument, missionDescriptionDocument, missionMentionIds } from './mission-description'
-import { uiAttribute } from './interface-language'
+import { uiAttribute, useInterfaceLanguage } from './interface-language'
+import { mentionCandidateRuntime } from './mention-runtime'
 
 export type MissionDescriptionComposerHandle = { startMention(): void; flush(): Promise<MissionDescriptionContent> }
 
 export const MissionDescriptionComposer = forwardRef<MissionDescriptionComposerHandle, {
   content: MissionDescriptionContent
   agents: AgentProfile[]
+  installations?: AdapterInstallation[]
   memberAgentIds: string[]
   unavailableAgentIds?: readonly string[]
   disabled: boolean
   identity: string
   onChange(content: MissionDescriptionContent): void
   onPasteFiles(files: File[]): void
-}>(function MissionDescriptionComposer({ content, agents, memberAgentIds, unavailableAgentIds, disabled, identity, onChange, onPasteFiles }, ref) {
+}>(function MissionDescriptionComposer({ content, agents, installations, memberAgentIds, unavailableAgentIds, disabled, identity, onChange, onPasteFiles }, ref) {
+  const interfaceLanguage = useInterfaceLanguage()
   const composer = useRef<StructuredMentionComposerHandle>(null)
   const local = useRef(content)
   useEffect(() => {
@@ -25,9 +28,10 @@ export const MissionDescriptionComposer = forwardRef<MissionDescriptionComposerH
   }, [content])
   const members = useMemo(() => agents.map(agent => ({
     agentId: agent.agentId, displayName: agent.displayName, teamRole: agent.teamRole, avatarRef: agent.avatarRef,
+    ...mentionCandidateRuntime(agent, installations),
     inThread: memberAgentIds.includes(agent.agentId),
     mentionable: !unavailableAgentIds?.includes(agent.agentId) && (agent.presence === 'present' || agent.presence === 'away' && memberAgentIds.includes(agent.agentId))
-  })), [agents, memberAgentIds, unavailableAgentIds])
+  })), [agents, installations, memberAgentIds, unavailableAgentIds, interfaceLanguage])
   useImperativeHandle(ref, () => ({
     startMention: () => composer.current?.startMention(),
     flush: async () => composer.current ? missionContentFromDocument((await composer.current.flush()).document) : local.current

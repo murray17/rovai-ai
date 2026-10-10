@@ -15,7 +15,9 @@ const agent: AgentProfile = { agentId: 'lead', displayName: '负责人', avatarR
   growthTopic: '', defaultCapabilities: [], presence: 'present', runtimeConfiguration: null,
   runtimeReadiness: { status: 'ready', blockers: [] }, memberOrder: 0, version: 1,
   createdAt: now, updatedAt: now, removedAt: null }
-const outside: AgentProfile = { ...agent, agentId: 'outside', displayName: '爱丽丝', teamRole: '实现者', memberOrder: 1 }
+const outside: AgentProfile = { ...agent, agentId: 'outside', displayName: '爱丽丝', teamRole: '实现者', memberOrder: 1,
+  runtimeConfiguration: { adapterKind: 'codex-cli', model: { mode: 'explicit', modelId: 'configured-test-model', options: {} },
+    permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: {} } } }
 const member = (profile: AgentProfile) => ({ agentId: profile.agentId, displayName: profile.displayName, avatarRef: null,
   teamRole: profile.teamRole, accent: '', membershipStatus: 'active' as const, leaveRequestedAt: null,
   profilePresence: 'present' as const, memberOrder: profile.memberOrder, isDefaultLead: profile === agent, version: 1 })

@@ -20,6 +20,10 @@ const appearance={...DEFAULT_APPEARANCE,preference:theme,resolvedTheme:theme} as
 applyAppearanceSnapshot(document.documentElement,appearance)
 const model=createReviewModel('web','camp')
 const profiles=[...agents, ...Array.from({length:18},(_,i)=>({...agents[i%agents.length],agentId:`extra-${i}`,displayName:`扩展队员 ${String(i+1).padStart(2,'0')}`}))]
+profiles[0] = { ...profiles[0], runtimeConfiguration: { ...profiles[0].runtimeConfiguration!, model: {mode:'explicit',modelId:'gpt-5.4',options:{}} } }
+const missionInstallations = installations.map(installation => installation.adapterKind === 'codex-cli'
+ ? {...installation,snapshot:{...installation.snapshot,models:installation.snapshot.models.map(model => model.id === 'gpt-5.4' ? {...model,displayName:'使命模型显示名'} : model)}}
+ : installation)
 const missionSourceAttachments=[
  {id:'mission-source-directory',displayName:'需求资料',kind:'directory' as const,fileCount:null,mediaType:'inode/directory',byteSize:null,previewKind:'none' as const,availability:'unknown' as const},
  {id:'mission-source-pdf',displayName:'requirements.pdf',kind:'file' as const,fileCount:1,mediaType:'application/pdf',byteSize:4096,previewKind:'none' as const,availability:'unknown' as const},
@@ -133,7 +137,7 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
  }
  if(method==='missions.cleanup.list')return structuredClone(orphanCleanups)
  if(method==='members.list')return profiles
- if(method==='runtime.installations.list')return installations
+ if(method==='runtime.installations.list')return missionInstallations
  if(method==='memory.hearthReviewItems.list')return []
  if(method==='navigation.snapshot')return nav
  if(method==='navigation.threads')return {throughGlobalSequence:nav.throughGlobalSequence,groupKeys:[],threads:[]}
