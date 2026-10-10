@@ -51,17 +51,17 @@ export function memberRuntimeConfigurationPresentation(
   const model = modelDescriptor?.displayName.trim() || modelSelection.modelId
   const effortKey = configuration.adapterKind === 'claude-code-cli'
     ? 'effort'
-    : 'reasoning_effort'
+    : configuration.adapterKind === 'pi' ? 'thinking_level' : 'reasoning_effort'
   const effortDescriptor = modelDescriptor?.options.find((option) => option.key === effortKey) ?? null
   const rawEffort = modelSelection.options[effortKey]
   const effort = effortDescriptor || typeof rawEffort === 'string'
     ? {
-        label: configuration.adapterKind === 'claude-code-cli'
+        label: configuration.adapterKind === 'claude-code-cli' || configuration.adapterKind === 'pi'
           ? uiAttribute('思考强度')
           : uiAttribute('推理强度'),
         value: typeof rawEffort === 'string' && rawEffort
           ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [])
-          :uiAttribute("跟随模型默认值")
+          : configuration.adapterKind === 'pi' ? uiAttribute('跟随 Pi 原生设置') : uiAttribute("跟随模型默认值")
       }
     : null
 
@@ -89,12 +89,13 @@ export function messageRuntimeModelPresentation(
   const descriptor = installation?.adapterKind === model.adapterKind
     ? installation.snapshot?.models.find(candidate => candidate.id === model.modelId)
     : null
-  const effortKey = model.adapterKind === 'claude-code-cli' ? 'effort' : 'reasoning_effort'
+  const effortKey = model.adapterKind === 'claude-code-cli' ? 'effort'
+    : model.adapterKind === 'pi' ? 'thinking_level' : 'reasoning_effort'
   const choices = descriptor?.options.find(option => option.key === effortKey)?.values ?? []
   return {
     model: descriptor?.displayName.trim() || model.modelId || uiAttribute('智能体默认'),
     effort: model.reasoningEffort ? {
-      label: model.adapterKind === 'claude-code-cli' ? uiAttribute('思考强度') : uiAttribute('推理强度'),
+      label: model.adapterKind === 'claude-code-cli' || model.adapterKind === 'pi' ? uiAttribute('思考强度') : uiAttribute('推理强度'),
       value: runtimeEffortValueLabel(model.reasoningEffort, choices)
     } : null
   }

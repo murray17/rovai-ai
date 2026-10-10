@@ -24,6 +24,15 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
     model.runtimeMetadata = { dshSource: 'native', ...(model.isDefault ? { dshOptionsResolved: true } : {}) }
     model.options = model.isDefault ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', values: [{ value: 'max', label: 'max' }], scope: 'run', defaultValue: null }] : []
   }
+  if (kind === 'pi') for (const [index, model] of installation.snapshot!.models.entries()) {
+    model.runtimeMetadata = { piThinkingSchemaVersion: 1, piThinkingState: index === 3 ? 'unknown' : 'known' }
+    model.options = index === 3 ? [] : [{ key: 'thinking_level', label: '思考强度', valueType: 'enum', scope: 'session', defaultValue: null,
+      values: (index === 2 ? ['off'] : index === 0 ? ['off', 'high', 'max'] : ['off', 'low', 'high']).map(value => ({ value, label: value })) }]
+  }
+  if (kind === 'pi') installation.lastProbeAttempt = { id: 'old-health-failure', installationId: installation.id,
+    status: 'failed', failureClass: 'transient', diagnosticCode: 'runtime_check_timed_out',
+    candidatePath: '/fixture/pi', executableFingerprint: 'fixture', attemptedAt: '2026-09-14T00:00:00Z',
+    retryAfter: null, failure: null }
   return installation
 }
 
@@ -40,6 +49,7 @@ function Fixture(): React.JSX.Element {
     mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
+  if (kind === 'pi' && state.piInvalidated) installation.modelCatalog.status = 'invalidated'
   const nativeDshModels = kind === 'deepseek-harness' ? fixture(kind, false, generation).snapshot!.models : []
   if (kind === 'deepseek-harness' && state.dshCacheShape) {
     installation.snapshot!.models = state.dshCacheShape === 'empty' ? []
@@ -49,6 +59,7 @@ function Fixture(): React.JSX.Element {
   Object.assign(window, { runtimeTest: Object.assign(state, {
     draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled,
     expireCatalog: () => setCatalogExpired(true),
+    invalidatePiCatalog: () => { state.piInvalidated = true; setObservation(value => value + 1) },
     setDshReadMode,
     setDshCacheShape: (shape: string | null) => { state.dshCacheShape = shape; state.dshCache = {}; setObservation(value => value + 1) },
     refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setObservation(value => value + 1) },
@@ -56,6 +67,7 @@ function Fixture(): React.JSX.Element {
     switchKind: (next: AdapterKind) => { setKind(next); setDraft(draftFromDefaults(fixture(next, false, generation).memberRuntimeDefaults!)) },
     reset: (nextPage = 'member', nextMode = 'normal') => {
       state.changes = 0
+      state.piInvalidated = false; state.piCatalogModels = null; setObservation(0)
       setPage(nextPage); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false)
       const item = fixture('codex-cli', false, 1); setKind('codex-cli')
       setDraft({ model: onboardingRuntimeSelectionFor('codex-cli', [item]).model!, permissions: item.memberRuntimeDefaults!.permissions })
@@ -64,6 +76,9 @@ function Fixture(): React.JSX.Element {
   }) })
   const catalog = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
     state.calls++
+    if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
+      cache: { ...installation.modelCatalog, observedAt: '2026-10-01T00:00:00Z' }, models: state.piCatalogModels,
+      refreshStatus: 'completed', diagnosticCode: null })
     if (kind === 'deepseek-harness' && target) {
       state.dshReads ??= []
       state.dshCache ??= {}

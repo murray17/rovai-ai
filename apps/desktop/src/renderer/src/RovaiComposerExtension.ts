@@ -4,16 +4,23 @@ import { PlainTextExtension } from '@lexical/plain-text'
 import {
   $addUpdateTag,
   $createLineBreakNode,
+  $createRangeSelection,
   $getNearestNodeFromDOMNode,
   $getSelection,
   $isNodeSelection,
   $isParagraphNode,
   $isRangeSelection,
+  $setSelection,
+  BEFORE_INPUT_COMMAND,
   CLICK_COMMAND,
   COMMAND_PRIORITY_HIGH,
+  COMPOSITION_START_COMMAND,
   CUT_COMMAND,
   FORMAT_TEXT_COMMAND,
+  KEY_ARROW_LEFT_COMMAND,
+  KEY_ARROW_RIGHT_COMMAND,
   KEY_BACKSPACE_COMMAND,
+  KEY_DELETE_COMMAND,
   KEY_ENTER_COMMAND,
   PASTE_COMMAND,
   PASTE_TAG,
@@ -23,7 +30,9 @@ import {
   SET_TEXT_FORMAT_COMMAND,
   configExtension,
   defineExtension,
-  type LexicalEditor
+  mergeRegister,
+  type LexicalEditor,
+  type RangeSelection
 } from 'lexical'
 import { ComposerAtomNode, $isComposerAtomNode } from './ComposerAtomNode'
 import {
@@ -71,7 +80,30 @@ export const ComposerAtomExtension = defineExtension({
   name: 'rovai:composer-atom',
   nodes: [ComposerAtomNode],
   register(editor) {
-    return editor.registerNodeTransform(ParagraphNode, normalizeParagraphBoundary)
+    let selectedElements = new Set<HTMLElement>()
+    return mergeRegister(
+      editor.registerNodeTransform(ParagraphNode, normalizeParagraphBoundary),
+      editor.registerUpdateListener(({ editorState }) => {
+        const nextElements = editorState.read(() => {
+          const selection = $getSelection()
+          return new Set($isNodeSelection(selection)
+            ? selection.getNodes().filter($isComposerAtomNode)
+              .map(node => editor.getElementByKey(node.getKey()))
+              .filter((element): element is HTMLElement => element !== null)
+            : [])
+        })
+        for (const element of selectedElements) {
+          if (!nextElements.has(element)) delete element.dataset.composerSelected
+        }
+        for (const element of nextElements) element.dataset.composerSelected = 'true'
+        editor.getRootElement()?.toggleAttribute('data-composer-atom-selected', nextElements.size > 0)
+        selectedElements = nextElements
+      }),
+      () => {
+        for (const element of selectedElements) delete element.dataset.composerSelected
+        editor.getRootElement()?.removeAttribute('data-composer-atom-selected')
+      }
+    )
   }
 })
 
@@ -83,18 +115,70 @@ function normalizeParagraphBoundary(paragraph: ParagraphNode): void {
   paragraph.remove()
 }
 
+// PlainTextExtension can enter a Decorator NodeSelection, but only edits and
+// navigates RangeSelection. Restore an equivalent range before handing it back.
+function $restoreComposerAtomSelection(backward = false): RangeSelection | null {
+  const selection = $getSelection()
+  if (!$isNodeSelection(selection)) return null
+  const nodes = selection.getNodes()
+  // Arrow navigation selects one Atom. Do not expand a discontiguous selection
+  // into a range that could also replace unselected text between its nodes.
+  if (nodes.length !== 1 || !$isComposerAtomNode(nodes[0])) return null
+  const node = nodes[0]
+  const parentKey = node.getParentOrThrow().getKey()
+  const offset = node.getIndexWithinParent()
+  const range = $createRangeSelection()
+  const start = backward ? range.focus : range.anchor
+  const end = backward ? range.anchor : range.focus
+  start.set(parentKey, offset, 'element')
+  end.set(parentKey, offset + 1, 'element')
+  $setSelection(range)
+  return range
+}
+
+function moveFromComposerAtomSelection(editor: LexicalEditor, event: KeyboardEvent, left: boolean): boolean {
+  if (editor.isComposing()) return false
+  const selection = $getSelection()
+  if (!$isNodeSelection(selection)) return false
+  const node = selection.getNodes()[0]
+  const parentDOM = node && editor.getElementByKey(node.getParentOrThrow().getKey())
+  const backward = parentDOM && getComputedStyle(parentDOM).direction === 'rtl' ? !left : left
+  const range = $restoreComposerAtomSelection(backward)
+  if (!range) return false
+  event.preventDefault()
+  range.modify(event.shiftKey ? 'extend' : 'move', backward, 'character')
+  return true
+}
+
 export const ComposerCommandExtension = defineExtension({
   name: 'rovai:composer-commands',
   register(editor) {
     const cleanups = [
       editor.registerCommand(FORMAT_TEXT_COMMAND, () => true, COMMAND_PRIORITY_HIGH),
       editor.registerCommand(SET_TEXT_FORMAT_COMMAND, () => true, COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(KEY_ARROW_LEFT_COMMAND,
+        event => moveFromComposerAtomSelection(editor, event, true), COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(KEY_ARROW_RIGHT_COMMAND,
+        event => moveFromComposerAtomSelection(editor, event, false), COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(BEFORE_INPUT_COMMAND, () => {
+        if (!editor.isComposing()) $restoreComposerAtomSelection()
+        return false
+      }, COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(COMPOSITION_START_COMMAND, () => {
+        if (!editor.isComposing()) $restoreComposerAtomSelection()
+        return false
+      }, COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(KEY_DELETE_COMMAND, () => {
+        if (!editor.isComposing()) $restoreComposerAtomSelection()
+        return false
+      }, COMMAND_PRIORITY_HIGH),
       editor.registerCommand(KEY_ENTER_COMMAND, (event) => {
         const runtime = runtimes.get(editor)
         if (!runtime) return false
         if (editor.isComposing() || event?.isComposing) return true
         if (event?.shiftKey || runtime.enterInsertsLineBreak?.()) {
           event?.preventDefault()
+          $restoreComposerAtomSelection()
           const selection = $getSelection()
           if ($isRangeSelection(selection)) selection.insertNodes([$createLineBreakNode()])
           return true
@@ -106,6 +190,7 @@ export const ComposerCommandExtension = defineExtension({
       editor.registerCommand(KEY_BACKSPACE_COMMAND, (event) => {
         const runtime = runtimes.get(editor)
         if (!runtime || editor.isComposing()) return false
+        $restoreComposerAtomSelection()
         const selection = $getSelection()
         if (!$isRangeSelection(selection) || !selection.isCollapsed()) return false
         const anchor = selection.anchor
@@ -175,6 +260,7 @@ export const ComposerClipboardExtension = defineExtension({
         const document = structured ? runtime.recoverClipboard(structured) : null
         event.preventDefault()
         $addUpdateTag(PASTE_TAG)
+        $restoreComposerAtomSelection()
         if (document) {
           $insertComposerDocument(document)
         } else {

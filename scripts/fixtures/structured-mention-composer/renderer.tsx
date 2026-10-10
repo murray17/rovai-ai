@@ -2,6 +2,7 @@ import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/s
 import type { ComposerDocument } from '@contracts'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { $getSelection, $isNodeSelection, $isRangeSelection, getNearestEditorFromDOMNode } from 'lexical'
 import {
   StructuredMentionComposer,
   type StructuredMentionComposerHandle,
@@ -202,6 +203,20 @@ function Harness() {
           const selected = menu?.querySelector<HTMLElement>('[aria-selected="true"]')
           const options = [...(menu?.querySelectorAll<HTMLElement>('[role="option"]') ?? [])]
           return {
+            selectionKind: getNearestEditorFromDOMNode(element).getEditorState().read(() => {
+              const current = $getSelection()
+              return $isNodeSelection(current) ? 'node' : $isRangeSelection(current) ? 'range' : 'none'
+            }),
+            caret: (() => {
+              const selection = window.getSelection()
+              return {
+                count: selection?.rangeCount,
+                collapsed: selection?.isCollapsed,
+                insideEditor: Boolean(selection?.anchorNode && element.contains(selection.anchorNode)),
+                insideAtom: Boolean(selection?.anchorNode?.parentElement?.closest('[data-composer-atom]')),
+                color: getComputedStyle(element).caretColor
+              }
+            })(),
             content: flushed?.document ?? null,
             text: element.innerText.replaceAll('\u200B', ''),
             errors: [...errors],
