@@ -11,6 +11,13 @@ last_updated: 2026-10-10
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Kimi 使用官方 Provider 配置（2026-10-10）
+
+按 User 要求退役 Rovai 专属 `kimi-code.env`、`ROVAI_KIMI_CONFIG` 与模型变量注入。
+正式运行、健康检查和模型目录探测由 Kimi 读取官方配置；旧文件不再影响启动或 Host 复用，
+不自动迁移、覆盖配置或删除历史。当前合同为 [Runtime Launch v56](../../contracts/runtime-launch-and-verification-v56.md)，
+理由见 [V1.72-D32](decisions.md#v1-72-d32)，验证记录见[实施计划](implementation-plan.md#2026-10-10-kimi-官方-provider-配置)。
+
 ## Claude Code / Codex 原生自动记忆（2026-10-10）
 
 受管执行固定关闭 Runtime 原生自动记忆，保留 Rovai Memory、项目规则、原生持久化与原 ID Resume。

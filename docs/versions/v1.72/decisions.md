@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 ---
 
 # v1.72 版本决定
@@ -715,3 +715,24 @@ D30 的唯一官方 ACP 后端保持，已有实现和正负证据保留，后�
 共享 Admission 阻止普通发现、检查和新执行；Renderer 不提供新选择。已保存配置按现有未准入合同只读，
 无关身份编辑仍可保存，历史对话、Session 记录与凭据均不删除。不保留可启动 Hub，不用 Rovai 摘要代替原生压缩。
 本轮优先调查 Command Code 模型目录与 BYOK 切换，不把两个 Runtime 的成功范围相互代用。
+
+
+<a id="v1-72-d32"></a>
+## V1.72-D32：Kimi Provider 配置回归官方来源
+
+- 状态：accepted
+- 日期：2026-10-10
+- 确认：User 消息 `e6a1d1c6-ff21-46f4-8a70-75b386cd1e6b`
+- 当前权威：[Kimi 当前边界](../../architecture/runtime-catalog-boundaries.md#kimi-code-当前边界)、[Runtime Launch v56](../../contracts/runtime-launch-and-verification-v56.md)
+
+### 背景与选择
+
+Rovai 专属 env 会把 Kimi 的默认模型切换为内存中的临时 Provider，官方配置变更因此可能未被采用。
+User 要求删除自有 env 与变量注入，正式运行、检查和目录探测统一交由原生 Kimi 读取官方配置。
+
+### 后果与替代方案
+
+退役专属文件解析、校验和 Host 摘要，不自动改写官方配置、迁移凭据、删除旧文件或重写显式模型选择。
+只在旧 env 中配置的 Provider 必须由用户在 Kimi 原生配置中提供；历史 Run/Session 保留。
+拒绝把旧 env 保留为隐式 fallback，因为这会继续形成两个配置来源；也不把旧字段自动合并进官方 TOML，
+避免覆盖用户已经配置的 Provider。MCP、权限与原生 Session 延续继续使用已有合同。
