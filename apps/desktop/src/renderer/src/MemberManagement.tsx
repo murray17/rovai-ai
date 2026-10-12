@@ -882,6 +882,14 @@ const MemberEditor = forwardRef<
                       role="alert"
                     ><UiText zh={"仍有 "} />{removal.preview.nonTerminalAgentRunCount}{' '}<UiText zh={"个未结束的执行，当前不能移除。"} /></div>
                   )}
+                  {removal.preview.soleMemberThreadCount > 0 && (
+                    <div className="inline-error app-dialog-blocker" role="alert">
+                      {uiAttribute(
+                        '该队员是 {0} 个会话中的唯一队员，请先在这些会话中添加其他队员，再移除。',
+                        String(removal.preview.soleMemberThreadCount)
+                      )}
+                    </div>
+                  )}
                   <label className="field-label app-dialog-confirm-field"><UiText zh={"输入 "} /><code>{removal.displayName}</code><UiText zh={" 以确认"} /><input
                       value={removal.confirmationName}
                       onChange={(event) =>

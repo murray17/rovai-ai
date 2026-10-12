@@ -25,6 +25,7 @@ let externalAfterUpdate = null
 let delayedReload = false
 let catalogScenario = null
 let releaseCatalog = null
+let removalBlockers = { nonTerminalAgentRunCount: 0, soleMemberThreadCount: 0 }
 const catalogCalls = []
 const catalogDisplayTimings = []
 const fixtureConsoleInfo = console.info.bind(console)
@@ -85,6 +86,7 @@ window.rovai = {
       }
     }
     if (method === 'members.list') return clone(members)
+    if (method === 'member.runtimeEnvironment.get') return { revision: 0, environment: {} }
     const command = payload.command ?? payload
     calls.push({ method, command: clone(command), commandId: payload.commandId })
     await new Promise((resolve) => setTimeout(resolve, 70))
@@ -99,12 +101,13 @@ window.rovai = {
     if (method === 'members.removalPreview')
       return {
         agentId: member.agentId,
+        displayName: member.displayName,
         version: member.version,
-        removable: true,
-        currentCampMembershipCount: 0,
+        removable: removalBlockers.nonTerminalAgentRunCount === 0 && removalBlockers.soleMemberThreadCount === 0,
+        currentThreadMembershipCount: removalBlockers.soleMemberThreadCount,
         openAssignedTaskCount: 0,
         defaultLeadThreadCount: 0,
-        nonTerminalAgentRunCount: 0
+        ...removalBlockers
       }
     if (method === 'members.reorder') {
       members = command.orderedAgentIds.map((id) =>
@@ -215,6 +218,7 @@ window.memberFixture = {
     document.documentElement.dataset.theme = theme
   },
   language: language => changeInterfaceLanguage({ setInterfaceLanguage: async interfaceLanguage => ({ interfaceLanguage }) }, language),
+  removalBlockers: value => { removalBlockers = value },
   leave: () => openSettings(),
   reset: () => {
     members = initialMembers()

@@ -1,5 +1,5 @@
 ---
-version: 18
+version: 19
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -150,10 +150,12 @@ parameters therefore show model fields only.
 
 ## Removal
 
-Permanent removal is blocked while the teammate owns a non-terminal AgentRun. Otherwise the Chinese
-confirmation shows the Camps they will leave and the number of unfinished Tasks whose responsibility
-will be released. The Renderer presents the Core preview and result; it does not independently close
-membership, Task or Lead state.
+Permanent removal is blocked while the teammate owns a non-terminal AgentRun or is the only member
+of any Thread. Show both blocker counts from the Core preview, including guidance to add another
+teammate to each affected Thread before removal. A correct name alone does not clear these blockers.
+The confirmation also shows the number of Threads they will leave and unfinished Tasks whose
+responsibility will be released. The Renderer presents the Core preview and result; it does not
+independently close membership, Task or Lead state.
 
 On conflict or failure, keep the dialog, selection, draft edits and focus. Do not claim partial
 removal succeeded.

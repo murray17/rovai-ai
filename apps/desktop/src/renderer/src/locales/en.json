@@ -1465,6 +1465,7 @@
   "个将重选": "each will be reselected",
   "仍有": "still has",
   "个未结束的执行，当前不能移除。": "uncompleted executions; cannot remove currently.",
+  "该队员是 {0} 个会话中的唯一队员，请先在这些会话中添加其他队员，再移除。": "Threads with no other teammates: {0}. Add another teammate to each before removing this one.",
   "输入": "input",
   "以确认": "to confirm",
   "区分大小写": "case-sensitive",

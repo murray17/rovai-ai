@@ -175,6 +175,60 @@ app
         ['untrusted', 'on-request', 'never (no approval prompts)']
       ])
     })
+    await check('member removal accepts Chinese confirmation and explains every Core blocker', async () => {
+      await run("window.memberFixture.change(window.memberFixture.profiles()[0].agentId, { displayName: '研究员' })")
+      await settle()
+      const dialog = '[role=dialog]'
+      const confirmation = `${dialog} .app-dialog-confirm-field input`
+      const remove = `${dialog} .danger-button`
+      const openRemoval = async () => {
+        await click(`${active}.member-detail-actions button`)
+        await click('.member-editor-menu-danger')
+        await wait(`document.querySelector(${JSON.stringify(confirmation)})`)
+        await settle()
+      }
+      await openRemoval()
+      assert.equal(await run(`document.activeElement.matches(${JSON.stringify(confirmation)})`), true)
+      await fill(confirmation, '研究生')
+      assert.equal(await run(`document.querySelector(${JSON.stringify(remove)}).disabled`), true)
+      await fill(confirmation, '研')
+      for (const character of ['究', '员']) await window.webContents.insertText(character)
+      await settle()
+      assert.equal(await run(`document.querySelector(${JSON.stringify(remove)}).disabled`), false)
+      await key('Escape')
+      for (const [runs, sole, theme, language] of [
+        [0, 2, 'day', 'zh-CN'],
+        [1, 0, 'night', 'zh-CN'],
+        [1, 2, 'night', 'en']
+      ]) {
+        await run(`window.memberFixture.removalBlockers({ nonTerminalAgentRunCount: ${runs}, soleMemberThreadCount: ${sole} }); window.memberFixture.theme('${theme}'); window.memberFixture.language('${language}')`)
+        await settle()
+        await openRemoval()
+        await fill(confirmation, '研究员')
+        assert.equal(await run(`document.querySelector(${JSON.stringify(remove)}).disabled`), true)
+        const blockers = await run(`[...document.querySelectorAll('${dialog} .app-dialog-blocker')].map(node => node.textContent)`)
+        assert.equal(blockers.length, Number(runs > 0) + Number(sole > 0))
+        if (sole > 0) {
+          const guidance = language === 'en'
+            ? 'Threads with no other teammates: 2. Add another teammate to each before removing this one.'
+            : '该队员是 2 个会话中的唯一队员，请先在这些会话中添加其他队员，再移除。'
+          assert.ok(blockers.includes(guidance), JSON.stringify(blockers))
+        }
+        await capture(`member-removal-${runs}-${sole}-${language}`)
+        await click(remove)
+        assert.equal(await run("window.memberFixture.calls.some(call => call.method === 'members.remove')"), false)
+        await key('Escape')
+      }
+      await run("window.memberFixture.removalBlockers({ nonTerminalAgentRunCount: 0, soleMemberThreadCount: 0 }); window.memberFixture.theme('day'); window.memberFixture.language('zh-CN')")
+      await settle()
+      await openRemoval()
+      await fill(confirmation, '研究员')
+      assert.equal(await run(`document.querySelector(${JSON.stringify(remove)}).disabled`), false)
+      await click(remove)
+      await wait(`!document.querySelector(${JSON.stringify(confirmation)})`)
+      assert.equal(await run("window.memberFixture.calls.find(call => call.method === 'members.remove').command.confirmationName"), '研究员')
+      await reloadPage()
+    })
     await check('sidebar dialogs dismiss without refocusing ellipsis and jump search keeps keyboard input', async () => {
       for (const label of ['重命名', '删除']) {
         await run("document.querySelector('.camp-menu-trigger').focus()")
