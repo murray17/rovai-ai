@@ -43,10 +43,14 @@ const layout=JSON.parse(prepared.stdout), data=resolve(layout.core)
 if(!continueMissing){await mkdir(project); await mkdir(native)}
 const wirePath=join(fixture,'wire.jsonl'), stagePath=join(fixture,'stage.txt')
 let stage='setup', core, campId
-const result=continueMissing?JSON.parse(await readFile(join(fixture,'result.json'),'utf8')):{adapter:kind,platform:'windows-x64',base:spawnSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).stdout.trim(),
-  coreSha256:createHash('sha256').update(await readFile(coreExecutable)).digest('hex'),fixture,data,project,stages:[],shutdowns:[],startedAt:new Date().toISOString()}
+const base=spawnSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).stdout.trim()
+const coreSha256=createHash('sha256').update(await readFile(coreExecutable)).digest('hex')
+const result=continueMissing?JSON.parse(await readFile(join(fixture,'result.json'),'utf8')):{adapter:kind,platform:'windows-x64',base,
+  coreSha256,fixture,data,project,stages:[],shutdowns:[],startedAt:new Date().toISOString()}
 const notifications=result.notifications??[]
 if(continueMissing){
+  assert.equal(result.base,base,'A different source revision requires a fresh fixture')
+  assert.equal(result.coreSha256,coreSha256,'A different Core build requires a fresh fixture')
   if(reproduceReplacementFailure){
     const missing=result.stages.find(s=>s.stage==='missing');assert.equal(kind,'copilot-cli');assert.ok(result.finishedAt&&result.historyRemoved&&missing?.status==='failed'&&!missing.timedOut&&missing.businessInputCount===0&&missing.input.every(x=>x.status!=='accepted'),'Only confirmed unsubmitted failed replacement may be examined with a new input')
   }else assert.ok(result.finishedAt&&!result.historyRemoved&&!result.stages.some(s=>s.stage==='missing'),'Only a completed cold run before deletion may continue');
@@ -66,9 +70,9 @@ async function setStage(s){stage=s;await writeFile(stagePath,s)}
 function query(sql,...params){const db=new DatabaseSync(join(data,'rovai.sqlite'),{readOnly:true});try{return db.prepare(sql).all(...params)}finally{db.close()}}
 async function wire(){try{return(await readFile(wirePath,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse)}catch(e){if(e.code==='ENOENT')return[];throw e}}
 async function startCore(){core=startQualificationCore({coreExecutable,dataDirectory:data,workingDirectory:project,runtimeCacheDirectory:join(fixture,'cache'),mcpConfigPath:join(data,'mcp.json'),onNotification:m=>{if(['agent_run.started','agent_run.native_session_bound','agent_run.native_session_continuity_lost','agent_run.terminal','error'].includes(m.method))notifications.push({stage,...m})}});const health=await core.request('health.check');result.platformAdmission=health.runtimePlatformAdmission;result.hostPlatform=health.hostPlatform}
-async function stopCore(){if(!core)return;const table=await processTable(),pids=new Set([core.pid,...descendantsOf(table,core.pid)]),identities=table.filter(p=>pids.has(p.pid));
+async function stopCore(){if(!core)return;const corePid=core.pid,table=await processTable(),pids=new Set([corePid,...descendantsOf(table,corePid)]),identities=table.filter(p=>pids.has(p.pid));
   const stopped=await core.stop();await writeFile(join(fixture,stage+'-stderr.txt'),stopped.stderrTail??'');core=null;
-  const remaining=await waitForProcessIdentitiesToExit(identities,15000);result.shutdowns.push({stage,code:stopped.code,identities,remaining});assert.equal(remaining.length,0,'Test children remain; deletion prohibited')}
+  const remaining=await waitForProcessIdentitiesToExit(identities,15000);result.shutdowns.push({stage,corePid,code:stopped.code,identities,remaining});assert.equal(remaining.length,0,'Test children remain; deletion prohibited')}
 async function waitUntil(fn,timeout=150000){const end=Date.now()+timeout;while(Date.now()<end){const v=await fn();if(v)return v;await new Promise(r=>setTimeout(r,250))}throw Error('Timed out: '+stage)}
 async function send(label){await setStage(label);const previousId=query('SELECT native_session_id AS id FROM conversation WHERE camp_id=? AND agent_id=?',campId,'agent_2')[0]?.id;
   const count=query('SELECT COUNT(*) AS n FROM agent_run WHERE camp_id=?',campId)[0].n;

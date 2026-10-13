@@ -28,17 +28,29 @@ export async function processTable() {
 
 export function descendantsOf(table, rootPid) {
   const descendants = new Set()
+  const byPid = new Map(table.map(process => [process.pid, process]))
   let changed = true
   while (changed) {
     changed = false
     for (const process of table) {
       if ((process.ppid === rootPid || descendants.has(process.ppid)) && !descendants.has(process.pid)) {
+        // Windows retains a numeric parent PID after that parent exits. Do not
+        // claim an older process when the PID has since been reused by our tree.
+        const childStarted = processStartedAtMilliseconds(process.startedAt)
+        const parentStarted = processStartedAtMilliseconds(byPid.get(process.ppid)?.startedAt)
+        if (Number.isFinite(childStarted) && Number.isFinite(parentStarted) && childStarted < parentStarted) continue
         descendants.add(process.pid)
         changed = true
       }
     }
   }
   return [...descendants]
+}
+
+export function processStartedAtMilliseconds(value) {
+  // Windows PowerShell 5 emits the .NET JSON date form; PowerShell 7 uses ISO.
+  const windowsDate = typeof value === 'string' && /^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/u.exec(value)
+  return windowsDate ? Number(windowsDate[1]) : Date.parse(value)
 }
 
 export async function waitForProcessesToExit(pids, timeoutMs = 30_000) {

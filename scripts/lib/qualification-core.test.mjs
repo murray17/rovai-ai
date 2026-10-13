@@ -1,14 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { qualificationRuntimePrivateDiagnostic, sameProcessIdentity } from './qualification-core.mjs'
+import { descendantsOf, qualificationRuntimePrivateDiagnostic, sameProcessIdentity } from './qualification-core.mjs'
 
-test('long process waits reject a reused Windows PID by creation identity', () => {
+test('process ancestry and long waits reject a reused Windows PID by creation identity', () => {
   const expected = { pid: 42, startedAt: '/Date(1000)/' }
   assert.equal(sameProcessIdentity(expected, { pid: 42, startedAt: '/Date(1000)/' }), true)
   assert.equal(sameProcessIdentity(expected, { pid: 42, startedAt: '/Date(2000)/' }), false)
   assert.equal(sameProcessIdentity(expected, { pid: 43, startedAt: '/Date(1000)/' }), false)
   assert.equal(sameProcessIdentity(expected, { pid: 42 }), true)
   assert.equal(sameProcessIdentity({ pid: 42 }, { pid: 42 }), true)
+  const table = [
+    { pid: 42, ppid: 1, startedAt: '2026-10-13T06:28:52.335Z' },
+    { pid: 43, ppid: 42, startedAt: '2026-10-13T06:29:25.755Z' },
+    // An older service retains the numeric PID of a long-exited parent. That
+    // PID now belongs to the test's git child; the service is not our child.
+    { pid: 44, ppid: 43, startedAt: '2026-10-13T05:43:43.433Z' },
+    { pid: 45, ppid: 44, startedAt: '2026-10-13T05:44:00.000Z' },
+    { pid: 46, ppid: 43, startedAt: '2026-10-13T06:29:25.764Z' },
+    { pid: 47, ppid: 42, startedAt: '2026-10-13T05:00:00.000Z' }
+  ]
+  assert.deepEqual(descendantsOf(table, 42), [43, 46])
+  const windowsPowerShellTable = table.map(p => ({ ...p, startedAt: `/Date(${Date.parse(p.startedAt)})/` }))
+  assert.deepEqual(descendantsOf(windowsPowerShellTable, 42), [43, 46])
+  assert.deepEqual(descendantsOf([{ pid: 1, ppid: 0 }, { pid: 2, ppid: 1 }], 1), [2])
 })
 
 test('private Runtime diagnostics retain bounded stderr and failed native turn details', () => {

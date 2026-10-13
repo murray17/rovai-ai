@@ -34,7 +34,19 @@ function observe(line, direction) {
 }
 const args = process.argv.slice(2)
 const resumeFlag = ['--resume', '--session-id', '--conversation'].find(flag => args.includes(flag))
+// Observe the same inherited context before launching the real CLI. Never log
+// the whole context: it also carries private transport and lease material.
+let processContext
+if (process.env.ROVAI_CLI_CONTEXT) {
+  const contextPath = process.env.ROVAI_CLI_CONTEXT, runTmp = process.env.ROVAI_RUN_TMP
+  try {
+    const context = JSON.parse(readFileSync(contextPath, 'utf8'))
+    processContext = { contextPath, processId: context.processId, runTmp,
+      runTmpExists: !!runTmp && existsSync(runTmp), unbound: context.lease == null }
+  } catch (error) { processContext = { contextPath, runTmp, readErrorCode: error.code ?? 'invalid-json' } }
+}
 record({ direction: 'launch', target: config.target, prefix: config.prefix, resumeFlag,
+  processContext,
   resumeArgument: resumeFlag ? args[args.indexOf(resumeFlag) + 1] : null,
   additionalDirectories: args.flatMap((arg, i) => arg === '--add-dir' ? [{ path: args[i + 1], exists: existsSync(args[i + 1]) }] : []),
   environment: { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE,
