@@ -3,7 +3,7 @@
 // Usage: node scripts/smoke-member-environment-upgrade.mjs /absolute/old/rovai-core [candidate-core]
 // Adapter-only regressions: replace the old Core path with --adapter-regressions.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -16,9 +16,25 @@ import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from 
 const previousCore = process.argv[2]
 const adapterRegressionsOnly = previousCore === '--adapter-regressions'
 assert.ok(adapterRegressionsOnly || (previousCore && isAbsolute(previousCore)), 'Supply the absolute pre-upgrade Core path (with its adjacent rovai CLI) or --adapter-regressions')
-assert.notEqual(process.platform, 'win32', 'This synthetic Python CLI fixture requires macOS or Linux')
-const candidateCore = resolve(process.argv[3] ?? join(import.meta.dirname, '../target/debug/rovai-core'))
-const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-env-upgrade-')))
+assert.ok(process.platform !== 'win32' || adapterRegressionsOnly, 'Windows supports the adapter regressions; no cross-version claim')
+const candidateCore = resolve(process.argv[3] ?? join(import.meta.dirname, '../target/debug/rovai-core' + (process.platform === 'win32' ? '.exe' : '')))
+const fixture = process.platform === 'win32'
+  ? join(tmpdir(), 'rovai-env-upgrade-' + crypto.randomUUID())
+  : await realpath(await mkdtemp(join(tmpdir(), 'rovai-env-upgrade-')))
+if (process.platform === 'win32') preparePrivate(fixture)
+console.error('Protocol fixture: ' + fixture)
+
+function preparePrivate(path) {
+  const result = spawnSync(candidateCore, ['--prepare-windows-data-root', path], { encoding: 'utf8', windowsHide: true })
+  assert.equal(result.status, 0, result.stderr)
+}
+async function writeFixture(path, source) {
+  if (process.platform !== 'win32') return writeFile(path, source)
+  const python = process.env.ROVAI_TEST_PYTHON
+  assert.ok(python && isAbsolute(python), 'Provide an explicit native Windows Python executable')
+  await writeFile(path + '.py', source)
+  await writeFile(path, `@echo off\r\n"${python}" -X utf8 -u "%~f0.py" %*\r\nexit /b %ERRORLEVEL%\r\n`)
+}
 const results = []
 const failures = []
 try {
@@ -33,7 +49,7 @@ try {
     } }))
     await writeFile(join(home, '.codex/config.toml'), 'model_provider = "fixture"\nmodel = "fixture-model"\n[model_providers.fixture]\nname = "Fixture"\nbase_url = "https://host.invalid/v1"\nwire_api = "responses"\nenv_key = "OPENAI_API_KEY"\n')
     const executable = join(directory, kind)
-    await writeFile(executable, syntheticCli(kind))
+    await writeFixture(executable, syntheticCli(kind))
     await chmod(executable, 0o700)
     console.error(`Isolated upgrade acceptance: data=${data}; skills=${join(data, 'managed-skill-library')}; MCP=${join(data, 'mcp.json')}`)
     const databasePath = join(data, 'rovai.sqlite')
@@ -180,7 +196,8 @@ try {
   if (failures.length) throw new AggregateError(failures, 'Native session upgrade acceptance failed')
   console.log(JSON.stringify({ ok: true, results }))
 } finally {
-  await rm(fixture, { recursive: true, force: true })
+  // Keep native Windows private evidence for the audit. Unix keeps its prior lifecycle.
+  if (process.platform !== 'win32') await rm(fixture, { recursive: true, force: true })
 }
 
 async function waitFor(probe, describe) {
@@ -193,6 +210,9 @@ async function waitFor(probe, describe) {
 }
 
 function connectCore(binary, args, cwd, env) {
+  if (process.platform === 'win32') env = { ...env, SystemRoot: process.env.SystemRoot,
+    ComSpec: process.env.ComSpec, PATH: process.env.PATH, USERPROFILE: env.HOME,
+    LOCALAPPDATA: join(cwd, 'local'), APPDATA: join(cwd, 'roaming'), TEMP: cwd, TMP: cwd }
   const child = spawn(binary, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
   const closed = once(child, 'close'), pending = new Map()
   let nextId = 0, stderr = ''
@@ -280,10 +300,11 @@ for line in sys.stdin:
 // Reuse this isolated Core/CLI owner for the production fallback sequence. The
 // CLI only speaks ACP; all preparation, binding, failure and dispatch are Core's.
 async function acpFallbackAcceptance(root, binary) {
-  const directory = join(root, 'acp-fallback'), data = join(directory, 'core'), home = join(directory, 'home')
+  const directory = join(root, 'acp-fallback'), data = join(directory, process.platform === 'win32' ? 'Core' : 'core'), home = join(directory, 'home')
+  if (process.platform === 'win32') preparePrivate(directory)
   await mkdir(home, { recursive: true })
-  const executable = join(directory, 'traecli'), log = join(directory, 'requests.jsonl')
-  await writeFile(executable, `#!/usr/bin/python3
+  const executable = join(directory, process.platform === 'win32' ? 'traecli.cmd' : 'traecli'), log = join(directory, 'requests.jsonl')
+  await writeFixture(executable, `#!/usr/bin/python3
 import json, os, sys, uuid, time
 stage = os.environ['RESUME_CASE']
 if '--version' in sys.argv:
@@ -295,7 +316,7 @@ for line in sys.stdin:
     if 'id' not in request: continue
     method, params = request['method'], request.get('params', {})
     with open(${JSON.stringify(log)}, 'a') as output:
-        output.write(json.dumps(dict(stage=stage, method=method, params=params)) + '\\n')
+        output.write(json.dumps(dict(stage=stage, method=method, params=params, environment=os.environ.get('RESUME_ENV'), pid=os.getpid())) + '\\n')
     error, error_code = None, -32603
     if method == 'initialize':
         result = {'protocolVersion':1,'agentCapabilities':{'loadSession':not stage.startswith('unsupported')}}
@@ -359,13 +380,47 @@ for line in sys.stdin:
     const configured = await core.request('members.runtime.set', { commandId: crypto.randomUUID(), command: {
       agentId: 'agent_1', expectedVersion: profile.version, adapterKind: 'trae-cn-cli',
       model: { mode: 'explicit', modelId: 'model-b', options: {} },
-      permissions: { adapterKind: 'trae-cn-cli', schemaVersion: 1, values: { permission_mode: 'default' } }
+      permissions: { adapterKind: 'trae-cn-cli', schemaVersion: 1, values: { permission_mode: 'default' } },
+      environment: { expectedRevision: 0, json: JSON.stringify({ RESUME_ENV: 'A' }) }
     } })
     assert.equal(configured.status, 'applied', JSON.stringify(configured))
     const created = await core.request('threads.create', { commandId: crypto.randomUUID(), name: 'Fallback acceptance',
       workspace: { projectPath: directory }, memberAgentIds: ['agent_1'], defaultLeadAgentId: 'agent_1', collaborationMode: 'peer' })
     campId = created.payload.threadId
-    await send('SEED_INPUT'); await settle('succeeded'); await core.stop()
+    await send('SEED_INPUT'); await settle('succeeded')
+    const firstPrompt = (await records()).find(r => r.method === 'session/prompt')
+    assert.equal(firstPrompt.environment, 'A')
+    const originalId = query('SELECT native_session_id FROM conversation WHERE camp_id=?', campId).native_session_id
+    const currentProfile = await core.request('members.get', { agentId: 'agent_1' })
+    const updated = await core.request('members.runtime.set', { commandId: crypto.randomUUID(), command: {
+      agentId: 'agent_1', expectedVersion: currentProfile.version, adapterKind: 'trae-cn-cli',
+      model: { mode: 'explicit', modelId: 'model-b', options: {} },
+      permissions: { adapterKind: 'trae-cn-cli', schemaVersion: 1, values: { permission_mode: 'default' } },
+      environment: { expectedRevision: 1, json: JSON.stringify({ RESUME_ENV: 'B' }) }
+    } })
+    assert.equal(updated.status, 'applied', JSON.stringify(updated))
+    await send('WARM_AFTER_SAVE_B'); await settle('succeeded')
+    const warmPrompt = (await records()).filter(r => r.method === 'session/prompt').at(-1)
+    assert.equal(warmPrompt.environment, 'A', 'Saved B must not mutate the running process')
+    assert.equal(warmPrompt.pid, firstPrompt.pid)
+    assert.equal(warmPrompt.params.sessionId, originalId)
+    await core.stop()
+    const fixtureDb = new DatabaseSync(join(data, 'rovai.sqlite'))
+    try {
+      fixtureDb.prepare("UPDATE conversation SET native_binding_compatibility_digest='changed-context-only' WHERE camp_id=?").run(campId)
+      fixtureDb.prepare("UPDATE native_session_bootstrap_evidence SET session_charter_digest='changed-initialization-copy' WHERE native_binding_id IN (SELECT native_binding_id FROM conversation WHERE camp_id=?)").run(campId)
+    } finally { fixtureDb.close() }
+    const coldOffset = (await records()).length
+    core = start('seed'); await core.request('health.check')
+    await send('COLD_AFTER_SAVE_B_AND_CONTEXT_CHANGE'); await settle('succeeded')
+    const coldRecords = (await records()).slice(coldOffset)
+    assert.equal(coldRecords.filter(r => r.method === 'session/load').length, 1)
+    assert.equal(coldRecords.find(r => r.method === 'session/load').params.sessionId, originalId)
+    const coldPrompt = coldRecords.find(r => r.method === 'session/prompt')
+    assert.equal(coldPrompt.environment, 'B')
+    assert.notEqual(coldPrompt.pid, firstPrompt.pid)
+    assert.equal(coldRecords.filter(r => r.method === 'session/prompt').length, 1)
+    await core.stop()
     const replacements = ['unsupported-new-fails','unsupported','load-unsupported-new-fails','load-unsupported','resume-and-load-unsupported']
     const successful = ['unsupported','load-unsupported','resume-and-load-unsupported','resume-unsupported-load-success']
     for (const stage of [...replacements, 'resume-unsupported-load-success','initialize-method-missing','model-method-missing','initialize-error','restore-error','model-error','mcp-error','cancel','timeout','input-unknown']) {
@@ -395,17 +450,18 @@ for line in sys.stdin:
       const notice = query("SELECT COUNT(*) AS total FROM event_log WHERE entity_id=? AND event_type='agent_run.native_session_continuity_lost' AND json_extract(payload_json,'$.continuation')='native_session_replaced'", run.id)
       assert.equal(notice.total, replaced ? 1 : 0, stage)
     }
-    return { kind: 'trae-cn-cli', fallbackOnce: true, replacementFailureKeepsTarget: true, unknownErrorsDoNotFallback: true, noDuplicateInput: true }
+    return { kind: 'trae-cn-cli', fallbackOnce: true, replacementFailureKeepsTarget: true, unknownErrorsDoNotFallback: true, noDuplicateInput: true, warmKeepsAAfterSavingB: true, coldUsesBAndOriginalIdAfterContextChange: true }
   } finally { await core?.stop(); await removeEphemeralRuntimeCampFilesRoot(data, { homeDirectory: home }) }
 }
 
 // Exercise both Conversation kinds through Core's normal send/bind/Fleet paths.
 // The mock retains native files and logs real switch_session targets and inputs.
 async function piConversationAcceptance(root, binary) {
-  const directory = join(root, 'pi-conversations'), data = join(directory, 'core'), home = join(directory, 'home')
+  const directory = join(root, 'pi-conversations'), data = join(directory, process.platform === 'win32' ? 'Core' : 'core'), home = join(directory, 'home')
+  if (process.platform === 'win32') preparePrivate(directory)
   await mkdir(home, { recursive: true })
-  const executable = join(directory, 'pi'), log = join(directory, 'requests.jsonl')
-  await writeFile(executable, `#!/usr/bin/python3
+  const executable = join(directory, process.platform === 'win32' ? 'pi.cmd' : 'pi'), log = join(directory, 'requests.jsonl')
+  await writeFixture(executable, `#!/usr/bin/python3
 import json, os, sys, uuid
 if '--version' in sys.argv:
     print('0.84.4'); sys.exit(0)

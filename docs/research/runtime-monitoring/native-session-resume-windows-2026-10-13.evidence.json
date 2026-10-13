@@ -1,0 +1,3294 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-13",
+  "hostPlatform": "windows-x64",
+  "baseline": "f7b3bf8d89380cea3689eb9ffcdc0ff1c971d632",
+  "coreSha256": "6ecf83c6ed78fd861597246b45c5e9bfcdad79a8d44fae375d1cd507fbb497ca",
+  "excluded": [
+    "cursor-agent",
+    "cline-cli",
+    "command-code-cli"
+  ],
+  "runtimes": [
+    {
+      "adapter": "codex-cli",
+      "version": "codex-cli 0.160.0",
+      "executable": "%USERPROFILE%\\.codex\\packages\\standalone\\releases\\0.160.0-x86_64-pc-windows-msvc\\bin\\codex.exe",
+      "executableSha256": "fdda5fa3cf3fb3d000b876720742857676293e4315e4b045fae6f8bd7e866d1d",
+      "resolvedLaunch": {
+        "target": "%USERPROFILE%\\.codex\\packages\\standalone\\releases\\0.160.0-x86_64-pc-windows-msvc\\bin\\codex.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "codex-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:46:09.433Z",
+      "finishedAt": "2026-10-13T02:49:11.254Z",
+      "privateEvidenceSha256": "6edb0150b814be7a500de903e1b4d9247a337881e31b8bba331db98c496097f6",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codex-cli://runtime-default",
+              "output_tokens": 150,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "thread/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "\\\\?\\<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codex-cli://runtime-default",
+              "output_tokens": 67,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "thread/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "\\\\?\\<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codex-cli://runtime-default",
+              "output_tokens": 67,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "thread/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "\\\\?\\<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "thread/resume",
+              "code": -32600
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codex-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\sessions\\2026\\10\\13\\rollout-2026-10-13T10-46-33-<original-session>.jsonl",
+            "backup": "<private-backup>/0-rollout-2026-10-13T10-46-33-<original-session>.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "claude-code-cli",
+      "version": "2.1.288 (Claude Code)",
+      "executable": "%USERPROFILE%\\.local\\bin\\claude.exe",
+      "executableSha256": "84304f7d4b0cd0ebcbe8318695a260151b48991a6659c3366fdd5da290c0ab91",
+      "resolvedLaunch": {
+        "target": "%USERPROFILE%\\.local\\bin\\claude.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "claude-code-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:33:56.799Z",
+      "finishedAt": "2026-10-13T02:36:38.486Z",
+      "privateEvidenceSha256": "9dc6aded1459b685dc573d1a51766ffc4b15ed8975cf35d272d81abc572c6d96",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [],
+          "resumeArguments": [
+            {
+              "flag": "--session-id",
+              "id": "<original-session>"
+            }
+          ],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "claude-code://runtime-default",
+              "output_tokens": 160,
+              "usage_source": "mixed",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [],
+          "resumeArguments": [
+            {
+              "flag": "--resume",
+              "id": "<original-session>"
+            }
+          ],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "claude-code://runtime-default",
+              "output_tokens": 50,
+              "usage_source": "mixed",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [],
+          "resumeArguments": [
+            {
+              "flag": "--resume",
+              "id": "<original-session>"
+            }
+          ],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "claude-code://runtime-default",
+              "output_tokens": 50,
+              "usage_source": "mixed",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_control_initialization_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [],
+          "resumeArguments": [
+            {
+              "flag": "--resume",
+              "id": "<original-session>"
+            }
+          ],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "claude-code://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\projects\\C--Users-reiam-AppData-Local-Temp-rovai-resume-721-byok-20261013-claude-code-cli-project-with-spaces\\<original-session>.jsonl",
+            "backup": "<private-backup>/0-<original-session>.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "pi",
+      "version": "1.0.0",
+      "executable": "%APPDATA%\\npm\\pi.cmd",
+      "executableSha256": "35ec1b2b20461eadbbaaf10e209e0ffe9a0f8cc2f948ae4670023ea85caff296",
+      "resolvedLaunch": {
+        "target": "C:\\Program Files\\nodejs\\node.exe",
+        "prefix": [
+          "%APPDATA%\\npm\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\bundle\\cli.js"
+        ]
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:2dec32c61673793e06c80e9c55fb9631473a418cb773b309f9e075216b3362b8",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "pi",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:32:46.517Z",
+      "finishedAt": "2026-10-13T02:34:52.722Z",
+      "privateEvidenceSha256": "733f96e4494b25990603edf0fce61083559f0f9b3689d43ceccaa1ef1dd97fdd",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "new_session"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "pi://runtime-default",
+              "output_tokens": 78,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "switch_session",
+              "sessionPath": "<native>\\sessions\\--C--Users-reiam-AppData-Local-Temp-rovai resume 721 byok 20261013-pi-project with spaces--\\2026-10-13T02-33-13-191Z_<original-session>.jsonl"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "pi://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "switch_session",
+              "sessionPath": "<native>\\sessions\\--C--Users-reiam-AppData-Local-Temp-rovai resume 721 byok 20261013-pi-project with spaces--\\2026-10-13T02-33-13-191Z_<original-session>.jsonl"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "pi://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<replacement-session>",
+          "originalBindingRetained": false,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 1,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "new_session"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "pi://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\sessions\\--C--Users-reiam-AppData-Local-Temp-rovai resume 721 byok 20261013-pi-project with spaces--\\2026-10-13T02-33-13-191Z_<original-session>.jsonl",
+            "backup": "<private-backup>/0-2026-10-13T02-33-13-191Z_<original-session>.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "copilot-cli",
+      "version": "GitHub Copilot CLI 1.0.91.\nRun 'copilot update' to check for updates.",
+      "executable": "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\GitHub.Copilot_Microsoft.Winget.Source_8wekyb3d8bbwe\\copilot.exe",
+      "executableSha256": "9db6bff0cf719556b0c8bf74488c2fc58adf1421ea2de240417d60ef7b7f529c",
+      "resolvedLaunch": {
+        "target": "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\GitHub.Copilot_Microsoft.Winget.Source_8wekyb3d8bbwe\\copilot.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "copilot-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:43:10.084Z",
+      "finishedAt": "2026-10-13T02:54:24.754Z",
+      "privateEvidenceSha256": "d11d372a5ab8c302c036462dba4671b7a87642f1e44a788d86e1cbc509478580",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "copilot-cli://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported_partial"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "copilot-cli://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported_partial"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "copilot-cli://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported_partial"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/load",
+              "code": -32002,
+              "data": {
+                "uri": "Session <original-session> not found"
+              }
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "copilot-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\session-state\\<original-session>",
+            "backup": "<private-backup>/0-<original-session>",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      },
+      "replacementFailureReproduction": {
+        "commandFlag": "--reproduce-replacement-failure",
+        "expectedExitCode": 1,
+        "status": "failed",
+        "originalBindingRetained": true,
+        "businessInputCount": 0,
+        "continuityNoticeCount": 0,
+        "additionalDirectoriesAtEachLaunch": [
+          [
+            {
+              "path": "\\\\?\\<core>\\attachments\\<camp>",
+              "exists": true
+            },
+            {
+              "path": "<core>\\runtime\\builtin-tools\\<id>\\run-tmp",
+              "exists": true
+            }
+          ],
+          [
+            {
+              "path": "\\\\?\\<core>\\attachments\\<camp>",
+              "exists": true
+            },
+            {
+              "path": "<core>\\runtime\\builtin-tools\\<id>\\run-tmp",
+              "exists": false
+            }
+          ]
+        ]
+      }
+    },
+    {
+      "adapter": "qwen-code",
+      "version": "0.24.7",
+      "executable": "%LOCALAPPDATA%\\qwen-code\\bin\\qwen.cmd",
+      "executableSha256": "8e5bf308520fe99c46656e7322977a955ee95160c4b0046f93d7675f71adead6",
+      "resolvedLaunch": {
+        "target": "%LOCALAPPDATA%\\qwen-code\\qwen-code\\node\\node.exe",
+        "prefix": [
+          "%LOCALAPPDATA%\\qwen-code\\qwen-code\\lib\\cli-entry.js"
+        ]
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "qwen-code",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:35:12.291Z",
+      "finishedAt": "2026-10-13T02:37:37.724Z",
+      "privateEvidenceSha256": "6a08d01ed5ffcbf99e115698d57986fdd6bf5759d06c450e5ca6b1ca191c7955",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qwen-code://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qwen-code://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qwen-code://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<replacement-session>",
+          "originalBindingRetained": false,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 1,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            },
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/resume",
+              "code": -32002,
+              "data": {
+                "uri": "session:<original-session>"
+              }
+            }
+          ],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qwen-code://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\projects\\c--users-reiam-appdata-local-temp-rovai-resume-721-byok-20261013-qwen-code-project-with-spaces\\chats\\<original-session>.jsonl",
+            "backup": "<private-backup>/0-<original-session>.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\projects\\c--users-reiam-appdata-local-temp-rovai-resume-721-byok-20261013-qwen-code-project-with-spaces\\extract-cursor.json",
+            "backup": "<private-backup>/1-extract-cursor.json",
+            "exactSessionId": "<original-session>",
+            "projectVerified": false,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\sessions\\15492-42219adb.json",
+            "backup": "<private-backup>/2-15492-42219adb.json",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\sessions\\20212-c8df4e9e.json",
+            "backup": "<private-backup>/3-20212-c8df4e9e.json",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\usage\\token-usage-2026-10.jsonl",
+            "backup": "<private-backup>/4-token-usage-2026-10.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": false,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "qoder-cli",
+      "version": "1.1.65",
+      "executable": "%USERPROFILE%\\.qoder\\bin\\qodercli\\qodercli.exe",
+      "executableSha256": "31e09220fec98e4abea6dc0dec435c009625a214a9d479217e88a5fc94060797",
+      "resolvedLaunch": {
+        "target": "%USERPROFILE%\\.qoder\\bin\\qodercli\\qodercli.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "qoder-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:35:12.577Z",
+      "finishedAt": "2026-10-13T02:37:52.430Z",
+      "privateEvidenceSha256": "22a89bae03436a8267c64309ac5aee7e111ae998ac3f3f4a4be7f1af131c16b1",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qoder-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qoder-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qoder-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<replacement-session>",
+          "originalBindingRetained": false,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 1,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            },
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/resume",
+              "code": -32602,
+              "data": {
+                "code": "INVALID_SESSION_IDENTIFIER",
+                "sessionId": "<original-session>",
+                "projectRoot": "<project with spaces>"
+              }
+            }
+          ],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "qoder-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\projects\\C--Users-reiam-AppData-Local-Temp-rovai-resume-721-byok-20261013-qoder-cli-project-with-spaces\\<original-session>\\state.json",
+            "backup": "<private-backup>/0-state.json",
+            "exactSessionId": "<original-session>",
+            "projectVerified": false,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\projects\\C--Users-reiam-AppData-Local-Temp-rovai-resume-721-byok-20261013-qoder-cli-project-with-spaces\\<original-session>.jsonl",
+            "backup": "<private-backup>/1-<original-session>.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "codebuddy-cli",
+      "version": "2.164.0",
+      "executable": "%LOCALAPPDATA%\\codebuddy\\bin\\codebuddy.exe",
+      "executableSha256": "28346e4690f375068ce5ca6c365dedc1575dc9fa228d646f998c24303d1167b9",
+      "resolvedLaunch": {
+        "target": "%LOCALAPPDATA%\\codebuddy\\bin\\codebuddy.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "codebuddy-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:36:27.482Z",
+      "finishedAt": "2026-10-13T02:39:30.708Z",
+      "privateEvidenceSha256": "7d7950427ef573b5b4a6855dc5d67d3d7336205277d212ba0c3fbdfd3bbfa7e7",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codebuddy-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codebuddy-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codebuddy-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<replacement-session>",
+          "originalBindingRetained": false,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 1,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "codebuddy-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\projects\\c-Users-reiam-AppData-Local-Temp-rovai resume 721 byok 20261013-codebuddy-cli-project with spaces\\<original-session>.jsonl",
+            "backup": "<private-backup>/0-<original-session>.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": false,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\sessions\\20692.json",
+            "backup": "<private-backup>/1-20692.json",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "kimi-code-cli",
+      "version": "2.1.1",
+      "executable": "%USERPROFILE%\\.kimi-code\\bin\\kimi.exe",
+      "executableSha256": "28096756410623f0413607b10872dc16fe8c037c87b005821030daba569a32d4",
+      "resolvedLaunch": {
+        "target": "%USERPROFILE%\\.kimi-code\\bin\\kimi.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "kimi-code-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:37:22.924Z",
+      "finishedAt": "2026-10-13T02:39:24.608Z",
+      "privateEvidenceSha256": "0c12a3cc55372fef86f98f86180bcbc56546058fdc4c5118d6f1e9a3dcf3dbc4",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kimi-code-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kimi-code-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kimi-code-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/resume",
+              "code": -32602,
+              "data": {
+                "sessionId": "<original-session>"
+              }
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kimi-code-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\sessions\\wd_project-with-spaces_c3fb98e7fa7c\\<original-session>\\state.json",
+            "backup": "<private-backup>/0-state.json",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\session_index.jsonl",
+            "backup": "<private-backup>/1-session_index.jsonl",
+            "exactSessionId": "<original-session>",
+            "projectVerified": false,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "grok-build",
+      "version": "grok 1.0.46 (2765805b9442)",
+      "executable": "%USERPROFILE%\\.grok\\bin\\grok.exe",
+      "executableSha256": "e09c0893cee4850a569bd90e7aed956ea503b34f551637d58187ca4dfb931611",
+      "resolvedLaunch": {
+        "target": "%USERPROFILE%\\.grok\\bin\\grok.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:66f80ed14dc6c2903f86af29f8209c6bee6aa72340f09a8b2b52da335242c66b",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "grok-build",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:44:59.954Z",
+      "finishedAt": "2026-10-13T02:47:00.614Z",
+      "privateEvidenceSha256": "3afe8e21415632675be51984a70af853357a4d2f0634f820ef8889b1a764e773",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "grok-build://runtime-default",
+              "output_tokens": 68,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "grok-build://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "grok-build://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/resume",
+              "code": -32603,
+              "data": {
+                "code": "FS_NOT_FOUND"
+              }
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "grok-build://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\sessions\\<project with spaces>\\<original-session>",
+            "backup": "<private-backup>/0-<original-session>",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "kiro-cli",
+      "version": "kiro-cli-chat 2.27.1",
+      "executable": "%LOCALAPPDATA%\\Kiro-Cli\\kiro-cli.exe",
+      "executableSha256": "82f65f9ee370409c322c47ce937879a57dac210e8de4a91af1c5c1513e649f47",
+      "resolvedLaunch": {
+        "target": "%LOCALAPPDATA%\\Kiro-Cli\\kiro-cli.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "native-account"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "kiro-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-12T16:19:14.042Z",
+      "finishedAt": "2026-10-12T16:21:12.129Z",
+      "privateEvidenceSha256": "860903ad8bc2ac868c69fe6dcc3741f0f2e154c871aeca4f2fa5be49c76819ce",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kiro-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kiro-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kiro-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/load",
+              "code": -32603
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "kiro-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\sessions\\cli\\<original-session>.json",
+            "backup": "<private-backup>/0-<original-session>.json",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "opencode-cli",
+      "version": "opencode v2.0.26",
+      "executable": "%USERPROFILE%\\.local\\bin\\opencode.exe",
+      "executableSha256": "e13e57a7f6b7abddec887e0b2d912d22484077c50dff5bed4f3199bcf63b6088",
+      "resolvedLaunch": {
+        "target": "%USERPROFILE%\\.local\\bin\\opencode.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "opencode-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:43:10.716Z",
+      "finishedAt": "2026-10-13T02:48:16.432Z",
+      "privateEvidenceSha256": "746d6cf8a8d0ca5170ed5a81044b684e2df81944fe73526587a63cbb6e9128a8",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "opencode-cli://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_result",
+              "usage_quality": "runtime_reported_partial"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "opencode-cli://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_result",
+              "usage_quality": "runtime_reported_partial"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "opencode-cli://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_result",
+              "usage_quality": "runtime_reported_partial"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/resume",
+              "code": -32602,
+              "data": {
+                "sessionId": "<original-session>"
+              }
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "opencode-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\data\\opencode\\opencode.db",
+            "backup": "<private-backup>/0-opencode.db",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\data\\opencode\\opencode.db-wal",
+            "backup": "<private-backup>/1-opencode.db-wal",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\data\\opencode\\opencode.db-shm",
+            "backup": "<private-backup>/2-opencode.db-shm",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "trae-cn-cli",
+      "version": "trae-cli version 0.120.52\nbuild date: 2026-08-12T01:32:37Z\nbuild commit: 6756e52a9238b6d493928e55b05127957dbfefb4\ncommit date: 2026-08-10T08:15:57Z",
+      "executable": "%LOCALAPPDATA%\\trae-cli\\bin\\trae-cli.exe",
+      "executableSha256": "051e96640ebba251927c6e8c1257bb84d6777e5ccb5282cb76ad832442d6ef52",
+      "resolvedLaunch": {
+        "target": "%LOCALAPPDATA%\\trae-cli\\bin\\trae-cli.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "trae-cn-cli",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:45:00.261Z",
+      "finishedAt": "2026-10-13T02:46:56.452Z",
+      "privateEvidenceSha256": "69c06c5e39fb1e47e4f081251825dce8e0f038ffa03b1c29d941e37ad83810a9",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "trae-cn-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "trae-cn-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "trae-cn-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/load",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/load",
+              "code": -32602
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "trae-cn-cli://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\AppData\\Local\\trae-cli\\sessions\\<original-session>",
+            "backup": "<private-backup>/0-<original-session>",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": true,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "deepseek-harness",
+      "version": "0.2.1-alpha.2",
+      "executable": "%APPDATA%\\npm\\dsh.cmd",
+      "executableSha256": "cee5d416f179f482763e1d5b218de246f9652defb7b0bf67e3bd70d91566287f",
+      "resolvedLaunch": {
+        "target": "C:\\Program Files\\nodejs\\node.exe",
+        "prefix": [
+          "%APPDATA%\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js"
+        ]
+      },
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:39c8037edac69b899a382e569f2b92135e9f48490b16321726b35375dc6444f0",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "deepseek-harness",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:43:10.386Z",
+      "finishedAt": "2026-10-13T02:45:54.194Z",
+      "privateEvidenceSha256": "92211455e12c0fa11e2155b677fea887079585cb75ffdfcd8b1726d8fd2118eb",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/new"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "[\"sub2api\",\"gpt-6\"]",
+              "output_tokens": 111,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "[\"sub2api\",\"gpt-6\"]",
+              "output_tokens": 53,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "[\"sub2api\",\"gpt-6\"]",
+              "output_tokens": 53,
+              "usage_source": "runtime_event",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>",
+                "cwd": "<project with spaces>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/resume",
+              "code": -32602
+            }
+          ],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "[\"sub2api\",\"gpt-6\"]",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\sessions\\--C-Users-reiam-AppData-Local-Temp-rovai~0020resume~0020721~0020verified~0020recorder~002020261013-deepseek-harness-project~0020with~0020spaces--\\<original-session>\\session.v4.jsonl.zstd",
+            "backup": "<private-backup>/0-session.v4.jsonl.zstd",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "antigravity-app",
+      "version": "1.2.16",
+      "executable": "%LOCALAPPDATA%\\agy\\bin\\agy.exe",
+      "executableSha256": "871e1eeb205dd3269b762e81808b7a86fe7cf73b59da51b14e3d8ac005581bfe",
+      "resolvedLaunch": {
+        "target": "%LOCALAPPDATA%\\agy\\bin\\agy.exe",
+        "prefix": []
+      },
+      "provider": {
+        "name": "native-account"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "antigravity-app",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:46:09.138Z",
+      "finishedAt": "2026-10-13T02:49:06.699Z",
+      "privateEvidenceSha256": "4ffc0af5522e72d27fd0220222bdf3109e0284e771dfcea57e4cd499cfdc7820",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "antigravity://runtime-default",
+              "output_tokens": 479,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [],
+          "resumeArguments": [
+            {
+              "flag": "--conversation",
+              "id": "<original-session>"
+            }
+          ],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "antigravity://runtime-default",
+              "output_tokens": 115,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [],
+          "resumeArguments": [
+            {
+              "flag": "--conversation",
+              "id": "<original-session>"
+            }
+          ],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "antigravity://runtime-default",
+              "output_tokens": 104,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "failed",
+          "coreError": "runtime_launch_failed",
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 0,
+          "inputDeliveryStates": [],
+          "continuityNoticeCount": 0,
+          "businessProcess": null,
+          "sameProcessAsSeed": null,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [],
+          "resumeArguments": [
+            {
+              "flag": "--conversation",
+              "id": "<original-session>"
+            }
+          ],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": false,
+          "expectedMarkerObservedInCoreNarration": false,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "antigravity://runtime-default",
+              "output_tokens": null,
+              "usage_source": null,
+              "usage_quality": null
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "%USERPROFILE%\\.gemini\\antigravity-cli\\conversations\\<original-session>.db",
+            "backup": "<private-backup>/0-<original-session>.db",
+            "exactSessionId": "<original-session>",
+            "projectVerified": null,
+            "sharedStore": true,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "%USERPROFILE%\\.gemini\\antigravity-cli\\conversations\\<original-session>.db-wal",
+            "backup": "<private-backup>/1-<original-session>.db-wal",
+            "exactSessionId": "<original-session>",
+            "projectVerified": null,
+            "sharedStore": true,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "%USERPROFILE%\\.gemini\\antigravity-cli\\conversations\\<original-session>.db-shm",
+            "backup": "<private-backup>/2-<original-session>.db-shm",
+            "exactSessionId": "<original-session>",
+            "projectVerified": null,
+            "sharedStore": true,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    },
+    {
+      "adapter": "zcode-app",
+      "version": "3.14.4.7912",
+      "executable": "%LOCALAPPDATA%\\Programs\\ZCode\\ZCode.exe",
+      "executableSha256": "2cd9f0672841f9a09d00aced4223114c3c7c37cfa8a308e7e79641d617497b0f",
+      "resolvedLaunch": {
+        "target": "C:\\Program Files\\nodejs\\node.exe",
+        "prefix": []
+      },
+      "officialAppKernel": "\\\\?\\%LOCALAPPDATA%\\Programs\\ZCode\\resources\\glm\\zcode.cjs",
+      "provider": {
+        "name": "sub2api",
+        "model": "gpt-6",
+        "endpoint": "http://127.0.0.1:18080"
+      },
+      "authentication": {
+        "probe": "authenticated",
+        "realLlmRoundSucceeded": true
+      },
+      "admission": {
+        "evidenceRevision": "sha256:9c40aa1c943bc3b2e823ea2a9a48ac41441a3924190ec46d493135a46b0b00b0",
+        "platform": "windows-x64",
+        "reasonCode": null,
+        "runtimeKind": "zcode-app",
+        "status": "qualified"
+      },
+      "startedAt": "2026-10-13T02:49:50.069Z",
+      "finishedAt": "2026-10-13T02:52:17.518Z",
+      "privateEvidenceSha256": "25d5a0474839e22568df815e7657bfaf0919784cf0e40a89024a62ee8e79bc15",
+      "allTestProcessesReaped": true,
+      "stages": [
+        {
+          "stage": "seed",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": null,
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [
+            {
+              "method": "session/create"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "zcode-app://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "warm",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-1",
+          "sameProcessAsSeed": true,
+          "actualRestoreCarriedOriginalId": false,
+          "calls": [],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "zcode-app://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "cold",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<original-session>",
+          "originalBindingRetained": true,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 0,
+          "businessProcess": "process-2",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>"
+              }
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [],
+          "nativeNewCallCount": 0,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "zcode-app://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        },
+        {
+          "stage": "missing",
+          "tested": true,
+          "status": "succeeded",
+          "coreError": null,
+          "timedOut": false,
+          "bindingBefore": "<original-session>",
+          "bindingAfter": "<replacement-session>",
+          "originalBindingRetained": false,
+          "businessInputCount": 1,
+          "inputDeliveryStates": [
+            {
+              "status": "accepted"
+            }
+          ],
+          "continuityNoticeCount": 1,
+          "businessProcess": "process-3",
+          "sameProcessAsSeed": false,
+          "actualRestoreCarriedOriginalId": true,
+          "calls": [
+            {
+              "method": "session/resume",
+              "sessionId": "<original-session>",
+              "target": {
+                "sessionId": "<original-session>"
+              }
+            },
+            {
+              "method": "session/create"
+            }
+          ],
+          "resumeArguments": [],
+          "errors": [
+            {
+              "method": "session/resume",
+              "code": -32004
+            }
+          ],
+          "nativeNewCallCount": 1,
+          "expectedMarkerObservedInWireFrame": true,
+          "expectedMarkerObservedInCoreNarration": true,
+          "usage": [
+            {
+              "provider_key": null,
+              "model_key": "zcode-app://runtime-default",
+              "output_tokens": 10,
+              "usage_source": "runtime_private_extension",
+              "usage_quality": "runtime_reported"
+            }
+          ]
+        }
+      ],
+      "historyDeletion": {
+        "completed": true,
+        "targets": [
+          {
+            "path": "<native>\\sessions.sqlite",
+            "backup": "<private-backup>/0-sessions.sqlite",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\sessions.sqlite-wal",
+            "backup": "<private-backup>/1-sessions.sqlite-wal",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          },
+          {
+            "path": "<native>\\sessions.sqlite-shm",
+            "backup": "<private-backup>/2-sessions.sqlite-shm",
+            "exactSessionId": "<original-session>",
+            "projectVerified": true,
+            "sharedStore": false,
+            "stoppedBeforeDeletion": true
+          }
+        ]
+      }
+    }
+  ]
+}
