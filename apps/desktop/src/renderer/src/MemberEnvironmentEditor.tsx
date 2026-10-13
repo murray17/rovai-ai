@@ -105,7 +105,6 @@ export function MemberEnvironmentEditor({ environment: env, disabled }: { enviro
       <textarea ref={textarea} id={id} className="member-environment-json" aria-label={t('环境变量 JSON')} aria-invalid={!!env.error} aria-describedby={env.error ? `${id}-error` : undefined} placeholder={ENVIRONMENT_PLACEHOLDER} value={env.text} disabled={disabled || env.loading} spellCheck={false} autoComplete="off" rows={4} onChange={event => env.update(event.target.value)}/>
       {env.error && <p id={`${id}-error`} className="environment-error" role="alert">{env.error}{env.loading && <button type="button" className="quiet-button" onClick={env.reset}>{t('重试')}</button>}</p>}
       {env.hasSecrets && <div className="environment-caption"><button type="button" className="quiet-button environment-reveal" onClick={() => void env.toggleReveal()} disabled={disabled || env.loading} aria-pressed={env.revealed}><DialogControlIcon name={env.revealed ? 'eye-off' : 'eye'}/>{env.revealed ? t('隐藏密钥') : t('显示密钥')}</button></div>}
-      {env.hasSecrets && !env.revealed && <p className="environment-secret-hint">{t('保留“<saved>”沿用原凭据，替换其内容即可更新。')}</p>}
       {env.saved && <p className="environment-saved" role="status">{t('已保存。')}</p>}
     </div>
   </details>

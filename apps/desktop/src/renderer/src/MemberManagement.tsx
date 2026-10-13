@@ -1274,9 +1274,16 @@ export const MemberRuntimeForm = forwardRef<
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!canSave || (busy !== null || submitting) || submittingRef.current) return
+    setSubmitError(null)
+    let environmentEdit: MemberEnvironmentEdit | undefined
+    try {
+      if (selectedKind) environmentEdit = environment.edit()
+    } catch {
+      // Environment validation is already shown beside the editor.
+      return
+    }
     submittingRef.current = true
     setSubmitting(true)
-    setSubmitError(null)
     const pendingSubmission: PendingRuntimeSubmission = {
       baseVersion: agent.version,
       persistedKey: submittedRuntimeConfigurationKey(selectedKind, draft),
@@ -1285,7 +1292,7 @@ export const MemberRuntimeForm = forwardRef<
     pendingSubmissionRef.current = pendingSubmission
     try {
       if (selectedKind) {
-        await onSave(selectedKind, draft, environment.edit())
+        await onSave(selectedKind, draft, environmentEdit)
         await environment.savedSuccessfully()
       } else {
         await onClear()

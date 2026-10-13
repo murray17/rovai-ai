@@ -3672,7 +3672,6 @@
   "运行环境已在其他位置更新，请重新读取。": "The environment was updated elsewhere. Reload the saved configuration.",
   "显示密钥": "Show keys",
   "隐藏密钥": "Hide keys",
-  "保留“<saved>”沿用原凭据，替换其内容即可更新。": "Keep \"<saved>\" to use the existing credential, or replace it with a new value.",
   "{0} 旧环境配置": "{0} legacy environment",
   "{0} 的环境变量需要迁移": "{0} environment variables need migration",
   "{0} 的旧环境变量配置": "{0} legacy environment variables",
