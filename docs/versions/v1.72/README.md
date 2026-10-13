@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-12
+last_updated: 2026-10-13
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -54,7 +54,9 @@ Memory 入口改用完整 CLI 和按需读取教学。Charter revision 22 保持
 复用现有 Evidence、精确 Run Stop 和独立续做命令；Core 从持久化续做 Delivery 派生受理事实，
 切群／刷新后旧失败入口保持收起。单行预览首次读取失败可随更新／重连恢复，慢请求保留更新并补拉；
 旧恢复记录与实时事件按版本合并，不覆盖新正文。排队不占位，不创建公开消息，不改变模型上下文或数据库结构。
-当前边界见 [Run Process Detail Surface v50](../../contracts/run-process-detail-surface-v50.md)，验证与交付见
+2026-10-13 增补：共享高亮统一为 4.8 秒；执行行右键直达外观“减少动态效果”，
+初始化与已受理的空内容按真实状态分别显示连接／处理文案。
+当前边界见 [Run Process Detail Surface v51](../../contracts/run-process-detail-surface-v51.md)，验证与交付见
 [实施记录](implementation-plan.md#会话内队员占位)。
 
 ## Windows Web 凭据可用性（2026-10-11）

@@ -113,6 +113,9 @@ export function runPresencePreview(run: AgentRunView, progress?: LiveExecutionPr
   }
   if (run.cancelRequestedAt) return { kind: 'status', text: uiAttribute('正在停止…') }
   if (run.status === 'waiting') return { kind: 'status', text: uiAttribute(agentRunPresentation(run).label) }
+  if (run.status === 'running' && run.waitReason === 'runtime_initializing') {
+    return { kind: 'status', text: uiAttribute('正在连接智能体…') }
+  }
   const latest = progress?.items.findLast(item => item.kind === 'tool' || item.kind === 'narration' && item.body.trim())
   if (latest?.kind === 'tool') return {
     kind: 'command',
@@ -120,5 +123,5 @@ export function runPresencePreview(run: AgentRunView, progress?: LiveExecutionPr
     iconKind: latest.step.publicCommand && latest.step.iconKind === 'unknown' ? 'terminal' : latest.step.iconKind
   }
   if (latest?.kind === 'narration') return { kind: 'narration', text: currentNarrationLine(latest.body) }
-  return { kind: 'status', text: progress?.runtimeThinkingTitle || uiAttribute('正在处理…') }
+  return { kind: 'status', text: progress?.runtimeThinkingTitle || uiAttribute('正在处理你的请求…') }
 }

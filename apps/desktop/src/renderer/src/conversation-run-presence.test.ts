@@ -116,4 +116,27 @@ describe('conversation Run presence', () => {
     expect(runPresencePreview(run('a','alice',{status:'failed'}),progress).kind).toBe('error')
     expect(runPresencePreview(run('a','alice',{cancelRequestedAt:'now'}),progress)).toEqual({kind:'status',text:'正在停止…'})
   })
+
+  it('uses the accepted-input fence for connecting, then processing until visible evidence arrives', () => {
+    const initializing = run('a', 'alice', { waitReason: 'runtime_initializing' })
+    const accepted = { ...initializing, waitReason: null }
+    const thinking = buildLiveExecutionProgress([], 'a', { includePublicResults: false })
+    expect(runPresencePreview(initializing)).toEqual({ kind: 'status', text: '正在连接智能体…' })
+    expect(runPresencePreview(accepted)).toEqual({ kind: 'status', text: '正在处理你的请求…' })
+    expect(runPresencePreview(accepted, { ...thinking, runtimePhase: 'thinking' as const })).toEqual({ kind: 'status', text: '正在处理你的请求…' })
+    const titled = { ...thinking, runtimePhase: 'thinking' as const, runtimeThinkingTitle: '核对现有边界' }
+    expect(runPresencePreview(accepted, titled).text).toBe('核对现有边界')
+    expect(runPresencePreview(initializing, titled).text).toBe('正在连接智能体…')
+
+    const progress = buildLiveExecutionProgress([{
+      id: 'text', agentRunId: 'a', eventType: 'agent.text.delta',
+      payload: { itemId: 'text', delta: '已经开始处理' }, createdAt: '2026-10-10T12:00:00Z'
+    } as LiveRuntimeEvent], 'a', { includePublicResults: false })
+    expect(runPresencePreview(accepted, progress)).toEqual({ kind: 'narration', text: '已经开始处理' })
+    // A reconnect can still have earlier evidence; it must describe the new initialization.
+    expect(runPresencePreview(initializing, progress).text).toBe('正在连接智能体…')
+    expect(runPresencePreview({ ...initializing, cancelRequestedAt: 'now' }, progress).text).toBe('正在停止…')
+    expect(runPresencePreview({ ...initializing, status: 'failed' }, progress).kind).toBe('error')
+    expect(runPresencePreview({ ...initializing, status: 'waiting', waitReason: 'approval' }, progress).text).toBe('等待审批')
+  })
 })

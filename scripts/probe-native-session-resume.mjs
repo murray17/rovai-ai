@@ -156,7 +156,14 @@ args=sys.argv[1:]
 resume,resume_flag=None,None
 for flag in ['--resume','--session-id','--conversation']:
     if flag in args and args.index(flag)+1<len(args): resume,resume_flag=args[args.index(flag)+1],flag
-record({'direction':'launch','resumeArgument':resume,'resumeFlag':resume_flag})
+launch={'direction':'launch','resumeArgument':resume,'resumeFlag':resume_flag,
+    'additionalDirectories':[{'path':args[i+1],'exists':os.path.isdir(args[i+1])} for i,arg in enumerate(args[:-1]) if arg=='--add-dir']}
+context_path=os.getenv('ROVAI_CLI_CONTEXT')
+if context_path:
+    with open(context_path) as source: context=json.load(source)
+    run_tmp=os.environ['ROVAI_RUN_TMP']
+    launch['builtinTools']={'processId':context['processId'],'runTmp':run_tmp,'runTmpExists':os.path.isdir(run_tmp),'unbound':context.get('lease') is None}
+record(launch)
 child=subprocess.Popen([target]+args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=None)
 def stop(signum,frame):
     try: child.send_signal(signum)

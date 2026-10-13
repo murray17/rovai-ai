@@ -43,7 +43,6 @@ import {
   CAMP_OPEN_FEEDBACK_DELAY_MS,
   ControlledShutdownOverlay,
   SHUTDOWN_FEEDBACK_DELAY_MS,
-  STARTUP_FEEDBACK_DELAY_MS,
   WindowDragStrip,
   allNavigationThreads,
   authoritativeWorkspaceIsAvailable,
@@ -320,14 +319,14 @@ describe('accepted Thread deletion tombstone', () => {
 })
 
 describe('availability-first workspace gate', () => {
-  it('starts with the ordinary page frame before the first Supervisor snapshot, without loading feedback', () => {
+  it('covers the ordinary page frame with loading before the first Supervisor snapshot', () => {
     vi.stubGlobal('document', { documentElement: { dataset: {}, style: {} } })
     vi.stubGlobal('window', { rovai: { platform: 'darwin' } })
     try {
       const markup = renderToStaticMarkup(createElement(App))
       expect(markup).toContain('unified-sidebar')
       expect(markup).not.toContain('bootstrap-shell')
-      expect(markup).not.toContain('startup-loading-canvas')
+      expect(markup).toContain('startup-loading-canvas')
       expect(markup).not.toContain('sidebar-empty')
       expect(markup).not.toContain('onboarding-app-shell')
     } finally {
@@ -714,11 +713,9 @@ function canonicalActivity(
 
 describe('cold startup route presentation', () => {
   it('removes the global gate as soon as Main Window Session returns a target', () => {
-    expect(STARTUP_FEEDBACK_DELAY_MS).toBe(400)
-    expect(startupFeedbackShouldBeVisible('loading', false)).toBe(false)
-    expect(startupFeedbackShouldBeVisible('loading', true)).toBe(true)
-    expect(startupFeedbackShouldBeVisible('waiting', false)).toBe(true)
-    expect(startupFeedbackShouldBeVisible('resolved', true)).toBe(false)
+    expect(startupFeedbackShouldBeVisible('loading')).toBe(true)
+    expect(startupFeedbackShouldBeVisible('waiting')).toBe(true)
+    expect(startupFeedbackShouldBeVisible('resolved')).toBe(false)
     expect(startupGateShouldBeVisible(null)).toBe(true)
     expect(startupGateShouldBeVisible({
       schemaVersion: 1,
@@ -730,7 +727,7 @@ describe('cold startup route presentation', () => {
     })).toBe(false)
   })
 
-  it('renders delayed Thread opening as a full-window brand canvas with separate recovery', () => {
+  it('renders Thread startup as a full-window brand canvas with separate recovery', () => {
     const loading = renderToStaticMarkup(createElement(StartupRouteLoading, {
       kind: 'camp',
       waiting: false,

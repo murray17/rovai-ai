@@ -391,6 +391,7 @@ app
           `${active}.member-editor-two-columns > div:nth-child(2) input`,
           '保留职责草稿'
         )
+        await wait(`!document.querySelector('${active}.member-runtime-form button[aria-label="保存运行配置"]').disabled`)
         await saveRuntime()
         await wait(
           `window.memberFixture.profiles()[0].runtimeConfiguration.permissions.values.sandbox_mode === 'read-only'`
@@ -516,6 +517,47 @@ app
           true
         )
         await click(`${active}.member-runtime-conflict button`)
+      }
+    )
+    await check(
+      'manual model IDs save as current intent, discard cleanly and never enter the native catalog',
+      async () => {
+        await reloadPage()
+        const modelTrigger = `${active}.runtime-model-field .runtime-model-picker-trigger`
+        const nativeCatalog = await run('JSON.stringify(window.memberFixture.installations)')
+        await click(modelTrigger)
+        await fill('.runtime-model-search input', '  provider/private-model  ')
+        await click('[data-specify-candidate]')
+        await saveRuntime()
+        await wait(`window.memberFixture.profiles()[0].runtimeConfiguration.model.modelId === 'provider/private-model'`)
+        const submission = await run('window.memberFixture.calls.filter(call => call.method === "members.runtime.set").at(-1)')
+        assert.deepEqual(submission.command.model, { mode: 'explicit', modelId: 'provider/private-model', options: {} })
+        await wait(`!document.querySelector('${modelTrigger}').disabled`)
+        await click(modelTrigger)
+        assert.equal(await run('document.querySelector("[data-manual-current]").textContent'), 'provider/private-model')
+        await fill('.runtime-model-search input', 'provider/unsaved-model')
+        await run("window.memberFixture.language('en')")
+        await settle()
+        assert.equal(await run('document.querySelector(".runtime-model-search input").value'), 'provider/unsaved-model')
+        assert.equal(await run('document.querySelector("[data-specify-candidate]").getAttribute("aria-label")'), 'Use model provider/unsaved-model')
+        await capture('manual-model-inline-english')
+        await click('[data-specify-candidate]')
+        await run("window.memberFixture.language('zh-CN')")
+        await settle()
+        await click(`${active}.member-runtime-form button`, '放弃更改')
+        assert.equal(await run(`document.querySelector('${modelTrigger} strong').textContent`), 'provider/private-model')
+        await click(modelTrigger)
+        await fill('.runtime-model-search input', 'gpt-5.4-mini')
+        assert.equal(await run('Boolean(document.querySelector("[data-specify-candidate]"))'), false)
+        await key('Enter')
+        await saveRuntime()
+        await wait(`window.memberFixture.profiles()[0].runtimeConfiguration.model.modelId === 'gpt-5.4-mini'`)
+        await wait(`!document.querySelector('${modelTrigger}').disabled`)
+        await click(modelTrigger)
+        assert.equal(await run('Boolean(document.querySelector("[data-manual-current]"))'), false)
+        assert.equal(await run('document.querySelector(".runtime-picker-scroll").textContent.includes("provider/private-model")'), false)
+        assert.equal(await run('JSON.stringify(window.memberFixture.installations)'), nativeCatalog)
+        await key('Escape')
       }
     )
     await check(

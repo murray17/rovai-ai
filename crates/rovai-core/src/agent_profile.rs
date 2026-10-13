@@ -4743,7 +4743,7 @@ fn resolve_model_selection(
                 .find(|model| model.id == *model_id && !model.hidden && !model.deprecated);
             if model.is_none() {
                 // The cached catalog is a configuration aid, not execution truth. Preserve a
-                // previously validated explicit selection so the real Runtime Session can make
+                // saved or manually entered explicit selection so the real Runtime Session can make
                 // the final decision without silently falling back.
                 return Ok(Ok(ResolvedModelSelection {
                     dsh_source,
@@ -5368,6 +5368,20 @@ fn model_option_validation_rejects_preserved_effort_after_catalog_refresh() {
                 .options,
             json!({"reasoning_effort":"max"})
         );
+        let manual = resolve_model_selection(
+            AdapterKind::ClaudeCodeCli,
+            catalog,
+            &ModelSelection::Explicit {
+                model_id: "provider/private-model".into(),
+                options: json!({}),
+                dsh_source: None,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(manual.model_id, "provider/private-model");
+        assert_eq!(manual.source, "explicit");
+        assert_eq!(manual.options, json!({}));
     }
 }
 
@@ -7500,6 +7514,50 @@ mod slow_tests {
                     configuration.model.clone()
                 }
             );
+        }
+
+        // The picker can also save a new ID absent from the native catalog. It is
+        // current member intent, not a catalog entry, including after switching away.
+        for (index, model) in [
+            ModelSelection::Explicit {
+                model_id: "provider/private-model".into(),
+                options: json!({}),
+                dsh_source: None,
+            },
+            ModelSelection::RuntimeDefault,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let result = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        &format!("manual-model-{index}"),
+                        SetMemberRuntimeConfigurationCommand {
+                            environment_update: None,
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: version,
+                            adapter_kind: AdapterKind::CodexCli,
+                            model: model.clone(),
+                            permissions: configuration.permissions.clone(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(result.result.code, "agent_profile.runtime_configured");
+            version += 1;
+            let saved = service
+                .get_profile(&database, &profile.agent_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(saved.version, version);
+            assert_eq!(saved.runtime_configuration.unwrap().model, model);
+            let catalog: String = database.connection().query_row(
+                "SELECT model_catalog_json FROM adapter_capability_snapshot WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind = 'codex-cli')",
+                [], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(catalog, "[]");
         }
 
         drop(database);

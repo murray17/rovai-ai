@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-10-09
+last_updated: 2026-10-13
 ---
 
 # Camp 会话工作区
@@ -135,7 +135,7 @@ Escape 收起预览。定位只滚动公共时间线并聚焦目标消息，保�
 较新页读取失败仍在执行记录内保留原位重试。
 
 冷启动恢复与应用内切换的呈现边界不同。Main Window Session 一旦给出恢复目标，Renderer 必须挂载对应一级页面框架；
-不足 400ms 不显示加载提示，超时后由共享的不透明整窗品牌画布遮住框架，直到真实目标内容可用再淡出。Camp shell 不得
+共享的不透明整窗品牌画布从 Renderer 首帧起遮住框架，直到真实目标内容可用再淡出。Camp shell 不得
 用标题区、骨架或结构占位伪装 meaningful content，也不得在 `camps.enter` 成功前提交权威 Camp。成功 enter 的 Active Camp 保持 Active；meaningful
 未激活的 Pending Camp 外壳保持 Pending。若该 Camp 已有有效 Desktop-local Composer snapshot，则在 Camp
 权威进入后恢复；普通一键 Pending 的客户端 presence 允许其进入侧栏，但不会激活 Camp，
@@ -668,7 +668,7 @@ Terminal、File Read、File Write、Web 等图标。运行时最右端只有状�
 组收口后恢复分组图标、成功步骤数与最右端上下展开箭头，
 不重复显示终态状态 icon。底部和窄 Inspector 使用同一结构。
 
-收起且运行的组摘要、收起且压缩中的 Compact、思考中与连接中文字，以约 2.4 秒一轮从左到右依次高亮。
+收起且运行的组摘要、收起且压缩中的 Compact、思考中与连接中文字，与会话执行行共用 RunningText，以 4.8 秒一轮从左到右依次高亮。
 高亮只覆盖静止的文字，不移动文字或闪烁背景；展开组或 Compact 后停止该行高亮，子指令及结果正文保持静态。
 完成、失败、等待、停止和结果未知保持静态；减少动态效果或 forced-colors 时关闭文字高亮，状态事实仍保留。
 
@@ -992,9 +992,15 @@ Run 卡片与步骤组均以权威终态优先：即使取消标记尚存，终�
 
 正文与命令复用执行台投影。原文当前行逐字更新；原文开始下一行后，在同一个物理行切到下一行继续显示。
 末尾换行或空行暂时保留上一非空行，整行高度不变；没有原始换行的长文本静态省略，不按标点、字数或宽度分段。
-运行中去掉左侧转圈，直接复用 RunCard 的 RunningText：文字静止，高亮从左向右滑过；停止提交、等待和失败不扫光。
-reduced-motion 和 forced-colors 下关闭高亮层，正文仍实时更新。命令保留既有工具图标；
+运行中去掉左侧转圈，直接复用 RunCard 的 RunningText：文字静止，高亮以 4.8 秒一轮从左向右滑过；停止提交、等待和失败不扫光。
+系统 reduced-motion、外观“始终减少”和 forced-colors 下关闭高亮层，正文仍实时更新。命令保留既有工具图标；
 内容点击打开对应 Run 详情，原文完整保留。行内不显示耗时，以短竖线分隔右侧停止区，整行透明、无外框。
+右键、长按或 Shift+F10 / ContextMenu 打开执行行菜单，包含“查看执行过程”和“减少动态效果…”。
+后者进入外观设置并滚动、聚焦已有“减少动态效果”控件，沿用“跟随系统／始终减少”；
+复用正常设置导航和草稿保存，不改写普通设置入口记住的分类。Esc 关闭菜单并归还执行行焦点。
+初始化 `runtime_initializing` 时显示“正在连接智能体…”，真实输入受理清除此状态后，
+无可见内容时显示“正在处理你的请求…”，再由已有正文、命令或合法原生思考短标题接替。
+初始化优先于重连前的旧 Evidence；停止、等待及失败各用原状态反馈，不按计时猜测阶段。
 停止图标与执行台共用，默认中性色、透明背景，悬浮才变红，点击后确认；取消／Esc 不提交，
 确认只停止对应 Run。自然结束后占位移除，不增加执行完成行。
 
@@ -1004,7 +1010,7 @@ reduced-motion 和 forced-colors 下关闭高亮层，正文仍实时更新。�
 不增加“结果未知”交互。新 Run 开始再展示，再失败时重试新 Run；执行台历史记录仍可主动多次继续执行。
 新 Run 不改变原消息与草稿。仅每位队员最新且尚未受理续做的公开 batch 失败可保留占位，避免历史失败堆积。
 已发消息的复制／回复按钮、分组、文件与图片不变；桌面静止时仍只有最新一条队员消息的复制／回复常驻。
-桌面行高 36px，停止目标 26px，粗指针扩展为 44px 目标；精确边界见 [Run Process Detail Surface v50](../../contracts/run-process-detail-surface-v50.md)。
+桌面行高 36px，停止目标 26px，粗指针扩展为 44px 目标；精确边界见 [Run Process Detail Surface v51](../../contracts/run-process-detail-surface-v51.md)。
 
 ## 会话 Pane 紧凑布局
 

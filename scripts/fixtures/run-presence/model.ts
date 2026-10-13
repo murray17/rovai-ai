@@ -253,6 +253,12 @@ export const model = {
   },
   get: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn) },
   note: (note: string) => update({ note }),
+  showStartupStatus(waitReason: 'runtime_initializing' | null) {
+    update({ streamPaused: true, snapshot: { ...state.snapshot,
+      agentRuns: state.snapshot.agentRuns.map((run: any) => run.id === 'run-alice' ? { ...run, waitReason } : run),
+      executionEvidence: state.snapshot.executionEvidence.filter((item: any) => item.agentRunId !== 'run-alice')
+    } })
+  },
   showNarration(text: string) {
     const evidence = state.snapshot.executionEvidence.map((item: any) => item.id === 'e-run-alice-3'
       ? { ...item, revision: (item.revision || 0) + 1, payload: { ...item.payload, delta: text } } : item)

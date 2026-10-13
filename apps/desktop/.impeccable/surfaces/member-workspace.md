@@ -1,5 +1,5 @@
 ---
-version: 18
+version: 19
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -96,7 +96,8 @@ that Runtime. The Runtime, model and permissions save atomically through the exi
 
 For any `light_ready` installation, expose Runtime default model plus only permissions described by the
 static Adapter schema. Login, model and capability validation happens in the real task Host; do not add
-routine copy explaining that mechanism. Do not offer explicit models before a verified catalog. TRAE uses the same model
+routine copy explaining that mechanism. Native choices require catalog evidence; manually entered IDs only record user intent
+and retain each Adapter's execution checks. TRAE uses the same model
 catalog cache and Picker behavior as every other Runtime; its permission draft still defaults to the statically
 admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the existing compact switch pattern for
 `trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.
@@ -115,9 +116,11 @@ relaxes validation for a new selection. A failed refresh keeps the list and offe
 only the model and parameters, not TTL maintenance copy. Saving an explicit catalog-refresh rejection waits for
 committed refresh and retries once under one continuous saving state, preserving the draft and expectedVersion.
 Switching Runtime never triggers discovery, and an older async result must not mutate the new draft.
-Runtime default remains selectable without a catalog. An existing saved explicit model keeps its ID in the closed
-control; the menu may say “尚未核对”; a fresh or stale catalog that omits it uses evidence-specific copy instead of the
-absolute “已失效”. This does not add repair semantics for manually modified or technically recovered corrupt data.
+Runtime default remains selectable without a catalog. The search input also accepts an exact model ID. For nonempty,
+trimmed input absent from the native catalog and current manual selection, show “使用 {ID}” / “Use {ID}” in the result list.
+Do not add a permanent action, badge or second editor. The current catalog-absent ID appears as an ordinary selected row;
+choosing another model removes that manual row. Save only the current explicit selection with initially empty options, never
+a custom catalog or recent-ID list. The model catalog continues to use native Runtime configuration, not member environment.
 
 Keep presence and destructive removal in the header overflow menu. Removal uses its existing confirmation
 and Core preview. Do not expose Installation IDs, executable paths or internal bindings in the ordinary profile.

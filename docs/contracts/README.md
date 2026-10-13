@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-10-12
+last_updated: 2026-10-13
 ---
 
 # 长期接口合同
@@ -162,7 +162,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Pending Camp Input v2（历史）](pending-camp-input-v2.md) | v1 FIFO/edit token 不变；原生保存 source refs，working refs 支持添加/删除/排序与附件-only，发布失败精确 needs-repair；content wire 由 v3 替代 |
 | [Pending Camp Input v1（历史）](pending-camp-input-v1.md) | 私有下一轮输入、FIFO、编辑 token、暂停、原子发布与无附件边界 |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
-| [Desktop Runtime Availability v2（当前）](desktop-runtime-availability-v2.md) | 严格 lease/ticket 后原位逐版本事务、receipt 续跑、旧 manifest 恢复、独立瞬时重试与统一会话启动反馈；generation/capability 不变 |
+| [Desktop Runtime Availability v3（当前）](desktop-runtime-availability-v3.md) | 继承 v2 的权威与恢复边界；冷启动首帧即显示整窗加载画布，删除启动反馈 400ms 延迟 |
+| [Desktop Runtime Availability v2（历史）](desktop-runtime-availability-v2.md) | 严格 lease/ticket 后原位逐版本事务、receipt 续跑、旧 manifest 恢复及独立瞬时重试；启动呈现延迟由 v3 替代 |
 | [Desktop Runtime Availability v1（历史）](desktop-runtime-availability-v1.md) | Bootstrap/Full Core、SQLite 准入、copy/switch 与结构化 failure；旧 manifest 恢复仍保留，普通升级执行策略由 v2 替代 |
 | [First-run Onboarding v6（当前）](first-run-onboarding-v6.md) | schema 3；训练营自动复制所选 Runtime、模型与权限到其余未配置内置队员，逐人冻结、恢复与冲突保护；已完成用户不补写 |
 | [First-run Onboarding v5（历史）](first-run-onboarding-v5.md) | v4 admission/provisioning 不变；Active Camp starter 进入可恢复的 Desktop-local Composer snapshot |
@@ -567,7 +568,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v50（当前）](run-process-detail-surface-v50.md) | 每 Run 的发送前固定锚点与成功发送跟随、单行内按原文换行推进及 RunCard 高亮 |
+| [Run Process Detail Surface v51（当前）](run-process-detail-surface-v51.md) | 共享 4.8 秒高亮、执行行动态效果设置入口与真实连接／处理反馈 |
+| [Run Process Detail Surface v50（历史）](run-process-detail-surface-v50.md) | 每 Run 的发送前固定锚点与成功发送跟随、单行内按原文换行推进及 RunCard 高亮 |
 | [Run Process Detail Surface v49（历史）](run-process-detail-surface-v49.md) | 单行预览首次读取失败的事件驱动恢复、在途更新补拉及新旧 Evidence 合并；不改变 v48 展示与授权规则 |
 | [Run Process Detail Surface v48](run-process-detail-surface-v48.md) | 停止区短竖线分隔、默认中性色停止按钮；按持久化续做 Delivery 恢复已受理重试的收起状态 |
 | [Run Process Detail Surface v47（历史）](run-process-detail-surface-v47.md) | 会话内单行队员占位、V2 确认停止、命令图标与中断重试；复用已有命令和 Evidence |

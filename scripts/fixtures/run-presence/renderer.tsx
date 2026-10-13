@@ -5,6 +5,9 @@ import { NavigationShell } from '../../../apps/desktop/src/renderer/src/Navigati
 import { createDesktopNavigation } from '../../../apps/desktop/src/renderer/src/desktop-navigation'
 import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadNavigation'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/AppHeader'
+import { AppearanceSettings } from '../../../apps/desktop/src/renderer/src/AppearanceSettings'
+import { DEFAULT_APPEARANCE } from '../../../apps/desktop/src/shared/appearance'
+import type { AppearancePreferences, AppearanceSnapshot } from '@contracts'
 import { ThreadWorkspace, campConversationTimeline } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { FilePreviewProvider } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
@@ -49,6 +52,8 @@ function Workbench() {
   const [proposal, setProposal] = useState(params.get('baseline') !== '1')
   const [controls, setControls] = useState(params.get('pure') !== '1')
   const [info, setInfo] = useState(false)
+  const [settings, setSettings] = useState(false)
+  const [appearance, setAppearance] = useState<AppearanceSnapshot>({ ...DEFAULT_APPEARANCE, resolvedTheme: theme as 'day' | 'night' })
   const [inspector, setInspector] = useState<any>(null)
   const [detailHost, setDetailHost] = useState<HTMLElement | null>(null)
   const [placement, setPlacement] = useState<any>('inspector')
@@ -60,10 +65,26 @@ function Workbench() {
       : state.snapshot
   const sequence = scenarios[state.scenario]
   const navigation = useMemo(() => {
-    const nav = createDesktopNavigation(async () => {})
+    const nav = createDesktopNavigation(async (target, transaction) => {
+      if (transaction.commit()) setSettings(target.kind === 'settings')
+    })
     nav.reset({ kind: 'camp', threadId: state.snapshot.thread.id } as any)
     return nav
   }, [])
+  const openMotionSettings = async () => {
+    await navigation.push({ kind: 'settings', section: 'appearance' })
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const control = document.querySelector<HTMLSelectElement>('#appearance-motion')
+      control?.scrollIntoView({ block: 'center', behavior: 'instant' })
+      control?.focus({ preventScroll: true })
+    }))
+  }
+  const changeAppearance = async (preferences: AppearancePreferences): Promise<AppearanceSnapshot> => {
+    const next = { ...preferences, resolvedTheme: theme as 'day' | 'night' }
+    setAppearance(next)
+    return next
+  }
+  useEffect(() => { document.documentElement.dataset.motionPreference = appearance.motionPreference }, [appearance.motionPreference])
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
   useEffect(() => { document.documentElement.dataset.presence = proposal ? 'proposal' : 'baseline' }, [proposal])
   useEffect(() => {
@@ -84,7 +105,7 @@ function Workbench() {
         ...['消息投递与恢复', '会话工作区优化', '发布前检查'].map((title, i) => ({ ...current, id: `demo-thread-${i}`, title, marker: 'none' }))] }] }
   useEffect(() => {
     Object.assign(window, { __presence: { setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal,
-      getState: model.get, showNarration: model.showNarration, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
+      getState: model.get, showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
         const s = model.get().snapshot
         const ids = [...document.querySelectorAll<HTMLElement>('[data-message-id]')].map(e => e.dataset.messageId)
         const positions = ids.map(id => s.messages.findIndex((m: any) => m.id === id)).filter(i => i >= 0)
@@ -113,18 +134,20 @@ function Workbench() {
     <CurrentUserProfileContext.Provider value={{ profile, ready: true, error: null, reload: () => {}, save: async next => { setProfile(next as any); return next } }}>
     <FilePreviewProvider threadId={state.snapshot.thread.id} resolvedTheme={theme as any} api={model.fileApi}>
     <div className="prototype-workbench">
-      <NavigationShell platform="darwin" className="app-shell-camp" navigation={navigation}>
+      <NavigationShell platform="darwin" settings={settings} className={settings ? '' : 'app-shell-camp'} navigation={navigation}>
         <div className="prototype-window-lights" aria-hidden="true"><i /><i /><i /></div>
-        <ThreadNavigation view="camp" platform="darwin" state="ready" navigation={navSnapshot} activeThreadId={visibleSnapshot.thread.id}
+        <ThreadNavigation view={settings ? 'settings' : 'camp'} settingsSection="appearance" onSettingsBack={() => { void navigation.back() }}
+          onSettingsSectionChange={() => {}} platform="darwin" state="ready" navigation={navSnapshot} activeThreadId={visibleSnapshot.thread.id}
           currentProjectKey="presence-project" pendingMemoryCount={0}
           onNewConversation={() => unsupported('新对话')} onMembers={() => setInspector('members')}
           onMemory={() => unsupported('记忆')} onAutomations={() => unsupported('定时任务')} onMissions={() => unsupported('使命板')}
-          onSettings={() => setInfo(true)} onOpenProject={() => unsupported('项目')} onCreateInProject={() => unsupported('新对话')}
+          onSettings={() => { void navigation.push({ kind: 'settings', section: 'appearance' }) }} onOpenProject={() => unsupported('项目')} onCreateInProject={() => unsupported('新对话')}
           onThread={thread => { setInspector(null); setOtherThread(thread.id === current.id ? null : { id: thread.id, title: thread.title }) }}
           onRemoveProject={async () => unsupported('移除项目')} onDelete={async () => unsupported('删除对话')}
           onRename={async (_, title) => model.rename(title)} onError={error => model.note(String(error))} />
-        <AppHeader threadTitle={visibleSnapshot.thread.title} contextLabel="rovai-ai" thread={visibleSnapshot} detailEntryHostRef={setDetailHost} onFocusApprovals={() => {}} />
-        <main className="content task-content camp-content">
+        {!settings && <AppHeader threadTitle={visibleSnapshot.thread.title} contextLabel="rovai-ai" thread={visibleSnapshot} detailEntryHostRef={setDetailHost} onFocusApprovals={() => {}} />}
+        {settings && <div className="window-drag-strip window-drag-strip-settings" aria-hidden="true" />}
+        <main className="content task-content camp-content" style={settings ? { display: 'none' } : undefined} aria-hidden={settings || undefined}>
           <ThreadWorkspace key={`${state.generation}:${visibleSnapshot.thread.id}`} snapshot={params.has('windowed') ? { ...visibleSnapshot, executionEvidence: [] } : visibleSnapshot}
             liveRuntimeEvents={model.controls.liveEvidence ? visibleSnapshot.executionEvidence.map(liveRuntimeEventFromExecutionEvidence) : undefined}
             workspaceEntrySnapshotReady={!model.controls.holdEntrySnapshot}
@@ -136,8 +159,12 @@ function Workbench() {
             worldMapEnabled={false} inspectorVisible={inspector !== null} inspectorTab={inspector ?? 'members'}
             detailEntryHost={detailHost} onOpenInspector={setInspector} onCloseInspector={() => setInspector(null)} onInspectorTabChange={setInspector}
             onOpenSingleChat={() => unsupported('单聊')} onConfigureRuntime={() => unsupported('运行配置')}
+            onOpenMotionSettings={() => { void openMotionSettings() }}
             suppressExecutionAutoOpen onNotify={model.note} onNotifyError={model.note} />
         </main>
+        {settings && <main className="content settings-content"><div className="settings-workbench"><div className="settings-panel settings-panel-appearance">
+          <AppearanceSettings appearance={appearance} disabled={false} onChange={changeAppearance} />
+        </div></div></main>}
       </NavigationShell>
       {controls && <section className="prototype-control-bar" aria-label="交互稿演示控制">
         <div className="prototype-label"><strong>队员占位</strong><span>停止区分隔 · 模拟数据</span></div>

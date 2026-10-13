@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-12
+last_updated: 2026-10-13
 ---
 
 # v1.72 实施与验收
@@ -1973,3 +1973,23 @@ exposure digest 计算；保留文件权限、Run/Adapter 归属、原生同名�
 最小命令：`cargo test -p rovai-core --features slow-tests --lib -- context_manifest_recovers_redacted_frozen_mcp_exposure_without_digests mcp_projection::tests:: agent_run_diagnostic_projects_only_safe_frozen_and_public_facts`。
 结果：上述 10 项全部通过；`cargo check --workspace`、格式检查、相对 `d41778bf` 的通用文档门禁通过。
 本轮未重复无关的完整慢测，前述 3 项 main 已有 CampOpen 失败的结论不变。
+
+
+## 执行反馈减速与动态效果入口（2026-10-13）
+
+User 确认 4.8 秒、执行行右键入口及连接／处理两阶段文案，并授权独立 worktree 实现与 PR 合入。
+基线 `79b156d71f6921245c7e5bcb1d138ccfc7c4967b`，分支 `rovai/conversation-motion-feedback`；
+边界见 [Run Process Detail Surface v51](../../contracts/run-process-detail-surface-v51.md)。
+
+- RunningText 全部消费处统一为 4.8 秒，含会话执行行、RunCard 和单聊反馈；
+  外观“始终减少”、系统 reduced-motion 与 forced-colors 隐藏高亮层，实际内容仍推进。
+- 执行行保留左键详情，右键／长按／键盘菜单可直达外观既有选择器；
+  复用设置导航，不改写记住的分类，Esc 在菜单焦点锁释放后回到执行行。
+- 初始化使用 Run 的 runtime_initializing，真实受理后转为处理兜底；停止、失败和等待优先，
+  不新增计时猜测、思考正文、后端状态或迁移。
+
+类型检查、242 个 Vitest 文件／2656 项用例、文档治理与其 10 项单测通过。
+生产组件浏览器夹具通过 37 个阶段、6 组主题尺寸与 26 项交互记录，包含
+右键／Shift+F10／长按松手、设置聚焦与保存、减少动态效果、强制颜色和既有锚点／重试回归。
+外观保存使用隔离内存适配器，未启动日常 App、Core 或真实 Runtime；BusinessApp 的设置跳转
+复用既有离开保护与草稿 owner，浏览器夹具只验证组件路径，不替代完整 App 的导航验收。

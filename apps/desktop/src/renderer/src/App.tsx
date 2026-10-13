@@ -10,7 +10,7 @@ import { initializeInterfaceLanguage, useInterfaceLanguage } from './interface-l
 import { applyAppearanceSnapshot } from './theme'
 import {
   BusinessApp, BootstrapShell, StartupWorkspace, ControlledShutdownOverlay,
-  authoritativeWorkspaceIsAvailable, STARTUP_FEEDBACK_DELAY_MS, SHUTDOWN_FEEDBACK_DELAY_MS,
+  authoritativeWorkspaceIsAvailable, SHUTDOWN_FEEDBACK_DELAY_MS,
   errorMessage, asRecord, stringField
 } from './BusinessApp'
 export * from './BusinessApp'
@@ -25,17 +25,9 @@ export function App(): React.JSX.Element {
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
   const [startupError, setStartupError] = useState<string | null>(null)
   const [startupReadAttempt, setStartupReadAttempt] = useState(0)
-  const [startupFeedbackDelayElapsed, setStartupFeedbackDelayElapsed] = useState(false)
   const [runtimeShuttingDown, setRuntimeShuttingDown] = useState(false)
   const [shutdownFeedbackVisible, setShutdownFeedbackVisible] = useState(false)
   const startupStartedAt = useRef(performance.now())
-
-  useEffect(() => {
-    const elapsed = performance.now() - startupStartedAt.current
-    const remaining = Math.max(0, STARTUP_FEEDBACK_DELAY_MS - elapsed)
-    const timer = window.setTimeout(() => setStartupFeedbackDelayElapsed(true), remaining)
-    return () => window.clearTimeout(timer)
-  }, [])
 
   useEffect(() => {
     let disposed = false
@@ -140,7 +132,7 @@ export function App(): React.JSX.Element {
   } else if (!authoritativeWorkspaceIsAvailable(presentationSupervisor) || !startupSnapshot) {
     workspace = <StartupWorkspace
       snapshot={startupSnapshot}
-      feedbackVisible={!shuttingDown && startupFeedbackDelayElapsed}
+      feedbackVisible={!shuttingDown}
       error={shuttingDown ? null : startupError}
       onRetry={() => setStartupReadAttempt((attempt) => attempt + 1)}
     />
@@ -151,7 +143,6 @@ export function App(): React.JSX.Element {
           <BusinessApp environment={desktopBusinessEnvironment}
             initialStartupSnapshot={startupSnapshot}
             startupStartedAtMs={startupStartedAt.current}
-            startupFeedbackDelayElapsed={startupFeedbackDelayElapsed}
           />
         </CurrentUserProfileProvider></ThreadClientProvider>
         <CoreSubsystemNotice subsystems={presentationSupervisor?.coreSubsystems ?? []} />

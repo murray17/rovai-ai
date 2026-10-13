@@ -710,6 +710,7 @@ function RuntimeModelPicker({
     const model = models.find((candidate) => candidate.id === value)
     if (model) onChange({ ...draft, model: explicitSelection(model, draft.model,
       canFilterOptions && adapterKind !== 'deepseek-harness' && adapterKind !== 'pi') })
+    else onChange({ ...draft, model: { mode: 'explicit', modelId: value, options: {} } })
   }
 
   const statusCopy = modelCatalogStatusCopy(cache, {
@@ -718,8 +719,6 @@ function RuntimeModelPicker({
     servingCachedModels: models.length > 0,
     refreshStatus: loading ? 'joined' : activeLiveCatalog?.refreshStatus ?? null
   })
-  const missingSelectionLabel = explicit && !selectedModel ? missingModelLabel(explicit.modelId, cache.status)
-    : null
   const triggerLabel = draft.model.mode === 'runtime_default'
     ? uiAttribute('默认')
     : selectedModel?.displayName ?? draft.model.modelId
@@ -736,7 +735,6 @@ function RuntimeModelPicker({
         models={models}
         value={selectedValue}
         label={triggerLabel}
-        missingLabel={missingSelectionLabel}
         disabled={disabled}
         loading={loading}
         failed={refreshFailed || persistedRefreshFailed}
@@ -819,15 +817,6 @@ function latestCatalogRefreshFailed(installation: AdapterInstallation, cache: Ru
   return Number.isNaN(attemptedTime)
     || Number.isNaN(observedTime)
     || attemptedTime >= observedTime
-}
-
-function missingModelLabel(
-  modelId: string,
-  status: RuntimeModelCatalogCache['status']
-): string {
-  if (status === 'fresh') return uiAttribute("当前目录未提供 · {0}", String(modelId))
-  if (status === 'stale') return uiAttribute("缓存中未找到 · {0}", String(modelId))
-  return uiAttribute("尚未核对 · {0}", String(modelId))
 }
 
 export function modelCatalogStatusCopy(

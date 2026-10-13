@@ -56,7 +56,7 @@ app.whenReady().then(async()=>{
  const click=async s=>{await run('document.querySelector('+JSON.stringify(s)+').click()');await sleep(60)};
  await w.loadFile(join(root,'renderer/index.html'));await wait('!!window.fixture && !document.querySelector("textarea").disabled');
  await click('summary');
- assert.ok(await run('document.body.innerText.includes("环境变量在智能体进程启动时读取")'));
+ assert.equal(await run('document.body.innerText.includes("环境变量在智能体进程启动时读取")'),false);
  assert.equal(await run('document.querySelectorAll("input[type=checkbox]").length'),0);
  assert.equal(await run('document.querySelector("textarea").getBoundingClientRect().height'),104);
  await run('document.querySelector("textarea").focus()');
@@ -74,7 +74,7 @@ app.whenReady().then(async()=>{
  await run('window.fixture.scenario("conflict")');await click('[data-reset]');await wait('!document.querySelector(".danger-button").disabled');await click('.danger-button');
  await wait('document.body.innerText.includes("会话已发生变化")');await click('[role=dialog] .quiet-button');
  w.setContentSize(390,844);await run('window.fixture.language("en")');await sleep(200);
- assert.ok(await run('document.body.innerText.includes("Saving does not affect running processes")'));
+ assert.equal(await run('document.body.innerText.includes("Saving does not affect running processes")'),false);
  assert.equal(await run('getComputedStyle(document.querySelector("textarea")).fontSize'),'16px');
  assert.ok(await run('document.documentElement.scrollWidth<=innerWidth'));
  writeFileSync(join(root,'mobile-en.png'),(await w.webContents.capturePage()).toPNG());
@@ -82,7 +82,7 @@ app.whenReady().then(async()=>{
  assert.ok(await run('document.body.innerText.includes("Reset Alice")'));
  assert.ok(await run('document.documentElement.scrollWidth<=innerWidth'));
  writeFileSync(join(root,'mobile-reset-en.png'),(await w.webContents.capturePage()).toPNG());
- console.log(JSON.stringify({ok:true,checks:['saved-marker','no-combination-confirmation','process-start-timing-copy','reset-exact-conversation-version','active-work-block','conflict-retains-dialog','mobile-english','no-overflow','short-editor-no-focus-ring']}));app.exit(0);
+ console.log(JSON.stringify({ok:true,checks:['saved-marker','no-combination-confirmation','no-process-start-timing-copy','reset-exact-conversation-version','active-work-block','conflict-retains-dialog','mobile-english','no-overflow','short-editor-no-focus-ring']}));app.exit(0);
 }).catch(e=>{console.error(e);app.exit(1)});
 `)
 let child, closed, passed = false

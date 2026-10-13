@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-10-08
+last_updated: 2026-10-12
 ---
 
 # Camp Open Read Path 架构
@@ -88,8 +88,9 @@ app click / notification target
   -> background target row read / observed campViewed / authoritative row update
 
 cold startup
+  -> Renderer shows the shared startup canvas from its first frame
   -> Main Window Session returns a frozen local target
-  -> Renderer paints the target route shell; the shared startup canvas appears only after the 400ms threshold
+  -> Renderer mounts the target route shell beneath the shared startup canvas
   -> Renderer queues camps.enter ahead of Overview/preferences/runtime health
   -> Core activation-aware enter + bounded business collections + per-returned-Run evidence count/change water
   -> Renderer commits Active Camp or meaningful Pending Camp Draft + meaningful content, then fades the canvas
@@ -188,7 +189,7 @@ user/agent 正文节点；exact total、顺序和目标由 Core 响应拥有。�
 冷启动 route shell 只证明恢复目标已确定，不证明 Camp 存在；Active Camp 也不保证 Default Lead 已 reconcile。
 它不得设置
 `activeCampId`、触发 `campViewed`、提交下次恢复位置或启用 Notification navigation。Camp、Members 与
-Memory 仍分别拥有读取与错误状态，但冷启动可见反馈共用不透明整窗品牌画布：不足 400ms 无提示，超时后只显示品牌标记，
+Memory 仍分别拥有读取与错误状态，但冷启动可见反馈共用不透明整窗品牌画布：从 Renderer 首帧起只显示品牌标记，
 真实目标提交后淡出。Main Window Session、Camp、Members 或 Memory 的冷启动读取失败进入独立整窗恢复面；该呈现变化
 不授予权威查询、route commit、已读或恢复位置写入能力。应用已就绪后的普通切换继续使用各自的局部反馈。
 

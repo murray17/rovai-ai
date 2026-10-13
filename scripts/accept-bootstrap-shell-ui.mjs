@@ -337,30 +337,37 @@ async function verifyOptionalSubsystemRecovery() {
   })
   let application = null
   try {
+    let retainedMcpConfig
     try {
       await seed.request('members.list')
       await seed.request('runtime.subsystems.retry')
+      retainedMcpConfig = await seed.request('mcp.config.get')
+      assert(retainedMcpConfig.path === join(optionalDataDir, 'mcp.json'),
+        'Refusing to obstruct MCP configuration outside this isolated fixture')
     } finally {
       assert((await seed.stop()).code === 0, 'Fixture Core did not stop cleanly')
     }
     seedCompletedOnboardingForAcceptance(optionalDataDir)
-    const fault = join(optionalDataDir, 'managed-skill-library', '.staging')
+    // Managed Skills no longer initialize the historical Library staging root.
+    // A directory at this fixture's MCP file path still exercises a real,
+    // recoverable optional-subsystem failure without changing authority.
+    const fault = retainedMcpConfig.path
     await rename(fault, `${fault}.original`)
-    await writeFile(fault, 'retained test obstruction', { flag: 'wx', mode: 0o600 })
+    await mkdir(fault)
     application = await launchApp(optionalDataDir)
     await waitForExpression(application.cdp, `window.rovai.supervisor.getSnapshot().then(snapshot =>
       snapshot.fullCoreState === 'ready'
-      && snapshot.coreSubsystems.some(subsystem => subsystem.id === 'skills' && subsystem.state === 'degraded')
+      && snapshot.coreSubsystems.some(subsystem => subsystem.id === 'mcp' && subsystem.state === 'degraded')
       && snapshot.coreSubsystems.every(subsystem => subsystem.state !== 'initializing'))`, 45_000)
     await waitForSelector(application.cdp, '.app-shell:not(.onboarding-app-shell)', 45_000)
     await waitForSelector(application.cdp, '.core-subsystem-notice', 45_000)
     const before = await evaluate(application.cdp, 'window.rovai.supervisor.getSnapshot()', true)
     assert((await evaluate(application.cdp, `window.rovai.request('members.list')`, true)).length > 0,
-      'Member authority is unavailable while Skill Library is degraded')
+      'Member authority is unavailable while MCP is degraded')
     await evaluate(application.cdp, 'window.rovai.request("navigation.snapshot")', true)
     const blocked = await evaluate(application.cdp,
-      `window.rovai.request('skills.list').then(() => null, failure => failure)`, true)
-    assert(blocked.code === 'subsystem_unavailable' && blocked.details.subsystem === 'skills'
+      `window.rovai.request('mcp.config.get').then(() => null, failure => failure)`, true)
+    assert(blocked.code === 'subsystem_unavailable' && blocked.details.subsystem === 'mcp'
       && blocked.generation === before.generation && blocked.retryable,
     'Renderer lost the structured feature failure across contextBridge')
     await evaluate(application.cdp, `(() => {
@@ -369,7 +376,7 @@ async function verifyOptionalSubsystemRecovery() {
       document.querySelector('.core-subsystem-notice button').focus()
     })()`)
     await setTheme(application.cdp, 'day')
-    const dayCapture = join(outputDir, 'core-skill-degraded-day-1040x700.png')
+    const dayCapture = join(outputDir, 'core-mcp-degraded-day-1040x700.png')
     await capture(application.cdp, dayCapture)
     await application.cdp.send('Emulation.setDeviceMetricsOverride', {
       width: 520, height: 350, deviceScaleFactor: 2, mobile: false
@@ -385,12 +392,13 @@ async function verifyOptionalSubsystemRecovery() {
         && notice.scrollWidth <= notice.clientWidth + 1
         && notice.getBoundingClientRect().bottom <= window.innerHeight + 1
     })()`), 'The compact feature notice overflows or loses keyboard recovery')
-    const nightCapture = join(outputDir, 'core-skill-degraded-night-200-percent.png')
+    const nightCapture = join(outputDir, 'core-mcp-degraded-night-200-percent.png')
     await capture(application.cdp, nightCapture)
     await rename(fault, `${fault}.obstruction`)
+    await rename(`${fault}.original`, fault)
     await evaluate(application.cdp, `document.querySelector('.core-subsystem-notice button').click()`)
     await waitForExpression(application.cdp, `window.rovai.supervisor.getSnapshot().then(snapshot =>
-      snapshot.coreSubsystems.find(subsystem => subsystem.id === 'skills')?.state === 'ready'
+      snapshot.coreSubsystems.find(subsystem => subsystem.id === 'mcp')?.state === 'ready'
       && !document.querySelector('.core-subsystem-notice'))`, 45_000)
     const after = await evaluate(application.cdp, 'window.rovai.supervisor.getSnapshot()', true)
     assert(after.generation === before.generation && after.restartAttempt === 0
@@ -399,9 +407,12 @@ async function verifyOptionalSubsystemRecovery() {
     assert(await evaluate(application.cdp,
       'window.__authorityBeforeFeatureRetry === document.querySelector(".app-shell")'),
     'Feature retry remounted the authority workspace')
-    assert((await evaluate(application.cdp, 'window.rovai.request("skills.list")', true)).length > 0,
-      'Skill Library did not recover')
-    return { generation: after.generation, dataDir: optionalDataDir, captures: { day: dayCapture, night: nightCapture } }
+    const recoveredMcpConfig = await evaluate(application.cdp, 'window.rovai.request("mcp.config.get")', true)
+    assert(recoveredMcpConfig.path === fault && recoveredMcpConfig.exists
+      && !recoveredMcpConfig.fileIssue && !recoveredMcpConfig.permissionIssue
+      && recoveredMcpConfig.configDigest === retainedMcpConfig.configDigest,
+    'MCP did not recover the retained isolated configuration')
+    return { subsystem: 'mcp', generation: after.generation, dataDir: optionalDataDir, captures: { day: dayCapture, night: nightCapture } }
   } finally {
     if (application) await closeApp(application)
     await removeEphemeralRuntimeCampFilesRoot(optionalDataDir, { temporaryDirectory: fixtureRoot })
@@ -440,7 +451,7 @@ async function inspectBootstrap(cdp) {
       title: document.querySelector('.bootstrap-authority-card h1')?.textContent?.trim() ?? '',
       body: document.querySelector('.bootstrap-authority-card')?.textContent ?? '',
       authoritativeTree: Boolean(document.querySelector('.app-shell')),
-      camps: document.querySelectorAll('.camp-nav-row').length,
+      threads: document.querySelectorAll('.camp-nav-row').length,
       members: document.querySelectorAll('.member-sidebar-row').length,
       memory: document.querySelectorAll('.memory-library').length,
       retryFocused: document.activeElement === retry,

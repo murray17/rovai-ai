@@ -106,7 +106,6 @@ export function MemberEnvironmentEditor({ environment: env, disabled }: { enviro
       {env.error && <p id={`${id}-error`} className="environment-error" role="alert">{env.error}{env.loading && <button type="button" className="quiet-button" onClick={env.reset}>{t('重试')}</button>}</p>}
       {env.hasSecrets && <div className="environment-caption"><button type="button" className="quiet-button environment-reveal" onClick={() => void env.toggleReveal()} disabled={disabled || env.loading} aria-pressed={env.revealed}><DialogControlIcon name={env.revealed ? 'eye-off' : 'eye'}/>{env.revealed ? t('隐藏密钥') : t('显示密钥')}</button></div>}
       {env.hasSecrets && !env.revealed && <p className="environment-secret-hint">{t('保留“<saved>”沿用原凭据，替换其内容即可更新。')}</p>}
-      <p className="environment-secret-hint">{t('环境变量在智能体进程启动时读取。保存不会影响已运行的进程，后续新启动的进程使用最新配置。')}</p>
       {env.saved && <p className="environment-saved" role="status">{t('已保存。')}</p>}
     </div>
   </details>

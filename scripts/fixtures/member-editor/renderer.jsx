@@ -69,6 +69,7 @@ window.rovai = {
     }
   },
   request: async (method, payload) => {
+    if (method === 'member.runtimeEnvironment.get') return { revision: 0, environment: {} }
     if (method === 'runtime.modelCatalog.open') {
       catalogCalls.push(clone(payload))
       const installation = installations.find(

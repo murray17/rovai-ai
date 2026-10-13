@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-09-27
+last_updated: 2026-10-12
 ---
 
 # Rovai-ai 开发者指南
@@ -105,8 +105,8 @@ Preload 请求 transport 或 Renderer 错误读取改动还须运行 `pnpm test:
 真实 Tray。`Full check` 的 `desktop-windows` scope 可单独运行 Windows Desktop 自动化，不代表 Windows 10/11 交互验收。
 修改 Desktop 历史导航、侧栏按钮或平台输入时运行 `pnpm test:navigation-shell` 与 `pnpm test:startup-presentation`，
 并运行 `desktop-navigation` / `window-navigation` 定向 Vitest；历史只在内存中保存，复用既有隔离 Electron 夹具。
-修改启动页面、Supervisor Renderer gate 或 400ms 反馈时运行 `pnpm test:startup-presentation`：真实 Electron 中挂载生产
-App，以受控本机 API 和时钟验证页面框架、截止时间与 authority 请求门禁，不启动 Core 或访问日常数据。
+修改启动页面、Supervisor Renderer gate 或首帧品牌反馈时运行 `pnpm test:startup-presentation`：真实 Electron 中挂载生产
+App，以受控本机 API 和时钟验证首帧画布、就绪交接与 authority 请求门禁，不启动 Core 或访问日常数据。
 修改审批 Dock 的焦点、原生选项或 Reason 展示时运行 `pnpm test:approval-dock`，使用生产组件的隔离 Electron
 夹具验证键盘操作与动态布局，不启动 Core 或模型。
 修改消息选文引用时运行 `pnpm test:message-quotes`：隔离 Electron 使用生产正文、引用组件与共享投影样例，验证选区排除、原生悬浮、键盘、完整选文和整行定位。验收窗口使用独立 userData，不启动 Core 或模型；其他会争用 OS 焦点的 Electron 验收应顺序运行。

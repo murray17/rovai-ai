@@ -161,6 +161,8 @@ async function reset(target: RestorableLocation | null = { kind: 'camp', threadI
   if (resolveSupervisor) initialSupervisor.resolve(supervisor)
   root = createRoot(document.getElementById('root')!)
   flushSync(() => root!.render(<App />))
+  check(document.querySelector('.startup-loading-canvas'),
+    'The first committed frame must show loading before any timer or IPC response')
   await flush()
 }
 
@@ -304,19 +306,20 @@ Object.assign(window, { startupTest: {
   async run() {
     const cases: string[] = []
     await reset(null, false)
-    pageFrame('location', false)
+    pageFrame('location', true)
     noAuthority()
-    cases.push('null initial snapshots retain ordinary chrome')
+    cases.push('null initial snapshots show the brand canvas from the first frame')
 
     for (const target of [{ kind: 'camp', threadId }, { kind: 'members', agentId: null, tab: 'identity' },
       { kind: 'memory' }, { kind: 'quick_chat' }] as RestorableLocation[]) {
       await reset(target)
+      pageFrame(target.kind, true)
       await advance(399)
-      pageFrame(target.kind, false)
+      pageFrame(target.kind, true)
       await advance(1)
       pageFrame(target.kind, true)
       noAuthority()
-      cases.push(`${target.kind}: 399ms silent, 400ms full-window brand feedback`)
+      cases.push(`${target.kind}: full-window brand feedback starts immediately and stays visible`)
     }
 
     await reset()
@@ -345,8 +348,10 @@ Object.assign(window, { startupTest: {
 
     await reset()
     publish({ startupPhase: 'migrating_authority' })
+    await flush()
+    pageFrame('camp', true)
     await advance(399)
-    pageFrame('camp', false)
+    pageFrame('camp', true)
     await advance(1)
     pageFrame('camp', true)
     check(document.querySelector('.startup-loading-canvas .sr-only')?.textContent === '正在打开会话',
@@ -377,10 +382,10 @@ Object.assign(window, { startupTest: {
       authorityState: { kind: 'current', origin: 'initialized' },
       capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
     await flush()
-    check(document.querySelector('.onboarding-welcome'), 'A real first install proceeds immediately once ready; 400ms is not a minimum delay')
-    check(!document.querySelector('.startup-loading-canvas, .bootstrap-shell'), 'Fast startup must not flash loading')
+    check(document.querySelector('.onboarding-welcome'), 'A real first install proceeds immediately once ready')
+    check(!document.querySelector('.startup-loading-canvas, .bootstrap-shell'), 'Ready onboarding replaces the initial loading canvas')
     check(!calls.includes('threads.enter'), 'A fresh first-run flow must not enter an existing Camp')
-    cases.push('first-run authority gate stays intact without imposing a 400ms minimum delay')
+    cases.push('first-run authority gate stays intact and ready onboarding replaces loading immediately')
 
     await reset()
     await advance(350)
@@ -388,9 +393,9 @@ Object.assign(window, { startupTest: {
       authorityState: { kind: 'current', origin: 'existing' },
       capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
     await flush()
-    pageFrame('camp', false)
+    pageFrame('camp', true)
     await advance(49)
-    pageFrame('camp', false)
+    pageFrame('camp', true)
     await advance(1)
     pageFrame('camp', true)
     onboarding.resolve({ schemaVersion: 2, status: 'completed', origin: 'existing_installation',
@@ -408,7 +413,7 @@ Object.assign(window, { startupTest: {
     listeners.forEach(listener => listener(starting()))
     await flush()
     check(currentRail === document.querySelector('.unified-sidebar'), 'A stale Supervisor revision cannot reset the workspace')
-    cases.push('ready handoff shares the original deadline and waits for real Camp authority')
+    cases.push('ready handoff keeps loading visible until real Camp authority is available')
 
     await reset()
     publish({ fullCoreState: 'blocked', capabilities: { ...supervisor.capabilities, fullCoreRetry: true },
@@ -428,10 +433,10 @@ Object.assign(window, { startupTest: {
     pageFrame('location', false)
     recoveryFrame('location')
     check(document.querySelector('[role="alertdialog"]')?.textContent?.includes('暂时无法打开会话'),
-      'Local session failure must expose recovery before 400ms')
+      'Local session failure must replace loading with recovery immediately')
     check(!document.body.textContent?.includes('Local session read failed'), 'Local technical failure stays out of visible copy')
     noAuthority()
-    cases.push('local preference read errors stay local and do not wait 400ms')
+    cases.push('local preference read errors stay local and replace loading with recovery immediately')
 
     await reset({ kind: 'members', agentId: null, tab: 'runtime' })
     const health: HealthStatus = {
@@ -523,6 +528,8 @@ Object.assign(window, { startupTest: {
       authorityState: { kind: 'current', origin: 'existing' },
       capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
     await flush(); await advance(0); await flush()
+    await advance(STARTUP_LOADING_EXIT_MS)
+    check(!document.querySelector('.startup-loading-canvas'), 'The ready workspace releases its startup canvas after the exit transition')
     const clickNavigation = async (name: string, selector = 'button') => {
       const button = [...document.querySelectorAll<HTMLButtonElement>(selector)].find(item => item.textContent?.trim() === name || item.getAttribute('aria-label') === name)
       check(button && !button.disabled, 'Missing available navigation button: ' + name)
@@ -584,6 +591,7 @@ Object.assign(window, { startupTest: {
     responses.set('skills.deliveryGroups.list', [])
     responses.set('skills.candidates', { skills: [], errors: [] })
     responses.set('threads.exists', true)
+    responses.set('threads.pendingDraft.setPresence', { changed: false })
     requestHandlers.set('thread.composerDraft.get', ({ threadId }) => ({ threadId, body: '', content: { version: 2, segments: [] },
       revision: 1, attachments: [], replyIntent: null, continuationIntent: null, updatedAt: stamp, expiresAt: null }))
     requestHandlers.set('thread.pendingInputs.get', ({ threadId }) => ({ threadId, executionActive: false, editSession: null, items: [] }))
@@ -696,6 +704,7 @@ Object.assign(window, { startupTest: {
       publish({ runtimeMode: 'full_core', fullCoreState: 'ready', startupPhase: null, authorityState: { kind: 'current', origin: 'existing' },
         capabilities: { ...supervisor.capabilities, authoritativeWorkspace: true, coreRequests: true } })
       await flush(); await advance(0); await flush(); await advance(0); await flush()
+      await advance(STARTUP_LOADING_EXIT_MS)
       await clickNavigation('导航会话 A', '.camp-nav-open')
       await clickNavigation('导航会话 B', '.camp-nav-open')
       if (collapsed) await clickNavigation('收起导航侧栏')
@@ -801,7 +810,11 @@ Object.assign(window, { startupTest: {
     }
     const selectedMemberName = () => document.querySelector<HTMLInputElement>('.member-editor-page:not([hidden]) input[id$="displayName"]')?.value
     await selectMember('A'); await selectMember('B')
-    await clickNavigation('新增队员')
+    const addOptions = document.querySelector<HTMLButtonElement>('[aria-label="选择添加方式"]')
+    check(addOptions, 'The member creation menu must be available')
+    addOptions.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    await flush()
+    await clickNavigation('手动创建', '[role="menuitem"]')
     const draftName = document.querySelector<HTMLInputElement>('.member-editor-page:not([hidden]) input[id$="displayName"]')!
     check(draftName, 'New-member name input must exist')
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(draftName, '保留的队员草稿')
@@ -1070,8 +1083,6 @@ Object.assign(window, { startupTest: {
       if (state === 'blocked') {
         publish({ fullCoreState: 'blocked', capabilities: { ...supervisor.capabilities, fullCoreRetry: true },
           lastError: { code: 'authority_contract_changed', message: 'migration schema /private/fixture.sqlite', retryable: false, details: {} } })
-      } else {
-        await advance(400)
       }
     }
     document.documentElement.dataset.theme = theme
@@ -1087,6 +1098,7 @@ Object.assign(window, { startupTest: {
     const loading = document.querySelector<HTMLElement>('.startup-loading-canvas')
     const mark = document.querySelector<SVGElement>('.startup-loading-mark')
     if (state === 'loading') {
+      check(now === 0, 'Loading screenshots must capture the initial frame without advancing timers')
       check(loading && mark, 'Loading capture must include the full-window brand canvas')
       const expectedSurface = theme === 'night' ? 'rgb(24, 29, 33)' : 'rgb(255, 255, 255)'
       check(getComputedStyle(loading).backgroundColor === expectedSurface,

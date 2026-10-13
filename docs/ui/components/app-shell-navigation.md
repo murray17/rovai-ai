@@ -205,8 +205,8 @@ Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再�
 
 ## 冷启动反馈
 
-App 启动后立即读取本机 Main Window Session，Core capability ready 后立即读取目标数据，不用提示面阻断读取。前 400ms 不显示
-“正在打开”反馈；读取在门槛内完成时直接呈现目标页面。超过 400ms 时，在仍保持挂载但不可交互的目标框架之上显示
+App 启动后立即读取本机 Main Window Session，Core capability ready 后立即读取目标数据，不用提示面阻断读取。Renderer
+从首帧起，在仍保持挂载但不可交互的页面框架之上显示
 覆盖完整 Renderer 视口的不透明品牌画布：日间使用纯白 `--conversation-surface`，夜间使用 Steel Night 的实心
 `--conversation-surface`，不得透出、模糊或伪造底层页面。
 
@@ -215,12 +215,12 @@ App 启动后立即读取本机 Main Window Session，Core capability ready 后�
 下品牌标记保持静止；目标真正 ready 后，画布用 180ms 淡出再释放交互与焦点。普通已就绪页面内部的独立加载仍保留
 既有骨架与目标语义。
 
-启动错误不等待 400ms，并切换为独立的不透明恢复面：只显示“暂时无法打开会话”以及可用的“重新打开”与“导出诊断”，
-不复用品牌呼吸、不渲染原始技术错误，并把焦点约束在恢复操作内。队员页与记忆页的结构、导航和已加载内容不因反馈门槛改变。
+启动错误立即切换为独立的不透明恢复面：只显示“暂时无法打开会话”以及可用的“重新打开”与“导出诊断”，
+不复用品牌呼吸、不渲染原始技术错误，并把焦点约束在恢复操作内。队员页与记忆页的结构、导航和已加载内容保持原有语义。
 
 Main Window Session 必须等待本机偏好读取后冻结恢复目标，不能把窗口创建时的临时默认值当成上次位置。窗口无需等待
 这些读取或 Core 就可以出现。Core 检查/迁移期间保留非权威页面框架，业务控件与快捷键暂不接受操作；没有投影不代表
-项目或会话为空。400ms 从根组件首次挂载起计算，Core ready、Onboarding admission 和目标投影之间的交接不重置计时。
+项目或会话为空。Core ready、Onboarding admission 和目标投影之间的交接持续显示品牌画布，不露出未就绪的框架。
 只有明确 `blocked` / `crashed` 才使用 [Bootstrap Shell](bootstrap-shell.md)；本机偏好读取失败立即切换到独立恢复面。
 
 ## 导航投影新鲜度

@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type { AgentProfile, AgentRunView, ThreadSnapshot } from '@contracts'
 import { AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
 import { ContinueAgentRunButton } from './ContinueAgentRunButton'
-import { ExecutionStopIcon } from './ExecutionIcons'
+import { ExecutionIcon, ExecutionStopIcon } from './ExecutionIcons'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
 import { ToolCallIcon } from './ExecutionToolGroup'
 import { MemberAvatar } from './MemberAvatar'
+import { NavigationIcon } from './NavigationIcon'
 import { RunningText } from './RunningText'
 import { runPresencePreview, type ConversationRunPresenceSlot } from './conversation-run-presence'
 import { identityColorToken } from './theme'
@@ -14,10 +16,11 @@ import { uiAttribute, useInterfaceLanguage } from './interface-language'
 import { buildLiveExecutionProgress, type LiveRuntimeEvent } from './ui-model'
 import { groupExecutionEventsByRunId } from './execution-events'
 import { useExecutionWindow } from './useExecutionWindow'
+import { useNavigationPressMenu } from './useNavigationPressMenu'
 import type { AgentRunStopViewState } from './ThreadWorkspace'
 import './conversation-run-presence.css'
 
-export function ConversationRunPresence({ snapshot, slot, profiles, eventsByRunId, windowedEvidence, stopState, onStop, onOpen, onError }: {
+export function ConversationRunPresence({ snapshot, slot, profiles, eventsByRunId, windowedEvidence, stopState, onStop, onOpen, onOpenMotionSettings, onError }: {
   snapshot: ThreadSnapshot
   slot: ConversationRunPresenceSlot
   profiles: readonly AgentProfile[]
@@ -26,6 +29,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, eventsByRunI
   stopState(run: AgentRunView): AgentRunStopViewState
   onStop(run: AgentRunView): Promise<void>
   onOpen(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
+  onOpenMotionSettings?(): void
   onError(message: string): void
 }): React.JSX.Element | null {
   useInterfaceLanguage()
@@ -83,7 +87,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, eventsByRunI
             <div className="run-presence-line">
               <RunPresenceOpen threadId={snapshot.thread.id} run={run} name={name} description={description}
                 windowedEvidence={windowedEvidence} events={eventsByRunId.get(run.id)}
-                stopping={state === 'stopping' || state === 'confirming'} onOpen={onOpen} />
+                stopping={state === 'stopping' || state === 'confirming'} onOpen={onOpen} onOpenMotionSettings={onOpenMotionSettings} />
               {(canStop || canRetry) && <span className="run-presence-guide" aria-hidden="true" />}
               {canStop && <button className="run-presence-stop" type="button" disabled={state !== 'available'}
                 title={state === 'confirming' ? uiAttribute('正在确认停止结果') : uiAttribute('停止{0}的本次执行', name)}
@@ -121,7 +125,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, eventsByRunI
   </>
 }
 
-function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, events, stopping, onOpen }: {
+function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, events, stopping, onOpen, onOpenMotionSettings }: {
   threadId: string
   run: AgentRunView
   name: string
@@ -130,7 +134,12 @@ function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, e
   events?: LiveRuntimeEvent[]
   stopping: boolean
   onOpen(agentId: string, trigger: HTMLButtonElement, options: { runId: string }): void
+  onOpenMotionSettings?(): void
 }): React.JSX.Element {
+  const trigger = useRef<HTMLButtonElement>(null)
+  const restoreFocusOnClose = useRef(false)
+  const menuId = useId()
+  const menu = useNavigationPressMenu(Boolean(onOpenMotionSettings))
   const tail = useExecutionWindow(windowedEvidence && run.status === 'running', threadId, run, events, null, true)
   const progress = useMemo(() => {
     // Reconcile evidence by identity/revision before projecting a line. A late
@@ -140,11 +149,41 @@ function RunPresenceOpen({ threadId, run, name, description, windowedEvidence, e
   }, [tail.evidence, events, run.id, windowedEvidence])
   const preview = runPresencePreview(run, progress)
   const running = run.status === 'running' && !run.cancelRequestedAt && !stopping
-  return <button className={`run-presence-open is-${preview.kind}`} type="button" data-preview-kind={preview.kind}
+  const button = <button ref={trigger} {...menu.rowProps} className={`run-presence-open is-${preview.kind}`} type="button" data-preview-kind={preview.kind}
     title={uiAttribute('查看执行过程')} aria-label={`${name}，${preview.text}，${description}`}
+    aria-expanded={onOpenMotionSettings ? menu.open : undefined} aria-controls={menu.open ? menuId : undefined}
     onClick={event => onOpen(run.agentId, event.currentTarget, { runId: run.id })}>
     {!running && <span className={`run-presence-status is-${run.status}`} aria-hidden="true"><ExecutionStatusGlyph status={run.status} /></span>}
     {preview.iconKind && <ToolCallIcon iconKind={preview.iconKind} />}
     <RunningText className={`run-presence-preview is-${preview.kind}`} text={preview.text} active={running} />
   </button>
+  if (!onOpenMotionSettings) return button
+  const bounds = menu.open ? trigger.current?.getBoundingClientRect() : undefined
+  const point = menu.contextPoint ?? { x: bounds?.left ?? 0, y: bounds?.bottom ?? 0 }
+  return <DropdownMenu.Root open={menu.open} onOpenChange={menu.setOpen}>
+    {button}
+    <DropdownMenu.Trigger asChild>
+      <span className="sidebar-context-anchor" aria-hidden="true" tabIndex={-1} style={{ left: point.x, top: point.y }} />
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Portal>
+      <DropdownMenu.Content {...menu.menuProps} id={menuId} className="sidebar-action-menu run-presence-menu"
+        aria-label={uiAttribute('执行行操作')} align="start" sideOffset={4} collisionPadding={8} loop
+        onEscapeKeyDown={() => { restoreFocusOnClose.current = true }} onCloseAutoFocus={event => {
+          event.preventDefault()
+          // Wait for the modal menu's focus trap to release before returning to the row.
+          if (restoreFocusOnClose.current) menu.restoreRowFocus()
+          restoreFocusOnClose.current = false
+        }}>
+        <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={() => {
+          if (trigger.current) onOpen(run.agentId, trigger.current, { runId: run.id })
+        }}>
+          <ExecutionIcon className="sidebar-action-menu-icon" /><span>{uiAttribute('查看执行过程')}</span>
+        </DropdownMenu.Item>
+        <DropdownMenu.Separator className="sidebar-action-menu-separator" />
+        <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onOpenMotionSettings}>
+          <NavigationIcon name="sun-moon" /><span>{uiAttribute('减少动态效果…')}</span>
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
+  </DropdownMenu.Root>
 }

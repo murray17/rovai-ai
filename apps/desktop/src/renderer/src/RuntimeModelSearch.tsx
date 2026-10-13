@@ -7,13 +7,12 @@ import { UiText, uiAttribute } from './interface-language'
 const DEFAULT_MODEL = 'runtime_default'
 const normalize = (text: string): string => text.normalize('NFKC').trim().toLocaleLowerCase()
 
-export function RuntimeModelSearch({ open, onOpenChange, models, value, label, missingLabel, disabled, loading, failed, notice, onRetry, onSelect }: {
+export function RuntimeModelSearch({ open, onOpenChange, models, value, label, disabled, loading, failed, notice, onRetry, onSelect }: {
   open: boolean
   onOpenChange(open: boolean): void
   models: ModelDescriptor[]
   value: string
   label: string
-  missingLabel: string | null
   disabled: boolean
   loading: boolean
   failed: boolean
@@ -30,9 +29,17 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
   const tabDismissed = useRef(false)
   const [query, setQuery] = useState('')
   const [activeId, setActiveId] = useState(value)
+  const isManual = value !== DEFAULT_MODEL && !models.some(model => model.id === value)
+  const showManual = isManual && normalize(value).includes(normalize(query))
   const filtered = models.filter(model => normalize(`${model.displayName} ${model.id}`).includes(normalize(query)))
-  const enabled = [...filtered.map(model => model.id), DEFAULT_MODEL]
-  const active = enabled.includes(activeId) ? activeId : filtered[0]?.id
+  const candidate = query.trim()
+  const canSpecify = candidate.length > 0 && candidate !== DEFAULT_MODEL
+    && !/[\u0000-\u001f\u007f]/.test(candidate)
+    && !models.some(model => model.id === candidate)
+    && !(isManual && value === candidate)
+  const resultIds = [...(showManual ? [value] : []), ...filtered.map(model => model.id), ...(canSpecify ? [candidate] : [])]
+  const enabled = [...resultIds, DEFAULT_MODEL]
+  const active = enabled.includes(activeId) ? activeId : resultIds[0]
   const activeIndex = active ? enabled.indexOf(active) : -1
   const activeDescendant = activeIndex >= 0 ? `${id}-option-${activeIndex}` : undefined
 
@@ -51,6 +58,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
   function handleKey(event: KeyboardEvent<HTMLElement>): void {
     if (composing.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (event.target !== search.current) return
       event.preventDefault()
       const index = enabled.indexOf(active ?? '')
       setActiveId(enabled[(index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length])
@@ -61,7 +69,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
       const localControls = [...(content.current?.querySelectorAll<HTMLElement>('input,button') ?? [])]
         .filter(element => element.tabIndex >= 0 && !element.matches(':disabled'))
       const localNext = localControls[localControls.indexOf(event.target as HTMLElement) + (event.shiftKey ? -1 : 1)]
-      if (localNext) { event.preventDefault(); localNext.focus(); return }
+      if (localNext) { event.preventDefault(); requestAnimationFrame(() => localNext.focus()); return }
       event.preventDefault()
       const controls = [...document.querySelectorAll<HTMLElement>('button,input,select,textarea,a[href],[tabindex]')]
         .filter(element => element.tabIndex >= 0 && !element.matches(':disabled') && !element.closest('[inert]')
@@ -69,7 +77,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
       const next = controls[controls.indexOf(trigger.current!) + (event.shiftKey ? -1 : 1)]
       tabDismissed.current = true
       onOpenChange(false)
-      ;(next ?? trigger.current)?.focus()
+      requestAnimationFrame(() => (next ?? trigger.current)?.focus())
     }
   }
 
@@ -103,12 +111,15 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
       align="start" sideOffset={5} collisionPadding={10} aria-label={uiAttribute("模型选项")}
       onOpenAutoFocus={event => { event.preventDefault(); search.current?.focus() }}
       onCloseAutoFocus={event => { if (tabDismissed.current) event.preventDefault() }}
-      onEscapeKeyDown={event => { if (composing.current || event.isComposing) event.preventDefault() }} onKeyDown={handleKey}>
+      onEscapeKeyDown={event => {
+        if (composing.current || event.isComposing) event.preventDefault()
+      }} onKeyDown={handleKey}>
       <div className="runtime-model-search">
         <svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input ref={search} role="combobox" aria-label={uiAttribute("搜索模型")} aria-expanded={open}
+        <input ref={search} role="combobox" aria-label={uiAttribute("搜索模型或输入 ID")} aria-expanded={open}
           aria-controls={`${id}-list`} aria-autocomplete="list" aria-activedescendant={activeDescendant}
-          placeholder={uiAttribute("搜索模型名称或 ID…")} value={query}
+          placeholder={uiAttribute("搜索模型或输入 ID…")} value={query}
+          spellCheck={false} autoComplete="off" autoCapitalize="none" autoCorrect="off"
           onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }}
           onChange={event => { setQuery(event.target.value); setActiveId('') }} />
         {query && <button className="runtime-model-search-clear" type="button" aria-label={uiAttribute("清除模型搜索")}
@@ -122,11 +133,15 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
       </div>}
       <div id={`${id}-list`} role="listbox" aria-label={uiAttribute("模型")} className="runtime-picker-options">
         <div ref={scroll} className="runtime-picker-scroll">
-          {missingLabel && <div role="option" aria-selected="true" aria-disabled="true" className="runtime-model-picker-item" data-disabled="">
-            <span className="runtime-model-picker-copy"><strong>{missingLabel}</strong></span>
-          </div>}
+          {showManual && <button type="button" tabIndex={-1} role="option" aria-selected="true"
+            id={`${id}-option-0`} data-option-index={0} data-manual-current
+            className="runtime-model-picker-item" data-highlighted={active === value ? '' : undefined} title={value}
+            onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(value)} onClick={() => choose(value)}>
+            <span className="runtime-model-picker-copy"><strong>{value}</strong></span>
+            <span className="runtime-model-picker-check"><RuntimePickerCheck /></span>
+          </button>}
           {filtered.map((model, index) => <button key={model.id} type="button" tabIndex={-1}
-            role="option" aria-selected={value === model.id} id={`${id}-option-${index}`} data-option-index={index}
+            role="option" aria-selected={value === model.id} id={`${id}-option-${index + Number(showManual)}`} data-option-index={index + Number(showManual)}
             className="runtime-model-picker-item" data-highlighted={active === model.id ? '' : undefined}
             title={[model.displayName, model.id, model.description].filter(Boolean).join('\n')}
             onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(model.id)} onClick={() => choose(model.id)}>
@@ -136,13 +151,20 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, m
             </span>
             <span className="runtime-model-picker-check">{value === model.id && <RuntimePickerCheck />}</span>
           </button>)}
-          {!filtered.length && <p className="runtime-model-picker-empty" role="status">
+          {canSpecify && <button type="button" tabIndex={-1} role="option" aria-selected="false" data-specify-candidate
+            id={`${id}-option-${filtered.length + Number(showManual)}`} data-option-index={filtered.length + Number(showManual)}
+            className="runtime-model-picker-item runtime-model-specify" data-highlighted={active === candidate ? '' : undefined}
+            title={uiAttribute("使用模型 {0}", candidate)} aria-label={uiAttribute("使用模型 {0}", candidate)}
+            onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(candidate)} onClick={() => choose(candidate)}>
+            <span className="runtime-model-specify-copy"><span><UiText zh="使用" /></span><code>{candidate}</code></span>
+          </button>}
+          {!filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
             {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在获取模型列表…") : failed ? uiAttribute("暂时无法获取模型列表。") : uiAttribute("当前没有可选的固定模型。")}
           </p>}
         </div>
         <div className="runtime-picker-default">
           <button type="button" tabIndex={-1} role="option" aria-selected={value === DEFAULT_MODEL}
-            id={`${id}-option-${filtered.length}`} className="runtime-model-picker-item"
+            id={`${id}-option-${resultIds.length}`} className="runtime-model-picker-item"
             data-highlighted={active === DEFAULT_MODEL ? '' : undefined} title={uiAttribute("跟随智能体默认")}
             onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(DEFAULT_MODEL)} onClick={() => choose(DEFAULT_MODEL)}>
             <span className="runtime-model-picker-copy"><strong><UiText zh={"默认"} /></strong></span>

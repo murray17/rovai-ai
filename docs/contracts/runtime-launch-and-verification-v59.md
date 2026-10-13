@@ -4,7 +4,7 @@ name: Runtime Launch and Verification
 version: v59
 status: accepted
 source_version: v1.72
-last_updated: 2026-10-12
+last_updated: 2026-10-13
 ---
 
 # Runtime Launch and Verification v59
@@ -54,8 +54,6 @@ Migration 193 将 schema 142 升为 143，移除 conversation_runtime_environmen
 
 ## 界面
 
-环境编辑器保留保存/放弃、JSON 校验、凭据遮蔽/查看和离页保护。环境生效说明只显示：
-
-> 环境变量在智能体进程启动时读取。保存不会影响已运行的进程，后续新启动的进程使用最新配置。
+环境编辑器保留保存/放弃、JSON 校验、凭据遮蔽/查看和离页保护，不展示固定的环境生效说明。
 
 不显示快照缺失/重置生效文案，不新增确认、待生效状态或强制重启引导。

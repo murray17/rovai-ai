@@ -285,7 +285,6 @@ export function requestAuthoritativeThreadOpenProjection(
 
 type LoadState = 'loading' | 'ready' | 'error'
 export type StartupStatus = 'loading' | 'waiting' | 'resolved'
-export const STARTUP_FEEDBACK_DELAY_MS = 400
 export const SHUTDOWN_FEEDBACK_DELAY_MS = 400
 export type View = 'compose' | 'camp' | 'members' | 'automations' | 'missions' | 'memory' | 'settings'
 type ActivateThreadOptions = {
@@ -371,10 +370,9 @@ export function startupGateShouldBeVisible(
 }
 
 export function startupFeedbackShouldBeVisible(
-  status: StartupStatus,
-  delayElapsed: boolean
+  status: StartupStatus
 ): boolean {
-  return status === 'waiting' || (status === 'loading' && delayElapsed)
+  return status !== 'resolved'
 }
 
 export function campViewIsVisibleForReadAcknowledgement(
@@ -809,10 +807,10 @@ export function StartupWorkspace({
               onExportDiagnostics={() => window.rovai.exportDiagnostics()} />)}
       </main>
     </NavigationShell>
-    <StartupLoadingCanvas
-      visible={feedbackVisible && error === null}
+    {error === null && <StartupLoadingCanvas
+      visible={feedbackVisible}
       route={target?.kind ?? 'location'}
-    />
+    />}
     </>
   )
 }
@@ -1012,15 +1010,13 @@ export function BusinessApp({
   sidebarFooter,
   remoteConnection,
   initialStartupSnapshot,
-  startupStartedAtMs,
-  startupFeedbackDelayElapsed
+  startupStartedAtMs
 }: {
   environment: BusinessEnvironment
   sidebarFooter?: React.ReactNode
   remoteConnection?: React.ReactNode
   initialStartupSnapshot?: DesktopStartupSnapshot
   startupStartedAtMs?: number
-  startupFeedbackDelayElapsed?: boolean
 }): React.JSX.Element {
   const { client, preferences: uiPreferences, desktop } = environment
   const userAnchorNavigationFor = useThreadUserAnchorCache(client)
@@ -2988,6 +2984,21 @@ export function BusinessApp({
     else void navigateToSettings(rememberedSection)
   }
 
+  const openMotionSettings = async (): Promise<void> => {
+    try {
+      if (!await navigateToSettings('appearance')) return
+      await afterNextPaint()
+      const { entries, index } = desktopNavigation.getSnapshot()
+      const target = entries[index]
+      if (target?.kind !== 'settings' || target.section !== 'appearance') return
+      const control = document.querySelector<HTMLSelectElement>('#appearance-motion')
+      control?.scrollIntoView({ block: 'center', behavior: 'instant' })
+      control?.focus({ preventScroll: true })
+    } catch (nextError) {
+      setError(errorMessage(nextError))
+    }
+  }
+
   const returnToMobileSettings = (): void => {
     const { entries, index } = desktopNavigation.getSnapshot()
     const previous = entries[index - 1]
@@ -4128,10 +4139,7 @@ export function BusinessApp({
     settings: 'settings-content'
   }
   const startupGateVisible = Boolean(desktop) && startupGateShouldBeVisible(startupSnapshot)
-  const startupFeedbackVisible = startupFeedbackShouldBeVisible(
-    startupStatus,
-    startupFeedbackDelayElapsed ?? false
-  )
+  const startupFeedbackVisible = startupFeedbackShouldBeVisible(startupStatus)
   const startupRoutePending = !startupGateVisible && startupStatus !== 'resolved'
     ? startupRouteTarget
     : null
@@ -4185,7 +4193,7 @@ export function BusinessApp({
       <>
         <StartupWorkspace
           snapshot={startupSnapshot}
-          feedbackVisible={startupFeedbackDelayElapsed ?? false}
+          feedbackVisible={!shuttingDown}
           error={onboardingError || startupError}
           onRetry={retryStartup}
         />
@@ -4441,6 +4449,7 @@ export function BusinessApp({
             firstRunThread={firstRunThread}
             firstRunThreadId={firstRunThreadId}
             onConfigureRuntime={configureMemberRuntime}
+            onOpenMotionSettings={() => { void openMotionSettings() }}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
             onNotify={notify}
             onNotifyError={notifyError}
@@ -4660,7 +4669,7 @@ export function BusinessApp({
         onDownload={appUpdates.download}
       />}
     </NavigationShell>
-    <StartupLoadingCanvas visible={startupLoadingVisible} route={startupLoadingRoute} />
+    {startupStatus !== 'waiting' && <StartupLoadingCanvas visible={startupLoadingVisible} route={startupLoadingRoute} />}
     </MissionInteractionProvider>
     </FilePreviewProvider>
     </MobileLayoutProvider>

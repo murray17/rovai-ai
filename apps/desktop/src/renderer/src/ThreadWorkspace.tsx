@@ -1662,6 +1662,7 @@ export function ThreadWorkspace({
   firstRunThread = null,
   firstRunThreadId = null,
   onConfigureRuntime,
+  onOpenMotionSettings,
   onDismissRuntimeRecovery,
   onNotify = () => undefined,
   onNotifyError
@@ -1724,6 +1725,7 @@ export function ThreadWorkspace({
   firstRunThread?: FirstRunThreadContext | null
   firstRunThreadId?: string | null
   onConfigureRuntime?(agentId: string): void
+  onOpenMotionSettings?(): void
   onDismissRuntimeRecovery?(): void
   onNotify?(message: string): void
   onNotifyError?(message: string): void
@@ -4945,7 +4947,7 @@ export function ThreadWorkspace({
                         confirming: confirmingRunIds.has(run.id),
                         turnCancelling: run.threadTurnId !== null && cancellingTurnIds.has(run.threadTurnId)
                       })}
-                      onStop={onCancelAgentRun} onOpen={openExecutionProcess} onError={notifyError} />)
+                      onStop={onCancelAgentRun} onOpen={openExecutionProcess} onOpenMotionSettings={onOpenMotionSettings} onError={notifyError} />)
                     continue
                   }
                   const dayKey = localDayKey(timelineItem.createdAt)

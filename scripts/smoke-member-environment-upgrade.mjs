@@ -224,8 +224,8 @@ function connectCore(binary, args, cwd, env) {
     if (message.error) entry.reject(new Error(message.error.message))
     else entry.resolve(message.result)
   })
-  child.on('close', () => {
-    for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(new Error(`Core exited: ${stderr}`)) }
+  child.on('close', (code, signal) => {
+    for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(new Error(`Core exited (${signal ?? code}): ${stderr}`)) }
     pending.clear()
   })
   return {
@@ -297,6 +297,36 @@ for line in sys.stdin:
 `
 }
 
+// Check the process boundary before initialize/activation, where a real CLI may
+// validate its additional directories. Do not let later lease binding repair it.
+function processContextProbe(log) {
+  return `
+if os.environ.get('ROVAI_CLI_CONTEXT'):
+    context_path = os.environ['ROVAI_CLI_CONTEXT']
+    with open(context_path) as source: context = json.load(source)
+    run_tmp = os.environ['ROVAI_RUN_TMP']
+    launch = dict(method='process/start', stage=os.getenv('RESUME_CASE'), pid=os.getpid(), cwd=os.getcwd(),
+        contextPath=context_path, processId=context['processId'], runTmp=run_tmp,
+        runTmpExists=os.path.isdir(run_tmp), unbound=context.get('lease') is None)
+    with open(${JSON.stringify(log)}, 'a') as output: output.write(json.dumps(launch) + '\\n')
+    if not launch['runTmpExists'] or not launch['unbound']:
+        sys.exit('new Runtime requires an existing run-tmp and an unbound process context')
+`
+}
+
+function assertFreshProcessContexts(launches, cwd) {
+  assert.ok(launches.length > 0, 'observe the actual CLI startup boundary')
+  for (const launch of launches) {
+    assert.equal(launch.cwd, cwd, 'keep the project as the process working directory')
+    assert.equal(launch.runTmpExists, true, 'run-tmp must exist before initialize/activation')
+    assert.equal(launch.unbound, true, 'a new process must not inherit an old active lease')
+  }
+  for (const field of ['processId', 'contextPath', 'runTmp']) {
+    assert.equal(new Set(launches.map(row => row[field])).size, launches.length,
+      `each newly launched process must own a distinct ${field}`)
+  }
+}
+
 // Reuse this isolated Core/CLI owner for the production fallback sequence. The
 // CLI only speaks ACP; all preparation, binding, failure and dispatch are Core's.
 async function acpFallbackAcceptance(root, binary) {
@@ -311,6 +341,7 @@ if '--version' in sys.argv:
     print('traecli 0.3.0'); sys.exit(0)
 if 'models' in sys.argv:
     print('[{"name":"model-a","context_window":168000},{"name":"model-b","context_window":168000}]'); sys.exit(0)
+${processContextProbe(log)}
 for line in sys.stdin:
     request = json.loads(line)
     if 'id' not in request: continue
@@ -437,6 +468,9 @@ for line in sys.stdin:
       const run = await settle(successful.includes(stage) ? 'succeeded' : stage === 'cancel' ? 'cancelled' : 'failed')
       await core.stop()
       const actual = (await records()).filter(r => r.stage === stage)
+      const launches = actual.filter(r => r.method === 'process/start')
+      assertFreshProcessContexts(launches, directory)
+      assert.equal(launches.length, stage.startsWith('load-unsupported') || stage === 'resume-and-load-unsupported' ? 2 : 1, stage)
       const after = query('SELECT native_session_id FROM conversation WHERE camp_id=?', campId).native_session_id
       assert.equal(actual.filter(r => r.method === 'session/new').length, replacements.includes(stage) ? 1 : 0, stage)
       assert.equal(actual.filter(r => r.method === 'session/prompt').length, successful.includes(stage) || stage === 'input-unknown' ? 1 : 0, stage)
@@ -450,7 +484,7 @@ for line in sys.stdin:
       const notice = query("SELECT COUNT(*) AS total FROM event_log WHERE entity_id=? AND event_type='agent_run.native_session_continuity_lost' AND json_extract(payload_json,'$.continuation')='native_session_replaced'", run.id)
       assert.equal(notice.total, replaced ? 1 : 0, stage)
     }
-    return { kind: 'trae-cn-cli', fallbackOnce: true, replacementFailureKeepsTarget: true, unknownErrorsDoNotFallback: true, noDuplicateInput: true, warmKeepsAAfterSavingB: true, coldUsesBAndOriginalIdAfterContextChange: true }
+    return { kind: 'trae-cn-cli', fallbackOnce: true, replacementFailureKeepsTarget: true, unknownErrorsDoNotFallback: true, noDuplicateInput: true, warmKeepsAAfterSavingB: true, coldUsesBAndOriginalIdAfterContextChange: true, freshProcessContexts: true }
   } finally { await core?.stop(); await removeEphemeralRuntimeCampFilesRoot(data, { homeDirectory: home }) }
 }
 
@@ -465,6 +499,7 @@ async function piConversationAcceptance(root, binary) {
 import json, os, sys, uuid
 if '--version' in sys.argv:
     print('0.84.4'); sys.exit(0)
+${processContextProbe(log)}
 native_root = os.path.join(os.path.dirname(__file__), 'native-sessions')
 os.makedirs(native_root, exist_ok=True)
 sid, session_file = None, None
@@ -583,6 +618,38 @@ for line in sys.stdin:
     const prompts = (await records()).filter(r => r.method === 'prompt')
     assert.equal(prompts.length, 8)
     assert.equal(query("SELECT COUNT(*) AS total FROM event_log WHERE event_type='agent_run.native_session_continuity_lost'").total, 0)
-    return { kind: 'pi', publicAndPrivateExactResume: true, warmAndRestarted: true, inputs: prompts.length }
+
+    // A cold resume of a deleted exact target releases its Host before the one
+    // permitted replacement. The replacement must receive a new process context.
+    await core.stop()
+    await rm(sessions.get('public').sessionFile)
+    const offset = (await records()).length
+    core = start(); await core.request('health.check')
+    const sent = await core.request('thread.messages.send', { commandId: crypto.randomUUID(), threadId: campId,
+      content: composerDocumentForAddress({ mode: 'default' }, 'PI_INPUT_MISSING_HISTORY'), sourceAttachments: [], quotes: [], replyToThreadMessageId: null,
+      execution: { taskId: null, purpose: 'Verify fresh Pi fallback process context', completionRole: 'required' } })
+    assert.equal(sent.commandResult.status, 'accepted')
+    total++
+    await waitFor(() => {
+      const state = query("SELECT COUNT(*) AS total, SUM(status IN ('succeeded','failed','cancelled')) AS settled FROM agent_run WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id=?)", campId)
+      return state.total === total && state.settled === total
+    }, () => `${JSON.stringify(latestRun())}; ${core.diagnostics()}`)
+    const run = latestRun()
+    assert.equal(run.status, 'succeeded', JSON.stringify(run))
+    const fallback = (await records()).slice(offset)
+    const launches = fallback.filter(r => r.method === 'process/start')
+    assert.equal(launches.length, 2, 'one cold restore Host and one replacement Host')
+    assertFreshProcessContexts(launches, directory)
+    const replacement = fallback.filter(r => r.method === 'new_session')
+    assert.equal(replacement.length, 1)
+    const inputs = fallback.filter(r => r.method === 'prompt')
+    assert.equal(inputs.length, 1)
+    assert.ok(inputs[0].request.message.includes('PI_INPUT_MISSING_HISTORY'))
+    const bound = query('SELECT native_session_id FROM conversation WHERE id=?', run.conversation_id).native_session_id
+    assert.notEqual(bound, sessions.get('public').sessionId)
+    assert.equal(bound, inputs[0].sessionId)
+    assert.equal(query('SELECT native_session_id FROM conversation WHERE id=?', privateConversationId).native_session_id, sessions.get('private').sessionId)
+    assert.equal(query("SELECT COUNT(*) AS total FROM event_log WHERE entity_id=? AND event_type='agent_run.native_session_continuity_lost'", run.id).total, 1)
+    return { kind: 'pi', publicAndPrivateExactResume: true, warmAndRestarted: true, inputs: prompts.length + inputs.length, missingHistoryFallbackOnce: true, freshProcessContexts: true }
   } finally { await core?.stop(); await removeEphemeralRuntimeCampFilesRoot(data, { homeDirectory: home }) }
 }

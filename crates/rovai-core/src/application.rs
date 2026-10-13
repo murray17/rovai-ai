@@ -15695,6 +15695,9 @@ impl Core {
                     uuid::Uuid::new_v4()
                 );
                 launch_permit.check_cancelled()?;
+                // Failed activation has retired the previous Host and its
+                // process-scoped tools. Prepare the replacement before spawn.
+                let replacement_builtin_tools = self.prepare_builtin_tool_process_config()?;
                 let replacement = self
                     .pi
                     .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
@@ -15711,7 +15714,7 @@ impl Core {
                         native_binding_id: &replacement_binding.native_binding_id,
                         native_binding_generation: replacement_binding.native_binding_generation,
                         bootstrap: &replacement_bootstrap,
-                        builtin_tools: &builtin_tools,
+                        builtin_tools: &replacement_builtin_tools,
                     })
                     .await
                     .with_context(|| {
@@ -17320,6 +17323,7 @@ impl Core {
                         &runtime_compatibility_digest,
                     )
                     .await?;
+                    let replacement_builtin_tools = self.prepare_builtin_tool_process_config()?;
                     runtime = adapter
                         .ensure_agent_run_runtime(
                             &execution.agent_run_id,
@@ -17330,7 +17334,7 @@ impl Core {
                             &execution.workspace,
                             execution.permission_semantics,
                             &execution.runtime,
-                            &builtin_tools,
+                            &replacement_builtin_tools,
                             &mcp_projection.servers,
                             &mcp_projection.projection_digest,
                             attachment_access_root,
@@ -17436,6 +17440,9 @@ impl Core {
                 self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
                     .await?;
                 launch_permit.check_cancelled()?;
+                // forget_agent_run retired the old run-tmp and tool identity.
+                // The CLI may validate these paths before we can bind its lease.
+                let replacement_builtin_tools = self.prepare_builtin_tool_process_config()?;
                 runtime = adapter
                     .ensure_agent_run_runtime(
                         &execution.agent_run_id,
@@ -17446,7 +17453,7 @@ impl Core {
                         &execution.workspace,
                         execution.permission_semantics,
                         &execution.runtime,
-                        &builtin_tools,
+                        &replacement_builtin_tools,
                         &mcp_projection.servers,
                         &mcp_projection.projection_digest,
                         attachment_access_root,
