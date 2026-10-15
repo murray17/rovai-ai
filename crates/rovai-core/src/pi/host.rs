@@ -3699,7 +3699,7 @@ done
     fn session_header_scan_and_missing_exact_target_are_classified_without_text_guessing() {
         let root =
             std::env::temp_dir().join(format!("rovai-pi-session-scan-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = crate::platform::private_storage::create_private_directory(&root).unwrap();
         let id = "00000000-0000-4000-8000-000000000077";
         let session = root.join("session.jsonl");
         std::fs::write(
@@ -3712,7 +3712,7 @@ done
         .unwrap();
         validate_native_session_file(&session, id, &root, true).unwrap();
         let locator_root = root.join("locator");
-        std::fs::create_dir_all(&locator_root).unwrap();
+        crate::platform::private_storage::create_private_directory(&locator_root).unwrap();
         write_private_json(
             &locator_root.join("locator.json"),
             &PiSessionLocator {
