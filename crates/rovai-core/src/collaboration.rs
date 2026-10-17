@@ -5429,6 +5429,12 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
         [camp_id],
     )?;
+    // An Automation occurrence references its trigger message and Delivery with
+    // NO ACTION foreign keys, and terminal occurrences are immutable, so the
+    // link cannot be nulled. The occurrence belongs to this Camp: remove it
+    // (its notification deliveries cascade) before the Camp's messages and
+    // Deliveries. The Automation definition and other occurrences are kept.
+    transaction.execute("DELETE FROM automation_run WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         "DELETE FROM message_attachment WHERE camp_id = ?1",
         [camp_id],

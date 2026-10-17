@@ -3193,6 +3193,104 @@ mod tests {
         remove_test_database(database, directory);
     }
 
+    // A Camp produced by an Automation occurrence is referenced by the
+    // occurrence through trigger_message_id/trigger_delivery_id (NO ACTION).
+    // Permanently deleting that Camp must remove the occurrence with it and
+    // keep the Automation definition and its other occurrences.
+    #[test]
+    fn deleting_an_automation_camp_removes_its_occurrence_and_keeps_the_definition() {
+        let service = AutomationService::default();
+        let (mut database, directory, quick_chat_path) = test_database();
+        let (automation_id, _) = create_manual_automation(
+            &service,
+            &mut database,
+            "automation-delete-create",
+            "Summarize today's papers.",
+        );
+        let run_automation = |database: &mut Database, command_id: &str| -> (String, String) {
+            let started = service
+                .run_now(
+                    database,
+                    &user_command(
+                        command_id,
+                        RunAutomationCommand {
+                            automation_id: automation_id.clone(),
+                        },
+                    ),
+                    CURRENT_USER_ID,
+                    &quick_chat_path,
+                )
+                .expect("manual Automation should start");
+            (
+                started.result.payload["runId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+                started.result.payload["threadId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        };
+        let (deleted_run_id, deleted_camp_id) =
+            run_automation(&mut database, "automation-delete-run-1");
+        // A running occurrence makes the next one an overlap skip; settle it the
+        // way a failed scheduled run is left behind in a real store.
+        service
+            .interrupt_before_runtime(&mut database, &deleted_run_id)
+            .expect("first occurrence should settle");
+        let (kept_run_id, kept_camp_id) = run_automation(&mut database, "automation-delete-run-2");
+
+        let transaction = database.connection_mut().transaction().unwrap();
+        crate::collaboration::delete_camp_aggregate(&transaction, &deleted_camp_id)
+            .expect("an Automation-produced Camp must be deletable");
+        transaction.commit().unwrap();
+
+        let count = |sql: &str, id: &str| -> i64 {
+            database
+                .connection()
+                .query_row(sql, [id], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            count("SELECT COUNT(*) FROM camp WHERE id = ?1", &deleted_camp_id),
+            0
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM automation_run WHERE id = ?1",
+                &deleted_run_id
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM automation WHERE id = ?1",
+                &automation_id
+            ),
+            1
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM camp WHERE id = ?1", &kept_camp_id),
+            1
+        );
+        assert_eq!(
+            count(
+                "SELECT COUNT(*) FROM automation_run WHERE id = ?1",
+                &kept_run_id
+            ),
+            1
+        );
+        let violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(violations, 0);
+        remove_test_database(database, directory);
+    }
+
     #[test]
     fn scheduled_once_overlap_is_skipped_and_closed_definition_can_run_manually() {
         let service = AutomationService::default();
