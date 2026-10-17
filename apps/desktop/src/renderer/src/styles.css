@@ -4757,6 +4757,13 @@ body:has(.composer-image-attachment[data-context-open="true"]) .image-action-not
 .agent-timeline .file-extension-label { padding: 2px 5px; border: 0; border-radius: 4px; color: var(--attachment-accent); background: color-mix(in srgb, var(--attachment-accent) 12%, transparent); font-size: 7.7px; }
 .agent-file-open-cue { display: grid; justify-items: end; gap: 3px; color: var(--faint); font-size: 8.5px; font-weight: 650; }
 .agent-file-open-cue svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.attachment-download { display: flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 4px; padding: 0 10px; border: 0; border-left: 1px solid var(--line); color: var(--muted); background: transparent; font-size: 10px; font-weight: 650; cursor: pointer; }
+.attachment-download svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.attachment-download:hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--brand) 7%, transparent); }
+.attachment-download:disabled { cursor: wait; opacity: .76; }
+.file-preview-download-action { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface); font: 600 10px/1.4 inherit; cursor: pointer; }
+.file-preview-download-action:hover { color: var(--ink); background: var(--surface-raised); }
+.file-preview-download-action svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
 .attachment-remove { position: absolute; z-index: 1; top: 3px; right: 3px; display: grid; width: 19px; height: 19px; padding: 0; place-items: center; border: 0; border-radius: 50%; color: var(--muted); background: color-mix(in srgb, var(--surface) 90%, transparent); line-height: 1; }
 .attachment-remove:hover { color: var(--ink); background: var(--surface-raised); }
 .attachment-preparing,

@@ -341,7 +341,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
 }
 
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
-  const { reload, retry, changePage, revealInFolder, displayed } = useFilePreview()
+  const { reload, retry, changePage, revealInFolder, download, displayed } = useFilePreview()
   const [pathActionError, setPathActionError] = useState<string | null>(null)
   useEffect(() => setPathActionError(null), [tab.file?.handleId, tab.id])
   useEffect(() => { if (tab.file && tab.content && tab.content.kind !== 'html') displayed(tab.id, tab.file.handleId) }, [tab.file?.handleId, tab.content, tab.id, displayed])
@@ -358,6 +358,23 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
     >
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13 5.5V2.8l-1.2 1.1A5.4 5.4 0 1 0 13.2 9" /></svg>
       {tab.isRefreshing ? uiAttribute("正在重新加载") : uiAttribute("有更新")}
+    </button>
+  ) : null
+  const canDownload = tab.loadState === 'ready' && Boolean(tab.file?.capabilities.includes('download'))
+  const downloadAction = canDownload ? (
+    <button
+      className="file-preview-download-action"
+      type="button"
+      title={uiAttribute("下载文件")}
+      onClick={() => {
+        setPathActionError(null)
+        void download(tab.id).then((result) => {
+          setPathActionError(result.ok ? null : result.error.message)
+        }).catch(() => setPathActionError(uiAttribute('文件操作失败，请重试。')))
+      }}
+    >
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5v7M5.2 6.9 8 9.7l2.8-2.8M3 13h10" /></svg>
+      <UiText zh={"下载"} />
     </button>
   ) : null
   const pathControl = showPath ? <>
@@ -378,15 +395,16 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
     </span>}
   </> : null
   if (tab.content?.kind === 'html') {
-    return <HtmlViewer tab={tab} pathControl={pathControl} updateAction={tab.isRefreshing ? null : updateAction} />
+    return <HtmlViewer tab={tab} pathControl={pathControl} updateAction={tab.isRefreshing ? null : <>{updateAction}{downloadAction}</>} />
   }
   return (
     <>
       {showPath && <div className="file-preview-path-row">
         {pathControl}
         {updateAction}
+        {downloadAction}
       </div>}
-      {!showPath && updateAction && <div className="file-preview-update-row">{updateAction}</div>}
+      {!showPath && (updateAction || downloadAction) && <div className="file-preview-update-row">{updateAction}{downloadAction}</div>}
       <div className="file-preview-content">
         {tab.loadState === 'opening' && !tab.content && (
           <OpeningIndicator />

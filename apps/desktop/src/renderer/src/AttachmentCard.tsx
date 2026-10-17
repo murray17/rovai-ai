@@ -245,6 +245,7 @@ export function AttachmentCard({
   const systemOpenLabel = client.attachments.kind === 'download' ? uiAttribute('下载文件') : attachment.kind === 'directory'
     ? uiAttribute('打开文件夹')
     : uiAttribute('使用系统应用打开')
+  const downloadButtonAvailable = client.attachments.kind === 'download' && timeline && attachment.kind === 'file' && primaryActionAvailable
   const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null && !previewFailed
   const showAttachmentContextMenu = (x: number, y: number): void => {
     fileLocation.inspect()
@@ -429,6 +430,22 @@ export function AttachmentCard({
               </button>
             )
           : <div className="attachment-open">{content}</div>}
+      {downloadButtonAvailable && (
+        <button
+          className="attachment-download"
+          type="button"
+          aria-label={`${uiAttribute('下载文件')} ${attachment.displayName}`}
+          title={uiAttribute('下载文件')}
+          aria-busy={attachmentAction !== null || undefined}
+          disabled={disabled || attachmentAction !== null}
+          onClick={() => void runAttachmentAction('open', true)}
+        >
+          <svg viewBox="0 0 18 18" aria-hidden="true">
+            <path d="M9 2.8v8.2M5.6 7.9 9 11.3l3.4-3.4M3.4 14.6h11.2" />
+          </svg>
+          <span><UiText zh={"下载"} /></span>
+        </button>
+      )}
       {!previewOpen && imageContextMenu}
       {imageNotice && createPortal(<div className="image-action-notice" role="status" aria-hidden={previewOpen || undefined}>{imageNotice}</div>, document.body)}
       {hasImagePreview && (

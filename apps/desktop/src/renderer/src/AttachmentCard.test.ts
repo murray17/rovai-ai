@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { ThreadMessageAttachmentView, LocalAttachmentOwnerLocator } from '@contracts'
 import { AttachmentCard } from './AttachmentCard'
+import { ThreadClientProvider, type ThreadClient } from './camp-client'
 
 vi.mock('./FilePreviewContext', () => ({
   useOptionalFilePreview: () => ({ open: vi.fn() })
@@ -90,5 +91,28 @@ describe('AttachmentCard composer actions', () => {
     expect(markup).toContain('aria-disabled="true"')
     expect(markup).toContain('aria-busy="true"')
     expect(markup).not.toContain('attachment-context-anchor')
+  })
+})
+
+describe('AttachmentCard Web download', () => {
+  const locator: LocalAttachmentOwnerLocator = { owner: 'message', threadId: 'camp-1', messageId: 'message-1', attachmentRefId: fileAttachment.id }
+  const render = (kind: 'download' | 'native', attachment: ThreadMessageAttachmentView = fileAttachment) => {
+    const client = { platform: 'linux', attachments: kind === 'download' ? { kind, download: vi.fn() } : { kind, open: vi.fn(), reveal: vi.fn() } } as unknown as ThreadClient
+    return renderToStaticMarkup(createElement(
+      ThreadClientProvider,
+      { client, children: createElement(AttachmentCard, { attachment, locator, presentation: 'agent-timeline' }) }
+    ))
+  }
+
+  it('shows a download button beside the open control in the Web timeline', () => {
+    const markup = render('download')
+    expect(markup).toContain('class="attachment-download"')
+    expect(markup).toContain('aria-label="下载文件 report.md"')
+    expect(markup.indexOf('attachment-open')).toBeLessThan(markup.indexOf('attachment-download'))
+  })
+
+  it('does not add a second download button in Desktop or for directories', () => {
+    expect(render('native')).not.toContain('attachment-download')
+    expect(render('download', { ...fileAttachment, kind: 'directory', mediaType: 'inode/directory' })).not.toContain('attachment-download')
   })
 })
