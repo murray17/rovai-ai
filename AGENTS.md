@@ -33,3 +33,55 @@
 - Do not install or enable Impeccable hooks or plugins without explicit user approval.
 - Incremental work preserves the established Rovai AI visual world. Do not enter a
   replacement-world flow unless the user explicitly requests a redesign.
+
+## Project knowledge distillation (2026-10-19)
+
+This section is a compact task router distilled from the current repository. It
+does not replace `docs/README.md`, the owning Architecture, or the current
+Contract.
+
+### Authority order
+
+1. Live behavior and targeted test evidence.
+2. Current source, migrations, contracts, and build configuration.
+3. `docs/architecture/`, the owning `docs/contracts/*-vN.md`, the single
+   `current_version` in `docs/versions/README.md`, and
+   `docs/decisions/CURRENT.md`.
+4. Historical version documents, research briefs, and postmortems: context
+   only, never current constraints.
+
+### Non-negotiable repository facts
+
+- Stack: pnpm 11, Node >= 24, Electron + React + TypeScript, and a Rust
+  workspace with `rovai-core`, `rovai-host`, and `rovai-web`.
+- Domain vocabulary is normative: Thread (not Conversation), Mission (not
+  Task), User for new structured current-user projections, and Gather is
+  retired.
+- `crates/rovai-core/src/db.rs` and `application.rs` are the largest authority
+  files. Search them before adding a parallel command, migration, store,
+  snapshot, or event path.
+- Contracts are versioned files. Change the narrowest owning contract, add or
+  advance its version deliberately, and run the documentation gates.
+- All code changes land through a task branch and a Pull Request targeting
+  `main`; do not push directly to `main`.
+- Development must go through `pnpm dev`. It supplies an isolated `userData`
+  and isolated Skill Library. Never point Core at the daily data directory,
+  run from `dist/`, or use bare `electron-vite dev`.
+- Development, packaged-app acceptance, daily installation, and real-runtime
+  probes are separate channels with separate isolation evidence.
+- Do not install Impeccable hooks/plugins, start MCP servers, call providers,
+  or read credentials, cookies, or tokens without explicit user approval.
+
+### Change-to-verification matrix
+
+| Change | Minimum verification |
+| --- | --- |
+| Renderer or ordinary TypeScript | `pnpm typecheck` plus the focused test |
+| Rust Core | Targeted `cargo test -p rovai-core --lib <owner>::`, then `pnpm test:rust:pr` |
+| Preload/IPC transport | `pnpm test:desktop-bridge` |
+| Electron layout or native window flow | The matching `pnpm test:*` fixture and `pnpm build:desktop` |
+| Documentation, Contract, Architecture, Version Decision | `pnpm docs:test` and `pnpm docs:check` |
+| Skill authoring | `pnpm skills:test` and `pnpm skills:check` |
+| Packaged desktop | `pnpm build:desktop` plus isolated acceptance |
+
+Scenario-specific project skills live in `.agents/skills/`.
