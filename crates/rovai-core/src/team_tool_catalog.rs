@@ -1277,7 +1277,7 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_READ_TOOL_NAME,
             "title": "Read public Thread messages",
-            "description": "Read published messages from one public Thread using its live state, including an explicit historical Thread. Target membership is not a read permission. With no selector, return the newest page; use before/nextCursor for older messages. Default limit: 20; range: 1-100. Use messageId for one message or replyChain for a reply chain. messageId cannot combine with replyChain, before or limit. Normal items include mentions: Agent entries {id,name} are persisted effective targets; {id:\"user\"} marks a structured current User mention. Mentions do not indicate reading or execution; withdrawn items contain only a withdrawal marker. IDs and cursors never bypass visibility.",
+            "description": "Read published messages from one public Thread using its live state, including an explicit historical Thread. Target membership is not a read permission. Default: newest 20 messages; limit 1-100. before N reads sequence < N; after N reads sequence > N, oldest first. Both return ascending order. before and after are mutually exclusive. after 0 starts at the oldest visible message. While hasMore, pass nextCursor with the same flag. Use messageId for one message or replyChain for a reply chain. messageId cannot combine with replyChain, before, after or limit. Normal items include mentions: Agent entries {id,name} are persisted effective targets; {id:\"user\"} marks a structured current User mention. Mentions do not indicate reading or execution; withdrawn items contain only a withdrawal marker. IDs and cursors never bypass visibility.",
             "inputSchema": ThreadHistoryService::camp_read_input_schema(),
             "outputSchema": camp_read_success_schema()
         }),
@@ -1645,6 +1645,27 @@ mod tests {
         )
         .unwrap();
         validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &json!({"limit": 100})).unwrap();
+        for after in [0, 1, 123] {
+            for input in [
+                json!({"after": after}),
+                json!({"replyChain": "message_123", "after": after, "limit": 100}),
+            ] {
+                validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &input).unwrap();
+            }
+        }
+        for invalid in [
+            json!({"after": -1}),
+            json!({"after": 1.5}),
+            json!({"after": "20"}),
+            json!({"after": null}),
+            json!({"after": true}),
+            json!({"before": 10, "after": 0}),
+            json!({"replyChain": "message_123", "before": 10, "after": 0}),
+            json!({"messageId": "message_123", "after": 0}),
+            json!({"before": 0}),
+        ] {
+            assert!(validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &invalid).is_err());
+        }
         for invalid in [json!(0), json!(101), json!(-1), json!(1.5), json!("20")] {
             assert!(
                 validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &json!({"limit": invalid}))
@@ -1655,7 +1676,7 @@ mod tests {
             json!({"mode": "timeline"}),
             json!({"direction": "before"}),
             json!({"cursor": 42}),
-            json!({"after": 5}),
+            json!({"since": 5}),
         ] {
             assert!(validate_builtin_tool_input(CAMP_READ_TOOL_NAME, &legacy).is_err());
         }

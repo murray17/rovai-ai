@@ -2142,7 +2142,7 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
         ],
         "thread.read" => &[
             "rovai thread read",
-            "rovai thread read --limit 20",
+            "rovai thread read --after 123",
             "rovai thread read --before 123",
             "rovai thread read --message-id '<message-id>'",
             "rovai thread read --reply-chain '<message-id>' --limit 20",
@@ -2619,10 +2619,16 @@ mod tests {
 
         let read = builtin_tool_description("thread.read", true).unwrap();
         let read_help = operation_help_text(&read);
-        for flag in ["--limit", "--before", "--message-id", "--reply-chain"] {
+        for flag in [
+            "--limit",
+            "--before",
+            "--after",
+            "--message-id",
+            "--reply-chain",
+        ] {
             assert!(read_help.contains(flag), "missing {flag} from help");
         }
-        for removed in ["--mode", "--direction", "--cursor", "--after"] {
+        for removed in ["--mode", "--direction", "--cursor", "--since"] {
             assert!(!read_help.contains(removed), "stale {removed} in help");
         }
         assert!(read_help.contains("Omit for the current Thread"));
@@ -2631,7 +2637,7 @@ mod tests {
             operation_help_examples("thread.read"),
             [
                 "rovai thread read",
-                "rovai thread read --limit 20",
+                "rovai thread read --after 123",
                 "rovai thread read --before 123",
                 "rovai thread read --message-id '<message-id>'",
                 "rovai thread read --reply-chain '<message-id>' --limit 20",
@@ -2640,6 +2646,12 @@ mod tests {
         for (args, expected) in [
             (vec!["--limit", "20"], json!({"limit": 20})),
             (vec!["--before", "123"], json!({"before": 123})),
+            (vec!["--after", "0"], json!({"after": 0})),
+            (vec!["--after", "123"], json!({"after": 123})),
+            (
+                vec!["--reply-chain", "msg_123", "--after", "5"],
+                json!({"replyChain": "msg_123", "after": 5}),
+            ),
             (
                 vec!["--message-id", "msg_123"],
                 json!({"messageId": "msg_123"}),
@@ -2655,7 +2667,7 @@ mod tests {
                 expected
             );
         }
-        for removed in ["--mode", "--direction", "--cursor", "--after"] {
+        for removed in ["--mode", "--direction", "--cursor", "--since"] {
             assert!(
                 parse_operation_input(&read, &[removed.to_string(), "legacy".to_string()]).is_err()
             );

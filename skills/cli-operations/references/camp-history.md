@@ -13,18 +13,20 @@ Choose the narrowest scope that answers the question:
 
 ## Read messages
 
-Bare `rovai thread read` returns the latest 20 visible messages. `--thread-id` selects one public Thread; reads use its live state, including historical Threads. Target membership is not a read permission. Cross-Thread search and discovery retain their existing frozen search boundary.
+Bare `rovai thread read` returns the latest 20 visible messages. `--thread-id` selects one public Thread; reads use its live state, including historical Threads. Target membership is not a read permission. New Runs list Threads live; cross-Thread message searches retain the Run's frozen boundary.
 
 ```bash
-rovai thread read --limit 20
+rovai thread read --after <lastProcessedSequence>
 rovai thread read --before <nextCursor>
 rovai thread read --message-id <message-id>
 rovai thread read --reply-chain <message-id> --limit 20
 ```
 
-Timeline and reply-chain pages move toward older messages. Pass nextCursor as --before. Exact messageId cannot combine with replyChain, before or limit; there are no mode or direction input fields.
+For timeline or reply-chain pages, use `--before` for older messages or `--after` for newer messages, excluding the given sequence. Use only one flag; while hasMore, pass nextCursor with that same flag. Exact messageId cannot combine with replyChain, before, after or limit; there are no mode or direction input fields.
 
-Normal items include addressing: saved effectiveAgentRecipients and mentionsCurrentUser. Withdrawn markers have no addressing. Use these fields when recipients or User mentions matter.
+For later incremental reads, reuse the last successfully processed sequence for the same Thread and scope; keep it on empty pages. hasMore=false describes this read only.
+
+Normal items include mentions: Agent {id,name} entries are saved effective recipients; {id:"user"} marks a structured current User mention. Withdrawn markers have no mentions. Mentions do not prove reading or execution.
 
 When the Thread is unknown, use history search to obtain threadId and messageId, then read that pair. Once the Thread is known, search there if needed. A message ID alone does not search across Threads.
 

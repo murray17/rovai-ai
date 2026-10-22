@@ -30,7 +30,7 @@ pub const CAMP_LIST_TOOL_NAME: &str = "thread.list";
 pub const CAMP_SEARCH_TOOL_NAME: &str = "thread.search";
 pub const HISTORY_SEARCH_TOOL_NAME: &str = "history.search";
 pub const CAMP_READ_TOOL_NAME: &str = "thread.read";
-pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 14;
+pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 15;
 
 const CAMP_LIST_DEFAULT_LIMIT: usize = 20;
 const CAMP_LIST_MAX_LIMIT: usize = 50;
@@ -100,6 +100,7 @@ pub struct ThreadReadInput {
     #[serde(rename = "replyChain", alias = "thread")]
     pub thread: Option<String>,
     pub before: Option<i64>,
+    pub after: Option<i64>,
     pub limit: Option<usize>,
 }
 
@@ -255,9 +256,28 @@ impl ThreadHistoryService {
                 },
                 {
                     "additionalProperties": false,
+                    "required": ["replyChain", "after"],
+                    "properties": {
+                        "threadId": {"type": "string", "pattern": CAMP_ID_PATTERN},
+                        "replyChain": {"type": "string", "minLength": 1},
+                        "after": {"type": "integer", "minimum": 0},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": MAX_PAGE_LIMIT}
+                    }
+                },
+                {
+                    "additionalProperties": false,
                     "properties": {
                         "threadId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "before": {"type": "integer", "minimum": 1},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": MAX_PAGE_LIMIT}
+                    }
+                },
+                {
+                    "additionalProperties": false,
+                    "required": ["after"],
+                    "properties": {
+                        "threadId": {"type": "string", "pattern": CAMP_ID_PATTERN},
+                        "after": {"type": "integer", "minimum": 0},
                         "limit": {"type": "integer", "minimum": 1, "maximum": MAX_PAGE_LIMIT}
                     }
                 }
@@ -476,32 +496,33 @@ impl ThreadHistoryService {
             resolve_live_read_target(&transaction, run, &fence, requested_camp_id.as_deref())?
                 .ok_or_else(read_unavailable)?;
         validate_cursor(input.before)?;
+        if input.after.is_some_and(|after| after < 0) {
+            return Err(invalid_argument("after must be a non-negative sequence"));
+        }
+        if input.before.is_some() && input.after.is_some() {
+            return Err(invalid_argument("before and after are mutually exclusive"));
+        }
+        let (direction, cursor) = match input.after {
+            Some(after) => (ReadDirection::After, Some(after)),
+            None => (ReadDirection::Before, input.before),
+        };
         let value = if let Some(message_id) = input.message_id.as_deref() {
-            if input.thread.is_some() || input.before.is_some() || input.limit.is_some() {
+            if input.thread.is_some()
+                || input.before.is_some()
+                || input.after.is_some()
+                || input.limit.is_some()
+            {
                 return Err(invalid_argument(
-                    "messageId cannot be combined with thread, before, or limit",
+                    "messageId cannot be combined with replyChain, before, after, or limit",
                 ));
             }
             read_item(&transaction, &target, run, message_id)?
         } else if let Some(message_id) = input.thread.as_deref() {
             let limit = effective_limit(input.limit, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT)?;
-            read_thread(
-                &transaction,
-                &target,
-                message_id,
-                ReadDirection::Before,
-                input.before,
-                limit,
-            )?
+            read_thread(&transaction, &target, message_id, direction, cursor, limit)?
         } else {
             let limit = effective_limit(input.limit, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT)?;
-            read_timeline(
-                &transaction,
-                &target,
-                ReadDirection::Before,
-                input.before,
-                limit,
-            )?
+            read_timeline(&transaction, &target, direction, cursor, limit)?
         };
         transaction.commit()?;
         Ok(value)
@@ -3324,45 +3345,69 @@ mod slow_tests {
         assert_eq!(default_page["hasMore"], true);
         assert_eq!(default_page["nextCursor"], 211);
 
-        let mut cursor = None;
-        let mut seen = Vec::new();
-        loop {
+        // Both directions traverse the same visible set across multiple pages,
+        // preserving the tombstone gap and the withdrawn placeholder.
+        for direction in [ReadDirection::Before, ReadDirection::After] {
+            let mut cursor = (direction == ReadDirection::After).then_some(0);
+            let mut seen = Vec::new();
+            loop {
+                let page = read_timeline(
+                    &transaction,
+                    &paged_target,
+                    direction,
+                    cursor,
+                    MAX_PAGE_LIMIT,
+                )
+                .unwrap();
+                let items = page["items"].as_array().unwrap();
+                assert!(items.len() <= 100);
+                let sequences = items
+                    .iter()
+                    .map(|item| item["sequence"].as_i64().unwrap())
+                    .collect::<Vec<_>>();
+                assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
+                if let Some(cursor) = cursor {
+                    match direction {
+                        ReadDirection::Before => {
+                            assert!(sequences.last().is_some_and(|value| *value < cursor))
+                        }
+                        ReadDirection::After => {
+                            assert!(sequences.first().is_some_and(|value| *value > cursor))
+                        }
+                    }
+                }
+                seen.extend(sequences);
+                if page["hasMore"] == false {
+                    assert!(page["nextCursor"].is_null());
+                    break;
+                }
+                cursor = Some(page["nextCursor"].as_i64().unwrap());
+                let edge = match direction {
+                    ReadDirection::Before => items.first(),
+                    ReadDirection::After => items.last(),
+                };
+                assert_eq!(cursor, edge.map(|item| item["sequence"].as_i64().unwrap()));
+            }
+            seen.sort_unstable();
+            assert_eq!(
+                seen,
+                (1..=230)
+                    .filter(|sequence| *sequence != 101)
+                    .collect::<Vec<_>>()
+            );
+        }
+        for after in [100, 101] {
             let page = read_timeline(
                 &transaction,
                 &paged_target,
-                ReadDirection::Before,
-                cursor,
-                MAX_PAGE_LIMIT,
+                ReadDirection::After,
+                Some(after),
+                1,
             )
             .unwrap();
-            let items = page["items"].as_array().unwrap();
-            assert!(items.len() <= 100);
-            let sequences = items
-                .iter()
-                .map(|item| item["sequence"].as_i64().unwrap())
-                .collect::<Vec<_>>();
-            assert!(sequences.windows(2).all(|pair| pair[0] < pair[1]));
-            if let Some(before) = cursor {
-                assert!(sequences.last().is_some_and(|sequence| *sequence < before));
-            }
-            seen.extend(sequences);
-            if page["hasMore"] == false {
-                assert!(page["nextCursor"].is_null());
-                break;
-            }
-            cursor = Some(page["nextCursor"].as_i64().unwrap());
-            assert_eq!(
-                cursor,
-                items.first().map(|item| item["sequence"].as_i64().unwrap())
-            );
+            assert_eq!(page["items"][0]["sequence"], 102);
+            assert_eq!(page["nextCursor"], 102);
         }
-        seen.sort_unstable();
-        assert_eq!(
-            seen,
-            (1..=230)
-                .filter(|sequence| *sequence != 101)
-                .collect::<Vec<_>>()
-        );
         // These rows must still be normal messages when collection metadata is read.
         let rows = (4..=23)
             .map(|sequence| MessageRow {

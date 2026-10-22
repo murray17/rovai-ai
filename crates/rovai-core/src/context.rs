@@ -10028,7 +10028,7 @@ mod slow_tests {
                         body: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
                         prepared_attachment_ids: Vec::new(),
                         address: TestThreadMessageAddress::Default,
-                        reply_to_camp_message_id: None,
+                        reply_to_camp_message_id: Some(initial_message_id.clone()),
                         execution: None,
                     },
                 },
@@ -10060,6 +10060,7 @@ mod slow_tests {
                     message_id: Some(late_message_id.clone()),
                     thread: None,
                     before: None,
+                    after: None,
                     limit: None,
                 },
             )
@@ -10070,6 +10071,113 @@ mod slow_tests {
             "CURRENT_BOUNDARY_AFTER_MANIFEST"
         );
 
+        // Exercise the public read input, including direction dispatch and the
+        // live boundary on the next call after reaching a terminal page.
+        let mut forward = ThreadReadInput {
+            camp_id: None,
+            message_id: None,
+            thread: None,
+            before: None,
+            after: Some(0),
+            limit: Some(1),
+        };
+        let first = ThreadHistoryService
+            .read(&mut fixture.database, &run, &forward)
+            .unwrap();
+        assert_eq!(first["direction"], "after");
+        assert_eq!(first["items"][0]["messageId"], initial_message_id);
+        assert_eq!(first["hasMore"], true);
+        assert_eq!(first["nextCursor"], 1);
+        forward.after = first["nextCursor"].as_i64();
+        let last = ThreadHistoryService
+            .read(&mut fixture.database, &run, &forward)
+            .unwrap();
+        assert_eq!(last["items"][0]["messageId"], late_message_id);
+        assert_eq!(last["hasMore"], false);
+        assert!(last["nextCursor"].is_null());
+        for after in [2, i64::MAX] {
+            forward.after = Some(after);
+            let empty = ThreadHistoryService
+                .read(&mut fixture.database, &run, &forward)
+                .unwrap();
+            assert_eq!(empty["items"], json!([]));
+            assert_eq!(empty["hasMore"], false);
+            assert!(empty["nextCursor"].is_null());
+        }
+        let arrival = CollaborationService::default()
+            .send_test_camp_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: TestThreadMessageCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        draft_revision: None,
+                        body: "ARRIVAL_AFTER_TERMINAL_PAGE".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestThreadMessageAddress::Default,
+                        reply_to_camp_message_id: Some(initial_message_id.clone()),
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let arrival_id = arrival.result.payload["threadMessageId"].as_str().unwrap();
+        forward.after = Some(2);
+        let new_page = ThreadHistoryService
+            .read(&mut fixture.database, &run, &forward)
+            .unwrap();
+        assert_eq!(new_page["items"][0]["messageId"], arrival_id);
+        assert_eq!(new_page["hasMore"], false);
+
+        // The reply-chain anchor chooses the chain, while after uses the
+        // Thread's sequence even when it precedes that anchor.
+        forward.thread = Some(arrival_id.to_string());
+        forward.after = Some(1);
+        let chain_page = ThreadHistoryService
+            .read(&mut fixture.database, &run, &forward)
+            .unwrap();
+        assert_eq!(chain_page["mode"], "reply_chain");
+        assert_eq!(chain_page["direction"], "after");
+        assert_eq!(chain_page["items"][0]["messageId"], late_message_id);
+        assert_eq!(chain_page["hasMore"], true);
+        assert_eq!(chain_page["nextCursor"], 2);
+        forward.after = chain_page["nextCursor"].as_i64();
+        let chain_last = ThreadHistoryService
+            .read(&mut fixture.database, &run, &forward)
+            .unwrap();
+        assert_eq!(chain_last["items"][0]["messageId"], arrival_id);
+        assert_eq!(chain_last["hasMore"], false);
+        assert!(chain_last["nextCursor"].is_null());
+
+        for invalid in [
+            ThreadReadInput {
+                before: Some(3),
+                ..forward.clone()
+            },
+            ThreadReadInput {
+                after: Some(-1),
+                ..forward.clone()
+            },
+            ThreadReadInput {
+                message_id: Some(initial_message_id.clone()),
+                thread: None,
+                limit: None,
+                ..forward.clone()
+            },
+        ] {
+            assert!(
+                ThreadHistoryService
+                    .read(&mut fixture.database, &run, &invalid)
+                    .is_err()
+            );
+        }
+
         let guessed_id = ThreadHistoryService
             .read(
                 &mut fixture.database,
@@ -10079,6 +10187,7 @@ mod slow_tests {
                     message_id: Some(initial_message_id),
                     thread: None,
                     before: None,
+                    after: None,
                     limit: None,
                 },
             )
@@ -10208,6 +10317,7 @@ mod slow_tests {
                     message_id: Some(unjoined_message_id.clone()),
                     thread: None,
                     before: None,
+                    after: None,
                     limit: None,
                 },
             )
@@ -10265,6 +10375,7 @@ mod slow_tests {
                     message_id: Some(unjoined_message_id.clone()),
                     thread: None,
                     before: None,
+                    after: None,
                     limit: None,
                 },
             )
@@ -10348,6 +10459,7 @@ mod slow_tests {
                     message_id: Some(late_message_id.clone()),
                     thread: None,
                     before: None,
+                    after: None,
                     limit: None,
                 },
             )
@@ -10834,6 +10946,7 @@ mod slow_tests {
                     message_id: None,
                     thread: None,
                     before: None,
+                    after: None,
                     limit: Some(20),
                 },
             )
@@ -10866,6 +10979,7 @@ mod slow_tests {
                         message_id: None,
                         thread: None,
                         before: None,
+                        after: None,
                         limit: Some(1),
                     },
                 )

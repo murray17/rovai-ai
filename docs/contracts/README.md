@@ -16,7 +16,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 ## 会话 Task 能力（当前）
 
 - [Durable Task v6](durable-task-v6.md)
-- [Built-in Tool Transport v43](builtin-tool-transport-v43.md)：成功 Send 输入来源与文件卡片排除；[v42（历史）](builtin-tool-transport-v42.md) 保留原 Task 发现边界。
+- [Built-in Tool Transport v44](builtin-tool-transport-v44.md)：Thread read 正向分页输入与精简教学；继承 [v43（历史）](builtin-tool-transport-v43.md) 的 Send 输入来源和 [v42（历史）](builtin-tool-transport-v42.md) 的 Task 发现边界。
 - [ContextManifest Evidence v40 / v42](context-manifest-evidence-v42.md)
 - [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md)
 - [Run Facts v10](run-facts-v10.md)
@@ -82,7 +82,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp History v12（历史）](camp-history-v12.md)：mentions 统一，作者字段保留原始身份。
 - [ContextManifest v34（历史）](context-manifest-evidence-v34.md)：路由投影精简，public 34/11/9、non-batch 35/12/6，旧输入原格式恢复。
 - [ContextManifest v33（历史）](context-manifest-evidence-v33.md)：新 Run Mention 字段、原版本恢复和现有预算/摘要。
-- [Camp History v14（当前）](camp-history-v14.md)：新 Run 实时目录、消息发送时间排序、撤回回退与独立正文边界；继承 v13 发送者输出。
+- [Camp History v15（当前）](camp-history-v15.md)：after 排他正向分页、同方向续页及按范围增量读取；继承 [v14（历史）](camp-history-v14.md) 的实时目录与独立正文边界。
 - [Camp History v13（历史）](camp-history-v13.md)：read/search 统一发送者，Agent Output 12；历史回执保持。
 
 ## 生命周期

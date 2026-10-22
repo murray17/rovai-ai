@@ -11,6 +11,16 @@ last_updated: 2026-10-22
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Thread read 正向增量读取（2026-10-22）
+
+新增 `rovai thread read --after N`，按排他序列号从最早未覆盖消息向后分页；0 可从最早消息起读。
+默认最新 20、before、单条详情和返回字段保持。按已确认的三处清单更新 description/help、示例和
+history reference，校正旧 mentions/目录教学。完整前后文本、确认及验证见
+[方案与实施记录](model-context-change-thread-read-after.md)。当前规范为
+[History v15](../../contracts/camp-history-v15.md) 与 [Transport v44](../../contracts/builtin-tool-transport-v44.md)。
+跨版本影响见方案的九项表；无数据库迁移、UI、Runtime Activity、Native Binding 或版本切换。
+
+
 ## 消息字面 HTML 与引用投影（2026-10-22）
 
 聊天正文保留尖括号占位符和原始 HTML 文字，并在可信 Mention 替换前完成文本化。

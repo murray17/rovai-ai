@@ -11,7 +11,7 @@ test('Product Contract Fingerprint reads code/build authority and marks unavaila
   assert.equal(fingerprint.contextFormatterVersion.value, 40)
   assert.equal(fingerprint.contextDeliveryProfileVersion.value, 15)
   assert.equal(fingerprint.durableTaskContract.value.version, 6)
-  assert.equal(fingerprint.builtInTransportVersion.value, 43)
+  assert.equal(fingerprint.builtInTransportVersion.value, 44)
   assert.equal(fingerprint.acceptedInputAckContract.value.semanticClass, 'accepted_input_only')
   assert.equal(fingerprint.coreExecutableDigest.status, 'unavailable')
 })

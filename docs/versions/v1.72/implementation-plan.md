@@ -4032,3 +4032,14 @@ worktree `rovai-ai-restore-agent-file-width`，基线 `c0f8a0df7309913f63f8e12c1
 `pnpm test:composer-input` 三项通过：既有生产夹具验证中英文、日夜主题、用户卡片 224px、
 Agent 列表 620px 上限及 200px 窄容器收缩，截图人工复核通过。验收使用隔离 Electron，无 Core 或真实 Runtime。
 基于上述基线运行通用文档门禁；源码布局评估与机械扫描未发现本次恢复的阻断问题。
+
+
+## Thread read 正向增量读取（2026-10-22）
+
+User 在接口与提示词清单交付后确认实施、PR 与合入 main。范围和完整前后文本见
+[已确认 r1](model-context-change-thread-read-after.md)；当前字段由 [History v15](../../contracts/camp-history-v15.md)
+与 [Transport v44](../../contracts/builtin-tool-transport-v44.md) 拥有。
+
+- after 与 before 互斥；after=0；正向跨页、空页、序列空洞、实时新增及 reply-chain。
+- 延用输出字段、权限、撤回/附件投影及历史 receipt；无 migration 或 Bootstrap/Manifest 升级。
+- 复用既有 Rust owner；实际检查结果统一记录在方案的实施验证段，未执行项不得视为通过。

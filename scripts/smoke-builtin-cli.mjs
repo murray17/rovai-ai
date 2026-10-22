@@ -1076,7 +1076,7 @@ camp_search_help="$("$CLI" camp search --help)"
 printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai thread search --query 'amount'"
 printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai thread search --thread-id '<thread-id>' --query 'amount'"
 camp_read_help="$("$CLI" camp read --help)"
-printf '%s\n' "$camp_read_help" | grep -Fq -- 'rovai thread read --limit 20'
+printf '%s\n' "$camp_read_help" | grep -Fq -- 'rovai thread read --after 123'
 printf '%s\n' "$camp_read_help" | grep -Fq -- 'rovai thread read --before 123'
 printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai thread read --message-id '<message-id>'"
 printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai thread read --reply-chain '<message-id>' --limit 20"

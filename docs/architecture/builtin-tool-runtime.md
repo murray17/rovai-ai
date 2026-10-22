@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-10-20
+last_updated: 2026-10-22
 ---
 
 # Built-in Tool Runtime Architecture
@@ -11,9 +11,9 @@ last_updated: 2026-10-20
 人类用户的主称呼、双别名、结构化搜索与冻结投影边界见 [User Naming v1](../contracts/user-naming-v1.md)。
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v43](../contracts/builtin-tool-transport-v43.md)、
+[Built-in Tool Transport v44](../contracts/builtin-tool-transport-v44.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
-[Camp History v14](../contracts/camp-history-v14.md)、
+[Camp History v15](../contracts/camp-history-v15.md)、
 [Durable Task v6](../contracts/durable-task-v6.md) 和
 [Camp Message Send v28](../contracts/camp-message-send-v28.md)、
 [Current User Attention v8](../contracts/current-user-attention-v8.md)与
@@ -161,7 +161,7 @@ create/update 的 `avatarFile` 由 CLI 原样传入；Core 在 Run 认证后复�
 用冻结的 `execution_root` 解析相对路径，绝对路径原样保留。路径 helper 与 Agent 附件共用，
 头像继续直接导入 immutable asset，不创建附件记录或新增路径授权机制。
 内置素材与 managed 图片在授权 Run tmp 中物化，复用 lease 清理；每次 get 重验权限和重取文件。
-完整字段、裁切及错误见 [Transport v43](../contracts/builtin-tool-transport-v43.md)。
+完整字段、裁切及错误见 [Transport v44](../contracts/builtin-tool-transport-v44.md)。
 
 Mission read uses a distinct global read seam: every effective authenticated AgentRun may list all Missions or
 read one opaque internal `rvm_...` ID, including saved structured attachment paths. Omitted-ID `get` resolves only the
@@ -710,10 +710,10 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
 系统不声称能够证明模型主观意图。
 
 - CLI 从 direct flags、JSON stdin/heredoc 或 `--input-file` 构造一个对象。Send 文件按
-  [Transport v43](../contracts/builtin-tool-transport-v43.md)分流，只有正文文件可与除 `--body` 外的发送参数组合；
+  [Transport v44](../contracts/builtin-tool-transport-v44.md)分流，只有正文文件可与除 `--body` 外的发送参数组合；
   完整请求文件和其他 operation 保持来源互斥。所有来源共用
   catalog canonical input Schema validator，只有通过后才加载 lease/context 并发送 IPC。`thread.read`
-  直接发送 `messageId | thread | before | limit` 的合法组合，不补写模式或方向，也不接受旧字段。
+  直接发送 `threadId`、`messageId`、`replyChain`、互斥的 `before/after` 与 `limit` 的合法组合，不补写模式或方向，也不接受旧字段。
   Core 继续拥有默认 limit、cursor 与组合约束的权威校验。Send 的可选 `sendInputFilePath` 单独进入
   内部 IPC 和现有执行 Evidence，作为文件卡片排除来源；业务输入对象和 Agent Output 保持。来源不用于
   读取文件或扩展权限，没有来源时不推测；
