@@ -96,8 +96,19 @@ describe('StructuredMentionComposer V2', () => {
     expect(structuredMentionOptions(catalog, '').map((option) => option.kind)).toEqual([
       'all_members', 'member', 'member', 'invite_other'
     ])
-    expect(structuredMentionOptions(catalog, '卖花女')).toEqual([
-      { kind: 'member', member: outsider }
+    for (const query of ['卖花女', '爱丽', 'aili', 'ailisi', 'als', 'AILI', 'ＡＩＬＩ', 'wuhaojie', 'whj']) {
+      expect(structuredMentionOptions(catalog, query)).toEqual([
+        { kind: 'member', member: outsider }
+      ])
+    }
+    const sameNameInThread = { ...outsider, agentId: 'agent_4', inThread: true }
+    const unavailable = { ...outsider, agentId: 'agent_5', mentionable: false }
+    const reordered = [outsider, unavailable, sameNameInThread]
+    expect(structuredMentionOptions(reordered, 'aili')).toEqual([
+      { kind: 'member', member: sameNameInThread }, { kind: 'member', member: outsider }
+    ])
+    expect(structuredMentionOptions(reordered, 'als', true)).toEqual([
+      { kind: 'back_to_camp' }, { kind: 'member', member: outsider }
     ])
     expect(structuredMentionOptions(catalog, '', true)).toEqual([
       { kind: 'back_to_camp' }, { kind: 'member', member: outsider }
@@ -106,11 +117,26 @@ describe('StructuredMentionComposer V2', () => {
       'member', 'member', 'invite_other'
     ])
     expect(structuredMentionOptions(catalog, '所有', false, false)).toEqual([])
+    expect(structuredMentionOptions(catalog, 'aili', false, false)).toEqual([
+      { kind: 'member', member: outsider }
+    ])
     const fullThread = Array.from({ length: 60 }, (_, index) => ({
       ...members[0], agentId: `camp-${index}`
     }))
     expect(structuredMentionOptions([...fullThread, outsider], '').at(-1)).toEqual({ kind: 'invite_other' })
     expect(structuredMentionOptions([...fullThread, outsider], '')).toHaveLength(50)
+    const matchingThread = fullThread.map(member => ({ ...member, displayName: '爱丽丝' }))
+    const matchingOutsiders = Array.from({ length: 60 }, (_, index) => ({
+      ...outsider, agentId: `outside-${index}`
+    }))
+    expect(structuredMentionOptions([...matchingOutsiders, ...matchingThread], 'aili')).toEqual([
+      ...matchingThread.slice(0, 40).map(member => ({ kind: 'member', member })),
+      ...matchingOutsiders.slice(0, 10).map(member => ({ kind: 'member', member }))
+    ])
+    expect(structuredMentionOptions([...matchingThread, ...matchingOutsiders], 'als', true)).toEqual([
+      { kind: 'back_to_camp' },
+      ...matchingOutsiders.slice(0, 49).map(member => ({ kind: 'member', member }))
+    ])
   })
 
   it('renders the catalog-backed member avatar in the candidate UI', () => {

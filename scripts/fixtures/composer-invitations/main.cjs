@@ -37,7 +37,7 @@ app.whenReady().then(async () => {
   let mentionCount = 0
   const mention = async () => {
     await evaluate('invitationTest.focus()')
-    await window.webContents.debugger.sendCommand('Input.insertText', { text: '@爱丽丝' })
+    await window.webContents.debugger.sendCommand('Input.insertText', { text: mentionCount === 0 ? '@aili' : '@爱丽丝' })
     await wait(`!!document.querySelector('.structured-mention-menu [role="option"]')`)
     const before = await evaluate('invitationTest.state().text')
     assert.equal(await evaluate(`document.querySelector('.structured-mention-menu').innerText.includes('configured-test-model')`), false)

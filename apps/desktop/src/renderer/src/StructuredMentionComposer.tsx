@@ -2,7 +2,8 @@ import { useReferencePicker, type ReferenceScope } from './useReferencePicker'
 import { composerReferenceIdentities, useReferenceAvailability } from './useReferenceAvailability'
 import { ThreadReferenceMenu } from './ThreadReferenceMenu'
 import { useReferencePreview } from './ThreadReferencePreview'
-import { fuzzyContains, isReferenceAtom, referenceAtom, referenceIdentity } from './thread-reference'
+import { isReferenceAtom, referenceAtom, referenceIdentity } from './thread-reference'
+import { memberSearchMatches } from './member-search'
 import { useShortcuts } from './ShortcutProvider'
 import { shouldSendComposerKey } from '../../shared/shortcuts'
 import { useEditingRecovery } from './camp-client'
@@ -173,7 +174,7 @@ export function structuredMentionOptions(
   const options: StructuredMentionOption[] = []
   const matches = (member: StructuredMentionMember): boolean =>
     member.mentionable !== false
-      && (fuzzyContains(member.displayName, normalizedQuery) || fuzzyContains(member.teamRole, normalizedQuery))
+      && (memberSearchMatches(member.displayName, normalizedQuery) || memberSearchMatches(member.teamRole, normalizedQuery))
   const current = members.filter((member) => member.inThread !== false && matches(member))
   const outside = members.filter((member) => member.inThread === false && matches(member))
   if (inviteLayer) {

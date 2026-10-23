@@ -554,18 +554,28 @@ app.whenReady().then(async () => {
     })
 
     await run('Member Typeahead replaces only the local query with one Atom', async () => {
-      await reset('请 ')
-      await insert('@甲')
-      const open = await state(false)
-      assert.equal(open.menuKind, 'mention')
-      assert.ok(open.options.some((option) => option.endsWith('\n队员甲\n系统架构师')), JSON.stringify(open))
-      await key('Enter', 13)
-      const current = await expectSegments([
-        { kind: 'text', text: '请 ' },
-        { kind: 'atom', atom: { type: 'member', agentId: 'agent-a', labelFallback: '队员甲' } },
-        { kind: 'text', text: ' ' }
-      ])
-      assert.deepEqual(current.atomTypes, ['member'])
+      for (const [query, agentId, name, role, chooseKey, code] of [
+        ['@甲', 'agent-a', '队员甲', '系统架构师', 'Enter', 13],
+        ['@aili', 'agent-outside', '爱丽丝', '五号街卖花女', 'Enter', 13],
+        ['@als', 'agent-outside', '爱丽丝', '五号街卖花女', 'Tab', 9]
+      ]) {
+        await reset('请 ')
+        await evaluate('window.composerTest.includeOutsideMember()')
+        await frames()
+        await insert(query)
+        const open = await state(false)
+        assert.equal(open.menuKind, 'mention')
+        assert.ok(open.options.some(option => option.includes(`\n${name}\n${role}`)), JSON.stringify(open))
+        await key(chooseKey, code)
+        const current = await expectSegments([
+          { kind: 'text', text: '请 ' },
+          { kind: 'atom', atom: { type: 'member', agentId, labelFallback: name } },
+          { kind: 'text', text: ' ' }
+        ])
+        assert.deepEqual(current.atomTypes, ['member'])
+        assert.deepEqual(current.atomLabels, ['@' + name])
+        assert.equal(current.submitCount, 0)
+      }
     })
 
     await run('invite layer inserts an outsider Atom without changing the draft until selection', async () => {

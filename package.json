@@ -211,6 +211,7 @@
     "lexical": "0.50.0",
     "micromark-util-decode-string": "2.0.1",
     "parse5": "7.3.0",
+    "pinyin-pro": "3.29.5",
     "qrcode": "1.5.4",
     "qrcode.react": "4.2.0",
     "react": "19.2.7",

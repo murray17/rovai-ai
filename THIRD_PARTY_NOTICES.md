@@ -65,7 +65,11 @@ semantic differences after normalized comparison. See
 
 ## 6. JavaScript Dependencies
 
-The frozen pnpm graph contains 494 exact package instances: 149 production
+Member-name and team-role pinyin search uses `pinyin-pro 3.29.5` (MIT),
+copyright 2022-present zh-lx. Its unmodified npm package license is retained in
+`legal/licenses/javascript/pinyin-pro@3.29.5/LICENSE`.
+
+The archived pnpm graph snapshot contains 494 exact package instances: 149 production
 instances and 345 development-only instances. Electron Builder packages 144
 instances in `app.asar`; the five pruned production-graph-only instances are
 recorded explicitly in `legal/manifests/javascript-binary-dependencies.json`.
