@@ -1,3 +1,4 @@
+import hermesLogo from './assets/runtime-logos/hermes.png'
 import { LanguagePreferenceOptions } from './LanguagePreferenceControl'
 import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
 import { useState, type KeyboardEvent } from 'react'
@@ -75,6 +76,7 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'cursor-agent': cursorLogo,
   'kimi-code-cli': kimiLogo,
   'minimax-code-cli': minimaxLogo,
+  'hermes-cli': hermesLogo,
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
   'cline-cli': clineLogo,
@@ -97,6 +99,7 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'cursor-agent': 'Cursor Agent',
   'kimi-code-cli': 'Kimi Code',
     'minimax-code-cli': 'MiniMax Code',
+    'hermes-cli': 'Hermes Agent',
   'grok-build': 'Grok Build',
   'deepseek-harness': 'DeepSeek Harness',
   'cline-cli': 'Cline',

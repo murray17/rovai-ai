@@ -1,3 +1,4 @@
+import hermesLogo from './assets/runtime-logos/hermes.png'
 import minimaxLogo from './assets/runtime-logos/minimax-color.svg'
 import type { AdapterKind } from '@contracts'
 import antigravityLogo from './assets/runtime-logos/antigravity-color.svg'
@@ -31,6 +32,7 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'cursor-agent',
   'kimi-code-cli',
   'minimax-code-cli',
+  'hermes-cli',
   'grok-build',
   'deepseek-harness',
   'cline-cli',
@@ -59,6 +61,7 @@ export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'cursor-agent': cursorLogo,
   'kimi-code-cli': kimiLogo,
   'minimax-code-cli': minimaxLogo,
+  'hermes-cli': hermesLogo,
   'grok-build': grokLogo,
   'deepseek-harness': deepseekLogo,
   'cline-cli': clineLogo,
@@ -82,6 +85,7 @@ export function adapterLabel(kind: AdapterKind): string {
     'cursor-agent': 'Cursor Agent',
     'kimi-code-cli': 'Kimi Code',
     'minimax-code-cli': 'MiniMax Code',
+    'hermes-cli': 'Hermes Agent',
     'grok-build': 'Grok Build',
     'deepseek-harness': 'DeepSeek Harness',
     'cline-cli': 'Cline',

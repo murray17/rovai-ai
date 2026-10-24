@@ -750,6 +750,21 @@ impl FleetState {
             );
         }
 
+        // Hermes has one native Gateway per binding. Reserve that
+        // actual shared resource while spawning, executing and stopping; an
+        // unrelated binding never waits on the other Host's I/O.
+        if request.adapter_kind == AdapterKind::HermesCli
+            && self.processes.values().any(|entry| {
+                entry.adapter_kind == AdapterKind::HermesCli
+                    && entry.compatibility.reuse_scope == request.compatibility.reuse_scope
+                    && entry.state != FleetProcessState::IdleWarm
+            })
+        {
+            return FleetAcquirePlan::Blocked(
+                "Hermes native binding already has an active process owner".to_string(),
+            );
+        }
+
         if request.adapter_kind == AdapterKind::CodexCli
             && self.processes.values().any(|entry| {
                 entry.adapter_kind == AdapterKind::CodexCli
@@ -2477,61 +2492,77 @@ mod tests {
 
     #[tokio::test]
     async fn different_runs_spawn_outside_the_global_fleet_lock() {
-        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
-            Duration::from_secs(1),
-        )));
-        let started = Arc::new(tokio::sync::Semaphore::new(0));
-        let release = Arc::new(tokio::sync::Semaphore::new(0));
+        for (first_kind, second_kind) in [
+            (AdapterKind::OpencodeCli, AdapterKind::CodexCli),
+            (AdapterKind::HermesCli, AdapterKind::HermesCli),
+        ] {
+            let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
+                Duration::from_secs(1),
+            )));
+            let started = Arc::new(tokio::sync::Semaphore::new(0));
+            let release = Arc::new(tokio::sync::Semaphore::new(0));
 
-        let first = {
-            let fleet = fleet.clone();
-            let started = started.clone();
-            let release = release.clone();
-            tokio::spawn(async move {
-                fleet
-                    .acquire(
-                        acquire_request("parallel-a", "camp-a"),
-                        move || async move {
+            let first = {
+                let fleet = fleet.clone();
+                let started = started.clone();
+                let release = release.clone();
+                tokio::spawn(async move {
+                    let mut request = acquire_request("parallel-a", "camp-a");
+                    request.adapter_kind = first_kind;
+                    fleet
+                        .acquire(request, move || async move {
                             started.add_permits(1);
                             release.acquire().await.unwrap().forget();
                             Ok(fake_host("parallel-host-a"))
-                        },
-                    )
-                    .await
-            })
-        };
-        let second = {
-            let fleet = fleet.clone();
-            let started = started.clone();
-            let release = release.clone();
-            tokio::spawn(async move {
-                let mut request = acquire_request("parallel-b", "camp-b");
-                request.adapter_kind = AdapterKind::CodexCli;
-                fleet
-                    .acquire(request, move || async move {
-                        started.add_permits(1);
-                        release.acquire().await.unwrap().forget();
-                        Ok(fake_host("parallel-host-b"))
-                    })
-                    .await
-            })
-        };
+                        })
+                        .await
+                })
+            };
+            let second = {
+                let fleet = fleet.clone();
+                let started = started.clone();
+                let release = release.clone();
+                tokio::spawn(async move {
+                    let mut request = acquire_request("parallel-b", "camp-b");
+                    request.adapter_kind = second_kind;
+                    fleet
+                        .acquire(request, move || async move {
+                            started.add_permits(1);
+                            release.acquire().await.unwrap().forget();
+                            Ok(fake_host("parallel-host-b"))
+                        })
+                        .await
+                })
+            };
 
-        tokio::time::timeout(Duration::from_secs(1), started.acquire_many(2))
-            .await
-            .expect("both independent spawns must enter before either completes")
-            .unwrap()
-            .forget();
-        release.add_permits(2);
-        assert_eq!(
-            first.await.unwrap().unwrap().host.process_id(),
-            "parallel-host-a"
-        );
-        assert_eq!(
-            second.await.unwrap().unwrap().host.process_id(),
-            "parallel-host-b"
-        );
-        fleet.shutdown_all().await;
+            tokio::time::timeout(Duration::from_secs(1), started.acquire_many(2))
+                .await
+                .expect("both independent spawns must enter before either completes")
+                .unwrap()
+                .forget();
+            if first_kind == AdapterKind::HermesCli {
+                let mut same_binding = acquire_request("conflicting-maintenance", "camp-a");
+                same_binding.adapter_kind = AdapterKind::HermesCli;
+                assert!(
+                    fleet
+                        .acquire(same_binding, || async {
+                            panic!("same Hermes Home must not start another owner")
+                        })
+                        .await
+                        .is_err()
+                );
+            }
+            release.add_permits(2);
+            assert_eq!(
+                first.await.unwrap().unwrap().host.process_id(),
+                "parallel-host-a"
+            );
+            assert_eq!(
+                second.await.unwrap().unwrap().host.process_id(),
+                "parallel-host-b"
+            );
+            fleet.shutdown_all().await;
+        }
     }
 
     #[tokio::test]

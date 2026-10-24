@@ -17,7 +17,7 @@ pub const BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_FORMATTER_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v1.28";
 
-const POLICY_ADAPTERS: [AdapterKind; 11] = [
+const POLICY_ADAPTERS: [AdapterKind; 12] = [
     AdapterKind::CopilotCli,
     AdapterKind::ClineCli,
     AdapterKind::OpencodeCli,
@@ -29,6 +29,7 @@ const POLICY_ADAPTERS: [AdapterKind; 11] = [
     AdapterKind::GrokBuild,
     AdapterKind::ZcodeApp,
     AdapterKind::AntigravityApp,
+    AdapterKind::HermesCli,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,7 +126,8 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::QwenCode
         | AdapterKind::KimiCodeCli
         | AdapterKind::GrokBuild
-        | AdapterKind::ZcodeApp => CompactionDetectorPolicy::BestEffort,
+        | AdapterKind::ZcodeApp
+        | AdapterKind::HermesCli => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
         | AdapterKind::ClineCli
         | AdapterKind::CodexCli
@@ -152,6 +154,7 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         AdapterKind::GrokBuild => "ROVAI_INTERNAL_GROK_COMPACTION_DETECTOR_POLICY",
         AdapterKind::ZcodeApp => "ROVAI_INTERNAL_ZCODE_COMPACTION_DETECTOR_POLICY",
         AdapterKind::AntigravityApp => "ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY",
+        AdapterKind::HermesCli => "ROVAI_INTERNAL_HERMES_COMPACTION_DETECTOR_POLICY",
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::DeepseekHarness
@@ -906,6 +909,9 @@ fn qualified_admission(
     admission_point: &str,
 ) -> bool {
     match adapter_kind {
+        AdapterKind::HermesCli => {
+            source_signal == "post_compaction" && admission_point == "completed"
+        }
         AdapterKind::ClineCli => false,
         AdapterKind::CopilotCli => {
             source_signal == "preCompact" && admission_point == "imminent_edge"
@@ -954,6 +960,11 @@ pub fn admitted_hook_compaction_signal(
     trigger: &str,
 ) -> Option<(&'static str, &'static str)> {
     match adapter_kind {
+        AdapterKind::HermesCli
+            if hook_event_name == "post_compaction" && trigger == "summarize" =>
+        {
+            Some(("post_compaction", "completed"))
+        }
         AdapterKind::CopilotCli
             if hook_event_name == "preCompact" && matches!(trigger, "manual" | "auto") =>
         {
@@ -992,6 +1003,24 @@ mod tests {
 
     #[test]
     fn release_policy_matrix_keeps_protected_and_antigravity_disabled() {
+        assert_eq!(
+            admitted_hook_compaction_signal(AdapterKind::HermesCli, "post_compaction", "summarize"),
+            Some(("post_compaction", "completed"))
+        );
+        for trigger in [
+            "started",
+            "failed",
+            "cancelled",
+            "prune_tool_results",
+            "provider_native",
+            "",
+        ] {
+            assert!(
+                admitted_hook_compaction_signal(AdapterKind::HermesCli, "post_compaction", trigger)
+                    .is_none()
+            );
+        }
+
         // Keep Cline in startup reconciliation to fence the previous
         // first_payload observer when upgrading to the protected System Rule.
         assert_eq!(

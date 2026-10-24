@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:98cbd0f437f7b18c53fc8ca7a50307c44e48a44f4efb6d0dcf2ab78161819cf8";
+    "sha256:1a5db6f025f82c20c7dda82ce7ba4b0878bc8de41b0725407b3a3749da6be5ad";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -365,7 +365,8 @@ mod tests {
                         }
                         AdapterKind::CursorAgent
                         | AdapterKind::ClineCli
-                        | AdapterKind::CommandCodeCli => {
+                        | AdapterKind::CommandCodeCli
+                        | AdapterKind::HermesCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -458,6 +459,7 @@ mod tests {
                     | AdapterKind::ClineCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
+                    | AdapterKind::HermesCli
                     | AdapterKind::ZcodeApp
                     | AdapterKind::DeepseekHarness
             ) {
@@ -495,6 +497,19 @@ mod tests {
     #[test]
     fn macos_catalog_qualifies_each_runtime_only_with_its_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
+        for platform in HostPlatformKey::ALL {
+            let hermes = registry.platform_admission(AdapterKind::HermesCli, platform);
+            assert_eq!(
+                hermes.status(),
+                if platform == HostPlatformKey::MacosArm64 {
+                    RuntimePlatformAdmissionStatus::Preview
+                } else {
+                    RuntimePlatformAdmissionStatus::NotQualified
+                }
+            );
+            assert!(hermes.evidence_revision().is_none());
+            assert!(!hermes.is_qualified());
+        }
 
         assert_eq!(
             registry
@@ -564,6 +579,7 @@ mod tests {
                     | AdapterKind::ClineCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
+                    | AdapterKind::HermesCli
                     | AdapterKind::Pi
                     | AdapterKind::GrokBuild
                     | AdapterKind::ZcodeApp

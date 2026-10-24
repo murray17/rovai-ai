@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-10-22
+last_updated: 2026-10-24
 ---
 
 # 当前规范与决定理由导航
@@ -348,3 +348,27 @@ MiniMax Code 的 ACP、Host 与精确恢复边界由[当前架构](../architectu
 
 环境 JSON 直接显示、标量转字符串与简化限制的理由：[V1.72-D56](../versions/v1.72/decisions.md#v1-72-d56)；
 当前规范：[Runtime Launch v71](../contracts/runtime-launch-and-verification-v71.md)。
+
+## Hermes 进程所有权
+
+当前规范：[Hermes Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md)、
+[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#hermes-受管-acp)、
+[平台准入](../contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
+官方 ACP＋专用 Gateway、逐 Run 冷恢复、最低版本策略与 Preview 的理由见 [V1.72-D59](../versions/v1.72/decisions.md#v1-72-d59)。
+
+Hermes 的首次/更新 user 层投递与完成通知后下一普通输入补发规范见
+[Hermes 输入合同](../contracts/hermes-managed-runtime-v1.md#session-与输入)和
+[Redelivery 架构](../architecture/native-session-bootstrap-redelivery.md#hermes-完成通知与下一普通输入)，理由见
+[V1.72-D60](../versions/v1.72/decisions.md#v1-72-d60)。
+
+用户明确处理原生 unknown 的规范见 [Hermes 恢复](../contracts/hermes-managed-runtime-v1.md#用户明确处理未知执行)
+和 [User Automation](../contracts/user-automation-v6.md#hermes-显式恢复)，保留两层终态与官方精确接口的理由见
+[V1.72-D61](../versions/v1.72/decisions.md#v1-72-d61)。
+
+Hermes 的原会话优先、当前安装选择、恢复与新输入分离以及绑定级并发保护，当前规范见
+[Hermes 合同](../contracts/hermes-managed-runtime-v1.md#安装与进程)，理由见
+[V1.72-D62](../versions/v1.72/decisions.md#v1-72-d62)。
+
+Hermes 普通协议直连、增强观测降级与控制器收缩的当前规范见
+[Hermes 结果与观测](../contracts/hermes-managed-runtime-v1.md#结果与观测)，理由见
+[V1.72-D63](../versions/v1.72/decisions.md#v1-72-d63)。

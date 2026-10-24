@@ -323,6 +323,46 @@ async fn execute(args: &[String]) -> Result<u8> {
             0
         }
         ("agent-run", Some("cancel")) => agent_run_cancel(&flags).await?,
+        ("agent-run", Some("hermes-inspect")) => {
+            flags.validate(&["agent-run-id"], &["json"])?;
+            print_json(
+                &invoke(
+                    "agentRun.hermesRecovery.inspect",
+                    json!({
+                        "agentRunId": flags.required("agent-run-id")?
+                    }),
+                )
+                .await?,
+            )?;
+            0
+        }
+        ("agent-run", Some("hermes-discard")) => {
+            flags.validate(&["inspection-file"], &["acknowledge-effects", "json"])?;
+            if !flags.has("acknowledge-effects") {
+                return Err(CliError::new("hermes_recovery_confirmation_required",
+                    "The previous task may have external effects. Read the inspection first; --acknowledge-effects explicitly abandons its unknown execution without replaying it.").into());
+            }
+            let inspection: Value =
+                serde_json::from_slice(&fs::read(flags.required("inspection-file")?)?)?;
+            let confirmation = inspection
+                .get("confirmation")
+                .filter(|value| value.is_object())
+                .context("Inspection contains no single unknown execution to acknowledge")?;
+            let command_id = format!(
+                "hermes-recovery:{}",
+                rovai_core::command::canonical_json_digest(confirmation)?
+            );
+            print_json(
+                &invoke(
+                    "agentRun.hermesRecovery.resolve",
+                    json!({
+                        "commandId":command_id,"confirmation":confirmation,"acknowledgeEffects":true
+                    }),
+                )
+                .await?,
+            )?;
+            0
+        }
         ("trial", Some("run")) => trial_run(&flags).await?,
         ("trace", Some("export")) => {
             trace_export(&flags).await?;
@@ -436,11 +476,31 @@ async fn evaluation_actions_reach_their_public_help_without_owner_ipc() {
         let args = ["eval", action, "--help"].map(str::to_string);
         assert_eq!(execute(&args).await.unwrap(), 0);
     }
+    for action in ["hermes-inspect", "hermes-discard"] {
+        let args = ["agent-run", action, "--help"].map(str::to_string);
+        assert_eq!(execute(&args).await.unwrap(), 0);
+    }
+    let error = execute(
+        &[
+            "agent-run",
+            "hermes-discard",
+            "--inspection-file",
+            "/never-read-without-confirmation",
+        ]
+        .map(str::to_string),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("hermes_recovery_confirmation_required")
+    );
 }
 
 fn print_help() {
     println!(
-        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app thread create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n  rovai app trace export|schedule|schedules\n  rovai app eval configure|gate|weekly|schedule|status|cancel\n\nThe Desktop App must already be running. V1 never launches it automatically."
+        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app thread create|send|open\n  rovai app agent-run show|watch|export|cancel|hermes-inspect|hermes-discard\n  rovai app trial run\n  rovai app trace export|schedule|schedules\n  rovai app eval configure|gate|weekly|schedule|status|cancel\n\nThe Desktop App must already be running. V1 never launches it automatically."
     );
 }
 
@@ -474,6 +534,12 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
             "rovai app agent-run export --agent-run-id <id> --output <directory> [--json]"
         }
         ("agent-run", Some("cancel")) => "rovai app agent-run cancel --agent-run-id <id> [--json]",
+        ("agent-run", Some("hermes-inspect")) => {
+            "rovai app agent-run hermes-inspect --agent-run-id <original-interrupted-run> [--json]\nInspect the original Hermes session without submitting a task. Save the JSON output for explicit recovery."
+        }
+        ("agent-run", Some("hermes-discard")) => {
+            "rovai app agent-run hermes-discard --inspection-file <inspection.json> --acknowledge-effects [--json]\nThe previous task may have external effects. This explicitly abandons its exact unknown execution, preserves the failed Run and never replays it. Send a NEW task after recovery; repeat this exact inspection to reconcile an uncertain response."
+        }
         ("trial", Some("run")) => {
             "rovai app trial run --agent-id <id> --workspace <directory> --task-file <file> [--name <name>] [--timeout 30m] [--wait | --no-wait] [--export <directory>] [--open] [--json]"
         }

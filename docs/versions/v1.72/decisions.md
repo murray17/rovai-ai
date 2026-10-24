@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-22
+last_updated: 2026-10-24
 ---
 
 # v1.72 版本决定
@@ -1245,3 +1245,92 @@ Atom 按 ID 绑定，本机标签只展示；Core 首次发布捕获标题并保
 不新增 references 数组、上下文块、Composer V3、serializer 版本或数据库表；不改变已冻结 Context Blob。
 命令回放先于目标读取，源删除不使合法消息失效。若未来需要发送时历史快照，须独立定义读取边界，不能
 用当前引用 ID/标题冒充。未选择标题重绑、自动解析普通文本、跨 Host ID 或引用引发执行的方案。
+
+<a id="v1-72-d59"></a>
+
+## V1.72-D59：Hermes 使用官方 ACP 与专用 Gateway，逐 Run 冷恢复并保持最低版本策略
+
+- 状态：accepted
+- 日期：2026-10-23
+- 授权：User 在 Hermes Thread 的 2026-10-22 sequence 3 要求开启 worktree 接入；sequence 4 允许真实 LLM 与原生 BYOK/Sub2API；sequence 10 要求最低版本策略；2026-10-23 sequence 18 在官方入口验证后要求开始切换。不宣称跨平台资格确认。
+- 当前权威：[Hermes Managed Runtime v1](../../contracts/hermes-managed-runtime-v1.md)、[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#hermes-受管-acp)、[平台准入](../../contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
+
+只包装官方 ACP viewer 不能保证执行者退出，暖 Gateway 也会保留旧 B 与终端环境。
+官方入口 Probe 已证明专用 Gateway 每 Run 重启后能恢复原 Session、刷新 B 和 CLI 环境。因此本轮取代早期
+进程内 SessionManager/AIAgent 覆盖，选择 Fleet 拥有的官方 ACP＋专用 Gateway，以公开 RPC 完成精确
+Steer/取消、reasoning/MCP mutation 和原生事件补充。controller 借用发行物的传输及纯格式化帮助函数，
+不修改服务端执行器、聊天循环或安装源码。
+
+代价是每 Run 冷启动成本、binding 独立 Home 和多进程回收；官方结果只足以提供文件片段，不能延续早期
+完整文件快照的能力宣称。保留 >=0.22.4，不锁 commit/dirty/上界，实际能力与协议仍探测核对。
+macOS arm64 维持 Preview，其他平台与完整 Fleet/CLI/UI 矩阵未完成不晋升 Qualified；已测版本与兼容策略分开。
+
+
+<a id="v1-72-d60"></a>
+## V1.72-D60：Hermes 规则随用户输入交付，原生提示词由 Hermes 解析
+
+- 状态：accepted
+- 日期：2026-10-23
+- 当前权威：[Hermes Managed Runtime v1](../../contracts/hermes-managed-runtime-v1.md#session-与输入)、[Bootstrap v6](../../contracts/native-session-bootstrap-v6.md#hermes-的-user-层投递例外)、[Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md#hermes-完成通知与下一普通输入)。
+- 确认：[Hermes 首次输入 R1](model-context-change-hermes-first-input.md)，User sequence 31。
+
+原先 system overlay 注入要求 Rovai 复刻原生 env/config/personality 优先级，增加持续兼容责任。
+选择复用 Core 的 B、在首条实际普通用户输入前置规则，让 Hermes 自行拥有原生系统提示词；代价是 user 层
+规则没有 system/developer 优先级，并且需要按精确接受事实跟踪规则更新和冷恢复。
+
+0.22.4 原生 protect_first_n 在首次压缩后退化，不能证明无限次完整保留。使用官方 committed Hook
+及已有输入账本，在下一普通输入补发，不介入当前 Run 的原生模型循环。接受这段完整规则可见性空窗。
+未选择继续解析并拼接原生 system overlay，也未选择补丁原生压缩器或在每轮无条件重复 B。
+进程/CLI lease 生命周期仍按 D59，不由投递位置改变推导旧进程可跨 Run 复用。
+
+<a id="v1-72-d61"></a>
+## V1.72-D61：Hermes 未知执行由用户明确处理，原生与 Rovai 终态分别保留
+
+- 状态：accepted
+- 日期：2026-10-23
+- 授权：User sequence 34 要求修正能力残留，并提供官方精确 unknown 恢复操作；不返回 system 注入。
+- 当前权威：[Hermes 未知执行](../../contracts/hermes-managed-runtime-v1.md#用户明确处理未知执行)、[恢复架构](../../architecture/agent-run-recovery.md)、[User Automation](../../contracts/user-automation-v6.md#hermes-显式恢复)。
+
+强杀后 Core 失败收口不能消除原生 unknown admission，普通恢复门禁又先于聊天输入，故 `/discard`
+文本不能充当可靠出口。选择用户 CLI 的检查／明确确认操作，用官方精确 receipt 与 resolve_unknown
+解除原会话阻塞，保留旧任务失败和副作用证据；下一任务仍由用户另行提交。
+
+代价是当前需用户普通终端操作，尚无专用聊天按钮。未选择自动放弃未知任务、重放原输入、编辑原生数据库，
+或自动换 Session 绕过。与既有“继续执行”产生独立 Run 的语义分开，不改其他 Adapter 或共享队列合同。
+
+<a id="v1-72-d62"></a>
+## V1.72-D62：Hermes 优先恢复原会话，执行门禁与恢复分开
+
+- 状态：accepted
+- 日期：2026-10-23
+- 授权：User sequence 36 要求按可用性处理版本、路径、安装记录与指纹漂移，取消全局长锁。
+- 当前权威：[Hermes Session 与输入](../../contracts/hermes-managed-runtime-v1.md#session-与输入)、[恢复架构](../../architecture/agent-run-recovery.md)。
+
+采用共享同类 CLI 的当前目标选择，旧 Run 的安装信息不永久绑定可执行文件。原 binding 的 Home/profile
+和 Session ID 继续保留；实际兼容性由当前选定 Runtime 验证。先恢复历史与状态，再按原生执行、审批、
+排队或 unknown 阻塞新输入。读取断线只重连原受管 Gateway；不重放业务输入、不自动换 Session。
+
+移除跨 Hermes 会话的长锁，复用调度 lane、Fleet owner 与同 Home 文件锁。不同成员/Session 不互相
+等待。用户维护入口只用于 D61 的异常确认，不能成为普通续聊的前置步骤。
+
+代价是实际缺失或不兼容的原生 Session 仍会如实失败，unknown 仍需用户明确处理；当前不新增聊天按钮。
+未选择以安装指纹永久封锁旧 Session，亦未选择通过新建 Session 掩盖原生阻塞。其他 Adapter 的回退策略不变。
+
+
+<a id="v1-72-d63"></a>
+## V1.72-D63：Hermes 普通交互直连官方 ACP，增强观测不决定任务终态
+
+- 状态：accepted
+- 日期：2026-10-24
+- 授权：User sequence 38 明确要求以可用性、原生兼容与低维护成本简化 Hermes 接入。
+- 当前权威：[Hermes Managed Runtime v1](../../contracts/hermes-managed-runtime-v1.md)、[Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#hermes-受管-acp)。
+
+D59/D62 的控制器重复了官方 ACP 已有的 admission、事件回放与终态处理，并要求额外事件通道完整，
+使补充观测丢失也能破坏明确成功。选择共享 ACP 直接使用官方协议；启动器只准备 Home/进程，移除消息
+转发、工具过滤与重建、连续序号回放、逐 prompt receipt 成功门禁、额外文件锁及内部 reasoning 依赖。
+只在官方 ACP 的实际缺口保留按需 MCP 撤销、Steer 与已有 unknown 操作。
+
+代价是结构化 Diff、完整工具参数和可归属的 prompt 用量可能缺失；如实降级，不模拟上游没提供的保证。
+失败/取消照原生处理，中断未知不重放，错误 Session/请求不串联。沿用 FirstPayload、官方完成 Hook 的
+下一普通输入补发、原生能力关闭策略、逐 Run 冷启动、共享 Fleet/队列/Send/CLI lease。
+未选择扩大 Gateway/Fleet、恢复或证据框架，也不为内部实验分支持续维持私有接口兼容。

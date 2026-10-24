@@ -1,6 +1,8 @@
 mod claim;
+mod hermes_rules;
 mod input;
 pub(crate) use claim::ClaimedBatchContext;
+pub use hermes_rules::HermesRulesEvidence;
 
 use crate::message_quote::{
     MessageQuoteSnapshot, QuoteStorage, ThreadQuoteFence, load_agent_visible_camp_quotes,
@@ -160,7 +162,8 @@ pub const fn charter_delivery_mode_for_adapter(adapter_kind: AdapterKind) -> Cha
         | AdapterKind::QwenCode
         | AdapterKind::TraeCnCli
         | AdapterKind::CursorAgent
-        | AdapterKind::KimiCodeCli => CharterDeliveryMode::FirstPayload,
+        | AdapterKind::KimiCodeCli
+        | AdapterKind::HermesCli => CharterDeliveryMode::FirstPayload,
     }
 }
 
@@ -222,9 +225,10 @@ pub struct PreparedContext {
     /// The immutable AgentRun Dynamic Context persisted by ContextManifest.
     pub rendered_payload: String,
     pub rendered_payload_digest: String,
-    /// The transient Runtime input. It differs from `rendered_payload` only
-    /// for a new `first_payload` Native Session.
+    /// Runtime text, including a selected Bootstrap envelope for first input,
+    /// update or compaction recovery. Hermes freezes the exact text in a Blob.
     pub runtime_payload: String,
+    pub hermes_rules: Option<HermesRulesEvidence>,
     pub charter_delivery_mode: CharterDeliveryMode,
     pub bootstrap_in_runtime_payload: bool,
     pub bootstrap_redelivery_revision: Option<i64>,
@@ -323,6 +327,7 @@ struct RuntimeInputDeliveryOptions<'a> {
     bootstrap_redelivery_revision: Option<i64>,
     bootstrap_evidence_id: Option<&'a str>,
     runtime_payload_digest: Option<&'a str>,
+    hermes_rules: Option<&'a HermesRulesEvidence>,
 }
 
 #[derive(Debug)]
@@ -521,6 +526,42 @@ impl ContextService {
     }
 
     fn materialize_inner(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        prepared_skill_exposure: Option<&PreparedSkillExposure>,
+        prepared_mcp_projection: Option<&PreparedMcpProjection>,
+        source_attachment_paths: &[String],
+        request: &MaterializeContextRequest<'_>,
+        source_delivery_id: Option<&str>,
+    ) -> Result<ContextMaterialization> {
+        let mut result = self.materialize_unsealed(
+            database,
+            blob_store,
+            prepared_skill_exposure,
+            prepared_mcp_projection,
+            source_attachment_paths,
+            request,
+            source_delivery_id,
+        )?;
+        if let ContextMaterialization::Ready(context) = &mut result {
+            if let Some(evidence) = &mut context.hermes_rules {
+                if evidence.payload_blob_id.is_empty() {
+                    evidence.payload_blob_id = blob_store
+                        .put_bytes(
+                            database,
+                            context.runtime_payload.as_bytes(),
+                            "text/plain; charset=utf-8",
+                            "sensitive",
+                        )?
+                        .id;
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    fn materialize_unsealed(
         &self,
         database: &mut Database,
         blob_store: &ManagedBlobStore,
@@ -877,15 +918,21 @@ impl ContextService {
             }
             (render_run_facts(&run_facts)?, mission_details_version)
         };
-        let bootstrap_redelivery_revision = pending_redelivery_revision(
-            database,
-            bootstrap_binding_id,
-            expected_binding_generation,
-        )?;
-        let bootstrap_in_runtime_payload = (request.charter_delivery_mode
+        let hermes = adapter_kind == AdapterKind::HermesCli;
+        let bootstrap_redelivery_revision = if hermes && source_delivery_id.is_some() {
+            None
+        } else {
+            pending_redelivery_revision(
+                database,
+                bootstrap_binding_id,
+                expected_binding_generation,
+            )?
+        };
+        let mut bootstrap_in_runtime_payload = (request.charter_delivery_mode
             == CharterDeliveryMode::FirstPayload
             && bootstrap_required)
             || bootstrap_redelivery_revision.is_some();
+        let mut hermes_rules = None;
         let current_input_value =
             current_input.as_payload(&attachment_paths, &current_input_skill_resolution.links);
         let mut batch_run_input_value = claimed_context
@@ -913,7 +960,25 @@ impl ContextService {
             }
         }
         let a2a_guidance = prepare_a2a_guidance(database, &snapshot)?;
-        let bootstrap_payload = if bootstrap_in_runtime_payload {
+        let bootstrap_payload = if hermes {
+            if source_delivery_id.is_some() {
+                None
+            } else {
+                let bootstrap = format_session_bootstrap_for_snapshot(
+                    database,
+                    &snapshot,
+                    bootstrap_evidence.clone(),
+                )?;
+                let (overlay, evidence) = hermes_rules::select(
+                    database,
+                    &snapshot,
+                    &bootstrap.payload,
+                    bootstrap_redelivery_revision,
+                )?;
+                hermes_rules = Some(evidence);
+                overlay
+            }
+        } else if bootstrap_in_runtime_payload {
             let bootstrap = format_session_bootstrap_for_snapshot(
                 database,
                 &snapshot,
@@ -927,6 +992,9 @@ impl ContextService {
         } else {
             None
         };
+        if hermes {
+            bootstrap_in_runtime_payload = bootstrap_payload.is_some();
+        }
 
         let workspace_fact = if let Some(claimed) = &dynamic_context {
             let mut workspace = claimed.workspace.clone();
@@ -1447,6 +1515,7 @@ impl ContextService {
             rendered_payload: payload,
             rendered_payload_digest: payload_digest,
             runtime_payload,
+            hermes_rules,
             charter_delivery_mode: request.charter_delivery_mode,
             bootstrap_in_runtime_payload,
             bootstrap_redelivery_revision,
@@ -1553,11 +1622,18 @@ impl ContextService {
         // FirstPayload adapter adds its already durable bootstrap in Runtime;
         // the dynamic bytes themselves remain frozen here and are never
         // re-selected on retry/recovery.
-        let runtime_budget = max_payload_bytes.saturating_sub(bootstrap_payload_reserve(
-            request.charter_delivery_mode,
-            bootstrap_required,
-            has_pending_bootstrap_redelivery(transaction, &snapshot)?,
-        ));
+        let reserve = if run_snapshot_adapter_kind(&snapshot)? == AdapterKind::HermesCli {
+            MAX_SESSION_BOOTSTRAP_BYTES
+                + hermes_rules::envelope("compaction_recovery", "").len()
+                + 2
+        } else {
+            bootstrap_payload_reserve(
+                request.charter_delivery_mode,
+                bootstrap_required,
+                has_pending_bootstrap_redelivery(transaction, &snapshot)?,
+            )
+        };
+        let runtime_budget = max_payload_bytes.saturating_sub(reserve);
         let workspace_fact =
             prepare_workspace_fact(transaction, &snapshot, requires_new_native_session, true)?;
         let additional_skills = prepare_additional_skills(
@@ -1835,6 +1911,7 @@ impl ContextService {
                 bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
                 bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
                 runtime_payload_digest: Some(&runtime_payload_digest),
+                hermes_rules: context.hermes_rules.as_ref(),
                 ..RuntimeInputDeliveryOptions::default()
             },
         )
@@ -1861,6 +1938,7 @@ impl ContextService {
                 bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
                 bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
                 runtime_payload_digest: Some(&runtime_payload_digest),
+                hermes_rules: context.hermes_rules.as_ref(),
                 ..RuntimeInputDeliveryOptions::default()
             },
         )
@@ -1886,6 +1964,7 @@ impl ContextService {
                 bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
                 bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
                 runtime_payload_digest: Some(&runtime_payload_digest),
+                hermes_rules: context.hermes_rules.as_ref(),
                 ..RuntimeInputDeliveryOptions::default()
             },
         )
@@ -2044,6 +2123,7 @@ impl ContextService {
             bootstrap_redelivery_revision,
             bootstrap_evidence_id,
             runtime_payload_digest,
+            hermes_rules,
         } = options;
         let transaction = database.connection_mut().transaction()?;
         let active: bool = transaction.query_row(
@@ -2168,6 +2248,7 @@ impl ContextService {
                         runtime_request_digest,
                     ],
                 )?;
+                hermes_rules::persist(&transaction, &existing.id, hermes_rules)?;
                 existing.status = "prepared".to_string();
                 existing.native_input_id = None;
                 existing.bootstrap_redelivery_revision = bootstrap_redelivery_revision;
@@ -2333,6 +2414,7 @@ impl ContextService {
                 runtime_request_digest,
             ],
         )?;
+        hermes_rules::persist(&transaction, &delivery_id, hermes_rules)?;
         append_raw_event(
             &transaction,
             "runtime.input_prepared",
@@ -7483,6 +7565,31 @@ fn load_existing_manifest(
     if row.12 != delivery_mode.as_str() {
         anyhow::bail!("ContextManifest Charter delivery mode cannot change during recovery");
     }
+    let hermes = run_snapshot_adapter_kind(snapshot)? == AdapterKind::HermesCli;
+    if hermes {
+        if let Some(evidence) = hermes_rules::frozen(database, &row.0)? {
+            let runtime_payload = blob_store.read_text(database, &evidence.payload_blob_id)?;
+            anyhow::ensure!(
+                runtime_payload.len() <= max_payload_bytes,
+                "Frozen Hermes payload exceeds limit"
+            );
+            return Ok(Some(PreparedContext {
+                manifest_id: row.0,
+                bootstrap_evidence_id: row.7,
+                rendered_payload: payload,
+                rendered_payload_digest: row.4,
+                runtime_payload,
+                bootstrap_in_runtime_payload: evidence.kind != "none",
+                hermes_rules: Some(evidence),
+                charter_delivery_mode: delivery_mode,
+                bootstrap_redelivery_revision: row.14,
+                expected_binding_generation: row.1,
+                requires_new_native_session,
+                camp_message_boundary_sequence: row.2,
+                collaboration_state_digest: row.5,
+            }));
+        }
+    }
     let charter = blob_store.read_text(database, &row.8)?;
     let entrypoint = blob_store.read_text(database, &row.10)?;
     let (bootstrap_contract, platform_section, platform_digest): (String, Option<String>, Option<String>) = database.connection().query_row(
@@ -7500,7 +7607,9 @@ fn load_existing_manifest(
     )?;
     let bootstrap_required = requires_new_native_session
         || snapshot.native_charter_digest.as_deref() != Some(bootstrap_digest.as_str());
-    let bootstrap_redelivery_revision = if row.13 {
+    let bootstrap_redelivery_revision = if hermes && source_delivery_id.is_some() {
+        None
+    } else if row.13 {
         // Once an input has crossed the prepared cutoff, recovery must
         // reconstruct exactly that decision. A later observation belongs to
         // the next controllable prompt and cannot be pulled into this one.
@@ -7512,10 +7621,14 @@ fn load_existing_manifest(
             .context("Stored ContextManifest has no Native Binding identity")?;
         pending_redelivery_revision(database, native_binding_id, row.1)?
     };
-    let bootstrap_in_runtime_payload = (delivery_mode == CharterDeliveryMode::FirstPayload
+    let mut bootstrap_in_runtime_payload = (delivery_mode == CharterDeliveryMode::FirstPayload
         && bootstrap_required)
         || bootstrap_redelivery_revision.is_some();
-    let runtime_payload = if bootstrap_in_runtime_payload {
+    let mut hermes_rules = None;
+    let runtime_payload = if hermes && source_delivery_id.is_some() {
+        bootstrap_in_runtime_payload = false;
+        payload.clone()
+    } else if bootstrap_in_runtime_payload || hermes {
         let member_identity = match claim::load(database.connection(), &snapshot.agent_run_id)? {
             Some(claimed) => claimed.member_identity,
             None => load_latest_member_identity(database, &snapshot.agent_id)?,
@@ -7527,12 +7640,26 @@ fn load_existing_manifest(
             platform_section.as_deref(),
             &entrypoint,
         )?;
-        let bootstrap = if bootstrap_redelivery_revision.is_some() {
-            render_bootstrap_redelivery_overlay(&bootstrap)
+        if hermes {
+            let (overlay, evidence) = hermes_rules::select(
+                database,
+                snapshot,
+                &bootstrap,
+                bootstrap_redelivery_revision,
+            )?;
+            bootstrap_in_runtime_payload = overlay.is_some();
+            hermes_rules = Some(evidence);
+            overlay
+                .map(|b| compose_first_payload(&b, &payload))
+                .unwrap_or_else(|| payload.clone())
         } else {
-            bootstrap
-        };
-        compose_first_payload(&bootstrap, &payload)
+            let bootstrap = if bootstrap_redelivery_revision.is_some() {
+                render_bootstrap_redelivery_overlay(&bootstrap)
+            } else {
+                bootstrap
+            };
+            compose_first_payload(&bootstrap, &payload)
+        }
     } else {
         payload.clone()
     };
@@ -7545,6 +7672,7 @@ fn load_existing_manifest(
         rendered_payload: payload,
         rendered_payload_digest: row.4,
         runtime_payload,
+        hermes_rules,
         charter_delivery_mode: delivery_mode,
         bootstrap_in_runtime_payload,
         bootstrap_redelivery_revision,
@@ -7735,18 +7863,34 @@ fn materialize_frozen_delivery_context(
         &bootstrap_evidence.native_binding_id,
         expected_binding_generation,
     )?;
-    let bootstrap_in_runtime_payload =
+    let mut bootstrap_in_runtime_payload =
         (request.charter_delivery_mode == CharterDeliveryMode::FirstPayload && bootstrap_required)
             || bootstrap_redelivery_revision.is_some();
-    let runtime_payload = if bootstrap_in_runtime_payload {
+    let hermes = run_snapshot_adapter_kind(snapshot)? == AdapterKind::HermesCli;
+    let mut hermes_rules = None;
+    let runtime_payload = if bootstrap_in_runtime_payload || hermes {
         let bootstrap =
             format_session_bootstrap_for_snapshot(database, snapshot, bootstrap_evidence.clone())?;
-        let bootstrap = if bootstrap_redelivery_revision.is_some() {
-            render_bootstrap_redelivery_overlay(&bootstrap.payload)
+        if hermes {
+            let (overlay, evidence) = hermes_rules::select(
+                database,
+                snapshot,
+                &bootstrap.payload,
+                bootstrap_redelivery_revision,
+            )?;
+            bootstrap_in_runtime_payload = overlay.is_some();
+            hermes_rules = Some(evidence);
+            overlay
+                .map(|b| compose_first_payload(&b, &frozen.rendered_payload))
+                .unwrap_or_else(|| frozen.rendered_payload.clone())
         } else {
-            bootstrap.payload
-        };
-        compose_first_payload(&bootstrap, &frozen.rendered_payload)
+            let bootstrap = if bootstrap_redelivery_revision.is_some() {
+                render_bootstrap_redelivery_overlay(&bootstrap.payload)
+            } else {
+                bootstrap.payload
+            };
+            compose_first_payload(&bootstrap, &frozen.rendered_payload)
+        }
     } else {
         frozen
             .runtime_payload
@@ -8030,6 +8174,7 @@ fn materialize_frozen_delivery_context(
         rendered_payload: frozen.rendered_payload.clone(),
         rendered_payload_digest: payload_digest,
         runtime_payload,
+        hermes_rules,
         charter_delivery_mode: request.charter_delivery_mode,
         bootstrap_in_runtime_payload,
         bootstrap_redelivery_revision,
@@ -14008,6 +14153,177 @@ mod slow_tests {
         assert!(!next_context.requires_new_native_session);
         assert!(!next_context.bootstrap_in_runtime_payload);
         managed_fixture.cleanup();
+    }
+
+    // Owns Hermes's complete-B acceptance ledger and exact frozen user bytes.
+    // The generic Bootstrap owner deliberately excludes identity from its digest.
+    #[test]
+    fn hermes_rules_follow_accepted_inputs_and_freeze_compaction_revisions() {
+        let mut fixture = fixture();
+        bind_fixture_native_session(&mut fixture, "hermes-rules-session");
+        let original_growth: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT growth_topic FROM agent_profile WHERE id='agent_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let store = ManagedBlobStore::new(&fixture.directory);
+        for (index, expected) in [
+            "initial",
+            "none",
+            "update",
+            "compaction_recovery",
+            "compaction_recovery",
+            "none",
+            "update",
+            "none",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index > 0 {
+                if index == 6 {
+                    // An upgraded Session's old accepted system-layer inputs
+                    // must not masquerade as accepted user-layer rules.
+                    fixture.database.connection().execute("UPDATE runtime_input_delivery SET hermes_rules_envelope_version=NULL,hermes_rules_digest=NULL,hermes_rules_delivery_kind=NULL,hermes_runtime_payload_blob_id=NULL", []).unwrap();
+                }
+                if index == 2 {
+                    fixture.database.connection().execute("UPDATE agent_profile SET display_name='Updated Hermes identity' WHERE id='agent_1'", []).unwrap();
+                }
+                let previous = fixture.run_id.clone();
+                let (run, epoch) = complete_run_and_start_followup(
+                    &mut fixture,
+                    &previous,
+                    &format!("HERMES_TASK_{index}"),
+                );
+                fixture.run_id = run;
+                fixture.execution_epoch = epoch;
+            }
+            fixture.database.connection().execute("UPDATE agent_run SET effective_config_json=json_set(effective_config_json,'$.runtimeAdapter','hermes-cli') WHERE id=?1", [&fixture.run_id]).unwrap();
+            freeze_fixture_claim(&mut fixture);
+            if index == 3 {
+                fixture.database.connection().execute("INSERT INTO bootstrap_redelivery_requirement(conversation_id,native_binding_id,native_binding_generation,adapter_kind,requested_revision,acknowledged_revision,created_at,updated_at)
+                    SELECT conversation_id,?2,1,'hermes-cli',1,0,datetime('now'),datetime('now') FROM agent_run WHERE id=?1",
+                    params![fixture.run_id,fixture.native_binding_id]).unwrap();
+            }
+            let request = MaterializeContextRequest {
+                agent_run_id: &fixture.run_id,
+                execution_epoch: fixture.execution_epoch,
+                charter_delivery_mode: CharterDeliveryMode::FirstPayload,
+                max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+            };
+            let ContextMaterialization::Ready(context) = ContextService
+                .materialize(&mut fixture.database, &store, &request)
+                .unwrap()
+            else {
+                panic!("ready")
+            };
+            let evidence = context.hermes_rules.as_ref().unwrap();
+            assert_eq!(evidence.kind, expected);
+            assert_eq!(
+                context.runtime_payload.matches("[MEMBER_IDENTITY]").count(),
+                usize::from(expected != "none")
+            );
+            assert!(context.runtime_payload.ends_with(&context.rendered_payload));
+            let delivery = ContextService
+                .prepare_input_delivery_for_context(
+                    &mut fixture.database,
+                    &fixture.run_id,
+                    fixture.execution_epoch,
+                    &context,
+                )
+                .unwrap();
+            assert!(
+                crate::managed_blob::camp_blob_references(
+                    fixture.database.connection(),
+                    &fixture.camp_id,
+                    "SELECT id FROM agent_run WHERE camp_id=?1",
+                )
+                .unwrap()
+                .contains(&evidence.payload_blob_id)
+            );
+            if index == 0 {
+                // Prepared/unknown are not accepted. A retry uses frozen bytes even
+                // after profile edits, and creates no second delivery or task.
+                let snapshot =
+                    load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(
+                    hermes_rules::select(&fixture.database, &snapshot, "B", None)
+                        .unwrap()
+                        .1
+                        .kind,
+                    "initial"
+                );
+                ContextService
+                    .mark_input_delivery_unknown(
+                        &mut fixture.database,
+                        &delivery.id,
+                        "controlled lost response",
+                    )
+                    .unwrap();
+                fixture.database.connection().execute("UPDATE agent_profile SET growth_topic='edited after preparation' WHERE id='agent_1'", []).unwrap();
+            }
+            if index == 3 {
+                fixture.database.connection().execute("UPDATE bootstrap_redelivery_requirement SET requested_revision=2 WHERE native_binding_id=?1", [&fixture.native_binding_id]).unwrap();
+            }
+            let ContextMaterialization::Ready(recovered) = ContextService
+                .materialize(&mut fixture.database, &store, &request)
+                .unwrap()
+            else {
+                panic!("ready")
+            };
+            assert_eq!(recovered, context);
+            ContextService
+                .acknowledge_input_delivery(
+                    &mut fixture.database,
+                    &delivery.id,
+                    &format!("hermes-input-{index}"),
+                )
+                .unwrap();
+            if index == 0 {
+                // Restore the changed field so the next input really has identical B.
+                fixture
+                    .database
+                    .connection()
+                    .execute(
+                        "UPDATE agent_profile SET growth_topic=?1 WHERE id='agent_1'",
+                        [&original_growth],
+                    )
+                    .unwrap();
+            }
+            if index == 3 {
+                assert_eq!(
+                    pending_redelivery_revision(&fixture.database, &fixture.native_binding_id, 1)
+                        .unwrap(),
+                    Some(2)
+                );
+            }
+            if index >= 4 {
+                assert_eq!(
+                    pending_redelivery_revision(&fixture.database, &fixture.native_binding_id, 1)
+                        .unwrap(),
+                    None
+                );
+            }
+            assert_eq!(
+                fixture
+                    .database
+                    .connection()
+                    .query_row(
+                        "SELECT COUNT(*) FROM runtime_input_delivery WHERE agent_run_id=?1",
+                        [&fixture.run_id],
+                        |r| r.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                1
+            );
+        }
+        fixture.cleanup();
     }
 
     #[test]

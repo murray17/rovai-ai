@@ -1,0 +1,130 @@
+{
+  "native_commit": "4d04303818b61bf3aa09278af48356315515965b",
+  "native_version": "0.22.4",
+  "scope": "unchanged native ContextCompressor with synthetic history and stub summary provider; no Gateway/Core or real model; force=True is NOT automatic-compression acceptance",
+  "compression_config": {
+    "enabled": true,
+    "threshold": 0.5,
+    "protect_first_n": 3,
+    "protect_last_n": 20,
+    "tail_mode": null,
+    "in_place": null
+  },
+  "source_sha256": "065dc9babbcb811a514c32319ed13a6ddaeefbc3964a109f7bb8e4c9260779d1",
+  "results": [
+    {
+      "tail_mode": "lean",
+      "protect_first_n": 3,
+      "initial": {
+        "compression_count": 0,
+        "effective_protect_first_n": 3,
+        "protected_head_size": 4,
+        "full_rules_present": true,
+        "first_message_verbatim": true,
+        "messages": 163
+      },
+      "cycles": [
+        {
+          "compression_count": 1,
+          "effective_protect_first_n": 0,
+          "protected_head_size": 1,
+          "full_rules_present": true,
+          "first_message_verbatim": true,
+          "messages": 9
+        },
+        {
+          "compression_count": 2,
+          "effective_protect_first_n": 0,
+          "protected_head_size": 1,
+          "full_rules_present": false,
+          "first_message_verbatim": false,
+          "messages": 7
+        }
+      ],
+      "cold_after_first": {
+        "compression_count": 0,
+        "effective_protect_first_n": 0,
+        "protected_head_size": 1,
+        "full_rules_present": true,
+        "first_message_verbatim": true,
+        "messages": 9
+      }
+    },
+    {
+      "tail_mode": "legacy",
+      "protect_first_n": 3,
+      "initial": {
+        "compression_count": 0,
+        "effective_protect_first_n": 3,
+        "protected_head_size": 4,
+        "full_rules_present": true,
+        "first_message_verbatim": true,
+        "messages": 163
+      },
+      "cycles": [
+        {
+          "compression_count": 1,
+          "effective_protect_first_n": 0,
+          "protected_head_size": 1,
+          "full_rules_present": true,
+          "first_message_verbatim": true,
+          "messages": 21
+        },
+        {
+          "compression_count": 2,
+          "effective_protect_first_n": 0,
+          "protected_head_size": 1,
+          "full_rules_present": false,
+          "first_message_verbatim": false,
+          "messages": 19
+        }
+      ],
+      "cold_after_first": {
+        "compression_count": 0,
+        "effective_protect_first_n": 0,
+        "protected_head_size": 1,
+        "full_rules_present": true,
+        "first_message_verbatim": true,
+        "messages": 21
+      }
+    },
+    {
+      "tail_mode": "lean",
+      "protect_first_n": 0,
+      "initial": {
+        "compression_count": 0,
+        "effective_protect_first_n": 0,
+        "protected_head_size": 1,
+        "full_rules_present": true,
+        "first_message_verbatim": true,
+        "messages": 163
+      },
+      "cycles": [
+        {
+          "compression_count": 1,
+          "effective_protect_first_n": 0,
+          "protected_head_size": 1,
+          "full_rules_present": false,
+          "first_message_verbatim": false,
+          "messages": 7
+        },
+        {
+          "compression_count": 2,
+          "effective_protect_first_n": 0,
+          "protected_head_size": 1,
+          "full_rules_present": false,
+          "first_message_verbatim": false,
+          "messages": 7
+        }
+      ],
+      "cold_after_first": {
+        "compression_count": 0,
+        "effective_protect_first_n": 0,
+        "protected_head_size": 1,
+        "full_rules_present": false,
+        "first_message_verbatim": false,
+        "messages": 7
+      }
+    }
+  ]
+}

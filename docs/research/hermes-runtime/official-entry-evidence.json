@@ -1,0 +1,105 @@
+{
+  "date": "2026-10-23",
+  "platform": "macOS arm64",
+  "nativeVersion": "0.22.4",
+  "sourceCommit": "4d04303818b61bf3aa09278af48356315515965b",
+  "nativeSourceModified": false,
+  "productionAdapterChanged": false,
+  "method": "official CLI Gateway and ACP; controlled loopback Responses with real native tools; separate authenticated Gateway RPC comparison",
+  "controlled": {
+    "firstBinding": {
+      "gatewaySystem": true,
+      "viewerSystem": false,
+      "terminalContext": "GATEWAY-CONTEXT-A",
+      "reasoningEffort": "low"
+    },
+    "warmBinding": {
+      "gatewaySystem": true,
+      "viewerBSystem": false,
+      "terminalContext": "GATEWAY-CONTEXT-A"
+    },
+    "effortReply": {
+      "configOptions": []
+    },
+    "effortOnWire": "low",
+    "slashEffortOnWire": "high",
+    "questionnaireAdvertised": false,
+    "missingResume": {
+      "code": -32603,
+      "message": "Internal error",
+      "data": {
+        "details": "not_found"
+      }
+    },
+    "activeSteerReachedModel": true,
+    "idleSteerStartedModelTurn": true,
+    "cancelTerminalStillAlive": false,
+    "reconnectedCancelTerminalStillAlive": true,
+    "rpcCancelTerminalStillAlive": false,
+    "rpcBinding": {
+      "rpcSystem": true,
+      "terminalContext": "RPC-CONTEXT-A"
+    },
+    "rpcChangedCreate": {
+      "type": "GatewayRPCError",
+      "message": "invalid_params"
+    },
+    "rpcEnvMutation": {
+      "type": "GatewayRPCError",
+      "message": "invalid_params"
+    },
+    "rpcEffortOnWire": "high",
+    "rpcLateSteer": {
+      "type": "GatewayRPCError",
+      "message": "stale_generation"
+    },
+    "rpcLateSteerStartedModel": false,
+    "providerError": {
+      "code": -32603,
+      "message": "Internal error",
+      "data": {
+        "details": "admitted_turn_failed"
+      }
+    },
+    "providerDetailVisible": true,
+    "coldBinding": {
+      "newGatewaySystem": true,
+      "oldGatewaySystem": false,
+      "terminalContext": "GATEWAY-CONTEXT-B",
+      "sameSession": true
+    },
+    "coldReadyMs": 2163,
+    "cleanupRemainingPids": [],
+    "acpFileDiffContentCount": 0,
+    "nativeFileToolCompletions": 3,
+    "gatewayInlineDiffs": [
+      {
+        "tool": "write_file",
+        "isError": false,
+        "displayDiff": "  ┊ review diff\na/official-diff.txt → b/official-diff.txt\n@@ -0,0 +1 @@\n+alpha"
+      },
+      {
+        "tool": "write_file",
+        "isError": false,
+        "displayDiff": "  ┊ review diff\na/official-diff.txt → b/official-diff.txt\n@@ -1 +1 @@\n-alpha\n+beta"
+      },
+      {
+        "tool": "patch",
+        "isError": false,
+        "displayDiff": "  ┊ review diff\na/$FIXTURE/project/official-diff.txt → b/$FIXTURE/project/official-diff.txt\n@@ -1 +1 @@\n-beta\n+gamma"
+      }
+    ]
+  },
+  "realModel": {
+    "provider": "sub2api",
+    "model": "gpt-6.1-sol",
+    "passed": true,
+    "sameSession": true,
+    "readyMs": 5528,
+    "firstOutput": "REAL-SYSTEM-A",
+    "firstContext": "REAL-CONTEXT-A",
+    "secondOutput": "REAL-SYSTEM-B\nMEMORY-OPAL-8624",
+    "secondContext": "REAL-CONTEXT-B",
+    "temporaryCredentialRemoved": true
+  }
+}

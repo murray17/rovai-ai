@@ -1,10 +1,47 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-20
+last_updated: 2026-10-23
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-10-23 Hermes 显式 unknown 恢复补修
+
+Ready 目录已与 FirstPayload 对齐：首条 user 规则、signal-driven/best-effort 压缩连续性，移除旧 system
+注入与原生永久保留声明。旧 Ready 快照在发现阶段失效，显式重新检查后保留模型参数和权限能力。
+生产 Core 与官方 0.22.4 的受控验收通过旧快照升级、Core 强杀、精确检查/确认、跨重启幂等与原 Session 新任务。
+真实 Sub2API `gpt-6.1-sol` 验收通过强杀 Gateway/Core 后的 unknown 显式处理；原 Run 保持失败，
+旧输入不重放，原 Session 接受新任务，没有重复公开 Send，受管后代全部回收。
+入口为用户 CLI `hermes-inspect` / `hermes-discard --acknowledge-effects`，未新增聊天恢复按钮。
+证据与失败尝试分别记录在[脱敏恢复摘要](research/hermes-runtime/explicit-unknown-recovery-2026-10-23.json)
+和[实施验证](versions/v1.72/hermes-first-input-implementation.md#合入前补修与显式恢复)。Hermes 仍为 Preview。
+
+## 2026-10-23 Hermes 首次输入规则
+
+当前 user 层规则投递与完成通知后的下一普通输入恢复，见
+[实施验证](versions/v1.72/hermes-first-input-implementation.md)。下节系统层压缩资格属于调整前路径，
+不能转移为首条 user 规则永久保留的保证。进程、取消、文件与 usage 的既有证据仍各自保留。
+该阶段真实 Core 的 Steer/取消/Send 通过；强杀后的原生 admission 为 unknown，续轮被安全拒绝。
+该次崩溃续接仍不计通过，保留[原始脱敏记录](research/hermes-runtime/first-input-core-recovery-2026-10-23.json)；
+后续显式恢复验证独立记录于上节，不改写这次失败。
+
+## 2026-10-23 Hermes 初始接入
+
+官方 source install 0.22.4 / commit `4d04303818b61bf3aa09278af48356315515965b`，macOS arm64。
+真实 Sub2API `gpt-6.1-sol` 验证原生系统绑定、暖轮 Usage、精确冷恢复、压缩后指令、MCP 与 Skill；
+隔离 Core 验证公开 Send、文件操作和真实 patch 证据。完整结果与保留边界见
+[Hermes 验证记录](research/hermes-runtime/README.md)。平台为 Preview，不能等同其他平台或完整能力轴资格。
+同日增量：兼容策略改为 >=0.22.4；原生 272000/204000 窗口/阈值自动压缩、压缩后与冷恢复连续性通过。
+早期进程内路径的完整文件状态与 Desktop 验证已完成，Desktop 覆盖 effort 保存、错误模型原生详情、
+同一 Run 的 Steer ACK 与修正后 Send，Skills 区分用户与受信项目来源。新版本/其他平台未因最低版本策略自动取得资格。
+
+同日官方入口切换：未修改的官方 ACP＋专用 Gateway，每 Run 精确冷恢复并更新 B/CLI lease；原生阈值
+自动压缩、精确 Steer/取消、错误与 turn usage、MCP 增改撤销/同名优先/发现失败拒绝通过。文件证据现为
+原生成功结果的 reported_mutation 片段，早期完整快照资格不转移到新路径。图片 bytes 到达原生媒体缓存，
+但本次 Sub2API 模型在 auto 预解析与 native pixels 模式均未正确识别四色图，识图准确性不记通过。
+生产 Core 的强杀/重启验收也通过：受管 Gateway/终端全部回收，已接受输入不自动重放，显式下一轮精确
+恢复同一原生 Session 并使用新 CLI lease 发送，没有重复公开消息。
 
 ## 2026-10-20 ZCode 与 OpenCode V2 原生问卷禁用
 

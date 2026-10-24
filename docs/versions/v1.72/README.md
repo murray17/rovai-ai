@@ -6,10 +6,35 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-23
+last_updated: 2026-10-24
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Hermes Runtime（2026-10-23）
+
+按 User 要求在独立 worktree 接入 Hermes，并切换到未修改的官方 ACP＋专用 Gateway；最低版本 0.22.4，
+每 Run 冷恢复原 Session 并刷新 CLI lease，macOS arm64 为 Preview。
+实现范围、真实模型验证、清单及与其他 Adapter 的差异见 [Hermes 记录](../../research/hermes-runtime/README.md)。
+当前规范为 [Hermes Managed Runtime v1](../../contracts/hermes-managed-runtime-v1.md)，取舍见 [D59](decisions.md#v1-72-d59)。
+首次普通 user 输入携带规则与压缩后下一输入补发已按 [R1](model-context-change-hermes-first-input.md) 确认，
+当前实施与验证见 [Hermes 首次输入记录](hermes-first-input-implementation.md)，投递层取舍见 [D60](decisions.md#v1-72-d60)。
+合入前补齐 Ready 分类、旧探测失效和普通 Rust 回归，并增加用户显式处理原生 unknown 的维护入口；
+合同与边界见 [未知执行恢复](../../contracts/hermes-managed-runtime-v1.md#用户明确处理未知执行)，理由见 [D61](decisions.md#v1-72-d61)。
+按 [D62](decisions.md#v1-72-d62) 使用当前选定 Hermes 恢复原 Home/profile/Session；安装与指纹变化不否定
+恢复资格，历史恢复与新输入门禁分开，移除 Hermes 全局长锁。验证边界见 [实施记录](hermes-first-input-implementation.md)。
+
+按 [D63](decisions.md#v1-72-d63) 进一步删除普通消息代理和逐轮双通道对账，改由共享 ACP 直接使用官方
+终态、工具和取消。增强 Diff/参数/用量缺失保持未知，原生 reasoning 配置不由 Rovai 接管。
+当前代码与回归边界见[简化实施记录](hermes-first-input-implementation.md#官方-acp-直连简化2026-10-24)。
+
+影响范围：新增 Adapter/原生启动与 Renderer 目录项；Migration 214 将 schema 163 扩展至 164，215 将其扩展至 165；
+Hermes 采用 user 层首次/更新/压缩恢复包装，完整 B 的接受证据与精确最终 Blob 进入既有输入账本；
+B/P 内部 Formatter/Manifest/Profile 与其他 Adapter 不变；
+文档路由与能力降级说明同步。无发布版本变更、既有会话 clean break、领域词汇变更或其他平台资格晋升。
+
+当前受控官方入口已验证自动压缩、插话/取消、原生工具执行、并发、MCP 增改撤销与失败拒绝。图片运输已验证，
+当前模型的识图准确性未通过；原生 `.env` 独有 Skills 路径变量的菜单索引仍有限制。具体准入不由 Ready 代替。
 
 ## 撤回消息两分钟重新编辑（2026-10-23）
 

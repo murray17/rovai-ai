@@ -4,7 +4,7 @@ contract: native-session-bootstrap-v6
 status: accepted
 version: 6
 source_version: v1.72
-last_updated: 2026-10-22
+last_updated: 2026-10-23
 ---
 
 # Native Session Bootstrap v6
@@ -42,3 +42,11 @@ Bootstrap contract `native_session_bootstrap_v6` / formatter **6**。Migration 2
 旧 v5 和冻结 claim 恢复继续成立，v5 stable digest 计算不变，旧 Evidence 不倒填 Team 指引。
 现有 session charter **25**、binding compatibility **16**、Dynamic Manifest/formatter **40/42**、
 Profile **15/16** 均不变；完整动态合同见 [ContextManifest v42](context-manifest-evidence-v42.md)。
+
+## Hermes 的 user 层投递例外
+
+Hermes 复用本合同完整 B，按[Hermes Managed Runtime v1](hermes-managed-runtime-v1.md#session-与输入)
+在首次、规则更新或压缩恢复的下一普通输入前置投递；不注入 system/developer，不读取或改写原生 personality/system overlay。
+它以完整 B digest 和接受回执去重，并在既有输入账本引用包含完整规则的冻结 Managed Blob；
+这是 [Hermes R1](../versions/v1.72/model-context-change-hermes-first-input.md) 确认的运输/证据例外，
+不改变其他 Adapter、不改变 B 的 section/formatter 或 Team 指引的固定来源。

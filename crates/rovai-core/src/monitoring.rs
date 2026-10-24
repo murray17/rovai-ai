@@ -2124,6 +2124,12 @@ fn eligible_mask(runtime: AdapterKind, _runtime_version: Option<&str>) -> i64 {
                 | ELIGIBLE_REASONING_OUTPUT
         }
         AdapterKind::KimiCodeCli => full_tokens & !ELIGIBLE_REASONING_OUTPUT,
+        AdapterKind::HermesCli => {
+            ELIGIBLE_PROMPT_INPUT_TOTAL
+                | ELIGIBLE_CACHE_READ
+                | ELIGIBLE_OUTPUT
+                | ELIGIBLE_REASONING_OUTPUT
+        }
         AdapterKind::MinimaxCodeCli => {
             (full_tokens & !(ELIGIBLE_REASONING_OUTPUT | ELIGIBLE_REQUEST_CACHE_HIT))
                 | ELIGIBLE_COST
@@ -3697,6 +3703,8 @@ pub fn parse_acp_usage_message(
                 },
             )
         }
+        // Official Hermes ACP reports Session counters, not a prompt delta.
+        // Without a native per-prompt baseline, consumption remains unknown.
         AdapterKind::CommandCodeCli => (
             "command-code-acp-prompt-usage-v1",
             RuntimeInputSemantics::CacheInclusiveTotal,
@@ -5144,6 +5152,29 @@ mod tests {
 
     #[test]
     fn runtime_parsers_emit_sparse_usage_without_antigravity_inference() {
+        let hermes = parse_acp_usage_message(
+            AdapterKind::HermesCli,
+            Some("0.22.4"),
+            "rovai/acp_prompt_completed",
+            &json!({"sessionId":"hermes","promptId":"turn-2",
+            "result":{"usage":{"inputTokens":100,"outputTokens":12,"cachedReadTokens":40,"thoughtTokens":2}}}),
+        );
+        assert!(
+            hermes.is_empty(),
+            "Session counters cannot be charged as this prompt's usage"
+        );
+        let failed = parse_acp_usage_message(
+            AdapterKind::HermesCli,
+            Some("0.22.4"),
+            "rovai/acp_prompt_completed",
+            &json!({"sessionId":"hermes","promptId":"failed-turn","error":"API failed",
+                "hermesExecution":{"admissionId":"admission","executionGeneration":2,
+                    "usage":{"inputTokens":100,"outputTokens":12,"cachedReadTokens":40}}}),
+        );
+        assert!(
+            failed.is_empty(),
+            "Official ACP supplies no failed-turn usage delta"
+        );
         let root_prompt = json!({"sessionId":"root", "promptId":"prompt-1", "result":{"usage":{
             "inputTokens":100,"cachedReadTokens":40,"cachedWriteTokens":20,
             "outputTokens":10,"thoughtTokens":5,"totalTokens":175}}});

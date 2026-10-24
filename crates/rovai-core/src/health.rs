@@ -1703,6 +1703,7 @@ async fn acp_probe_at(
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
             | AdapterKind::MinimaxCodeCli
+            | AdapterKind::HermesCli
             | AdapterKind::ZcodeApp
     ) {
         return AcpCapabilityProbe {
@@ -2063,7 +2064,14 @@ async fn run_acp_probe_with_scope(
         // Global options precede `acp serve` in TRAE CLI 2.0.
         command.args(["--permission-mode", "default"]);
     }
-    if kind == AdapterKind::DeepseekHarness {
+    if kind == AdapterKind::HermesCli {
+        crate::hermes::configure_command(
+            &mut command,
+            &probe_root,
+            &probe_root.join("hermes-storage"),
+        )
+        .await?;
+    } else if kind == AdapterKind::DeepseekHarness {
         crate::dsh::configure_probe(&mut command, &probe_root)?;
     } else if kind == AdapterKind::OpencodeCli && catalog_only {
         crate::opencode_compat::configure_catalog_command(&mut command);
@@ -2095,7 +2103,11 @@ async fn run_acp_probe_with_scope(
     let mut process =
         RuntimeProbeProcess::spawn(&mut command, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT)
             .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
-    let deadline = Duration::from_secs(30);
+    let deadline = Duration::from_secs(if kind == AdapterKind::HermesCli {
+        90
+    } else {
+        30
+    });
     let result = {
         let (stdin, lines) = process.split_io()?;
         let exchange = async {
@@ -2133,6 +2145,16 @@ async fn run_acp_probe_with_scope(
             )
             .await?;
             let mut initialize = read_rpc_result(lines, 1).await?;
+            if kind == AdapterKind::HermesCli {
+                anyhow::ensure!(
+                    crate::hermes::supported_version(
+                        initialize
+                            .pointer("/agentInfo/version")
+                            .and_then(Value::as_str)
+                    ),
+                    "Unsupported Hermes ACP version"
+                );
+            }
             if let Some(preparation) = &model_preparation {
                 crate::dsh::annotate_session(&mut initialize, preparation);
             }
@@ -2320,7 +2342,10 @@ async fn run_acp_probe_with_scope(
                 .context("ACP session/new did not return sessionId")?;
             if matches!(
                 kind,
-                AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::MinimaxCodeCli
+                AdapterKind::KiroCli
+                    | AdapterKind::GrokBuild
+                    | AdapterKind::MinimaxCodeCli
+                    | AdapterKind::HermesCli
             ) {
                 let current_model =
                     crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session)
@@ -2859,6 +2884,7 @@ pub fn configure_acp_command(
         AdapterKind::CursorAgent => {
             command.arg("acp");
         }
+        AdapterKind::HermesCli => {} // managed entry configured asynchronously before spawn
         AdapterKind::KimiCodeCli | AdapterKind::MinimaxCodeCli => {
             command.arg("acp");
         }
@@ -2959,15 +2985,27 @@ fn acp_observed_capabilities(
             .into_iter()
             .map(str::to_string),
         );
-        if !matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
+        if !matches!(
+            kind,
+            AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::HermesCli
+        ) {
             capabilities.push("session.set_config_option".to_string());
         }
     }
     if matches!(
         kind,
-        AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::MinimaxCodeCli
+        AdapterKind::DeepseekHarness
+            | AdapterKind::CommandCodeCli
+            | AdapterKind::MinimaxCodeCli
+            | AdapterKind::HermesCli
     ) {
         capabilities.retain(|capability| capability != "workspace.additional_roots");
+    }
+    if kind == AdapterKind::HermesCli && session.is_some() {
+        capabilities.extend([
+            "session.set_model".to_string(),
+            "session.set_mode".to_string(),
+        ]);
     }
     if kind == AdapterKind::DeepseekHarness {
         if let Some(session) = session
@@ -2980,6 +3018,23 @@ fn acp_observed_capabilities(
 }
 
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
+    if kind == AdapterKind::HermesCli {
+        return [
+            "acp.initialize",
+            "session.new",
+            "session.prompt",
+            "session.cancel",
+            "session.update",
+            "session.load",
+            "session.set_model",
+            "session.set_mode",
+            "structured_permission_request",
+            "mcp.additive_per_run",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    }
     if matches!(
         kind,
         AdapterKind::CommandCodeCli | AdapterKind::MinimaxCodeCli
@@ -3075,7 +3130,10 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
     .into_iter()
     .map(str::to_string)
     .collect::<Vec<_>>();
-    if !matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
+    if !matches!(
+        kind,
+        AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::HermesCli
+    ) {
         capabilities.push("session.set_config_option".to_string());
     }
     capabilities
@@ -3100,6 +3158,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
             | AdapterKind::CommandCodeCli
             | AdapterKind::ClineCli
             | AdapterKind::MinimaxCodeCli
+            | AdapterKind::HermesCli
     )
 }
 
@@ -3766,6 +3825,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         AdapterKind::CursorAgent => (&["ROVAI_CURSOR_BIN"][..], "cursor-agent"),
         AdapterKind::KimiCodeCli => (&["ROVAI_KIMI_BIN"][..], "kimi"),
         AdapterKind::MinimaxCodeCli => (&["ROVAI_MINIMAX_CODE_BIN"][..], "mcode"),
+        AdapterKind::HermesCli => (&["ROVAI_HERMES_BIN"][..], "hermes"),
         AdapterKind::GrokBuild => (&["ROVAI_GROK_BIN"][..], "grok"),
         AdapterKind::DeepseekHarness => (&["ROVAI_DEEPSEEK_HARNESS_BIN"][..], "dsh"),
         AdapterKind::ClineCli => (&["ROVAI_CLINE_BIN"][..], "cline"),
@@ -4006,6 +4066,7 @@ for line in sys.stdin:
     #[test]
     fn catalog_refresh_requires_current_full_acp_evidence() {
         for kind in [
+            AdapterKind::HermesCli,
             AdapterKind::OpencodeCli,
             AdapterKind::CopilotCli,
             AdapterKind::KiroCli,
@@ -4048,6 +4109,13 @@ for line in sys.stdin:
                     !catalog_refresh_evidence_current(kind, &invalid),
                     "{kind:?}: {invalidation}"
                 );
+            }
+            if kind == AdapterKind::HermesCli {
+                let mut legacy = snapshot;
+                legacy
+                    .capabilities
+                    .push("context.charter.managed_system_prompt".into());
+                assert!(!catalog_refresh_evidence_current(kind, &legacy));
             }
         }
     }

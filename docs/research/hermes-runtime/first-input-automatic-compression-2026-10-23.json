@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-23",
+  "fixture": "rovai-hermes-real-first-input-fzvna7kq",
+  "nativeVersion": "0.22.4",
+  "sourceCommit": "4d04303818b61bf3aa09278af48356315515965b",
+  "model": "gpt-6.1-sol",
+  "realProvider": true,
+  "thresholdModified": false,
+  "manualCompressionCalled": false,
+  "observers": {
+    "requests": "official pre_api_request",
+    "completion": "official post_compaction"
+  },
+  "config": {
+    "checkpoint_required": false,
+    "codex_app_server_auto": "native",
+    "codex_gpt55_autoraise": true,
+    "codex_responses_compact_threshold": null,
+    "codex_responses_native": false,
+    "enabled": true,
+    "hygiene_max_turn_hold_seconds": 10,
+    "idle_compact_after_seconds": 0,
+    "max_attempts": 3,
+    "min_tail_user_messages": 1,
+    "proactive_prune_min_reclaim_tokens": 4096,
+    "proactive_prune_min_result_chars": 8000,
+    "proactive_prune_tokens": 0,
+    "progress_notices": false,
+    "protect_first_n": 3,
+    "protect_last_n": 20,
+    "target_ratio": 0.2,
+    "threshold": 0.5
+  },
+  "compactions": [
+    {
+      "commit_status": "committed",
+      "trigger_source": "pre_api",
+      "method": "llm_summary",
+      "main_context_limit": 272000,
+      "effective_threshold": 204000,
+      "protected_head_tokens": 203,
+      "messages_before": 19,
+      "messages_after": 12,
+      "history_rewritten": true,
+      "split_status": "in_place_committed"
+    },
+    {
+      "commit_status": "committed",
+      "trigger_source": "post_tool",
+      "method": "llm_summary",
+      "main_context_limit": 272000,
+      "effective_threshold": 204000,
+      "protected_head_tokens": 0,
+      "messages_before": 28,
+      "messages_after": 24,
+      "history_rewritten": true,
+      "split_status": "in_place_committed"
+    }
+  ],
+  "first": {
+    "carriesRules": true,
+    "selectedCompletion": 0,
+    "fullRuleCountsInUser": [
+      1
+    ],
+    "rulesNeverInSystem": true
+  },
+  "ordinaryNext": {
+    "carriesRules": false,
+    "selectedCompletion": 0,
+    "fullRuleCountsInUser": [
+      1
+    ],
+    "rulesNeverInSystem": true
+  },
+  "rounds": [
+    {
+      "round": 0,
+      "contextWindow": 272000,
+      "compressionCount": 0,
+      "carriesRules": false,
+      "selectedCompletion": 0,
+      "fullRuleCountsInUser": [
+        1,
+        1
+      ],
+      "rulesNeverInSystem": true
+    },
+    {
+      "round": 1,
+      "contextWindow": 272000,
+      "compressionCount": 0,
+      "carriesRules": false,
+      "selectedCompletion": 0,
+      "fullRuleCountsInUser": [
+        1,
+        1
+      ],
+      "rulesNeverInSystem": true
+    },
+    {
+      "round": 2,
+      "contextWindow": 272000,
+      "compressionCount": 1,
+      "carriesRules": false,
+      "selectedCompletion": 0,
+      "fullRuleCountsInUser": [
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "rulesNeverInSystem": true
+    },
+    {
+      "round": 3,
+      "contextWindow": 272000,
+      "compressionCount": 2,
+      "carriesRules": true,
+      "selectedCompletion": 1,
+      "fullRuleCountsInUser": [
+        2,
+        2,
+        2,
+        3,
+        3
+      ],
+      "rulesNeverInSystem": true
+    }
+  ],
+  "after": {
+    "carriesRules": true,
+    "selectedCompletion": 2,
+    "fullRuleCountsInUser": [
+      4
+    ],
+    "rulesNeverInSystem": true
+  },
+  "cold": {
+    "carriesRules": false,
+    "selectedCompletion": 2,
+    "fullRuleCountsInUser": [
+      4
+    ],
+    "rulesNeverInSystem": true
+  },
+  "passed": true,
+  "scope": "Official native requests with a small synthetic rule block; production Core/full Bootstrap acceptance is recorded separately. Counts include native summary copies and history, not just this input. A completed hook causes next ordinary-input restoration, not immediate same-Run recovery."
+}

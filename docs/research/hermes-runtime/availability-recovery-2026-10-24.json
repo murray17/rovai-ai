@@ -1,0 +1,137 @@
+{
+  "date": "2026-10-24",
+  "scope": "Hermes original Session restoration and binding-scoped ownership; macOS arm64 Preview",
+  "native": {
+    "version": "0.22.4",
+    "sourceCommit": "4d04303818b61bf3aa09278af48356315515965b",
+    "sourceModified": false,
+    "controllerRevision": "rovai-hermes-host-v6"
+  },
+  "controlled": {
+    "fixture": "rovai-hermes-first-input-k58OJV",
+    "command": "node scripts/smoke-hermes-first-input.mjs --availability",
+    "provider": "loopback scripted Responses",
+    "isolation": [
+      "Core data directory",
+      "native Home",
+      "Skill Library",
+      "MCP configuration"
+    ],
+    "summary": {
+      "version": "Hermes Agent v0.22.4 (2026.9.24) · stable · local 4d04303818b6",
+      "compression": false,
+      "protectFirst": 3,
+      "syntheticProvider": true,
+      "nativeSessionUnchanged": true,
+      "summaries": 0,
+      "results": [
+        {
+          "phase": 0,
+          "kind": "initial",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 1,
+          "kind": "none",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 2,
+          "kind": "none",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 3,
+          "kind": "update",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 4,
+          "kind": "none",
+          "status": "failed",
+          "reason": "native_unknown_before_input"
+        },
+        {
+          "phase": 4,
+          "kind": "none",
+          "status": "failed"
+        },
+        {
+          "phase": 5,
+          "kind": "none",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        }
+      ],
+      "recovery": {
+        "inspectionPreservedUnknown": true,
+        "staleGenerationRejected": true,
+        "explicitResolution": true,
+        "originalRunFailed": true,
+        "noModelCall": true,
+        "noReplay": true,
+        "retryAfterRestart": true,
+        "processesReaped": true,
+        "legacyReadySnapshotRefreshed": true,
+        "noDuplicateSend": true
+      },
+      "availability": {
+        "fingerprintDriftResumed": true,
+        "pathDriftColdResumed": true,
+        "originalHomePreserved": true,
+        "restoredUnknownSeparatelyBlockedInput": true,
+        "replacedInstallationAndStaleVersionCacheRecovered": true
+      }
+    },
+    "wireSha256": "13efa71e0b9fb2ceda02399ec71b7b567cfcc4ba19dc5fb7628ddd679d611f66"
+  },
+  "regression": {
+    "ordinaryRust": {
+      "passed": 478,
+      "failed": 0,
+      "ignored": 1
+    },
+    "controllerPython": {
+      "passed": 8,
+      "failed": 0
+    },
+    "extendedOwners": [
+      "runtime::tests::resume_uses_cli_type_and_current_target_instead_of_configuration",
+      "acp::tests::continuation_prefers_same_host_then_resume_then_history_restore",
+      "runtime_fleet::tests::different_runs_spawn_outside_the_global_fleet_lock"
+    ]
+  },
+  "diagnosticAttempts": [
+    {
+      "fixture": "rovai-hermes-first-input-3p6XKj",
+      "result": "Found obsolete system capabilities retained in an already-invalidated snapshot after path drift; production discovery corrected."
+    },
+    {
+      "fixture": "rovai-hermes-first-input-Gi1SCj",
+      "result": "Unknown restoration/resolution passed; fixture mistook the prior blocked Run for the next task."
+    },
+    {
+      "fixture": "rovai-hermes-first-input-G241Xx",
+      "result": "Installation-copy fixture needed SQLite BigInt reads for nanosecond executable timestamps; not a native execution failure."
+    },
+    {
+      "fixture": "rovai-hermes-first-input-jDpwvz",
+      "result": "Original Session resumed after installation replacement; final directory assertion incorrectly required prior Ready before explicitly checking the new installation."
+    }
+  ],
+  "limits": [
+    "Only native 0.22.4 was executed. Wrapper/path changes and a synthetic stale 0.22.3 cache are not evidence for another actual native version.",
+    "Read-only Gateway reconnect and approval/running/queued state classification have deterministic controller coverage; no live transport fault or live approval matrix was injected in this Core run.",
+    "No new real-model, automatic-compaction or daily App installation run; previous evidence remains separately attributed.",
+    "Unknown resolution still requires explicit User consent; current exceptional recovery UI is User CLI."
+  ]
+}

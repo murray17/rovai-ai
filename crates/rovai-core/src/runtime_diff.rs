@@ -174,6 +174,7 @@ fn admit_candidate(
                 && source_event_kind == "tool.updated.result"
                 && semantic_kind == "zcode_edit_patch"
         }
+        AdapterKind::HermesCli => false,
         AdapterKind::CommandCodeCli if semantic_kind == "reported_mutation" => {
             protocol_family == "acp-v1"
                 && source_event_kind == "session/update.tool_call_update.completed.edit_file"
@@ -1661,6 +1662,16 @@ mod tests {
         );
         assert_eq!(admitted.entries[0].diff, "-old\n+new\n-second\n+changed\n");
         assert!(!admitted.evidence_entries.to_string().contains("PRIVATE"));
+        let mut hermes = payload.clone();
+        hermes["runtimeDiff"]["adapterKind"] = json!("hermes-cli");
+        hermes["runtimeDiff"]["sourceEventKind"] =
+            json!("session/update.tool_call_update.completed.file_result");
+        assert!(
+            admit_runtime_diff(&hermes, Path::new("/repo"), Some("hermes-cli"))
+                .unwrap()
+                .is_err(),
+            "Retired private Hermes fragments are not current native evidence"
+        );
         let mut legacy = payload.clone();
         legacy["runtimeDiff"]["protocolFamily"] = json!("cline-hub-v1");
         assert!(
@@ -1799,6 +1810,20 @@ mod tests {
             projection.entries.unwrap()[0]
                 .diff
                 .contains("-before\n+after")
+        );
+        // Native Hermes ACP diffs are display snippets, not complete states.
+        // The retired private evidence dialect is no longer admitted.
+        let unsupported = json!({"runtimeDiff": {
+            "adapterKind":"hermes-cli", "protocolFamily":"acp-v1",
+            "sourceEventKind":"session/update.tool_call_update.completed",
+            "semanticKind":"hermes_file_states", "entries":[{
+                "path":"file.txt", "changeKind":"update", "oldText":"before", "newText":"after"
+            }]
+        }});
+        assert!(
+            admit_runtime_diff(&unsupported, Path::new("/repo"), Some("hermes-cli"))
+                .unwrap()
+                .is_err()
         );
     }
 

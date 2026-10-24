@@ -28,6 +28,7 @@ pub fn supports_active_input(adapter: &str) -> bool {
             | "codebuddy-cli"
             | "qwen-code"
             | "minimax-code-cli"
+            | "hermes-cli"
             | "grok-build"
             | "kiro-cli"
             | "zcode-app"
@@ -101,6 +102,7 @@ pub fn protocol_unavailable(
         "pi" => ([0, 99, 0], v[0].min(1)),
         "qwen-code" => ([0, 18, 4], 0),
         "minimax-code-cli" => ([0, 6, 12], 0),
+        "hermes-cli" => ([0, 22, 4], v[0]),
         "grok-build" => ([1, 0, 14], 1),
         "kiro-cli" => ([2, 21, 1], 2),
         "zcode-app" => ([0, 16, 5], 0),

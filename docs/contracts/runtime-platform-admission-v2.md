@@ -135,3 +135,12 @@ Ready 检查。取舍见 [V1.59-D10](../versions/v1.59/decisions.md#v1-59-d10)�
 [验收报告](../research/minimax-code-runtime/linux-qualification-2026-10-18.md)分别记录；partial Usage、
 原生权限/plan、取消问卷和原生管理命令的边界保持。其他平台、其他 Runtime、普通动态检查和执行
 fail-closed 门槛不因本项晋升改变；不建立 Renderer allowlist。
+
+## Hermes 初始准入
+
+`hermes-cli × macos-arm64` 为 `preview / qualification_evidence_missing`，其余三个平台为
+`not_qualified / qualification_evidence_missing`。当前资格证据仅覆盖已记录的官方 source install 0.22.4
+安装；兼容策略为 >=0.22.4，不锁 commit，具体能力仍由运行时检查确认。
+[受管合同](hermes-managed-runtime-v1.md)与[验证记录](../research/hermes-runtime/README.md)明确内部接口、
+真实 LLM 证据和未完成矩阵；不由一次 Ready 探测推断完整平台资格。理由见
+[V1.72-D59](../versions/v1.72/decisions.md#v1-72-d59)。

@@ -506,6 +506,10 @@ impl ManagedBlobStore {
                       WHERE context_manifest.rendered_payload_blob_id = managed_blob.id
                   )
                   AND NOT EXISTS (
+                      SELECT 1 FROM runtime_input_delivery
+                      WHERE runtime_input_delivery.hermes_runtime_payload_blob_id = managed_blob.id
+                  )
+                  AND NOT EXISTS (
                       SELECT 1 FROM agent_run_execution_evidence
                       WHERE agent_run_execution_evidence.content_blob_id = managed_blob.id
                   )
@@ -547,6 +551,10 @@ impl ManagedBlobStore {
                   AND NOT EXISTS (
                       SELECT 1 FROM context_manifest
                       WHERE rendered_payload_blob_id = ?1
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM runtime_input_delivery
+                      WHERE hermes_runtime_payload_blob_id = ?1
                   )
                   AND NOT EXISTS (
                       SELECT 1 FROM agent_run_execution_evidence
@@ -776,6 +784,7 @@ pub(crate) fn camp_blob_references(
             | "agent_run_file_change_projection"
             | "agent_run_image"
             | "action_execution"
+            | "runtime_input_delivery"
             | "context_manifest" => format!("agent_run_id IN ({camp_agent_run_ids})"),
             "native_session_bootstrap_evidence" => {
                 "conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)".to_owned()

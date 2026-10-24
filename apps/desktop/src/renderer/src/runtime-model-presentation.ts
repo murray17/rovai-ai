@@ -16,6 +16,7 @@ export function runtimeAdapterLabel(kind: string): string {
     'cursor-agent': 'Cursor Agent',
     'kimi-code-cli': 'Kimi Code',
     'minimax-code-cli': 'MiniMax Code',
+    'hermes-cli': 'Hermes Agent',
     'grok-build': 'Grok Build',
     'deepseek-harness': 'DeepSeek Harness',
     'cline-cli': 'Cline',

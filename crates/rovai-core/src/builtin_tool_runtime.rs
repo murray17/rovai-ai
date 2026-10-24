@@ -342,9 +342,11 @@ impl BuiltinToolLeaseRegistry {
 
     /// Called under the invocation gate after reading the current instance state.
     /// A failed projection refresh cannot revoke a lease or cancel execution.
+    /// A binding refresh targets (process, Run, epoch); None refreshes all active leases.
     pub(crate) async fn refresh_tasks(
         &self,
         enabled_runs: &std::collections::HashSet<String>,
+        target: Option<(&str, &str, i64)>,
     ) -> bool {
         let processes = self.processes.lock().await;
         let mut refreshed = true;
@@ -352,6 +354,14 @@ impl BuiltinToolLeaseRegistry {
             let Some(active) = &process.active else {
                 continue;
             };
+            if let Some((process_id, agent_run_id, execution_epoch)) = target {
+                if process.config.process_id() != process_id
+                    || active.agent_run_id != agent_run_id
+                    || active.execution_epoch != execution_epoch
+                {
+                    continue;
+                }
+            }
             let context = BuiltinToolLeaseContext {
                 execution_root: active.execution_root.clone(),
                 run_tmp: active.run_tmp.to_string_lossy().into_owned(),
@@ -903,20 +913,93 @@ mod tests {
         fs::rename(config.context_path(), &saved_context).unwrap();
         fs::create_dir(config.context_path()).unwrap();
         let enabled_runs = std::collections::HashSet::from(["run-1".to_string()]);
-        assert!(!registry.refresh_tasks(&enabled_runs).await);
+        for target in [None, Some((config.process_id(), "run-1", 1))] {
+            let _gate = registry.invocation_guard().await;
+            assert!(!registry.refresh_tasks(&enabled_runs, target).await);
+        }
         assert!(registry.authenticate(&first).await.is_ok());
         fs::remove_dir(config.context_path()).unwrap();
         fs::rename(saved_context, config.context_path()).unwrap();
-        assert!(registry.refresh_tasks(&enabled_runs).await);
+        {
+            let _gate = registry.invocation_guard().await;
+            assert!(registry.refresh_tasks(&enabled_runs, None).await);
+        }
         let repaired: BuiltinToolCliContext =
             serde_json::from_slice(&fs::read(config.context_path()).unwrap()).unwrap();
         assert!(repaired.tasks_enabled);
         assert_eq!(repaired.lease.unwrap().lease_id, first.lease_id);
-        assert!(registry.refresh_tasks(&Default::default()).await);
+        {
+            let _gate = registry.invocation_guard().await;
+            assert!(registry.refresh_tasks(&Default::default(), None).await);
+        }
         let disabled: BuiltinToolCliContext =
             serde_json::from_slice(&fs::read(config.context_path()).unwrap()).unwrap();
         assert!(!disabled.tasks_enabled);
         assert!(registry.authenticate(&first).await.is_ok());
+        // Preserve a valid, noncanonical encoding to detect even an identical
+        // projection rewrite without depending on timestamps or inode behavior.
+        fn preserve_context_bytes(config: &BuiltinToolProcessConfig) -> Vec<u8> {
+            let mut bytes = fs::read(config.context_path()).unwrap();
+            bytes.push(b'\n');
+            fs::write(config.context_path(), &bytes).unwrap();
+            bytes
+        }
+        let unchanged = preserve_context_bytes(&config);
+        let other_config =
+            BuiltinToolProcessConfig::create(&executable(), &endpoint, &root).unwrap();
+        let other = registry
+            .bind(&other_config, "other-run", 1, &binding(), &root)
+            .await
+            .unwrap();
+        let both_enabled =
+            std::collections::HashSet::from(["run-1".to_string(), "other-run".to_string()]);
+        {
+            let _gate = registry.invocation_guard().await;
+            assert!(
+                registry
+                    .refresh_tasks(
+                        &both_enabled,
+                        Some((other_config.process_id(), "other-run", 1))
+                    )
+                    .await
+            );
+        }
+        assert_eq!(fs::read(config.context_path()).unwrap(), unchanged);
+        let other_context: BuiltinToolCliContext =
+            serde_json::from_slice(&fs::read(other_config.context_path()).unwrap()).unwrap();
+        assert!(other_context.tasks_enabled);
+        assert_eq!(other_context.lease.unwrap().lease_id, other.lease_id);
+        // Global settings still project every active process, including same-value repair.
+        for enabled in [&both_enabled, &Default::default()] {
+            let _gate = registry.invocation_guard().await;
+            assert!(registry.refresh_tasks(enabled, None).await);
+            for process in [&config, &other_config] {
+                let context: BuiltinToolCliContext =
+                    serde_json::from_slice(&fs::read(process.context_path()).unwrap()).unwrap();
+                assert_eq!(context.tasks_enabled, !enabled.is_empty());
+            }
+        }
+        registry
+            .unbind(other_config.process_id(), "other-run", 1)
+            .await;
+        let other_unbound = preserve_context_bytes(&other_config);
+        {
+            let _gate = registry.invocation_guard().await;
+            assert!(
+                registry
+                    .refresh_tasks(
+                        &both_enabled,
+                        Some((other_config.process_id(), "other-run", 1))
+                    )
+                    .await
+            );
+        }
+        assert_eq!(
+            fs::read(other_config.context_path()).unwrap(),
+            other_unbound
+        );
+        drop(other_config);
+
         let member_image = rovai_core::member_avatar::materialize_member_avatar(
             &root,
             config.run_tmp(),
@@ -943,6 +1026,18 @@ mod tests {
             .unwrap();
         assert!(rotated.lease_generation > first.lease_generation);
         assert_ne!(rotated.lease_id, first.lease_id);
+        {
+            let _gate = registry.invocation_guard().await;
+            assert!(
+                registry
+                    .refresh_tasks(&enabled_runs, Some((config.process_id(), "run-1", 1)))
+                    .await
+            );
+        }
+        let current: BuiltinToolCliContext =
+            serde_json::from_slice(&fs::read(config.context_path()).unwrap()).unwrap();
+        assert_eq!(current.lease.unwrap().lease_id, rotated.lease_id);
+        assert!(current.tasks_enabled);
         assert!(registry.authenticate(&first).await.is_err());
         assert!(config.run_tmp().is_dir());
         assert!(!config.run_tmp().join("stale-from-first-lease.txt").exists());
@@ -1043,6 +1138,17 @@ mod tests {
                 .join("stale-from-rotated-lease.txt")
                 .exists()
         );
+        let unchanged = preserve_context_bytes(&config);
+        for (run, epoch) in [("run-1", 1), ("run-2", 1), ("run-1", 2)] {
+            let _gate = registry.invocation_guard().await;
+            assert!(
+                registry
+                    .refresh_tasks(&both_enabled, Some((config.process_id(), run, epoch)))
+                    .await
+            );
+            assert_eq!(fs::read(config.context_path()).unwrap(), unchanged);
+        }
+        assert!(registry.authenticate(&second).await.is_ok());
         registry.unbind(config.process_id(), "run-2", 2).await;
         drop(config);
         let _ = fs::remove_dir_all(root);

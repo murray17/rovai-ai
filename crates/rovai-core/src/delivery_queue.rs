@@ -2968,6 +2968,7 @@ mod tests {
                         | crate::agent_profile::AdapterKind::CodebuddyCli
                         | crate::agent_profile::AdapterKind::QwenCode
                         | crate::agent_profile::AdapterKind::MinimaxCodeCli
+                        | crate::agent_profile::AdapterKind::HermesCli
                         | crate::agent_profile::AdapterKind::GrokBuild
                         | crate::agent_profile::AdapterKind::KiroCli
                         | crate::agent_profile::AdapterKind::ZcodeApp
@@ -3879,6 +3880,27 @@ mod tests {
             ),
             ("qwen-code", Some("0.18.4"), "acp-v1", None),
             ("minimax-code-cli", Some("0.6.12"), "acp-v1", None),
+            ("hermes-cli", Some("0.22.4"), "acp-v1", None),
+            ("hermes-cli", Some("0.23.0"), "acp-v1", None),
+            ("hermes-cli", Some("1.0.0"), "acp-v1", None),
+            (
+                "hermes-cli",
+                Some("0.22.3"),
+                "acp-v1",
+                Some(R::VersionIncompatible),
+            ),
+            (
+                "hermes-cli",
+                None,
+                "acp-v1",
+                Some(R::RuntimeIdentityUnknown),
+            ),
+            (
+                "hermes-cli",
+                Some("0.23.0"),
+                "other",
+                Some(R::ProtocolIncompatible),
+            ),
             (
                 "minimax-code-cli",
                 Some("0.6.11"),

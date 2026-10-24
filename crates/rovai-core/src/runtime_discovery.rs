@@ -1274,6 +1274,7 @@ fn version_arguments(kind: AdapterKind) -> &'static [&'static str] {
 fn version_timeout(kind: AdapterKind) -> Duration {
     match kind {
         AdapterKind::CodebuddyCli => CODEBUDDY_VERSION_TIMEOUT,
+        AdapterKind::HermesCli => Duration::from_secs(20),
         // Pi's packaged JavaScript entrypoint may need a cold Node startup before it can
         // answer `--version`. Keep the bounded probe, but do not apply the native-binary
         // deadline to this runtime.

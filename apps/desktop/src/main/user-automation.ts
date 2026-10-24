@@ -80,6 +80,7 @@ const ADAPTER_KINDS: readonly AdapterKind[] = [
   'cursor-agent',
   'kimi-code-cli',
   'minimax-code-cli',
+  'hermes-cli',
   'grok-build',
   'deepseek-harness',
   'zcode-app',
@@ -453,6 +454,21 @@ export async function dispatchUserAutomation(
         afterSequence: input.afterSequence ?? 0,
         limit: input.limit ?? 500
       })
+    case 'agentRun.hermesRecovery.inspect':
+      return dependencies.core.request('agentRuns.hermesRecovery.inspect', {
+        agentRunId: stringField(input, 'agentRunId')
+      })
+    case 'agentRun.hermesRecovery.resolve': {
+      if (input.acknowledgeEffects !== true) {
+        throw new UserAutomationError('hermes_recovery_confirmation_required',
+          'The previous task may have external effects; explicit acknowledgement is required.')
+      }
+      return dependencies.core.request('agentRuns.hermesRecovery.resolve', {
+        commandId: stringField(input, 'commandId'),
+        confirmation: record(input.confirmation, 'confirmation'),
+        acknowledgeEffects: true
+      })
+    }
     case 'agentRun.cancel': {
       const agentRunId = stringField(input, 'agentRunId')
       const diagnostic = await dependencies.core.request<AgentRunDiagnosticView>(

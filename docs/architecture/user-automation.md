@@ -63,6 +63,10 @@ IPC 断开不能证明 mutation 未发生。CLI 的 mutation command ID 在首�
 
 ## 诊断而非评测
 
+Hermes 未知执行维护通过两个封闭操作进入 Core，使用原 binding 的受管控制进程及官方精确 RPC。
+Main 不启动 Runtime、不读取原生数据库；Core 保留失败任务、记录用户确认和原生回执，不创建业务 Run。
+操作合同见 [Hermes 显式恢复](../contracts/user-automation-v6.md#hermes-显式恢复)。
+
 Diagnostic Trial 只回答“这个已配置成员 Runtime 能否在当前产品路径上接受并完成这一个隔离任务，以及 Core
 记录了什么”。它不拥有 case catalog、replica、judge、score、comparison、qualification 或 publication。
 现有 Benchmark/Qualification 架构不能消费 Trial bundle 后将其自动提升为正式结果；需要正式评测时仍使用其

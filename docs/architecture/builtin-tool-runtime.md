@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-10-20
+last_updated: 2026-10-24
 ---
 
 # Built-in Tool Runtime Architecture
@@ -356,6 +356,12 @@ Thread 并使用调用时 sequence boundary；ContextManifest history catalog �
 5. Core 建立 Runtime Input Delivery，将 Manifest 绑定到 execution epoch/Binding generation 后投递；
 6. Agent 使用固定命令和 command-local `--help`；Router 从 lease 解析当前 Run 与 Thread。
 
+普通 Run 绑定后的 Task CLI discovery 只刷新本进程；用户保存全局 Task 设置（含同值修复）及既有失败
+重试仍刷新所有活动进程。刷新先取得既有 invocation gate，再读取最新任务设置；定向刷新在 processes
+锁内核对 process/Run/execution epoch，并使用当前 ActiveLease 写入。已解绑或换绑的旧目标跳过，不能
+写回早先捕获的 lease。设置保存先提交并释放数据库事务，再进入刷新；投影失败只记录诊断，不撤销已绑定
+lease 或取消任务。绑定本身与 Task 投影仍允许各写一次当前进程的小文件，不建立跨请求缓存。
+
 ### Resume / Resident process reuse
 
 Resume 重新投递稳定 Bootstrap，但不改变 catalog 真源；新 Run 必须获得新 lease。兼容 IdleWarm
@@ -604,6 +610,10 @@ revision 轮换。新 Session 才冻结新模板，既有 Evidence 保持原 byt
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
+
+Hermes 的运输/证据例外见 [Hermes Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md)：
+完整 Core Bootstrap 在 user 层首次或更新输入中投递，完整 B digest 与最终正文 Managed Blob
+随既有输入账本冻结；接受回执决定去重，身份更新不新建 Session。此例外不改变其他 Runtime。
 
 public Context Formatter v28 的 `COLLABORATION_STATE` 投影 只描述 peers。Core 从 stable current
 ThreadMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer

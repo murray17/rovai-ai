@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-17
+last_updated: 2026-10-24
 ---
 
 # 测试与 Smoke Test
@@ -117,6 +117,25 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 ```
 
 ## Rust 测试准入与退役门槛
+
+Hermes 当前仅保留 launcher/官方错误边界的独立纯函数 owner；恢复、稀疏 Usage、目录/Ready、探测刷新与
+数据库迁移继续扩展原 owner。直接 ACP 简化删除私有 native patch 解析职责及其唯一 Rust owner，
+不是跳过现行合同；runtime_diff 原 owner 改验退役 dialect 不再准入，历史证据投影保持可读。
+退役理由与最低层选择见[Hermes 测试归属](../research/hermes-runtime/README.md#rust-测试归属)。
+
+`python3 scripts/test-hermes-controller.py` 覆盖现存启动器和小范围官方控制。生产 Core 的
+`smoke-hermes-first-input.mjs --availability` 复用隔离 Home/data-dir/Skill Library/MCP，验证当前安装恢复
+原 Session、未知任务不重放、明确解除阻塞后新任务；`--compression --unprotected` 单独验证多次自动压缩。
+普通模式还验证 Core 从原生默认模型 A 显式选择 B，检查后续及冷恢复的实际请求模型为 B，原 Session 不变。
+`smoke-hermes-experience.mjs` 验证普通工具、停止、独立 Binding 并发，以及缺少增强详情仍成功；沿同一原生
+Session 验证 MCP 首次绑定、部分/全部不可用仍可对话、冷恢复重绑、更新与明确清空。Python 既有入口
+参数化覆盖稀疏配置空值、保留源配置、一次快照/一次 mutation、原生阻塞与未确认撤销不降级为成功。
+同一配置 owner 覆盖 Skills 字符串/列表、空白/空项、变量展开和 create_dir；通过官方安装解释器运行该入口
+的 `--native-skills` 模式，在临时 Home 用实际 SKILL.md 验证原生发现、来源 config 与链接、来源 Home 接续。
+原生模式复用 `scripts/lib/hermes-native-acp.mjs` 的 `hermesManagedCommand`，只需已准备依赖，不启动模型。
+失败回合不提供独立 usage delta 时保持未知；`smoke-hermes-failed-usage.mjs` 验证失败与不虚构消费。
+受控 Provider 使用 dummy key，实际运行未修改的官方执行器；不能等同真实付费模型验收。最新结果见
+[实施记录](../versions/v1.72/hermes-first-input-implementation.md#官方-acp-直连简化2026-10-24)。
 
 Web 长粘贴扩展既有 Host HTTP 与浏览器适配/恢复 owners；schema 161→162 的 DDL 失败回滚
 无法由 HTTP 测试证明，新增一个复用 schema-only fixture 的迁移 owner。准入与最小命令见
@@ -1705,3 +1724,19 @@ CLI 解析与教学 owner 保留文件输入矩阵并覆盖旧 taskId 兼容；`
 它拥有原生文件阅读、失败恢复、迟到响应、键盘导航、逐队员配置与 MCP 凭据编辑的 Electron 交互覆盖；
 完整范围见 [fixture 说明](../../scripts/fixtures/capability-workspace/README.md)。旧 `SkillSettings` 页面及仅服务
 旧导入／交付组的单元测试已退役。Core 的历史 Library、Revision、投影恢复与兼容测试继续拥有旧数据路径。
+
+
+## Hermes 首次输入与完成通知
+
+`context::slow_tests::hermes_rules_follow_accepted_inputs_and_freeze_compaction_revisions` 拥有 Hermes 完整 B
+摘要、接受状态和冻结最终输入的组合合同。旧共享 Bootstrap owner 的稳定摘要刻意不含身份，不能证明
+身份单独变化、prepared/unknown 去重及较晚 compaction revision 的行为；复用现有 Context fixture，
+不引入完整 Core/进程 fixture。覆盖首次、重复、身份更新、未知恢复、较早 ACK 不消费较晚通知。
+`db::hermes::rules_tests::rules_migration_preserves_data_and_rolls_back_with_receipt` 拥有 Migration 215
+新增 FK/nullable 字段与 receipt 的 DDL 原子性；现有 catalog owner 验证的是闭集表重建，不能替代它。
+使用既有 seeded database；旧 catalog owner 同步向下构造 schema 164，再执行原有 rollback 矩阵。
+
+最低命令：`cargo test -p rovai-core --features slow-tests,extended-tests --lib hermes`。
+原 compaction policy owner 扩充 Hermes completed kind 的正反例；原 CLI outbox owner 增加未完成、缺字段和旋转 Session 的拒绝，既有 lease fencing owner 保留。
+原生请求与生产 Core 的边界由 `scripts/smoke-hermes-first-input.mjs` 拥有，与已有 qualification helper
+共用隔离启动器；真实模型自动压缩单独记录，不把合成 usage 当作实际账单或模型效果。

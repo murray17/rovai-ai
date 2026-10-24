@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-23",
+  "nativeSourceCommit": "4d04303818b61bf3aa09278af48356315515965b",
+  "window": 65536,
+  "threshold": 0.5,
+  "protectLast": 2,
+  "syntheticHighInputTokens": 60000,
+  "passiveUpdateChecksDisabledInPrivateFixture": true,
+  "scope": "Production Core, CLI, official ACP/Gateway and actual model request capture with a deterministic loopback provider. Not real-model quality or native default compression configuration. Native Gateway trims message edges; internal complete Bootstrap and task bytes match frozen input after that normalization.",
+  "runs": [
+    {
+      "fixture": "rovai-hermes-first-input-ynZFaN",
+      "version": "Hermes Agent v0.22.4 (2026.9.24) · stable · local 4d04303818b6",
+      "compression": true,
+      "protectFirst": 3,
+      "syntheticProvider": true,
+      "nativeSessionUnchanged": true,
+      "summaries": 2,
+      "results": [
+        {
+          "phase": 0,
+          "kind": "initial",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 1,
+          "kind": "none",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 2,
+          "kind": "none",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 3,
+          "kind": "update",
+          "requested": 1,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 4,
+          "kind": "compaction_recovery",
+          "requested": 2,
+          "acknowledged": 1,
+          "mainRequests": 2
+        },
+        {
+          "phase": 5,
+          "kind": "compaction_recovery",
+          "requested": 2,
+          "acknowledged": 2,
+          "mainRequests": 2
+        },
+        {
+          "phase": 6,
+          "kind": "none",
+          "requested": 2,
+          "acknowledged": 2,
+          "mainRequests": 2
+        }
+      ]
+    },
+    {
+      "fixture": "rovai-hermes-first-input-p6bLWp",
+      "version": "Hermes Agent v0.22.4 (2026.9.24) · stable · local 4d04303818b6",
+      "compression": true,
+      "protectFirst": 0,
+      "syntheticProvider": true,
+      "nativeSessionUnchanged": true,
+      "summaries": 2,
+      "results": [
+        {
+          "phase": 0,
+          "kind": "initial",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 1,
+          "kind": "none",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 2,
+          "kind": "none",
+          "requested": 0,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 3,
+          "kind": "update",
+          "requested": 1,
+          "acknowledged": 0,
+          "mainRequests": 2
+        },
+        {
+          "phase": 4,
+          "kind": "compaction_recovery",
+          "requested": 2,
+          "acknowledged": 1,
+          "mainRequests": 2
+        },
+        {
+          "phase": 5,
+          "kind": "compaction_recovery",
+          "requested": 2,
+          "acknowledged": 2,
+          "mainRequests": 2
+        },
+        {
+          "phase": 6,
+          "kind": "none",
+          "requested": 2,
+          "acknowledged": 2,
+          "mainRequests": 2
+        }
+      ]
+    }
+  ]
+}

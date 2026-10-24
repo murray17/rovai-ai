@@ -235,6 +235,8 @@ function runtimeParametersFor(
           <PermissionSwitch {...props} fieldKey="auto_approve" label={uiAttribute("自动通过权限请求")} enabledValue="true" disabledValue="false" />
         </div>
       )
+    case 'hermes-cli':
+      return <div className="runtime-parameter-form">{modelFieldsFor('hermes-cli', props)}<PermissionSelect {...props} fieldKey="permission_mode" label={uiAttribute("文件编辑审批")} /></div>
     case 'minimax-code-cli':
       return <div className="runtime-parameter-form">{modelFieldsFor('minimax-code-cli', props)}<PermissionSelect {...props} fieldKey="mode" label={uiAttribute("执行模式")} /><PermissionSelect {...props} fieldKey="permission_mode" label={uiAttribute("权限模式")} /></div>
     case 'command-code-cli':
@@ -423,6 +425,7 @@ function modelFieldsFor(
     case 'codebuddy-cli':
     case 'qwen-code':
     case 'deepseek-harness':
+    case 'hermes-cli':
       return <ModelFields {...props} optionKey="reasoning_effort" optionLabel={uiAttribute("推理强度")} />
     case 'pi':
       return <ModelFields {...props} optionKey="thinking_level" optionLabel={uiAttribute('思考强度')} />
@@ -576,9 +579,11 @@ function ModelFields({
     })
   }
 
-  const optionValue = explicit && optionKey
+  const storedOptionValue = explicit && optionKey
     ? stringValue(explicit.options[optionKey])
     : ''
+  const optionValue = adapterKind === 'hermes-cli' && storedOptionValue === 'runtime_default'
+    ? '' : storedOptionValue
   const optionInvalid = optionValue
     ? !option?.values.some((candidate) => candidate.value === optionValue)
     : false
@@ -613,7 +618,8 @@ function ModelFields({
             ...(optionInvalid ? [{ value: optionValue, label: optionsKnown
               ? uiAttribute("当前目录未提供 · {0}", String(optionValue))
               : uiAttribute('尚未核对 · {0}', optionValue), disabled: true }] : []),
-            ...(option?.values ?? []).map(choice => ({ ...choice, disabled: isDsh && !optionsKnown }))
+            ...(option?.values ?? []).filter(choice => adapterKind !== 'hermes-cli' || choice.value !== 'runtime_default')
+              .map(choice => ({ ...choice, disabled: isDsh && !optionsKnown }))
           ]}
         />
       )}

@@ -574,6 +574,8 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
       return { permission: 'allow' }
     case 'copilot-cli':
       return { allow_all: 'on' }
+    case 'hermes-cli':
+      return { permission_mode: 'dont_ask' }
     case 'minimax-code-cli':
       return { permission_mode: 'bypassPermissions', mode: 'default' }
     case 'claude-code-cli':

@@ -33,6 +33,7 @@ const ADAPTER_KINDS = new Set<AdapterKind>([
   'cursor-agent',
   'kimi-code-cli',
   'minimax-code-cli',
+  'hermes-cli',
   'grok-build',
   'deepseek-harness',
   'zcode-app',

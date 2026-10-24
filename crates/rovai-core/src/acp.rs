@@ -1281,6 +1281,7 @@ pub(crate) struct AcpRpcError {
     message: String,
     provider_detail: Option<String>,
     minimax_steer_pre_delivery_rejection: bool,
+    hermes_session_missing: bool,
 }
 
 impl std::fmt::Debug for AcpRpcError {
@@ -1306,6 +1307,7 @@ impl AcpRpcError {
             .and_then(|data| {
                 data.as_str()
                     .or_else(|| data.get("error").and_then(Value::as_str))
+                    .or_else(|| data.get("details").and_then(Value::as_str))
             })
             .and_then(|detail| sanitize_public_runtime_error(detail, &[]))
             .filter(|detail| detail != &message);
@@ -1339,6 +1341,8 @@ impl AcpRpcError {
                         })
                 })
                 .map(str::to_string),
+            hermes_session_missing: value["code"] == -32603
+                && value["data"]["details"] == "not_found",
             minimax_steer_pre_delivery_rejection: value["code"] == -32602
                 && matches!(
                     message.as_str(),
@@ -1376,6 +1380,7 @@ impl AcpRpcError {
                     && self.session_id.as_deref() == Some(session_id)
                     && self.project_root.as_deref() == Some(cwd)
             }
+            AdapterKind::HermesCli => self.hermes_session_missing,
             // The official bridge emits this only for the native resume call,
             // not a later subscribe, model, permission or MCP operation.
             AdapterKind::ZcodeApp => self.code == Some(-32004),
@@ -1464,6 +1469,7 @@ pub(crate) struct AcpHost {
     grok_context_windows: BTreeMap<String, i64>,
     codebuddy_config_dir: Option<PathBuf>,
     minimax_data_dir: Option<PathBuf>,
+    hermes_control: Option<ManagedProcessLaunchSpec>,
 }
 
 fn enrich_paired_tool_message(
@@ -1843,6 +1849,20 @@ impl AcpHost {
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
         }
+        if frozen_runtime.adapter_kind == AdapterKind::HermesCli {
+            // Official ACP initialize validates the selected installation.
+            // Stale installation metadata never prevents native restoration.
+            command.env(
+                "ROVAI_HERMES_MCP_NAMES",
+                serde_json::to_string(&external_mcp_servers.keys().collect::<Vec<_>>())?,
+            );
+            crate::hermes::configure_command(
+                &mut command,
+                private_config_root.context("Hermes private Host missing")?,
+                &private_runtime_dir.join("hermes-storage"),
+            )
+            .await?;
+        }
         let ephemeral_config = configure_runtime_command(
             &mut command,
             workspace,
@@ -1902,6 +1922,8 @@ impl AcpHost {
             ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("runtime-host:{}", frozen_runtime.adapter_kind.as_str()),
         )?;
+        let hermes_control =
+            (frozen_runtime.adapter_kind == AdapterKind::HermesCli).then(|| spec.clone());
         let minimax_data_dir = (frozen_runtime.adapter_kind == AdapterKind::MinimaxCodeCli)
             .then(|| minimax_data_dir(&spec))
             .flatten();
@@ -1981,6 +2003,7 @@ impl AcpHost {
             client_terminal_mode,
             codebuddy_config_dir,
             minimax_data_dir,
+            hermes_control,
             client_terminal_bridge,
             host_instance_id,
             child: Mutex::new(child),
@@ -2083,14 +2106,17 @@ impl AcpHost {
             initialize_params["clientCapabilities"]["_meta"] =
                 json!({"opencode/child-session-updates": true});
         }
-        // V1 installs plugin dependencies in the background during catalog
-        // discovery. If that short-lived process exits first, its native lock
-        // expires after 60 seconds. Allow that bounded cold-start recovery;
-        // never delete native locks or resend an accepted prompt to recover.
-        let initialize_timeout = if host.adapter_kind == AdapterKind::OpencodeCli
+        let initialize_timeout = if host.adapter_kind == AdapterKind::HermesCli {
+            // Cover private Home preparation, the launcher's 55-second Gateway
+            // readiness budget, and the subsequent official ACP import/handshake.
+            Duration::from_secs(90)
+        } else if host.adapter_kind == AdapterKind::OpencodeCli
             && crate::opencode_compat::Generation::from_version(host.reported_version.as_deref())
                 == Some(crate::opencode_compat::Generation::V1)
         {
+            // V1 installs plugin dependencies during catalog discovery. If that
+            // process exits first, its native lock expires after 60 seconds.
+            // Allow recovery without deleting locks or resending accepted input.
             Duration::from_secs(90)
         } else {
             Duration::from_secs(45)
@@ -2112,6 +2138,14 @@ impl AcpHost {
                     bail!(
                         "OpenCode initialize identity conflicts with the prepared launch contract (reported {version}); task input was not sent"
                     );
+                }
+                if host.adapter_kind == AdapterKind::HermesCli
+                    && !crate::hermes::supported_version(
+                        result.pointer("/agentInfo/version").and_then(Value::as_str),
+                    )
+                {
+                    host.shutdown().await;
+                    bail!("Rovai requires Hermes >= 0.22.4");
                 }
                 if host.adapter_kind == AdapterKind::CommandCodeCli {
                     if let Err(error) = crate::command_code_acp::verify_ready(
@@ -2614,6 +2648,29 @@ impl AcpHost {
         )
     }
 
+    async fn hermes_control(&self, operation: &str, params: Value) -> Result<Value> {
+        ensure!(self.is_alive(), "Hermes Host exited");
+        let result = crate::hermes::control(
+            self.hermes_control
+                .as_ref()
+                .context("Hermes control unavailable")?,
+            operation,
+            params,
+        )
+        .await?;
+        if let Some(missing) = result
+            .get("missingMcpServers")
+            .and_then(Value::as_array)
+            .filter(|names| !names.is_empty())
+        {
+            self.send_host_diagnostic(format!(
+                "Hermes MCP discovery incomplete; unavailable servers: {}. Continuing with native tools and available MCP servers.",
+                json!(missing)
+            ));
+        }
+        Ok(result)
+    }
+
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
         let response_error = message.get("error").map(AcpRpcError::from_response);
         let response = if let Some(error) = response_error.as_ref() {
@@ -2664,6 +2721,13 @@ impl AcpHost {
                 session_id,
                 prompt_id,
             } => {
+                let hermes_failed = self.adapter_kind == AdapterKind::HermesCli
+                    && message
+                        .pointer("/error/data/details")
+                        .and_then(Value::as_str)
+                        == Some("admitted_turn_failed");
+                let hermes_uncertain = self.adapter_kind == AdapterKind::HermesCli
+                    && crate::hermes::input_acceptance_uncertain(&message);
                 // An undrained Qwen callback item has never crossed stdin.
                 let mut queued = self.qwen_steering.lock().await;
                 let ids: Vec<_> = queued
@@ -2683,7 +2747,7 @@ impl AcpHost {
                     }
                 }
                 drop(queued);
-                let native_response_succeeded = response.is_ok();
+                let native_response_succeeded = response.is_ok() && !hermes_uncertain;
                 let cline_observations = if self.adapter_kind == AdapterKind::ClineCli {
                     match self
                         .capture_cline_observations(&session_id, &prompt_id, response.as_ref().ok())
@@ -2751,7 +2815,11 @@ impl AcpHost {
                     active_prompt
                 {
                     match (&response, response_error.as_ref()) {
-                        (Ok(_), _) if should_emit_input_disposition => {
+                        (Ok(_), _)
+                            if should_emit_input_disposition
+                                && (native_response_succeeded
+                                    || active_prompt.prompt_activity_observed) =>
+                        {
                             let _ = self.incoming.send(owner.input_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -2761,7 +2829,7 @@ impl AcpHost {
                         }
                         (Err(_), Some(_))
                             if should_emit_input_disposition
-                                && active_prompt.prompt_activity_observed =>
+                                && (active_prompt.prompt_activity_observed || hermes_failed) =>
                         {
                             // A matching terminal response alone may be a pre-execution
                             // rejection. Prompt-scoped activity observed before that matching
@@ -2774,7 +2842,9 @@ impl AcpHost {
                                 &active_prompt,
                             ));
                         }
-                        (Err(error), Some(response_error)) if should_emit_input_disposition => {
+                        (Err(error), Some(response_error))
+                            if should_emit_input_disposition && !hermes_uncertain =>
+                        {
                             let _ = self.incoming.send(owner.input_not_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -2785,12 +2855,16 @@ impl AcpHost {
                         }
                         _ => {}
                     }
-                    let input_disposition =
-                        if native_response_succeeded || active_prompt.prompt_activity_observed {
-                            "accepted"
-                        } else {
-                            "not_accepted"
-                        };
+                    let input_disposition = if native_response_succeeded
+                        || active_prompt.prompt_activity_observed
+                        || hermes_failed
+                    {
+                        "accepted"
+                    } else if hermes_uncertain {
+                        "unknown"
+                    } else {
+                        "not_accepted"
+                    };
                     if self.adapter_kind == AdapterKind::ClineCli && !cline_observations.is_empty()
                     {
                         for record in &cline_observations {
@@ -3423,6 +3497,7 @@ impl AcpHost {
                         | AdapterKind::KiroCli
                         | AdapterKind::TraeCnCli
                         | AdapterKind::MinimaxCodeCli
+                        | AdapterKind::HermesCli
                 ) && !active_prompt.acceptance_emitted
                     && (matches!(
                         message
@@ -4287,15 +4362,13 @@ impl AcpHost {
         prepared: &AcpPreparedPrompt,
         text: &str,
     ) -> Result<()> {
+        let params = json!({"sessionId": session_id, "prompt": [{"type":"text", "text":text}]});
         if let Err(error) = self
             .send(json!({
                 "jsonrpc": "2.0",
                 "method": "session/prompt",
                 "id": prepared.request_id,
-                "params": {
-                    "sessionId": session_id,
-                    "prompt": [{"type": "text", "text": text}]
-                }
+                "params": params
             }))
             .await
         {
@@ -4613,6 +4686,12 @@ impl AcpSessionPermissions {
     fn from_frozen(frozen: &FrozenAgentRuntimeConfig) -> Result<Self> {
         let values = &frozen.permissions.values;
         let mode = match frozen.adapter_kind {
+            AdapterKind::HermesCli => Some(
+                values["permission_mode"]
+                    .as_str()
+                    .filter(|mode| matches!(*mode, "default" | "accept_edits" | "dont_ask"))
+                    .context("Hermes requires valid file edit policy")?,
+            ),
             AdapterKind::MinimaxCodeCli => Some(
                 values["permission_mode"]
                     .as_str()
@@ -4734,6 +4813,7 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::MinimaxCodeCli
             | AdapterKind::CommandCodeCli
             | AdapterKind::ClineCli
+            | AdapterKind::HermesCli
     )
 }
 
@@ -5028,7 +5108,7 @@ impl AcpRuntime {
                     "session/load"
                 };
                 let result = loop {
-                    let params = if method == "session/resume" {
+                    let mut params = if method == "session/resume" {
                         build_acp_resume_session_params(
                             self.host.adapter_kind,
                             existing_session_id,
@@ -5052,6 +5132,9 @@ impl AcpRuntime {
                         }
                         params
                     };
+                    if self.host.adapter_kind == AdapterKind::HermesCli {
+                        params["mcpServers"] = json!([]);
+                    }
                     match self
                         .host
                         .rpc_with_timeout(method, params, ACP_HISTORY_RESTORE_TIMEOUT)
@@ -5130,10 +5213,40 @@ impl AcpRuntime {
         {
             *self.session_result.write().await = Some(result);
         }
+        if self.host.adapter_kind == AdapterKind::HermesCli && prebound_session {
+            // Restore first. MCP revocation is an idle-only preparation; a native
+            // blocker must not discard or replace the successfully restored Session.
+            let state = self
+                .host
+                .hermes_control(
+                    "prepare_session",
+                    json!({"sessionId":session_id,"mcpServers":mcp_servers}),
+                )
+                .await?;
+            if let Some(result) = self.session_result.write().await.as_mut() {
+                result["_meta"]["rovaiHermesState"] = state;
+            }
+        }
         let session_result = self.session_result.read().await.clone();
         self.host
             .remember_session(&session_id, session_result.as_ref())
             .await;
+        if self.host.adapter_kind == AdapterKind::HermesCli
+            && session_result
+                .as_ref()
+                .and_then(|result| {
+                    result
+                        .pointer("/_meta/rovaiHermesState/state")
+                        .and_then(Value::as_str)
+                })
+                .is_some_and(|state| state != "idle")
+        {
+            // Restoration succeeded. Keep history/session identity available;
+            // the separate input gate reports why a new task cannot start.
+            self.finish_session_attachment(&session_id, prebound_session)
+                .await?;
+            return Ok(session_id);
+        }
         if self.host.adapter_kind == AdapterKind::ClineCli
             && model_source == "runtime_default"
             && let Some(expected) = crate::cline::configured_native_model()?
@@ -5248,7 +5361,7 @@ impl AcpRuntime {
                 // CodeBuddy omits it from set_config_option's built-in choices.
             } else if matches!(
                 self.host.adapter_kind,
-                AdapterKind::KiroCli | AdapterKind::GrokBuild
+                AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::HermesCli
             ) {
                 self.set_model(&session_id, model).await?;
             } else {
@@ -5391,16 +5504,43 @@ impl AcpRuntime {
                 .await?;
             }
         }
+        if self.host.adapter_kind == AdapterKind::HermesCli {
+            let mode = self
+                .session_permissions
+                .mode
+                .as_deref()
+                .context("Hermes edit approval mode missing")?;
+            self.host
+                .rpc(
+                    "session/set_mode",
+                    json!({"sessionId":session_id,"modeId":mode}),
+                )
+                .await?;
+        }
+        self.finish_session_attachment(&session_id, prebound_session)
+            .await?;
+        Ok(session_id)
+    }
+
+    async fn finish_session_attachment(
+        &self,
+        session_id: &str,
+        prebound_session: bool,
+    ) -> Result<()> {
         if prebound_session {
             self.host
-                .settle_loading_replay(&session_id, &self.owner)
+                .settle_loading_replay(session_id, &self.owner)
                 .await?;
         } else {
             self.host
-                .bind_session(&session_id, &self.owner, AcpSessionPhase::Ready)
+                .bind_session(session_id, &self.owner, AcpSessionPhase::Ready)
                 .await?;
         }
-        let previous_session_id = self.session_id.write().await.replace(session_id.clone());
+        let previous_session_id = self
+            .session_id
+            .write()
+            .await
+            .replace(session_id.to_string());
         if let Some(previous_session_id) = previous_session_id
             && previous_session_id != session_id
         {
@@ -5408,7 +5548,39 @@ impl AcpRuntime {
                 .unbind_session(&previous_session_id, &self.owner)
                 .await;
         }
-        Ok(session_id)
+        Ok(())
+    }
+
+    pub(crate) async fn ensure_hermes_input_ready(&self) -> Result<()> {
+        if self.host.adapter_kind != AdapterKind::HermesCli {
+            return Ok(());
+        }
+        let result = self.session_result.read().await;
+        let state = result
+            .as_ref()
+            .and_then(|result| result.pointer("/_meta/rovaiHermesState/state"))
+            .and_then(Value::as_str)
+            .unwrap_or("idle");
+        let message = match state {
+            "idle" => return Ok(()),
+            "running" => "原会话已恢复，原生任务仍在执行，暂不能提交新任务",
+            "approval" => "原会话已恢复，原生任务正在等待审批，暂不能提交新任务",
+            "queued" => "原会话已恢复，原生仍有待执行任务，暂不能提交新任务",
+            "unknown" => "原会话已恢复，但有一次执行的结果未知；需要明确处理该执行后才能提交新任务",
+            _ => "原会话已恢复，但原生执行状态尚无法确认",
+        };
+        Err(rovai_core::runtime_failure::RuntimeFailureError::new(
+            rovai_core::runtime_failure::RuntimeFailureView::new(
+                AdapterKind::HermesCli,
+                rovai_core::runtime_failure::RuntimeFailureOrigin::Runtime,
+                rovai_core::runtime_failure::RuntimeFailurePhase::Execution,
+                format!("hermes_session_{state}"),
+                message,
+                None,
+                false,
+            ),
+        )
+        .into())
     }
 
     pub async fn session_capabilities(&self) -> AcpSessionCapabilities {
@@ -5469,19 +5641,19 @@ impl AcpRuntime {
         if self.host.adapter_kind == AdapterKind::MinimaxCodeCli {
             let options = result["configOptions"]
                 .as_array()
-                .context("MiniMax did not return configuration state")?;
+                .context("Runtime did not return configuration state")?;
             ensure!(
                 options
                     .iter()
                     .any(|option| option["id"] == config_id && option["currentValue"] == value),
-                "MiniMax did not confirm requested configuration"
+                "Runtime did not confirm requested configuration"
             );
             let mut selected = self
                 .session_result
                 .read()
                 .await
                 .clone()
-                .context("MiniMax Session has no option state")?;
+                .context("Runtime Session has no option state")?;
             selected["configOptions"] = result["configOptions"].clone();
             *self.session_result.write().await = Some(selected.clone());
             self.host
@@ -5669,6 +5841,20 @@ impl AcpRuntime {
         if !active {
             return Err(rovai_core::steer::ActiveInputNotAccepted.into());
         }
+        if self.adapter_kind() == AdapterKind::HermesCli {
+            let result = self
+                .host
+                .hermes_control("steer", json!({"sessionId":session,"text":text}))
+                .await?;
+            if result["accepted"] == false {
+                return Err(rovai_core::steer::ActiveInputNotAccepted.into());
+            }
+            ensure!(
+                result["accepted"] == true,
+                "Hermes steering outcome is unknown"
+            );
+            return Ok(input_id.to_string());
+        }
         if self.adapter_kind() == AdapterKind::QwenCode {
             let (sender, receipt) = oneshot::channel();
             self.host.qwen_steering.lock().await.insert(
@@ -5770,7 +5956,9 @@ impl AcpRuntime {
         );
         // Some transports cannot atomically bind to a native turn. Retire the
         // exact Host for every path so no leftover queue reaches a successor.
-        self.host.retire_after_steer.store(true, Ordering::Release);
+        if self.adapter_kind() != AdapterKind::HermesCli {
+            self.host.retire_after_steer.store(true, Ordering::Release);
+        }
         timeout(
             Duration::from_secs(10),
             self.host
@@ -6537,6 +6725,20 @@ impl AcpCliRuntimeAdapter {
         }
         #[cfg(target_os = "macos")]
         ManagedProcess::recover_descendants(&self.private_runtime_dir.join("owned-processes"))?;
+        #[cfg(target_os = "macos")]
+        if kind == AdapterKind::HermesCli {
+            let bindings = self.private_runtime_dir.join("hermes-bindings");
+            if bindings.is_dir() {
+                for binding in std::fs::read_dir(bindings)? {
+                    let binding = binding?;
+                    if binding.file_type()?.is_dir() {
+                        ManagedProcess::recover_descendants(
+                            &binding.path().join("owned-processes"),
+                        )?;
+                    }
+                }
+            }
+        }
         if matches!(
             kind,
             AdapterKind::CopilotCli
@@ -6599,7 +6801,17 @@ impl AcpCliRuntimeAdapter {
         let spawn_builtin_tool_factory = builtin_tool_factory.clone();
         let spawn_external_mcp_servers = external_mcp_servers.clone();
         let spawn_attachment_access_root = attachment_access_root.to_path_buf();
-        let spawn_private_runtime_dir = self.private_runtime_dir.clone();
+        let spawn_private_runtime_dir = if self.kind == AdapterKind::HermesCli {
+            // Native sessions survive controller teardown, but never share a
+            // Gateway owner/lock with another binding or the user's native CLI.
+            self.private_runtime_dir
+                .join("hermes-bindings")
+                .join(canonical_json_digest(
+                    &json!({"binding": native_binding_id}),
+                )?)
+        } else {
+            self.private_runtime_dir.clone()
+        };
         let spawn_startup_bootstrap = startup_bootstrap.map(str::to_owned);
         let spawn_incoming = self.incoming.clone();
         let spawn_compaction_policy = self.compaction_detector_policy;
@@ -6686,6 +6898,82 @@ impl AcpCliRuntimeAdapter {
             .await
             .insert(agent_run_id.to_string(), runtime.clone());
         Ok(runtime)
+    }
+
+    /// User-owned maintenance uses the existing Fleet/process owner, with no
+    /// Run, CLI lease, session/prompt, model configuration or business input.
+    pub(crate) async fn recover_hermes_session(
+        &self,
+        scope: &crate::application::hermes_recovery::RecoveryScope,
+        workspace: &AgentRunWorkspace,
+        permission_semantics: PermissionSemantics,
+        runtime: FrozenAgentRuntimeConfig,
+        params: Value,
+    ) -> Result<Value> {
+        ensure!(
+            self.kind == AdapterKind::HermesCli && runtime.adapter_kind == self.kind,
+            "Recovery is only available for Hermes"
+        );
+        let operation = format!("hermes-recovery:{}", uuid::Uuid::new_v4());
+        let private_dir =
+            self.private_runtime_dir
+                .join("hermes-bindings")
+                .join(canonical_json_digest(
+                    &json!({"binding": scope.native_binding_id}),
+                )?);
+        ensure!(
+            private_dir
+                .join("hermes-storage/native-home/state.db")
+                .is_file(),
+            "The original Hermes session storage is unavailable"
+        );
+        let incoming = self.incoming.clone();
+        let workspace = workspace.clone();
+        let lease = self
+            .fleet
+            .acquire(
+                FleetAcquireRequest {
+                    agent_run_id: operation.clone(),
+                    execution_epoch: 0,
+                    adapter_kind: self.kind,
+                    compatibility: RuntimeCompatibilityKey::member_session(
+                        &scope.camp_id,
+                        &scope.agent_id,
+                        Some(&scope.native_binding_id),
+                        &operation,
+                    ),
+                },
+                move || async move {
+                    let host = AcpHost::spawn(
+                        workspace.path(),
+                        &workspace,
+                        permission_semantics,
+                        &runtime,
+                        incoming,
+                        None,
+                        CompactionDetectorPolicy::Disabled,
+                        false,
+                        &BTreeMap::new(),
+                        &private_dir,
+                        None,
+                        None,
+                    )
+                    .await?;
+                    Ok(RuntimeProcessHost::Acp(host))
+                },
+            )
+            .await?;
+        let host = lease.host.into_acp()?;
+        let result = host.hermes_control("recover_unknown", params).await;
+        let cleanup = self
+            .fleet
+            .release_with_outcome(&operation, 0, FleetReleaseDisposition::Stop)
+            .await;
+        ensure!(
+            matches!(cleanup, crate::runtime_fleet::FleetReleaseOutcome::Reaped),
+            "Hermes recovery cleanup is not confirmed; inspect again before continuing"
+        );
+        result
     }
 
     pub async fn get_agent_run(
@@ -6814,10 +7102,12 @@ impl AcpCliRuntimeAdapter {
 fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseDisposition {
     if matches!(
         adapter_kind,
-        AdapterKind::KiroCli | AdapterKind::CursorAgent
+        AdapterKind::KiroCli | AdapterKind::CursorAgent | AdapterKind::HermesCli
     ) {
         // Kiro keeps a Native Session locked for the lifetime of its ACP
         // process. Cursor Host reuse remains outside the current contract.
+        // Hermes freezes Gateway environment per Run; cold-resume its private
+        // native session so the next Run receives fresh built-in credentials.
         FleetReleaseDisposition::Stop
     } else {
         FleetReleaseDisposition::Reusable
@@ -6886,6 +7176,10 @@ pub(crate) fn runtime_compatibility_digest(
             "grokNativeRulesRevision".to_string(),
             json!(GROK_NATIVE_RULES_REVISION),
         );
+    }
+    if frozen_runtime.adapter_kind == AdapterKind::HermesCli {
+        compatibility["hermesImplementationDigest"] =
+            json!(crate::hermes::implementation_digest()?);
     }
     if frozen_runtime.adapter_kind == AdapterKind::DeepseekHarness {
         compatibility["dshNativeConfigurationDigest"] =
@@ -7041,7 +7335,8 @@ fn prepare_private_host_config(
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClineCli
         | AdapterKind::CommandCodeCli
-        | AdapterKind::MinimaxCodeCli => (
+        | AdapterKind::MinimaxCodeCli
+        | AdapterKind::HermesCli => (
             private_runtime_dir
                 .join("acp-host")
                 .join(uuid::Uuid::new_v4().to_string()),
@@ -7089,6 +7384,13 @@ fn configure_runtime_command(
         .as_object()
         .context("ACP permission configuration must be an object")?;
     match runtime.adapter_kind {
+        AdapterKind::HermesCli => {
+            ensure!(
+                permission_semantics != PermissionSemantics::CoreEnforcedV1
+                    || workspace.access != "read_only",
+                "Hermes cannot enforce a read-only workspace"
+            );
+        } // installation-bound managed entry already configured
         AdapterKind::MinimaxCodeCli => {
             health::configure_acp_command(
                 command,
@@ -7817,6 +8119,7 @@ fn configure_compaction_detector_command(
             | AdapterKind::QoderCli
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
+            | AdapterKind::HermesCli
     ) {
         return Ok(None);
     }
@@ -7854,10 +8157,14 @@ fn configure_compaction_detector_command(
                 AdapterKind::CopilotCli => "preCompact",
                 AdapterKind::QoderCli | AdapterKind::QwenCode => "PostCompact",
                 AdapterKind::CodebuddyCli => "SessionStart",
+                AdapterKind::HermesCli => "post_compaction",
                 _ => unreachable!(),
             }),
         );
         match adapter_kind {
+            AdapterKind::HermesCli => {
+                command.env("ROVAI_HERMES_COMPACTION_HOOK", &hook_command);
+            }
             AdapterKind::CopilotCli => {
                 let plugin_root = root.join("copilot-plugin");
                 std::fs::create_dir_all(&plugin_root)?;
@@ -8411,6 +8718,7 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
         AdapterKind::MinimaxCodeCli => permissions["permission_mode"] == "bypassPermissions",
+        AdapterKind::HermesCli => false,
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
@@ -8813,9 +9121,13 @@ pub fn completed_action(
         "locations": update.get("locations"),
     }))?;
     let effect_disposition = acp_effect_disposition(succeeded, &native_kind);
-    let public_file_changes = (succeeded && adapter_kind != AdapterKind::MinimaxCodeCli)
-        .then(|| public_acp_file_changes(update.get("content")))
-        .flatten();
+    let public_file_changes = (succeeded
+        && !matches!(
+            adapter_kind,
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+        ))
+    .then(|| public_acp_file_changes(update.get("content")))
+    .flatten();
     let public_file_operation_path = (succeeded
         && matches!(native_kind.as_str(), "read" | "edit" | "write"))
     .then(|| single_public_acp_location_path(update.get("locations")))
@@ -8897,7 +9209,10 @@ fn reconcile_completed_action(
     }
     if matches!(completion.outcome, ActionResultOutcome::Succeeded)
         && completion.public_file_changes.is_none()
-        && adapter_kind != AdapterKind::MinimaxCodeCli
+        && !matches!(
+            adapter_kind,
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+        )
     {
         completion.public_file_changes = observed.public_file_changes;
     }
@@ -8979,7 +9294,10 @@ fn reconcile_completed_action(
     .map(str::to_string);
     if matches!(completion.outcome, ActionResultOutcome::Succeeded)
         && completion.public_file_changes.is_none()
-        && adapter_kind != AdapterKind::MinimaxCodeCli
+        && !matches!(
+            adapter_kind,
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+        )
         && completion.native_kind == "edit"
         && let Some(path) = completion.public_file_operation_path.as_deref()
     {
@@ -9920,6 +10238,25 @@ mod tests {
             (AdapterKind::KimiCodeCli, -32002, json!({}), false),
             (AdapterKind::QwenCode, -32602, json!({}), false),
             (AdapterKind::CopilotCli, -32603, json!({}), false),
+            (
+                AdapterKind::HermesCli,
+                -32603,
+                json!({"details":"not_found"}),
+                true,
+            ),
+            (
+                AdapterKind::HermesCli,
+                -32603,
+                json!({"details":"connection_lost"}),
+                false,
+            ),
+            (
+                AdapterKind::HermesCli,
+                -32001,
+                json!({"code":"HERMES_SESSION_NOT_FOUND","sessionId":"old"}),
+                false,
+            ),
+            (AdapterKind::HermesCli, -32603, json!({}), false),
             (AdapterKind::ZcodeApp, -32004, json!({}), true),
             (AdapterKind::ZcodeApp, -32000, json!({}), false),
             (
@@ -15338,6 +15675,15 @@ while IFS= read -r ignored; do :; done
         );
         assert_eq!(
             select_acp_session_continuation(
+                AdapterKind::HermesCli,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::HistoryRestore
+        );
+        assert_eq!(
+            select_acp_session_continuation(
                 AdapterKind::GrokBuild,
                 false,
                 Some("session-1"),
@@ -16432,6 +16778,13 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn successful_terminal_acp_diff_content_is_kept_for_evidence_projection_only() {
+        for kind in [AdapterKind::HermesCli, AdapterKind::MinimaxCodeCli] {
+            let proposed = completed_action(kind, &json!({"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"preview","status":"completed","kind":"edit",
+                "content":[{"type":"diff","path":"a.txt","oldText":"before","newText":"after"}]
+            }})).unwrap().unwrap();
+            assert!(proposed.public_file_changes.is_none(), "{kind:?}");
+        }
         let completion = completed_action(
             AdapterKind::CursorAgent,
             &json!({

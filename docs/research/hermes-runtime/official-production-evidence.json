@@ -1,0 +1,223 @@
+{
+  "date": "2026-10-23",
+  "platform": "macos-arm64",
+  "admission": "preview",
+  "nativeVersion": "0.22.4",
+  "nativeSourceCommit": "4d04303818b61bf3aa09278af48356315515965b",
+  "minimumVersion": "0.22.4",
+  "entrypoints": [
+    "hermes --profile default acp",
+    "hermes --profile default gateway run --force --no-supervise --external-supervisor"
+  ],
+  "nativeExecutorPatched": false,
+  "perRunGatewayRestart": true,
+  "wire": {
+    "systemBinding": true,
+    "ordinaryPayload": true,
+    "rebind": true,
+    "turnDelta": true,
+    "nativeFailure": true,
+    "busyRejected": true,
+    "unsubmittedControl": true,
+    "envOverlay": true,
+    "configOverlay": true,
+    "personalityOverlay": true,
+    "requests": 7
+  },
+  "core": {
+    "runtime": "hermes-cli",
+    "version": "Hermes Agent v0.22.4 (2026.9.24) · stable · local 4d04303818b6",
+    "thread": "rvcamp_01m5kr86a4e3hs2naabc2fwjxp",
+    "run": "fb5dff50-1a83-4426-a478-cadef36d8534",
+    "evidenceCount": 10,
+    "patch": true,
+    "sameRunSteer": true
+  },
+  "coreRecovery": {
+    "nativeId": "local-87ddcc6efd6b52f22c96945647f848e014a43e464f8673ba3fe4b6ea31ec449e",
+    "sameSession": true,
+    "acceptedCrashInputReplayed": false,
+    "duplicateSend": false,
+    "crashRun": "36121de7-7ae4-4e6f-b586-0a078faeb7f9",
+    "resumedRun": "de5d93ad-6d69-4068-acb6-93a62ad606d2",
+    "remainingPids": []
+  },
+  "nativeModel": {
+    "nativeTools": {
+      "mcp": true,
+      "skill": true,
+      "modelAcknowledged": true,
+      "firstUsage": {
+        "cachedReadTokens": 26240,
+        "inputTokens": 35231,
+        "outputTokens": 171,
+        "totalTokens": 35402
+      }
+    },
+    "warmUsage": {
+      "cachedReadTokens": 6784,
+      "inputTokens": 7424,
+      "outputTokens": 12,
+      "totalTokens": 7436
+    },
+    "coldResume": true,
+    "changedAssignmentRejected": true
+  },
+  "autoCompression": {
+    "rounds": [
+      {
+        "round": 0,
+        "sessionId": "local-b5c3a3d47a8c1eeb065c5e6122607408b85375d6c6ee60add895ee34a73d6e81",
+        "contextWindow": 272000,
+        "compressionCount": 0,
+        "historyMessages": 9,
+        "toolCalls": 4,
+        "usage": {
+          "cachedReadTokens": 13440,
+          "inputTokens": 102256,
+          "outputTokens": 135,
+          "totalTokens": 102391
+        }
+      },
+      {
+        "round": 1,
+        "sessionId": "local-b5c3a3d47a8c1eeb065c5e6122607408b85375d6c6ee60add895ee34a73d6e81",
+        "contextWindow": 272000,
+        "compressionCount": 0,
+        "historyMessages": 16,
+        "toolCalls": 4,
+        "usage": {
+          "cachedReadTokens": 130304,
+          "inputTokens": 336335,
+          "outputTokens": 135,
+          "totalTokens": 336470
+        }
+      },
+      {
+        "round": 2,
+        "sessionId": "local-b5c3a3d47a8c1eeb065c5e6122607408b85375d6c6ee60add895ee34a73d6e81",
+        "contextWindow": 272000,
+        "compressionCount": 1,
+        "historyMessages": 25,
+        "toolCalls": 4,
+        "usage": {
+          "cachedReadTokens": 45184,
+          "inputTokens": 165737,
+          "outputTokens": 135,
+          "totalTokens": 165872
+        }
+      }
+    ],
+    "manualCompressionCalled": false,
+    "thresholdModified": false,
+    "initial": {
+      "sessionId": "local-b5c3a3d47a8c1eeb065c5e6122607408b85375d6c6ee60add895ee34a73d6e81",
+      "contextWindow": null,
+      "compressionCount": 0,
+      "historyMessages": 0
+    },
+    "continuity": true,
+    "coldResume": true
+  },
+  "experience": {
+    "reasoning": true,
+    "questionnaireDisabled": true,
+    "steer": true,
+    "nativeErrorDetail": true,
+    "mcpAddChangeRemove": true,
+    "mcpRovaiWins": true,
+    "mcpUnavailableRejected": true,
+    "sameNameExplicitNativeToolset": true
+  },
+  "fileEvidence": {
+    "semantics": "reported_mutation",
+    "fullBeforeAfter": false,
+    "tested": [
+      "create",
+      "overwrite",
+      "patch",
+      "delete",
+      "multi-file",
+      "move",
+      "empty",
+      "no-change",
+      "CRLF",
+      "failed-patch",
+      "binary-refusal",
+      "large-unread-overwrite-refusal",
+      "update-two-text-files-native-blank-separator",
+      "multifile-sql-comment-deletion"
+    ]
+  },
+  "imageEvaluation": {
+    "transportBytesVerified": true,
+    "correctlyIdentified": false,
+    "expected": [
+      "cyan",
+      "magenta",
+      "yellow",
+      "blue"
+    ],
+    "autoMode": "Native vision preprocessing described a uniform magenta square.",
+    "nativeMode": "Main model answered cyan, magenta, yellow, white.",
+    "model": "Sub2API gpt-6.1-sol"
+  },
+  "limitations": [
+    "macOS arm64 Preview only",
+    "No complete LRU/TTL/cross-platform matrix",
+    "MCP HTTP/SSE/OAuth matrix incomplete",
+    "Skills menu does not expand variables defined only in native .env",
+    "Image recognition accuracy failed for the tested provider/model",
+    "Native file snippets are not full before/after states"
+  ],
+  "fixtures": {
+    "wire": "rovai-hermes-wire-dsIDWL",
+    "experience": "rovai-hermes-experience-gUPMcr",
+    "core": "rovai-hermes-core-dISqud"
+  },
+  "cleanup": {
+    "privateCredentialHomesRemoved": true,
+    "privateCoreDataRemoved": true,
+    "rawWirePublished": false
+  },
+  "followupRegression": {
+    "controller": {
+      "tests": 4,
+      "passed": true,
+      "preFixFailed": true,
+      "delayedAdmissionDrained": true,
+      "lateLiveCopyDeduplicated": true,
+      "uncertainAttributionFails": true,
+      "replayGapFails": true,
+      "unsubmittedBranches": true
+    },
+    "failedUsage": {
+      "failed": true,
+      "input": 100,
+      "output": 10,
+      "cacheRead": 40,
+      "reasoning": 2,
+      "cost": null,
+      "countedOnce": true,
+      "requests": 2
+    },
+    "failedUsageFixture": "rovai-hermes-failed-usage-F6FEla",
+    "nativeDaemonStormBackoffDisabledForExternalOwner": true,
+    "nativeExecutorPatched": false,
+    "validation": {
+      "acpPassed": 67,
+      "acpIgnored": 2,
+      "monitoringPassed": 13,
+      "runtimeDiffPassed": 17,
+      "hermesPassed": 2,
+      "typecheck": true,
+      "pnpmTest": true,
+      "documentationGates": true
+    },
+    "cleanup": {
+      "privateCoreDataRemoved": true,
+      "dummyProviderHomesRemoved": true,
+      "rawWirePublished": false
+    }
+  }
+}

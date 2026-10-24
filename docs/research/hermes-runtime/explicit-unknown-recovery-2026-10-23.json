@@ -1,0 +1,115 @@
+{
+  "date": "2026-10-23",
+  "scope": "Hermes user-layer rules and explicit unknown recovery; macOS arm64 Preview",
+  "native": {
+    "version": "0.22.4",
+    "sourceCommit": "4d04303818b61bf3aa09278af48356315515965b",
+    "sourceModified": false,
+    "controllerRevision": "rovai-hermes-host-v5"
+  },
+  "controlled": {
+    "fixture": "rovai-hermes-first-input-566fmf",
+    "command": "node scripts/smoke-hermes-first-input.mjs --recovery",
+    "provider": "loopback scripted Responses",
+    "nativeSessionUnchanged": true,
+    "phases": [
+      {
+        "phase": 0,
+        "kind": "initial",
+        "requested": 0,
+        "acknowledged": 0,
+        "mainRequests": 2
+      },
+      {
+        "phase": 1,
+        "kind": "none",
+        "requested": 0,
+        "acknowledged": 0,
+        "mainRequests": 2
+      },
+      {
+        "phase": 2,
+        "kind": "none",
+        "requested": 0,
+        "acknowledged": 0,
+        "mainRequests": 2
+      },
+      {
+        "phase": 3,
+        "kind": "update",
+        "requested": 0,
+        "acknowledged": 0,
+        "mainRequests": 2
+      },
+      {
+        "phase": 4,
+        "kind": "none",
+        "status": "failed"
+      },
+      {
+        "phase": 5,
+        "kind": "none",
+        "requested": 0,
+        "acknowledged": 0,
+        "mainRequests": 2
+      }
+    ],
+    "recovery": {
+      "inspectionPreservedUnknown": true,
+      "staleGenerationRejected": true,
+      "explicitResolution": true,
+      "originalRunFailed": true,
+      "noModelCall": true,
+      "noReplay": true,
+      "retryAfterRestart": true,
+      "processesReaped": true,
+      "legacyReadySnapshotRefreshed": true,
+      "noDuplicateSend": true
+    }
+  },
+  "realModel": {
+    "fixture": "rovai-hermes-core-h3UHnB",
+    "command": "node scripts/smoke-hermes-core.mjs --force-unknown",
+    "provider": "native Sub2API",
+    "model": "gpt-6.1-sol",
+    "sameRunSteer": true,
+    "fileEvidence": true,
+    "terminalCancellation": true,
+    "sameSession": true,
+    "forceUnknown": true,
+    "nativeStateAfterCrash": "unknown",
+    "explicitNativeResolution": true,
+    "originalRunStillFailed": true,
+    "acceptedCrashInputReplayed": false,
+    "duplicateSend": false,
+    "remainingPids": []
+  },
+  "earlierAttempts": [
+    {
+      "fixture": "rovai-hermes-first-input-cGySQW",
+      "result": "failed legacy Ready upgrade assertion; recovery behavior passed",
+      "fix": "invalidate obsolete capability contract in startup static discovery"
+    },
+    {
+      "fixture": "rovai-hermes-first-input-p9esFq",
+      "result": "initial host identity check failed before prompt",
+      "fix": "await child lock when validating Hermes host PID; keep revision/version/PID checks"
+    },
+    {
+      "fixture": "rovai-hermes-core-y2eeEp",
+      "result": "native already idle after Core-only kill; not evidence of unknown recovery",
+      "followup": "force-unknown also kills the isolated Gateway before Core; the final run observed unknown and explicitly resolved it"
+    }
+  ],
+  "privacy": {
+    "rawWireCommitted": false,
+    "privateConfigAndCredentialCopiesRemoved": true,
+    "dailyAppDataModified": false
+  },
+  "limitations": [
+    "User CLI recovery; no new Renderer recovery button",
+    "Original Run remains failed or outcome unknown; resolving the native admission does not undo effects or replay the task",
+    "Automatic compaction was not rerun in this incremental recovery validation; prior evidence is separate",
+    "Only the recorded native version/provider/macOS installation was exercised; Hermes remains Preview"
+  ]
+}

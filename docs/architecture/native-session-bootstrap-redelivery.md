@@ -19,7 +19,7 @@ Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)。
 
 Team 指引采用 [Bootstrap v6](../contracts/native-session-bootstrap-v6.md)：仅从 Thread 创建时固定的
-非空文本恢复，Team 编辑/删除不触发补发；Single Chat 省略。下述 Runtime 投递矩阵保持不变。
+非空文本恢复，Team 编辑/删除不触发补发；Single Chat 省略。Hermes 的 user 层例外见下文。
 
 ## 两个独立生命周期
 
@@ -56,6 +56,7 @@ pending。
 | Qwen Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY` |
 | Antigravity | `unavailable_no_qualified_signal` | `disabled` | `ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY`；v0.48 不允许 enable |
 | TRAE CLI CN | `not_observed_no_qualified_signal` | `disabled` | 无；`0.120.52` manual/auto ACP 与 Hook Probe 未见结构化完成边界，状态不是 `Unsupported` |
+| Hermes | `signal_driven`，user 层规则 | `best_effort` | `ROVAI_INTERNAL_HERMES_COMPACTION_DETECTOR_POLICY` |
 | Claude Code | `protected_instruction_layer` | 不适用 | 无 |
 | Codex CLI | `protected_instruction_layer` | 不适用 | 无 |
 
@@ -229,6 +230,19 @@ digest。
 只有 selected Delivery 获得 Runtime accepted ACK，才将 acknowledged revision 推进到该冻结值。
 send failure、`delivery_unknown` 和 process loss 不消费 Requirement；ACK 较旧 revision 也不能清除
 Gate 后到达的更高 requested revision。
+
+## Hermes 完成通知与下一普通输入
+
+Hermes 使用私有 Home 内官方 `post_compaction` shell Hook，走既有 `rovai __compaction-hook`、
+process credential / Host instance / exact Session observer lease 和 durable outbox。
+仅 committed `summarize` 且没有旋转到其他 Session 的通知准入；失败、started、token 变化与普通文案不准入。
+重复运输沿原有 request/digest 去重。Hook 不读取 B/P、不修改原生历史，不批准其他用户 Hook。
+
+输入 prepared 是 cutoff：之前的 Requirement 可被普通 start 输入携带，之后的事件留给下一普通输入。
+Hermes Steer 不携带规则、不消费 pending；同一 Run 自动压缩后仍可能存在完整规则缺失窗口，不能宣称即时恢复。
+Hermes 外层 envelope v1 独立于共享 Redelivery v2，完整 B digest 和最终输入 Blob 是经确认的 Hermes 证据例外；
+其他 Runtime 继续遵守上文的身份/摘要/Blob 边界。字段和接受语义见
+[Hermes Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md#session-与输入)。
 
 ## 长期约束
 

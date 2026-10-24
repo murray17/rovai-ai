@@ -221,6 +221,7 @@ pub(super) fn assert_upgrade(db: &mut Database) {
     shared_environment::migrate(db).unwrap();
     web_pasted_text::migrate(db).unwrap();
     teams::migrate(db).unwrap();
+    db.migrate(false).unwrap();
     assert_eq!(
         evidence,
         public_history_claim_preserved_evidence_digest(db.connection()).unwrap()

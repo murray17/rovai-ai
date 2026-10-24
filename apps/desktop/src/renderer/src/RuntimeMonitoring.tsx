@@ -56,6 +56,7 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'cursor-agent', label: 'Cursor Agent' },
   { value: 'kimi-code-cli', label: 'Kimi Code' },
   { value: 'minimax-code-cli', label: 'MiniMax Code' },
+  { value: 'hermes-cli', label: 'Hermes Agent' },
   { value: 'grok-build', label: 'Grok Build' },
   { value: 'deepseek-harness', label: 'DeepSeek Harness' },
   { value: 'cline-cli', label: 'Cline' },

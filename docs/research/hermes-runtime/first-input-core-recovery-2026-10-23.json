@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-23",
+  "fixture": "rovai-hermes-core-V2xKVG",
+  "sameRunSteer": true,
+  "filePatchVerified": true,
+  "executionEvidenceCount": 13,
+  "coreRuns": [
+    {
+      "status": "succeeded",
+      "last_error_code": null
+    },
+    {
+      "status": "cancelled",
+      "last_error_code": null
+    },
+    {
+      "status": "failed",
+      "last_error_code": "accepted_input_outcome_unknown"
+    },
+    {
+      "status": "failed",
+      "last_error_code": "runtime_launch_failed"
+    }
+  ],
+  "nativeAdmissions": [
+    {
+      "seq": 1,
+      "intent": "queue",
+      "status": "terminal",
+      "outcome": "completed",
+      "generation": 2
+    },
+    {
+      "seq": 2,
+      "intent": "queue",
+      "status": "terminal",
+      "outcome": "interrupted",
+      "generation": 4
+    },
+    {
+      "seq": 3,
+      "intent": "queue",
+      "status": "unknown",
+      "outcome": null,
+      "generation": 6
+    }
+  ],
+  "normalRunPassed": true,
+  "coldContinuationCancellationPassed": true,
+  "ownedTreeCleanupPassed": true,
+  "forcedCrashContinuationPassed": false,
+  "acceptedCrashTaskAutomaticallyReplayed": false,
+  "diagnostic": "session/resume: Hermes session has unsettled execution; refusing a new turn",
+  "limitation": "This forced-crash continuation is not counted as a pass. Native unresolved execution is preserved; no retry, ledger rewrite or Session rotation was performed."
+}

@@ -287,12 +287,17 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
         bail!("compaction hook signal does not match its configured source");
     }
     let hook_event_name = source_signal.to_string();
-    let trigger = hook_input
-        .get("trigger")
-        .or_else(|| hook_input.get("source"))
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
+    let trigger = if adapter_kind == "hermes-cli" {
+        validate_hermes_compaction(&hook_input, &native_session_id, source_signal)?;
+        "summarize".to_string()
+    } else {
+        hook_input
+            .get("trigger")
+            .or_else(|| hook_input.get("source"))
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     // The explicit compact_summary field may travel only on this live local IPC
     // request so the execution console can reuse its Managed Blob result path.
     // It never participates in the observation digest or recovery outbox.
@@ -369,6 +374,19 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
     }
     let error = last_error.context("compaction observation submission remained uncertain")?;
     Err(error)
+}
+
+fn validate_hermes_compaction(input: &Value, session: &str, source: &str) -> Result<()> {
+    anyhow::ensure!(
+        source == "post_compaction"
+            && input["hook_event_name"] == "post_compaction"
+            && input["extra"]["kind"] == "summarize"
+            && input["extra"]["old_session_id"]
+                .as_str()
+                .is_some_and(|old| old.is_empty() || old == session),
+        "Hermes hook is not a committed in-place summary"
+    );
+    Ok(())
 }
 
 fn stage_compaction_observation(
@@ -3309,6 +3327,21 @@ mod tests {
 
     #[test]
     fn compaction_hook_stages_only_lifecycle_metadata_for_uncertain_recovery() {
+        let completed = json!({"hook_event_name":"post_compaction", "session_id":"session-1",
+            "extra":{"kind":"summarize","old_session_id":"session-1"}});
+        assert!(validate_hermes_compaction(&completed, "session-1", "post_compaction").is_ok());
+        for (pointer, value) in [
+            ("/hook_event_name", json!("pre_compaction")),
+            ("/extra/kind", json!("prune_tool_results")),
+            ("/extra/kind", Value::Null),
+            ("/extra/old_session_id", json!("other-session")),
+            ("/extra/old_session_id", Value::Null),
+        ] {
+            let mut rejected = completed.clone();
+            *rejected.pointer_mut(pointer).unwrap() = value;
+            assert!(validate_hermes_compaction(&rejected, "session-1", "post_compaction").is_err());
+        }
+        assert!(validate_hermes_compaction(&completed, "session-1", "pre_compaction").is_err());
         let root = std::env::temp_dir().join(format!("rovai-hook-outbox-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let context_path = root.join("context.json");

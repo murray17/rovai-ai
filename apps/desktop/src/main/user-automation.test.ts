@@ -265,6 +265,21 @@ describe('User Automation transport', () => {
         }
       }
     ])
+    const beforeRecovery = calls.length
+    await expect(dispatchUserAutomation('agentRun.hermesRecovery.resolve', {
+      commandId: 'resolve-unknown', confirmation: {}, acknowledgeEffects: false
+    }, dependencies)).rejects.toMatchObject({ code: 'hermes_recovery_confirmation_required' })
+    expect(calls).toHaveLength(beforeRecovery)
+    await dispatchUserAutomation('agentRun.hermesRecovery.inspect', { agentRunId: 'interrupted' }, dependencies)
+    await dispatchUserAutomation('agentRun.hermesRecovery.resolve', {
+      commandId: 'resolve-unknown', confirmation: { admissionId: 'exact' }, acknowledgeEffects: true
+    }, dependencies)
+    expect(calls.slice(beforeRecovery)).toEqual([
+      { method: 'agentRuns.hermesRecovery.inspect', params: { agentRunId: 'interrupted' } },
+      { method: 'agentRuns.hermesRecovery.resolve', params: {
+        commandId: 'resolve-unknown', confirmation: { admissionId: 'exact' }, acknowledgeEffects: true
+      } }
+    ])
   })
 
   it('rejects mismatched Runtime permission adapters before calling Core', async () => {

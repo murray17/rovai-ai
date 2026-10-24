@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-24",
+  "platform": "macOS arm64",
+  "rovaiBaseline": "0279267e6a1dfbe4c2611e84b855508589c50647",
+  "nativeVersion": "Hermes Agent v0.22.4 (2026.9.24) · stable · local 4d04303818b6",
+  "nativeSourceCommit": "4d04303818b61bf3aa09278af48356315515965b",
+  "nativeSourceModified": false,
+  "model": "controlled loopback Responses; no paid model",
+  "probe": "native-acp-boundary-probe.mjs",
+  "scope": "Direct official ACP with isolated native HERMES_HOME; no production Core or valid Built-in lease",
+  "checks": {
+    "acpEnvironmentNotForwarded": true,
+    "originalSessionResumed": true,
+    "cancelKeptSiblingAndGateway": true,
+    "executionContinuedAfterAcpDisconnect": true,
+    "acpExitKeptGateway": true,
+    "executionContinuedAfterAcpKill": true,
+    "nativeAutoStartedGatewaySurvivedAcpExit": true,
+    "configUnchanged": true,
+    "dotenvUnchanged": true
+  },
+  "sessionIdsDistinct": true,
+  "identity": [
+    {
+      "ROVAI_CLI_CONTEXT": null,
+      "ROVAI_AGENT_CLI": null,
+      "ROVAI_PROBE_RUN": null,
+      "version": "rovai 0.4.16 contract-v43 ipc-v3\n",
+      "send_exit": 2,
+      "send_stdout": "{\"error\":{\"code\":\"builtin_tool.cli_error\",\"message\":\"Built-in Tool request could not be completed.\",\"recovery\":\"stop\"}}\n",
+      "send_stderr": ""
+    },
+    {
+      "ROVAI_CLI_CONTEXT": null,
+      "ROVAI_AGENT_CLI": null,
+      "ROVAI_PROBE_RUN": null,
+      "version": "rovai 0.4.16 contract-v43 ipc-v3\n",
+      "send_exit": 2,
+      "send_stdout": "{\"error\":{\"code\":\"builtin_tool.cli_error\",\"message\":\"Built-in Tool request could not be completed.\",\"recovery\":\"stop\"}}\n",
+      "send_stderr": ""
+    },
+    {
+      "ROVAI_CLI_CONTEXT": null,
+      "ROVAI_AGENT_CLI": null,
+      "ROVAI_PROBE_RUN": null,
+      "version": "rovai 0.4.16 contract-v43 ipc-v3\n",
+      "send_exit": 2,
+      "send_stdout": "{\"error\":{\"code\":\"builtin_tool.cli_error\",\"message\":\"Built-in Tool request could not be completed.\",\"recovery\":\"stop\"}}\n",
+      "send_stderr": ""
+    }
+  ],
+  "cancelStopReason": "cancelled",
+  "peerStopReason": "end_turn",
+  "autoGateway": {
+    "parentWasAcp": true,
+    "separateProcessGroup": true
+  },
+  "fixtureGatewaysStopped": true,
+  "successfulPublicSends": 0,
+  "fullCollaborationQualified": false,
+  "limitations": [
+    "No successful built-in Send; these are ACP session labels, not validated Core member/Run/lease attribution.",
+    "Changed ACP environment markers on resume do not constitute real Core lease rotation acceptance.",
+    "Production ManagedProcess/Fleet connection-only cleanup is not implemented or tested.",
+    "MCP lifecycle, compaction policy retirement, historical Binding cutover and complete native configuration non-interference are not tested."
+  ]
+}

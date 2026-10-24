@@ -7527,26 +7527,32 @@ mod tests {
 
     #[test]
     fn resume_uses_cli_type_and_current_target_instead_of_configuration() {
-        for (old_key, new_key) in [
-            (None, None),
-            (None, Some("new")),
-            (Some("old"), None),
-            (Some("old"), Some("new")),
-        ] {
-            let mut execution = resume_execution(old_key, new_key, 1, 9);
-            execution.runtime.installation_id = "reinstalled-cli".into();
-            execution.runtime.binding_compatibility_digest =
-                "different-context-and-permissions".into();
-            execution.runtime.executable_fingerprint = "new-binary".into();
-            assert_eq!(
-                execution.resumable_native_session_id(),
-                Some("session-existing")
-            );
-            execution.runtime.adapter_kind = AdapterKind::ClaudeCodeCli;
-            assert_eq!(execution.resumable_native_session_id(), None);
-            execution.runtime.adapter_kind = AdapterKind::CodexCli;
-            execution.native_session_id = None;
-            assert_eq!(execution.resumable_native_session_id(), None);
+        for adapter in [AdapterKind::CodexCli, AdapterKind::HermesCli] {
+            for (old_key, new_key) in [
+                (None, None),
+                (None, Some("new")),
+                (Some("old"), None),
+                (Some("old"), Some("new")),
+            ] {
+                let mut execution = resume_execution(old_key, new_key, 1, 9);
+                execution.native_adapter_kind = Some(adapter);
+                execution.runtime.adapter_kind = adapter;
+                execution.runtime.installation_id = "reinstalled-cli".into();
+                execution.runtime.executable_path = "/new/location/selected-cli".into();
+                execution.runtime.reported_version = Some("0.23.0".into());
+                execution.runtime.binding_compatibility_digest =
+                    "different-context-and-permissions".into();
+                execution.runtime.executable_fingerprint = "new-binary".into();
+                assert_eq!(
+                    execution.resumable_native_session_id(),
+                    Some("session-existing")
+                );
+                execution.runtime.adapter_kind = AdapterKind::ClaudeCodeCli;
+                assert_eq!(execution.resumable_native_session_id(), None);
+                execution.runtime.adapter_kind = adapter;
+                execution.native_session_id = None;
+                assert_eq!(execution.resumable_native_session_id(), None);
+            }
         }
     }
 

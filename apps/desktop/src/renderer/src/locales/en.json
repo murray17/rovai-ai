@@ -2305,6 +2305,7 @@
   "文件系统访问": "Filesystem access",
   "审批策略": "Approval policy",
   "权限模式": "Permission mode",
+  "文件编辑审批": "File edit approval",
   "执行模式": "Execution mode",
   "终端沙箱": "Terminal sandbox",
   "工具权限": "Tool permissions",

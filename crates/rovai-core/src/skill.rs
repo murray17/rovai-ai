@@ -2721,6 +2721,7 @@ fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
         SkillDeliveryGroupKey::Cursor => "Cursor",
         SkillDeliveryGroupKey::Kimi => "Kimi Code",
         SkillDeliveryGroupKey::Minimax => "MiniMax Code",
+        SkillDeliveryGroupKey::Hermes => "Hermes Agent",
         SkillDeliveryGroupKey::Grok => "Grok Build",
         SkillDeliveryGroupKey::Zcode => "ZCode",
         SkillDeliveryGroupKey::Dsh => "DeepSeek Harness",

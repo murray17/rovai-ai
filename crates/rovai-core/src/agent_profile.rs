@@ -50,6 +50,7 @@ pub enum AdapterKind {
     CursorAgent,
     KimiCodeCli,
     MinimaxCodeCli,
+    HermesCli,
     GrokBuild,
     DeepseekHarness,
     ZcodeApp,
@@ -100,7 +101,7 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 20] = [
         Self::CodexCli,
         Self::Pi,
         Self::OpencodeCli,
@@ -117,6 +118,7 @@ impl AdapterKind {
         Self::CursorAgent,
         Self::KimiCodeCli,
         Self::MinimaxCodeCli,
+        Self::HermesCli,
         Self::GrokBuild,
         Self::DeepseekHarness,
         Self::ZcodeApp,
@@ -139,6 +141,7 @@ impl AdapterKind {
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi-code-cli",
             Self::MinimaxCodeCli => "minimax-code-cli",
+            Self::HermesCli => "hermes-cli",
             Self::GrokBuild => "grok-build",
             Self::DeepseekHarness => "deepseek-harness",
             Self::ZcodeApp => "zcode-app",
@@ -163,6 +166,7 @@ impl AdapterKind {
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi",
             Self::MinimaxCodeCli => "mcode",
+            Self::HermesCli => "hermes",
             Self::GrokBuild => "grok",
             Self::DeepseekHarness => "dsh",
             Self::ZcodeApp => "ZCode",
@@ -181,6 +185,7 @@ impl AdapterKind {
             Self::Pi => &["pi"],
             Self::KimiCodeCli => &["kimi"],
             Self::MinimaxCodeCli => &["mcode"],
+            Self::HermesCli => &["hermes"],
             Self::GrokBuild => &["grok"],
             Self::DeepseekHarness => &["dsh"],
             Self::ZcodeApp => &["ZCode"],
@@ -216,6 +221,7 @@ impl AdapterKind {
             Self::CursorAgent => "Cursor Agent",
             Self::KimiCodeCli => "Kimi Code",
             Self::MinimaxCodeCli => "MiniMax Code",
+            Self::HermesCli => "Hermes Agent",
             Self::GrokBuild => "Grok Build",
             Self::DeepseekHarness => "DeepSeek Harness",
             Self::ZcodeApp => "ZCode",
@@ -238,6 +244,7 @@ impl AdapterKind {
                 | Self::CursorAgent
                 | Self::KimiCodeCli
                 | Self::MinimaxCodeCli
+                | Self::HermesCli
                 | Self::GrokBuild
                 | Self::DeepseekHarness
                 | Self::ZcodeApp
@@ -261,6 +268,7 @@ impl AdapterKind {
             Self::CursorAgent => "ROVAI_CURSOR_BIN",
             Self::KimiCodeCli => "ROVAI_KIMI_BIN",
             Self::MinimaxCodeCli => "ROVAI_MINIMAX_CODE_BIN",
+            Self::HermesCli => "ROVAI_HERMES_BIN",
             Self::GrokBuild => "ROVAI_GROK_BIN",
             Self::DeepseekHarness => "ROVAI_DEEPSEEK_HARNESS_BIN",
             Self::ZcodeApp => "ROVAI_ZCODE_BIN",
@@ -290,6 +298,7 @@ impl AdapterKind {
             | Self::CursorAgent
             | Self::KimiCodeCli
             | Self::MinimaxCodeCli
+            | Self::HermesCli
             | Self::GrokBuild
             | Self::DeepseekHarness
             | Self::ZcodeApp
@@ -316,6 +325,7 @@ impl AdapterKind {
             | Self::TraeCnCli
             | Self::KimiCodeCli
             | Self::MinimaxCodeCli
+            | Self::HermesCli
             | Self::GrokBuild
             | Self::DeepseekHarness
             | Self::ZcodeApp
@@ -345,6 +355,7 @@ impl FromStr for AdapterKind {
             "cursor-agent" => Ok(Self::CursorAgent),
             "kimi-code-cli" => Ok(Self::KimiCodeCli),
             "minimax-code-cli" => Ok(Self::MinimaxCodeCli),
+            "hermes-cli" => Ok(Self::HermesCli),
             "grok-build" => Ok(Self::GrokBuild),
             "deepseek-harness" => Ok(Self::DeepseekHarness),
             "zcode-app" => Ok(Self::ZcodeApp),
@@ -2289,6 +2300,31 @@ impl AgentProfileService {
             entry.entrypoint_locator_identity.as_ref(),
             &now,
         )?;
+        // An unchanged executable is not evidence for an obsolete adapter
+        // contract. Startup discovery must not retain the old system guarantee.
+        if entry.adapter_kind == AdapterKind::HermesCli {
+            let capabilities = transaction.query_row(
+                "SELECT capabilities_json,probe_status FROM adapter_capability_snapshot WHERE installation_id=?1",
+                [&id], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?))).optional()?;
+            if let Some((raw, status)) = capabilities {
+                let mut capabilities: Vec<String> = serde_json::from_str(&raw)?;
+                let obsolete = |value: &String| {
+                    value == "context.charter.managed_system_prompt"
+                        || value == "context.compaction.native_system_prompt_preserved"
+                };
+                if capabilities.iter().any(obsolete)
+                    || (status == "ready"
+                        && !crate::agent_runtime_adapter::hermes_capabilities_current(
+                            &capabilities,
+                        ))
+                {
+                    capabilities.retain(|value| !obsolete(value));
+                    transaction.execute(
+                        "UPDATE adapter_capability_snapshot SET probe_status=CASE WHEN probe_status='ready' THEN 'installed_unverified' ELSE probe_status END,stale_at=?2,capabilities_json=?3 WHERE installation_id=?1",
+                        params![id, now, serde_json::to_string(&capabilities)?])?;
+                }
+            }
+        }
         transaction.commit()?;
         Ok(id)
     }
@@ -2338,7 +2374,7 @@ impl AgentProfileService {
                        CASE WHEN installation.adapter_kind = 'minimax-code-cli'
                             THEN snapshot.model_catalog_succeeded_at
                             ELSE COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at) END,
-                       snapshot.executable_fingerprint
+                       snapshot.executable_fingerprint, snapshot.capabilities_json
                 FROM adapter_installation AS installation
                 LEFT JOIN runtime_executable_identity AS identity
                   ON identity.installation_id = installation.id
@@ -2366,6 +2402,7 @@ impl AgentProfileService {
                         row.get::<_, Option<String>>(9)?,
                         row.get::<_, Option<String>>(10)?,
                         row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<String>>(12)?,
                     ))
                 },
             )
@@ -2393,14 +2430,24 @@ impl AgentProfileService {
             locator_fingerprint,
             catalog_succeeded_at,
             snapshot_fingerprint,
+            capabilities_json,
         )) = existing
         {
             let identity_changed =
                 path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
             let compatibility_changed =
                 identity_changed || locator_fingerprint.as_deref() != next_locator_fingerprint;
-            let snapshot_compatibility_changed =
-                compatibility_changed || snapshot_fingerprint.as_deref() != next_fingerprint;
+            let stale_hermes_contract = discovered.adapter_kind == AdapterKind::HermesCli
+                && probe_status.as_deref() == Some("ready")
+                && !capabilities_json
+                    .as_deref()
+                    .and_then(|raw| serde_json::from_str::<Vec<String>>(raw).ok())
+                    .is_some_and(|capabilities| {
+                        crate::agent_runtime_adapter::hermes_capabilities_current(&capabilities)
+                    });
+            let snapshot_compatibility_changed = compatibility_changed
+                || snapshot_fingerprint.as_deref() != next_fingerprint
+                || stale_hermes_contract;
             transaction.execute(
                 if compatibility_changed {
                     r#"
@@ -4394,6 +4441,7 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::CursorAgent
         | AdapterKind::KimiCodeCli
         | AdapterKind::MinimaxCodeCli
+        | AdapterKind::HermesCli
         | AdapterKind::GrokBuild
         | AdapterKind::DeepseekHarness
         | AdapterKind::CommandCodeCli => "acp-v1",
