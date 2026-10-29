@@ -49,6 +49,58 @@ describe('window file editing buffers', () => {
     expect(doc).toMatchObject({ draft: 'B', savedText: 'A', version: 'on-disk', unknown: undefined })
   })
 
+  it('restores manual retry when an unknown save left the original baseline unchanged', async () => {
+    const { store, api, doc } = await fixture()
+    store.change(doc, 'A'); api.saveTextFile.mockRejectedValueOnce(new Error('offline before write'))
+    await store.save(doc); store.change(doc, 'B')
+    api.readEditableFile.mockResolvedValueOnce(snapshot('original', 'same-content-current-version'))
+    expect(await store.reconcile(doc)).toBe(false)
+    expect(doc).toMatchObject({ draft: 'B', savedText: 'original', version: 'same-content-current-version', unknown: undefined, conflict: undefined })
+    expect(store.dialog).toBeNull(); expect(api.saveTextFile).toHaveBeenCalledTimes(1)
+    api.saveTextFile.mockResolvedValueOnce(snapshot('B', 'retry-version'))
+    expect(await store.save(doc)).toBe(true)
+    expect(api.saveTextFile).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'B', expectedVersion: 'same-content-current-version' }))
+  })
+
+  it('compares an uncertain overwrite with the disk snapshot the user chose to overwrite', async () => {
+    const { store, api, doc } = await fixture(); store.change(doc, 'A')
+    doc.conflict = { key: doc.key, text: 'outside', version: 'disk-2' }
+    api.saveTextFile.mockRejectedValueOnce(new Error('offline'))
+    const save = store.save(doc); store.dialog!.resolve('save'); await save
+    api.readEditableFile.mockResolvedValueOnce(snapshot('outside', 'disk-2'))
+    await store.reconcile(doc)
+    expect(doc).toMatchObject({ draft: 'A', savedText: 'outside', version: 'disk-2', unknown: undefined, conflict: undefined })
+    expect(store.dialog).toBeNull(); expect(fileEditDirty(doc)).toBe(true)
+  })
+
+  it('retains a real external conflict after an uncertain save without writing again', async () => {
+    const { store, api, doc } = await fixture(); store.change(doc, 'A')
+    api.saveTextFile.mockRejectedValueOnce(new Error('response lost')); await store.save(doc)
+    api.readEditableFile.mockResolvedValueOnce(snapshot('outside', 'disk-2'))
+    expect(await store.reconcile(doc)).toBe(false)
+    expect(doc.conflict?.text).toBe('outside'); expect(doc.draft).toBe('A')
+    expect(api.saveTextFile).toHaveBeenCalledTimes(1); expect(store.dialog).toBeNull()
+  })
+
+  it.each(['result', 'exception'] as const)('allows same-generation retry after an initial read %s failure', async failure => {
+    const api = { readEditableFile: vi.fn(async () => snapshot('original')), saveTextFile: vi.fn(async () => snapshot('saved')) }
+    if (failure === 'result') api.readEditableFile.mockResolvedValueOnce({ ok: false, error: { code: 'write_failed', message: 'temporary read failure' } })
+    else api.readEditableFile.mockRejectedValueOnce(new Error('offline'))
+    const store = new FileEditStore(api as unknown as FilePreviewApi); stores.push(store)
+    await store.attach('tab', file())
+    expect(store.get('tab')).toBeUndefined(); expect(store.failures.get('tab')).toBe('无法载入编辑内容')
+    await store.attach('tab', file())
+    expect(store.get('tab')?.draft).toBe('original'); expect(store.failures.has('tab')).toBe(false)
+    await store.attach('tab', file()); expect(api.readEditableFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an explicitly unsupported text file read-only without a transient failure notice', async () => {
+    const api = { readEditableFile: vi.fn(async (): Promise<FileEditResult> => ({ ok: false, error: { code: 'edit_unavailable', message: 'read only' } })), saveTextFile: vi.fn() }
+    const store = new FileEditStore(api as unknown as FilePreviewApi); stores.push(store)
+    await store.attach('tab', file())
+    expect(store.get('tab')).toBeUndefined(); expect(store.failures.has('tab')).toBe(false)
+  })
+
   it('uses the observed conflict version for an explicit overwrite', async () => {
     const { store, api, doc } = await fixture(); store.change(doc, 'draft')
     api.saveTextFile.mockResolvedValueOnce({ ok: false, error: { code: 'edit_conflict', message: 'conflict' }, current: { key: doc.key, text: 'outside', version: 'disk-2' } })

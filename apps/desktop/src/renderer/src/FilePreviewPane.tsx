@@ -402,9 +402,12 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
       title={uiAttribute('保存（{0}）', saveShortcut)} aria-label={uiAttribute('保存（{0}）', saveShortcut)} aria-busy={doc.saving}
       onClick={() => void edits?.save(doc)}><DialogControlIcon name="save" /></button>}
   </div>
-  const editError = doc?.error ?? edits?.failures.get(tab.id)
+  const editLoadError = edits?.failures.get(tab.id)
+  const editError = editLoadError ?? doc?.error
   const editFeedback = editError && <div className="file-preview-refresh-error" role="alert"><span>{editError}</span>
-    {doc && <button type="button" disabled={doc.saving} onClick={() => void edits?.save(doc)}>{uiAttribute(doc.unknown ? '核对保存结果' : doc.conflict ? '处理冲突' : '重试')}</button>}
+    {editLoadError && tab.file ? <button type="button" disabled={edits?.isAttaching(tab.id)}
+      onClick={() => void edits?.attach(tab.id, tab.file!)}>{uiAttribute('重试')}</button>
+      : doc && <button type="button" disabled={doc.saving} onClick={() => void edits?.save(doc)}>{uiAttribute(doc.unknown ? '核对保存结果' : doc.conflict ? '处理冲突' : '重试')}</button>}
   </div>
   const [pathActionError, setPathActionError] = useState<string | null>(null)
   useEffect(() => setPathActionError(null), [tab.file?.handleId, tab.id])

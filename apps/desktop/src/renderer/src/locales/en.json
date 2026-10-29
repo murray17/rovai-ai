@@ -4202,6 +4202,8 @@
   "磁盘内容与提交内容不同，修改已保留": "The file differs from the submitted content. Your changes are retained.",
   "文件超过 2 MiB，无法保存": "The file exceeds 2 MiB and cannot be saved.",
   "保存结果未知，修改已保留": "Save result unknown. Your changes are retained.",
+  "保存未完成，修改已保留": "Save did not complete. Your changes are retained.",
+  "无法载入编辑内容": "Could not load editable content",
   "正在保存，请稍后关闭": "Saving. Wait before closing.",
   "文件已在外部更新": "The file changed externally",
   "文件已不存在，修改已保留": "The file no longer exists. Your changes are retained.",

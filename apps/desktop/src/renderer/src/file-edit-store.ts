@@ -13,7 +13,7 @@ export interface FileEditDocument {
   saving: boolean
   error: string | null
   conflict?: EditableFileSnapshot
-  unknown?: { text: string }
+  unknown?: { text: string; baselineText: string }
   editorState?: EditorState
   scrollTop?: number
   navigationTarget?: FileLocationTarget
@@ -50,6 +50,7 @@ export class FileEditStore {
   shouldWarnOnUnload = (): boolean => [...this.documents.values()].some(doc => pending(doc) && this.#exitContents.get(doc) !== doc.draft)
   changed = (): void => { if (!this.#disposed) { this.#revision++; this.#listeners.forEach(fn => fn()) } }
   get = (tabId: string): FileEditDocument | undefined => this.tabs.get(tabId)
+  isAttaching = (tabId: string): boolean => this.#loading.has(tabId)
   protects = (tabId: string): boolean => { const doc = this.get(tabId); return !!doc && pending(doc) }
   hasUnsaved = (): boolean => [...this.documents.values()].some(pending)
 
@@ -59,13 +60,17 @@ export class FileEditStore {
     const access = { handleId: file.handleId, expectedGeneration: file.contentGeneration }
     if (this.#handles.get(tabId) === handleVersion || this.#loading.get(tabId) === handleVersion) return
     this.#loading.set(tabId, handleVersion)
+    this.changed()
     // A read started before a save completed must never roll that confirmed baseline back.
     const baselines = new Map([...this.documents].map(([key, doc]) => [key, { draft: doc.draft, version: doc.version }]))
     try {
       const result = await this.api.readEditableFile(access)
       if (this.#disposed || this.#loading.get(tabId) !== handleVersion) return
-      this.#handles.set(tabId, handleVersion)
-      if (!result.ok) return
+      if (!result.ok) {
+        if (['edit_unavailable', 'file_too_large'].includes(result.error.code)) this.failures.delete(tabId)
+        else this.failures.set(tabId, uiAttribute('无法载入编辑内容'))
+        return
+      }
       const old = this.tabs.get(tabId)
       if (old && old.key !== result.value.key) {
         old.error = uiAttribute('文件位置已失效，修改已保留'); this.changed(); return
@@ -85,9 +90,13 @@ export class FileEditStore {
       }
       doc.access = access
       this.#access.set(tabId, access)
+      this.#handles.set(tabId, handleVersion)
       this.tabs.set(tabId, doc); this.failures.delete(tabId); this.changed()
-    } catch { /* A failed capability probe keeps the existing read-only preview available. */ }
-    finally { if (this.#loading.get(tabId) === handleVersion) this.#loading.delete(tabId) }
+    } catch {
+      if (!this.#disposed && this.#loading.get(tabId) === handleVersion) this.failures.set(tabId, uiAttribute('无法载入编辑内容'))
+    } finally {
+      if (this.#loading.get(tabId) === handleVersion) { this.#loading.delete(tabId); this.changed() }
+    }
   }
 
   allowChange(doc: FileEditDocument, characters: number): boolean {
@@ -117,7 +126,7 @@ export class FileEditStore {
       doc.conflict = undefined; doc.unknown = undefined; doc.error = null; doc.editorState = undefined
       this.changed(); this.onSaved?.(this.tabIds(doc)); return true
     }
-    if (choice === 'save') return this.save(doc, observed.version)
+    if (choice === 'save') return this.save(doc, observed)
     return false
   }
   private tabIds(doc: FileEditDocument): string[] { return [...this.tabs].filter(([, value]) => value === doc).map(([id]) => id) }
@@ -144,6 +153,12 @@ export class FileEditStore {
         doc.unknown = undefined; doc.error = null; doc.conflict = undefined
         this.onSaved?.(this.tabIds(doc)); return true
       }
+      if (result.value.text === submitted.baselineText) {
+        doc.savedText = submitted.baselineText; doc.version = result.value.version
+        doc.unknown = undefined; doc.conflict = undefined
+        doc.error = uiAttribute('保存未完成，修改已保留')
+        return false
+      }
       doc.unknown = undefined; doc.conflict = result.value
       doc.error = uiAttribute('磁盘内容与提交内容不同，修改已保留')
       return false
@@ -151,16 +166,17 @@ export class FileEditStore {
     finally { doc.saving = false; this.changed() }
   }
 
-  async save(doc: FileEditDocument, observedVersion?: string): Promise<boolean> {
+  async save(doc: FileEditDocument, observed?: EditableFileSnapshot): Promise<boolean> {
     if (doc.saving) return false
     if (doc.unknown) return this.reconcile(doc) // Never resubmit an uncertain write.
-    if (doc.conflict && !observedVersion) return this.handleConflict(doc)
-    if (!fileEditDirty(doc) && !observedVersion) return true
+    if (doc.conflict && !observed) return this.handleConflict(doc)
+    if (!fileEditDirty(doc) && !observed) return true
     const submitted = doc.draft
+    const baselineText = observed?.text ?? doc.savedText
     if (new TextEncoder().encode(submitted).byteLength > 2 * 1024 * 1024) { doc.error = uiAttribute('文件超过 2 MiB，无法保存'); this.changed(); return false }
     doc.saving = true; doc.error = null; this.changed()
     let result: FileEditResult
-    try { result = await this.api.saveTextFile!({ ...doc.access, text: submitted, expectedVersion: observedVersion ?? doc.version }) }
+    try { result = await this.api.saveTextFile!({ ...doc.access, text: submitted, expectedVersion: observed?.version ?? doc.version }) }
     catch { result = { ok: false, error: { code: 'save_unknown', message: uiAttribute('保存结果未知，修改已保留') } } }
     doc.saving = false
     if (result.ok && result.value.key !== doc.key) result = { ok: false, error: { code: 'save_unknown', message: '保存结果未知，修改已保留' } }
@@ -170,7 +186,7 @@ export class FileEditStore {
       doc.error = null; doc.conflict = undefined; this.changed(); this.onSaved?.(this.tabIds(doc)); return true
     }
     doc.error = uiAttribute(result.error.message)
-    if (result.error.code === 'save_unknown') doc.unknown = { text: submitted }
+    if (result.error.code === 'save_unknown') { doc.unknown = { text: submitted, baselineText }; doc.conflict = undefined }
     if (result.error.code === 'edit_conflict' && result.current) {
       if (result.current.key === doc.key) doc.conflict = result.current
       else doc.error = uiAttribute('文件位置已失效，修改已保留')
