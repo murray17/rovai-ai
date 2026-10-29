@@ -11,6 +11,7 @@ import {
 } from './FilePreviewContext'
 import { FilePreviewPaneContent as FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewTabs } from './FilePreviewTabs'
+import { ProjectFileIcon } from './ProjectFileIcon'
 import { changeInterfaceLanguage } from './interface-language'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
@@ -188,7 +189,7 @@ describe('FilePreviewTabs open feedback', () => {
 
     const markup = renderTabs()
 
-    expect(markup).toContain('data-resource-type="config"')
+    expect(markup).toContain(renderToStaticMarkup(createElement(ProjectFileIcon, { fileName: 'config.toml' })))
     expect(markup).not.toContain('data-resource-type="text"')
   })
 
@@ -210,7 +211,7 @@ describe('FilePreviewTabs open feedback', () => {
     expect(markup).toContain('aria-label="readme.md"')
     expect(markup).toContain('aria-label="File Change·readme.md"')
     expect(markup).toContain('aria-label="关闭 File Change·readme.md"')
-    expect(markup).toContain('data-file-type="markdown" viewBox="0 0 24 24" aria-hidden="true"')
+    expect(markup).toContain(renderToStaticMarkup(createElement(ProjectFileIcon, { fileName: 'readme.md' })))
     expect(markup).toContain('data-file-type="file_change" viewBox="0 0 24 24" aria-hidden="true"')
     expect(markup).not.toContain('File Change·docs/readme.md')
   })

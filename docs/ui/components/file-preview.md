@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-file-preview
 status: accepted
-last_updated: 2026-10-25
+last_updated: 2026-10-29
 ---
 
 # Camp 文件预览区
@@ -41,9 +41,9 @@ last_updated: 2026-10-25
   用户消息其余文本、结构化 Mention/Skill、消息存储、整条消息复制与模型输入保持原合同。
 - 显式 Markdown 文件链接表达作者的导航意图，消息呈现阶段不检查目标是否存在。点击后才按消息来源工作目录解析
   exact relative path，或直接解析绝对路径，并执行既有来源、文件身份和可访问性校验。
-- 资源类型注册表只决定显式文件链接和普通文件 Tab 的图标；不得从图标推断 Preview 支持性。两处都按文件名查询
-  同一视觉类型，未知类型使用通用文件图标。Main 仍以既有 classifier 的扩展名、大小、MIME 与内容规则决定
-  Preview、系统打开或失败。
+- 资源类型注册表决定显式文件链接的单色图标；普通文件 Tab 使用下述文件类型图标。图标均按文件名选择，
+  未知类型使用通用文件图标，不得从图标推断 Preview 支持性。Main 仍以既有 classifier 的扩展名、大小、MIME
+  与内容规则决定 Preview、系统打开或失败。
 - 点击继续使用既有来源校验，打开/激活文件 Tab；同一文件去重，支持 `:44-46` 行范围，定位起始行并高亮范围。
   最终定位到具体普通文件后，无论位于 Camp 工作区内外，都直接进入相同 Preview；绝对路径、`~/`、本机 file URI、
   symlink、Attachment、Run Evidence 当前文件与预览内子链接都不弹目录授权选择器。不支持格式仍调用默认应用；
@@ -119,11 +119,12 @@ Mission 进入时先建立活动；有 running Run 且用户保存位置为右�
 [Run Process Detail Surface v42](../../contracts/run-process-detail-surface-v42.md)。
 
 Tabs 使用 Codex toolbar 语法：小间距、无逐项边框、当前项用次级 surface 和文字对比表达，不使用品牌下划线。
-普通文件 Tab 与会话文件链接按文件名共用相同资源视觉类型，不直接用 `FilePreviewKind` 选图标；左侧复用文件引用的
-同一套 14px、1.7px 描边单色 SVG Glyph，覆盖共享资源类型矩阵；File Change 固定复用 Diff/Patch Glyph。
-图标使用继承的中性色，作为装饰隐藏于辅助技术，
-文件名和 File Change 前缀继续提供可访问名称，不用颜色代替类型语义。
-文件名使用 UI 字体；同类 Tab 重名时从 Main 已签发的可见路径末尾逐级增加目录，使用当前同名组内的最短唯一后缀，
+普通文件 Tab 使用共享 `ProjectFileIcon`：`@react-symbols/icons` 的 `FileIcon` 按文件名扩展名匹配，
+`autoAssign={false}`，未知类型沿用库的普通文件回退；不直接用 `FilePreviewKind` 选图标。
+图标槽固定为 16px，保留 SVG 原有颜色，不套用操作图标的单色描边样式。File Change 继续复用 Diff/Patch Glyph，
+活动、执行与会话文件链接保持已有图标。所有图标作为装饰隐藏于辅助技术，文件名和 File Change 前缀继续提供可访问名称。
+文件名使用现有 UI 字体、12px、常规字重和正常字间距；代码正文与行号保持等宽字体。
+同类 Tab 重名时从 Main 已签发的可见路径末尾逐级增加目录，使用当前同名组内的最短唯一后缀，
 例如 `Desktop/report.html` 和 `Downloads/report.html`。重复后缀继续向上补足；只有安全文件名的 Attachment、
 项目根文件或仍无法区分的项使用 `文件名 · 1/2` 序号。
 历史变更与当前文件不会互相触发重名扩展。
