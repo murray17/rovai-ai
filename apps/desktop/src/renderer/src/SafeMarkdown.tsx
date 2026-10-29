@@ -12,6 +12,7 @@ import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import { parseFileReference } from '../../file-preview-reference'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MarkdownCodeFrame } from './MarkdownCodeFrame'
+import { MarkdownTableFrame } from './MarkdownTableFrame'
 import {
   visitRenderedFileReferences,
   type MarkdownNode
@@ -258,9 +259,7 @@ export function SafeMarkdown({
             )
           },
           table({ children: tableChildren }) {
-            return mode === 'document'
-              ? <div className="markdown-table-scroll"><table>{tableChildren}</table></div>
-              : <div className="markdown-table-scroll" tabIndex={0} role="region" aria-label={uiAttribute('表格')}><table>{tableChildren}</table></div>
+            return <MarkdownTableFrame>{tableChildren}</MarkdownTableFrame>
           },
           a({ href, children: linkChildren, className: linkClassName }) {
             if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && fileReferencesEnabled) {

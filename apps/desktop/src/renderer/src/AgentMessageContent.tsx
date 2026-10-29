@@ -16,7 +16,10 @@ export function AgentMessageContent({ className, ...props }: HTMLAttributes<HTML
       let width = 0
       // Tables keep their intrinsic width inside a separate scroll viewport.
       for (const table of root.querySelectorAll<HTMLElement>('.markdown-table-scroll > table')) {
-        width = Math.max(width, table.getBoundingClientRect().width)
+        const scroll = table.parentElement!
+        const frame = scroll.closest('.markdown-table-frame')
+        const gutter = frame ? frame.getBoundingClientRect().width - scroll.getBoundingClientRect().width : 0
+        width = Math.max(width, table.getBoundingClientRect().width + gutter)
       }
       for (const pre of root.querySelectorAll<HTMLElement>('.markdown-code-frame > pre')) {
         const range = root.ownerDocument.createRange()

@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-10-28
+last_updated: 2026-10-29
 ---
 
 # Camp 会话工作区
@@ -348,6 +348,12 @@ Desktop 复用新窗口处理并由本机默认浏览器打开，明确调用失
 Markdown 正文中的代码块提供[与文件预览一致的复制入口](file-preview.md#路径与-viewer)：右上角常驻图标只复制
 当前块内的代码；成功短暂显示对勾，失败可手动复制。该入口与整条消息复制独立，不改变原始 Markdown、
 用户消息的纯文本投影或选文引用范围。
+
+共享 Markdown 表格使用透明表头、细横向分隔线和单元格留白，不铺表头底色或竖向网格线。
+右上角的表格复制图标在悬停、键盘聚焦与复制反馈期间显示，触屏常驻；操作位于横向滚动区外，
+不遮挡表头，不随列滚走。复制当前完整表格（包含滚动区外的列），同时写入 HTML 表格与制表符分列
+的纯文本，单元格内的换行和双引号按 TSV 转义。成功短暂显示对勾，失败在原表格下方提示重试或
+手动选文复制。按钮与反馈不进入选文引用、文件搜索或复制内容，整条消息复制继续保留原始 Markdown。
 
 当前用户与通过 Owner 校验的外部 Principal 消息整体右对齐，头像位于消息右侧，作者与时间也在右侧收口；
 正文使用 `--conversation-user-message-surface` / `--conversation-user-message-line` 的浅灰圆角底面。底面按正文

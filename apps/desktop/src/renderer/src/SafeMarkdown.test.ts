@@ -87,7 +87,8 @@ describe('SafeMarkdown file preview references', () => {
       mode: 'document'
     }))
 
-    expect(markup).toContain('<div class="markdown-table-scroll"><table>')
+    expect(markup).toContain('class="markdown-table-scroll"')
+    expect(markup).toContain('class="markdown-table-copy"')
     expect(markup).toContain('<th>项目</th>')
     expect(markup).toContain('<td>宽内容</td>')
   })

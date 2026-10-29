@@ -185,6 +185,7 @@
     "test:member-runtime-apply": "node --test scripts/lib/member-runtime-apply.test.mjs",
     "test:run-presence-ui": "node --test --test-concurrency=1 scripts/lib/run-presence.test.mjs scripts/lib/reply-details.test.mjs",
     "test:markdown-code-copy": "node --test scripts/lib/markdown-code-copy.test.mjs",
+    "test:markdown-table-copy": "node --test scripts/lib/markdown-table-copy.test.mjs",
     "test:steer-ui": "node --test scripts/lib/steer-ui.test.mjs"
   },
   "dependencies": {
