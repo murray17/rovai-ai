@@ -13,8 +13,6 @@ import { MobileLayoutProvider } from '../../../apps/desktop/src/renderer/src/Mob
 import { model, profiles, installations, snippets, documents } from './model'
 import { SafeMarkdown } from '../../../apps/desktop/src/renderer/src/SafeMarkdown'
 import { MarkdownCodeFrame } from '../../../apps/desktop/src/renderer/src/MarkdownCodeFrame'
-import { AgentMessageContent } from '../../../apps/desktop/src/renderer/src/AgentMessageContent'
-import { createTableClipboardData } from '../../../apps/desktop/src/renderer/src/markdown-table-clipboard'
 import { readMessageQuoteText } from '../../../apps/desktop/src/renderer/src/message-quote-selection'
 import { createFileFindDomIndex } from '../../../apps/desktop/src/renderer/src/file-find-dom'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
@@ -52,24 +50,6 @@ function EdgeCases() {
     {visible && <MarkdownCodeFrame code={code}><pre><code>{code}</code></pre></MarkdownCodeFrame>}
     <SafeMarkdown inlineContent={{ TOKEN: <span>@当前用户</span> }}>{'```\nHello TOKEN\n```'}</SafeMarkdown>
     <SafeMarkdown>{'`inline`\n\n    indented\n\n```unknown\n\t中文 & <tag>  \n\nend\n```\n\n```\n```'}</SafeMarkdown>
-  </main>
-}
-
-function TableCases() {
-  const [source, setSource] = useState('| 场景 | 当前处理 | 调整后处理 |\n| --- | --- | --- |\n| 邮件包含付款记录 | 写入 `payment_report`，保存金额与币种 | 同时保存邮件编号，便于追溯 |\n| `companyCode=null` | 在 `classify` 阶段跳过，其他账户继续处理 | 记录原因，标记为**待核对** |\n| 账户不在白名单 | 跳过，不入库 | 保留原始记录，等待配置更新 |\n| 同一邮件重复到达 | 依据 `messageId` 去重 | 返回已有结果，避免重复入库 |')
-  const [visible, setVisible] = useState(true)
-  Object.assign(window, { __tableCopy: { setSource, setVisible, createTableClipboardData,
-    quote: () => readMessageQuoteText(document.querySelector('.table-message .safe-markdown') as HTMLElement),
-    find: () => createFileFindDomIndex(document.querySelector('.table-document .safe-markdown') as HTMLElement).text,
-    language: (language: string) => changeInterfaceLanguage(languageTestApi, language as any)
-  } })
-  return <main className="table-cases">
-    <h2>消息中的表格</h2>
-    {visible && <section className="table-message conversation-bubble agent public-agent-message">
-      <div className="message-surface"><AgentMessageContent className="final-copy"><SafeMarkdown>{source}</SafeMarkdown></AgentMessageContent></div>
-    </section>}
-    <h2>文档中的表格</h2>
-    <section className="table-document file-preview-markdown"><SafeMarkdown mode="document">{'| 项目 | 说明 |\n| --- | --- |\n| **行列与格式** | 一<br>二，带有 "引号" |\n| `代码` 与链接 | [参考文档](https://example.com/reference) |'}</SafeMarkdown></section>
   </main>
 }
 
@@ -114,4 +94,4 @@ function Workbench() {
     </FilePreviewProvider></CurrentUserProfileContext.Provider>
   </ThreadClientProvider></MobileLayoutProvider>
 }
-createRoot(document.getElementById('root')!).render(params.has('table') ? <TableCases /> : params.has('edge') ? <EdgeCases /> : <Workbench />)
+createRoot(document.getElementById('root')!).render(params.has('edge') ? <EdgeCases /> : <Workbench />)

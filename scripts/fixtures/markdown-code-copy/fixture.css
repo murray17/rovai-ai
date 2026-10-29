@@ -5,9 +5,3 @@
 .copy-window-lights i:nth-child(2) { background: #febc2e; }
 .copy-window-lights i:nth-child(3) { background: #28c840; }
 .edge-cases { padding: 32px; max-width: 700px; margin: auto; }
-.table-cases { max-width: 1000px; margin: auto; padding: 32px; }
-.table-cases h2 { margin: 24px 0 12px; font-size: 16px; font-weight: 600; }
-.table-cases .table-message { display: block; padding: 0; }
-.table-cases .table-message .message-surface { width: 100%; }
-.table-cases .table-message .final-copy { width: 100%; max-width: none; padding: 0; }
-@media (max-width: 600px) { .table-cases { padding: 16px; } }
