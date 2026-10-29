@@ -7,7 +7,6 @@ import { navigationThreadHasUnread } from './navigation-unread'
 import { useInterruptionAttention } from './thread-interruption-attention'
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1187,7 +1186,7 @@ function ThreadRow({
         onClick={() => onThread(thread)}
       >
         {pinned && <span className="pinned-camp-icon" aria-hidden="true"><NavigationIcon name="messages" /></span>}
-        <ThreadNavigationTitle title={title} selected={active} />
+        <span className="truncate">{title}</span>
         {thread.activationState === 'pending' && <span className="camp-draft-badge"><UiText zh={"草稿"} /></span>}
         <span className="camp-status-cluster" data-status={status} aria-hidden="true">
           {showDot && <span className="camp-status-slot"><i className="camp-unread-dot" /></span>}
@@ -1203,31 +1202,6 @@ function ThreadRow({
         mobile={mobile}
       />
     </div>
-  )
-}
-
-function ThreadNavigationTitle({ title, selected }: { title: string; selected: boolean }): JSX.Element {
-  const textRef = useRef<HTMLSpanElement>(null)
-  const [overflowing, setOverflowing] = useState(false)
-
-  // Selection changes the font weight, which can change overflow without resizing the box.
-  useLayoutEffect(() => {
-    const text = textRef.current
-    if (!text) return
-    const measure = () => setOverflowing(text.scrollWidth > text.clientWidth + 1)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(text)
-    return () => observer.disconnect()
-  }, [title, selected])
-
-  return (
-    <span className="camp-nav-title" data-overflow={overflowing || undefined}>
-      <span className="camp-nav-title-text" ref={textRef}>{title}</span>
-      {overflowing && [1, 2, 3].map((layer) => (
-        <span className={`camp-nav-title-blur camp-nav-title-blur-${layer}`} key={layer} aria-hidden="true">{title}</span>
-      ))}
-    </span>
   )
 }
 

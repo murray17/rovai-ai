@@ -380,10 +380,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
-  it('aligns sidebar titles independently from the reserved status and action lane', () => {
+  it('aligns sidebar titles independently from the fixed status and action lane', () => {
     expect(css).toMatch(/\.unified-sidebar\s*\{[^}]*--nav-child-indent: 24px[^}]*--nav-status-slot: 12px[^}]*--nav-unread-size: 7px/)
     expect(css).toMatch(/\.camp-group-children\s*\{[^}]*padding-left: var\(--nav-child-indent\)/)
-    expect(css).toMatch(/\.camp-nav-open\s*\{[^}]*gap: 7px[^}]*padding: 2px 32px 2px 8px/)
+    expect(css).toMatch(/\.camp-nav-open\s*\{[^}]*gap: 7px[^}]*padding: 2px 44px 2px 8px/)
     expect(css).toMatch(/\.pinned-navigation > \.camp-nav-row > \.camp-nav-open > \.pinned-camp-icon\s*\{[^}]*width: 17px[^}]*height: 17px[^}]*flex: 0 0 17px/)
     expect(css).toMatch(/\.camp-status-slot\s*\{[^}]*width: var\(--nav-status-slot\)[^}]*height: var\(--nav-status-slot\)[^}]*flex: 0 0 var\(--nav-status-slot\)[^}]*place-items: center[^}]*margin-left: auto/)
     expect(css).toMatch(/\.camp-status-slot > \.camp-unread-dot\s*\{[^}]*width: var\(--nav-unread-size\)[^}]*height: var\(--nav-unread-size\)[^}]*background: var\(--conversation-unread\)/)
