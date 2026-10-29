@@ -635,7 +635,8 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 .camp-nav-row { position: relative; display: flex; min-width: 0; min-height: 28px; align-items: center; border-radius: 6px; }
 .camp-nav-row:hover { background: var(--surface-muted); }
 .camp-nav-row.selected { background: var(--surface-selected); }
-.camp-nav-open { position: relative; width: 100%; display: flex; min-width: 0; min-height: 28px; flex: 1 1 auto; align-items: center; gap: 7px; align-self: stretch; padding: 2px 44px 2px 8px; border: 0; background: transparent; color: var(--rail-ink); text-align: left; cursor: pointer; font-size: 12px; font-weight: 400; line-height: 1.35; }
+.camp-nav-open { position: relative; width: 100%; display: flex; min-width: 0; min-height: 28px; flex: 1 1 auto; align-items: center; gap: 7px; align-self: stretch; padding: 2px 32px 2px 8px; border: 0; background: transparent; color: var(--rail-ink); text-align: left; cursor: pointer; font-size: 12px; font-weight: 400; line-height: 1.35; }
+.camp-nav-open:where(:has(.camp-status-cluster:is([data-status="loading-unread"], [data-status="opening-unread"]))) { padding-right: 44px; }
 .camp-nav-row.selected .camp-nav-open { color: var(--conversation-action-ink); font-weight: 500; }
 .pinned-camp-icon { display: none; }
 .pinned-navigation > .camp-nav-row > .camp-nav-open { position: relative; }
@@ -661,7 +662,47 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
 .camp-status-slot { display: grid; width: var(--nav-status-slot); height: var(--nav-status-slot); flex: 0 0 var(--nav-status-slot); place-items: center; margin-left: auto; pointer-events: none; }
 .camp-status-slot > .camp-loading-spinner { width: var(--nav-status-slot); height: var(--nav-status-slot); margin: 0; }
 .camp-status-slot > .camp-unread-dot { display: block; width: var(--nav-unread-size); height: var(--nav-unread-size); margin: 0; border: 0; border-radius: 50%; background: var(--conversation-unread); }
-.camp-nav-open .truncate { min-width: 0; flex: 1 1 auto; }
+.camp-nav-title { position: relative; display: block; min-width: 0; flex: 1 1 auto; overflow: hidden; white-space: nowrap; }
+.camp-nav-title-text { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* Crossfade clear text into increasing blur, then fade the combined tail.
+   Alpha masks preserve the row's theme, hover and selection surfaces. */
+.camp-nav-title[data-overflow="true"] {
+  --title-ending-width: min(44px, 45%);
+  --title-ending-blur: 1.8px;
+  --title-ending-start: calc(100% - var(--title-ending-width));
+  --title-ending-middle: calc(100% - var(--title-ending-width) * .67);
+  --title-ending-tail: calc(100% - var(--title-ending-width) * .3);
+  --title-ending-alpha: linear-gradient(to right, currentColor var(--title-ending-start), color-mix(in srgb, currentColor 90%, transparent) var(--title-ending-middle), color-mix(in srgb, currentColor 45%, transparent) var(--title-ending-tail), transparent 100%);
+  -webkit-mask-image: var(--title-ending-alpha);
+  mask-image: var(--title-ending-alpha);
+}
+.camp-nav-title[data-overflow="true"] .camp-nav-title-text {
+  text-overflow: clip;
+  --title-ending-clear: linear-gradient(to right, currentColor var(--title-ending-start), transparent var(--title-ending-middle));
+  -webkit-mask-image: var(--title-ending-clear);
+  mask-image: var(--title-ending-clear);
+}
+.camp-nav-title-blur {
+  position: absolute; inset: 0; display: block; overflow: hidden; pointer-events: none; user-select: none; -webkit-user-select: none;
+  -webkit-mask-image: var(--title-ending-layer); mask-image: var(--title-ending-layer);
+}
+.camp-nav-title-blur-1 {
+  filter: blur(calc(var(--title-ending-blur) / 3));
+  --title-ending-layer: linear-gradient(to right, transparent var(--title-ending-start), currentColor var(--title-ending-middle), transparent var(--title-ending-tail));
+}
+.camp-nav-title-blur-2 {
+  filter: blur(calc(var(--title-ending-blur) * 2 / 3));
+  --title-ending-layer: linear-gradient(to right, transparent var(--title-ending-middle), currentColor var(--title-ending-tail), transparent 100%);
+}
+.camp-nav-title-blur-3 {
+  filter: blur(var(--title-ending-blur));
+  --title-ending-layer: linear-gradient(to right, transparent var(--title-ending-tail), currentColor 100%);
+}
+@media (forced-colors: active) {
+  .camp-nav-title[data-overflow="true"], .camp-nav-title[data-overflow="true"] .camp-nav-title-text { -webkit-mask-image: none; mask-image: none; }
+  .camp-nav-title[data-overflow="true"] .camp-nav-title-text { text-overflow: ellipsis; }
+  .camp-nav-title-blur { display: none; }
+}
 .camp-draft-badge { flex: 0 0 auto; color: var(--faint); font-size: 11px; font-weight: 500; letter-spacing: .02em; }
 .sidebar-action-menu {
   z-index: 80;
@@ -710,7 +751,8 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
   .group-create-button,
   .project-heading-row > .group-menu-trigger { opacity: 1; pointer-events: auto; }
   .group-create-button:disabled { opacity: .48; }
-  .camp-nav-open { padding-right: 76px; }
+  .camp-nav-open:where(:has(.camp-status-cluster:not([data-status="none"]))) { padding-right: 60px; }
+  .camp-nav-open:where(:has(.camp-status-cluster:is([data-status="loading-unread"], [data-status="opening-unread"]))) { padding-right: 76px; }
   .camp-nav-row .camp-status-cluster,
   .camp-nav-row:is(:hover, :has(:focus-visible), [data-menu-open="true"]) .camp-status-cluster { right: 40px; visibility: visible; }
 }
