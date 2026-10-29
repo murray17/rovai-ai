@@ -4397,3 +4397,17 @@ Mission 抽屉和 Diff 文件树已有最终指针提交与缩放换算，保留
 真实 Core/浏览器、能力、生命周期和已接受差异分别记录于
 [Linux 验收](../../research/command-code-runtime/linux-acceptance-2026-10-25.md)；
 公开范围见 [V1.72-D61](decisions.md#v1-72-d61)，不增加 Runtime 管理机制。
+
+## 轻量文件编辑（2026-10-29）
+
+新增 Host `file_edit` 写入逻辑、Desktop/Web 文件适配、窗口编辑状态和 CodeMirror 编辑视图；UI 仅增加源码切换、圆点和路径行保存图标。
+Worktree：`../rovai-ai-project-files-prototype`；分支 `rovai/project-files-prototype`；基线 `4d274ad0a`；Governance：none；Status：ready。
+Rust 写入单测 3 项通过；`pnpm test:rust:pr` 共 480 passed / 1 既有 ignored。完整 Vitest 为 3029 passed / 2 既有 skipped。
+窗口草稿回归覆盖提交 A／继续输入 B、迟到读取、结果未知核对、版本冲突、失败关闭和同文件多标签关闭后继续保存。
+Desktop/Web 前端构建与 TypeScript 检查通过；真实 preload 和原生窗口关闭夹具通过。
+现有 Host/Web 集成 owner 在隔离工作区调用 Desktop admission 和 Web HTTP 两条真实链路并完成磁盘回读；
+覆盖句柄归属、BOM/CRLF、JSON 转义后的请求大小、外部冲突、明确覆盖和删除后拒绝重建，无真实 Runtime。
+V13 继续以模拟目录承载浏览交互，复用生产编辑组件；人工检查中英文、浅色/深色、720px 窄窗、草稿与撤销保留、
+Markdown 保存后预览刷新、关闭确认和冲突取消。生产目录服务不由此次交互稿推导为已交付。
+当前仅验证 macOS 开发产物，不代表 Windows/Linux 发行包或压缩体积已验收。
+按 User 既有偏好提交并推送原分支，保留 worktree 待后续评审，不自动创建 PR。

@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-10-18
+last_updated: 2026-10-29
 ---
 
 # File Preview Architecture
@@ -35,13 +35,13 @@ explicit local-link click
 
 - **Core** 拥有 Camp、Message、Attachment、Runtime Evidence 与当前文件身份映射；
 - **Desktop Main** 拥有宿主路径、原生选择器、Root Grant、只读文件能力、reopen token、HTML/asset token、watcher 和系统操作；
-- **Preload** 只暴露 [File Preview v23](../contracts/file-preview-v23.md) 的场景化方法；iframe 不获得 Preload；
+- **Preload** 只暴露 [File Preview v24](../contracts/file-preview-v24.md) 的场景化方法；iframe 不获得 Preload；
 - **Renderer** 拥有按 Camp 隔离的窗口内 Tab shell、布局与阅读状态，只把显式 Markdown link 分类为本地文件或 Web
   入口；inline-code 和正文不进入文件识别，也不读取磁盘。Activity 与 Execution 是 Renderer-only 合成标签，
   只借用同一 Tab shell 和分栏 host，不进入文件 controller、resource owner 或恢复来源。Tab shell 不拥有文件能力
   或当前文件事实。
 
-预览仅提供阅读能力。文字选择与系统复制是本地阅读行为，不连接 Composer 写入、消息持久化或 Agent input；
+当前项目普通文本补齐轻量编辑；历史证据、附件资产与分页内容仍只读。文字选择与系统复制不连接 Composer 写入、消息持久化或 Agent input；
 引用能力不在当前组件图内。
 
 `Files Changed` 卡片的入口由 Renderer 根据冻结的 `presentationKind` 路由：可靠差异进入不可变 Review，
@@ -141,7 +141,7 @@ Renderer 的 `file-preview-session.ts` 保存最多 24 个 Camp 的轻量快照�
 句柄、资源映射、站点和加载请求。React 只订阅状态，通过稳定的预览容器显示当前 Camp；不常驻完整 Camp 或 Runtime。
 
 最多 8 个热 Camp、128 MiB 不可见可重建内容、4 个 HTML 页面实例分别回收；集中配置与完整规则见
-[File Preview v23](../contracts/file-preview-v23.md)。保留不可重新取得内容，不通过普通回收丢弃临时唯一副本。
+[File Preview v24](../contracts/file-preview-v24.md)。保留不可重新取得内容，不通过普通回收丢弃临时唯一副本。
 24 个快照包含热 Camp。只有用户切回/打开/激活更新 LRU，后台完成和监听不更新。
 
 切 Thread 先复用标签内容、Blob URL 和 iframe。有更新或缓存句柄已回收时，当前可见标签通过候选刷新；
@@ -167,7 +167,7 @@ Main 将 `{campId, previewSessionId, bindingGeneration}` 与当前导航分开�
 Desktop 使用文件身份与属性，Web 还比较既有摘要；手动刷新和恢复完整加载。
 失败保留旧内容并阻断通知触发的重试；明确用户入口才可再次尝试。
 计时器随隐藏、关闭、淘汰、session 换代或释放清理。分页按可见行号在新内容中重新定位，
-缩短时回落到最后有效行，不跨版本复用字节偏移。完整行为见 [File Preview v23](../contracts/file-preview-v23.md)。
+缩短时回落到最后有效行，不跨版本复用字节偏移。完整行为见 [File Preview v24](../contracts/file-preview-v24.md)。
 
 ## 读取与 generation
 
@@ -229,7 +229,7 @@ Renderer 的文档期限由当前根 `documentId` 拥有，重复握手及子 fr
 无响应显示非阻塞的未知状态。服务端诊断采用有界回放与文档订阅起点，按请求开始序号过滤旧记录和延迟旧请求，
 子页面不清空根页面诊断，新的导航不继承历史页已耗尽的展示额度。
 查找使用有界可见正文快照、现有 Worker 和高亮定位；源码独立读取未注入内容。完整 wire、限制和状态见
-[File Preview v23](../contracts/file-preview-v23.md)。
+[File Preview v24](../contracts/file-preview-v24.md)。
 
 Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.ready 前注册 secure standard scheme，
 实际窗口 Session 安装 sender gate 与 protocol handler。token 绑定窗口、Camp、句柄、generation 和文档目录；
@@ -245,3 +245,13 @@ Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.r
 - webContents 销毁/应用退出：幂等释放对应或全部资源。
 
 不支持格式在来源与本地文件校验后直接交给系统默认应用，并在返回前释放一次性解析材料；它不进入上述长期资源图。
+
+## 轻量文本编辑
+
+`FilePreviewResources` 持有窗口级 `FileEditStore`，按 Host 文件 key 复用草稿与 CodeMirror 状态。
+预览 tab 仍由原有 controller 管理；普通缓存刷新不拥有编辑缓冲区。关闭先处理未保存内容，再释放句柄和编辑关联。
+保存及只读预览刷新分别提交，因此自写通知不能替换用户在保存期间继续输入的内容。
+
+Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core 重新解析业务来源，数据库锁之外的 blocking pool
+使用 `file_edit` 执行串行、带摘要基线的同目录替换。没有第二份 Node/Web 写入实现，也没有持久操作账本。
+字段和失败行为见 [File Preview v24](../contracts/file-preview-v24.md)，界面见[文件预览区](../ui/components/file-preview.md#轻量文本编辑)。

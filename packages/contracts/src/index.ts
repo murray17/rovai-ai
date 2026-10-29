@@ -1828,7 +1828,24 @@ export interface FilePreviewRetentionState {
   handles: { handleId: string; previewSessionId: string; tabId: string; lastUsed: number; visible: boolean; busy: boolean; recoverable: boolean }[]
 }
 
+export interface EditableFileSnapshot {
+  /** Host-issued current-file identity; independent of Thread and preview handles. */
+  key: string
+  text: string
+  version: string
+}
+export type FileEditErrorCode = 'edit_unavailable' | 'edit_conflict' | 'file_not_found' | 'file_too_large' | 'source_not_authorized' | 'write_failed' | 'save_unknown'
+export type FileEditResult = { ok: true; value: EditableFileSnapshot } | {
+  ok: false; error: { code: FileEditErrorCode; message: string }; current?: EditableFileSnapshot
+}
+export interface FileEditAccess { handleId: string; expectedGeneration: string }
+export interface SaveTextFileRequest extends FileEditAccess { text: string; expectedVersion: string }
+
 export interface FilePreviewApi {
+  onConnectionRestored?(listener: () => void): () => void
+  readEditableFile?(request: FileEditAccess): Promise<FileEditResult>
+  saveTextFile?(request: SaveTextFileRequest): Promise<FileEditResult>
+
   /** Browser image bytes resolved under the current, generation-bound parent. */
   readChildImage?(request: { handleId: string; expectedGeneration: string; rawReference: string }): Promise<FilePreviewOperationResult<FilePreviewBinaryContent>>
 

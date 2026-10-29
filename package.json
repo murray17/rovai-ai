@@ -188,6 +188,7 @@
     "test:steer-ui": "node --test scripts/lib/steer-ui.test.mjs"
   },
   "dependencies": {
+    "@codemirror/commands": "6.11.0",
     "@larksuiteoapi/node-sdk": "1.73.0",
     "acorn": "8.15.0",
     "dingtalk-stream": "2.1.6-beta.1",

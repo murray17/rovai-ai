@@ -1,5 +1,5 @@
 export type ShortcutActionId =
-  | 'execution' | 'tasks' | 'members' | 'dm' | 'preview' | 'composer' | 'latest' | 'attach'
+  | 'save-file' | 'execution' | 'tasks' | 'members' | 'dm' | 'preview' | 'composer' | 'latest' | 'attach'
   | 'jump' | 'new' | 'sidebar' | 'settings' | 'back' | 'forward' | 'missions' | 'automations'
   | 'find' | 'next' | 'previous' | 'previous-tab' | 'next-tab' | 'reveal-file' | 'open-file'
 export type ShortcutMouseSide = 'side1' | 'side2'

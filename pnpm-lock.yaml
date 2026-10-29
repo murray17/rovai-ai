@@ -11,6 +11,9 @@ importers:
 
   .:
     dependencies:
+      '@codemirror/commands':
+        specifier: 6.11.0
+        version: 6.11.0
       '@larksuiteoapi/node-sdk':
         specifier: 1.73.0
         version: 1.73.0(patch_hash=97c95bd39991d6d592e6a57dc9b0f79e52f8c5a5022326c139a8745acd138af8)(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)

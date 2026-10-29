@@ -232,7 +232,10 @@ fn routes(state: WebState) -> Router {
             post(avatars::avatar).layer(DefaultBodyLimit::max(24 * 1024 * 1024)),
         )
         .route("/downloads", post(downloads::prepare))
-        .route("/files", post(resources::files))
+        .route(
+            "/files",
+            post(resources::files).layer(DefaultBodyLimit::max(13 * 1024 * 1024)),
+        )
         .route("/files/bytes", post(resources::binary))
         .route("/attachments", post(resources::attachment))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate));

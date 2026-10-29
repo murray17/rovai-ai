@@ -9,7 +9,8 @@ import { UiText, uiAttribute } from './interface-language'
 
 const labels = { script: '脚本错误', promise: '异步脚本错误', resource: '资源加载失败', policy: '浏览器策略阻止', document: '页面加载失败', channel: '诊断通道不可用' }
 
-export function HtmlViewer({ tab, pathControl, updateAction, downloadAction }: {
+export function HtmlViewer({ tab, pathControl, updateAction, downloadAction, hideToolbar = false }: {
+  hideToolbar?: boolean
   tab: FilePreviewTabModel; pathControl: ReactNode; updateAction: ReactNode; downloadAction: ReactNode
 }): React.JSX.Element {
   const versions = [{ file: tab.file, content: tab.content, candidate: false },
@@ -17,11 +18,12 @@ export function HtmlViewer({ tab, pathControl, updateAction, downloadAction }: {
   return <>{versions.map(version => <div key={version.file?.handleId ?? tab.id}
     className="file-preview-html-version" hidden={version.candidate} inert={version.candidate}>
     <HtmlPageViewer tab={{ ...tab, file: version.file, content: version.content }}
-      candidate={version.candidate} downloadAction={version.candidate ? null : downloadAction} pathControl={pathControl} updateAction={updateAction} />
+      candidate={version.candidate} hideToolbar={hideToolbar} downloadAction={version.candidate ? null : downloadAction} pathControl={pathControl} updateAction={updateAction} />
   </div>)}</>
 }
 
-function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candidate }: {
+function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candidate, hideToolbar }: {
+  hideToolbar: boolean
   candidate: boolean
   downloadAction: ReactNode
   tab: FilePreviewTabModel
@@ -125,7 +127,7 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
   </button> : summary && <span className="file-preview-html-feedback">{summary}</span>
   return <div className="file-preview-html-stage" data-document-state={documentState} data-script-state={scriptFailed ? 'error' : 'no-error-observed'} data-resource-state={resourceFailed ? 'partial-failure' : 'no-error-observed'} data-channel-state={channelState} data-server-diagnostics-state={loadState.serverDiagnostics}>
     <span className="sr-only" role="status">{summary}</span>
-    {(pathControl || feedback || updateAction || downloadAction) && <div className={pathControl || downloadAction ? 'file-preview-path-row' : 'file-preview-html-feedback-row'}>
+    {!hideToolbar && (pathControl || feedback || updateAction || downloadAction) && <div className={pathControl || downloadAction ? 'file-preview-path-row' : 'file-preview-html-feedback-row'}>
       {pathControl}
       {updateAction}
       {feedback}
@@ -143,6 +145,7 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
         {downloadAction}
       </div>
     </div>}
+    {hideToolbar && hasDetails && feedback}
     {hasDetails && <div id={detailsId} className="file-preview-html-diagnostics" hidden={!expanded}>
       {tab.refreshError && <p role="alert"><UiText zh={"重新加载失败："} />{tab.refreshError}<UiText zh={"。已显示的内容会保留。"} /></p>}
       {loadState.notice && <p className="file-preview-html-notice">{loadState.notice}</p>}

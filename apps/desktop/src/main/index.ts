@@ -179,6 +179,7 @@ import {
   parseChooseRootRequest,
   parseCopyPathRequest,
   parseFilePreviewThread,
+  parseSaveTextRequest,
   parseGenerationRequest,
   parseHtmlSiteRequest,
   parseHandleRequest,
@@ -1329,6 +1330,11 @@ ipcMain.handle('rovai:file-preview-restore', (event, value: unknown) =>
 
 ipcMain.handle('rovai:file-preview-reopen', (event, value: unknown) =>
   filePreview.reopen(requireFilePreviewSender(event), parseReopenRequest(value)))
+
+ipcMain.handle('rovai:file-preview-read-editable', (event, value) =>
+  filePreview.editText(requireFilePreviewSender(event), parseGenerationRequest(value), false))
+ipcMain.handle('rovai:file-preview-save-text', (event, value) =>
+  filePreview.editText(requireFilePreviewSender(event), parseSaveTextRequest(value), true))
 
 ipcMain.handle('rovai:file-preview-read-text', (event, value: unknown) =>
   filePreview.readText(requireFilePreviewSender(event), parseGenerationRequest(value)))

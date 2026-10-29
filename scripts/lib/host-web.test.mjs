@@ -1,3 +1,4 @@
+import { exerciseFileEditing } from './host-web-file-edit.mjs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawn, execFileSync } from 'node:child_process'
@@ -239,7 +240,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal('dataDir' in info, false)
     assert.equal(info.name, (await host.request('app.info')).name)
     assert.deepEqual(await call(second, 'navigation.snapshot'), await host.request('navigation.snapshot'))
-    for (const operation of ['preferences.newConversation.initialize', 'host.web.token', 'host.web.rotate', 'host.web.loginTicket', 'core.shutdown', 'host.editor.resolve', 'host.upload.bind', 'camp.composerDraft.get', 'camp.composerDraft.save', 'camp.sourceAttachments.addFromPath', 'camp.attachments.desktopOpenTarget', 'filePreview.resolveSource']) {
+    for (const operation of ['preferences.newConversation.initialize', 'host.web.token', 'host.web.rotate', 'host.web.loginTicket', 'core.shutdown', 'host.editor.resolve', 'host.upload.bind', 'camp.composerDraft.get', 'camp.composerDraft.save', 'camp.sourceAttachments.addFromPath', 'camp.attachments.desktopOpenTarget', 'filePreview.resolveSource', 'filePreview.readEditable', 'filePreview.saveText']) {
       const response = await authorized(first, 'request', { method: 'POST', body: JSON.stringify({ operation, params: {} }) })
       assert.equal(response.status, 400, operation)
     }
@@ -572,6 +573,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(response.status, 200)
       return response.json()
     }
+    await exerciseFileEditing({ host, fileCall, session: first, otherSession: second, threadId: fileCampId, workspace, fixture })
     const prepareDownload = (session, body) => authorized(session, 'downloads', { method: 'POST', body: JSON.stringify(body) })
     const grant = async (source, session = first) => {
       const response = await prepareDownload(session, { kind: 'source', source })

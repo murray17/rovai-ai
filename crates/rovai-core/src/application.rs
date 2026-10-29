@@ -12018,6 +12018,30 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "filePreview.readEditable" | "filePreview.saveText" => {
+                let params: crate::file_edit::EditRequest =
+                    serde_json::from_value(request.params.clone())?;
+                if !matches!(
+                    params.source.kind.as_str(),
+                    "camp_workspace" | "message_reference"
+                ) {
+                    return Ok(crate::file_edit::failure("edit_unavailable"));
+                }
+                let resolved = {
+                    let database = self.database.lock().await;
+                    resolve_file_preview_source(
+                        &database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        params.source.clone(),
+                    )?
+                };
+                let saving = request.method == "filePreview.saveText";
+                tokio::task::spawn_blocking(move || {
+                    crate::file_edit::execute(params, resolved, saving)
+                })
+                .await
+                .context("File edit task failed")
+            }
             "filePreview.resolveSource" => {
                 let params: ResolveFilePreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;

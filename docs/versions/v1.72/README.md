@@ -11,6 +11,13 @@ last_updated: 2026-10-29
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 轻量文件编辑（2026-10-29）
+
+已有预览链路增加当前项目 UTF-8 文本编辑、手动保存、未保存关闭确认与基本冲突处理；Desktop 和 Web 共用 Rust Host。
+沿用原有界面与 CodeMirror，不新增编辑页面、自动保存或持久草稿。目录 V12 仍为独立交互稿；本次不冒称目录服务已上线。
+规范见 [File Preview v24](../../contracts/file-preview-v24.md)，取舍见 [D69](decisions.md#v1-72-d69)。
+验证记录见[实施计划](implementation-plan.md#轻量文件编辑2026-10-29)。
+
 ## 数据库启动减重（2026-10-29）
 
 按 User 明确要求，以普通用户稳定打开和旧数据保留为首要目标：现有 SQLite 单次读写打开，原连接完成版本检查、

@@ -307,7 +307,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Skill Content Preview v1（历史）](skill-content-preview-v1.md) | 旧 Library Revision 或导入候选的只读内容合同；当前原生 Skill 原址预览见 Skills Rebuild v1 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
-| [File Preview v23（当前）](file-preview-v23.md) | Desktop 最近定位复用、同版本自动刷新跳过内容与 HTML 准备；候选与更新水位保持 |
+| [File Preview v24（当前）](file-preview-v24.md) | 当前项目 UTF-8 文本编辑、共享 Host 手动保存、摘要冲突及窗口草稿保留 |
+| [File Preview v23（历史）](file-preview-v23.md) | Desktop 最近定位复用、同版本自动刷新跳过内容与 HTML 准备；候选与更新水位保持 |
 | [File Preview v22（历史）](file-preview-v22.md) | 当前可见文件自动刷新、后台按需更新、失败阻断与分页行号恢复；复用候选刷新和既有通知 |
 | [File Preview v21（历史）](file-preview-v21.md) | 精确归因内部诊断 CSP 拒绝，中性降级并停止当前文档无效重试；保留作者策略与真实错误 |
 | [File Preview v20（历史）](file-preview-v20.md) | 无 Diff 的终态 Read/Write 文件操作由精确 Run Evidence 授权预览，保留 Diff、根外绝对路径和 Run 工作目录解析 |

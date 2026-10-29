@@ -1,3 +1,4 @@
+import { FileEditStore } from './file-edit-store'
 import type { FilePreviewApi, FilePreviewRetentionState } from '@contracts'
 import { filePreviewRetentionLimits } from '../../file-preview-retention'
 import { createFilePreviewSession, type FilePreviewContent, type FilePreviewSession, type FilePreviewTabModel } from './file-preview-controller'
@@ -12,6 +13,7 @@ function bytes(content: FilePreviewContent | null): number {
 
 /** Window-owned resource lifetime. React only subscribes and displays these sessions. */
 export class FilePreviewResources {
+  readonly edits: FileEditStore
   readonly sessions = new Map<string, FilePreviewSession>()
   readonly #listeners = new Set<() => void>()
   readonly #unsubscribe: (() => void)[] = []
@@ -27,12 +29,20 @@ export class FilePreviewResources {
   currentThreadId: string | null = null
 
   constructor(readonly api: FilePreviewApi, readonly limits: Readonly<Record<keyof typeof filePreviewRetentionLimits, number>> = filePreviewRetentionLimits) {
+    this.edits = new FileEditStore(api)
+    this.edits.onSaved = ids => {
+      for (const session of this.sessions.values()) for (const id of ids) {
+        if (session.getSnapshot().tabs.some(tab => tab.id === id)) void session.actions.reload(id, false, true)
+      }
+    }
+    this.#unsubscribe.push(this.edits.subscribe(this.changed))
     this.#empty = createFilePreviewSession(api, '', this)
   }
 
   #connect(): void {
     if (this.#connected) return
     this.#connected = true
+    this.edits.registerWindow()
     const api = this.api
     this.#unsubscribe.push(api.onExternalUpdate(event => this.sessions.get(event.threadId)?.externalUpdate(event.previewKeys)),
       filePreviewSessionStore.onDiscard(threadId => this.discard(threadId)))
@@ -109,7 +119,7 @@ export class FilePreviewResources {
     return [...this.sessions.values()].flatMap(session => session.getSnapshot().tabs.flatMap(tab => tab.kind === 'file'
       ? [{
         session, tab, visible: this.visible(session, tab.id), usage: session.tabUsage.get(tab.id) ?? session.lastUsed,
-        recoverable: !!(tab.sourceRequest && restorableFilePreviewRequest(tab.sourceRequest))
+        recoverable: !this.edits.protects(tab.id) && !!(tab.sourceRequest && restorableFilePreviewRequest(tab.sourceRequest))
       }] : []))
   }
 
@@ -118,6 +128,7 @@ export class FilePreviewResources {
       ? !!(tab.content || tab.file || tab.candidate || tab.loadState === 'opening') : tab.kind === 'file_change' && (!!tab.detail || tab.detailStatus === 'loading')))
     if (hot.includes(session) || hot.length < this.limits.hotThreads) return true
     const victim = hot.filter(value => value !== session && !this.isCurrent(value.threadId)
+      && !value.getSnapshot().tabs.some(tab => this.edits.protects(tab.id))
       && value.getSnapshot().tabs.every(tab => tab.kind !== 'file' || !tab.content || !!(tab.sourceRequest && restorableFilePreviewRequest(tab.sourceRequest))))
       .sort((a, b) => a.lastUsed - b.lastUsed)[0]
     if (!victim) return false
@@ -150,7 +161,7 @@ export class FilePreviewResources {
       && (tab.content || tab.file || tab.loadState === 'opening' || tab.candidate) || tab.kind === 'file_change' && (tab.detail || tab.detailStatus === 'loading')))
     for (const session of hot.sort((a, b) => a.lastUsed - b.lastUsed)) {
       if (hot.length <= this.limits.hotThreads) break
-      if (this.isCurrent(session.threadId)) continue
+      if (this.isCurrent(session.threadId) || session.getSnapshot().tabs.some(tab => this.edits.protects(tab.id))) continue
       const tabs = session.getSnapshot().tabs.filter(tab => tab.kind === 'file') as FilePreviewTabModel[]
       if (tabs.some(tab => tab.content && (!tab.sourceRequest || !restorableFilePreviewRequest(tab.sourceRequest)))) continue
       session.cool()
@@ -189,7 +200,7 @@ export class FilePreviewResources {
       entries = this.#entries()
     }
     const protectedThreads = [...this.sessions.values()].filter(session => this.isCurrent(session.threadId)
-      || session.pendingOpens > 0 || session.getSnapshot().tabs.some(tab => tab.kind === 'file' && (tab.content || tab.file || tab.loadState === 'opening') || tab.kind === 'file_change' && (tab.detail || tab.detailStatus === 'loading')))
+      || session.pendingOpens > 0 || session.getSnapshot().tabs.some(tab => this.edits.get(tab.id)) || session.getSnapshot().tabs.some(tab => tab.kind === 'file' && (tab.content || tab.file || tab.loadState === 'opening') || tab.kind === 'file_change' && (tab.detail || tab.detailStatus === 'loading')))
     filePreviewSessionStore.protect(protectedThreads.map(session => session.threadId))
     const cold = [...this.sessions.values()].filter(session => !protectedThreads.includes(session)).sort((a, b) => a.lastUsed - b.lastUsed)
     for (const session of cold) {
@@ -217,7 +228,8 @@ export class FilePreviewResources {
 
   discard(threadId: string): void {
     const session = this.sessions.get(threadId)
-    if (!session) return
+    if (!session || session.getSnapshot().tabs.some(tab => this.edits.protects(tab.id))) return
+    this.edits.release(session.getSnapshot().tabs.map(tab => tab.id))
     this.sessions.delete(threadId)
     session.dispose()
     this.changed()
@@ -229,6 +241,7 @@ export class FilePreviewResources {
     for (const off of this.#unsubscribe) off()
     for (const session of this.sessions.values()) session.dispose()
     this.sessions.clear()
+    this.edits.dispose()
     void this.sync().catch(() => undefined)
   }
 }

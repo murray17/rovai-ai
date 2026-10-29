@@ -9539,3 +9539,11 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 @media (min-width: 1800px) {
   .public-agent-message { --agent-message-prose-width: 780px; }
 }
+
+/* Editing adds only controls within the existing path row. */
+.file-preview-edit-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.file-preview-edit-actions:empty { display: none; }
+.file-preview-source-switch { width: auto; padding: 0 7px; font: inherit; font-size: 12px; }
+.file-preview-tab-dirty { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; opacity: .75; }
+.file-preview-saved-preview { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.file-preview-saved-preview[hidden] { display: none; }

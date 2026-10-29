@@ -1,3 +1,4 @@
+import type { FileEditStore } from './file-edit-store'
 import { uiAttribute } from './interface-language'
 import { parseFileReference } from '../../file-preview-reference'
 import { newCommandId } from '../../shared/command-id'
@@ -223,6 +224,7 @@ type LoadedFilePreviewContent = {
   pageIndex: number
 }
 export interface PreviewSessionOwner {
+  edits?: FileEditStore
   admit(session: FilePreviewSession): boolean
   changed(): void
   touch(session: FilePreviewSession, tabId?: string): void
@@ -1029,7 +1031,9 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     })
   }
 
-  const closeMany = (tabIds: string[]) => {
+  const closeMany = async (tabIds: string[]) => {
+    if (owner.edits && tabIds.some(id => owner.edits!.protects(id)) && !await owner.edits.confirmClose(tabIds)) return
+    if (disposed) return
     const ids = new Set(tabIds)
     if (ids.size === 0) return
     const previous = tabsRef.current
@@ -1057,6 +1061,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         void api.release({ handleId: tab.file.handleId })
       }
     }
+    owner.edits?.release([...ids])
     if (nextActiveTabId && nextActiveTabId !== currentActiveTabId) ensureVisibleTab(nextActiveTabId)
   }
 
@@ -1109,7 +1114,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   }))
 
   const toggleHtmlSource = (tabId: string): void => {
-    setTabs((current) => current.map((tab) => tab.kind === 'file' && tab.id === tabId && tab.content?.kind === 'html'
+    setTabs((current) => current.map((tab) => tab.kind === 'file' && tab.id === tabId && (tab.content?.kind === 'html' || tab.content?.kind === 'markdown')
       ? { ...tab, htmlSourceMode: !tab.htmlSourceMode }
       : tab))
   }
@@ -1153,7 +1158,11 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     revokeContent(previous.content)
     if (previous.file) void api.release({ handleId: previous.file.handleId })
   }
-  const reload = async (tabId: string, visibleOnly = false): Promise<void> => {
+  const reload = async (tabId: string, visibleOnly = false, afterSave = false): Promise<void> => {
+    if (!afterSave && owner.edits?.protects(tabId)) {
+      if (!visibleOnly) await owner.edits.checkDisk(owner.edits.get(tabId)!)
+      return
+    }
     const tab = tabsRef.current.find(entry => entry.id === tabId)
     if (disposed || tab?.kind !== 'file' || tab.isRefreshing || tab.loadState === 'opening'
       || visibleOnly && pageRequests.has(tabId)) return
@@ -1415,6 +1424,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       if (active?.kind === 'file' && active.previewKey && changed.has(active.previewKey)) scheduleRefresh(active.id)
     },
     evictBytes: (tabId: string) => {
+      if (owner.edits?.protects(tabId)) return
       clearRefreshTimer(tabId)
       refreshVersions.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
@@ -1432,6 +1442,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       } : entry))
     },
     evict: (tabId: string, handleOnly = false, alreadyReleased = false, htmlOnly = false) => {
+      if (owner.edits?.protects(tabId)) return
       clearRefreshTimer(tabId)
       refreshVersions.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
