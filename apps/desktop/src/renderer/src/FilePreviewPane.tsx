@@ -11,6 +11,7 @@ import { MarkdownFilePreview } from './MarkdownFilePreview'
 import { FileFindScope } from './FilePreviewFind'
 import { FileFindDomAdapter } from './FileFindDomAdapter'
 import { HtmlViewer } from './HtmlFileViewer'
+import { FilePreviewViewSwitch } from './FilePreviewViewSwitch'
 import { useFilePreview, useFilePreviewApi, canDownloadFile, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
 import { FilePreviewTabIcon, ResourceReferenceIcon } from './FilePreviewTabIcon'
@@ -395,8 +396,8 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   }, active)
   const editor = showEditor && active && doc && edits ? <EditableCodeViewer key={doc.key} doc={doc} store={edits} theme={resolvedTheme} target={tab.file?.target} /> : null
   const editActions = <div className="file-preview-edit-actions">
-    {sourceSwitch && <button type="button" className="file-action-button file-preview-source-switch" onClick={() => toggleHtmlSource(tab.id)}
-      aria-label={uiAttribute(tab.htmlSourceMode ? '预览' : '源码')} title={uiAttribute(tab.htmlSourceMode ? '预览' : '源码')}>{uiAttribute(tab.htmlSourceMode ? '预览' : '源码')}</button>}
+    {sourceSwitch && <FilePreviewViewSwitch interactive={tab.content?.kind === 'html'} sourceMode={!!tab.htmlSourceMode}
+      onChange={() => toggleHtmlSource(tab.id)} />}
     {doc && fileEditDirty(doc) && <button type="button" className="file-action-button" disabled={doc.saving}
       title={uiAttribute('保存（{0}）', saveShortcut)} aria-label={uiAttribute('保存（{0}）', saveShortcut)} aria-busy={doc.saving}
       onClick={() => void edits?.save(doc)}><DialogControlIcon name="save" /></button>}

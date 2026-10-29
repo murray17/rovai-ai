@@ -3,6 +3,7 @@ import { HtmlPreviewHostChannel } from '../../../../../packages/html-preview/src
 import { htmlPreviewDiagnosticKey, parseHtmlPreviewDiagnostic, validPreviewOrigin, type HtmlPreviewDiagnostic } from '../../../../../packages/html-preview/src/protocol'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
 import { HtmlPreviewSource } from './HtmlPreviewSource'
+import { FilePreviewViewSwitch } from './FilePreviewViewSwitch'
 import { useHtmlFileFind } from './file-find-html'
 import { HtmlPreviewLoadState, type HtmlPreviewLoadSnapshot } from './file-preview-html-load'
 import { UiText, uiAttribute } from './interface-language'
@@ -132,16 +133,7 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
       {updateAction}
       {feedback}
       <div className="file-preview-html-actions">
-        {(pathControl || downloadAction) && <div className="file-preview-view-switch" role="group" aria-label={uiAttribute('HTML 视图')}>
-          <button type="button" className="file-action-button" aria-label={uiAttribute('交互预览')} title={uiAttribute('交互预览')}
-            aria-pressed={!sourceMode} onClick={() => { if (sourceMode) toggleHtmlSource(tab.id) }}>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 8h14M6 6h.01M9 6h.01"/></svg>
-          </button>
-          <button type="button" className="file-action-button" aria-label={uiAttribute('查看源码')} title={uiAttribute('查看源码')}
-            aria-pressed={sourceMode} onClick={() => { if (!sourceMode) toggleHtmlSource(tab.id) }}>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 6-4 4 4 4m8-8 4 4-4 4M11.5 3.5l-3 13"/></svg>
-          </button>
-        </div>}
+        {(pathControl || downloadAction) && <FilePreviewViewSwitch interactive sourceMode={sourceMode} onChange={() => toggleHtmlSource(tab.id)} />}
         {downloadAction}
       </div>
     </div>}
