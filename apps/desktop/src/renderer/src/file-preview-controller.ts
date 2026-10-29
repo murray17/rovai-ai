@@ -247,6 +247,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   let openFeedback: FilePreviewOpenFeedback | null = null
   const retired = new Map<string, { file: ResolvedFilePreview | null; content: FilePreviewContent | null }>()
   const refreshDone = new Map<string, () => void>()
+  const pendingSavedRefreshes = new Set<string>()
   const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
   const committedLoads = new Set<symbol>()
   let snapshot: { tabs: PreviewTabModel[]; activeTabId: string | null; paneVisible: boolean; openFeedback: FilePreviewOpenFeedback | null } = { tabs: tabsRef.current, activeTabId: activeTabIdRef.current, paneVisible: paneVisibleRef.current, openFeedback }
@@ -1049,7 +1050,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         : previous.slice(Math.max(0, activeIndex + 1)).find((tab) => !ids.has(tab.id))?.id
         ?? previous.slice(0, Math.max(0, activeIndex)).reverse().find((tab) => !ids.has(tab.id))?.id
         ?? remaining[0].id
-    for (const tab of closing) if (tab.kind === 'file') { clearRefreshTimer(tab.id); refreshVersions.delete(tab.id); discardCandidate(tab); revokeContent(tab.content); if (tab.file) displayed(tab.id, tab.file.handleId) }
+    for (const tab of closing) if (tab.kind === 'file') { clearRefreshTimer(tab.id); refreshVersions.delete(tab.id); pendingSavedRefreshes.delete(tab.id); discardCandidate(tab); revokeContent(tab.content); if (tab.file) displayed(tab.id, tab.file.handleId) }
     setTabs(() => remaining)
     setActiveTabId(nextActiveTabId)
     setOpenFeedback((current) => current && ids.has(current.tabId) ? null : current)
@@ -1164,8 +1165,14 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       return
     }
     const tab = tabsRef.current.find(entry => entry.id === tabId)
-    if (disposed || tab?.kind !== 'file' || tab.isRefreshing || tab.loadState === 'opening'
+    if (disposed || tab?.kind !== 'file') return
+    if (tab.isRefreshing) {
+      if (afterSave) pendingSavedRefreshes.add(tabId)
+      return
+    }
+    if (tab.loadState === 'opening'
       || visibleOnly && pageRequests.has(tabId)) return
+    pendingSavedRefreshes.delete(tabId)
     clearRefreshTimer(tabId)
     if (!tab.file && !tab.content) { await reopen(tabId); return }
     const oldFile = tab.file
@@ -1244,7 +1251,9 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       if (candidate) void api.release({ handleId: candidate.handleId })
       if (current()) {
         refreshVersions.delete(tabId)
-        scheduleRefresh(tabId)
+        // Coalesce completed saves into one fresh preview, even with a newer dirty draft.
+        if (pendingSavedRefreshes.delete(tabId)) void reload(tabId, false, true)
+        else scheduleRefresh(tabId)
       }
     }
   }
@@ -1427,6 +1436,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       if (owner.edits?.protects(tabId)) return
       clearRefreshTimer(tabId)
       refreshVersions.delete(tabId)
+      pendingSavedRefreshes.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
       if (tab?.kind !== 'file') { session.evict(tabId); return }
       discardCandidate(tab)
@@ -1445,6 +1455,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       if (owner.edits?.protects(tabId)) return
       clearRefreshTimer(tabId)
       refreshVersions.delete(tabId)
+      pendingSavedRefreshes.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
       if (!tab) return
       if (tab.kind === 'mission_activity' || tab.kind === 'execution') return
@@ -1472,6 +1483,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       disposed = true
       suspendRefresh()
       refreshVersions.clear()
+      pendingSavedRefreshes.clear()
       committedLoads.clear()
       scopeGenerationRef.current += 1
       for (const tab of tabsRef.current) if (tab.kind === 'file') {

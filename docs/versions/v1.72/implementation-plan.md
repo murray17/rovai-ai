@@ -4442,3 +4442,19 @@ Governance：none；Status：ready。保留当前字体、图标、路径行、�
   英文深色 720px 检查目录抽屉、选文件自动关闭、固定入口和原有源码／预览图标；截图与源码随 V15 交付。
 - `pnpm typecheck`、Desktop/Web 构建通过，无新增依赖。文档测试 10 项通过，并执行当前文档门禁。
   Rust 生产代码未变，未重复全 Rust 套件；不推导 Windows/Linux 安装包、包体增量、崩溃恢复或外部进程强互斥。
+
+### 连续保存后的预览补刷（2026-10-29，User seq41）
+
+复用上述 worktree 与分支，基线 `ae7914205`；Governance：none；Status：ready。
+共享 controller 按文件合并“保存后待刷新”标记，当前刷新结束后读取最新已保存内容；关闭、淘汰与释放时清理。
+不更改布局、保存协议或编辑状态。新增一个 A→B→C 回归：延迟 HTML A，保存 B、输入 C，再完成 A；
+最终模拟磁盘／预览／保存基线均为 B，草稿 C、CodeMirror 光标、撤销历史及编辑滚动位置保留。
+已有迟到候选清理用例同时验证关闭、淘汰、冷却和释放后不会触发残留补刷。
+该用例在旧 controller 上因缺少第二次刷新失败，修复后通过；文件预览、编辑状态和 Web HTML 相关 85 项测试通过。
+`pnpm typecheck`、Desktop/Web 构建及文档治理单测 10 项通过。
+`pnpm docs:check`、以 `ae7914205` 为 base 的 `pnpm docs:check:ci` 通过。
+`pnpm test:rust:pr` 首轮 Core 433 通过、1 忽略，Runtime 子进程清理用例因
+`runtime_probe_stdout_cleanup_timed_out` 失败；保留首轮结果，不记为全量一次通过。
+单独重跑 `runtime_probe_process::tests::` 5 项通过，原 workspace 测试二进制复跑该模块同样通过；
+`cargo test --workspace --exclude rovai-core` 补跑其余包通过。本轮未改 Rust 代码或测试。
+本轮使用受控文件接口与 HTML 就绪回执验证共享 controller；没有新增浏览器或真实 Host 的端到端验收。
