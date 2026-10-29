@@ -6,10 +6,52 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-28
+last_updated: 2026-10-29
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 数据库启动减重（2026-10-29）
+
+按 User 明确要求，以普通用户稳定打开和旧数据保留为首要目标：现有 SQLite 单次读写打开，原连接完成版本检查、
+必要迁移和运行配置；删除文件状态票据、macOS provenance 特判与重复准入。Windows 启动必需存储按实际权限访问，
+凭据专用边界保持。无 schema/业务格式变化，现有旧版本逐事务升级与 manifest 恢复继续支持。
+取舍见 [D68](decisions.md#v1-72-d68)，当前规则见 [Availability-first Runtime](../../architecture/availability-first-runtime.md)
+与 [Availability v3](../../contracts/desktop-runtime-availability-v3.md#数据库启动与有界重试)，验收、测试退役与交付边界见
+[实施记录](database-startup-simplification.md)。本次替代下方 10 月 28 日的来源标记特判方案，不更换当前版本指针。
+
+## 手动停止保留执行条（2026-10-29）
+
+公开手动停止保留静态状态、最终耗时及图标继续入口；失败改为图标重试。每位队员仅保留最新未受理
+继续的停止／普通失败，继续受理或新 Run 出现后收起；输入过大拒绝保留原输入详情。
+排队、启动、等待和成功沿用既有规则。只调整 Renderer，未改变 Core 状态或模型上下文。
+当前规则见 [Run Process Detail Surface v57](../../contracts/run-process-detail-surface-v57.md)，
+实施与验证见[实施记录](implementation-plan.md#手动停止保留执行条2026-10-29)。
+
+## 安全 HTML 与选文引用简化（2026-10-29）
+
+按 User 已确认的[变更说明](model-context-change-html-quotes-simple.md)，SafeMarkdown 统一使用现成
+HTML 解析与默认清洗器；选文直接保存，仅保留可选来源跳转，不重算来源或维护跨端投影。
+新模型引用只有 kind/text；旧引用新请求使用保存文字，冻结输入恢复保留原字节。
+当前规范见 [Message Quotes v2](../../contracts/message-quotes-v2.md)、[ContextManifest v43/v44](../../contracts/context-manifest-evidence-v44.md)、
+[History v17](../../contracts/camp-history-v17.md)、[Transport v45](../../contracts/builtin-tool-transport-v45.md)、
+[架构](../../architecture/message-quotes.md)与[会话 UI](../../ui/components/conversation-workspace.md#原始-html-与字面文本)。
+影响限 Renderer、选文数据/模型入口、现有版本准入及相关测试文档；承载消息权限、预算、Runtime 协议与平台资格保持。
+不增加渲染框架、配置开关、标记系统或历史修复；替代下方 10 月 22 日的字面 HTML / 投影 v3 方案。
+
+## Windows Fleet 记录存储可用性（2026-10-29）
+
+针对 Issue #942，Windows 的 `runtime-fleet/owners` 改为按实际文件访问权限创建和读写，移除这条路径的
+ACL 模板准入与自动修权。原子替换、进程归属和停止回执保留；CLI、桌面预检、诊断及 Fleet 降级不在本次范围。
+当前规则见 [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md#runtime-fleet-owner-records)，
+测试归属与实际验证见[实施记录](implementation-plan.md#windows-fleet-记录存储修复2026-10-29)。
+
+## macOS 来源标记导致的启动误拦截（2026-10-28）
+
+补齐 main/WAL/journal 的系统来源标记识别，以及 current authority 以读写方式打开后的有界重新准入。
+已有校验在发行版 0.5.1 与 0.5.2 之间未变；本次升级触发了既有兼容缺口，而非新增 schema migration 失败。
+当前规则见 [Availability-first Runtime](../../architecture/availability-first-runtime.md#database-authority-state-machine)，
+复现、测试归属与交付边界见[实施记录](implementation-plan.md#macos-来源标记启动修复2026-10-28)。
 
 ## Thread read 正向增量读取（2026-10-22）
 
@@ -52,7 +94,7 @@ Issue #891 按 User 确认的范围统一启动／重新检测／主动检查的
 
 按 User 确认的交互稿收敛为前端展示修正：启动阶段统一文案，Delivery 简化准备／排队提示，
 停止时移除有色提示与重复停止按钮，状态图标保留时间线。无 Core 字段、状态机或调度变更。
-当前规则见 [Run Process Detail Surface v56](../../contracts/run-process-detail-surface-v56.md)，
+当时规则见 [Run Process Detail Surface v56](../../contracts/run-process-detail-surface-v56.md)，
 实施与验证见[实施记录](implementation-plan.md#run-启动与停止展示2026-10-26)。
 
 ## Hermes Runtime（2026-10-25）
@@ -62,8 +104,9 @@ Issue #891 按 User 确认的范围统一启动／重新检测／主动检查的
 FirstPayload 保留首次/真实更新，取消压缩补发；ACP 清理不拥有原生执行端。
 当前规范见 [Hermes 合同](../../contracts/hermes-managed-runtime-v1.md)，理由见 [D67](decisions.md#v1-72-d67)，
 正文确认见 [R2](model-context-change-hermes-first-input.md)，验证见 [实施记录](hermes-first-input-implementation.md)。
-最低版本 0.22.4。2026-10-28 按 User sequence 126 重新开放 macOS arm64/x64，内部采用 Preview，
-不恢复资格提示。Windows x64、Linux x64 保持 NotQualified，用户入口继续隐藏，普通执行关闭。
+最低版本 0.22.4。2026-10-28 按维护者要求在 macOS arm64/x64、Windows x64、Linux x64 均普通开放，
+统一采用 `enabled`，不采用 Preview 或实验标签。入口消费共享准入；Windows ACP 仅拥有连接根进程，
+不将原生共享 Gateway 纳入 Job。开放与完整平台资格验证分开记录，不制造 qualification evidence。
 内部实现和已有记录保留，Intel 开放不代表完成实机验收，状态见[平台准入](../../contracts/runtime-platform-admission-v2.md#hermes-初始准入)。
 按同 Thread sequence 134 接通官方 ACP slash Steer：已知结束走普通队列；已发出的补充即使被原生
 转入下一轮，也由原 Core Run 跟踪至完成。验证与覆盖边界见[接通记录](../../research/hermes-runtime/README.md#core-steer-接通2026-10-28)。
@@ -131,6 +174,8 @@ schema 162，Team 顺延到 Migration 213 / schema 163，本地展示偏好 sche
 验证与交付记录见同一[实施记录](team-management-implementation.md#v10-收口与-main-整合2026-10-22)。
 
 ## 消息字面 HTML 与引用投影（2026-10-22）
+
+以下为已交付历史记录；当前行为由上方“安全 HTML 与选文引用简化”替代。
 
 聊天正文保留尖括号占位符和原始 HTML 文字，并在可信 Mention 替换前完成文本化。
 更新日志、Markdown 文件与 Skill 阅读面显式保留隐藏策略；执行过程可见性判断和引用投影 v3 同步。

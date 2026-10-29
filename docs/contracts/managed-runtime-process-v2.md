@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-25
+last_updated: 2026-10-28
 ---
 
 # Managed Runtime Process v2
@@ -33,7 +33,7 @@ runtime compatibility / execution ownership identity
 接口返回 `ManagedProcess`，其可观察能力限于 stdio、PID/OS identity、wait、graceful request、bounded tree
 termination 与 reap result。调用方不接触 Job/process-group handle，也不自行 attach、break away 或枚举后代。
 
-Runtime 上报 PID 的归属核验也由此边界拥有。Windows 只以本次受管 Job handle 查询仍存活的成员，
+Runtime 上报 PID 的归属核验也由此边界拥有。Windows 整树所有权只以本次受管 Job handle 查询仍存活的成员，
 兼容 command shim 与原生子进程的不同 PID；未知、无权查询、已退出或其他 Job 的进程均不通过。
 其他平台继续核对受管根 PID。调用方不通过全局进程枚举、名称或仅有父 PID 关系替代这一证据。
 
@@ -262,5 +262,8 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 `RuntimeConnection` 仅拥有本次启动的客户端根进程。Hermes 正式 ACP 与 ACP 探测使用此 purpose，
 不收集 descendant ledger、不向进程组或后代发送清理信号；原生共享 Gateway 可继续运行。
 即使客户端首次启动 Gateway，后者也不变为 Run 私有资源。其他 purpose 的树所有权不变。
-当前该连接模式仅在 Unix 实现，Hermes Windows 尚未准入；不降低其他 Windows Runtime 的 Job 保证。
+Windows 的此 purpose 不分配 Rovai Job；仍使用相同的入口身份校验和仅 stdio 的 handle 继承列表。
+PID 归属只核对本次捕获的存活根进程 handle；强制清理通过该 handle 调用 `TerminateProcess`，
+`tree_is_empty()` 在此模式只证明根进程退出。退出竞态不转为按 PID 重查或全局扫杀。
+其他 purpose 保留创建时原子加入 kill-on-close Job、完整后代归属与清理保证。
 根进程退出只证明连接结束，原生执行未知仍按任务合同处理。用户授权取消通过官方协议进行。

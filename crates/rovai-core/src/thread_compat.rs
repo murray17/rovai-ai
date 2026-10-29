@@ -194,16 +194,20 @@ pub(crate) fn project_builtin_result(operation: &str, result: &mut Value) -> Res
     Ok(())
 }
 
-/// Model quote metadata is owned by Rovai; quoted text and capture snapshots are opaque.
+/// New tool reads carry text only. Legacy frozen contexts keep their original naming.
 pub(crate) fn project_quote_scopes(message: &mut Value, legacy: bool) {
     if let Some(quotes) = message.get_mut("quotes").and_then(Value::as_array_mut) {
         for quote in quotes {
+            if !legacy {
+                if let Some(value) = quote.as_object_mut() {
+                    value.remove("source");
+                }
+                continue;
+            }
             let Some(source) = quote.get_mut("source").and_then(Value::as_object_mut) else {
                 continue;
             };
             let renamed = match (source.get("scope").and_then(Value::as_str), legacy) {
-                (Some("current_conversation_messages"), false) => Some("current_messages"),
-                (Some("camp_messages"), false) => Some("thread_messages"),
                 (Some("current_messages"), true) => Some("current_conversation_messages"),
                 (Some("thread_messages"), true) => Some("camp_messages"),
                 _ => None,

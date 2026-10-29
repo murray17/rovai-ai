@@ -2676,7 +2676,7 @@ fn runtime_diagnostic_checks(
                     row.get("platform").and_then(Value::as_str) == Some(host_platform)
                         && matches!(
                             row.get("status").and_then(Value::as_str),
-                            Some("qualified" | "preview")
+                            Some("enabled" | "qualified" | "preview")
                         )
                 })
                 .filter_map(|row| row.get("runtimeKind")?.as_str().map(str::to_string))
@@ -19774,7 +19774,7 @@ async fn run_core(
         .and_then(AdmissionAssessment::source_contract_version)
         .map(str::to_string);
     trace_startup_stage(
-        "authority_assessment",
+        "authority_open_and_version",
         assessment_started.elapsed(),
         source_contract.as_deref(),
     );
@@ -19874,7 +19874,7 @@ async fn run_core(
                 attachment_views.root_identity_digest(),
             );
             trace_startup_stage(
-                "authority_open",
+                "authority_configuration",
                 opening_started.elapsed(),
                 source_contract.as_deref(),
             );
@@ -32771,7 +32771,7 @@ done
 
     #[test]
     fn diagnostics_include_machine_health_for_preview_runtimes() {
-        let runtime_health = json!({
+        let mut runtime_health = json!({
             "hostPlatform": "macos-arm64",
             "runtimeCatalog": [{
                 "runtimeKind": "pi",
@@ -32792,14 +32792,20 @@ done
             }]
         });
 
-        let checks = runtime_diagnostic_checks(
-            &runtime_health,
-            &BTreeMap::from([(AdapterKind::Pi, 1)]),
-            true,
-            "2026-09-03T00:00:00Z",
-        );
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].subject_id.as_deref(), Some("pi"));
+        for status in ["preview", "enabled"] {
+            runtime_health["runtimePlatformAdmission"][0]["status"] = json!(status);
+            if status == "enabled" {
+                runtime_health["runtimePlatformAdmission"][0]["reasonCode"] = Value::Null;
+            }
+            let checks = runtime_diagnostic_checks(
+                &runtime_health,
+                &BTreeMap::from([(AdapterKind::Pi, 1)]),
+                true,
+                "2026-09-03T00:00:00Z",
+            );
+            assert_eq!(checks.len(), 1, "{status}");
+            assert_eq!(checks[0].subject_id.as_deref(), Some("pi"));
+        }
     }
 
     #[test]

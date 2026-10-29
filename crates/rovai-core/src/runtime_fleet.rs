@@ -956,19 +956,9 @@ impl RuntimeOwnerRecordStore {
         let root = fleet_root.join("owners");
         #[cfg(windows)]
         {
-            use crate::platform::private_storage::{
-                admit_private_directory, prepare_legacy_managed_private_directory,
-                repair_legacy_managed_private_file,
-            };
-            admit_private_directory(data_dir)?;
-            prepare_legacy_managed_private_directory(&fleet_root)?;
-            prepare_legacy_managed_private_directory(&root)?;
-            for entry in std::fs::read_dir(&root)? {
-                let path = entry?.path();
-                if path.extension().is_some_and(|ext| ext == "json") {
-                    repair_legacy_managed_private_file(&path)?;
-                }
-            }
+            // Core already owns admission of its data root. These internal
+            // records need ordinary file access, not permission to change ACLs.
+            std::fs::create_dir_all(&root)?;
         }
         #[cfg(not(windows))]
         {
@@ -985,6 +975,17 @@ impl RuntimeOwnerRecordStore {
 
     fn record_path(&self, process_id: &str) -> PathBuf {
         self.root.join(format!("{process_id}.json"))
+    }
+
+    fn write_record(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        #[cfg(windows)]
+        {
+            crate::platform::private_storage::atomic_write_bytes(path, bytes)
+        }
+        #[cfg(not(windows))]
+        {
+            crate::platform::private_storage::atomic_write_private_bytes(path, bytes)
+        }
     }
 
     fn register(
@@ -1027,10 +1028,7 @@ impl RuntimeOwnerRecordStore {
                 }
             },
         };
-        rovai_core::platform::private_storage::atomic_write_private_bytes(
-            &self.record_path(process_id),
-            &serde_json::to_vec(&record)?,
-        )?;
+        self.write_record(&self.record_path(process_id), &serde_json::to_vec(&record)?)?;
         Ok(())
     }
 
@@ -1042,8 +1040,7 @@ impl RuntimeOwnerRecordStore {
         if let Some(mut record) = record.filter(|record| record.run_lease.is_some()) {
             record.reaped = true;
             if let Ok(data) = serde_json::to_vec(&record) {
-                let _ =
-                    rovai_core::platform::private_storage::atomic_write_private_bytes(&path, &data);
+                let _ = self.write_record(&path, &data);
             }
         } else {
             self.remove(process_id);
@@ -1086,10 +1083,7 @@ impl RuntimeOwnerRecordStore {
                 } else {
                     record.run_lease = None;
                     if let Ok(data) = serde_json::to_vec(&record) {
-                        let _ = rovai_core::platform::private_storage::atomic_write_private_bytes(
-                            &entry.path(),
-                            &data,
-                        );
+                        let _ = self.write_record(&entry.path(), &data);
                     }
                 }
             }
@@ -1200,9 +1194,7 @@ impl RuntimeOwnerRecordStore {
                 if remove_record && _record.run_lease.is_some() {
                     _record.reaped = true;
                     if let Ok(data) = serde_json::to_vec(&_record) {
-                        let _ = rovai_core::platform::private_storage::atomic_write_private_bytes(
-                            &path, &data,
-                        );
+                        let _ = self.write_record(&path, &data);
                     }
                     remove_record = false;
                 }
@@ -3825,11 +3817,12 @@ mod tests {
             process_start_identity: None,
             windows_job_name: None,
         };
-        crate::platform::atomic_write_private_bytes(
-            &store.record_path("old-host"),
-            &serde_json::to_vec(&record).unwrap(),
-        )
-        .unwrap();
+        store
+            .write_record(
+                &store.record_path("old-host"),
+                &serde_json::to_vec(&record).unwrap(),
+            )
+            .unwrap();
         let fleet = AgentRuntimeFleetManager::with_owner_records(
             Default::default(),
             Some(store.clone()),
@@ -3904,11 +3897,9 @@ mod tests {
                 owner_process_start_identity(child.id().unwrap());
             crashed_record.windows_job_name = Some(child.windows_job_name().to_owned());
             let path = store.record_path("crashed-host");
-            crate::platform::atomic_write_private_bytes(
-                &path,
-                &serde_json::to_vec(&crashed_record).unwrap(),
-            )
-            .unwrap();
+            store
+                .write_record(&path, &serde_json::to_vec(&crashed_record).unwrap())
+                .unwrap();
             assert!(
                 tokio::time::timeout(Duration::from_secs(5), child.wait())
                     .await
@@ -3961,11 +3952,9 @@ mod tests {
             let mut live_record = crashed_record.clone();
             live_record.windows_job_name = Some(live_child.windows_job_name().to_owned());
             let live_path = store.record_path("live-host");
-            crate::platform::atomic_write_private_bytes(
-                &live_path,
-                &serde_json::to_vec(&live_record).unwrap(),
-            )
-            .unwrap();
+            store
+                .write_record(&live_path, &serde_json::to_vec(&live_record).unwrap())
+                .unwrap();
             let restarted = AgentRuntimeFleetManager::new_with_builtin_tools(
                 Default::default(),
                 &root,
@@ -4063,11 +4052,9 @@ mod tests {
             ] {
                 crashed_record.pid = pid;
                 crashed_record.process_start_identity = start_identity;
-                crate::platform::atomic_write_private_bytes(
-                    &path,
-                    &serde_json::to_vec(&crashed_record).unwrap(),
-                )
-                .unwrap();
+                store
+                    .write_record(&path, &serde_json::to_vec(&crashed_record).unwrap())
+                    .unwrap();
                 let restarted = AgentRuntimeFleetManager::new_with_builtin_tools(
                     Default::default(),
                     &root,
@@ -4099,11 +4086,9 @@ mod tests {
             for job_name in [None, Some("invalid-job".to_string())] {
                 crashed_record.windows_job_name = job_name;
                 crashed_record.pid = u32::MAX;
-                crate::platform::atomic_write_private_bytes(
-                    &path,
-                    &serde_json::to_vec(&crashed_record).unwrap(),
-                )
-                .unwrap();
+                store
+                    .write_record(&path, &serde_json::to_vec(&crashed_record).unwrap())
+                    .unwrap();
                 assert_eq!(
                     restarted
                         .stop_agent_run_until_with_outcome(
@@ -4127,100 +4112,192 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_owner_registration_admits_only_private_or_legacy_inherited_storage() {
-        use std::os::windows::process::CommandExt;
-        let icacls = PathBuf::from(std::env::var_os("SystemRoot").unwrap())
-            .join("System32")
-            .join("icacls.exe");
-        // This owner covers the private-storage migration seam. The receipt
-        // owner above covers lifecycle/ACK; lower-level ACL tests cannot prove
-        // that Fleet prepares every parent and preserves legacy scoped records.
-        for legacy in [false, true] {
+    fn windows_owner_records_use_effective_file_permissions_without_rewriting_acls() {
+        use std::os::windows::{fs::OpenOptionsExt, process::CommandExt};
+        use windows_sys::Win32::{
+            Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, WRITE_DAC},
+            System::Threading::CREATE_NO_WINDOW,
+        };
+        let system32 = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+        let whoami = std::process::Command::new(system32.join("whoami.exe"))
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .unwrap();
+        assert!(whoami.status.success());
+        let user = String::from_utf8(whoami.stdout).unwrap().trim().to_owned();
+        let acl = |path: &Path, arguments: &[&str]| {
+            let output = std::process::Command::new(system32.join("icacls.exe"))
+                .arg(path)
+                .args(arguments)
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "ACL fixture operation failed: {output:?}"
+            );
+            output.stdout
+        };
+        // This owner replaces the retired ACL migration contract with ordinary
+        // Windows I/O, including the FullControl/no-inheritance regression.
+        for permissions in [
+            "no-inheritance",
+            "fresh",
+            "inherited",
+            "extra-entry",
+            "modify-only",
+        ] {
             let root =
                 std::env::temp_dir().join(format!("rovai-owner-storage-{}", uuid::Uuid::new_v4()));
             crate::platform::prepare_private_directory(&root).unwrap();
             let fleet_root = root.join("runtime-fleet");
             let owners = fleet_root.join("owners");
-            let key = RunLeaseKey {
+            let old_key = RunLeaseKey {
                 agent_run_id: "old-run".into(),
                 execution_epoch: 7,
             };
-            if legacy {
-                // Elevated Windows runners can default ordinary child ownership
-                // to Administrators. This migration admits only current-user
-                // ownership: establish that explicitly, then reset only DACLs
-                // to the private parent's inherited policy.
+            let old_bytes = serde_json::to_vec(&RuntimeOwnerRecord {
+                run_lease: Some(old_key.clone()),
+                reaped: true,
+                core_generation: "old-core".into(),
+                pid: u32::MAX,
+                process_group_id: 0,
+                executable_path: "fixture".into(),
+                process_start_identity: None,
+                windows_job_name: None,
+            })
+            .unwrap();
+            let old_path = owners.join("legacy.json");
+            let before = if permissions == "fresh" {
+                None
+            } else {
                 crate::platform::prepare_private_directory(&fleet_root).unwrap();
                 crate::platform::prepare_private_directory(&owners).unwrap();
-                crate::platform::atomic_write_private_bytes(
-                    &owners.join("legacy.json"),
-                    &serde_json::to_vec(&RuntimeOwnerRecord {
-                        run_lease: Some(key.clone()),
-                        reaped: true,
-                        core_generation: "old-core".into(),
-                        pid: u32::MAX,
-                        process_group_id: 0,
-                        executable_path: "fixture".into(),
-                        process_start_identity: None,
-                        windows_job_name: None,
-                    })
-                    .unwrap(),
-                )
-                .unwrap();
-                let reset = std::process::Command::new(&icacls)
-                    .arg(&fleet_root)
-                    .args(["/reset", "/T", "/Q"])
-                    .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
-                    .output()
-                    .unwrap();
-                assert!(
-                    reset.status.success(),
-                    "failed to establish inherited-ACL fixture"
-                );
-                assert!(crate::platform::prepare_private_directory(&owners).is_err());
-            }
-            let store = RuntimeOwnerRecordStore::new(&root).unwrap();
+                std::fs::write(&old_path, &old_bytes).unwrap();
+                match permissions {
+                    "inherited" => {
+                        acl(&fleet_root, &["/reset", "/T", "/Q"]);
+                    }
+                    "no-inheritance" => {
+                        for path in [&fleet_root, &owners] {
+                            acl(
+                                path,
+                                &["/grant:r", &format!("{user}:F"), "*S-1-5-18:F", "/Q"],
+                            );
+                        }
+                    }
+                    "extra-entry" => {
+                        for path in [&fleet_root, &owners] {
+                            acl(path, &["/grant", "*S-1-1-0:(OI)(CI)R", "/Q"]);
+                        }
+                    }
+                    "modify-only" => {
+                        // OWNER RIGHTS removes the owner's implicit WRITE_DAC;
+                        // Modify still permits normal record I/O and deletion.
+                        for path in [&fleet_root, &owners] {
+                            acl(
+                                path,
+                                &[
+                                    "/grant:r",
+                                    &format!("{user}:(OI)(CI)M"),
+                                    "*S-1-3-4:(OI)(CI)M",
+                                    "/Q",
+                                ],
+                            );
+                            let denied = std::fs::OpenOptions::new()
+                                .read(true)
+                                .access_mode(WRITE_DAC)
+                                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                                .open(path)
+                                .unwrap_err();
+                            assert_eq!(denied.kind(), std::io::ErrorKind::PermissionDenied);
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                Some([
+                    acl(&fleet_root, &[]),
+                    acl(&owners, &[]),
+                    acl(&old_path, &[]),
+                ])
+            };
+            let store = RuntimeOwnerRecordStore::new(&root)
+                .unwrap_or_else(|error| panic!("{permissions}: {error:#}"));
+            let new_key = RunLeaseKey {
+                agent_run_id: "new-run".into(),
+                execution_epoch: 8,
+            };
             store
-                .register(
-                    "new-host",
-                    &fake_host("new-host"),
-                    Some(RunLeaseKey {
-                        agent_run_id: "new-run".into(),
-                        execution_epoch: 8,
-                    }),
-                )
+                .register("new-host", &fake_host("new-host"), Some(new_key.clone()))
                 .unwrap();
-            crate::platform::prepare_private_directory(&root.join("runtime-fleet")).unwrap();
-            crate::platform::prepare_private_directory(&owners).unwrap();
-            crate::platform::open_private_read_file(&store.record_path("new-host")).unwrap();
-            if legacy {
-                assert!(store.confirmed_stop(&key));
-                assert!(store.record_path("legacy").exists());
-                store.acknowledge_cleanup(&key);
-                assert!(!store.record_path("legacy").exists());
+            assert!(!store.confirmed_stop(&new_key));
+            store.finish_stop("new-host");
+            assert!(
+                store.confirmed_stop(&new_key),
+                "{permissions}: stop receipt was not saved"
+            );
+            let restarted = RuntimeOwnerRecordStore::new(&root).unwrap();
+            assert!(restarted.confirmed_stop(&new_key));
+            restarted.acknowledge_cleanup(&new_key);
+            assert!(!store.record_path("new-host").exists());
+            if let Some(before) = before {
+                assert_eq!(std::fs::read(&old_path).unwrap(), old_bytes);
+                assert_eq!(
+                    [
+                        acl(&fleet_root, &[]),
+                        acl(&owners, &[]),
+                        acl(&old_path, &[])
+                    ],
+                    before,
+                    "{permissions}: normal I/O must not change existing ACLs"
+                );
+                assert!(restarted.confirmed_stop(&old_key));
+                restarted.acknowledge_cleanup(&old_key);
+                assert!(!old_path.exists());
             }
             std::fs::remove_dir_all(root).unwrap();
         }
-        // A broader ACL under the private Core root is not a legacy managed
-        // child and must not be rewritten or silently ignored. Grant Everyone
-        // explicitly so this case does not depend on the machine's TEMP ACL.
-        let root =
-            std::env::temp_dir().join(format!("rovai-owner-untrusted-{}", uuid::Uuid::new_v4()));
+        // Real write/replace failures preserve the old record and do not leave
+        // temporary records behind. No permissions are repaired to force success.
+        let root = std::env::temp_dir().join(format!(
+            "rovai-owner-write-failure-{}",
+            uuid::Uuid::new_v4()
+        ));
         crate::platform::prepare_private_directory(&root).unwrap();
-        let destination = root.join("runtime-fleet");
-        crate::platform::prepare_private_directory(&destination).unwrap();
-        let grant = std::process::Command::new(icacls)
-            .arg(&destination)
-            .args(["/grant", "*S-1-1-0:(OI)(CI)F", "/Q"])
-            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
-            .output()
-            .unwrap();
+        let store = RuntimeOwnerRecordStore::new(&root).unwrap();
+        store.register("kept", &fake_host("kept"), None).unwrap();
+        let path = store.record_path("kept");
+        let original = std::fs::read(&path).unwrap();
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions).unwrap();
         assert!(
-            grant.status.success(),
-            "failed to establish the explicit broad-ACL fixture"
+            store
+                .register("kept", &fake_host("replacement"), None)
+                .is_err()
         );
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(&store.root).unwrap().count(), 1);
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        acl(&store.root, &["/deny", &format!("{user}:(WD,AD)"), "/Q"]);
+        assert!(
+            store
+                .register("blocked", &fake_host("blocked"), None)
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(&store.root).unwrap().count(), 1);
+        acl(&store.root, &["/remove:d", &user, "/Q"]);
+        store.remove("kept");
+        std::fs::remove_dir(&store.root).unwrap();
+        std::fs::write(&store.root, b"keep this unexpected file").unwrap();
         assert!(RuntimeOwnerRecordStore::new(&root).is_err());
-        assert!(crate::platform::prepare_private_directory(&destination).is_err());
+        assert_eq!(
+            std::fs::read(&store.root).unwrap(),
+            b"keep this unexpected file"
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

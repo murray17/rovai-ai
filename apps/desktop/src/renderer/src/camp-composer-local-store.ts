@@ -54,15 +54,13 @@ function isComposerDocument(value: unknown): value is ComposerDocument {
 
 function isQuote(value: unknown): value is MessageQuoteSnapshot {
   if (!object(value) || value.version !== 1 || !string(value.quoteId, 512)
-    || !object(value.source) || !string(value.source.campId, 512)
-    || !string(value.source.messageId, 512)
-    || (value.source.scope !== 'camp' && value.source.scope !== 'single_chat')
-    || !object(value.authorAtCapture) || !string(value.authorAtCapture.displayName, 512)
-    || (value.authorAtCapture.type !== 'user' && value.authorAtCapture.type !== 'agent')
-    || !string(value.text) || value.format !== 'plain_text'
-    || !string(value.capturedAt, 128) || !string(value.sourceContentDigest, 512)
-    || !string(value.snapshotDigest, 512)) return false
-  return value.authorAtCapture.type !== 'agent' || string(value.authorAtCapture.agentId, 512)
+    || !string(value.text) || value.format !== 'plain_text' || !string(value.capturedAt, 128)) return false
+  // Source labels are optional navigation hints, never a reason to lose saved text.
+  if (value.source !== undefined && (!object(value.source) || !string(value.source.messageId, 512)
+    || !string(value.source.campId, 512) || !['camp', 'single_chat'].includes(String(value.source.scope)))) delete value.source
+  if (value.authorAtCapture !== undefined && (!object(value.authorAtCapture) || !string(value.authorAtCapture.displayName, 512)
+    || !['user', 'agent'].includes(String(value.authorAtCapture.type)))) delete value.authorAtCapture
+  return true
 }
 
 function isAttachment(value: unknown): value is ThreadMessageAttachmentView {

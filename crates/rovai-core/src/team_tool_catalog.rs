@@ -185,7 +185,7 @@ pub(crate) fn legacy_camp_search_success_schema(include_camp_title: bool) -> Val
         "anchorMessageId": {"type": ["string", "null"]},
         "createdAt": {"type": "string", "format": "date-time"},
         "snippet": {"type": "string", "maxLength": 200},
-        "quotes": crate::message_quote::model_quotes_schema("thread_messages")
+        "quotes": crate::message_quote::model_quotes_schema()
     });
     let mut required = vec![
         "threadId",
@@ -292,7 +292,7 @@ fn collection_message_schema(legacy: bool) -> Value {
             "anchorMessageId": {"type": ["string", "null"]},
             "createdAt": {"type": "string", "format": "date-time"},
             "body": {"type": "string"},
-            "quotes": crate::message_quote::model_quotes_schema("thread_messages"),
+            "quotes": crate::message_quote::model_quotes_schema(),
             "attachmentCount": {"type": "integer", "minimum": 0},
             (if legacy { "addressing" } else { "mentions" }): message_mentions_schema(legacy)
         }
@@ -349,7 +349,7 @@ fn item_message_schema(legacy: bool) -> Value {
             "anchorMessageId": {"type": ["string", "null"]},
             "createdAt": {"type": "string", "format": "date-time"},
             "body": {"type": "string"},
-            "quotes": crate::message_quote::model_quotes_schema("thread_messages"),
+            "quotes": crate::message_quote::model_quotes_schema(),
             "attachmentCount": {"type": "integer", "minimum": 0},
             "attachments": {
                 "type": "array", "maxItems": 10,

@@ -431,7 +431,7 @@ impl ThreadAttachmentViewStore {
 
         reject_runtime_root_marker_ancestor(root)?;
 
-        let canonical_root = crate::platform::private_storage::prepare_private_directory(root)
+        let canonical_root = prepare_runtime_directory(root)
             .context("runtime_camp_files_root_invalid: cannot create or admit root")?;
         reject_existing_symlink_components(root)?;
         set_directory_mode(&canonical_root, 0o700)?;
@@ -5520,6 +5520,12 @@ fn admit_runtime_root_marker(
             root_identity_digest: root_identity_digest.to_string(),
             created_at: marker.created_at,
         };
+        #[cfg(windows)]
+        crate::platform::private_storage::atomic_write_bytes(
+            &marker_path,
+            &serde_json::to_vec(&migrated)?,
+        )?;
+        #[cfg(not(windows))]
         crate::platform::private_storage::atomic_write_private_json(&marker_path, &migrated)?;
         sync_directory(canonical_root)?;
         return Ok(());
@@ -5857,8 +5863,19 @@ fn macos_volume_identity(path: &Path) -> Result<String> {
     ))
 }
 
+fn prepare_runtime_directory(path: &Path) -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        crate::platform::private_storage::prepare_data_directory(path)
+    }
+    #[cfg(not(windows))]
+    {
+        crate::platform::private_storage::prepare_private_directory(path)
+    }
+}
+
 fn ensure_private_directory(path: &Path) -> Result<()> {
-    crate::platform::private_storage::prepare_private_directory(path)?;
+    prepare_runtime_directory(path)?;
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         anyhow::bail!("managed Runtime View directory is unsafe");
@@ -6053,11 +6070,18 @@ fn set_file_mode(path: &Path, mode: u32) -> Result<()> {
 }
 
 fn private_open_read_write(path: &Path) -> Result<File> {
-    crate::platform::private_storage::open_private_read_write_file(path)
+    #[cfg(windows)]
+    {
+        crate::platform::private_storage::open_data_read_write_file(path)
+    }
+    #[cfg(not(windows))]
+    {
+        crate::platform::private_storage::open_private_read_write_file(path)
+    }
 }
 
 fn write_new_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    let mut file = crate::platform::private_storage::create_private_new_file(path)?;
+    let mut file = crate::platform::private_storage::create_data_new_file(path)?;
     serde_json::to_writer(&mut file, value)?;
     file.write_all(b"\n")?;
     file.sync_all()?;

@@ -6,6 +6,14 @@ last_updated: 2026-10-28
 
 # Agent Runtime 兼容性清单
 
+## 2026-10-28 Hermes 普通开放全部现有平台
+
+按维护者要求，macOS arm64/x64、Windows x64、Linux x64 均采用普通 `enabled` 准入，
+发现、安装、检查、成员配置与执行均可用，不采用 Preview。Windows 连接清理只拥有捕获的客户端根进程，
+共享 Gateway 不加入其 Job；其他 Runtime 的整树 Job 保证保持。平台开放不代表已完成完整模型与能力矩阵。
+当前范围由[平台准入](contracts/runtime-platform-admission-v2.md#hermes-初始准入)与
+[连接进程所有权](contracts/managed-runtime-process-v2.md#原生共享执行端的连接进程)拥有。
+
 ## 2026-10-28 Hermes 运行中插话接通
 
 官方 0.22.4 ACP slash Steer 已通过生产 Core 接入，使用既有 Native Session、Run 和 CLI 授权。
@@ -15,7 +23,7 @@ last_updated: 2026-10-28
 独立验证。证据见 [Core Steer 验证](research/hermes-runtime/README.md#core-steer-接通2026-10-28)。
 当前只有 macOS arm64 执行证据；不扩展为 Intel/其他平台、Desktop UI 或原生 image block 验收。
 
-## 2026-10-28 Hermes macOS 重新开放
+## 2026-10-28 Hermes macOS 重新开放（已由全部平台普通开放取代）
 
 按 User sequence 126，macOS arm64/x64 重新开放发现、检查、安装配置、成员选择和普通执行，
 内部沿用 Preview，不显示 Preview 或资格记录未齐备提示。Windows x64 与 Linux x64 继续隐藏。

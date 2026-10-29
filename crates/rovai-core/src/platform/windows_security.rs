@@ -16,9 +16,9 @@ use windows_sys::Win32::{
         },
         CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GetAce, GetAclInformation,
         GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetTokenInformation,
-        INHERITED_ACE, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
-        SECURITY_ATTRIBUTES, TOKEN_GROUPS, TOKEN_QUERY, TOKEN_USER, TokenLogonSid, TokenUser,
+        OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_GROUPS,
+        TOKEN_QUERY, TOKEN_USER, TokenLogonSid, TokenUser,
     },
     Storage::FileSystem::FILE_ALL_ACCESS,
     System::Threading::{GetCurrentProcess, OpenProcessToken},
@@ -122,18 +122,6 @@ impl PrivateSecurityDescriptor {
         }
         let security = SecurityInfo::from_file_handle(handle)?;
         security.verify_private_policy(self.kind, &self.principal_sid)
-    }
-
-    /// The old managed-directory writer inherited the admitted parent's exact
-    /// user/SYSTEM ACL. Broader grants and unknown owners are not migration inputs.
-    pub(crate) fn verify_inherited_file_handle(&self, handle: HANDLE) -> Result<()> {
-        if !matches!(
-            self.kind,
-            PrivateObjectKind::Directory | PrivateObjectKind::File
-        ) {
-            bail!("kernel-object descriptors cannot admit inherited filesystem objects");
-        }
-        SecurityInfo::from_file_handle(handle)?.verify_policy(self.kind, &self.principal_sid, true)
     }
 
     pub(crate) fn verify_job_handle(&self, handle: HANDLE) -> Result<()> {
@@ -281,15 +269,6 @@ impl SecurityInfo {
     }
 
     fn verify_private_policy(&self, kind: PrivateObjectKind, current_user_sid: &str) -> Result<()> {
-        self.verify_policy(kind, current_user_sid, false)
-    }
-
-    fn verify_policy(
-        &self,
-        kind: PrivateObjectKind,
-        current_user_sid: &str,
-        inherited: bool,
-    ) -> Result<()> {
         if kind != PrivateObjectKind::NamedPipe {
             self.verify_file_owner(current_user_sid)?;
         }
@@ -305,14 +284,9 @@ impl SecurityInfo {
             return Err(io::Error::last_os_error())
                 .context("failed to inspect Windows security descriptor control flags");
         }
-        if (control & SE_DACL_PROTECTED != 0) == inherited {
+        if control & SE_DACL_PROTECTED == 0 {
             return Err(PrivateDaclMismatch(
-                if inherited {
-                    "legacy storage object DACL is not inherited"
-                } else {
-                    "filesystem object DACL is not protected from inheritance"
-                }
-                .to_string(),
+                "filesystem object DACL is not protected from inheritance".to_string(),
             )
             .into());
         }
@@ -348,7 +322,7 @@ impl SecurityInfo {
         let expected_flags = match kind {
             PrivateObjectKind::Directory => (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8,
             PrivateObjectKind::File | PrivateObjectKind::NamedPipe | PrivateObjectKind::Job => 0,
-        } | if inherited { INHERITED_ACE as u8 } else { 0 };
+        };
         // CreateNamedPipe maps generic rights in the supplied descriptor to
         // the file-object rights exposed by the created pipe. GA therefore
         // admits as FILE_ALL_ACCESS when the post-creation DACL is read back.

@@ -55,7 +55,7 @@ describe('local Thread Composer drafts', () => {
         { ...original, content: { version: 2, segments: [{ kind: 'text', text: '后来修改' }] } },
         { ...original, replyIntent: { replyToThreadMessageId: 'new-reply', targetState: 'available', author: null, excerpt: null, recipientSelectionRequired: false } },
         { ...original, attachments: [{ id: '11111111-1111-4111-8111-111111111111', sourcePath: '/new', displayName: 'new', kind: 'file', mediaType: null, byteSize: 1, fileCount: 1, previewKind: 'none', availability: 'available' }] },
-        { ...original, quotes: [{ version: 1, quoteId: 'new', source: { scope: 'camp', campId: original.threadId, messageId: 'source' }, authorAtCapture: { type: 'user', displayName: 'User' }, text: '新增引用', format: 'plain_text', capturedAt: '2026-10-17', sourceContentDigest: 'source', snapshotDigest: 'snapshot' }] }
+        { ...original, quotes: [{ version: 1, quoteId: 'new', source: { scope: 'camp', campId: original.threadId, messageId: 'source' }, authorAtCapture: { type: 'user', displayName: 'User' }, text: '新增引用', format: 'plain_text', capturedAt: '2026-10-17' }] }
       ]
       for (const edited of edits) {
         saveLocalThreadComposerDraft(edited, storage)
@@ -108,8 +108,6 @@ describe('local Thread Composer drafts', () => {
         text: '先检查这一段',
         format: 'plain_text',
         capturedAt: '2026-09-19T08:00:00Z',
-        sourceContentDigest: 'sha256:source',
-        snapshotDigest: 'sha256:snapshot'
       }],
       replyIntent: {
         replyToThreadMessageId: 'message-old', targetState: 'available',
@@ -127,6 +125,11 @@ describe('local Thread Composer drafts', () => {
 
     expect(loadLocalThreadComposerDraft('camp-a', storage)).toEqual(campA)
     expect(loadLocalThreadComposerDraft('camp-b', storage)).toEqual(campB)
+
+    // A reopened browser restores the saved selection even without any source metadata.
+    const withoutSource = { ...campA, quotes: campA.quotes.map(({ source, authorAtCapture, ...quote }) => quote) }
+    saveLocalThreadComposerDraft(withoutSource, storage)
+    expect(loadLocalThreadComposerDraft('camp-a', storage)).toEqual(withoutSource)
 
     clearLocalThreadComposerDraft('camp-a', storage)
     expect(loadLocalThreadComposerDraft('camp-a', storage)).toBeNull()

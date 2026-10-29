@@ -521,9 +521,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)\s*\{\s*:root\s*\{[^}]*--conversation-composer-width:\s*1440px/
     )
-    expect(css).toMatch(
-      /\.conversation-bubble\.agent \.safe-markdown > :where\(pre, \.markdown-code-frame, table\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
-    )
+    expect(css).toContain('--agent-message-prose-width: 780px;')
     expect(css).toMatch(
       /@media\s*\(min-width:\s*1800px\)[\s\S]*?\.timeline-event-card:not\(\.task-event-card\)\s*\{[^}]*width:\s*min\(var\(--conversation-artifact-width\), 100%\)/
     )

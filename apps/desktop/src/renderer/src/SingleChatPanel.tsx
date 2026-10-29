@@ -459,10 +459,11 @@ export function SingleChatRunHistory({
 }
 
 async function revealPrivateQuote(quote: MessageQuoteSnapshot): Promise<void> {
+  if (!quote.source) return
   const root = document.querySelector<HTMLElement>(`[data-single-chat-owner="${CSS.escape(quote.source.conversationId ?? '')}"]`)
   const target = root?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(quote.source.messageId)}"]`)
   if (!target) throw new Error('quote.source_unavailable')
-  await revealMessageQuote(quote, target, quote.authorAtCapture.type === 'user' ? target.textContent ?? '' : undefined)
+  revealMessageQuote(target)
 }
 
 function SingleChatTranscript({

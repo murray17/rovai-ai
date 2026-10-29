@@ -233,7 +233,7 @@ app.whenReady().then(async () => {
       assert.ok(quote, JSON.stringify(await evaluate('({selected:window.getSelection().toString(), anchor:window.getSelection().anchorNode?.parentElement?.outerHTML,focus:window.getSelection().focusNode?.parentElement?.outerHTML,body:document.querySelector("#web-user").outerHTML})')))
       const selected = await evaluate('window.getSelection().toString()')
       assert.equal(quote.text, selected)
-      assert.equal(quote.bodyAtSelection.slice(quote.startScalar, quote.endScalar), selected)
+      assert.deepEqual(Object.keys(quote).sort(), ['messageId', 'text'])
       assert.equal(webOpens.length, before)
       for (const result of await evaluate('window.composerTest.comparePartialWebQuotes()')) {
         assert.deepEqual(result.linked, result.plain)

@@ -127,7 +127,6 @@ pub(super) fn select_delivery(
     let messages = project_public_input_messages(
         &tx,
         &snapshot.camp_id,
-        &snapshot.agent_id,
         boundary,
         &[message_id],
         &mut SenderNames::default(),

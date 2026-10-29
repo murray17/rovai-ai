@@ -1,0 +1,20 @@
+{
+  "channel": "isolated-packaged-app",
+  "source": "e833043a0fa2f51bf5f125f37cead413896de5bd",
+  "checks": {
+    "firstOpen": true,
+    "lockWaitResponsive": true,
+    "provenanceFirstOpen": true,
+    "membersAndThreadPreserved": true,
+    "sqliteIntegrity": "ok"
+  },
+  "duringWait": {
+    "state": "starting"
+  },
+  "animationFrames": 17,
+  "notVerified": [
+    "Windows GUI",
+    "Daily host restart (running old host preserved)",
+    "Physical system-origin provenance event (native xattr mutation verified)"
+  ]
+}

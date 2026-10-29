@@ -1,5 +1,4 @@
 export * from '../../shared/execution-presentation/safe-markdown-model'
-import type { RawHtmlPolicy } from '../../shared/execution-presentation/safe-markdown-model'
 import remarkGfm from 'remark-gfm'
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkCjkFriendlyStrikethrough from 'remark-cjk-friendly-gfm-strikethrough/parseOnly'
@@ -149,43 +148,44 @@ function markdownLinkLabel(node: MarkdownNode): string {
   return Array.isArray(node.children) ? node.children.map(markdownLinkLabel).join('') : ''
 }
 
-const inlineFlowNodeTypes = new Set(['heading', 'paragraph', 'tableCell'])
-const inlineFlowBoundaryNodeTypes = new Set(['break', 'footnoteReference'])
 const bodyTextCharacter = /[\p{Letter}\p{Number}]/u
 
-type InlineFlowToken =
-  | { kind: 'text'; value: string }
-  | { kind: 'fileReference'; node: MarkdownNode }
-  | { kind: 'boundary' }
-
-function markdownNodeChildren(node: MarkdownNode): MarkdownNode[] {
-  return node.children ?? []
+type RenderedNode = {
+  type?: string
+  tagName?: string
+  value?: string
+  properties?: Record<string, unknown>
+  children?: RenderedNode[]
 }
+type InlineFlowToken = { kind: 'text'; value: string } | { kind: 'fileReference'; node: RenderedNode } | { kind: 'boundary' }
+const flowBlocks = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th', 'li', 'div', 'blockquote'])
 
-function isMarkdownFileReference(node: MarkdownNode): boolean {
-  return node.type === 'link'
-    && typeof node.url === 'string'
-    && Boolean(parseFileReference(node.url))
-}
-
-function appendInlineFlowTokens(node: MarkdownNode, tokens: InlineFlowToken[], rawHtmlPolicy: RawHtmlPolicy): void {
-  if (isMarkdownFileReference(node)) {
-    tokens.push({ kind: 'fileReference', node })
-    return
+// This runs on sanitized HTML, so discarded tags and attributes never count as
+// visible neighbors. Existing file links alone receive the presentation classes.
+export function visitRenderedFileReferences(root: RenderedNode, fragment: string): void {
+  const tokens: InlineFlowToken[] = []
+  const walk = (node: RenderedNode): void => {
+    if (node.type === 'text') {
+      if (node.value) tokens.push({ kind: 'text', value: node.value })
+      return
+    }
+    if (node.tagName === 'a' && String(node.properties?.href ?? '').startsWith(fragment)) {
+      tokens.push({ kind: 'fileReference', node }); return
+    }
+    if (node.tagName === 'img' || node.tagName === 'pre') { tokens.push({ kind: 'boundary' }); return }
+    const block = flowBlocks.has(node.tagName ?? '') || node.tagName === 'br' || node.tagName === 'hr'
+    if (block) tokens.push({ kind: 'boundary' })
+    node.children?.forEach(walk)
+    if (block) tokens.push({ kind: 'boundary' })
   }
-  if ((node.type === 'text' || node.type === 'inlineCode' || node.type === 'html' && rawHtmlPolicy === 'text')
-    && typeof node.value === 'string') {
-    if (node.value) tokens.push({ kind: 'text', value: node.value })
-    return
+  walk(root)
+  for (const [index, token] of tokens.entries()) {
+    if (token.kind !== 'fileReference') continue
+    token.node.properties = { ...token.node.properties, className: fileReferenceSpacingClassName({
+      marginInlineStart: inlineTokenTouchesBodyText(tokens[index - 1], 'end'),
+      marginInlineEnd: inlineTokenTouchesBodyText(tokens[index + 1], 'start')
+    }) }
   }
-  if (inlineFlowBoundaryNodeTypes.has(String(node.type))) {
-    tokens.push({ kind: 'boundary' })
-    return
-  }
-  // Images, definitions and dropped HTML do not contribute visible neighbors.
-  // Literal HTML above affects spacing only; its contents are never reparsed.
-  if (omittedNodeTypes.has(String(node.type))) return
-  for (const child of markdownNodeChildren(node)) appendInlineFlowTokens(child, tokens, rawHtmlPolicy)
 }
 
 function firstCodePoint(value: string): string {
@@ -205,30 +205,6 @@ function inlineTokenTouchesBodyText(token: InlineFlowToken | undefined, edge: 's
   if (token?.kind !== 'text') return false
   const character = edge === 'start' ? firstCodePoint(token.value) : lastCodePoint(token.value)
   return bodyTextCharacter.test(character)
-}
-
-export function visitMarkdownFileReferences(
-  root: MarkdownNode,
-  visitor: (node: MarkdownNode, spacing: FileReferenceInlineSpacing) => void,
-  rawHtmlPolicy: RawHtmlPolicy = 'text'
-): void {
-  const visitBlocks = (node: MarkdownNode): void => {
-    if (inlineFlowNodeTypes.has(String(node.type))) {
-      const tokens: InlineFlowToken[] = []
-      appendInlineFlowTokens(node, tokens, rawHtmlPolicy)
-      for (const [index, token] of tokens.entries()) {
-        if (token.kind !== 'fileReference') continue
-        visitor(token.node, {
-          marginInlineStart: inlineTokenTouchesBodyText(tokens[index - 1], 'end'),
-          marginInlineEnd: inlineTokenTouchesBodyText(tokens[index + 1], 'start')
-        })
-      }
-      return
-    }
-    if (node.type === 'code' || omittedNodeTypes.has(String(node.type))) return
-    for (const child of markdownNodeChildren(node)) visitBlocks(child)
-  }
-  visitBlocks(root)
 }
 
 export function fileReferenceSpacingClassName(spacing: FileReferenceInlineSpacing): string {

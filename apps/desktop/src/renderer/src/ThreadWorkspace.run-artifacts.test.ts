@@ -16,7 +16,7 @@ it('keeps an input rejection inspectable with zero evidence and no inline hint o
   const timeline = renderTimeline(snapshot([rejected], false, false))
   expect(timeline).toContain('输入内容过大 · 查看详情')
   expect(timeline).not.toContain('请改用文件附件')
-  expect(timeline).not.toContain('run-presence-retry')
+  expect(timeline).not.toContain('run-presence-resume')
   const disclosure = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
     run: rejected, threadId: 'camp-artifacts'
   }))
@@ -202,7 +202,7 @@ describe('Manual Run interruption in the conversation', () => {
     expect(markup).not.toContain('data-message-id=')
   })
 
-  it.each([true, false])('attaches only to the last public reply, with artifacts = %s', artifacts => {
+  it.each([true, false])('replaces the last reply marker with a retained stop row, with artifacts = %s', artifacts => {
     const source = stopped()
     const candidate = snapshot([source], artifacts, artifacts)
     candidate.messages = [{ ...publicMessage(source), id: 'first', sequence: 1 },
@@ -211,23 +211,44 @@ describe('Manual Run interruption in the conversation', () => {
     const items = timeline(candidate)
     expect(items.filter(item => item.kind === 'camp_message' && item.interruptedRun).map(item => item.id)).toEqual(['last'])
     const markup = renderTimeline(candidate)
-    expect(markers(markup)).toEqual(['run-1'])
+    expect(markers(markup)).toEqual([])
+    expect(markup).toContain('data-presence-run="run-1" data-presence-state="cancelled" data-continuation="true"')
+    expect(markup).toContain('已停止')
+    expect(markup).not.toContain('run-presence-spinner')
     expect(markup).not.toContain('run-artifact-output')
     expect(markup.indexOf(artifacts ? 'run-file-changes-card-files' : 'data-message-id="last"'))
-      .toBeLessThan(markup.indexOf('data-interrupted-run-id'))
+      .toBeLessThan(markup.indexOf('data-presence-run'))
   })
 
-  it.each([false, true])('does not create an output row when stopping without a reply or artifacts, with history = %s', hasHistory => {
+  it('retains a stop row after standalone artifacts without repeating identity or the interruption marker', () => {
+    const markup = renderTimeline(snapshot([stopped()]))
+    expect(markers(markup)).toEqual([])
+    expect(avatars(markup)).toBe(1)
+    expect(markup.indexOf('run-file-changes-card-files')).toBeLessThan(markup.indexOf('data-presence-run'))
+    expect(markup).toContain('data-continuation="true"')
+  })
+
+  it.each([false, true])('retains a stop row without inventing output, with history = %s', hasHistory => {
     const candidate = snapshot([stopped()], false, false)
     if (hasHistory) candidate.messages = [{ ...publicMessage(candidate.agentRuns[0]), id: 'later-user', sequence: 1,
       authorType: 'user', authorId: 'local-user', sourceAgentRunId: null, createdAt: '2026-09-06T06:02:00Z' }]
     expect(timeline(candidate).map(item => item.id)).toEqual(hasHistory ? ['later-user'] : [])
     const markup = renderTimeline(candidate)
     expect(markers(markup)).toEqual([])
-    expect(avatars(markup)).toBe(0)
+    expect(avatars(markup)).toBe(1)
+    expect(markup).toContain('data-presence-run="run-1" data-presence-state="cancelled" data-continuation="false"')
     expect(markup).not.toContain('run-artifact-output')
     expect(markup).not.toContain('run-file-changes-card')
     expect(markup).not.toContain('agent-message-output-actions')
+  })
+
+  it('restores the historical interruption marker when a continuation has been accepted', () => {
+    const source = stopped({ hasAcceptedContinuation: true })
+    const candidate = snapshot([source], false, false)
+    candidate.messages = [publicMessage(source)]
+    const markup = renderTimeline(candidate)
+    expect(markers(markup)).toEqual(['run-1'])
+    expect(markup).not.toContain('data-presence-run')
   })
 
   it.each([

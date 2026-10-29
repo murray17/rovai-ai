@@ -899,7 +899,6 @@ fn select_batch_prefix(
         let run_input = project_batch_run_input_for_claim(
             transaction,
             camp_id,
-            agent_id,
             camp_public_tail,
             &message_ids,
             &skill_links,
@@ -3215,16 +3214,15 @@ mod tests {
                 &fixture.camp_id,
                 None,
                 &QuoteSelection {
-                    message_id: "quoted-reference".into(),
-                    body_at_selection: "visible history".into(),
-                    start_scalar: 0,
-                    end_scalar: 15,
+                    message_id: Some("quoted-reference".into()),
+
                     text: "visible history".into(),
-                    current_user_display_name: None,
                 },
             )
             .unwrap();
             store_quotes(&tx, QuoteStorage::CampMessage, "steer-one", &[quote]).unwrap();
+            tx.execute("DELETE FROM camp_message WHERE id='quoted-reference'", [])
+                .unwrap();
             tx.commit().unwrap();
         }
         {
@@ -6189,12 +6187,9 @@ mod tests {
             &fixture.camp_id,
             None,
             &QuoteSelection {
-                message_id: "projected-1".to_string(),
-                body_at_selection: "secret".to_string(),
-                start_scalar: 0,
-                end_scalar: 6,
+                message_id: Some("projected-1".to_string()),
+
                 text: "secret".to_string(),
-                current_user_display_name: None,
             },
         )
         .unwrap();
@@ -6215,7 +6210,6 @@ mod tests {
         let projection = project_batch_run_input_for_claim(
             &transaction,
             &fixture.camp_id,
-            "agent_1",
             boundary,
             &["projected-1".to_string(), "projected-2".to_string()],
             &[CurrentInputSkillLink {
@@ -6265,7 +6259,10 @@ mod tests {
         assert_eq!(messages[1]["senderType"], "agent");
         assert_eq!(messages[1]["senderId"], "agent_2");
         assert!(messages[1]["senderName"].as_str().is_some());
-        assert_eq!(messages[1]["quotes"][0]["source"]["author"]["type"], "user");
+        assert_eq!(
+            messages[1]["quotes"][0],
+            json!({"kind":"message_excerpt","text":"secret"})
+        );
         let mut without_sender_name = projection.clone();
         without_sender_name["messages"][1]
             .as_object_mut()

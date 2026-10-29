@@ -98,8 +98,8 @@ describe('conversation Run presence', () => {
     expect(order([{...b,publicTailSequenceAtStart:null}],timeline)).toEqual(order([b],timeline))
   })
 
-  it('keeps message artifacts together and continues the adjacent Run identity', () => {
-    const a = run('a','alice',{status:'failed'})
+  it.each(['failed', 'cancelled'] as const)('keeps %s artifacts together and continues the adjacent Run identity', status => {
+    const a = run('a','alice',{status, cancelReasonCode:'user_requested_agent_run_stop'})
     const artifact = {kind:'run_artifacts',id:'artifact-a',createdAt:a.createdAt,run:a,imageGroups:[],fileChanges:[],memberCreations:[]} as ThreadConversationTimelineItem
     expect(order([a],[message(1,null),artifact,message(2,'peer')])).toEqual(['message-1','artifact-a','run-presence:a','message-2'])
     expect(slots([a],[artifact])).toEqual([['a',true]])
@@ -121,6 +121,30 @@ describe('conversation Run presence', () => {
       run('stopped','',{status:'cancelled'}),run('approval','alice',{status:'waiting',waitReason:'approval'})]
     expect(slots(runs)).toEqual([['approval',false],['queued',false]])
     expect(runPresencePreview(runs[5]).text).toBe('等待审批')
+  })
+
+  it('retains only the latest public manual stop until acceptance or a newer Run', () => {
+    const stopped = run('stopped', 'alice', { status: 'cancelled', cancelReasonCode: 'user_requested_agent_run_stop' })
+    const next = run('next', 'alice', { createdAt: '2026-10-10T12:01:00Z' })
+    expect(slots([stopped])).toEqual([['stopped', false]])
+    expect(slots([structuredClone(stopped)], [], false)).toEqual([])
+    expect(slots([structuredClone(stopped)])).toEqual([['stopped', false]])
+    expect(slots([{ ...stopped, hasAcceptedContinuation: true }])).toEqual([])
+    const oldFailure = run('older', 'alice', { status: 'failed', createdAt: '2026-10-10T11:59:00Z' })
+    const acknowledged = conversationRunPresenceTimeline([], [oldFailure, stopped], true, new Set([stopped.id]))
+    expect(acknowledged).toEqual([])
+    expect(stopped.hasAcceptedContinuation).toBeUndefined()
+    for (const status of ['queued', 'running', 'waiting', 'failed', 'succeeded'] as const) {
+      expect(slots([stopped, { ...next, status }]).flat()).not.toContain(stopped.id)
+    }
+    expect(slots([stopped, run('peer', 'audrey')])).toEqual([['peer', false], ['stopped', false]])
+    expect(slots([stopped, { ...next, invocationKind: 'single_chat' }])).toEqual([['stopped', false]])
+    expect(slots([{ ...stopped, invocationKind: 'single_chat' }])).toEqual([])
+    expect(slots([{ ...stopped, invocationKind: 'direct' }])).toEqual([['stopped', false]])
+    for (const cancelReasonCode of [null, 'camp_turn_cancelled', 'single_chat_ended', 'execution_budget_exhausted'] as const) {
+      expect(slots([{ ...stopped, cancelReasonCode }])).toEqual([])
+    }
+    expect(slots([{ ...stopped, status: 'succeeded' }])).toEqual([])
   })
 
   it('keeps only the latest unacknowledged batch failure after authoritative re-entry', () => {
@@ -253,6 +277,10 @@ describe('conversation presence copy and duration', () => {
     expect(runPresenceElapsedSeconds({ ...current, status: 'waiting' }, now)).toBe(88)
     expect(runPresenceElapsedSeconds({ ...current, status: 'failed', endedAt: '2026-10-10T12:01:00Z' }, now)).toBe(59)
     expect(runPresenceElapsedSeconds({ ...current, status: 'failed', endedAt: null }, now)).toBeNull()
+    const stopped = { ...current, status: 'cancelled' as const, endedAt: '2026-10-10T12:01:00Z' }
+    expect(runPresenceElapsedSeconds(stopped, now)).toBe(59)
+    expect(runPresenceElapsedSeconds(stopped, now + 60_000)).toBe(59)
+    expect(runPresenceElapsedSeconds({ ...stopped, endedAt: null }, now)).toBeNull()
     for (const startedAt of [null, 'invalid']) expect(runPresenceElapsedSeconds({ ...current, startedAt }, now)).toBeNull()
     expect(runPresenceElapsedSeconds({ ...current, endedAt: 'invalid' }, now)).toBeNull()
     expect(runPresenceElapsedSeconds(current, Date.parse('2026-10-10T12:00:00Z'))).toBe(0)

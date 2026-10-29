@@ -26,7 +26,7 @@ describe('execution console layout', () => {
 
   it('keeps all Run states on the execution surface without a running fill override', () => {
     expect(styleBlock('.camp-conversation-view-controls button[aria-pressed="true"]')).toMatch(
-      /background:\s*var\(--brand-soft\)/
+      /background:\s*var\(--neutral-selected\)/
     )
     expect(styleBlock('.execution-drawer')).not.toMatch(
       /--execution-running-surface:/

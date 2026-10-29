@@ -16,7 +16,7 @@ import { ConversationRunPresence } from './ConversationRunPresence'
 import { MessageQuotePreview } from './MessageQuotePreview'
 import { ConversationRunSource } from './ConversationRunSource'
 import { useRunSourceNavigation } from './useRunSourceNavigation'
-import { conversationRunPresenceTimeline } from './conversation-run-presence'
+import { conversationRunPresenceTimeline, isUserInterruptedRun } from './conversation-run-presence'
 import { PendingThreadDraftPersistence } from './pending-thread-draft'
 import { pastedTextFileName } from './long-text-paste'
 import { MessageModelSummary, ModelSummaryText, ProfileModelFields } from './ThreadModelInformation'
@@ -179,6 +179,7 @@ import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { mentionCandidateRuntime } from './mention-runtime'
 import { SafeMarkdown } from './SafeMarkdown'
+import { AgentMessageContent } from './AgentMessageContent'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { useExecutionPreviewHost, useOptionalFilePreview } from './FilePreviewContext'
@@ -1249,10 +1250,6 @@ function compareTimelinePresentationOrder(
     || left.id.localeCompare(right.id)
 }
 
-function isUserInterruptedRun(run: AgentRunView): boolean {
-  return run.status === 'cancelled' && run.cancelReasonCode === 'user_requested_agent_run_stop'
-}
-
 export function campConversationTimeline(
   messages: ThreadMessageView[],
   turns: ThreadSnapshot['turns'] = [],
@@ -1773,6 +1770,8 @@ export function ThreadWorkspace({
   const { profile: currentUserProfile } = useCurrentUserProfile()
   const currentUserName = currentUserDisplayName(currentUserProfile)
   const filePreview = useOptionalFilePreview()
+  const rightPreviewBlocksExecutionAutoOpen = executionPlacement === 'right'
+    && Boolean(filePreview?.paneVisible && filePreview.activeTab && filePreview.activeTab.kind !== 'execution')
   const replyReader = useMemo(() => new ThreadReplyReader(snapshot.thread.id, client), [snapshot.thread.id, client])
   const replyDetail = useSyncExternalStore(replyReader.subscribe, replyReader.getSnapshot, replyReader.getSnapshot)
   const [replyFull, setReplyFull] = useState(false)
@@ -2134,7 +2133,7 @@ export function ThreadWorkspace({
   const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<ThreadInspectorTab>('tasks')
   const [workspaceEntrySelection] = useState(() =>
-    workspaceEntrySnapshotReady && !suppressExecutionAutoOpen
+    workspaceEntrySnapshotReady && !suppressExecutionAutoOpen && !rightPreviewBlocksExecutionAutoOpen
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
   )
@@ -2453,10 +2452,11 @@ export function ThreadWorkspace({
 
   useEffect(() => setMentionPopover(null), [snapshot.thread.id])
   useLayoutEffect(() => {
-    if (workspaceEntrySnapshotHandled.current || !workspaceEntrySnapshotReady) return
+    if (workspaceEntrySnapshotHandled.current) return
+    if (!workspaceEntrySnapshotReady && !rightPreviewBlocksExecutionAutoOpen) return
     workspaceEntrySnapshotHandled.current = true
     if (executionEntryInteractionThreadId.current === snapshot.thread.id) return
-    if (suppressExecutionAutoOpen) return
+    if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) return
     const entrySelection = executionWorkspaceEntrySelection(snapshot.agentRuns)
     const runningRun = entrySelection?.focusedRun ?? null
     setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
@@ -2485,13 +2485,14 @@ export function ThreadWorkspace({
     filePreview,
     snapshot.agentRuns,
     workspaceEntrySnapshotReady,
-    suppressExecutionAutoOpen
+    suppressExecutionAutoOpen,
+    rightPreviewBlocksExecutionAutoOpen
   ])
   useLayoutEffect(() => {
     if (workspaceEntryInspectorHandled.current) return
-    if (!workspaceEntrySnapshotReady) return
+    if (!workspaceEntrySnapshotReady && !rightPreviewBlocksExecutionAutoOpen) return
     workspaceEntryInspectorHandled.current = true
-    if (suppressExecutionAutoOpen) return
+    if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) return
     if (!mobile && workspaceEntryRunningRun && executionPlacement === 'inspector') {
       onOpenInspector?.(inspectorTab)
     } else if (workspaceEntryRunningRun && executionPlacement === 'right') {
@@ -2505,14 +2506,15 @@ export function ThreadWorkspace({
     filePreview,
     workspaceEntryRunningRun,
     workspaceEntrySnapshotReady,
-    suppressExecutionAutoOpen
+    suppressExecutionAutoOpen,
+    rightPreviewBlocksExecutionAutoOpen
   ])
   useLayoutEffect(() => {
     if (mountedThreadId.current === snapshot.thread.id) return
     mountedThreadId.current = snapshot.thread.id
     executionEntryInteractionThreadId.current = null
-    workspaceEntrySnapshotHandled.current = workspaceEntrySnapshotReady
-    const entrySelection = workspaceEntrySnapshotReady && !suppressExecutionAutoOpen
+    workspaceEntrySnapshotHandled.current = workspaceEntrySnapshotReady || rightPreviewBlocksExecutionAutoOpen
+    const entrySelection = workspaceEntrySnapshotReady && !suppressExecutionAutoOpen && !rightPreviewBlocksExecutionAutoOpen
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
     const runningRun = entrySelection?.focusedRun ?? null
@@ -2531,7 +2533,7 @@ export function ThreadWorkspace({
     } else if (runningRun && executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, workspaceEntrySnapshotReady])
+  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
@@ -2639,9 +2641,16 @@ export function ThreadWorkspace({
       visibleThreadMessages
     ]
   )
+  // Applied receipts update both presence and historical markers together while
+  // Core's refreshed projection is in flight; re-entry still uses the Core fact.
+  const [continuedRunIds, setContinuedRunIds] = useState<ReadonlySet<string>>(() => new Set())
+  useEffect(() => setContinuedRunIds(new Set()), [snapshot.thread.id])
   const presenceTimeline = useMemo(() => conversationRunPresenceTimeline(
-    conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady
-  ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady])
+    conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, continuedRunIds
+  ), [conversationTimeline, snapshot.agentRuns, workspaceEntrySnapshotReady, continuedRunIds])
+  const retainedStopIds = useMemo(() => new Set(presenceTimeline.flatMap(item =>
+    item.kind === 'run_presence' && isUserInterruptedRun(item.slot.run) ? [item.slot.run.id] : []
+  )), [presenceTimeline])
   const historyBoundaryId = anchorWindowBeforeNormal
     ? conversationTimeline.find(item => item.kind === 'camp_message' && item.message.sequence >= normalStart!)?.id : null
   const latestAgentMessageId = useMemo(() => {
@@ -3504,7 +3513,7 @@ export function ThreadWorkspace({
     runSourceNavigation.cancel()
     anchorNavigation.navigation.cancelNavigation()
     const threadId = snapshot.thread.id
-    if (quote.source.scope !== 'camp' || quote.source.campId !== threadId) throw new Error('quote.owner_mismatch')
+    if (quote.source?.scope !== 'camp' || quote.source.campId !== threadId) throw new Error('quote.owner_mismatch')
     const messageId = quote.source.messageId
     setConversationView('conversation')
     setQuoteSourceId(messageId)
@@ -3520,7 +3529,7 @@ export function ThreadWorkspace({
     if (activeThreadIdRef.current !== threadId) return
     const target = timelineScrollRef.current?.querySelector<HTMLElement>(`[data-message-quote-body="${CSS.escape(messageId)}"][data-quote-owner="thread:${CSS.escape(threadId)}"]`)
     if (!target) throw new Error('quote.source_unavailable')
-    await revealMessageQuote(quote, target, source.authorType === 'user' ? source.body.replace(/\r\n/gu, '\n') : undefined)
+    revealMessageQuote(target)
   }
 
   const revealReplyParent = async (messageId: string, fromDetails = false): Promise<void> => {
@@ -5030,7 +5039,9 @@ export function ThreadWorkspace({
     const submittedExecutionRequest = submittedExecutionRequests[0]
     if (!submittedExecutionRequest) return
     const consumeRequest = (): void => { setSubmittedExecutionRequests((current) => current.slice(1)) }
-    if (suppressExecutionAutoOpen) { consumeRequest(); return }
+    // Consume even before the Run arrives so leaving the preview cannot replay
+    // an automatic navigation that was declined while the user was reading.
+    if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) { consumeRequest(); return }
     if (taskCreationBlocksSubmittedRunAutoFocus(
       taskCreationActive,
       inspectorVisible,
@@ -5078,7 +5089,8 @@ export function ThreadWorkspace({
     initializePreviewMinimumWidth,
     mobile,
     taskCreationActive,
-    suppressExecutionAutoOpen
+    suppressExecutionAutoOpen,
+    rightPreviewBlocksExecutionAutoOpen
   ])
 
   const conversationFindTotal = conversationFind.snapshot?.totalMatchCount ?? 0
@@ -5466,6 +5478,7 @@ export function ThreadWorkspace({
                         confirming: confirmingRunIds.has(run.id),
                         turnCancelling: run.threadTurnId !== null && cancellingTurnIds.has(run.threadTurnId)
                       })}
+                      onContinued={runId => setContinuedRunIds(current => new Set(current).add(runId))}
                       onStop={onCancelAgentRun} onOpen={openExecutionProcess} onError={notifyError} />)
                     continue
                   }
@@ -5557,7 +5570,7 @@ export function ThreadWorkspace({
                             ))}
                           </div>
                         )}
-                        {isUserInterruptedRun(run) && (
+                        {isUserInterruptedRun(run) && !retainedStopIds.has(run.id) && (
                           <RunInterruptionMarker run={run} author={author} onOpen={openExecutionProcess} />
                         )}
                       </section>
@@ -5606,6 +5619,8 @@ export function ThreadWorkspace({
                     continue
                   }
                   const campMessage = timelineItem.message
+                  const interruptedRun = timelineItem.interruptedRun && !retainedStopIds.has(timelineItem.interruptedRun.id)
+                    ? timelineItem.interruptedRun : undefined
                   if (campMessage.withdrawn) {
                     previousMessageAuthorKey = null
                     items.push(
@@ -5860,16 +5875,23 @@ export function ThreadWorkspace({
                                     segment.kind === 'current_user_mention'
                                   )
                                     ? (
-                                        <div className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                        <AgentMessageContent className="final-copy" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
                                           {replyQuote}
                                           {renderPublicMessageBody(campMessage, 'timeline')}
-                                        </div>
+                                        </AgentMessageContent>
                                       )
                                     : (
-                                        <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' || campMessage.authorType === 'agent' ? campMessage.id : undefined} data-quote-owner={`thread:${snapshot.thread.id}`}>
-                                          {replyQuote}
-                                          {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
-                                        </div>
+                                        campMessage.authorType === 'agent' ? (
+                                          <AgentMessageContent className="message-bubble" data-message-quote-body={campMessage.id} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                            {replyQuote}
+                                            {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
+                                          </AgentMessageContent>
+                                        ) : (
+                                          <div className="message-bubble" data-message-quote-body={campMessage.authorType === 'user' ? campMessage.id : undefined} data-quote-owner={`thread:${snapshot.thread.id}`}>
+                                            {replyQuote}
+                                            {renderPublicMessageBody(campMessage, 'timeline', isConversationFindCurrent || quoteSourceId === campMessage.id)}
+                                          </div>
+                                        )
                                       )
                                 )}
                                 {!humanAuthored && (
@@ -5895,7 +5917,7 @@ export function ThreadWorkspace({
                                 />
                               )}
                               {campMessage.authorType === 'agent'
-                                && trailingResultItems.length === 0 && !timelineItem.interruptedRun
+                                && trailingResultItems.length === 0 && !interruptedRun
                                 && (
                                   <MessageActions
                                     timestamp={messageTimestamp}
@@ -5925,7 +5947,7 @@ export function ThreadWorkspace({
                           )}
                     </article>
                   )
-                  if (trailingResultItems.length > 0 || timelineItem.interruptedRun) {
+                  if (trailingResultItems.length > 0 || interruptedRun) {
                     items.push(
                       <div
                         className={`agent-message-output public-message-output${followsSameAuthor ? ' same-author' : ''}${isGroupContinuation ? ' is-group-continuation' : ''}`}
@@ -5954,8 +5976,8 @@ export function ThreadWorkspace({
                             />
                           ))}
                         </div>}
-                        {timelineItem.interruptedRun && (
-                          <RunInterruptionMarker run={timelineItem.interruptedRun} author={author} onOpen={openExecutionProcess} />
+                        {interruptedRun && (
+                          <RunInterruptionMarker run={interruptedRun} author={author} onOpen={openExecutionProcess} />
                         )}
                         <MessageActions
                           timestamp={messageTimestamp}

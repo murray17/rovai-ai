@@ -223,8 +223,8 @@ describe('Runtime user status projection', () => {
       label: '可用',
       detail: null
     })
-    for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64'] as const) {
-      for (const status of ['preview', 'qualified'] as const) {
+    for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
+      for (const status of ['enabled', 'preview', 'qualified'] as const) {
         for (const state of ['ready', 'missing', 'authentication_required'] as const) {
           const result = runtimeProductPresentation(
             { ...admission, runtimeKind: 'zcode-app', platform, status },

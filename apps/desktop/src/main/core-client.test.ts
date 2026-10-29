@@ -107,7 +107,7 @@ describe('CoreClient planned shutdown', () => {
 
   it('admits only bounded transient authority retries, independently of the crash budget', () => {
     const busy = { status: 'blocked' as const, authorityState: { kind: 'blocked' as const, reason: { kind: 'busy', stage: 'open' } } }
-    expect([0, 1, 2, 3].map(attempt => coreStartupRetryDelay(busy, attempt))).toEqual([250, 750, 1500, null])
+    expect([0, 1, 2, 3].map(attempt => coreStartupRetryDelay(busy, attempt))).toEqual([250, null, null, null])
     expect(coreStartupRetryDelay({ status: 'failed', error: { code: 'authority_migration_schema_failed', message: 'SQLITE_BUSY', retryable: true, details: { stage: 'database_migration' } } }, 0)).toBe(250)
     expect(coreStartupRetryDelay({ status: 'failed', error: { code: 'authority_recovery_failed', message: 'Requires explicit recovery', retryable: true, details: { stage: 'authority_recovery' } } }, 0)).toBeNull()
     for (const kind of ['unknown_data_contract', 'ambiguous_authority_candidates', 'unsupported_authority_artifact', 'identity_changed', 'corrupt_or_unreadable']) {
@@ -138,12 +138,12 @@ printf '%s\\n' '${JSON.stringify({ kind: 'core_startup', schemaVersion: 1, ...re
     try {
       const blocked = nextSnapshot(client, snapshot => snapshot.fullCoreState === 'blocked', 6_000)
       client.start()
-      expect(await blocked).toMatchObject({ generation: 4, restartAttempt: 0, capabilities: { authoritativeWorkspace: false, coreRequests: false } })
+      expect(await blocked).toMatchObject({ generation: 2, restartAttempt: 0, capabilities: { authoritativeWorkspace: false, coreRequests: false } })
       expect(snapshots.every(snapshot => snapshot.restartAttempt === 0 && !snapshot.capabilities.authoritativeWorkspace)).toBe(true)
       expect(snapshots.filter(snapshot => snapshot.fullCoreState === 'blocked')).toHaveLength(1)
-      expect(readFileSync(join(root, 'launches.txt'), 'utf8').trim().split('\n').map(args => args.includes('--require-existing-authority'))).toEqual([false, true, true, true])
+      expect(readFileSync(join(root, 'launches.txt'), 'utf8').trim().split('\n').map(args => args.includes('--require-existing-authority'))).toEqual([false, true])
       // Explicit retry gets a fresh startup budget, even before refusal exit.
-      const restarting = nextSnapshot(client, snapshot => snapshot.generation === 5 && snapshot.fullCoreState === 'starting')
+      const restarting = nextSnapshot(client, snapshot => snapshot.generation === 3 && snapshot.fullCoreState === 'starting')
       client.retryFullCore()
       await restarting
     } finally { client.stop() }

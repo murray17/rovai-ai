@@ -14152,7 +14152,6 @@ mod tests {
         let projection = crate::context::project_batch_run_input_for_claim(
             &transaction,
             &camp_id,
-            "agent_1",
             sequence,
             &[message_id],
             &[],
@@ -15787,7 +15786,6 @@ mod tests {
             let projection = crate::context::project_batch_run_input_for_claim(
                 &transaction,
                 &camp_id,
-                "agent_1",
                 boundary,
                 &[message_id],
                 &[],

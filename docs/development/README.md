@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-10-27
+last_updated: 2026-10-29
 ---
 
 # Rovai-ai 开发者指南
@@ -143,6 +143,10 @@ ThreadWorkspace、Lexical 与 CSS，覆盖确认跨期、刷新／重启不续�
 流式单行、停止默认／悬浮色与确认、重试受理后暂缓调度期间切群／刷新、后继失败、执行台多次授权、丢失回执、草稿保留、双主题、三种桌面尺寸、200% 等效缩放及粗指针。`ROVAI_PRESENCE_UI_OUTPUT` 保留截图与报告；
 执行条验证覆盖浅灰完整单行、独立转圈、稳定中英文候选、可点击计时和整行悬浮停止色；其余界面保持生产组件。
 非默认 Chrome 路径使用 `ROVAI_TEST_CHROME`。夹具只持久化模拟服务端数据，不启动 Core 或模型；真实 SQLite 受理、重开及未领取窗口由既有 `user_continuation_preserves_source_and_claims_independent_fifo_batches` owner 覆盖。
+
+Markdown 表格复制运行 `node --test scripts/lib/markdown-table-copy.test.mjs`：隔离 Chrome 验证消息与文件预览的
+HTML／TSV、悬浮和键盘、失败重试、流式更新、宽表滚动与主题；`ROVAI_TABLE_COPY_OUTPUT` 可保留截图和报告，
+`ROVAI_TEST_CHROME` 可指定浏览器。夹具复用生产组件，不启动 Core 或 Runtime。
 
 记忆工作区运行 `pnpm test:memory-workspace-ui`：隔离 Chrome 挂载生产 MemoryLibrary、通知和导航组件，
 验证全部范围、精简布局、版本展开、通知查看/关闭、编辑草稿、失败/冲突重试、变更操作及双主题桌面/手机尺寸。

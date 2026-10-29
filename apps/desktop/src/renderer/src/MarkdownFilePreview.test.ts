@@ -18,7 +18,7 @@ describe('MarkdownFilePreview', () => {
         '',
         '<!-- private-metadata -->',
         '',
-        '<div>hidden-html-body</div>'
+        '<div>allowed-html-body</div>'
       ].join('\n')
     }))
 
@@ -28,7 +28,7 @@ describe('MarkdownFilePreview', () => {
     expect(markup).toContain('<h1 data-markdown-heading="File Preview">File Preview</h1>')
     expect(markup).not.toContain('data-markdown-heading="document_type')
     expect(markup).not.toContain('private-metadata')
-    expect(markup).not.toContain('hidden-html-body')
+    expect(markup).toContain('<div>allowed-html-body</div>')
   })
 
   it('renders nested values as selectable text without interpreting embedded HTML', () => {

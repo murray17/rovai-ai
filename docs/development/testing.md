@@ -162,6 +162,12 @@ Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease�
 最低 Rust 命令 `cargo test --workspace` 与 `cargo test -p rovai-core --features slow-tests,extended-tests --lib hermes`。
 实际结果见 [实施记录](../versions/v1.72/hermes-first-input-implementation.md)，不等同真实付费模型或跨平台验收。
 
+Hermes 全平台普通开放扩展既有 Admission 矩阵、诊断和 Renderer owners；不新增 Rust 测试函数。
+Windows 的 `managed_process::tests::windows_job_contains_an_immediate_grandchild_after_leader_exit`
+同时覆盖连接根进程的归属、强制终止和 Drop 后共享服务仍存活；其原有整树 Job 断言保留。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib runtime_platform_admission::`
+及 `cargo test -p rovai-core --features extended-tests --lib managed_process::`，默认 workspace 仍须通过。
+
 Web 长粘贴扩展既有 Host HTTP 与浏览器适配/恢复 owners；schema 161→162 的 DDL 失败回滚
 无法由 HTTP 测试证明，新增一个复用 schema-only fixture 的迁移 owner。准入与最小命令见
 [Web 长粘贴实施记录](../versions/v1.72/web-pasted-text-implementation.md#验证归属)。

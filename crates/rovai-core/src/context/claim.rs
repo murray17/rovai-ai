@@ -229,7 +229,7 @@ pub(super) fn load(connection: &Connection, run_id: &str) -> Result<Option<Claim
     // Historical inputs retain their original materializer, including databases
     // exercised at intermediate migration boundaries.
     let current: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=?1 AND context_manifest_version IN (36, 37, 38, 39, 40))",
+        "SELECT EXISTS(SELECT 1 FROM agent_run_input WHERE agent_run_id=?1 AND context_manifest_version IN (36, 37, 38, 39, 40, 43))",
         [run_id], |row| row.get(0),
     )?;
     if !current {

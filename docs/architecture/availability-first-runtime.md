@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-availability-and-authority-startup-boundary
 status: accepted
-last_updated: 2026-10-12
+last_updated: 2026-10-29
 ---
 
 # Availability-first Runtime
@@ -19,15 +19,15 @@ SQLite 阻断时继续工作；SQLite authority 仍然 fail closed。这个拆�
 | CoreClient Supervisor | child generation、完整 revision snapshot、能力门禁、请求 fencing、独立启动重试与意外退出预算 | 领域状态、SQLite recovery 决策 |
 | CoreSubsystems | 当前进程的可选功能初始化、错误、执行门禁与串行重试 | 数据库准入、替代 authority、Runtime qualification |
 | Core data-directory lease | canonical data directory 的 OS 排他所有权与稳定对象身份 | 数据合同分类或迁移 |
-| DatabaseAdmission | exact Rovai/Lumen artifact 观察、只读优先探测、租约内 SQLite journal recovery、一次性票据、typed blocker | schema 写入、自动 quarantine、UI 文案 |
-| Database open/init | 票据消费后的 exact open，或 confirmed absence 上的 staging initialization | 目录扫描式猜测、覆盖竞态 target |
-| AuthorityMigrationRunner | exact 原位逐版本事务、receipt 续跑、重新准入、旧 manifest 中断恢复 | 常规整库副本、替换主文件、失败后创建空 authority |
+| DatabaseAdmission | exact Rovai/Lumen 路径选择、单次读写打开与版本分类、typed blocker | schema 写入、自动 quarantine、UI 文案 |
+| Database open/init | 已打开连接的运行配置，或 confirmed absence 上的 staging initialization | 目录扫描式猜测、覆盖竞态 target |
+| AuthorityMigrationRunner | 同一连接上的逐版本事务、receipt 续跑、旧 manifest 中断恢复 | 常规整库副本、替换主文件、失败后创建空 authority |
 | Renderer startup boundary | 订阅 Supervisor、读取本机恢复目标、首帧以不透明整窗品牌画布遮住页面框架；明确阻断时展示恢复壳层 | 未准入时挂载权威 hooks、合成业务空集合 |
 
 ## Startup sequence
 
 ```text
-Windows only: admit private Bootstrap profile -> single-instance lock
+Windows only: prepare usable Bootstrap profile -> single-instance lock
   -> assess formal root (failure => bound Bootstrap Shell, no Core path)
 Electron ready
   -> install in-memory local defaults
@@ -37,9 +37,10 @@ Electron ready
   -> spawn Full Core generation
        -> acquire CoreDataDirLease
        -> DatabaseAdmission::assess
-          -> Existing ticket -> exact open
-          -> Initializable ticket -> staged create-if-absent publish
-          -> Migration ticket -> exact in-place transactions/reassess/reopen
+          -> select exact path -> open SQLite READ_WRITE (no CREATE) -> version/receipt check
+          -> Current -> configure the same connection
+          -> Confirmed absent -> staged create-if-absent publish
+          -> Older supported version -> transactions on the same connection
              (existing legacy manifest only -> recover old switch/reassess)
           -> Blocked -> structured refusal and clean exit
        -> exact legacy cancellation settlement
@@ -87,59 +88,48 @@ accepted-input 和 delivery recovery 仍在 ready 前，不能用 optional failu
 
 完整 Core preparer 不再是窗口前置条件。独立壳层 profile 由已经打包的 Agent CLI 的 Desktop-only 原生入口创建，只有
 Electron 本机状态，不包含 Core path；继续使用原有 protected-DACL 原语，没有 PowerShell、普通 mkdir fallback 或静默修权。
-所有实例先绑定同一个 profile 再判定 single-instance，只有 primary 才准备正式 data root。成功后仍在 ready 前使用原正式
+所有实例先绑定同一个 profile 再判定 single-instance，只有 primary 才准备正式 data root。现有目录以实际访问为准，不要求 ACL 模板或 WRITE_DAC；新目录保留适当的创建权限。成功后仍在 ready 前使用原正式
 布局；失败回到已准入的壳层路径并展示 assessment，CoreClient 持有 null data path 而不是临时数据库目录。
 
-Windows 重新检查该 assessment 会保留原参数 relaunch Desktop，避免 ready 后重绑 Chromium sessionData。若私有壳层
+Windows 重新检查该 assessment 会保留原参数 relaunch Desktop，避免 ready 后重绑 Chromium sessionData。若壳层
 存储本身也不可用，只能原生提示并结束启动；这与正式 root 失败时仍显示 Electron Shell 是两条不同边界。
-协议细节见 [Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v2.md#8-windows-pre-ready-bootstrap-assessment)。
+协议细节见 [Windows Bootstrap assessment](../contracts/desktop-runtime-availability-v3.md#数据库启动与有界重试)。
 
 ## Database authority state machine
 
-准入观察 `rovai.sqlite` 与 `lumen.sqlite` 的 main/WAL/journal/SHM。main、WAL 与 rollback journal 是决定恢复边界的
-authority artifacts；SHM 是可丢弃协调缓存，但只能在 main 不存在、票据仍有效且 identity 未变化时清理。
+Core 先取得数据目录实例锁，再选择 `rovai.sqlite` 或历史 `lumen.sqlite`。main、WAL 与 rollback journal
+决定是否存在待保护数据：两个 main、没有 main 但存在 WAL/journal、另一 namespace 的孤立日志均进入恢复面，
+不猜测目标、不删除日志、不建空库。孤立 SHM 是可重建缓存，仅在确认首次初始化时清理。
 
-两个 main 同时出现、孤立 WAL/journal、未知合同、损坏/不可读、权限拒绝、SQLite busy 或对象 identity 改变都产生
-typed blocker。现有 main 优先以 READ_ONLY/NOFOLLOW 探测，不使用 CREATE。只读连接对干净 WAL 库可能新建空 WAL
-和 SHM：只有 main/journal 的对象、长度与状态未变，且原本缺失的 WAL 新建后为零字节，才视为正常探测副作用。
-已存在 WAL 的改变、新出现的非空 WAL 与 main/journal 改变仍拒绝；这不改变孤立 WAL 的阻断规则。
+现有库只以 READ_WRITE/NOFOLLOW/NO_MUTEX、无 CREATE 打开一次，立即设置 `busy_timeout=5000`。
+SQLite 自行恢复 WAL/hot journal；不预先以只读方式打开，不切换连接做恢复，不读取来源标记，不比较 main/WAL/journal
+的时间戳、长度或内容快照。系统元数据变化、有效 WAL 提交和正常 checkpoint 不构成拒绝理由。
 
-`SQLITE_READONLY_ROLLBACK` / `SQLITE_READONLY_RECOVERY` 表示引擎需要正常日志恢复，不等同于目录权限拒绝。
-Admission 在仍持有 lease 且复核两个 namespace 后，只对原 exact target 做一次 READ_WRITE/NOFOLLOW、无 CREATE、
-`query_only` 的探测，让 SQLite 回滚 hot journal 或恢复 WAL。恢复可以改变物理字节和移除已消费日志，但不执行应用
-DML、schema migration 或手动 journal 删除。随后丢弃旧观察并完整重新准入；未知合同、真实权限问题或损坏仍按实际
-结果拒绝，重复遇到恢复要求返回可重试 busy，不增加永久 blocked 状态。
+在同一连接的读事务中分类版本。当前版本仅检查 marker/classifier、最终迁移完成记录、没有未来 receipt 与核心表存在；
+不重验全部历史 receipt 或功能 SQL。支持的旧版本才进入其完整来源分类、编号冲突识别与逐版本迁移。
+缺失当前完成记录、未来版本、未知合同或实际 SQLite 损坏/权限/I/O 错误保留原库，返回可诊断结果。
+深度完整性检查由恢复/诊断或特定迁移的验证拥有，不进入健康启动。
 
-支持的旧合同拿 migration ticket；current 合同拿 existing ticket；确定没有两个 namespace 的 authority artifacts
-才拿 initialization ticket。
+操作接口携带已打开的连接与目录租约，只区分现有库、初始化与升级。保留主文件的稳定对象身份检查，防止
+路径被替换/移走后向失联对象继续写入；这不保存文件状态或比较日志变化。首次初始化仍先构造 staging 库，
+发布前确认两个 namespace 无主库/日志，通过 no-replace 原子发布保护并发出现的已有文件。
 
-票据将“检查结果”与“允许执行的下一步”绑定。打开前再次核对 main/WAL/journal；初始化发布前再次确认 absence，并
-通过 no-replace commit 消除最后窗口的覆盖风险。票据保存探测后的完整 WAL identity，消费时不再放宽空 WAL 转换。
-SHM 不参与 existing/migration ticket 的绝对字节稳定要求。
-
-正常打开、新建发布后打开、迁移后重开统一配置 WAL、`synchronous=NORMAL`、foreign keys 与 `busy_timeout=5000`；
-首次初始化 staging 的 DELETE 模式只服务于单文件发布，不得成为正式连接的运行配置。
+运行连接沿用 WAL、`synchronous=NORMAL`、foreign keys 与 5 秒 busy timeout。首次 staging 使用 DELETE 模式
+只为单文件安全发布；失败不覆盖目标，也不把已有库错误转换为初始化机会。Desktop、Agent CLI、Web、Server
+均经共享 `run_core` 消费这些接口，没有宿主专用的跳过准入分支。
 
 ## Migration switch
 
-此历史锚点继续保留，但普通 Upgrade 已改为原位事务。入口只消费 lease-bound ticket，不允许额外传路径；
-READ_WRITE/NOFOLLOW/NO_MUTEX 打开且不带 CREATE。任何写入前，在同一只读事务重验 contract/schema/classifier、
-完整 receipt（含 applied_at）和 schema cookie，并再次验证文件身份；漂移返回非重试 `authority_contract_changed`。
+历史锚点继续保留，普通升级直接使用已打开连接。每版本的 IMMEDIATE 事务同时提交 DDL/DML、marker 和 receipt；
+失败仅回滚当前步骤，重启按已提交记录继续。升级前后只守住目录租约与选定主文件，结束时在同一连接核对当前版本
+完成记录；不重复打开、不生成票据、不重新准入、不执行全库快照复制。
 
-macOS 首次由新版 App 打开旧 authority 时，系统可能给原 main 文件添加 `com.apple.provenance`，只改变 ctime。
-普通票据仍按完整身份严格拒绝。仅在确认 provenance 从无到有、main 对象/长度/mtime/属主/权限未变、
-WAL 与 journal 无数据变化且另一 namespace 为空时，Core 才可在任何应用迁移写入前丢弃旧票据，
-完整重新准入一次；新旧 source contract 与全部 receipt 必须一致。任一条件不满足或再次漂移仍停止，
-不得把这条兼容路径用于一般 ctime 变化或未知文件替换。
+编号冲突、旧 Lumen 合同、未完成升级与历史结构辨识只在对应升级路径执行。关闭外键重建的步骤继续在提交前核对
+受影响表及入向引用。普通升级不创建备份/manifest、不替换主文件，也不默认全库 quick_check/foreign_key_check。
 
-复用既有逐版本 IMMEDIATE 事务，DDL/DML、marker 和 receipt 一起提交，失败只回滚当前步骤；重启从缺失步骤继续。
-正常迁移不创建 staging、backup、manifest，不替换 main，不默认执行全库 quick_check/foreign_key_check。关键对象
-检查只读 schema metadata，关闭外键重建的步骤在本事务提交前检查显式受影响表及其入向引用。迁移后复核同一 main、重新 admission
-和 exact reopen；Blocked 或 Initializable 都停止，不创建替代 authority。通用历史投影补算、完整诊断与用户备份各自独立。
-
-旧 Snapshot manifest 仍由原恢复代码处理：比较 actual main 与 original/migrated identity，不凭 stage 猜测。
-Unix rename 的 ctime 变化只在这条兼容路径解释，对象、长度和 mtime 仍必须匹配；普通票据保持完整严格比较。
-真实强杀覆盖切换前后两侧，也覆盖原位 reconciliation 和 126 已提交时的中断；未知对象始终阻断。
+已存在的旧 Snapshot manifest 继续由兼容恢复代码处理：根据 actual main 与 original/migrated identity 恢复旧切换，
+而非凭 stage 猜测。仅此历史格式保留其 identity/length/state 字段和 Unix rename 的 ctime 解释；它们不参与普通打开。
+恢复之后允许重新选择已存在库，但禁止转为首次初始化。真实强杀覆盖旧切换两侧与原位事务已提交的中断。
 
 主线 Pending/Fast/Fast 生命周期与渠道的 117/118/119 编号冲突按 [Channel/Main Schema Join v2](../contracts/channel-main-schema-join-v2.md)
 汇合：保留渠道顺序，把精确识别的主线 receipt 在同一原库事务内映射到 126/127/130。128/129 分别保留历史
@@ -163,7 +153,7 @@ Canonical 引用并发布 `v1.53/schema 94/activity-v3`。Migration 144 再以�
 [Domain Command Result v1](../contracts/domain-command-result-v1.md)与
 [Scheduled Automation v1](../contracts/scheduled-automation-v1.md)。
 
-内部 trace 保留 assessment/open、reconciliation、每个实际 migration、reassessment/reopen、core_ready 的耗时和
+内部 trace 记录 authority_open_and_version、authority_configuration、reconciliation、每个实际 migration 与 core_ready 的耗时和
 source/target contract；不记录 SQL、业务行或渠道秘密，不把技术阶段转为产品页面文案。
 
 ## Supervisor and request fencing
@@ -172,7 +162,8 @@ source/target contract；不记录 SQL、业务行或渠道秘密，不把技术
 exit 都绑定二者；旧 child 的迟到消息被丢弃。Snapshot 每次发布完整状态并推进 revision，Renderer 只接受更新 revision。
 
 确定性 authority refusal 不属于 crash，也不触发自动重试。仅 admission/open/migration 的明确 busy/locked、短暂文件占用
-与已分类瞬时 I/O 使用独立 250/750/1500ms startup retry；必须等原 child 退出，期间保持 starting 和 capability gate。
+与已分类瞬时 I/O 最多使用一次 250ms startup retry；必须等原 child 退出，期间保持 starting 和 capability gate。
+SQLite 每次锁争用先等待最多 5 秒，Core 不增加内部重试循环；CLI/Web/Server 不另设自动重启层。
 预算耗尽再展示“暂时无法打开会话”；显式用户重试和 ready 重置 startup budget。领域恢复的可重试标志不自动进入该路径。
 一旦在本 Desktop 生命周期见过 authority，后续自动/手动/崩溃重启附带 `--require-existing-authority`，原库消失就拒绝
 初始化；这不是路径授权。只有当前 child 意外退出使用 crash budget。关闭取消待执行重试并是唯一可跨 generation

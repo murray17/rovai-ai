@@ -92,9 +92,9 @@ describe('first-run onboarding flow', () => {
     const staleMarkup = renderOnboarding(snapshot('runtime'), 'ready', staleHealth, [staleInstallation])
     expect(staleMarkup).toContain('暂未找到可用的智能体')
     expect(staleMarkup).not.toContain('Hermes')
-    for (const platform of ['macos-arm64', 'macos-x64'] as const) {
+    for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
       const admittedHealth = { ...staleHealth, hostPlatform: platform, runtimePlatformAdmission: [{
-        ...staleHealth.runtimePlatformAdmission[0], platform, status: 'preview' as const
+        ...staleHealth.runtimePlatformAdmission[0], platform, status: 'enabled' as const, reasonCode: null
       }] }
       expect(onboardingHasUsableRuntime('ready', admittedHealth, [staleInstallation])).toBe(true)
       const markup = renderOnboarding(snapshot('runtime'), 'ready', admittedHealth, [staleInstallation])

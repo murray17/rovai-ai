@@ -64,9 +64,8 @@ describe('applying a saved member Runtime configuration', () => {
     }
     const hermesMember = { ...member, runtimeConfiguration: { ...configuration, adapterKind: 'hermes-cli' as const } }
     for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
-      const admitted = platform.startsWith('macos-')
-      const admissions: RuntimePlatformAdmission[] = [{ runtimeKind: 'hermes-cli', platform, status: admitted ? 'preview' : 'not_qualified', reasonCode: 'runtime_platform.qualification_evidence_missing', evidenceRevision: null }]
-      expect(runtimeApplyEligibility(hermesMember, configuration, undefined, { hostPlatform: platform, admissions })).toBe(admitted ? 'available' : 'locked')
+      const admissions: RuntimePlatformAdmission[] = [{ runtimeKind: 'hermes-cli', platform, status: 'enabled', reasonCode: null, evidenceRevision: null }]
+      expect(runtimeApplyEligibility(hermesMember, configuration, undefined, { hostPlatform: platform, admissions })).toBe('available')
     }
     const target = { ...member, runtimeConfiguration: configuration }
     const admissions = [{ platform: 'windows-x64', runtimeKind: 'codex-cli', status: 'not_qualified' }] as RuntimePlatformAdmission[]

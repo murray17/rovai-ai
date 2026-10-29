@@ -7,7 +7,7 @@ import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { ActionApprovalView, AgentRunFileChangesDetailView, AgentRunFileChangesView, ComposerDocument, FilePreviewApi, OpenFilePreviewRequest, ResolvedFilePreview, ResolvedTheme, TaskView } from '@contracts'
 import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
-import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard, ThreadWorkspace } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
+import { AgentRunFileChangesTimelineCard, ApprovalDock, RuntimeRecoveryDock, TaskTimelineCard, ThreadWorkspace, type NotificationFocusTarget } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { FilePreviewProvider, useFilePreview, type FilePreviewContextValue } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
 import { filePreviewSessionStore } from '../../../apps/desktop/src/renderer/src/file-preview-session'
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from '../../../apps/desktop/src/renderer/src/FilePreviewLayout'
@@ -466,22 +466,38 @@ function ToolRows(): React.JSX.Element {
 }
 const initialExecutionCase = new URLSearchParams(location.search).get('initial-execution')
 let claimFirstRun: () => void
+let reenterExecution: (ready: boolean) => void
+let resolveExecutionEntry: () => void
+let focusExecutionNotification: () => void
 let executionPhase = ''
-function InitialExecutionWorkspace(): React.JSX.Element {
+function InitialExecutionWorkspace({ camp }: { camp: string }): React.JSX.Element {
   previewController = useFilePreview()
   const [phase, setPhase] = useState('pending')
+  const [generation, setGeneration] = useState(0)
+  const [entryReady, setEntryReady] = useState(true)
+  const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   executionPhase = phase
   claimFirstRun = () => setPhase('running')
+  reenterExecution = (ready) => {
+    setEntryReady(ready)
+    setNotificationFocus(null)
+    setGeneration(current => current + 1)
+  }
+  resolveExecutionEntry = () => setEntryReady(true)
+  focusExecutionNotification = () => setNotificationFocus({
+    requestId: Date.now(), kind: 'agent_run', agentRunId: fixtureRun.id, threadTurnId: null, active: true
+  })
   const snapshot = {
     ...initial,
-    thread: { ...initial.thread, id: 'camp-1', title: '首次 Run 宽度验收',
+    thread: { ...initial.thread, id: camp, title: '执行与预览验收',
       activationState: phase === 'pending' && initialExecutionCase !== 'existing' ? 'pending' as const : 'active' as const,
       missionId: initialExecutionCase === 'mission' ? 'mission-1' : undefined },
     messages: phase === 'pending' ? [] : [initial.messages[0]],
     agentRuns: phase === 'running' ? [{ ...fixtureRun, inputMessageIds: [initial.messages[0].id] }] : []
   }
-  return <ThreadWorkspace snapshot={snapshot} projectName="Fixture" agents={agents} installations={installations}
-    initialComposerDraft={{ ...initialDraft, threadId: 'camp-1' }} busy={false} executionPlacement="right"
+  return <ThreadWorkspace key={generation} snapshot={snapshot} projectName="Fixture" agents={agents} installations={installations}
+    initialComposerDraft={{ ...initialDraft, threadId: camp }} busy={false} executionPlacement="right"
+    workspaceEntrySnapshotReady={entryReady} notificationFocus={notificationFocus}
     onSend={async () => {
       setPhase('submitted')
       return { threadMessageId: initial.messages[0].id, deliveryIds: ['delivery-1'], agentRunIds: [], addressedAgentIds: [agents[0].agentId] }
@@ -517,7 +533,7 @@ function Fixture(): React.JSX.Element {
     <div className="app-shell app-shell-camp">
       <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
       <AppHeader threadTitle="文件预览验收" contextLabel="Rovai AI" thread={null} onFocusApprovals={() => {}} />
-      <main className="content task-content">{initialExecutionCase ? <InitialExecutionWorkspace /> : <Workspace />}</main>
+      <main className="content task-content">{initialExecutionCase ? <InitialExecutionWorkspace camp={camp} /> : <Workspace />}</main>
     </div>
     {toolRowsVisible && <ToolRows />}
   </FilePreviewProvider>
@@ -584,8 +600,15 @@ Object.assign(window, { previewTest: {
   downloadState: () => ({ requests: [...sourceDownloads], restores: fileRestores.length, reads: fileReads,
     activeTabId: previewController.activeTabId, tab: previewController.tabs.find(tab => tab.id === 'cold-download-file') }),
   claimFirstRun: () => claimFirstRun(),
+  reenterExecution: (ready = true) => reenterExecution(ready),
+  resolveExecutionEntry: () => resolveExecutionEntry(),
+  focusExecutionNotification: () => focusExecutionNotification(),
+  openExecutionChanges: () => previewController.openFileChanges('camp-1', changes),
+  closeActiveTab: () => previewController.activeTabId && previewController.close(previewController.activeTabId),
   executionPhase: () => executionPhase,
   activeTabKind: () => previewController.activeTab?.kind,
+  executionPreviewState: () => ({ visible: previewController.paneVisible, activeTabId: previewController.activeTabId,
+    activeTabKind: previewController.activeTab?.kind, tabKinds: previewController.tabs.map(tab => tab.kind) }),
   openExecution: () => previewController.openExecution(),
   openActivity: () => previewController.openMissionActivity('mission-1'),
   selectExecution: () => previewController.activate(previewController.tabs.find(tab => tab.kind === 'execution')!.id),

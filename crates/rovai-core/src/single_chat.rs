@@ -357,7 +357,7 @@ impl SingleChatService {
                             "sequence": {"type": "integer", "minimum": 1},
                             "role": {"type": "string", "enum": ["user", "assistant"]},
                             "body": {"type": "string"},
-                            "quotes": crate::message_quote::model_quotes_schema("current_messages"),
+                            "quotes": crate::message_quote::model_quotes_schema(),
                             "attachments": {
                                 "type": "array",
                                 "items": {
@@ -4344,14 +4344,8 @@ mod tests {
                     expected_revision: 2,
                     action: crate::message_quote::QuoteAction::Add {
                         selection: crate::message_quote::QuoteSelection {
-                            current_user_display_name: None,
-                            message_id: first.result.payload["conversationMessageId"]
-                                .as_str()
-                                .unwrap()
-                                .to_string(),
-                            body_at_selection: "请检查这一处设计".into(),
-                            start_scalar: 3,
-                            end_scalar: 8,
+                            message_id: None,
+
                             text: "这一处设计".into(),
                         },
                     },
@@ -4359,12 +4353,16 @@ mod tests {
             ),
         )
         .unwrap();
+        // Restart the existing persistence owner with a source-free saved selection.
+        #[cfg(feature = "slow-tests")]
+        database.reopen_production().unwrap();
         let captured = load_quotes(
             database.connection(),
             QuoteStorage::PrivateDraft,
             &conversation_id,
         )
         .unwrap();
+        assert!(captured[0].source.is_none());
         let queued = service
             .send(
                 &mut database,
@@ -4483,6 +4481,79 @@ mod tests {
         assert_eq!(snapshot.messages.len(), 3);
         assert_eq!(snapshot.messages[2].body, "读取排队附件");
         assert_eq!(snapshot.messages[2].quotes, captured);
+        let candidate = runtime
+            .list_dispatchable_agent_runs(&database, 8)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.agent_run_id == queued_run_id)
+            .unwrap();
+        let workspace = crate::runtime::AgentRunWorkspace {
+            execution_root: database.directory().join("workspace").display().to_string(),
+            access: "read_only".into(),
+            isolation: "shared".into(),
+        };
+        let claimed = runtime
+            .claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "source-free-quote-claim".into(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".into(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: vec![],
+                    execution_epoch: None,
+                    payload: crate::runtime::ClaimAgentRunCommand {
+                        agent_run_id: queued_run_id.into(),
+                        expected_version: candidate.version,
+                        lease_owner: "quote-test".into(),
+                        lease_seconds: 60,
+                        workspace: Some(workspace),
+                        starting_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            claimed.result.code, "agent_run.claimed",
+            "{:?}",
+            claimed.result
+        );
+        let epoch = claimed.result.payload["executionEpoch"].as_i64().unwrap();
+        crate::team_tool::TeamToolService::default()
+            .prepare_binding_credential(&mut database, queued_run_id, epoch, false)
+            .unwrap();
+        let blobs = crate::managed_blob::ManagedBlobStore::new(database.directory());
+        let crate::context::ContextMaterialization::Ready(context) = crate::context::ContextService
+            .materialize(
+                &mut database,
+                &blobs,
+                &crate::context::MaterializeContextRequest {
+                    agent_run_id: queued_run_id,
+                    execution_epoch: epoch,
+                    charter_delivery_mode: crate::context::CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: 96 * 1024,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("source-free quote must materialize");
+        };
+        let input: serde_json::Value = serde_json::from_str(
+            context
+                .rendered_payload
+                .split("[CURRENT_INPUT]\n")
+                .nth(1)
+                .unwrap()
+                .split("\n[/CURRENT_INPUT]")
+                .next()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            input["quotes"],
+            json!([{"kind":"message_excerpt","text":"这一处设计"}])
+        );
         assert_eq!(snapshot.messages[2].attachments.len(), 1);
         assert!(snapshot.pending_inputs.items.is_empty());
         let public_messages: i64 = database

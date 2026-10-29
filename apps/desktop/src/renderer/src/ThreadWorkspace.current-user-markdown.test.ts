@@ -353,7 +353,7 @@ describe('Agent Current User Mention Markdown rendering', () => {
     expect(markup).toContain('请 @沐瓦 与 @所有队员 审阅。')
     expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
     expect(markup).not.toContain('<script')
-    expect(markup).toContain('&lt;script&gt;alert(&quot;unsafe&quot;)&lt;/script&gt;')
+    expect(markup).not.toContain('alert(&quot;unsafe&quot;)')
     expect(markup).not.toContain('alert("unsafe")')
   })
 
@@ -519,7 +519,7 @@ describe('Agent leading Member Mention Markdown rendering', () => {
     expect(markup).toContain('<table>')
     expect(markup).not.toContain('NON_AUTHORITATIVE_BODY_CACHE')
     expect(markup).not.toContain('<script')
-    expect(markup).toContain('&lt;script&gt;alert(&quot;unsafe&quot;)&lt;/script&gt;')
+    expect(markup).not.toContain('alert(&quot;unsafe&quot;)')
   })
 
   it('preserves multiple leading recipients and does not mutate authoritative content', () => {

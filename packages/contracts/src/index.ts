@@ -444,7 +444,7 @@ export interface ProductRuntimeCatalogEntry {
 
 export type HostPlatformKey = 'macos-arm64' | 'macos-x64' | 'windows-x64' | 'linux-x64'
 
-export type RuntimePlatformAdmissionStatus = 'qualified' | 'preview' | 'not_qualified' | 'unsupported'
+export type RuntimePlatformAdmissionStatus = 'enabled' | 'qualified' | 'preview' | 'not_qualified' | 'unsupported'
 
 export type RuntimePlatformAdmissionReasonCode =
   | 'runtime_platform.qualification_evidence_missing'
@@ -1450,23 +1450,15 @@ export type LocalAttachmentOwnerLocator =
 export interface MessageQuoteSnapshot {
   version: 1
   quoteId: string
-  source: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string }
-  authorAtCapture: { type: 'user'; displayName: string } | { type: 'agent'; agentId: string; displayName: string }
+  source?: { scope: 'camp' | 'single_chat'; campId: string; conversationId?: string; messageId: string }
+  authorAtCapture?: { type: 'user'; displayName: string } | { type: 'agent'; agentId: string; displayName: string }
   text: string
   format: 'plain_text'
   capturedAt: string
-  sourceContentDigest: string
-  /** Internal, immutable selection anchor. Never projected into model input. */
-  locator?: { projectionVersion: 1 | 2 | 3; startScalar: number; endScalar: number; projectionDigest: string }
-  snapshotDigest: string
 }
 
 export interface MessageQuoteSelection {
-  currentUserDisplayName?: string
-  messageId: string
-  bodyAtSelection: string
-  startScalar: number
-  endScalar: number
+  messageId?: string
   text: string
 }
 

@@ -269,7 +269,7 @@ function ReleaseNotesBody({ release, installed }: {
         : uiAttribute("发布日期暂未提供")}</p>
     </div>
     {notes
-      ? <SafeMarkdown className="about-release-notes" rawHtmlPolicy="drop">{notes}</SafeMarkdown>
+      ? <SafeMarkdown className="about-release-notes">{notes}</SafeMarkdown>
       : <p className="about-release-empty">{installed
         ? uiAttribute("此版本暂无内置更新日志。")
         : uiAttribute("此版本没有提供更新日志。版本号与下载操作仍以正式发布信息为准。")}</p>}

@@ -8,9 +8,9 @@ import {
 describe('safe Markdown presentation admission', () => {
   it.each([
     ['whitespace', '\n\n', false],
-    ['a literal Runtime fragment', '</think>\n\n', true],
+    ['a literal Runtime fragment', '</think>\n\n', false],
     ['an HTML block shown as text', '<div>\nprivate\n</div>', true],
-    ['a placeholder without other prose', '<UUID>', true],
+    ['a placeholder without other prose', '<UUID>', false],
     ['an image removed by the safe Renderer', '![remote](https://example.com/image.png)', false],
     ['plain narration', '正在分析。\n\n', true],
     ['visible text between inline HTML tags', '<think>仍然可见</think>', true],
@@ -21,11 +21,11 @@ describe('safe Markdown presentation admission', () => {
     expect(safeMarkdownHasRenderableContent(source)).toBe(expected)
   })
 
-  it('keeps explicit metadata readers on the drop policy', () => {
-    for (const source of ['<UUID>', '<!-- lang:en -->', '<div>\nprivate\n</div>']) {
-      expect(safeMarkdownHasRenderableContent(source, 'drop')).toBe(false)
+  it('uses the same sanitizer for narration admission', () => {
+    for (const source of ['<UUID>', '<!-- lang:en -->', '<script>hidden</script>']) {
+      expect(safeMarkdownHasRenderableContent(source)).toBe(false)
     }
-    expect(safeMarkdownHasRenderableContent('`<UUID>`', 'drop')).toBe(true)
+    expect(safeMarkdownHasRenderableContent('`<UUID>`')).toBe(true)
   })
 })
 

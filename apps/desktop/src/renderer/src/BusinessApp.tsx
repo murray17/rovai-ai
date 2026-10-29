@@ -1014,6 +1014,8 @@ export function BusinessApp({
 }): React.JSX.Element {
   const taskCapability = useTaskCapability()
   const taskCapabilityRef = useRef(taskCapability.enabled)
+  const taskCapabilityRevisionRef = useRef(0)
+  if (taskCapabilityRef.current !== taskCapability.enabled) taskCapabilityRevisionRef.current += 1
   taskCapabilityRef.current = taskCapability.enabled
   const { client, preferences: uiPreferences, desktop } = environment
   const reeditStore = useMemo(() => new MessageReeditStore(client.reeditScope ?? '',
@@ -1409,13 +1411,23 @@ export function BusinessApp({
     const startedAt = performance.now()
     const method = mode === 'enter' ? 'threads.enter' : 'threads.open'
     console.info(`[camp-open] trace=${traceId} stage=renderer_request method=${method}`)
-    const projection = mode === 'enter'
+    let capabilityRevision = taskCapabilityRevisionRef.current
+    let projection = mode === 'enter'
       ? await client.request<ThreadOpenProjection>('threads.enter', {
           traceId,
           commandId: newCommandId(),
           command: { threadId }
         })
       : await requestAuthoritativeThreadOpenProjection(client, threadId, traceId)
+    // A capability change can race an enter for a different Thread. Re-read an
+    // obsolete projection without replaying enter or refreshing every navigation.
+    // The revision also catches off/on cycles during the same request.
+    while (projection.schemaVersion === 9
+      && capabilityRevision !== taskCapabilityRevisionRef.current
+      && projection.tasksEnabled !== taskCapabilityRef.current) {
+      capabilityRevision = taskCapabilityRevisionRef.current
+      projection = await requestAuthoritativeThreadOpenProjection(client, threadId, traceId)
+    }
     if (projection.schemaVersion !== 9) throw new Error(uiAttribute('会话打开数据版本不兼容。'))
     const receivedAt = performance.now()
     console.info(
@@ -1998,6 +2010,7 @@ export function BusinessApp({
   )
 
   useEffect(() => {
+    if (!taskCapability.ready) return
     if (!taskCapability.enabled) {
       campSnapshotCache.current.clear()
       if (campSnapshotRef.current) setThreadSnapshot(campSnapshotRef.current, campSnapshotEntryPreviewRef.current, campSnapshotState.initialComposerDraft)
@@ -2007,9 +2020,11 @@ export function BusinessApp({
         setNotificationFocus(null)
       }
     }
-    if (!taskCapability.ready || !activeThreadId) return
-    void refreshActiveThreadSnapshot(activeThreadId).catch(() => undefined)
-  }, [taskCapability.enabled, taskCapability.ready, activeThreadId, refreshActiveThreadSnapshot])
+    // Capability changes invalidate the current surface. Ordinary navigation
+    // already verifies its cached preview with threads.enter and must retain it.
+    const threadId = activeThreadIdRef.current
+    if (threadId) void refreshActiveThreadSnapshot(threadId).catch(() => undefined)
+  }, [taskCapability.enabled, taskCapability.ready, refreshActiveThreadSnapshot])
 
   const loadEarlierThreadMessages = useCallback(async (): Promise<void> => {
     const requestedSnapshot = campSnapshotRef.current

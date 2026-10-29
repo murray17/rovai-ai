@@ -57,6 +57,9 @@ test('the production App presents the full-window brand loader without weakening
     if (process.env.ROVAI_PROJECT_DIRECTORIES_ONLY === '1') { assert.equal(report.cases.length, 4); return }
     assert.ok(report.cases.length >= 8)
     assert.ok(report.cases.includes('Ordinary Camp switching reads only the target row without unrelated queries'))
+    assert.ok(report.cases.includes('Cached Thread revisits show messages before authority returns without redundant reads, with Tasks off and on'))
+    assert.ok(report.cases.includes('Actual Task disable clears incompatible caches and panels while rejecting late enabled UI'))
+    assert.ok(report.cases.includes('Task capability changes during enter cannot commit the previous capability projection'))
     assert.ok(report.cases.includes('User stops do not create a Thread unread reminder, including lost receipts and navigation races'))
     assert.ok(report.cases.includes('Accepted deletion discards in-flight Web refresh failures and queued reads'))
     assert.ok(report.cases.includes('Web refresh confirms external deletion before removing the current Thread'))

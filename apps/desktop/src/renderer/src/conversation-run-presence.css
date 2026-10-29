@@ -11,10 +11,9 @@
 .run-source-popover .execution-input-list time { flex: none; color: var(--faint); font-size: 10px; }
 .run-source-popover .execution-input-list button:disabled { cursor: default; color: var(--faint); }
 .run-presence-line { position: relative; display: flex; align-items: center; box-sizing: border-box; width: 100%; max-width: 690px; min-width: 0; height: 42px; border-radius: 8px; background: var(--conversation-user-message-surface); transition: background-color 140ms ease; }
-.run-presence-line:has(.run-presence-open:hover, .run-presence-stop:hover, .run-presence-retry:hover) { background: var(--neutral-selected); }
+.run-presence-line:has(.run-presence-open:hover, .run-presence-stop:hover, .run-presence-resume:hover) { background: var(--neutral-selected); }
 .run-presence-open { display: flex; flex: 1 1 0; align-items: center; gap: 12px; width: 100%; height: 100%; padding: 0 14px; min-width: 0; border: 0; border-radius: inherit; color: var(--ink); background: transparent; cursor: pointer; text-align: left; font: 400 12.5px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-.run-presence-line:has(.run-presence-stop) .run-presence-open { padding-right: 52px; }
-.run-presence-line:has(.run-presence-retry) .run-presence-open { padding-right: 12px; }
+.run-presence-line:has(.run-presence-stop, .run-presence-resume) .run-presence-open { padding-right: 52px; }
 .run-presence-open:hover, .run-presence-open:active:not(:disabled) { background: transparent; transform: none; }
 .run-presence-preview { display: block; flex: 1 1 0; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-presence-preview.is-command { font: 400 11.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -31,14 +30,14 @@
 .run-presence-status.is-failed { color: var(--danger); }
 .run-presence-open > .tool-call-icon { flex: 0 0 14px; width: 14px; height: 14px; }
 .run-presence-open > .tool-call-icon svg { width: 14px; height: 14px; stroke-width: 1.3; }
-.run-presence-stop { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; transition: color 120ms ease, background-color 120ms ease; }
+.run-presence-stop, .run-presence-resume { position: absolute; top: 7px; right: 7px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; cursor: pointer; transition: color 120ms ease, background-color 120ms ease; }
 .run-presence-stop svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.45; }
 .run-presence-line:is(:hover, :focus-within) .run-presence-stop:not(:disabled), .run-presence-stop[aria-expanded="true"] { color: var(--danger); background: var(--danger-soft); }
 .run-presence-stop:disabled { cursor: default; }
-.run-presence-retry { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 4px; min-width: 60px; height: 32px; margin-right: 6px; padding: 0 7px; border: 0; border-radius: 5px; color: var(--ink); background: transparent; font: 500 12px/1.4 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; cursor: pointer; white-space: nowrap; }
-.run-presence-retry svg { width: 14px; height: 14px; }
-.run-presence-retry:hover:not(:disabled) { background: var(--surface-hover); }
-.run-presence-retry:disabled { color: var(--muted); cursor: wait; }
+.run-presence-resume svg { width: 14px; height: 14px; }
+.run-presence-resume:hover:not(:disabled) { background: var(--surface-hover); }
+.run-presence-resume:disabled { color: var(--muted); cursor: wait; }
+.run-presence-resume[aria-busy="true"] svg { animation: run-presence-stop-turn 900ms linear infinite; }
 .run-presence-stop-confirmation { z-index: 300; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; width: max-content; max-width: min(360px, calc(100vw - 32px)); padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 10px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); }
 .run-presence-stop-question { flex: 1 1 auto; margin: 0; min-width: 0; max-width: 100%; font: 400 13px/1.5 -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif; letter-spacing: 0; overflow-wrap: anywhere; }
 .run-presence-stop-question > span { white-space: nowrap; }
@@ -56,9 +55,9 @@
 .run-presence-stop-arrow { fill: var(--surface-raised); stroke: var(--line-strong); stroke-width: 1; }
 .run-presence-stop-error { flex-basis: 100%; margin: 0; color: var(--danger); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .conversation-run-presence button:focus-visible { outline: 2px solid var(--conversation-focus); outline-offset: 2px; }
-@media (pointer: coarse) { .run-presence-line { height: 48px; } .run-presence-line:has(.run-presence-stop) .run-presence-open { padding-right: 56px; } .run-presence-stop { top: 2px; right: 2px; width: 44px; } .run-presence-stop, .run-presence-retry { min-width: 44px; height: 44px; } }
+@media (pointer: coarse) { .run-presence-line { height: 48px; } .run-presence-line:has(.run-presence-stop, .run-presence-resume) .run-presence-open { padding-right: 56px; } .run-presence-stop, .run-presence-resume { top: 2px; right: 2px; width: 44px; } .run-presence-stop, .run-presence-resume { min-width: 44px; height: 44px; } }
 @media (pointer: coarse) { :root .run-presence-stop-confirmation :is(.quiet-button, .danger-button) { min-height: 44px; height: 44px; } }
 @media (pointer: coarse) { .run-source-reference { gap: 8px; } .run-source-reference > button.reply-parent-quote, .run-source-reference .execution-batch-count, .run-source-popover .execution-input-list button { min-width: 44px; min-height: 44px; } }
-@media (forced-colors: active) { .run-presence-line { outline: 1px solid CanvasText; } .run-presence-time { color: LinkText; } .run-presence-stop { border: 1px solid ButtonText; } :root .conversation-run-presence .run-presence-open .run-presence-spinner svg { animation: none !important; } }
+@media (forced-colors: active) { .run-presence-line { outline: 1px solid CanvasText; } .run-presence-time { color: LinkText; } .run-presence-stop, .run-presence-resume { border: 1px solid ButtonText; } :root .conversation-run-presence .run-presence-open .run-presence-spinner svg { animation: none !important; } }
 @media (forced-colors: active) { .run-presence-stop-confirmation { background: Canvas; color: CanvasText; border-color: CanvasText; } .run-presence-stop-arrow { fill: Canvas; stroke: CanvasText; } .run-presence-stop-busy { color: CanvasText; } }
-@media (prefers-reduced-motion: reduce), (forced-colors: active) { .run-presence-stop-busy svg { animation: none; } }
+@media (prefers-reduced-motion: reduce), (forced-colors: active) { .run-presence-stop-busy svg, .run-presence-resume[aria-busy="true"] svg { animation: none; } }

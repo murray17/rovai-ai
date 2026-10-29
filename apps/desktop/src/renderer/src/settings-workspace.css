@@ -701,6 +701,11 @@
   grid-template-columns: minmax(145px,1.15fr) minmax(135px,1fr) 80px 74px;
   gap: 12px;
 }
+@media (min-width: 821px) {
+  :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-member-bot-grid {
+    grid-template-columns: minmax(145px,1.15fr) minmax(135px,1fr) 80px 88px;
+  }
+}
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-member-bot-head {
   font-size: 10.5px;
   letter-spacing: 0;
@@ -718,6 +723,7 @@
   font-weight: 500;
   padding: 5px 9px;
   font-size: 11px;
+  white-space: nowrap;
 }
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .channel-row-action.is-danger {
   color: var(--danger);

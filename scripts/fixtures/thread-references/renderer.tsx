@@ -14,7 +14,7 @@ import { model, profiles, installations } from './model'
 import { ThreadReferencePreviewProvider } from '../../../apps/desktop/src/renderer/src/ThreadReferencePreview'
 import { SafeMarkdown } from '../../../apps/desktop/src/renderer/src/SafeMarkdown'
 import { MarkdownCodeFrame } from '../../../apps/desktop/src/renderer/src/MarkdownCodeFrame'
-import { projectQuoteBody, readMessageQuoteSelection } from '../../../apps/desktop/src/renderer/src/message-quote-selection'
+import { readMessageQuoteText, readMessageQuoteSelection } from '../../../apps/desktop/src/renderer/src/message-quote-selection'
 import { createFileFindDomIndex } from '../../../apps/desktop/src/renderer/src/file-find-dom'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
 import '../../../apps/desktop/src/renderer/src/styles.css'
@@ -27,7 +27,7 @@ document.documentElement.dataset.rovaiPlatform = 'darwin'
 const params = new URLSearchParams(location.search)
 const surface = params.get('surface') === 'web' ? 'web' : 'desktop'
 document.documentElement.dataset.rovaiSurface = surface
-Object.assign(window, { __referenceChecks: { projectQuoteBody, readMessageQuoteSelection } })
+Object.assign(window, { __referenceChecks: { readMessageQuoteText, readMessageQuoteSelection } })
 function Workbench() {
   const mobile = useMobileViewport(surface === 'web')
   const state = useSyncExternalStore(model.subscribe, model.get)

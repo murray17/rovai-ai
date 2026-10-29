@@ -1,0 +1,320 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "samplesPerBinary": 9,
+  "scope": "debug Core process spawn to ready; shared isolated healthy database; warm; no model; not daily session data",
+  "medianMs": {
+    "baseline": 122.73016699999971,
+    "candidate": 101.27250000000095
+  },
+  "baseline": [
+    {
+      "durationMs": 127.07716599999912,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=50 elapsed_ms=50",
+        "[startup] {\"elapsedMs\":14,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":16,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=17 elapsed_ms=93",
+        "[startup] stage=core_ready elapsed_ms=121",
+        "[startup] {\"elapsedMs\":121,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 122.36520799999926,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=46 elapsed_ms=46",
+        "[startup] {\"elapsedMs\":16,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":16,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=16 elapsed_ms=89",
+        "[startup] stage=core_ready elapsed_ms=116",
+        "[startup] {\"elapsedMs\":116,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 122.69991599999958,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=49 elapsed_ms=49",
+        "[startup] {\"elapsedMs\":14,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":17,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=17 elapsed_ms=90",
+        "[startup] stage=core_ready elapsed_ms=118",
+        "[startup] {\"elapsedMs\":118,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 119.08733300000131,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=47 elapsed_ms=47",
+        "[startup] {\"elapsedMs\":14,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":17,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=17 elapsed_ms=88",
+        "[startup] stage=core_ready elapsed_ms=115",
+        "[startup] {\"elapsedMs\":115,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 122.73016699999971,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=50 elapsed_ms=50",
+        "[startup] {\"elapsedMs\":14,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":14,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=14 elapsed_ms=88",
+        "[startup] stage=core_ready elapsed_ms=116",
+        "[startup] {\"elapsedMs\":116,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 122.09320800000023,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=46 elapsed_ms=46",
+        "[startup] {\"elapsedMs\":14,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":16,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=16 elapsed_ms=88",
+        "[startup] stage=core_ready elapsed_ms=117",
+        "[startup] {\"elapsedMs\":117,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 135.37312500000007,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=48 elapsed_ms=48",
+        "[startup] {\"elapsedMs\":16,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":23,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=23 elapsed_ms=99",
+        "[startup] stage=core_ready elapsed_ms=129",
+        "[startup] {\"elapsedMs\":129,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 131.6559589999997,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=49 elapsed_ms=49",
+        "[startup] {\"elapsedMs\":17,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":17,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=17 elapsed_ms=97",
+        "[startup] stage=core_ready elapsed_ms=127",
+        "[startup] {\"elapsedMs\":127,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 125.69208299999991,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=48 elapsed_ms=48",
+        "[startup] {\"elapsedMs\":18,\"sourceContract\":\"v1.72\",\"stage\":\"authority_assessment\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":17,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=17 elapsed_ms=95",
+        "[startup] stage=core_ready elapsed_ms=121",
+        "[startup] {\"elapsedMs\":121,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    }
+  ],
+  "candidate": [
+    {
+      "durationMs": 101.4718329999996,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=49 elapsed_ms=49",
+        "[startup] {\"elapsedMs\":7,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=69",
+        "[startup] stage=core_ready elapsed_ms=94",
+        "[startup] {\"elapsedMs\":94,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 95.45108299999993,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=43 elapsed_ms=43",
+        "[startup] {\"elapsedMs\":8,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=63",
+        "[startup] stage=core_ready elapsed_ms=89",
+        "[startup] {\"elapsedMs\":89,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 97.26999999999862,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=46 elapsed_ms=46",
+        "[startup] {\"elapsedMs\":8,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=65",
+        "[startup] stage=core_ready elapsed_ms=92",
+        "[startup] {\"elapsedMs\":92,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 101.27250000000095,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=49 elapsed_ms=49",
+        "[startup] {\"elapsedMs\":8,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=69",
+        "[startup] stage=core_ready elapsed_ms=95",
+        "[startup] {\"elapsedMs\":95,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 103.2182499999999,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=49 elapsed_ms=49",
+        "[startup] {\"elapsedMs\":8,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=70",
+        "[startup] stage=core_ready elapsed_ms=97",
+        "[startup] {\"elapsedMs\":97,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 99.7644169999985,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=49 elapsed_ms=49",
+        "[startup] {\"elapsedMs\":9,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=67",
+        "[startup] stage=core_ready elapsed_ms=94",
+        "[startup] {\"elapsedMs\":94,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 105.98995900000045,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=50 elapsed_ms=50",
+        "[startup] {\"elapsedMs\":9,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=70",
+        "[startup] stage=core_ready elapsed_ms=96",
+        "[startup] {\"elapsedMs\":96,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 100.81366700000035,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=47 elapsed_ms=47",
+        "[startup] {\"elapsedMs\":9,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=70",
+        "[startup] stage=core_ready elapsed_ms=95",
+        "[startup] {\"elapsedMs\":95,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    },
+    {
+      "durationMs": 102.18137500000012,
+      "phases": [
+        "assessing_authority",
+        "preparing_runtime_storage",
+        "opening_authority",
+        null
+      ],
+      "trace": [
+        "[startup] stage=runtime_search_ready duration_ms=43 elapsed_ms=43",
+        "[startup] {\"elapsedMs\":11,\"sourceContract\":\"v1.72\",\"stage\":\"authority_open_and_version\",\"targetContract\":\"v1.72\"}",
+        "[startup] {\"elapsedMs\":0,\"sourceContract\":\"v1.72\",\"stage\":\"authority_configuration\",\"targetContract\":\"v1.72\"}",
+        "[startup] stage=database_ready duration_ms=0 elapsed_ms=65",
+        "[startup] stage=core_ready elapsed_ms=97",
+        "[startup] {\"elapsedMs\":97,\"sourceContract\":\"v1.72\",\"stage\":\"core_ready\",\"targetContract\":\"v1.72\"}"
+      ]
+    }
+  ]
+}

@@ -79,7 +79,9 @@ type ActiveChild = {
   restartForAutomationControl: boolean
 }
 
-const STARTUP_RETRY_DELAYS_MS = [250, 750, 1500] as const
+// SQLite already waits up to five seconds per lock conflict. One bounded
+// respawn covers transient process/file failures without stacking retry loops.
+const STARTUP_RETRY_DELAYS_MS = [250] as const
 
 export function coreStartupRetryDelay(
   frame: Pick<CoreStartupWireFrame, 'status' | 'authorityState' | 'error'>,

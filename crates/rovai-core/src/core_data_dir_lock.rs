@@ -7,7 +7,7 @@ use std::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::platform::private_storage::{open_private_read_write_file, prepare_private_directory};
+use crate::platform::private_storage::{open_data_read_write_file, prepare_data_directory};
 
 pub const CORE_DATA_DIR_LOCK_FILE: &str = ".rovai-core-instance.lock";
 const MAX_OWNER_METADATA_BYTES: u64 = 8 * 1024;
@@ -166,7 +166,7 @@ impl CoreDataDirLease {
     pub fn try_acquire(
         data_dir: &Path,
     ) -> std::result::Result<CoreDataDirLeaseAcquisition, CoreDataDirLeaseInfrastructureError> {
-        let canonical_data_dir = prepare_private_directory(data_dir).map_err(|error| {
+        let canonical_data_dir = prepare_data_directory(data_dir).map_err(|error| {
             CoreDataDirLeaseInfrastructureError {
                 stage: CoreDataDirLeaseInfrastructureStage::PrepareDirectory,
                 message: format!(
@@ -186,7 +186,7 @@ impl CoreDataDirLease {
                 }
             })?;
         let lock_path = canonical_data_dir.join(CORE_DATA_DIR_LOCK_FILE);
-        let mut file = open_private_read_write_file(&lock_path).map_err(|error| {
+        let mut file = open_data_read_write_file(&lock_path).map_err(|error| {
             CoreDataDirLeaseInfrastructureError {
                 stage: CoreDataDirLeaseInfrastructureStage::OpenLockFile,
                 message: format!(
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn filesystem_identity_tracks_objects_not_paths_or_contents() {
         let directory = TestDirectory::new("identity");
-        let root = prepare_private_directory(&directory.0).unwrap();
+        let root = prepare_data_directory(&directory.0).unwrap();
         let directory_identity = FilesystemObjectIdentity::observe(&root).unwrap();
         let file = root.join("authority");
         std::fs::write(&file, b"committed").unwrap();
@@ -449,20 +449,19 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn an_existing_directory_with_inherited_acl_is_rejected() {
+    fn an_existing_directory_with_inherited_acl_keeps_instance_exclusion() {
         let directory = TestDirectory::new("inherited-directory");
         std::fs::create_dir_all(&directory.0).unwrap();
 
-        let error = CoreDataDirLock::acquire(&directory.0).unwrap_err();
-        assert!(
-            format!("{error:#}").contains("windows_storage.private_acl_invalid"),
-            "unexpected error: {error:#}"
-        );
+        let lock = CoreDataDirLock::acquire(&directory.0).unwrap();
+        assert!(CoreDataDirLock::acquire(&directory.0).is_err());
+        drop(lock);
+        assert!(CoreDataDirLock::acquire(&directory.0).is_ok());
     }
 
     #[cfg(windows)]
     #[test]
-    fn an_existing_lock_file_with_inherited_acl_is_rejected() {
+    fn an_existing_lock_file_with_inherited_acl_is_usable() {
         let directory = TestDirectory::new("inherited-file");
         let lock = CoreDataDirLock::acquire(&directory.0).unwrap();
         drop(lock);
@@ -470,10 +469,13 @@ mod tests {
         std::fs::remove_file(&lock_path).unwrap();
         std::fs::write(&lock_path, b"unknown owner").unwrap();
 
-        let error = CoreDataDirLock::acquire(&directory.0).unwrap_err();
+        let lock = CoreDataDirLock::acquire(&directory.0).unwrap();
+        assert!(CoreDataDirLock::acquire(&directory.0).is_err());
         assert!(
-            format!("{error:#}").contains("windows_storage.private_acl_invalid"),
-            "unexpected error: {error:#}"
+            std::fs::rename(&lock_path, directory.0.join("renamed-lock")).is_err(),
+            "a live instance lock cannot be moved aside for a second Core"
         );
+        drop(lock);
+        assert!(CoreDataDirLock::acquire(&directory.0).is_ok());
     }
 }

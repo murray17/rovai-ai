@@ -1,0 +1,10 @@
+{
+  "platform": "macOS arm64",
+  "entry": "standalone Server -> embedded Core -> Web HTTP",
+  "firstInitialize": true,
+  "reopen": true,
+  "memberCount": 4,
+  "membersPreserved": true,
+  "authenticatedWebReads": true,
+  "modelRequests": 0
+}

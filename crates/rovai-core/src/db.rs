@@ -36,6 +36,8 @@ mod notification_interruption;
 pub(crate) mod notification_model;
 #[path = "db_pending_draft.rs"]
 mod pending_draft;
+#[path = "db_quote_text.rs"]
+mod quote_text;
 #[path = "db_run_continuation.rs"]
 mod run_continuation;
 #[path = "db_shared_environment.rs"]
@@ -58,6 +60,7 @@ pub(crate) fn assert_task_capability_upgrade(database: &mut Database) {
 }
 #[cfg(test)]
 pub(crate) fn assert_single_chat_facts_upgrade(database: &mut Database) {
+    quote_text::assert_upgrade(database);
     single_chat_facts::assert_upgrade(database);
 }
 
@@ -238,8 +241,8 @@ use crate::camp_id::ThreadId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::database_admission::{
-    AuthorityBlock, ExistingAuthorityTicket, MigrationAuthorityOpen, NewAuthorityTicket,
-    TicketValidationError,
+    AuthorityBlock, AuthorityPathError, ExistingAuthorityOpen, MigrationAuthorityOpen,
+    MigrationOperation, NewAuthorityTarget,
 };
 use crate::execution_budget::{
     CAMP_TURN_EXECUTION_BUDGET_SCHEMA_VERSION, LEGACY_EXECUTION_ELAPSED_SECONDS,
@@ -499,7 +502,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 167;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 168;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -606,15 +609,15 @@ impl DatabaseOpenError {
     }
 }
 
-impl From<TicketValidationError> for DatabaseOpenError {
-    fn from(error: TicketValidationError) -> Self {
+impl From<AuthorityPathError> for DatabaseOpenError {
+    fn from(error: AuthorityPathError) -> Self {
         match error {
-            TicketValidationError::Blocked(block) => Self {
+            AuthorityPathError::Blocked(block) => Self {
                 code: "authority_ticket_blocked",
                 message: format!("authority ticket was blocked: {block:?}"),
                 authority_block: Some(block),
             },
-            TicketValidationError::Infrastructure(error) => Self {
+            AuthorityPathError::Infrastructure(error) => Self {
                 code: if error.retryable {
                     "authority_io_transient"
                 } else {
@@ -654,8 +657,8 @@ impl From<DatabaseOpenError> for DatabaseInitializeError {
     }
 }
 
-impl From<TicketValidationError> for DatabaseInitializeError {
-    fn from(error: TicketValidationError) -> Self {
+impl From<AuthorityPathError> for DatabaseInitializeError {
+    fn from(error: AuthorityPathError) -> Self {
         Self(DatabaseOpenError::from(error))
     }
 }
@@ -814,14 +817,15 @@ pub(crate) struct DatabaseContractMarker {
     pub classifier_version: String,
 }
 
-/// Small, read-only admission evidence, not a second migration ledger. Even a
-/// receipt timestamp or DDL change must invalidate an already issued ticket.
+/// Test evidence that a failed transaction preserved the migration ledger.
+#[cfg(all(test, feature = "extended-tests"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MigrationReceiptSnapshot {
     schema_cookie: i64,
     receipts: Vec<(i64, String)>,
 }
 
+#[cfg(all(test, feature = "extended-tests"))]
 impl MigrationReceiptSnapshot {
     pub(crate) fn read(connection: &Connection) -> rusqlite::Result<Self> {
         Ok(Self {
@@ -991,6 +995,7 @@ struct CurrentMigrationState {
     v215: bool,
     v216: bool,
     v217: bool,
+    v218: bool,
 }
 
 impl CurrentMigrationState {
@@ -1012,6 +1017,14 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v218 {
+            let mut previous = *self;
+            previous.v218 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 168
+                && self.v217
+                && previous.admits("v1.72", 167, classifier);
+        }
         if self.v217 {
             let mut previous = *self;
             previous.v217 = false;
@@ -3316,6 +3329,7 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
                         | 165
                         | 166
                         | 167
+                        | 168
                 )
         })
     {
@@ -3677,6 +3691,48 @@ fn connection_has_legacy_feishu_migration_collision(
     ))
 }
 
+pub(crate) fn classify_startup_contract(
+    connection: &Connection,
+) -> rusqlite::Result<DatabaseContractClassification> {
+    let marker_table: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='rovai_data_contract')",
+        [], |row| row.get(0))?;
+    if !marker_table {
+        return Ok(DatabaseContractClassification::Unknown(None));
+    }
+    let marker = connection.query_row(
+        "SELECT contract_version, projection_schema_version, classifier_version FROM rovai_data_contract WHERE singleton=1",
+        [], |row| Ok(DatabaseContractMarker { contract_version: row.get(0)?, projection_schema_version: row.get(1)?, classifier_version: row.get(2)? })
+    ).optional()?;
+    let Some(marker) = marker else {
+        return Ok(DatabaseContractClassification::Unknown(None));
+    };
+    if marker.projection_schema_version > CURRENT_PROJECTION_SCHEMA_VERSION {
+        return Ok(DatabaseContractClassification::Unknown(Some(marker)));
+    }
+    if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
+        && marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION
+    {
+        let core_tables: i64 = connection.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_migration','agent_profile','camp','camp_message','agent_run','canonical_runtime_activity','event_log')",
+            [], |row| row.get(0))?;
+        if core_tables != 7 || marker.classifier_version != V147_CLASSIFIER_VERSION {
+            return Ok(DatabaseContractClassification::Unknown(Some(marker)));
+        }
+        let complete: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=?1) AND NOT EXISTS(SELECT 1 FROM schema_migration WHERE version>?1)",
+            [CURRENT_PROJECTION_SCHEMA_VERSION + 50], |row| row.get(0))?;
+        // The marker and final receipt commit together. Historical receipt and
+        // feature-shape validation belongs to the corresponding upgrade path.
+        return Ok(if complete {
+            DatabaseContractClassification::Current(marker)
+        } else {
+            DatabaseContractClassification::Unknown(Some(marker))
+        });
+    }
+    classify_database_contract(connection)
+}
+
 pub(crate) fn classify_database_contract(
     connection: &Connection,
 ) -> rusqlite::Result<DatabaseContractClassification> {
@@ -3747,6 +3803,7 @@ pub(crate) fn classify_database_contract(
                 | 165
                 | 166
                 | 167
+                | 168
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3756,6 +3813,7 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 168 || quote_text::schema_matches(connection)?)
             && (marker.projection_schema_version < 167
                 || hermes::rules_schema_matches(connection)?)
             && (marker.projection_schema_version < 166 || hermes::schema_matches(connection)?)
@@ -6071,7 +6129,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=214),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=215),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=216),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=217)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=217),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=218)
         "#,
         [],
         |row| {
@@ -6224,6 +6283,7 @@ fn load_current_migration_state(
                 v215: row.get(145)?,
                 v216: row.get(146)?,
                 v217: row.get(147)?,
+                v218: row.get(148)?,
             })
         },
     )
@@ -6819,7 +6879,7 @@ fn open_existing_authority_connection(
         )
     })?;
     connection
-        .busy_timeout(Duration::from_millis(250))
+        .busy_timeout(Duration::from_secs(5))
         .map_err(|error| {
             database_sqlite_open_error(
                 "authority_busy_timeout_failed",
@@ -7518,9 +7578,9 @@ impl Database {
     }
 
     pub fn open_admitted(
-        ticket: ExistingAuthorityTicket<'_>,
+        ticket: ExistingAuthorityOpen<'_>,
     ) -> std::result::Result<Self, DatabaseOpenError> {
-        let open = ticket.into_open()?;
+        let open = ticket;
         let data_dir = open.path.parent().ok_or_else(|| DatabaseOpenError {
             code: "authority_target_parent_missing",
             message: format!("authority target has no parent: {}", open.path.display()),
@@ -7542,11 +7602,11 @@ impl Database {
     }
 
     pub fn open_admitted_with_runtime_camp_files_root(
-        ticket: ExistingAuthorityTicket<'_>,
+        ticket: ExistingAuthorityOpen<'_>,
         runtime_camp_files_root: &Path,
         runtime_camp_files_root_identity_digest: &str,
     ) -> std::result::Result<Self, DatabaseOpenError> {
-        let open = ticket.into_open()?;
+        let open = ticket;
         Self::open_admitted_parts(
             open,
             runtime_camp_files_root,
@@ -7559,8 +7619,7 @@ impl Database {
         runtime_camp_files_root: &Path,
         runtime_camp_files_root_identity_digest: &str,
     ) -> std::result::Result<Self, DatabaseOpenError> {
-        let path = open.path.clone();
-        let connection = open_existing_authority_connection(&path)?;
+        let (path, connection) = open.into_parts()?;
         crate::monitoring::register_monitoring_sql_functions(&connection)
             .and_then(|()| crate::execution_evidence::register_preview_function(&connection))
             .map_err(|error| {
@@ -7584,22 +7643,6 @@ impl Database {
                 error,
             )
         })?;
-        match classify_database_contract(&connection).map_err(|error| {
-            database_sqlite_open_error(
-                "authority_contract_revalidation_failed",
-                "revalidate authority data contract for",
-                &path,
-                crate::database_admission::BusyStage::Revalidation,
-                error,
-            )
-        })? {
-            DatabaseContractClassification::Current(_) => {}
-            DatabaseContractClassification::SupportedMigrationSource(_)
-            | DatabaseContractClassification::Unknown(_) => {
-                return Err(DatabaseOpenError::contract_changed(&path));
-            }
-        }
-        open.revalidate()?;
         configure_runtime_connection(&connection, &path)?;
         let mut database = Self {
             execution_text: Default::default(),
@@ -7611,19 +7654,28 @@ impl Database {
             runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
                 .to_string(),
         };
-        database.seed_agents().map_err(|error| {
-            DatabaseOpenError::operation(
-                "authority_seed_reconciliation_failed",
-                "reconcile built-in agents in",
-                &database.path,
-                error,
-            )
-        })?;
+        database
+            .seed_agents()
+            .map_err(|error| match error.downcast::<rusqlite::Error>() {
+                Ok(error) => database_sqlite_open_error(
+                    "authority_seed_reconciliation_failed",
+                    "reconcile built-in agents in",
+                    &database.path,
+                    crate::database_admission::BusyStage::Open,
+                    error,
+                ),
+                Err(error) => DatabaseOpenError::operation(
+                    "authority_seed_reconciliation_failed",
+                    "reconcile built-in agents in",
+                    &database.path,
+                    error,
+                ),
+            })?;
         Ok(database)
     }
 
     pub fn initialize_new(
-        ticket: NewAuthorityTicket<'_>,
+        ticket: NewAuthorityTarget<'_>,
     ) -> std::result::Result<Self, DatabaseInitializeError> {
         let open = ticket.into_initialization()?;
         let data_dir = open.path.parent().ok_or_else(|| {
@@ -7649,7 +7701,7 @@ impl Database {
     }
 
     pub fn initialize_new_with_runtime_camp_files_root(
-        ticket: NewAuthorityTicket<'_>,
+        ticket: NewAuthorityTarget<'_>,
         runtime_camp_files_root: &Path,
         runtime_camp_files_root_identity_digest: &str,
     ) -> std::result::Result<Self, DatabaseInitializeError> {
@@ -7680,7 +7732,7 @@ impl Database {
         ));
         let result = (|| -> std::result::Result<(), DatabaseInitializeError> {
             drop(
-                crate::platform::private_storage::create_private_new_file(&temporary).map_err(
+                crate::platform::private_storage::create_data_new_file(&temporary).map_err(
                     |error| {
                         DatabaseInitializeError(DatabaseOpenError::operation(
                             "authority_initialize_staging_create_failed",
@@ -7818,73 +7870,42 @@ impl Database {
         })
     }
 
-    /// Consumes no caller path: the only authority is the lease-bound ticket.
-    /// All validation precedes WAL configuration or application writes.
+    /// Upgrade the same connection that was opened under the directory lease.
+    /// Per-version IMMEDIATE transactions own source validation and atomicity.
     pub(crate) fn migrate_admitted_authority(
-        open: &MigrationAuthorityOpen<'_>,
+        open: MigrationAuthorityOpen<'_>,
         runtime_camp_files_root: &Path,
         runtime_camp_files_root_identity_digest: &str,
         progress: &mut dyn FnMut(&str, Duration),
-    ) -> std::result::Result<(), DatabaseMigrationError> {
-        let MigrationAuthorityOpen::Upgrade {
+    ) -> std::result::Result<Self, DatabaseMigrationError> {
+        open.revalidate()
+            .map_err(DatabaseMigrationError::from_path)?;
+        let MigrationOperation::Upgrade {
+            lease,
             path,
-            source_contract,
-            source_receipts,
+            namespace,
+            main_identity,
+            connection,
             ..
-        } = open
+        } = open.state
         else {
             unreachable!("interrupted snapshots use legacy recovery")
         };
-        let started = Instant::now();
-        let connection = (|| {
-            open.revalidate()
-                .map_err(DatabaseMigrationError::from_ticket)?;
-            let connection = open_existing_authority_connection(path)
-                .map_err(DatabaseMigrationError::from_open)?;
-            let validate = || -> rusqlite::Result<bool> {
-                let transaction = connection.unchecked_transaction()?;
-                let matches = matches!(
-                    classify_database_contract(&transaction)?,
-                    DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker == source_contract
-                ) && MigrationReceiptSnapshot::read(&transaction)?
-                    == *source_receipts;
-                transaction.commit()?;
-                Ok(matches)
-            };
-            match validate() {
-                Ok(true) => {}
-                Err(error) if crate::database_admission::sqlite_error_is_transient(&error) => {
-                    return Err(DatabaseMigrationError::from_sqlite(
-                        "authority_source_probe_failed",
-                        error,
-                    ));
-                }
-                Ok(false) | Err(_) => {
-                    return Err(DatabaseMigrationError::from_open(
-                        DatabaseOpenError::contract_changed(path),
-                    ));
-                }
-            }
-            open.revalidate()
-                .map_err(DatabaseMigrationError::from_ticket)?;
-            crate::monitoring::register_monitoring_sql_functions(&connection)
-                .and_then(|()| crate::execution_evidence::register_preview_function(&connection))
-                .map_err(DatabaseMigrationError::from_migration)?;
-            register_runtime_camp_files_functions(
-                &connection,
-                runtime_camp_files_root,
-                runtime_camp_files_root_identity_digest,
-            )
+        crate::monitoring::register_monitoring_sql_functions(&connection)
+            .and_then(|()| crate::execution_evidence::register_preview_function(&connection))
             .map_err(DatabaseMigrationError::from_migration)?;
-            Ok(connection)
-        })();
-        progress("authority_open", started.elapsed());
+        register_runtime_camp_files_functions(
+            &connection,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        )
+        .map_err(DatabaseMigrationError::from_migration)?;
         let mut database = Self {
             execution_text: Default::default(),
             execution_wake: Default::default(),
             message_changes: None,
-            connection: connection?,
-            path: path.clone(),
+            connection,
+            path,
             runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
             runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
                 .to_string(),
@@ -7892,11 +7913,28 @@ impl Database {
         database
             .migrate_with_progress(false, progress)
             .map_err(DatabaseMigrationError::from_migration)?;
-        validate_joined_channel_schema(database.connection())
+        // Verify the completed marker/ledger in this connection; do not close,
+        // re-admit or run historical feature fingerprints again.
+        if !matches!(
+            classify_startup_contract(database.connection())
+                .map_err(|error| DatabaseMigrationError::from_migration(error.into()))?,
+            DatabaseContractClassification::Current(_)
+        ) {
+            return Err(DatabaseMigrationError::from_open(
+                DatabaseOpenError::contract_changed(&database.path),
+            ));
+        }
+        crate::database_admission::verify_selected_main(
+            lease,
+            &database.path,
+            namespace,
+            &main_identity,
+        )
+        .map_err(DatabaseMigrationError::from_path)?;
+        database
+            .seed_agents()
             .map_err(DatabaseMigrationError::from_migration)?;
-        // The connection closes normally. SQLite owns WAL/checkpoint recovery;
-        // never detach, copy, delete or replace authority files here.
-        Ok(())
+        Ok(database)
     }
 
     #[cfg(all(test, feature = "extended-tests"))]
@@ -9534,6 +9572,9 @@ impl Database {
             if !self.schema_migration_applied(217)? {
                 migration_step!("migration_217", hermes::migrate_rules(self));
             }
+            if !self.schema_migration_applied(218)? {
+                migration_step!("migration_218", quote_text::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10409,6 +10450,9 @@ impl Database {
         }
         if !self.schema_migration_applied(217)? {
             migration_step!("migration_217", hermes::migrate_rules(self));
+        }
+        if !self.schema_migration_applied(218)? {
+            migration_step!("migration_218", quote_text::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -41735,73 +41779,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn admitted_migration_rechecks_contract_schema_and_exact_receipts_before_writing() {
-        use crate::{
-            core_data_dir_lock::CoreDataDirLease,
-            database_admission::{AdmissionAssessment, DatabaseAdmission},
-        };
-        for changed in ["contract", "projection", "classifier", "receipt", "schema"] {
-            let directory = std::env::temp_dir().join(format!(
-                "rovai-migration-source-revalidation-{}",
-                Uuid::new_v4()
-            ));
-            let database = fresh_schema_database_v170_at(&directory);
-            downgrade_current_schema_to_v128_source_for_test(database.connection());
-            let runtime_root = database.runtime_camp_files_root().to_path_buf();
-            let runtime_identity = database
-                .runtime_camp_files_root_identity_digest()
-                .to_string();
-            drop(database);
-            let lease = CoreDataDirLease::acquire(&directory).unwrap();
-            let AdmissionAssessment::RequiresMigration(ticket) =
-                DatabaseAdmission::assess(&lease).unwrap()
-            else {
-                panic!("migration ticket required")
-            };
-            let mut open = ticket.into_migration().unwrap();
-            // Vary the admission evidence, not the file: this isolates the SQL
-            // recheck from the independent filesystem identity guard.
-            let MigrationAuthorityOpen::Upgrade {
-                source_contract,
-                source_receipts,
-                path,
-                ..
-            } = &mut open
-            else {
-                unreachable!()
-            };
-            match changed {
-                "contract" => source_contract.contract_version.push_str("-changed"),
-                "projection" => source_contract.projection_schema_version += 1,
-                "classifier" => source_contract.classifier_version.push_str("-changed"),
-                "receipt" => source_receipts
-                    .receipts
-                    .last_mut()
-                    .unwrap()
-                    .1
-                    .push_str("-changed"),
-                "schema" => source_receipts.schema_cookie += 1,
-                _ => unreachable!(),
-            }
-            let source = path.clone();
-            let before = std::fs::read(&source).unwrap();
-            let error = Database::migrate_admitted_authority(
-                &open,
-                &runtime_root,
-                &runtime_identity,
-                &mut |_, _| {},
-            )
-            .unwrap_err();
-            assert_eq!(error.code(), "authority_contract_changed", "{changed}");
-            assert!(!error.retryable());
-            assert_eq!(std::fs::read(source).unwrap(), before, "{changed}");
-            drop(open);
-            drop(lease);
-            std::fs::remove_dir_all(directory).unwrap();
-        }
-    }
-
     fn assert_schema_objects(
         connection: &Connection,
         object_type: &str,
@@ -42222,6 +42199,7 @@ mod tests {
             v215: version >= 215,
             v216: version >= 216,
             v217: version >= 217,
+            v218: version >= 218,
         }
     }
 

@@ -639,14 +639,6 @@ impl CollaborationService {
                 ),
             },
             |transaction| {
-                if envelope.payload.quotes.iter().any(|quote| {
-                    quote.source.scope != "camp" || quote.source.camp_id != command.camp_id
-                }) {
-                    return Ok(Err(rejected(
-                        "quote.invalid_source",
-                        "Every quote must have been captured from this Thread",
-                    )));
-                }
                 let content = composer_document_to_content(&envelope.payload.content)?;
                 validate_user_authored_content(&content)?;
                 if let Some(rejection) =

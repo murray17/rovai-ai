@@ -18,7 +18,7 @@ export function ContinueAgentRunButton({ threadId, agentRunId, onError, appearan
   threadId: string
   agentRunId: string
   onError: (message: string) => void
-  appearance?: 'icon' | 'retry'
+  appearance?: 'icon' | 'retry' | 'continue'
   onApplied?: () => void
 }): React.JSX.Element {
   const client = useThreadClient()
@@ -50,7 +50,7 @@ export function ContinueAgentRunButton({ threadId, agentRunId, onError, appearan
       // Transport failure is not proof of rejection. The next click reconciles
       // this exact authorization; it must not create a second request.
       setUncertain(true)
-      onError(uiAttribute(appearance === 'retry' ? '连接暂时不可用，请稍后重试。' : '未确认提交结果，请再次点击核对。'))
+      onError(uiAttribute(appearance !== 'icon' ? '连接暂时不可用，请稍后重试。' : '未确认提交结果，请再次点击核对。'))
     } finally {
       submitting.current = false
       setBusy(false)
@@ -58,11 +58,10 @@ export function ContinueAgentRunButton({ threadId, agentRunId, onError, appearan
   }
 
   const label = appearance === 'retry' ? uiAttribute(busy ? '正在提交…' : '重试')
-    : uiAttribute(busy ? '正在提交' : uncertain ? '确认提交结果' : '继续执行')
-  return <button className={appearance === 'retry' ? 'run-presence-retry' : 'execution-continue'} type="button" title={label}
+    : uiAttribute(busy ? '正在提交' : appearance === 'icon' && uncertain ? '确认提交结果' : '继续执行')
+  return <button className={appearance === 'icon' ? 'execution-continue' : 'run-presence-resume'} type="button" title={label}
     aria-label={label} aria-busy={busy || undefined} disabled={busy}
     onClick={() => void submit()}>
     <DialogControlIcon name="refresh" />
-    {appearance === 'retry' && <span>{label}</span>}
   </button>
 }

@@ -1,6 +1,8 @@
 import { createContext, isValidElement, useContext, useEffect, useState, useLayoutEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import rehypeRaw from 'rehype-raw'
+import rehypeSanitize from 'rehype-sanitize'
 import remarkCjkFriendly from 'remark-cjk-friendly/parseOnly'
 import remarkCjkFriendlyStrikethrough from 'remark-cjk-friendly-gfm-strikethrough/parseOnly'
 import { FILE_REFERENCE_FRAGMENT, FileReferenceLink, type FileReferenceActivation } from './FileReferenceLink'
@@ -10,11 +12,10 @@ import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import { parseFileReference } from '../../file-preview-reference'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MarkdownCodeFrame } from './MarkdownCodeFrame'
+import { MarkdownTableFrame } from './MarkdownTableFrame'
 import {
-  fileReferenceSpacingClassName,
-  visitMarkdownFileReferences,
-  type MarkdownNode,
-  type RawHtmlPolicy
+  visitRenderedFileReferences,
+  type MarkdownNode
 } from './safe-markdown-model'
 import type { FilePreviewBinaryContent, FilePreviewOperationResult, ResolvedTheme } from '@contracts'
 import { UiText, uiAttribute } from './interface-language'
@@ -38,26 +39,6 @@ type InlineHtmlNode = {
   tagName?: string
   properties?: Record<string, string>
   children?: InlineHtmlNode[]
-}
-
-// Normalize raw nodes before trusted inline tokens are replaced. react-markdown's
-// own raw-to-text fallback runs after rehype plugins and would expose those tokens.
-// Neither policy parses HTML or creates elements from untrusted markup.
-function rehypeRawHtmlPolicy({ policy }: { policy: RawHtmlPolicy }): (tree: InlineHtmlNode) => void {
-  return (tree) => {
-    // react-markdown's skipHtml already handles the drop policy.
-    if (policy === 'drop') return
-    const visit = (parent: InlineHtmlNode): void => {
-      const children = parent.children
-      if (!children) return
-      for (let index = 0; index < children.length; index++) {
-        const node = children[index]
-        if (node.type === 'raw') children[index] = { type: 'text', value: node.value }
-        else visit(node)
-      }
-    }
-    visit(tree)
-  }
 }
 
 function rehypeInlineContent({ tokens }: { tokens: string[] }): (tree: InlineHtmlNode) => void {
@@ -89,19 +70,15 @@ function LeadingMarkdownContent(): JSX.Element {
   return <>{useContext(LeadingMarkdownContentContext)}</>
 }
 
-function remarkLeadingContent({ enabled, inline }: { enabled: boolean; inline: boolean }): (tree: MarkdownTreeNode) => void {
+function rehypeLeadingContent({ enabled, inline }: { enabled: boolean; inline: boolean }): (tree: InlineHtmlNode) => void {
   return (tree) => {
     if (!enabled) return
     const children = tree.children ??= []
-    const firstBlock = children.find((node) => !['definition', 'footnoteDefinition'].includes(node.type ?? ''))
-    const paragraph = inline && firstBlock?.type === 'paragraph'
-      ? firstBlock
-      : { type: 'paragraph', children: [] }
-    if (paragraph !== firstBlock) children.unshift(paragraph)
-    paragraph.data = {
-      ...paragraph.data,
-      hProperties: { ...paragraph.data?.hProperties, 'data-rovai-leading-content': 'true' }
-    }
+    const firstVisible = children.find(node => node.type !== 'text' || node.value?.trim())
+    const paragraph: InlineHtmlNode = inline && firstVisible?.tagName === 'p'
+      ? firstVisible : { type: 'element', tagName: 'p', properties: {}, children: [] }
+    if (paragraph !== firstVisible) children.unshift(paragraph)
+    paragraph.properties = { ...paragraph.properties, 'data-rovai-leading-content': 'true' }
   }
 }
 
@@ -145,34 +122,20 @@ function scrollToMarkdownHeading(root: HTMLElement, target: string): boolean {
   return Boolean(heading)
 }
 
-function fileLinkTransformer(addInlineSpacing: boolean, rawHtmlPolicy: RawHtmlPolicy): (tree: MarkdownTreeNode) => void {
+function remarkFileLinks(): (tree: MarkdownTreeNode) => void {
   return (tree) => {
-    visitMarkdownFileReferences(tree, (node, spacing) => {
-      if (typeof node.url !== 'string') return
-      node.url = `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(node.url)}`
-      if (addInlineSpacing) {
-        const className = fileReferenceSpacingClassName(spacing)
-        if (className) {
-          const existingClassName = node.data?.hProperties?.className
-          node.data = {
-            ...node.data,
-            hProperties: {
-              ...node.data?.hProperties,
-              className: [existingClassName, className].filter(Boolean).join(' ')
-            }
-          }
-        }
+    const visit = (node: MarkdownTreeNode): void => {
+      if (node.type === 'link' && node.url && parseFileReference(node.url)) {
+        node.url = `${FILE_REFERENCE_FRAGMENT}${encodeURIComponent(node.url)}`
       }
-    }, rawHtmlPolicy)
+      node.children?.forEach(visit)
+    }
+    visit(tree)
   }
 }
 
-function remarkFileLinks({ rawHtmlPolicy }: { rawHtmlPolicy: RawHtmlPolicy }): (tree: MarkdownTreeNode) => void {
-  return fileLinkTransformer(false, rawHtmlPolicy)
-}
-
-function remarkMessageFileLinks({ rawHtmlPolicy }: { rawHtmlPolicy: RawHtmlPolicy }): (tree: MarkdownTreeNode) => void {
-  return fileLinkTransformer(true, rawHtmlPolicy)
+function rehypeFileLinkSpacing(): (tree: InlineHtmlNode) => void {
+  return tree => visitRenderedFileReferences(tree, FILE_REFERENCE_FRAGMENT)
 }
 
 export function SafeMarkdown({
@@ -186,7 +149,6 @@ export function SafeMarkdown({
   leadingContent,
   inlineContent,
   inlineLeadingContent = true,
-  rawHtmlPolicy = 'text',
   mode = 'message',
   theme = 'day'
 }: {
@@ -202,8 +164,6 @@ export function SafeMarkdown({
   /** Collision-free placeholders generated from authoritative structured content. */
   inlineContent?: Readonly<Record<string, ReactNode>>
   inlineLeadingContent?: boolean
-  /** Literal markup in messages; metadata-oriented readers explicitly opt out. */
-  rawHtmlPolicy?: RawHtmlPolicy
   mode?: 'message' | 'document'
   theme?: ResolvedTheme
 }): JSX.Element {
@@ -255,14 +215,15 @@ export function SafeMarkdown({
           remarkCjkFriendly,
           [remarkCjkFriendlyStrikethrough, { singleTilde: false }],
           remarkRepairCjkUrlTail,
-          [mode === 'message' ? remarkMessageFileLinks : remarkFileLinks, fileReferencesEnabled ? { rawHtmlPolicy } : false],
-          [remarkLeadingContent, { enabled: hasLeadingContent, inline: inlineLeadingContent }]
+          [remarkFileLinks, fileReferencesEnabled]
         ]}
         rehypePlugins={[
-          [rehypeRawHtmlPolicy, { policy: rawHtmlPolicy }],
-          [rehypeInlineContent, { tokens: JSON.parse(inlineContentKeys) as string[] }]
+          rehypeRaw,
+          rehypeSanitize,
+          [rehypeLeadingContent, { enabled: hasLeadingContent, inline: inlineLeadingContent }],
+          [rehypeInlineContent, { tokens: JSON.parse(inlineContentKeys) as string[] }],
+          [rehypeFileLinkSpacing, fileReferencesEnabled && mode === 'message']
         ]}
-        skipHtml
         disallowedElements={[
           ...(!localImageUrl && !localImageContent ? ['img'] : []),
           'iframe', 'object', 'embed', 'script', 'style'
@@ -297,11 +258,9 @@ export function SafeMarkdown({
               </MarkdownCodeFrame>
             )
           },
-          ...(mode === 'document' ? {
-            table({ children: tableChildren }) {
-              return <div className="markdown-table-scroll"><table>{tableChildren}</table></div>
-            }
-          } : {}),
+          table({ children: tableChildren }) {
+            return <MarkdownTableFrame>{tableChildren}</MarkdownTableFrame>
+          },
           a({ href, children: linkChildren, className: linkClassName }) {
             if (href?.startsWith(FILE_REFERENCE_FRAGMENT) && fileReferencesEnabled) {
               let rawReference: string
@@ -365,7 +324,7 @@ export function SafeMarkdown({
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, rawHtmlPolicy, mode, theme])
+  }, [children, fileReferencesEnabled, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, mode, theme])
 
   return (
     <LeadingMarkdownContentContext.Provider value={leadingContent}>

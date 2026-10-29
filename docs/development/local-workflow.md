@@ -39,8 +39,8 @@ Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等�
 判定 single-instance；只有 primary 在 `app.ready` 前调用 `rovai-host.exe --prepare-windows-data-root <root>` 准备正式布局，把 Core
 绑定到 `<root>\Core`，把 Electron `userData` / `sessionData` 分别绑定到
 `<root>\Electron\User Data` / `<root>\Electron\Session Data`，并将隔离 Skill Library 放在
-`<root>\Core\managed-skill-library`。验收方必须传入一个尚未被普通 `mkdir` 以继承 ACL 创建的目标 root；
-已有但不满足 protected DACL 的未知目录会按合同拒绝，而不是被静默修权后复用。macOS 的现有
+`<root>\Core\managed-skill-library`。验收 root 必须独立于日常数据；可以是尚不存在或普通继承 ACL 的可用目录。
+新对象在创建时保护，已有对象按实际访问结果处理，不要求 protected DACL 模板或改 ACL 权限。macOS 的现有
 `--user-data-dir` 语义保持不变。
 正式 root 准备失败仍用已准入的壳层显示原因、不启动 Core；重试会保留原参数重启 Desktop，不能 ready 后重绑 sessionData。
 壳层 profile 不含 Core data path，也不是验收数据库后备目录。Windows 真机 UI/ACL 验收与其他平台的控制流模拟必须分开报告。

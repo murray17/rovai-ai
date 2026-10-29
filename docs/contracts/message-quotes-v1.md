@@ -2,12 +2,14 @@
 document_type: interface-contract
 contract: message-quotes
 version: 1
-status: accepted
+status: superseded
 authority: immutable-message-excerpts
 last_updated: 2026-10-23
 ---
 
-# Message Quotes v1
+# Message Quotes v1（历史）
+
+当前实现由 [v2](message-quotes-v2.md) 替代；下文投影、来源证明、范围及精确高亮约束均已退役。
 
 补充 Camp Composer Draft v12、Pending Camp Input v3、Single Chat v3 与消息读取合同。已确认输入说明：[v1.56 revision 6](../versions/v1.56/model-context-change-partial-message-quotes.md)。
 
@@ -26,7 +28,7 @@ Core 建立快照前验证源可读、来源版本和 MessageQuoteTextProjection
 
 v3 继承 v2 对 Agent Markdown 的 CJK-friendly emphasis，并同步 GFM 双波浪线边界；单波浪线仍为字面文本。
 Renderer 使用 remark CJK 扩展，Core 使用 Comrak 的现成 CJK 能力；双方消费同一组
-[投影对照用例](../../packages/contracts/fixtures/message-quote-projection-v3.json)。
+当时的跨端投影对照用例（已退役）。
 v3 将 Agent Markdown 的原始 HTML 节点作为字面文字纳入投影，包括尖括号占位符、HTML 块和注释；
 不执行 HTML，且在可信 CurrentUserMention 占位符替换前完成文本化。块内未解析的 Markdown 保持字面值。
 Renderer 与 Core 使用同一组 v3 对照用例；v1/v2 历史引用仍使用冻结文本，不按新规则重新捕获。

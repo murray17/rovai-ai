@@ -3586,7 +3586,7 @@ async function verifyRecoveryBlockerPresentation(cdp) {
       staleBlockerCount: stage.querySelectorAll('.process-recovery-blocker').length,
       spinnerCount: stage.querySelectorAll('.process-spinner').length,
       continueCount: stage.querySelectorAll('.execution-continue').length,
-      retryCount: document.querySelectorAll('[data-presence-run="${recoveryBlockedRunId}"] .run-presence-retry').length,
+      retryCount: document.querySelectorAll('[data-presence-run="${recoveryBlockedRunId}"] .run-presence-resume').length,
       stopCount: document.querySelectorAll('[data-presence-run="${recoveryBlockedRunId}"] .run-presence-stop').length
     }
   })()`)

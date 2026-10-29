@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:c037e6be4ef614f84caa550734cefd4a297be588cd3a559b37f028e277eb5b22";
+    "sha256:d148203a2ed95b48b59453d16c5b9884907fe7f025408a1403c5ceaa65e5968f";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -55,6 +55,7 @@ pub const ZCODE_WINDOWS_X64_EVIDENCE_REVISION: &str =
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimePlatformAdmissionStatus {
+    Enabled,
     Qualified,
     Preview,
     NotQualified,
@@ -92,6 +93,17 @@ pub struct RuntimePlatformAdmission {
 }
 
 impl RuntimePlatformAdmission {
+    /// Ordinary product availability without claiming completed qualification.
+    pub fn enabled(runtime_kind: AdapterKind, platform: HostPlatformKey) -> Self {
+        Self {
+            runtime_kind,
+            platform,
+            status: RuntimePlatformAdmissionStatus::Enabled,
+            reason_code: None,
+            evidence_revision: None,
+        }
+    }
+
     pub fn qualified(
         runtime_kind: AdapterKind,
         platform: HostPlatformKey,
@@ -177,15 +189,17 @@ impl RuntimePlatformAdmission {
     pub const fn allows_runtime_use(&self) -> bool {
         matches!(
             self.status,
-            RuntimePlatformAdmissionStatus::Qualified | RuntimePlatformAdmissionStatus::Preview
+            RuntimePlatformAdmissionStatus::Enabled
+                | RuntimePlatformAdmissionStatus::Qualified
+                | RuntimePlatformAdmissionStatus::Preview
         )
     }
 
     pub const fn blocker_code(&self) -> Option<&'static str> {
         match self.status {
-            RuntimePlatformAdmissionStatus::Qualified | RuntimePlatformAdmissionStatus::Preview => {
-                None
-            }
+            RuntimePlatformAdmissionStatus::Enabled
+            | RuntimePlatformAdmissionStatus::Qualified
+            | RuntimePlatformAdmissionStatus::Preview => None,
             RuntimePlatformAdmissionStatus::NotQualified => Some("runtime_platform_not_qualified"),
             RuntimePlatformAdmissionStatus::Unsupported => Some("runtime_platform_unsupported"),
         }
@@ -363,9 +377,14 @@ mod tests {
                                 })
                             );
                         }
-                        AdapterKind::CursorAgent
-                        | AdapterKind::ClineCli
-                        | AdapterKind::HermesCli => {
+                        AdapterKind::HermesCli => {
+                            assert_eq!(admission.status(), RuntimePlatformAdmissionStatus::Enabled);
+                            assert!(admission.allows_runtime_use());
+                            assert_eq!(admission.blocker_code(), None);
+                            assert_eq!(admission.reason_code(), None);
+                            assert!(admission.evidence_revision().is_none());
+                        }
+                        AdapterKind::CursorAgent | AdapterKind::ClineCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -404,7 +423,14 @@ mod tests {
 
         for runtime_kind in AdapterKind::ALL {
             let admission = registry.platform_admission(runtime_kind, HostPlatformKey::WindowsX64);
-            if runtime_kind == AdapterKind::MinimaxCodeCli {
+            if runtime_kind == AdapterKind::HermesCli {
+                assert_eq!(admission.status(), RuntimePlatformAdmissionStatus::Enabled);
+                assert!(admission.allows_runtime_use());
+                assert!(!admission.is_qualified());
+                assert_eq!(admission.reason_code(), None);
+                assert_eq!(admission.evidence_revision(), None);
+                assert_eq!(admission.blocker_code(), None);
+            } else if runtime_kind == AdapterKind::MinimaxCodeCli {
                 assert!(admission.is_qualified());
                 assert!(admission.allows_runtime_use());
                 assert_eq!(admission.reason_code(), None);
@@ -508,25 +534,12 @@ mod tests {
         let registry = AgentRuntimeAdapterRegistry::default();
         for platform in HostPlatformKey::ALL {
             let hermes = registry.platform_admission(AdapterKind::HermesCli, platform);
-            let admitted = matches!(
-                platform,
-                HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64
-            );
-            assert_eq!(
-                hermes.status(),
-                if admitted {
-                    RuntimePlatformAdmissionStatus::Preview
-                } else {
-                    RuntimePlatformAdmissionStatus::NotQualified
-                }
-            );
+            assert_eq!(hermes.status(), RuntimePlatformAdmissionStatus::Enabled);
             assert!(hermes.evidence_revision().is_none());
+            assert!(hermes.reason_code().is_none());
             assert!(!hermes.is_qualified());
-            assert_eq!(hermes.allows_runtime_use(), admitted);
-            assert_eq!(
-                hermes.blocker_code(),
-                (!admitted).then_some("runtime_platform_not_qualified")
-            );
+            assert!(hermes.allows_runtime_use());
+            assert_eq!(hermes.blocker_code(), None);
         }
 
         assert_eq!(
@@ -704,6 +717,16 @@ mod tests {
     #[test]
     fn wire_projection_uses_contract_field_and_enum_names() {
         let registry = AgentRuntimeAdapterRegistry::default();
+        for platform in HostPlatformKey::ALL {
+            let enabled =
+                serde_json::to_value(registry.platform_admission(AdapterKind::HermesCli, platform))
+                    .unwrap();
+            assert_eq!(enabled["runtimeKind"], "hermes-cli");
+            assert_eq!(enabled["platform"], platform.as_str());
+            assert_eq!(enabled["status"], "enabled");
+            assert!(enabled["reasonCode"].is_null());
+            assert!(enabled["evidenceRevision"].is_null());
+        }
         let blocked = serde_json::to_value(
             registry.platform_admission(AdapterKind::CursorAgent, HostPlatformKey::WindowsX64),
         )

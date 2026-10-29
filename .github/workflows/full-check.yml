@@ -222,7 +222,17 @@ jobs:
           cargo test -p rovai-core --lib --features extended-tests
           --target x86_64-pc-windows-msvc acp::compaction_detector_tests::
 
-      - name: Exercise Windows private storage admission
+      - name: Exercise Windows database recovery and ordinary permissions
+        run: >-
+          cargo test -p rovai-core --lib --features extended-tests
+          --target x86_64-pc-windows-msvc database_admission::
+
+      - name: Exercise Windows migration and interruption recovery
+        run: >-
+          cargo test -p rovai-core --lib --features extended-tests
+          --target x86_64-pc-windows-msvc authority_migration::
+
+      - name: Exercise Windows instance exclusion
         run: >-
           cargo test -p rovai-core --lib
           --target x86_64-pc-windows-msvc

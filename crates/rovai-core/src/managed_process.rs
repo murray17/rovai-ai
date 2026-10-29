@@ -638,17 +638,12 @@ impl ManagedProcess {
 
         #[cfg(windows)]
         {
-            if spec.purpose == ManagedProcessPurpose::RuntimeConnection {
-                return Err(anyhow::anyhow!(
-                    "connection-only Runtime ownership is not admitted on Windows"
-                )
-                .into());
-            }
+            let owns_descendants = spec.purpose != ManagedProcessPurpose::RuntimeConnection;
             let child = windows::WindowsManagedProcess::spawn(&spec)?;
             Ok(Self {
                 child,
                 tree_termination_requested: false,
-                owns_descendants: true,
+                owns_descendants,
             })
         }
 
@@ -797,7 +792,7 @@ impl ManagedProcess {
         }
         #[cfg(windows)]
         {
-            self.child.terminate_job()?;
+            self.child.terminate_owned_processes()?;
             self.tree_termination_requested = true;
             return Ok(());
         }
@@ -808,7 +803,7 @@ impl ManagedProcess {
         ))
     }
 
-    /// A successful query of this launch's Job reports no active members.
+    /// An owned tree's Job has no active members, or a connection root has exited.
     /// Historical notifications and descendant process handles do not gate cleanup.
     #[cfg(windows)]
     pub(crate) fn tree_is_empty(&self) -> io::Result<bool> {
@@ -966,7 +961,7 @@ impl ManagedProcess {
         }
         #[cfg(windows)]
         {
-            match self.child.terminate_job() {
+            match self.child.terminate_owned_processes() {
                 Ok(()) => {
                     self.tree_termination_requested = true;
                     return Ok(());
@@ -1827,6 +1822,64 @@ mod tests {
         let _ = std::fs::remove_file(handshake);
         let _ = std::fs::remove_file(fork);
         let _ = std::fs::remove_file(late_handshake);
+
+        // The same native spawn boundary also supports a connection that owns
+        // only its root. Its simulated shared Gateway must survive both forced
+        // client cleanup and dropping the client process handle.
+        let handshake = std::env::temp_dir().join(format!(
+            "rovai-managed-connection-{}.pid",
+            uuid::Uuid::new_v4()
+        ));
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "managed_process::tests::windows_job_child_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(WINDOWS_HELPER_MODE, "child")
+            .env(WINDOWS_HELPER_FILE, &handshake)
+            .env("ROVAI_MANAGED_PROCESS_HOLD_CONNECTION", "1");
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeConnection,
+            ManagedStdinPolicy::Piped,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "connection:shared-gateway-test",
+        )
+        .unwrap();
+        let mut connection = ManagedProcess::spawn(spec).unwrap();
+        let server_pid = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(pid) = std::fs::read_to_string(&handshake)
+                    .ok()
+                    .and_then(|value| value.trim().parse::<u32>().ok())
+                {
+                    break pid;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("shared server did not start");
+        let server = windows::TestProcess::open(server_pid).unwrap();
+        assert!(connection.owns_process_id(connection.id().unwrap()));
+        assert!(!connection.owns_process_id(server_pid));
+        assert!(!connection.tree_is_empty().unwrap());
+        connection.force_terminate_tree().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), connection.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(connection.tree_is_empty().unwrap());
+        assert!(!connection.owns_process_id(connection.id().unwrap()));
+        assert!(server.is_running().unwrap());
+        drop(connection);
+        assert!(server.is_running().unwrap());
+        // Only this test owns the simulated server, never production cleanup.
+        server.terminate().unwrap();
+        let _ = std::fs::remove_file(handshake);
     }
 
     #[cfg(windows)]
@@ -2015,6 +2068,9 @@ mod tests {
         }
         assert!(std::path::Path::new(&handshake).is_file());
         assert!(grandchild.try_wait().unwrap().is_none());
+        if std::env::var_os("ROVAI_MANAGED_PROCESS_HOLD_CONNECTION").is_some() {
+            std::thread::sleep(Duration::from_secs(30));
+        }
     }
 
     #[cfg(windows)]

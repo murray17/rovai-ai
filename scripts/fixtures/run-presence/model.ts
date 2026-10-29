@@ -199,7 +199,7 @@ const refresh = () => {
   update({ snapshot: value, stopId: value.agentRuns.some((r: any) => r.id === state.stopId && ['running','waiting'].includes(r.status)) ? state.stopId : null })
   if (controls.persistServer) sessionStorage.setItem(persistenceKey, JSON.stringify({
     scenario: state.scenario, stage: state.stage, serial, extraMessages, extraRuns, extraDeliveries,
-    retries: [...retries], holdDispatch: controls.holdDispatch
+    retries: [...retries], stopped: [...stopped], holdDispatch: controls.holdDispatch
   }))
 }
 function streamTick() {
@@ -470,8 +470,9 @@ export const model = {
   },
   restoreStopFocus() { if (stopTrigger?.isConnected) stopTrigger.focus() },
   stop(id: string) {
-    if (!state.snapshot.agentRuns.some((r: any) => r.id === id && ['running','waiting'].includes(r.status))) { update({ stopId: null }); return }
-    halt(); stopped.set(id, { run: { status: 'cancelled', endedAt: new Date().toISOString(), cancelReasonCode: 'user_requested_agent_run_stop', cancelRequestedAt: new Date().toISOString() },
+    const source = state.snapshot.agentRuns.find((r: any) => r.id === id && ['running','waiting'].includes(r.status))
+    if (!source) { update({ stopId: null }); return }
+    halt(); stopped.set(id, { run: { ...source, status: 'cancelled', endedAt: new Date().toISOString(), cancelReasonCode: 'user_requested_agent_run_stop', cancelRequestedAt: new Date().toISOString() },
       publishedIds: state.snapshot.messages.filter((m: any) => m.sourceAgentRunId === id).map((m: any) => m.id) })
     refresh()
   },
@@ -629,6 +630,7 @@ if (savedServer) {
   Object.assign(state, { scenario: saved.scenario, stage: saved.stage })
   serial = saved.serial; extraMessages = saved.extraMessages; extraRuns = saved.extraRuns; extraDeliveries = saved.extraDeliveries
   for (const [sourceId, record] of saved.retries) retries.set(sourceId, record)
+  for (const [sourceId, record] of saved.stopped ?? []) stopped.set(sourceId, record)
   controls.persistServer = true; controls.holdDispatch = saved.holdDispatch
 }
 refresh()

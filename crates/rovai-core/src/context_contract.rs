@@ -2,12 +2,12 @@ use serde_json::{Value, json};
 
 pub const NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION: &str = "native_session_bootstrap_v6";
 pub const BOOTSTRAP_FORMATTER_VERSION: i64 = 6;
-pub const SESSION_CHARTER_REVISION: i64 = 25;
+pub const SESSION_CHARTER_REVISION: i64 = 26;
 const NATIVE_BINDING_CHARTER_COMPATIBILITY_REVISION: i64 = 16;
-pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 42;
-pub const CONTEXT_MANIFEST_VERSION: i64 = 42;
-pub const PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION: i64 = 40;
-pub const PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION: i64 = 40;
+pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 44;
+pub const CONTEXT_MANIFEST_VERSION: i64 = 44;
+pub const PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION: i64 = 43;
+pub const PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION: i64 = 43;
 
 #[cfg(test)]
 pub(crate) fn native_binding_context_contract() -> Value {
@@ -55,18 +55,18 @@ mod tests {
         });
         let current = native_binding_context_contract();
         let compatibility = native_binding_compatibility_context_contract();
-        assert_eq!(SESSION_CHARTER_REVISION, 25);
+        assert_eq!(SESSION_CHARTER_REVISION, 26);
         assert_eq!(compatibility["sessionCharterRevision"], json!(16));
-        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION, 40);
-        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION, 40);
+        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION, 43);
+        assert_eq!(PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION, 43);
         assert_eq!(
             current,
             json!({
                 "nativeSessionBootstrap": "native_session_bootstrap_v6",
                 "bootstrapFormatterVersion": 6,
                 "sessionCharterRevision": SESSION_CHARTER_REVISION,
-                "agentRunContextFormatterVersion": 42,
-                "contextManifestVersion": 42,
+                "agentRunContextFormatterVersion": 44,
+                "contextManifestVersion": 44,
             })
         );
         assert_eq!(

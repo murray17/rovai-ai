@@ -146,7 +146,7 @@ export function runtimePlatformAdmissionFor(
 export function runtimePlatformAdmissionAllowsUse(
   admission: RuntimePlatformAdmission | null
 ): boolean {
-  return admission?.status === 'qualified' || admission?.status === 'preview'
+  return admission?.status === 'enabled' || admission?.status === 'qualified' || admission?.status === 'preview'
 }
 
 export function runtimeProductPresentation(

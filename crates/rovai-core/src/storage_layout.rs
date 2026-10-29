@@ -1,8 +1,7 @@
 //! Locations only: both entrypoints keep using the same stores and authority
 //! admission. The standalone layout never falls back to Desktop's Home roots.
 use crate::platform::private_storage::{
-    create_private_new_file, open_private_append_file, open_private_read_file,
-    prepare_private_directory,
+    create_data_new_file, open_data_append_file, open_data_read_file, prepare_data_directory,
 };
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -56,12 +55,12 @@ impl ServerPaths {
                 );
             }
         }
-        let root = prepare_private_directory(data_dir)?;
+        let root = prepare_data_directory(data_dir)?;
         let paths = Self::from_data_dir(&root)?;
         let marker_path = root.join("server-layout.json");
         if marker_path.try_exists()? {
             let mut bytes = Vec::new();
-            open_private_read_file(&marker_path)?
+            open_data_read_file(&marker_path)?
                 .take(4097)
                 .read_to_end(&mut bytes)?;
             ensure!(bytes.len() <= 4096, "Server layout marker is too large");
@@ -76,7 +75,7 @@ impl ServerPaths {
                 !paths.database.try_exists()?,
                 "server_legacy_layout: existing Rovai data has no standalone-root marker. Keep using its original rovai-host run command and paths; this entrypoint does not move Desktop or legacy preview data. Back up the complete instance before migration."
             );
-            let mut marker = create_private_new_file(&marker_path)?;
+            let mut marker = create_data_new_file(&marker_path)?;
             marker.write_all(&serde_json::to_vec(&LayoutMarker {
                 schema_version: 1,
                 layout: "standalone-root".into(),
@@ -87,7 +86,7 @@ impl ServerPaths {
         // assessment. Do not pre-create its marker or weaken those checks here.
         for directory in [&paths.skill_library_root, &paths.logs] {
             crate::camp_attachment_view::reject_existing_symlink_components(directory)?;
-            prepare_private_directory(directory)?;
+            prepare_data_directory(directory)?;
         }
         Ok(paths)
     }
@@ -100,14 +99,16 @@ impl ServerPaths {
                 token.len() == 64 && token.bytes().all(|value| value.is_ascii_hexdigit()),
                 "Invalid generated management token"
             );
-            let mut file = create_private_new_file(&path)?;
+            let mut file = create_data_new_file(&path)?;
             file.write_all(token.as_bytes())?;
             file.sync_all()?;
         }
         let mut token = String::new();
-        open_private_read_file(&path)?
-            .take(65)
-            .read_to_string(&mut token)?;
+        #[cfg(windows)]
+        let file = crate::platform::private_storage::open_server_token_read_file(&path)?;
+        #[cfg(not(windows))]
+        let file = crate::platform::private_storage::open_private_read_file(&path)?;
+        file.take(65).read_to_string(&mut token)?;
         ensure!(
             token.len() == 64 && token.bytes().all(|value| value.is_ascii_hexdigit()),
             "Stored Server token is invalid; it has not been replaced"
@@ -116,7 +117,7 @@ impl ServerPaths {
     }
 
     pub fn open_log(&self) -> Result<File> {
-        open_private_append_file(&self.logs.join("server.log"))
+        open_data_append_file(&self.logs.join("server.log"))
     }
 
     /// The Host passes the admitted canonical data directory. No directory is

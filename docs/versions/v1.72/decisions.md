@@ -3,7 +3,7 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-25
+last_updated: 2026-10-29
 ---
 
 # v1.72 版本决定
@@ -1430,3 +1430,23 @@ User sequence 81/82 继续确认模型菜单与执行分离、相同原生模型
 固定目录发现。模型选择由原生接口判断；文件候选只索引用户/项目的四个约定目录，不还原原生加载
 状态。接受外部自定义目录不再自动列入菜单、原生未启用文档可被用户显式引用的边界，保留原生
 加载与现有精确文件引用。没有新缓存、配置同步或原生状态管理器。
+
+
+<a id="v1-72-d68"></a>
+## V1.72-D68：数据库以 SQLite 可用性为准，历史检查只在升级和恢复执行
+
+- 状态：accepted
+- 日期：2026-10-29
+- 授权：User 要求完成数据库启动减重、验证、Review、合并与遵守宿主保护的安装，以可用性和旧数据保留为首要目标。
+- 当前权威：[Availability-first Runtime](../../architecture/availability-first-runtime.md)、[Availability v3](../../contracts/desktop-runtime-availability-v3.md#数据库启动与有界重试)、[Windows Private Storage v2](../../contracts/windows-private-storage-v2.md#启动必需存储)。
+
+文件状态快照把正常 SQLite 恢复、WAL 提交和 macOS 来源标记变化当作身份漂移，增加连接与误阻断。选择目录实例锁下
+单次读写打开，无 CREATE；SQLite 负责日志恢复，Core 只保留路径类型、主文件稳定身份、版本与完成记录、事务升级及真实
+I/O 错误。当前版本不重演历史结构链；历史编号冲突和旧 switch 仅进入对应升级/恢复。新库仍要求已确认 absence 和 no-replace。
+
+Windows 以实际访问权限判断已有启动存储，不要求模板匹配或改 ACL 权限。新对象创建时保护，专用凭据函数不放宽。
+Desktop 最多追加一次启动重启，避免叠加 SQLite 5 秒等待。接受没有启动期全历史校验的边界，深度检查保留给诊断和特定迁移。
+不改变数据格式，允许同一 schema 的旧程序回滚；回滚也会恢复旧的误阻断风险。
+
+未选择继续增加 macOS/Windows 例外、自动修权、损坏库自动 quarantine 后建空库或引入新重试框架：这些选择或继续扩大
+状态空间，或会让老用户误见空会话。此决定替代历史启动票据/元数据复核与现有启动目录 ACL 模板的当前约束，保留历史理由。

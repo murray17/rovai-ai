@@ -14,7 +14,7 @@ last_updated: 2026-10-03
 | Release packaging pipeline | Owns version-bound Markdown notes and release-date metadata, embeds both into the Desktop Main bundle, writes notes to every platform update manifest, and rejects stale sources or mismatched notes. |
 | Electron Main update service | Owns the single snapshot, installed-release version binding, check source coalescing, timers, candidate normalization, prompt generations, download/install mutexes and updater degradation. |
 | `electron-updater` adapter | Reads packaged channel configuration, performs provider checks/downloads and synchronously stages the platform installer; it never decides Renderer presentation. |
-| Preload bridge | Exposes the closed App Update v7 API (unchanged from v6) to the current Main Window, forwards typed snapshots and carries the private quit-preparation request; no provider object, installer path or credential crosses the bridge. |
+| Preload bridge | Exposes the closed App Update v8 API (unchanged from v6) to the current Main Window, forwards typed snapshots and carries the private quit-preparation request; no provider object, installer path or credential crosses the bridge. |
 | Renderer update controller | Hydrates with `get`, subscribes once, shares the same snapshot across Shell and About, and reports action-call failures without replacing Main facts. |
 | App Shell prompt/badges | Projects Main-owned prompt generation and actionable release states without reusing Notification Episode authority. |
 | About & Updates | Projects all operation/result states, explicit actions, safe release notes and the narrowly admitted fallback links. |
@@ -70,7 +70,7 @@ release header; the source and update manifest remain intact.
 
 ## 多语言发布与展示
 
-[App Update v7](../contracts/app-update-v7.md)拥有双语发布、精确分段、空段准入、回退和文档级定义规则；
+[App Update v8](../contracts/app-update-v8.md)拥有双语发布、精确分段、空段准入、回退和文档级定义规则；
 [Interface Language v2](../contracts/interface-language-v2.md)拥有客户端本地语言偏好与解析结果 API。
 发布源保留公共版本首标题，通过顶层独立 `<!-- lang:en -->` 与 `<!-- lang:zh-CN -->` 注释提供正文。
 发布检查与 Server draft 组装共用 Renderer 的 CommonMark/GFM 解析和非空判断；新发布要求双语，
@@ -84,7 +84,7 @@ Desktop、Desktop 托管 Web 与独立 Server 共用的正文组件订阅 `useIn
 只在展示副本选择语言，再做首 H1 去重与 `SafeMarkdown` 渲染。无标记、全空、重复、歧义或解析失败时
 保留全文；隐藏节点及递归空容器不阻挡回退。定义按原文顺序 first-wins，完整脚注和链接依赖进入显示副本，
 只有定义节点可序列化，公共前言与正文使用原文切片。语言变化不请求、不重置当前/新版本 tab、不改快照或
-更新资格；缺少翻译不自动翻译。精确规则只在 v7 合同维护。
+更新资格；缺少翻译不自动翻译。精确规则由 v8 继承 v7；显示副本统一使用默认 HTML 清洗，允许的标签正常渲染、注释隐藏。
 
 ## Check and prompt flow
 
@@ -174,7 +174,7 @@ updater-unavailable or download-failed states.
 
 ## References
 
-- [App Update v7](../contracts/app-update-v7.md)
+- [App Update v8](../contracts/app-update-v8.md)
 - [Planned Shutdown](planned-shutdown.md)
 - [App Shell navigation](../ui/components/app-shell-navigation.md)
 - [macOS packaging](../development/packaging.md)

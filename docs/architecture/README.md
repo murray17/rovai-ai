@@ -26,7 +26,7 @@ last_updated: 2026-10-16
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [Desktop App Updates](desktop-app-updates.md) | Main 单一更新快照、完成后递归调度、检查来源合并、提醒代次、显式下载/安装、Renderer 深链与 updater-first 受控退出边界 |
 | [Desktop Navigation Refresh](desktop-navigation-refresh.md) | Core 提交后失效提示、Renderer 全局 generation drain、Main-owned Sidecar Project 首次冻结/成员同步、失败退避、可见性与低频安全刷新边界 |
-| [Availability-first Runtime](availability-first-runtime.md) | Desktop bootstrap/full-core 分层、data-dir lease、SQLite 准入票据、copy migration、Supervisor generation/revision 与请求 fencing |
+| [Availability-first Runtime](availability-first-runtime.md) | Desktop bootstrap/full-core 分层、data-dir lease、SQLite 单次打开、原位事务迁移与历史切换恢复、Supervisor generation/revision 与请求 fencing |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Input Delivery、Native Turn 与 execution isolation 分离，未接受运输恢复、accepted/unknown 自动失败、cleanup 门禁与精确 Run Stop |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | 无 Gather 的当前 operation catalog、Mission 全局 read seam、完整结果运输、Core Router、Runtime Fleet、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Single Chat](single-chat.md) | 复用 Conversation/CampTurn/AgentRun 的私有会话模式、专用 Context、封闭 Built-in policy、公共 Source Refs、Conversation-local FIFO、exact-ID 结束、串行面板刷新与迟到隔离 |

@@ -4,7 +4,7 @@ contract: desktop-runtime-availability-v2
 authority: desktop-bootstrap-supervisor-authority-admission-and-request-transport
 status: accepted
 version: 2
-last_updated: 2026-09-20
+last_updated: 2026-10-28
 ---
 
 # Desktop Runtime Availability v2 Contract
@@ -100,6 +100,13 @@ Core 持有租约时返回 `owned_by_active_core`，不能执行 SQLite recovery
 main/journal 的完整 identity 未变且 WAL 从缺失变为零字节普通文件时，才接受该探测副作用。新出现的非空 WAL、
 已有 WAL 的改变或 main/journal 改变必须拒绝。票据保存刷新后的 WAL identity，后续消费严格复核，不延续该例外。
 
+macOS 来源标记存在独立、有界的重新准入路径：main、WAL 或 rollback journal 的 `com.apple.provenance`
+必须明确从无到有，对象、长度、mtime、属主及权限均未变，其余 authority artifact 保持不变或仅发生相同标记变化，
+另一 namespace 仍为空。main 标记变化可伴随零字节 WAL 的重建，非空 sidecar 不允许替换、出现或消失。
+只读探测与 existing READ_WRITE open 均可在应用写入前丢弃旧观察并完整重新准入一次；旧票据不能继续使用。
+existing open 保持原连接打开，重新准入禁用额外 journal recovery 与标记重试，并严格消费、复核新票据。
+未知来源标记、普通 ctime 变化、内容/权限变化或再次漂移仍阻断；此规则不改变 Windows 文件状态比较。
+
 精确的 `SQLITE_READONLY_ROLLBACK`（776）与 `SQLITE_READONLY_RECOVERY`（264）不能直接归类为权限拒绝。在 lease
 仍有效、两个 namespace 的 authority artifacts 与观察相符且对应 journal/WAL 存在时，Admission 可以对 exact target
 执行一次 READ_WRITE/NOFOLLOW、无 CREATE、`query_only=ON` 的合同探测，让 SQLite 自己完成正常 journal recovery。
@@ -125,6 +132,8 @@ WAL/journal identity 与另一 namespace 的缺席；使用 `READ_WRITE | NOFOLL
 在 WAL 配置或任何应用写入前，以同一只读事务再次执行 `classify_database_contract` 并核对 ticket 保存的
 contract/schema/classifier、schema cookie 与完整 migration receipts（含 applied_at）。源状态或 identity 漂移返回
 `authority_contract_changed`，不可自动重试，不解释为 corruption、不回退复制、不创建或隔离 authority。
+仅第 3 节明确的 macOS 来源标记变化允许丢弃旧票据重新准入一次；还必须核对新旧 source contract 与全部
+receipts 一致。该例外不允许继续使用过期观察，也不把一般合同或文件漂移变成自动重试。
 
 每个 migration 的 DDL/DML、contract marker 与 receipt 在该步骤自己的 IMMEDIATE 事务内提交。当前步骤失败只回滚
 当前步骤；先前提交的 receipt 保留。重启先完整 admission，再从缺失 receipt 继续。编号冲突仍按

@@ -384,7 +384,6 @@ impl ThreadHistoryService {
         reproject_search_candidates(&transaction, &query, &mut candidates)?;
         let result = attach_search_quotes(
             &transaction,
-            &target,
             ranked_search_response(
                 &transaction,
                 candidates,
@@ -454,10 +453,8 @@ impl ThreadHistoryService {
             &mut candidates,
         )?;
         reproject_search_candidates(&transaction, &query, &mut candidates)?;
-        let result = attach_history_search_quotes(
+        let result = attach_search_quotes(
             &transaction,
-            &run.agent_id,
-            fence.global_boundary,
             ranked_search_response(
                 &transaction,
                 candidates,
@@ -1636,36 +1633,21 @@ fn snippet(body: &str, first_match: Option<usize>) -> String {
 
 fn attach_message_quotes(
     transaction: &Transaction<'_>,
-    target: &ThreadTarget,
     message_id: &str,
     value: &mut Value,
 ) -> Result<()> {
-    let fence = match target.fence {
-        MessageFence::Current { boundary } => {
-            crate::message_quote::ThreadQuoteFence::CampSequence(boundary)
-        }
-        MessageFence::History { global_boundary } => {
-            crate::message_quote::ThreadQuoteFence::GlobalPublicationSequence(global_boundary)
-        }
-    };
-    let quotes = crate::message_quote::load_agent_visible_camp_quotes(
+    let quotes = crate::message_quote::load_quotes(
         transaction,
+        crate::message_quote::QuoteStorage::CampMessage,
         message_id,
-        &target.camp_id,
-        &target.viewer_agent_id,
-        fence,
     )?;
     if !quotes.is_empty() {
-        value["quotes"] = json!(crate::message_quote::public_history_quotes(&quotes));
+        value["quotes"] = json!(crate::message_quote::model_quotes(&quotes));
     }
     Ok(())
 }
 
-fn attach_search_quotes(
-    transaction: &Transaction<'_>,
-    target: &ThreadTarget,
-    mut response: Value,
-) -> Result<Value> {
+fn attach_search_quotes(transaction: &Transaction<'_>, mut response: Value) -> Result<Value> {
     for value in response["results"]
         .as_array_mut()
         .context("invalid search result")?
@@ -1674,35 +1656,7 @@ fn attach_search_quotes(
             .as_str()
             .context("search result has no message")?
             .to_owned();
-        attach_message_quotes(transaction, target, &message_id, value)?;
-    }
-    cap_top_k_response(response, "results")
-}
-
-fn attach_history_search_quotes(
-    transaction: &Transaction<'_>,
-    viewer_agent_id: &str,
-    global_boundary: i64,
-    mut response: Value,
-) -> Result<Value> {
-    for value in response["results"]
-        .as_array_mut()
-        .context("invalid search result")?
-    {
-        let message_id = value["messageId"]
-            .as_str()
-            .context("search result has no message")?
-            .to_owned();
-        let camp_id = value["threadId"]
-            .as_str()
-            .context("history search result has no Thread")?
-            .to_owned();
-        let target = ThreadTarget {
-            camp_id,
-            fence: MessageFence::History { global_boundary },
-            viewer_agent_id: viewer_agent_id.to_owned(),
-        };
-        attach_message_quotes(transaction, &target, &message_id, value)?;
+        attach_message_quotes(transaction, &message_id, value)?;
     }
     cap_top_k_response(response, "results")
 }
@@ -1766,7 +1720,7 @@ fn read_item(
     SenderNames::default()
         .project(transaction, &message.author_type, &message.author_id)?
         .insert_into(&mut value["items"][0]);
-    attach_message_quotes(transaction, target, message_id, &mut value["items"][0])?;
+    attach_message_quotes(transaction, message_id, &mut value["items"][0])?;
     Ok(value)
 }
 
@@ -1937,7 +1891,6 @@ fn read_thread(
     };
     fit_collection_response(
         transaction,
-        target,
         rows,
         json!({
             "threadId": target.camp_id,
@@ -1992,7 +1945,6 @@ fn read_timeline(
     };
     fit_collection_response(
         transaction,
-        target,
         rows,
         json!({
             "threadId": target.camp_id,
@@ -2382,7 +2334,6 @@ fn attachment_count(transaction: &Transaction<'_>, message_id: &str) -> Result<u
 
 fn fit_collection_response(
     transaction: &Transaction<'_>,
-    target: &ThreadTarget,
     rows: Vec<MessageRow>,
     mut response: Value,
 ) -> Result<Value> {
@@ -2391,15 +2342,7 @@ fn fit_collection_response(
     let mut sender_names = SenderNames::default();
     response["items"] = Value::Array(
         rows.iter()
-            .map(|row| {
-                collection_item(
-                    transaction,
-                    target,
-                    row,
-                    mentions.get(&row.id),
-                    &mut sender_names,
-                )
-            })
+            .map(|row| collection_item(transaction, row, mentions.get(&row.id), &mut sender_names))
             .collect::<Result<Vec<_>>>()?,
     );
     Ok(response)
@@ -2407,7 +2350,6 @@ fn fit_collection_response(
 
 fn collection_item(
     transaction: &Transaction<'_>,
-    target: &ThreadTarget,
     row: &MessageRow,
     mentions: Option<&Value>,
     sender_names: &mut SenderNames,
@@ -2427,7 +2369,7 @@ fn collection_item(
     sender_names
         .project(transaction, &row.author_type, &row.author_id)?
         .insert_into(&mut value);
-    attach_message_quotes(transaction, target, &row.id, &mut value)?;
+    attach_message_quotes(transaction, &row.id, &mut value)?;
     Ok(value)
 }
 
@@ -2752,15 +2694,9 @@ mod slow_tests {
         )
         .unwrap();
         assert_eq!(rows[0].body, "@User authoritative body");
-        let target = ThreadTarget {
-            camp_id: rows[0].camp_id.clone(),
-            fence: MessageFence::Current { boundary: 1 },
-            viewer_agent_id: "agent_1".into(),
-        };
         let addressing = load_message_mentions(&transaction, &[&rows[0]]).unwrap();
         let collection = collection_item(
             &transaction,
-            &target,
             &rows[0],
             addressing.get(&rows[0].id),
             &mut SenderNames::default(),
@@ -2769,14 +2705,8 @@ mod slow_tests {
         assert_eq!(collection["mentions"], json!([{"id": "user"}]));
         let mut withdrawn = rows[0].clone();
         withdrawn.withdrawn = true;
-        let marker = collection_item(
-            &transaction,
-            &target,
-            &withdrawn,
-            None,
-            &mut SenderNames::default(),
-        )
-        .unwrap();
+        let marker =
+            collection_item(&transaction, &withdrawn, None, &mut SenderNames::default()).unwrap();
         assert_eq!(marker.as_object().unwrap().len(), 4);
         assert!(marker.get("addressing").is_none());
         // Only structured atoms accept the alias; literal old text and mixed queries remain literal.
@@ -3427,7 +3357,6 @@ mod slow_tests {
             .collect();
         let collection = fit_collection_response(
             &transaction,
-            &target,
             rows,
             json!({
                 "threadId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",

@@ -9,8 +9,6 @@ import { UiText, uiAttribute } from './interface-language'
 export function quoteErrorMessage(error: unknown): string {
   const text = readErrorMessage(error)
   if (text.includes('limit_exceeded')) return uiAttribute("引用选文合计最多 12,000 字，请缩小选区或移除已有引用。")
-  if (text.includes('source_changed')) return uiAttribute("原消息内容已变化，请重新选择要引用的文字。")
-  if (text.includes('projection_mismatch')) return uiAttribute("选文位置未能确认，请重新选择要引用的文字。")
   if (text.includes('source_unavailable') || text.includes('owner_mismatch')) return uiAttribute("原消息暂不可用，已保留已有引用。")
   if (text.includes('question_required')) return uiAttribute("请填写这次的问题后再发送。")
   if (text.includes('draft_changed')) return uiAttribute("草稿已更新，请重试；已有问题和引用已保留。")
@@ -83,14 +81,10 @@ export function MessageQuotes({ quotes, onReveal, onMutate, onEmptyFocus, disabl
   const reveal = async (quote: MessageQuoteSnapshot): Promise<void> => {
     setError(null)
     try { await onReveal(quote); close() }
-    catch (failure) {
-      setError(String(failure).includes('selection_unavailable')
-        ? uiAttribute('已跳到原消息，选文位置已变化；引用文字仍保留。')
-        : uiAttribute('原消息暂不可用，已保留引用选文。'))
-    }
+    catch { setError(uiAttribute('原消息暂不可用，已保留引用选文。')) }
   }
   if (!quotes.length) return null
-  const authors = [...new Set(quotes.map((quote) => quote.authorAtCapture.displayName))].join('、')
+  const authors = [...new Set(quotes.map((quote) => quote.authorAtCapture?.displayName).filter(Boolean))].join('、')
   return <div className={`message-quotes${history ? ' is-history' : ''}`} data-quote-exclude>
     <Popover.Root open={open} onOpenChange={(next) => { cancelTimer(); setOpen(next) }} modal={false}>
       <div className="message-quotes-row" aria-label={uiAttribute("已引用 {0} 段", String(quotes.length))}>
@@ -108,7 +102,7 @@ export function MessageQuotes({ quotes, onReveal, onMutate, onEmptyFocus, disabl
             if (event.key === 'Escape') { event.preventDefault(); escape() }
             if (event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey && open)) { event.preventDefault(); enterRows() }
           }}
-          aria-label={uiAttribute("{0} {1} 段引用，来自{2}", String(history ? uiAttribute("查看") : uiAttribute("管理")), String(quotes.length), String(authors))}
+          aria-label={authors ? uiAttribute("{0} {1} 段引用，来自{2}", String(history ? uiAttribute("查看") : uiAttribute("管理")), String(quotes.length), String(authors)) : uiAttribute("引用 · {0} 段", String(quotes.length))}
           aria-haspopup="dialog" aria-expanded={open} aria-controls={open ? id : undefined}
         >
           <QuoteGlyph /><span className="message-quotes-label"><UiText zh={"引用 "} />{quotes.length}<UiText zh={" 段"} /></span>
@@ -128,15 +122,16 @@ export function MessageQuotes({ quotes, onReveal, onMutate, onEmptyFocus, disabl
           onPointerEnter={cancelTimer} onPointerLeave={leave} onFocusCapture={cancelTimer}
           onBlur={(event) => blur(event.relatedTarget)}
         >
-          <div className="message-quotes-popover-heading"><UiText zh={"引用 · "} />{quotes.length}<UiText zh={" 段"} /><span><UiText zh={"点击选文定位"} /></span></div>
+          <div className="message-quotes-popover-heading"><UiText zh={"引用 · "} />{quotes.length}<UiText zh={" 段"} />{quotes.some(quote => quote.source) && <span><UiText zh={"点击选文定位"} /></span>}</div>
           <div className="message-quotes-popover-body">
             {quotes.map((quote, index) => <div className="message-quote-entry" key={quote.quoteId}>
-              <button type="button" className="message-quote-jump" onClick={(event) => {
+              <button type="button" className="message-quote-jump" aria-disabled={!quote.source} onClick={(event) => {
+                if (!quote.source) return
                 const selection = window.getSelection()
                 if (selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return
                 void reveal(quote)
-              }} aria-label={uiAttribute("定位第 {0} 段引用，来自{1}", String(index + 1), String(quote.authorAtCapture.displayName))}>
-                <span className="message-quote-entry-author"><span>{index + 1}</span>{quote.authorAtCapture.displayName}</span>
+              }} aria-label={quote.source && quote.authorAtCapture ? uiAttribute("定位第 {0} 段引用，来自{1}", String(index + 1), String(quote.authorAtCapture?.displayName ?? '')) : uiAttribute("第 {0} 段引用", String(index + 1))}>
+                <span className="message-quote-entry-author"><span>{index + 1}</span>{quote.authorAtCapture?.displayName ?? ''}</span>
                 <span className="message-quote-full-text">{quote.text}</span>
               </button>
               {onMutate && <button type="button" className="message-quote-remove" disabled={disabled || busy} onClick={(event) => void remove(quote.quoteId, event.detail === 0)} aria-label={uiAttribute("移除第 {0} 段引用", String(index + 1))}>×</button>}

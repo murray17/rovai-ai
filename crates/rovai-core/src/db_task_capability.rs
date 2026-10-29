@@ -41,7 +41,7 @@ fn matches_columns(c: &Connection, expected: &[&str]) -> rusqlite::Result<bool> 
         && schema(c, "trigger", "context_manifest_v40_only_insert")
             .is_ok_and(|sql| sql.contains("NEW.context_manifest_version = 40"))
         && schema(c, "trigger", "agent_run_input_v40_only_insert")
-            .is_ok_and(|sql| sql.contains("IS NOT 40")))
+            .is_ok_and(|sql| sql.contains("IS NOT 40") || sql.contains("IS NOT 43")))
 }
 
 pub(super) fn migrate(database: &mut Database) -> Result<()> {

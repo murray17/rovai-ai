@@ -379,7 +379,7 @@ describe('AboutUpdatesSettingsView', () => {
     const source = '# Rovai AI v0.0.3\n\n<!-- lang:en -->\n\nRead[^details].\n\n<!-- lang:zh-CN -->\n\n中文\n\n[^details]: First paragraph\n\n    Second paragraph\n'
     const notes = displayReleaseNotes({ ...release, releaseNotes: source }, 'en')!
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, { children: notes, mode: 'document' }))
-    expect(markup).toContain('data-footnotes="true"')
+    expect(markup).toContain('data-footnotes=')
     expect(markup).toContain('<p>First paragraph</p>')
     expect(markup).toContain('<p>Second paragraph')
     expect(markup).not.toContain('中文')

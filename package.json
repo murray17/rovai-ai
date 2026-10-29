@@ -1,7 +1,7 @@
 {
   "name": "rovai-ai",
   "productName": "Rovai AI",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "type": "module",
   "description": "A desktop workspace for long-lived agent teams, shared Threads, visible execution, and collaborative memory.",
@@ -195,9 +195,12 @@
     "micromark-util-decode-string": "2.0.1",
     "parse5": "7.3.0",
     "qrcode": "1.5.4",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-cjk-friendly": "2.3.2",
     "remark-cjk-friendly-gfm-strikethrough": "2.3.1",
     "remark-gfm": "^4.0.1",
+    "remark-rehype": "^11.1.2",
     "remark-stringify": "^11.0.0"
   },
   "devDependencies": {

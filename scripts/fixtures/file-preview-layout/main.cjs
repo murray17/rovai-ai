@@ -195,24 +195,97 @@ app.whenReady().then(async () => {
     }
   })
 
-  await check('a late first Run preserves files, Activity and previously opened panes', async () => {
-    for (const scenario of ['file', 'hidden-file', 'mission', 'opened-empty', 'explicit-execution']) {
+  const openReadingTab = async kind => {
+    await run(kind === 'file' ? 'window.previewTest.openMarkdown()'
+      : kind === 'file_change' ? 'window.previewTest.openExecutionChanges()' : 'window.previewTest.openActivity()')
+    await snapshot()
+    assert.equal(await run('window.previewTest.activeTabKind()'), kind)
+  }
+
+  await check('visible files, Diff and Activity keep selection across submitted and late Runs without deferred jumps', async () => {
+    for (const kind of ['file', 'file_change', 'mission_activity']) {
+      for (const timing of ['before-send', 'after-send']) {
+        await initialExecutionFixture()
+        if (timing === 'before-send') await openReadingTab(kind)
+        await submitFirstMessage()
+        if (timing === 'after-send') await openReadingTab(kind)
+        const prior = await run('window.previewTest.executionPreviewState()')
+        await run('window.previewFocus = document.activeElement; window.previewTest.claimFirstRun()')
+        await waitForExecution('window.previewTest.executionPhase() === "running"')
+        assert.deepEqual(await run('window.previewTest.executionPreviewState()'), prior, `${kind}/${timing}: preserve the selected reading tab`)
+        assert.equal(await run('window.previewFocus === document.activeElement'), true, 'Auto-open must not move keyboard focus')
+        const state = await snapshot()
+        closeTo(state.width, state.available * .56, 'Reading keeps the shared width')
+        assert.equal(state.stored, null)
+        await capture(`execution-preserves-${kind}-${timing}`)
+        await run('window.previewTest.closeActiveTab()')
+        await snapshot()
+        assert.deepEqual(await run('window.previewTest.executionPreviewState().tabKinds'), [], 'Closing the preview cannot replay the consumed auto-open')
+      }
+    }
+  })
+
+  await check('hidden reading tabs, empty panes and selected execution keep automatic execution opening', async () => {
+    for (const scenario of ['hidden-file', 'hidden-activity', 'opened-empty', 'explicit-execution']) {
       await initialExecutionFixture(scenario)
-      await submitFirstMessage()
-      if (scenario.includes('file')) await run('window.previewTest.openMarkdown()')
-      else if (scenario === 'mission') await run('window.previewTest.openActivity()')
+      if (scenario === 'hidden-file') await run('window.previewTest.openMarkdown()')
+      else if (scenario === 'hidden-activity') await run('window.previewTest.openActivity()')
       else if (scenario === 'explicit-execution') await run('window.previewTest.openExecution()')
       else await run('window.previewTest.showPane()')
       await snapshot()
-      if (scenario === 'hidden-file' || scenario === 'opened-empty') {
+      if (scenario.startsWith('hidden-') || scenario === 'opened-empty') {
         await run('window.previewTest.hidePane()')
         await snapshot()
       }
+      await submitFirstMessage()
       const state = await claimFirstRun()
       closeTo(state.width, state.available * .56, `${scenario} retains width`)
       assert.equal(state.stored, null)
       assert.equal(await run('window.previewTest.activeTabKind()'), 'execution', 'Existing selection priority is unchanged')
-      if (scenario.includes('file') || scenario === 'mission') assert.equal(state.tabCount, 2)
+      if (scenario.startsWith('hidden-')) assert.equal(state.tabCount, 2)
+    }
+  })
+
+  await check('returning to a Thread preserves reading tabs for ready and delayed snapshots while explicit Run navigation still opens execution', async () => {
+    for (const kind of ['file', 'file_change', 'mission_activity']) {
+      for (const entry of ['remount', 'delayed', 'thread-switch']) {
+        await initialExecutionFixture('existing')
+        await submitFirstMessage()
+        await claimFirstRun()
+        await openReadingTab(kind)
+        const prior = await run('window.previewTest.executionPreviewState()')
+        if (entry === 'thread-switch') {
+          await run('window.previewTest.switchCamp()')
+          await run('window.previewTest.switchCamp()')
+        } else {
+          await run(`window.previewTest.reenterExecution(${entry !== 'delayed'})`)
+          await snapshot()
+          if (entry === 'delayed') await run('window.previewTest.resolveExecutionEntry()')
+        }
+        await snapshot()
+        assert.deepEqual(await run('window.previewTest.executionPreviewState()'), prior, `${kind}/${entry}: restore this Thread's selection`)
+        await run('window.previewTest.hidePane()')
+        await snapshot()
+        assert.equal(await run('window.previewTest.executionPreviewState().visible'), false, 'Leaving reading must not replay entry auto-open')
+        await run('window.previewTest.showPane(); window.previewTest.focusExecutionNotification()')
+        await waitForExecution('window.previewTest.activeTabKind() === "execution"')
+        assert.equal(await run('document.activeElement?.getAttribute("data-agent-run-id")'), 'review-run', 'Explicit notification still focuses the exact Run')
+      }
+    }
+  })
+
+  await check('closing reading before a delayed entry snapshot arrives cannot reopen execution', async () => {
+    for (const kind of ['file', 'file_change', 'mission_activity']) {
+      await initialExecutionFixture('existing')
+      await openReadingTab(kind)
+      await run('window.previewTest.reenterExecution(false)')
+      await snapshot()
+      await run('window.previewTest.closeActiveTab()')
+      await snapshot()
+      await run('window.previewTest.claimFirstRun(); window.previewTest.resolveExecutionEntry()')
+      await snapshot()
+      assert.deepEqual(await run('window.previewTest.executionPreviewState().tabKinds'), [], 'A delayed snapshot cannot revive entry navigation')
+      assert.equal(await run('window.previewTest.executionPreviewState().visible'), false)
     }
   })
 

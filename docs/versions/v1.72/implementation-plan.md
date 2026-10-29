@@ -3,10 +3,83 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-27
+last_updated: 2026-10-29
 ---
 
 # v1.72 实施与验收
+
+## 数据库启动减重（2026-10-29）
+
+实现与验收归 [数据库启动实施记录](database-startup-simplification.md)；替代本页旧 macOS 来源标记重新准入方案。
+当前合同为 [Desktop Runtime Availability v3](../../contracts/desktop-runtime-availability-v3.md#数据库启动与有界重试)，
+不新增 Migration、不改业务格式。日常宿主保护与原有会话保留是交付边界。
+
+## 手动停止保留执行条（2026-10-29）
+
+- Worktree：`../rovai-ai-retain-stopped-run`；
+  分支 `rovai/retain-stopped-run`，基线 `4d3aba9a550f2798245a18af403d0cbaa7bea7f8`；Governance：none。
+- 沿用现有公开 Run 投影、继续命令与样式，手动停止保留静态状态和最终耗时；停止／失败的操作只显示图标。
+  每位队员保留最新未受理继续的停止／普通失败，输入过大拒绝仍保留原输入详情且不可重试。
+- 停止条跟随最后回复／完整产物组，没有输出则留在启动锚点；保留期间省去重复中断标记。
+  `hasAcceptedContinuation`、缓存首屏门禁与新 Run 替换负责跨会话／刷新收起，不新增状态或存储。
+- 已通过类型检查、全部 Vitest（3022 passed / 2 skipped）、文档治理单测与上述基线的差分门禁。
+  presence 浏览器 owner 独立通过 38 个状态、6 个视口以及停止／继续／刷新链路；
+  [日夜截图](../../../.github/assets/run-stop-retained/README.md)使用真实组件与固定演示数据。
+- `pnpm test` 的 Node 层为 357 passed / 2 skipped / 1 failed：Product Contract Fingerprint
+  固定期望 schema 167，当前源码为 168。聚合 `test:run-presence-ui` 的 reply-details 在
+  `regroup-middle` 断言失败。两者均在未改动基线 `4d3aba9a5` 独立复现；不改写无关断言。
+- 默认 Rust workspace PR 回归 `pnpm test:rust:pr` 通过。审查补齐了停止条未知回执保持普通入口，
+  以及 Applied 回执先于权威投影时同时恢复历史中断标记的边界；对应浏览器回归覆盖同一 commandId 核对。
+
+## Windows Fleet 记录存储修复（2026-10-29）
+
+- 基线 `6996d1042`，分支 `codex/fix-windows-fleet-storage-942`。复用当前 checkout 与本地构建缓存；
+  Windows 验证只使用临时目录和隔离 Core/Skills/MCP/Runtime Files Root，不访问日常会话数据或真实模型。
+- Issue #942 已确认 Fleet 初始化失败导致 Core 退出，但现场缺少底层 cause。此前本地已复现当前用户与
+  SYSTEM 均有 FullControl、目录缺少继承标志时的相同退出；不能将本地复现当作用户现场原因已确认。
+- Windows Fleet 直接创建目录，记录写入使用普通权限的新建临时文件、flush 和 write-through 原子替换。
+  移除仅为 Fleet 使用的旧权限迁移；其他私有存储、凭据、IPC、Job、非 Windows 行为保持。
+- 原 `windows_owner_registration_admits_only_private_or_legacy_inherited_storage` 在同一 seam 改为
+  `windows_owner_records_use_effective_file_permissions_without_rewriting_acls`，测试函数数量不变。
+  旧 ACL 模板拒绝与修权断言随对应合同退出；保留新建、继承和旧 scoped record 的 case，并加入
+  FullControl 无继承、多余 ACE、无 WRITE_DAC 但可读写、真实写入/替换失败及原记录保留。
+  实际注册、stop receipt、重建 Store 和 cleanup ACK 经过生产方法，避免只测试底层文件 helper。
+- 最小命令：`cargo test -p rovai-core --features extended-tests --lib runtime_fleet::tests::windows_owner_records_use_effective_file_permissions_without_rewriting_acls -- --exact`。
+  相关 Fleet 生命周期、私有存储/Windows 安全、默认 workspace 与文档门禁继续执行。
+- Windows 本机定向验证：上述 owner 修复前以 `private_acl_invalid` 失败，修复后通过全部权限与失败保留 case；
+  Fleet 23 项、platform 10 项、ManagedProcess 14 项通过（7 个独立 helper 入口按原规则忽略）。
+  `cargo fmt --all --check`、`pnpm docs:test`（10 项）、`pnpm docs:check` 与带基线的 `pnpm docs:check:ci` 通过。
+  完整 workspace、隔离 Core 启动对比和远端 CI 的最终回执记录在本次 PR；不将 fixture 结果宣称为真实模型验收。
+
+## macOS 来源标记启动修复（2026-10-28）
+
+- 分支 `rovai/macos-wal-provenance`，基线 `c4dedf32683179070ee90e72eb1e6a1161c8228f`。
+  工作使用独立 worktree；所有复现均为合成 SQLite、独立 Skills/MCP 与 Runtime Files Root，不复制日常会话数据。
+- 0.5.1 与 0.5.2 tag 的 admission/migration 校验没有差异。原规则只观察 main 的 provenance，漏掉 WAL/journal；
+  current authority 的 READ_WRITE open 也没有迁移路径已有的来源标记重新准入。
+- 在已有合成数据库保留 32,992 字节已提交 WAL，安装版 0.5.2 首次打开返回 `identity_changed`。
+  WAL 的对象、长度、mtime 未变，`com.apple.provenance` 从无到有、ctime 改变；数据完整性检查通过。
+  这属于 macOS 文件元数据兼容问题，不能归因于数据库损坏或本轮 schema migration。
+- 修复扩展同一 artifact 判定到 main/WAL/journal，existing open 在写入前消费旧证明、完整重新准入一次并严格
+  复核新票据。未知标记、权限/属主/mtime/长度/对象变化、另一 authority 出现及真实写入仍拒绝。
+  Windows 的 last-write/size 比较不变；没有把本机 macOS 结果当成 Windows 真机验收。
+- 沿用 `read_probe_tolerates_only_a_new_empty_wal_not_authority_changes` 扩展 artifact 与拒绝条件矩阵；
+  修复前 WAL case 明确失败。沿用 `confirmed_absence_initializes_and_reopens_a_current_authority`，
+  复用原 SQLite fixture 验证只读探测重新准入、读写打开重新准入、真实写入仍拒绝、业务行与生产连接配置保留。
+  新增 Rust 测试函数为零。最小命令为 `cargo test -p rovai-core --lib database_admission::tests::`，12 项通过。
+- 原生进程复验将安装版 Host 的来源标记复制到临时修复版 Host，使 macOS 在同一合成场景实际添加数据库标记。
+  main 与非空 WAL 均出现来源标记，二者对象、长度与 mtime 未变，修复版首次即 `ready`、无需手动 Retry；
+  关闭后只读验证业务行仍为 `preserved`、SQLite `quick_check` 为 `ok`。未带来源标记的调试 Host 也能启动，
+  但那条未触发系统标记的路径不作为本回归的充分证据。
+- 既有迁移来源标记回归通过（`cargo test -p rovai-core --features extended-tests --lib
+  authority_migration::tests::macos_provenance_added_after_ticket_is_readmitted_without_losing_business_data -- --exact`）。
+  默认 `cargo test --workspace` 的 Core 为 434 passed / 1 failed / 1 ignored；唯一失败为既有
+  `successful_leader_with_stdio_holding_descendant_finishes_bounded` 的 500ms stdout cleanup 超时。
+  未修改 main 与修复分支的同一 owner 各做三次交替对照，均为一次相同超时、两次通过，证实既有时序不稳定；
+  保留失败记录，不改写或跳过该 owner，也不将整套回归记为全绿。随后单独补完 CLI 31、Host 4、Web 11 项，全部通过。
+- `cargo check --workspace`、`cargo fmt --all --check`、`git diff --check`、`pnpm docs:test`、
+  `pnpm docs:check` 和以本节基线为 `DOCS_BASE_REF` 的 `pnpm docs:check:ci` 通过。
+  安装与正式发行是独立交付边界，以上结果不代表已经发布修复版或完成 Windows 真机验收。
 
 ## MCP Run 快照与 Grok 启动清理（2026-10-26）
 

@@ -22,20 +22,19 @@ last_updated: 2026-10-26
   非权威页面框架不属于业务读写：本机恢复目标读取后挂载对应页面框架，从 Renderer 首帧起用不透明整窗品牌画布
   遮住框架，正常启动、迁移与目标读取交接期间持续显示；可见层只显示完整品牌标记，辅助技术统一获得
   “正在打开会话”，不暴露内部阶段。只有最终阻断或 crashed 才展示“暂时无法打开会话”的 Bootstrap 恢复面。
-- Core 必须先持有绑定 canonical data directory 与稳定对象身份的 OS 排他 lease，再观察或操作 SQLite。数据库
-  准入只返回 existing、initializable、migration 或 typed blocked；票据绑定 lease、不可复制、一次消费并在打开、
-  清理或发布前复核相关对象。只有 `lumen.sqlite` 时精确使用它，不创建 `rovai.sqlite`。
-- 没有 main 但存在 WAL/journal 是不完整 authority，必须阻断；孤立 SHM 只有在票据消费时 exact identity 未变才能
-  清理。全新 authority 只在两个 namespace 都确认无 main/WAL/journal 后，通过 staging 与原子 no-replace 发布。
-- 只读探测报告需要正常 SQLite journal recovery 时，可在同一 lease 的 exact target 上让引擎完成恢复，再重新准入；
-  不把正常 hot journal 回滚永久当作权限故障，也不授权业务写入或手动删除日志。正式连接统一配置 WAL 与同步策略。
-- 受支持旧合同只在 ticket 的 exact 原库上执行逐版本事务，无 CREATE；任何写入前重验 contract/classifier/schema cookie/
-  全部 receipts 与文件 identity。每步 DDL/DML/marker/receipt 一起提交，中断后从缺失步骤继续；不新建普通升级副本、
-  备份或 manifest，不替换主文件，不默认全库扫描。迁移后只重新准入并打开同一 main，不以失败或原库消失为由建空库。
-  旧 manifest 继续按 current main 的 original/migrated identity 恢复；未知 identity fail closed。
+- Core 必须先持有 canonical data directory 的 OS 排他 lease，再选择 SQLite 路径。操作类型仅区分已打开库、
+  确认首次初始化、升级与 typed blocked；现有库单次 READ_WRITE/NOFOLLOW 打开，不带 CREATE。只有 `lumen.sqlite`
+  时精确使用它，不创建 `rovai.sqlite`。保留目录租约和主文件稳定对象身份，不维护日志/元数据状态票据。
+- 两个 main、没有 main 但存在 WAL/journal、另一 namespace 的孤立日志均进入恢复。孤立 SHM 只在确认首次初始化时
+  清理。全新库经 staging 与原子 no-replace 发布；失败不覆盖现有文件，不将已见 authority 丢失当作首次安装。
+- WAL/hot journal 交给 SQLite 恢复，mtime/ctime/长度/来源标记变化不构成阻断。正式连接统一 WAL、同步策略与
+  5000ms busy timeout，不增加数据库重试循环。
+- 受支持旧合同在同一连接执行逐版本 IMMEDIATE 事务；每步 DDL/DML/marker/receipt 一起提交，中断后续跑。
+  历史结构与编号冲突检查仅在对应升级/恢复路径执行。普通升级不复制整库、不切换 main、不重新准入/重开。
+  旧 manifest 继续按 original/migrated identity 恢复；未知对象保留原文件并报错。
 - 当前数据库打开只检查现行 marker、迁移完成和必要业务结构，不比较 `sqlite_master.sql` 全文，不重验历史来源链。Usage 派生结构错误由模块处理，不阻断业务数据库；历史来源识别仍用于升级步骤。见[输入快照与数据库准入](../contracts/input-snapshot-storage-v1.md)。
 - Full Core Supervisor 发布单调 generation/revision 的完整快照。旧 child 的 frame、event、response 或 exit 不能污染
-  当前 generation；准入/打开/迁移的明确瞬时故障使用独立 250/750/1500ms startup retry，确定性错误不自动重试，均不
+  当前 generation；准入/打开/迁移的明确瞬时故障最多自动重启一次，间隔 250ms，确定性错误不自动重试，均不
   消耗 crash budget。已见 authority 的后续重启禁止初始化空库。Renderer-facing request 继续是 `Promise<T>`，内部 transport
   必须保留领域拒绝、基础设施失败、Full Core 不可用与 shutdown 的结构化类别；failure 以普通对象穿过 contextBridge，
   不能依赖 Error 自定义字段跨隔离世界保留。
@@ -341,9 +340,9 @@ last_updated: 2026-10-26
   由对应结果确认。字段与生命周期由 [Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md) 拥有。
 
 - TRAE 的 light check、显式 availability verification、cold resume、HistoryRestore 和 replay quarantine 使用独立的用户授权、Session ID 校验和有界恢复路径；恢复响应 ID 不一致时 fail closed。
-- Product execution qualification 是 `AdapterKind × HostPlatformKey` 的封闭准入。存在安装或能启动进程不等于平台合格；不合格组合保留配置但阻止执行，并提供结构化 reason/evidence。
+- Product execution qualification 是 `AdapterKind × HostPlatformKey` 的封闭准入。存在安装或能启动进程不等于平台合格；不合格组合保留配置但阻止执行，并提供结构化 reason/evidence。维护者明确普通开放的 `enabled` 允许使用但不声称 qualified，reason/evidence 均为空；Hermes 的四个平台沿此状态开放。
 - Pi 不得继承 ACP、Kimi、Grok 或通用平台 evidence。macOS arm64、macOS x64、Windows x64 当前分别绑定各自 Pi immutable qualification artifact 并为 Qualified；任何未来平台或不兼容版本在自己的 artifact 建立前仍必须 NotQualified。本机 debug override 只用于隔离 smoke，release 不得读取或应用。
-- Windows 正式进程必须在创建时原子加入受管 Job 并限制继承 handle；本地 IPC、私有存储、DACL、validated Node shim、长路径和 descendant cleanup 都是平台 admission 的组成部分，不能在进程启动后补偿安全边界。
+- Windows 整树所有权进程必须在创建时原子加入受管 Job 并限制继承 handle；`RuntimeConnection` 只拥有捕获的客户端根 handle，不将共享 Gateway 放入 Job，清理只终止该根进程。两种模式均保留入口身份与 stdio handle 继承校验。本地 IPC、私有存储、DACL、validated Node shim、长路径和相应所有权范围的 cleanup 都是平台 admission 的组成部分，不能在进程启动后补偿安全边界。
 
 ## Native Session、Context 与 Bootstrap
 
