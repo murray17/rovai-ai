@@ -1,0 +1,1889 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-31",
+  "platform": "macos-arm64",
+  "codeBaseline": "be7cac82fd878219102c053cafd8d87f22e12024",
+  "runtimeCount": 18,
+  "probeAttemptCount": 38,
+  "excludedRuntimes": [
+    "cline",
+    "cursor"
+  ],
+  "evidenceBoundary": "Structural observations only; not a production Rovai integration test. Raw files remain private in local temporary fixtures. A successful RPC is not proof of a completed child task. See README for manual observations and limitations.",
+  "nativeSidecarObservations": {
+    "copilot": "Exact new session journal contains assistant.message parentToolCallId/messageId and subagent.started/completed toolCallId; ACP assistant chunks lack these fields.",
+    "antigravity": "Exact child transcript referenced by native subagent_info contains fixture read and internal result delivery; also includes native safety-filter/retry evidence."
+  },
+  "probes": [
+    {
+      "sample": "antigravity-foreground-JziPn5",
+      "runtime": "antigravity",
+      "observedVersion": "1.4.5",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 46,
+      "wireSha256": "9b0b5e8b3c143dd10d27c5bdb259361949e4796e968a3674000bb657f367cba2",
+      "eventCounts": {
+        "init": 1,
+        "result": 1,
+        "step_update": 44
+      },
+      "observedStructuredToolNames": [
+        "invoke_subagent",
+        "manage_subagents",
+        "read_file"
+      ],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [
+        "step_update:subagent_info"
+      ],
+      "outcome": "launch_and_child_return_observed_with_native_filter_retry_in_child_transcript"
+    },
+    {
+      "sample": "claude-background-BryVJS",
+      "runtime": "claude",
+      "observedVersion": "2.1.308",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 272,
+      "wireSha256": "60d5599ed3f99a9a593fcff3de24101e5ac96ccfe92a70cdd3feb2c49fbbd376",
+      "eventCounts": {
+        "assistant": 11,
+        "result": 1,
+        "stream_event": 231,
+        "system": 26,
+        "user": 3
+      },
+      "observedStructuredToolNames": [
+        "Agent",
+        "ListAgents",
+        "Read"
+      ],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [
+        "/parent_tool_use_id"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [
+        "task_notification",
+        "task_progress",
+        "task_started",
+        "task_updated"
+      ],
+      "outcome": "native_observation_completed_see_report_for_capability_limits"
+    },
+    {
+      "sample": "claude-foreground-tBrok4",
+      "runtime": "claude",
+      "observedVersion": "2.1.308",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 215,
+      "wireSha256": "1ce0a72a33ff1d97b84b09db67a12506bac21b71bc963e130356b0074427379c",
+      "eventCounts": {
+        "assistant": 5,
+        "result": 1,
+        "stream_event": 193,
+        "system": 13,
+        "user": 3
+      },
+      "observedStructuredToolNames": [
+        "Agent",
+        "Read"
+      ],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [
+        "/parent_tool_use_id"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [
+        "task_notification",
+        "task_progress",
+        "task_started",
+        "task_updated"
+      ],
+      "outcome": "native_observation_completed_see_report_for_capability_limits"
+    },
+    {
+      "sample": "codebuddy-background-RwCCpy",
+      "runtime": "codebuddy",
+      "observedVersion": "2.133.1",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 333,
+      "wireSha256": "b75a5e5b9665549a7bef467ebca8ec380c4ac512d060a00e06362b56a917cda5",
+      "eventCounts": {
+        "_codebuddy.ai/command": 1,
+        "agent_message_chunk": 56,
+        "available_commands_update": 1,
+        "config_option_update": 1,
+        "fs/read_text_file": 1,
+        "response": 3,
+        "session/request_permission": 1,
+        "session_end": 1,
+        "session_info_update": 41,
+        "tool_call": 12,
+        "tool_call_update": 210,
+        "user_message_chunk": 5
+      },
+      "observedStructuredToolNames": [
+        "Agent",
+        "Read",
+        "SendMessage",
+        "TaskList",
+        "TaskOutput"
+      ],
+      "toolKindValues": [
+        "other",
+        "read"
+      ],
+      "assistantTextIdentityPaths": [
+        "/_meta/codebuddy.ai/memberEvent",
+        "/_meta/codebuddy.ai/messageId",
+        "/messageId"
+      ],
+      "toolIdentityPaths": [
+        "/_meta/codebuddy.ai/memberEvent",
+        "/_meta/codebuddy.ai/messageId",
+        "/messageId"
+      ],
+      "assistantTextMetaKeys": [
+        "codebuddy.ai/memberEvent",
+        "codebuddy.ai/messageId",
+        "codebuddy.ai/messageRequestId",
+        "codebuddy.ai/requestId",
+        "codebuddy.ai/requestModelId",
+        "codebuddy.ai/requestModelName",
+        "codebuddy.ai/responseModelId",
+        "codebuddy.ai/traceId",
+        "timestamp"
+      ],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 56,
+        "withExplicitParentChildOrMemberIdentity": 33
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "general-purpose",
+            "run_in_background": true
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "file_path"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "block",
+            "task_id",
+            "timeout"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "content",
+            "recipient",
+            "summary",
+            "type"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "content",
+            "recipient",
+            "summary",
+            "type"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "block",
+            "task_id",
+            "timeout"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "content",
+            "recipient",
+            "summary",
+            "type"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "codebuddy-foreground-XBJ2Oy",
+      "runtime": "codebuddy",
+      "observedVersion": "2.133.1",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 259,
+      "wireSha256": "94c764d0f1bc2a21cb16a11ea2803150e1aa6ad87c18ff8b645dacb21d1738ef",
+      "eventCounts": {
+        "_codebuddy.ai/command": 1,
+        "agent_message_chunk": 28,
+        "available_commands_update": 1,
+        "config_option_update": 1,
+        "fs/read_text_file": 1,
+        "response": 3,
+        "session/request_permission": 1,
+        "session_info_update": 29,
+        "tool_call": 4,
+        "tool_call_update": 190
+      },
+      "observedStructuredToolNames": [
+        "Agent",
+        "Read"
+      ],
+      "toolKindValues": [
+        "other",
+        "read"
+      ],
+      "assistantTextIdentityPaths": [
+        "/_meta/codebuddy.ai/messageId",
+        "/_meta/codebuddy.ai/parentToolCallId",
+        "/messageId"
+      ],
+      "toolIdentityPaths": [
+        "/_meta/codebuddy.ai/messageId",
+        "/_meta/codebuddy.ai/parentToolCallId",
+        "/codebuddy.ai/parentToolCallId",
+        "/messageId"
+      ],
+      "assistantTextMetaKeys": [
+        "codebuddy.ai/messageId",
+        "codebuddy.ai/messageRequestId",
+        "codebuddy.ai/parentToolCallId",
+        "codebuddy.ai/requestId",
+        "codebuddy.ai/requestModelId",
+        "codebuddy.ai/requestModelName",
+        "codebuddy.ai/responseModelId",
+        "codebuddy.ai/traceId",
+        "timestamp"
+      ],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 28,
+        "withExplicitParentChildOrMemberIdentity": 23
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "max_turns",
+            "prompt",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "general-purpose"
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "file_path"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "codex-foreground-QXQ0zq",
+      "runtime": "codex",
+      "observedVersion": "0.165.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 113,
+      "wireSha256": "e69478dbc506de152ce812e63474414e2a15f689870fe277a5f983befd6f2509",
+      "eventCounts": {
+        "account/rateLimits/updated": 3,
+        "account/updated": 1,
+        "configWarning": 1,
+        "hook/completed": 9,
+        "hook/started": 9,
+        "item/agentMessage/delta": 35,
+        "item/completed": 7,
+        "item/started": 9,
+        "mcpServer/startupStatus/updated": 18,
+        "remoteControl/status/changed": 1,
+        "response": 3,
+        "thread/started": 1,
+        "thread/status/changed": 4,
+        "thread/tokenUsage/updated": 3,
+        "turn/completed": 1,
+        "turn/moderationMetadata": 4,
+        "turn/started": 2,
+        "warning": 2
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [
+        "collabAgentToolCall:wait",
+        "subAgentActivity:completed",
+        "subAgentActivity:started"
+      ],
+      "distinctAssistantTextThreads": 2,
+      "terminalThreadMatchesRoot": false,
+      "outcome": "invalid_completion_boundary_child_turn_ended_probe"
+    },
+    {
+      "sample": "codex-foreground-XvIc2q",
+      "runtime": "codex",
+      "observedVersion": "0.165.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 131,
+      "wireSha256": "fb9f4339ecefdf8ee67bb9430df99f147d2508ff96e89aede6840f50f03ca205",
+      "eventCounts": {
+        "account/rateLimits/updated": 5,
+        "account/updated": 1,
+        "configWarning": 1,
+        "hook/completed": 11,
+        "hook/started": 11,
+        "item/agentMessage/delta": 39,
+        "item/completed": 9,
+        "item/started": 9,
+        "mcpServer/startupStatus/updated": 18,
+        "remoteControl/status/changed": 1,
+        "response": 3,
+        "thread/readState/changed": 1,
+        "thread/started": 1,
+        "thread/status/changed": 5,
+        "thread/tokenUsage/updated": 5,
+        "turn/completed": 2,
+        "turn/moderationMetadata": 5,
+        "turn/started": 2,
+        "warning": 2
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [
+        "collabAgentToolCall:wait",
+        "subAgentActivity:completed",
+        "subAgentActivity:started"
+      ],
+      "distinctAssistantTextThreads": 2,
+      "terminalThreadMatchesRoot": true,
+      "outcome": "native_observation_completed_see_report_for_capability_limits"
+    },
+    {
+      "sample": "command-background-kr4ouq",
+      "runtime": "command",
+      "observedVersion": "1.88.0",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 59,
+      "wireSha256": "aa2d89278bc1021eb590afb972b5afd96c48e50f8f82b97d4440bdc038dadfbf",
+      "eventCounts": {
+        "agent_message_chunk": 46,
+        "available_commands_update": 1,
+        "response": 3,
+        "session_info_update": 1,
+        "tool_call": 2,
+        "tool_call_update": 5,
+        "usage_update": 1
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 46,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "general",
+            "run_in_background": true
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "action",
+            "agent_id"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "command-foreground-vY9TZJ",
+      "runtime": "command",
+      "observedVersion": "1.88.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 39,
+      "wireSha256": "c21536940139080f52a790e71d170905c1893e17b6b89330a4ef05371ed8d18b",
+      "eventCounts": {
+        "agent_message_chunk": 30,
+        "available_commands_update": 1,
+        "response": 3,
+        "tool_call": 1,
+        "tool_call_update": 3,
+        "usage_update": 1
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 30,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "general"
+          }
+        }
+      ]
+    },
+    {
+      "sample": "copilot-foreground-G6KhN5",
+      "runtime": "copilot",
+      "observedVersion": "1.0.105",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 58,
+      "wireSha256": "98957f0919a92969861303e12fc3bc34b5414ab8dfb31ede7e2fd99effd91174",
+      "eventCounts": {
+        "agent_message_chunk": 42,
+        "available_commands_update": 2,
+        "config_option_update": 2,
+        "response": 3,
+        "session_info_update": 1,
+        "tool_call": 2,
+        "tool_call_update": 2,
+        "usage_update": 4
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other",
+        "read"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [
+        "/_meta/github.com/copilot/agentId"
+      ],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 42,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent_type",
+            "description",
+            "mode",
+            "name",
+            "prompt"
+          ],
+          "modeAndAgentFields": {
+            "agent_type": "explore",
+            "mode": "sync"
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "path"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "copilot-parallel-lGh3G1",
+      "runtime": "copilot",
+      "observedVersion": "1.0.105",
+      "requestedMode": "parallel",
+      "variant": "default",
+      "inboundFrameCount": 104,
+      "wireSha256": "adcf9d9fa7d1d87af9f14cedb18ef607737da84533806eba47342b801632b7cf",
+      "eventCounts": {
+        "agent_message_chunk": 76,
+        "available_commands_update": 2,
+        "config_option_update": 3,
+        "response": 3,
+        "session_info_update": 1,
+        "tool_call": 6,
+        "tool_call_update": 6,
+        "usage_update": 7
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other",
+        "read"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [
+        "/_meta/github.com/copilot/agentId"
+      ],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 76,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent_type",
+            "description",
+            "mode",
+            "name",
+            "prompt"
+          ],
+          "modeAndAgentFields": {
+            "agent_type": "explore",
+            "mode": "background"
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent_type",
+            "description",
+            "mode",
+            "name",
+            "prompt"
+          ],
+          "modeAndAgentFields": {
+            "agent_type": "explore",
+            "mode": "background"
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "path"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "path"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent_id",
+            "since_turn"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent_id",
+            "since_turn"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "dsh-background-9j9XF6",
+      "runtime": "dsh",
+      "observedVersion": "0.2.1-alpha.1",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 16,
+      "wireSha256": "135228bf103a9237f1302d490fa498fca53c12a42673b1814834e326bfbe8653",
+      "eventCounts": {
+        "agent_message_chunk": 4,
+        "agent_thought_chunk": 3,
+        "response": 3,
+        "tool_call": 1,
+        "tool_call_update": 1,
+        "usage_update": 4
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 4,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background"
+          ],
+          "modeAndAgentFields": {
+            "run_in_background": true
+          }
+        }
+      ]
+    },
+    {
+      "sample": "dsh-foreground-mME8MH",
+      "runtime": "dsh",
+      "observedVersion": "0.2.1-alpha.1",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 9,
+      "wireSha256": "4088a09ba97244eeaaf0c63048f2bde91be5fa0ac86587ace267f3c04c44ac35",
+      "eventCounts": {
+        "agent_message_chunk": 1,
+        "agent_thought_chunk": 1,
+        "response": 3,
+        "tool_call": 1,
+        "tool_call_update": 1,
+        "usage_update": 2
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 1,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background"
+          ],
+          "modeAndAgentFields": {
+            "run_in_background": false
+          }
+        }
+      ]
+    },
+    {
+      "sample": "grok-foreground-kcdNWh",
+      "runtime": "grok",
+      "observedVersion": "1.0.70",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 223,
+      "wireSha256": "dd93600eb6d0dd602256ac2b6c5aac928bfa45cce5cef301883f0aef47eb29ce",
+      "eventCounts": {
+        "_x.ai/mcp/init_progress": 6,
+        "_x.ai/mcp/server_status": 11,
+        "_x.ai/mcp/servers_updated": 1,
+        "_x.ai/mcp_initialized": 1,
+        "_x.ai/queue/changed": 3,
+        "_x.ai/session/prompt_complete": 1,
+        "_x.ai/session/setup": 12,
+        "_x.ai/sessions/changed": 2,
+        "available_commands_update": 2,
+        "hook_execution": 2,
+        "hook_run_started": 2,
+        "response": 3,
+        "retry_state": 1,
+        "tool_call_delta_chunk": 175,
+        "turn_completed": 1
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "blocked_native_response_metadata_deserialization"
+    },
+    {
+      "sample": "hermes-background-2CnNQb",
+      "runtime": "hermes",
+      "observedVersion": "0.22.4",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 23,
+      "wireSha256": "530f71efec2fab5edf0219ae2222aa799c2c00e06226b9f66d5f5944e2f09496",
+      "eventCounts": {
+        "agent_message_chunk": 13,
+        "available_commands_update": 1,
+        "response": 3,
+        "session_info_update": 2,
+        "tool_call": 1,
+        "tool_call_update": 1,
+        "usage_update": 2
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "execute"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 13,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "dispatch_observed_no_child_result_on_acp_in_window",
+      "passiveObservationMs": 20000,
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "hermes-background-sUxApX",
+      "runtime": "hermes",
+      "observedVersion": "0.22.4",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 31,
+      "wireSha256": "c1b3a89fd54c825c1d375324faec72672a8fd342dbdec93bc0aea77316488782",
+      "eventCounts": {
+        "agent_message_chunk": 17,
+        "available_commands_update": 1,
+        "response": 3,
+        "session_info_update": 2,
+        "tool_call": 2,
+        "tool_call_update": 2,
+        "usage_update": 4
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "execute",
+        "read"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 17,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "dispatch_observed_no_child_result_on_acp_in_window",
+      "passiveObservationMs": 60000,
+      "acpToolSummaries": [
+        {
+          "status": "failed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "hermes-foreground-V1LDl4",
+      "runtime": "hermes",
+      "observedVersion": "0.22.4",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 20,
+      "wireSha256": "e62335838a6ff5fd7744d084434ef30e0cbd68dcdfa12b221ffe3fdf04d5b6a1",
+      "eventCounts": {
+        "agent_message_chunk": 9,
+        "agent_thought_chunk": 1,
+        "available_commands_update": 1,
+        "response": 3,
+        "session_info_update": 1,
+        "tool_call": 1,
+        "tool_call_update": 1,
+        "usage_update": 3
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "execute"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 9,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "dispatch_observed_no_child_result_on_acp_in_window",
+      "passiveObservationMs": 0,
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "kimi-background-uuNtmr",
+      "runtime": "kimi",
+      "observedVersion": "2.3.3",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 178,
+      "wireSha256": "dfce4b03e0c084e77804693b04a9a90237dc6d4a2ac312f6da1647cdbf85af10",
+      "eventCounts": {
+        "agent_message_chunk": 27,
+        "available_commands_update": 1,
+        "fs/read_text_file": 4,
+        "response": 3,
+        "session_info_update": 1,
+        "tool_call": 2,
+        "tool_call_update": 139,
+        "usage_update": 1
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 27,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "explore",
+            "run_in_background": true
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "task_id",
+            "timeout"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "kimi-foreground-Je1RhO",
+      "runtime": "kimi",
+      "observedVersion": "2.3.3",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 148,
+      "wireSha256": "db81f99272b8de643856c0d05ae8e008b9956c12de8626db7279823d5e09b763",
+      "eventCounts": {
+        "agent_message_chunk": 5,
+        "available_commands_update": 1,
+        "fs/read_text_file": 4,
+        "response": 3,
+        "session_info_update": 1,
+        "tool_call": 1,
+        "tool_call_update": 133
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 5,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "explore"
+          }
+        }
+      ]
+    },
+    {
+      "sample": "kiro-foreground-mm8D84",
+      "runtime": "kiro",
+      "observedVersion": "2.21.1",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 0,
+      "wireSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "eventCounts": {},
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "blocked_native_login_required_before_initialize"
+    },
+    {
+      "sample": "minimax-background-OnQ3LP",
+      "runtime": "minimax",
+      "observedVersion": "0.6.12",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 209,
+      "wireSha256": "fc2e4b24870c3b2bae2d6d12d3ab8bff6c9e542493f0b41c9a237be203bfb275",
+      "eventCounts": {
+        "agent_message_chunk": 32,
+        "available_commands_update": 3,
+        "response": 3,
+        "session_info_update": 4,
+        "tool_call": 2,
+        "tool_call_update": 163,
+        "usage_update": 2
+      },
+      "observedStructuredToolNames": [
+        "task",
+        "task_output"
+      ],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 32,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent_name",
+            "description",
+            "prompt",
+            "run_in_background"
+          ],
+          "modeAndAgentFields": {
+            "agent_name": "explore",
+            "run_in_background": true
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "task_id",
+            "wait_ms"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "minimax-foreground-MgeMaa",
+      "runtime": "minimax",
+      "observedVersion": "0.6.12",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 151,
+      "wireSha256": "eb21a08420794ab22d3a0d7e28c373b23b380d0952c29d8c8ee9dd5f7442fdcd",
+      "eventCounts": {
+        "agent_message_chunk": 17,
+        "available_commands_update": 3,
+        "response": 3,
+        "session_info_update": 2,
+        "tool_call": 1,
+        "tool_call_update": 123,
+        "usage_update": 2
+      },
+      "observedStructuredToolNames": [
+        "task"
+      ],
+      "toolKindValues": [
+        "other"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 17,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent_name",
+            "description",
+            "prompt",
+            "run_in_background"
+          ],
+          "modeAndAgentFields": {
+            "agent_name": "explore",
+            "run_in_background": false
+          }
+        }
+      ]
+    },
+    {
+      "sample": "opencode-background-9M7pOP",
+      "runtime": "opencode",
+      "observedVersion": "2.2.0",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 21,
+      "wireSha256": "52feb6ded96ec25cd4a7cfb553ce8cd4f34a09c2cbed5cc94203783404bfb926",
+      "eventCounts": {
+        "agent_message_chunk": 9,
+        "available_commands_update": 1,
+        "response": 3,
+        "tool_call": 2,
+        "tool_call_update": 5,
+        "usage_update": 1
+      },
+      "observedStructuredToolNames": [
+        "read",
+        "subagent"
+      ],
+      "toolKindValues": [
+        "read",
+        "think"
+      ],
+      "assistantTextIdentityPaths": [
+        "/_meta/opencode/child-session",
+        "/_meta/opencode/child-session/parentID",
+        "/messageId"
+      ],
+      "toolIdentityPaths": [
+        "/_meta/opencode/child-session",
+        "/_meta/opencode/child-session/parentID"
+      ],
+      "assistantTextMetaKeys": [
+        "opencode/child-session"
+      ],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 9,
+        "withExplicitParentChildOrMemberIdentity": 3
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent",
+            "background",
+            "description",
+            "prompt"
+          ],
+          "modeAndAgentFields": {
+            "agent": "general",
+            "background": true
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "path"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "opencode-foreground-ZfZQ8a",
+      "runtime": "opencode",
+      "observedVersion": "2.2.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 16,
+      "wireSha256": "7d6f535f985e8923951ba2444754de9eb00434a733f44971be7650d0943b6ee1",
+      "eventCounts": {
+        "agent_message_chunk": 3,
+        "available_commands_update": 1,
+        "config_option_update": 1,
+        "response": 3,
+        "tool_call": 2,
+        "tool_call_update": 5,
+        "usage_update": 1
+      },
+      "observedStructuredToolNames": [
+        "read",
+        "subagent"
+      ],
+      "toolKindValues": [
+        "read",
+        "think"
+      ],
+      "assistantTextIdentityPaths": [
+        "/_meta/opencode/child-session",
+        "/_meta/opencode/child-session/parentID",
+        "/messageId"
+      ],
+      "toolIdentityPaths": [
+        "/_meta/opencode/child-session",
+        "/_meta/opencode/child-session/parentID"
+      ],
+      "assistantTextMetaKeys": [
+        "opencode/child-session"
+      ],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 3,
+        "withExplicitParentChildOrMemberIdentity": 2
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "agent",
+            "background",
+            "description",
+            "prompt"
+          ],
+          "modeAndAgentFields": {
+            "agent": "general",
+            "background": false
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "path"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "pi-foreground-0ftTvC",
+      "runtime": "pi",
+      "observedVersion": "1.1.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 38,
+      "wireSha256": "a4f676d200f41df14b7cbbc458d8ce2703e43adaa0d72d53131d1d4a28f57313",
+      "eventCounts": {
+        "agent_end": 1,
+        "agent_start": 1,
+        "message_end": 3,
+        "message_start": 3,
+        "message_update": 27,
+        "response": 1,
+        "turn_end": 1,
+        "turn_start": 1
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "no_native_subagent_in_default_toolset"
+    },
+    {
+      "sample": "pi-foreground-PCnKdC",
+      "runtime": "pi",
+      "observedVersion": "1.1.0",
+      "requestedMode": "foreground",
+      "variant": "explicit-example-extension",
+      "inboundFrameCount": 197,
+      "wireSha256": "8f1d620ea161f557727a3a28f60ba1f15cb2e779c58b06f7ef80c3e9e415a462",
+      "eventCounts": {
+        "agent_end": 1,
+        "agent_start": 1,
+        "message_end": 5,
+        "message_start": 5,
+        "message_update": 173,
+        "response": 1,
+        "tool_execution_end": 1,
+        "tool_execution_start": 1,
+        "tool_execution_update": 5,
+        "turn_end": 2,
+        "turn_start": 2
+      },
+      "observedStructuredToolNames": [
+        "subagent"
+      ],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "native_observation_completed_see_report_for_capability_limits"
+    },
+    {
+      "sample": "qoder-background-Qgmhh4",
+      "runtime": "qoder",
+      "observedVersion": "1.1.76",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 370,
+      "wireSha256": "4096e0486fff58890fcfc3fa72faa3156c717845a0a69cba06f6fa5f128cbc28",
+      "eventCounts": {
+        "agent_message_chunk": 36,
+        "agent_thought_chunk": 327,
+        "available_commands_update": 1,
+        "response": 3,
+        "tool_call": 1,
+        "tool_call_update": 2
+      },
+      "observedStructuredToolNames": [
+        "Agent"
+      ],
+      "toolKindValues": [
+        "think"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 36,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "run_in_background": true,
+            "subagent_type": "general-purpose"
+          }
+        }
+      ]
+    },
+    {
+      "sample": "qoder-foreground-7MvnI7",
+      "runtime": "qoder",
+      "observedVersion": "1.1.76",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 195,
+      "wireSha256": "c95759f3921a614b36d76696d2d40528bb00484080ec30f3f67a67311172a727",
+      "eventCounts": {
+        "agent_message_chunk": 57,
+        "agent_thought_chunk": 129,
+        "available_commands_update": 1,
+        "response": 3,
+        "tool_call": 2,
+        "tool_call_update": 3
+      },
+      "observedStructuredToolNames": [
+        "Agent",
+        "Read"
+      ],
+      "toolKindValues": [
+        "read",
+        "think"
+      ],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 57,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "general-purpose"
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "file_path"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "qwen-background-s6spqI",
+      "runtime": "qwen",
+      "observedVersion": "0.26.1",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 91,
+      "wireSha256": "dc72704e688973f86f7c40b248547326bc0fe31c2407f46a526a4e5ce0bc269b",
+      "eventCounts": {
+        "_qwencode/end_turn": 1,
+        "_qwencode/start_turn": 1,
+        "agent_message_chunk": 64,
+        "available_commands_update": 1,
+        "craft/drainMidTurnQueue": 1,
+        "fs/read_text_file": 1,
+        "response": 3,
+        "session/request_permission": 1,
+        "tool_call": 3,
+        "tool_call_update": 10,
+        "usage_update": 5
+      },
+      "observedStructuredToolNames": [
+        "agent",
+        "skill",
+        "tool_search"
+      ],
+      "toolKindValues": [
+        "other",
+        "read"
+      ],
+      "assistantTextIdentityPaths": [
+        "/_meta/backgroundTask/taskId",
+        "/_meta/backgroundTask/toolUseId",
+        "/_meta/backgroundTurn/taskId",
+        "/_meta/backgroundTurn/toolUseId",
+        "/_meta/executionLifecycle/subagentId"
+      ],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [
+        "backgroundTask",
+        "backgroundTurn",
+        "durationMs",
+        "executionLifecycle",
+        "qwenDiscreteMessage",
+        "source",
+        "usage"
+      ],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 64,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "args",
+            "skill"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "max_results",
+            "query"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "general-purpose",
+            "run_in_background": true
+          }
+        }
+      ]
+    },
+    {
+      "sample": "qwen-foreground-wAClHB",
+      "runtime": "qwen",
+      "observedVersion": "0.26.1",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 93,
+      "wireSha256": "463950406d49a0bd024bce57abcf98667054cd98d533aca083e3b50498656981",
+      "eventCounts": {
+        "agent_message_chunk": 65,
+        "available_commands_update": 1,
+        "craft/drainMidTurnQueue": 1,
+        "fs/read_text_file": 1,
+        "response": 3,
+        "tool_call": 4,
+        "tool_call_update": 14,
+        "usage_update": 4
+      },
+      "observedStructuredToolNames": [
+        "agent",
+        "read_file",
+        "skill",
+        "tool_search"
+      ],
+      "toolKindValues": [
+        "other",
+        "read"
+      ],
+      "assistantTextIdentityPaths": [
+        "/_meta/executionLifecycle/subagentId",
+        "/_meta/parentToolCallId"
+      ],
+      "toolIdentityPaths": [
+        "/_meta/parentToolCallId",
+        "/_meta/toolLifecycle/subagentId"
+      ],
+      "assistantTextMetaKeys": [
+        "durationMs",
+        "executionLifecycle",
+        "parentToolCallId",
+        "subagentType",
+        "usage"
+      ],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 65,
+        "withExplicitParentChildOrMemberIdentity": 24
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "args",
+            "skill"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "max_results",
+            "query"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "description",
+            "prompt",
+            "run_in_background",
+            "subagent_type"
+          ],
+          "modeAndAgentFields": {
+            "subagent_type": "general-purpose",
+            "run_in_background": false
+          }
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "file_path"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "trae-background-05msme",
+      "runtime": "trae",
+      "observedVersion": "0.209.1",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 42,
+      "wireSha256": "f02fb024615b1966e3a1101575fad3a9a30e406a8ca9d6a30f0ffd4b1602ce50",
+      "eventCounts": {
+        "agent_message_chunk": 8,
+        "agent_thought_chunk": 19,
+        "available_commands_update": 1,
+        "response": 3,
+        "tool_call": 4,
+        "tool_call_update": 3,
+        "usage_update": 4
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "execute",
+        "think"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [
+        "/_meta/traex/agentThreadId",
+        "/_meta/traex/childThreadId",
+        "/_meta/traex/parentThreadId",
+        "/_meta/traex/parentToolCallId"
+      ],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 8,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "call_id",
+            "command",
+            "cwd",
+            "parsed_cmd",
+            "source",
+            "started_at_ms",
+            "turn_id"
+          ],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "trae-foreground-C09VGe",
+      "runtime": "trae",
+      "observedVersion": "0.209.1",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 23,
+      "wireSha256": "6390de3780566119dc5eab52d1966e9525c1486d0711e5fdb87a42c9f2face20",
+      "eventCounts": {
+        "agent_message_chunk": 5,
+        "agent_thought_chunk": 8,
+        "available_commands_update": 1,
+        "response": 3,
+        "tool_call": 2,
+        "tool_call_update": 2,
+        "usage_update": 2
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [
+        "execute",
+        "think"
+      ],
+      "assistantTextIdentityPaths": [
+        "/messageId"
+      ],
+      "toolIdentityPaths": [
+        "/_meta/traex/agentThreadId",
+        "/_meta/traex/childThreadId",
+        "/_meta/traex/parentThreadId",
+        "/_meta/traex/parentToolCallId"
+      ],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "acpTextFrames": {
+        "totalIncludingEmpty": 5,
+        "withExplicitParentChildOrMemberIdentity": 0
+      },
+      "outcome": "native_observation_completed_see_report_for_capability_limits",
+      "acpToolSummaries": [
+        {
+          "status": "completed",
+          "rawInputKeys": [],
+          "modeAndAgentFields": {}
+        },
+        {
+          "status": "completed",
+          "rawInputKeys": [
+            "call_id",
+            "command",
+            "cwd",
+            "parsed_cmd",
+            "source",
+            "started_at_ms",
+            "turn_id"
+          ],
+          "modeAndAgentFields": {}
+        }
+      ]
+    },
+    {
+      "sample": "zcode-background-QxWqnG",
+      "runtime": "zcode",
+      "observedVersion": "0.17.0",
+      "requestedMode": "background",
+      "variant": "default",
+      "inboundFrameCount": 194,
+      "wireSha256": "33d6516776fd103f3453219d30df93e825c51d7f678ab9ae468bc6ccd3db60d7",
+      "eventCounts": {
+        "computer-use/operation-event": 12,
+        "model.streaming": 15,
+        "process/mcpTelemetry": 6,
+        "process/resourceSample": 1,
+        "response": 5,
+        "session.titleUpdated": 1,
+        "session.updated": 32,
+        "session/requestRuntimePreferences": 2,
+        "startup/storageState": 5,
+        "state.updated": 2,
+        "streamRecovery.updated": 2,
+        "tool.updated": 12,
+        "turn.completed": 1,
+        "turn.started": 1,
+        "v4/telemetry/event": 97
+      },
+      "observedStructuredToolNames": [
+        "Agent",
+        "Read",
+        "TaskOutput"
+      ],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [
+        "/payload/agentId",
+        "/payload/childSessionId",
+        "/payload/parentToolCallId"
+      ],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "native_observation_completed_see_report_for_capability_limits"
+    },
+    {
+      "sample": "zcode-foreground-65xX0D",
+      "runtime": "zcode",
+      "observedVersion": "0.17.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 10,
+      "wireSha256": "8150f3cea0d0af2c8807f3726346d71bf50d652ce7060a86006bf19f730bdcf5",
+      "eventCounts": {
+        "process/resourceSample": 2,
+        "response": 1,
+        "startup/storageState": 7
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "probe_invalid_jsonrpc_envelope"
+    },
+    {
+      "sample": "zcode-foreground-D5SdLT",
+      "runtime": "zcode",
+      "observedVersion": "0.17.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 144,
+      "wireSha256": "8919cbf83db0132b3f7473d87d124a2b8070ce038195aa8bc7562462b35a4db1",
+      "eventCounts": {
+        "computer-use/operation-event": 10,
+        "model.streaming": 10,
+        "process/mcpTelemetry": 6,
+        "response": 5,
+        "session.titleUpdated": 1,
+        "session.updated": 21,
+        "session/requestRuntimePreferences": 2,
+        "startup/storageState": 5,
+        "state.updated": 1,
+        "streamRecovery.updated": 1,
+        "tool.updated": 7,
+        "turn.completed": 1,
+        "turn.started": 1,
+        "v4/telemetry/event": 73
+      },
+      "observedStructuredToolNames": [
+        "Agent",
+        "Read"
+      ],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [
+        "/payload/agentId",
+        "/payload/childSessionId",
+        "/payload/parentToolCallId"
+      ],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "native_observation_completed_see_report_for_capability_limits"
+    },
+    {
+      "sample": "zcode-foreground-OTOH53",
+      "runtime": "zcode",
+      "observedVersion": "0.17.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 0,
+      "wireSha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "eventCounts": {},
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "probe_missing_provider_config_paths"
+    },
+    {
+      "sample": "zcode-foreground-jH7w6S",
+      "runtime": "zcode",
+      "observedVersion": "0.17.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 9,
+      "wireSha256": "a238ebd44a0a3ae5db944233bfc3af7d168b6bf3c87eee81a879326d26a4ddd4",
+      "eventCounts": {
+        "response": 3,
+        "session/requestRuntimePreferences": 1,
+        "startup/storageState": 5
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "probe_missing_preferences_response"
+    },
+    {
+      "sample": "zcode-foreground-jbcvq4",
+      "runtime": "zcode",
+      "observedVersion": "0.17.0",
+      "requestedMode": "foreground",
+      "variant": "default",
+      "inboundFrameCount": 6,
+      "wireSha256": "849a11393345717ac5949ec75e72e92f3340f31f17d8a0c5e4c84714db33a831",
+      "eventCounts": {
+        "response": 1,
+        "startup/storageState": 5
+      },
+      "observedStructuredToolNames": [],
+      "toolKindValues": [],
+      "assistantTextIdentityPaths": [],
+      "toolIdentityPaths": [],
+      "assistantTextMetaKeys": [],
+      "lifecycleSignals": [],
+      "outcome": "probe_used_legacy_workspace_method"
+    }
+  ]
+}
