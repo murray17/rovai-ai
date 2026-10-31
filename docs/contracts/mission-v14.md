@@ -41,3 +41,10 @@ filesystem snapshot, new cache or background refresh service.
 
 Creation, patch application, cleanup, current execution ownership and the conservative Mission lifecycle
 gate fallback from v13 are unchanged.
+
+For normal preparation reuse, an existing workspace that was already `ready` on entry and has not been
+created, restored, moved or cleaned in this call completes full identity validation once, before the existing
+generation/token-conditional ready update. The shared final execution-directory and database/deletion fences
+still run before dispatch. This per-call reuse never applies to creation or recovery, including a
+`cleanup_failed` workspace that becomes `ready` during the call. No stored validation flag or cross-call
+identity cache is introduced.

@@ -57,6 +57,11 @@ managed branch. Checkout observation is a separate best-effort read: branch plus
 unavailable. It is neither persisted nor allowed to change resource ownership. A branch change, missing managed
 branch, detached `HEAD`, checkout-observation failure or unavailable Diff base cannot alone block Runtime launch.
 Rovai does not switch or adopt branches and does not rewrite the fixed base.
+Within a single preparation call, an existing workspace that entered `ready` and remains intact reuses its
+completed identity validation after the generation/token-conditional ready update. It does not run the same
+full validation again at common exit. First creation, missing-workspace recovery and cleanup-failure recovery
+retain their final audit. Final execution-directory validation, the post-work database/deletion fence and
+frozen execution-workspace checks still run for normal reuse; no validation result survives the call.
 
 MissionGit computes cumulative changes from the recorded `base_sha` to the current Worktree content with an
 independent temporary index, including committed, staged, unstaged and untracked changes. One changes request
@@ -129,7 +134,7 @@ board return, retaining the same Thread draft and preview ownership. Renderer co
 Core's cleanup capability and does not infer it from Mission status. Deletion defaults to leaving worktree and
 branch in place. Optional cleanup records its intent in the same transaction that deletes the Mission, removes
 the card immediately, and exposes only failed orphan work through the existing cleanup route; retained resources
-never enter that route. Protocol and failure behavior live in [Mission v13](../contracts/mission-v13.md); UI in
+never enter that route. Protocol and failure behavior live in [Mission v14](../contracts/mission-v14.md); UI in
 [Mission board](../ui/components/mission-board.md). Reasons for the durable workspace and simplified model
 interface are in [V1.59-D11](../versions/v1.59/decisions.md#v1-59-d11); the explicit minimal cleanup choice is in
 [V1.59-D14](../versions/v1.59/decisions.md#v1-59-d14). Global discovery and current-only mutation are explained
@@ -151,7 +156,7 @@ The shared Composer has a Mission mode for individual references and Enter-to-ne
 broadcast semantics in this surface. Renderer derives pending invitations from the current document and current
 membership; it does not maintain a second invite list. Core validates identities again at save. Model-facing
 Mission reads retain the existing readable `description` field, while UI reads receive the ordered structure.
-Storage/upgrade and legacy text replacement semantics are owned by [Mission v13](../contracts/mission-v13.md).
+Storage/upgrade and legacy text replacement semantics are owned by [Mission v14](../contracts/mission-v14.md).
 
 ## Saved Team creation
 
@@ -160,7 +165,7 @@ selection and description member IDs to the existing Thread creation transaction
 authoritative roster and Lead, adds distinct mentioned members, and freezes nonempty guidance together with
 the Thread. Mission insertion remains in the same transaction. There is no live Team binding or Mission-specific
 Bootstrap path; editing/deleting Teams cannot change existing Mission Threads. General defaults only initialize
-the dialog; Mission creation never writes one-click preferences. See [Mission v13](../contracts/mission-v13.md).
+the dialog; Mission creation never writes one-click preferences. See [Mission v14](../contracts/mission-v14.md).
 
 If any Mission has no persisted workspace plan yet, existing records cannot rule out the path its first
 preparation will choose. Ordinary dispatch conservatively retains the gate in this case, including a

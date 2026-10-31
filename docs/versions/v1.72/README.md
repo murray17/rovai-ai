@@ -14,7 +14,7 @@ last_updated: 2026-10-30
 ## Mission 详情与复用校验精简（2026-11-01）
 
 单文件 Diff 只验证当前工作区和选中可信路径，移除全清单一致性拒绝与详情中的全仓准备。
-正常 ready 工作区复用的重复身份校验独立处理；创建、恢复、删除竞争和 Mission 锁范围保持。
+正常 ready 工作区复用的完整身份校验仅执行一次；创建、恢复、删除竞争和 Mission 锁范围保持。
 当前规则见 [Mission v14](../../contracts/mission-v14.md)，回归与隔离验收范围见
 [实施记录](mission-read-simplification.md)。只推送工作分支，不合并或安装。
 
