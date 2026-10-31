@@ -195,8 +195,10 @@ steps, 80px Shift+arrow steps, and Home/double-click default restoration, while 
 above the reader. A bounded per-Mission memory cache restores a viewed file
 without clearing its content or flashing loading state. Cache misses never show the prior file beneath a new
 selection; duplicate requests coalesce and late responses cannot replace the current selection. A file request
-carries its view association, rereads current Git state with a fresh private index and asks for an explicit full
-view refresh when the association is stale. Definition-only edits do not rescan Git. Binary/type/rename
+carries its view association and reads only the selected trusted paths with a fresh private index. The detail
+header, type icon, copied path and statistics use the returned `fileDiff.file`; list and aggregate statistics
+remain those of the retained list. Unrelated file or checkout changes do not block a detail read. An invalid
+workspace or selected-item association asks for the existing explicit refresh. Definition-only edits do not rescan Git. Binary/type/rename
 data and Git modes remain in the contract, but the dialog does not print a
 raw “Git 文件模式” row. Agent files reuse AttachmentCard, file preview and source-message navigation.
 Activity displays actual Mission history. The delete confirmation is intentionally concise and does not repeat

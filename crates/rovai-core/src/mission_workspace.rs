@@ -1406,6 +1406,7 @@ impl MissionGit {
         &self,
         workspace: &MissionWorkspace,
         metadata: &MissionDiffMetadata,
+        paths: Option<&[OsString]>,
     ) -> Result<TemporaryIndex> {
         let temporary = TemporaryIndex::new()?;
         let cwd = Path::new(&workspace.worktree_path);
@@ -1430,20 +1431,24 @@ impl MissionGit {
                 .await?;
             ensure!(output.status.success(), "mission.temporary_index_failed");
         }
+        // An absent selected file needs no intent-to-add entry. In particular,
+        // an empty selection must never become an unqualified whole-tree add.
+        if paths.is_some_and(|paths| paths.is_empty()) {
+            return Ok(temporary);
+        }
+        let mut args = vec![
+            "-c".into(),
+            "core.splitIndex=false".into(),
+            "add".into(),
+            "-A".into(),
+            "-N".into(),
+            "--".into(),
+        ];
+        if let Some(paths) = paths {
+            args.extend_from_slice(paths);
+        }
         let prepared = self
-            .output(
-                cwd,
-                &[
-                    "-c".into(),
-                    "core.splitIndex=false".into(),
-                    "add".into(),
-                    "-A".into(),
-                    "-N".into(),
-                    "--".into(),
-                ],
-                Some(&temporary.index),
-                None,
-            )
+            .output(cwd, &args, Some(&temporary.index), None)
             .await?;
         ensure!(
             prepared.status.success(),
@@ -1488,15 +1493,11 @@ impl MissionGit {
         workspace: &MissionWorkspace,
         metadata: MissionDiffMetadata,
     ) -> Result<PreparedMissionDiff> {
-        let checkout_state = metadata.checkout_state.clone();
-        let temporary = self.temporary_index(workspace, &metadata).await?;
+        let temporary = self.temporary_index(workspace, &metadata, None).await?;
         let files = self.changes_with_index(workspace, &temporary.index).await?;
-        Ok(PreparedMissionDiff::new(
-            workspace,
-            checkout_state,
-            temporary,
-            files,
-        ))
+        Ok(PreparedMissionDiff {
+            snapshot: MissionDiffSnapshot::new(workspace, files),
+        })
     }
     pub(crate) async fn prepare_diff_snapshot_observed(
         &self,
@@ -1524,43 +1525,40 @@ impl MissionGit {
         snapshot: &MissionDiffSnapshot,
         file_id: &str,
     ) -> Result<MissionFileDiff> {
-        let current = self
-            .prepare_diff_snapshot(workspace)
-            .await
-            .context("mission.changes_refresh_required")?;
         ensure!(
-            snapshot.same_view(current.snapshot()),
+            snapshot.matches_workspace(workspace),
             "mission.changes_refresh_required"
         );
-        let file = current
-            .snapshot()
+        let selected = snapshot
             .file(file_id)
-            .cloned()
             .context("mission.changes_refresh_required")?;
-        if file.binary {
-            return Ok(MissionFileDiff {
-                file,
-                patch: String::new(),
-                hunks: Vec::new(),
-            });
-        }
+        let metadata = self.diff_metadata(workspace).await?;
+        let paths = selected.existing_leaf_paths(Path::new(&workspace.worktree_path))?;
+        let temporary = self
+            .temporary_index(workspace, &metadata, Some(&paths))
+            .await?;
         let mut args = vec![
             "diff".into(),
             "--no-ext-diff".into(),
             "--no-textconv".into(),
             "--find-renames".into(),
+            "--raw".into(),
+            "--numstat".into(),
+            "--no-abbrev".into(),
+            "-z".into(),
+            "--patch".into(),
             "--unified=3".into(),
             workspace.base_sha.clone().into(),
             "--".into(),
         ];
-        for path in &file.raw_paths {
+        for path in &selected.raw_paths {
             args.push(path_os_string(path)?);
         }
         let output = self
             .output(
                 Path::new(&workspace.worktree_path),
                 &args,
-                Some(current.index()),
+                Some(&temporary.index),
                 None,
             )
             .await?;
@@ -1569,7 +1567,32 @@ impl MissionGit {
             "mission.diff_failed: {}",
             output.stderr.lossy_text()
         );
-        let patch = String::from_utf8(output.stdout.bytes).context("mission.diff_not_utf8")?;
+        // Git separates the NUL-delimited raw/numstat records from the patch
+        // with an extra NUL. Read both from one target-scoped invocation so
+        // current statistics never come from the older list snapshot.
+        let bytes = &output.stdout.bytes;
+        ensure!(!bytes.is_empty(), "mission.changes_refresh_required");
+        let boundary = bytes
+            .windows(2)
+            .position(|pair| pair == b"\0\0")
+            .context("mission.invalid_file_diff")?;
+        let mut files = parse_changes(&bytes[..boundary + 1])?;
+        ensure!(
+            files.len() == 1
+                && files[0].id == selected.id
+                && files[0].raw_paths == selected.raw_paths,
+            "mission.changes_refresh_required"
+        );
+        let file = files.remove(0);
+        if file.binary {
+            return Ok(MissionFileDiff {
+                file,
+                patch: String::new(),
+                hunks: Vec::new(),
+            });
+        }
+        let patch =
+            String::from_utf8(bytes[boundary + 2..].to_vec()).context("mission.diff_not_utf8")?;
         let hunks = parse_hunks(&patch)?;
         Ok(MissionFileDiff { file, patch, hunks })
     }
@@ -1579,24 +1602,19 @@ const MISSION_DIFF_SNAPSHOT_LIMIT: usize = 12;
 const MISSION_DIFF_SNAPSHOT_TTL: Duration = Duration::from_secs(10 * 60);
 
 /// One current-workspace view of the Mission change list. It keeps no temporary
-/// index or historical file content; file detail reads prepare a fresh index and
-/// reject this view when the current checkout or list no longer matches it.
+/// index or historical file content; file detail reads reuse only the trusted
+/// path association and workspace identity, not the old file statistics.
 #[derive(Clone)]
 pub struct MissionDiffSnapshot {
     view_id: String,
     workspace_id: String,
     worktree_path: String,
     workspace_generation: i64,
-    checkout_state: MissionCheckoutState,
     files: Arc<Vec<MissionChangedFile>>,
     file_indices: Arc<BTreeMap<String, usize>>,
 }
 impl MissionDiffSnapshot {
-    fn new(
-        workspace: &MissionWorkspace,
-        checkout_state: MissionCheckoutState,
-        files: Vec<MissionChangedFile>,
-    ) -> Self {
+    fn new(workspace: &MissionWorkspace, files: Vec<MissionChangedFile>) -> Self {
         let file_indices = files
             .iter()
             .enumerate()
@@ -1607,7 +1625,6 @@ impl MissionDiffSnapshot {
             workspace_id: workspace.id.clone(),
             worktree_path: workspace.worktree_path.clone(),
             workspace_generation: workspace.generation,
-            checkout_state,
             files: Arc::new(files),
             file_indices: Arc::new(file_indices),
         }
@@ -1628,43 +1645,19 @@ impl MissionDiffSnapshot {
             && self.worktree_path == workspace.worktree_path
             && self.workspace_generation == workspace.generation
     }
-    fn same_view(&self, other: &Self) -> bool {
-        self.workspace_id == other.workspace_id
-            && self.worktree_path == other.worktree_path
-            && self.workspace_generation == other.workspace_generation
-            && self.checkout_state == other.checkout_state
-            && self.files == other.files
-    }
 }
 
 pub struct PreparedMissionDiff {
     snapshot: MissionDiffSnapshot,
-    temporary_index: TemporaryIndex,
 }
 
 impl PreparedMissionDiff {
-    fn new(
-        workspace: &MissionWorkspace,
-        checkout_state: MissionCheckoutState,
-        temporary_index: TemporaryIndex,
-        files: Vec<MissionChangedFile>,
-    ) -> Self {
-        Self {
-            snapshot: MissionDiffSnapshot::new(workspace, checkout_state, files),
-            temporary_index,
-        }
-    }
-
     pub fn snapshot(&self) -> &MissionDiffSnapshot {
         &self.snapshot
     }
 
     pub fn into_snapshot(self) -> MissionDiffSnapshot {
         self.snapshot
-    }
-
-    fn index(&self) -> &Path {
-        &self.temporary_index.index
     }
 }
 
@@ -1934,6 +1927,52 @@ pub struct MissionChangedFile {
     pub new_mode: String,
     #[serde(skip)]
     raw_paths: Vec<Vec<u8>>,
+}
+impl MissionChangedFile {
+    fn existing_leaf_paths(&self, root: &Path) -> Result<Vec<OsString>> {
+        let mut existing = Vec::new();
+        for raw in &self.raw_paths {
+            let path = path_os_string(raw)?;
+            let components = Path::new(&path).components().collect::<Vec<_>>();
+            ensure!(
+                !components.is_empty()
+                    && components
+                        .iter()
+                        .all(|part| matches!(part, std::path::Component::Normal(_))),
+                "mission.invalid_diff_path"
+            );
+            let mut target = root.to_path_buf();
+            for (index, component) in components.iter().enumerate() {
+                target.push(component.as_os_str());
+                let metadata = match fs::symlink_metadata(&target) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                    Err(error) => return Err(error.into()),
+                };
+                if index + 1 < components.len() {
+                    ensure!(
+                        metadata.is_dir() && !metadata.file_type().is_symlink(),
+                        "mission.changes_refresh_required"
+                    );
+                } else if metadata.is_dir() {
+                    // A file replaced by a directory must not expand the read
+                    // or intent-to-add operation to its children. Gitlinks are
+                    // the existing exception: Git reads the submodule entry.
+                    ensure!(
+                        self.old_mode == "160000" || self.new_mode == "160000",
+                        "mission.changes_refresh_required"
+                    );
+                } else {
+                    ensure!(
+                        metadata.is_file() || metadata.file_type().is_symlink(),
+                        "mission.changes_refresh_required"
+                    );
+                    existing.push(path.clone());
+                }
+            }
+        }
+        Ok(existing)
+    }
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2659,6 +2698,9 @@ mod tests {
         );
         let edit = files.iter().find(|f| f.path == "edit.txt").unwrap().clone();
         assert_eq!((edit.additions, edit.deletions), (Some(1), Some(1)));
+        // A view associates a selected path; unrelated changes cannot block it.
+        fs::write(cwd.join("src/keep.txt"), "unrelated change\n").unwrap();
+        git.clear_invocations();
         let diff = git
             .file_diff(&workspace, &snapshot, &edit.id)
             .await
@@ -2666,6 +2708,51 @@ mod tests {
         assert!(diff.patch.contains("-original\n+final"));
         assert!(!diff.patch.contains("staged"));
         assert_eq!(diff.hunks[0].lines[0].old_line, Some(1));
+        let detail_calls = git.take_invocations();
+        for args in &detail_calls {
+            if args.iter().any(|arg| arg == "diff" || arg == "add") {
+                let separator = args.iter().position(|arg| arg == "--").unwrap();
+                assert_eq!(&args[separator + 1..], &["edit.txt"]);
+            }
+        }
+        assert_eq!(detail_calls.len(), 3, "metadata, target index, target diff");
+        assert_eq!(
+            detail_calls
+                .iter()
+                .filter(|args| args.iter().any(|arg| arg == "diff"))
+                .count(),
+            1,
+            "metadata and patch must come from one target diff"
+        );
+        fs::write(cwd.join("edit.txt"), "final\nsecond line\n").unwrap();
+        let changed = git
+            .file_diff(&workspace, &snapshot, &edit.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            (changed.file.additions, changed.file.deletions),
+            (Some(2), Some(1))
+        );
+        assert!(changed.patch.contains("+second line"));
+        fs::write(cwd.join("edit.txt"), "final\n").unwrap();
+        for name in ["remove.txt", "new.txt", special_name, "empty", "binary"] {
+            let file = files.iter().find(|file| file.path == name).unwrap();
+            let detail = git
+                .file_diff(&workspace, &snapshot, &file.id)
+                .await
+                .unwrap();
+            assert_eq!(detail.file, *file);
+        }
+        let binary = files.iter().find(|file| file.path == "binary").unwrap();
+        fs::write(cwd.join("binary"), "now text\n").unwrap();
+        let changed = git
+            .file_diff(&workspace, &snapshot, &binary.id)
+            .await
+            .unwrap();
+        assert!(!changed.file.binary);
+        assert_eq!(changed.file.additions, Some(1));
+        assert!(changed.patch.contains("+now text"));
+        fs::write(cwd.join("binary"), b"a\0b").unwrap();
         let renamed = files
             .iter()
             .find(|f| f.path == "renamed.txt")
@@ -2677,6 +2764,42 @@ mod tests {
             .unwrap();
         assert!(renamed_diff.patch.contains("a/rename.txt"));
         assert!(renamed_diff.patch.contains("b/renamed.txt"));
+        fs::write(cwd.join("renamed.txt"), "no longer a matching rename\n").unwrap();
+        assert!(
+            git.file_diff(&workspace, &snapshot, &renamed.id)
+                .await
+                .is_err(),
+            "a rename split into two changes cannot become a mixed single-file patch"
+        );
+        fs::write(cwd.join("renamed.txt"), "stable rename\n").unwrap();
+        fs::remove_file(cwd.join("edit.txt")).unwrap();
+        let deleted = git
+            .file_diff(&workspace, &snapshot, &edit.id)
+            .await
+            .unwrap();
+        assert_eq!(deleted.file.kind, "deleted");
+        assert_eq!(
+            (deleted.file.additions, deleted.file.deletions),
+            (Some(0), Some(1))
+        );
+        assert!(deleted.patch.contains("-original"));
+        fs::create_dir(cwd.join("edit.txt")).unwrap();
+        fs::write(cwd.join("edit.txt/child"), "do not include this child\n").unwrap();
+        assert!(
+            git.file_diff(&workspace, &snapshot, &edit.id)
+                .await
+                .is_err()
+        );
+        fs::remove_dir_all(cwd.join("edit.txt")).unwrap();
+        fs::write(cwd.join("edit.txt"), "final\n").unwrap();
+        let mut replaced = workspace.clone();
+        replaced.generation += 1;
+        assert!(git.file_diff(&replaced, &snapshot, &edit.id).await.is_err());
+        assert!(
+            git.file_diff(&workspace, &snapshot, "unknown-file")
+                .await
+                .is_err()
+        );
         assert_eq!(fs::read(&index).unwrap(), before);
         assert_eq!(git.text(cwd, &["rev-parse", "HEAD"]).await.unwrap(), head);
         fs::write(cwd.join("edit.txt"), "original\n").unwrap();
@@ -2810,6 +2933,17 @@ mod tests {
                 .into_snapshot();
             assert_eq!(git.command_count(), 3);
             assert!(snapshot.files().iter().any(|file| file.path == "edit.txt"));
+            let selected = snapshot
+                .files()
+                .iter()
+                .find(|file| file.path == "edit.txt")
+                .unwrap();
+            let diff = git
+                .file_diff(&workspace, &snapshot, &selected.id)
+                .await
+                .unwrap();
+            assert_eq!(diff.file, *selected);
+            assert!(diff.patch.contains("<<<<<<< HEAD"));
             assert_eq!(fs::read(&index).unwrap(), index_before);
             assert_eq!(
                 git.bytes(cwd, &["ls-files", "-u", "-z"]).await.unwrap(),
@@ -2881,6 +3015,14 @@ mod tests {
                     .iter()
                     .all(|file| file.path != "src/keep.txt" && !file.path.starts_with("docs/"))
             );
+            for file in snapshot.files() {
+                let diff = git
+                    .file_diff(&workspace, &snapshot, &file.id)
+                    .await
+                    .unwrap();
+                assert_eq!(diff.file, *file);
+                assert!(!diff.hunks.is_empty());
+            }
             assert_eq!(fs::read(&index).unwrap(), index_before);
             assert!(
                 git.text(cwd, &["ls-files", "-v", "src/keep.txt"])

@@ -2,7 +2,7 @@
 document_type: architecture
 authority: mission-architecture
 status: accepted
-last_updated: 2026-10-31
+last_updated: 2026-11-01
 ---
 
 # Missions
@@ -61,15 +61,21 @@ Rovai does not switch or adopt branches and does not rewrite the fixed base.
 MissionGit computes cumulative changes from the recorded `base_sha` to the current Worktree content with an
 independent temporary index, including committed, staged, unstaged and untracked changes. One changes request
 returns checkout observation and file list together. Its bounded process-local `viewId` retains only request
-association and file metadata, not a temporary index or historical content. A file request regenerates a private
-index and current list, rejects an association that is no longer applicable, and then runs the path-scoped Diff.
+association and file metadata, not a temporary index or historical content. Under [Mission v14](../contracts/mission-v14.md),
+a file request verifies the workspace and selected trusted path association, prepares a private index for only
+the selected existing leaf paths, and reads raw metadata, statistics and patch in one path-scoped Diff.
+Other file changes and checkout changes do not require a fresh whole-workspace list. An absent target never
+falls back to unqualified index preparation; a file replaced by a directory cannot expand to its children.
 The normal list-read path uses three Git processes: one combined `rev-parse` reads and validates the Worktree root,
 Git/admin/common directories, real/shared index paths, `HEAD`, actual branch and fixed base; one private-index
 `git -c core.splitIndex=false add -A -N` prepares tracked and untracked entries; and one combined raw/numstat Diff
 produces the file set. Index and shared-index files are copied with filesystem operations, and the real index is
 never written. Repositories without a materialized index or with another exceptional layout may use an additional
-safe initialization or diagnostic call. `missions.fileDiff` repeats the current-view read before its path-scoped
-patch call so `same_view` remains authoritative; no long-lived Git-result cache, watcher, worker or timer is added.
+safe initialization or diagnostic call. A normal single-file detail uses the identity observation, target-scoped
+index preparation and one raw/numstat/patch call, without a whole-list read. It may skip index preparation for
+absent leaves, while still copying the real/shared index. Unresolvable selected items use the existing refresh
+result; true Git/I/O failures remain errors. The post-read workspace fence stays in place. No long-lived
+Git-result cache, watcher, worker or timer is added.
 Multiple outstanding handles prevent a late old list request from replacing the newer handle; Renderer also
 discards superseded responses and clears file detail on refresh. This deliberately provides a current dynamic
 view, not a filesystem-atomic snapshot or a workspace versioning system. Git and actual files are the authority,

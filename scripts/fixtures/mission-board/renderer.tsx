@@ -222,7 +222,9 @@ const client={...model.client,onInvalidated:undefined,onEvent:(fn:any)=>{events.
   } finally { missionChangesInFlight-=1 }
  }
  if(method==='missions.fileDiff'){
-  const file=missionChangedFiles.find(file=>file.id===p.fileId)!
+  const file=structuredClone(missionChangedFiles.find(file=>file.id===p.fileId)!)
+  // The current target read can differ from the retained list statistics.
+  if(file.id==='file-a')file.additions=1
   if(file.id==='file-b')await new Promise(resolve=>setTimeout(resolve,90))
   return {file:structuredClone(file),hunks:[{oldStart:1,newStart:1,lines:[{kind:'deletion',text:`old-${file.id}`,oldLine:1,newLine:null},{kind:'addition',text:`new-${file.id}`,oldLine:null,newLine:1}]}],patch:''}
  }
