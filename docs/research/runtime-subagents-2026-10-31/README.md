@@ -8,6 +8,10 @@ last_updated: 2026-10-31
 
 # Native subagent：正文归属、command 与异步结果
 
+本文冻结调查时的现象与早期建议。后续 User 确认了平铺普通 command、过滤独立子代理正文、单文本详情和机器人图标；
+当前实施以 [Surface v58](../../contracts/run-process-detail-surface-v58.md)及[实施记录](../../versions/v1.72/subagent-flat-execution.md)为准。
+下方“子代理正文归委派详情”等早期建议不再是当前设计。
+
 本次调查对应 Thread `rvcamp_01m68yaq7reyssfamt52kz066j` 的 Copilot 正文碎片问题，及用户提供的
 `rovai_subagent_review.html`。代码基线为 `be7cac82fd878219102c053cafd8d87f22e12024`；当前版本通过
 [版本索引](../../versions/README.md)确认。本文是实测和实施建议，不改变当前合同，不表示生产修复已经交付。

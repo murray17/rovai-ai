@@ -7230,6 +7230,12 @@ describe('task event projections', () => {
   })
 
   it('derives the converged icon from canonical identity instead of display text', () => {
+    expect(activityIconKind(canonicalActivity('delegation', {
+      activityDomain: 'tool', semanticKind: 'tool.agent', toolName: 'Agent'
+    }))).toBe('agent')
+    expect(activityIconKind(canonicalActivity('named-only', {
+      activityDomain: 'tool', semanticKind: 'tool.call', toolName: 'Agent'
+    }))).toBe('tool')
     expect(activityIconKind(canonicalActivity('shell-rovai', {
       activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'rovai',
       sourceAuthority: 'core', credibility: 'core_verified'

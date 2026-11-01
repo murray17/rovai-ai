@@ -139,7 +139,7 @@ try {
     child.stdin.end(); await done
   } else {
     await request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true, writeTextFile: false } }, clientInfo: { name: 'rovai_subagent_probe', version: '1' } }, 45000)
-    const session = await request('session/new', { cwd: project, mcpServers: [] }, 45000)
+    const session = await request('session/new', { cwd: project, mcpServers: [], ...(runtime === 'grok' ? { additionalDirectories: [] } : {}) }, 45000)
     sessionId = session.sessionId
     terminal = await request('session/prompt', { sessionId, prompt: [{ type: 'text', text: instruction }] })
     if (runtime === 'hermes' || mode === 'background') {

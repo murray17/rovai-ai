@@ -136,9 +136,9 @@ pub fn read_range(
             r#"WITH ranked AS (
               SELECT first_evidence_sequence, source_evidence_ids_json, phase,
                      ROW_NUMBER() OVER (PARTITION BY operation_id, execution_epoch ORDER BY
-                       CASE classifier_version WHEN ?2 THEN 0 WHEN ?3 THEN 1 WHEN ?4 THEN 2 ELSE 3 END) AS rank
+                       CASE classifier_version WHEN ?2 THEN 0 WHEN ?6 THEN 1 WHEN ?3 THEN 2 WHEN ?4 THEN 3 ELSE 4 END) AS rank
               FROM execution_activity
-              WHERE agent_run_id = ?1 AND classifier_version IN (?2, ?3, ?4, ?5)
+              WHERE agent_run_id = ?1 AND classifier_version IN (?2, ?3, ?4, ?5, ?6)
                 AND EXISTS(SELECT 1 FROM agent_run WHERE id = ?1 AND status IN ('running', 'waiting', 'queued'))
             ) SELECT first_evidence_sequence, source_evidence_ids_json FROM ranked
               WHERE rank = 1 AND phase <> 'terminal' ORDER BY first_evidence_sequence"#,
@@ -151,6 +151,7 @@ pub fn read_range(
                     canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                     canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                     canonical_activity::LEGACY_CLASSIFIER_VERSION,
+                    canonical_activity::V4_CLASSIFIER_VERSION,
                 ],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )?
@@ -196,9 +197,9 @@ fn select_items(
         WITH ranked AS MATERIALIZED (
           SELECT operation_id, execution_epoch, first_evidence_sequence, source_evidence_ids_json,
                  ROW_NUMBER() OVER (PARTITION BY operation_id, execution_epoch ORDER BY
-                   CASE classifier_version WHEN ?4 THEN 0 WHEN ?5 THEN 1 WHEN ?6 THEN 2 ELSE 3 END) AS rank
+                   CASE classifier_version WHEN ?4 THEN 0 WHEN ?11 THEN 1 WHEN ?5 THEN 2 WHEN ?6 THEN 3 ELSE 4 END) AS rank
           FROM execution_activity
-          WHERE agent_run_id = ?1 AND classifier_version IN (?4, ?5, ?6, ?7)
+          WHERE agent_run_id = ?1 AND classifier_version IN (?4, ?5, ?6, ?7, ?11)
         ), owners AS MATERIALIZED (
           SELECT source.value AS id, operation_id, execution_epoch, first_evidence_sequence
           FROM ranked, json_each(source_evidence_ids_json) AS source WHERE rank = 1
@@ -243,7 +244,8 @@ fn select_items(
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
                 after,
                 watched,
-                forward
+                forward,
+                canonical_activity::V4_CLASSIFIER_VERSION
             ],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?

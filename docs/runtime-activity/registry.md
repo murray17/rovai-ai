@@ -1,8 +1,8 @@
 ---
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
-classifier_version: activity-v4
-last_updated: 2026-10-26
+classifier_version: activity-v5
+last_updated: 2026-11-01
 ---
 
 # Runtime Activity Mapping Registry
@@ -42,7 +42,11 @@ projection。[真实文件验证](../research/runtime-monitoring/command-cline-f
 
 ## Classifier cutover
 
-Migration 147 在 Notification Single Chat Migration 146 之后，把新 operation 的 current classifier 原子切换到
+当前 Migration 219 把新 operation 切换为 `activity-v5`，Data Contract 为 `v1.72 / projection schema 169`。
+新增 `tool.agent`，旧 v1–v4 operation 保持冻结分类器；Read Side 依次接受 v5、v4、v3、v2、v1。
+marker 与 receipt 219 原子提交，不重放或改写历史 Evidence。详细边界见[原生子代理映射](#native-subagent-command)。
+
+前次 Migration 147 在 Notification Single Chat Migration 146 之后，把新 operation 的 current classifier 原子切换到
 `activity-v4`，Data Contract 为 `v1.55 / projection schema 97`。已有 `activity-v1`、`activity-v2` 或 `activity-v3` row 不回填、不重分类、
 不删除；同一 operation 已有旧 projection 时，后续 phase 继续用原 classifier 结算。Read Side 依次接受
 v4、v3、v2、v1。marker 与 migration receipt 必须在同一事务提交，启动 reconciler 只有在 canonical receipt
@@ -352,3 +356,27 @@ ACP `run_commands/read_files/apply_patch/editor/search_codebase` 分别归一为
 Hermes 复用 `activity-v4` typed ACP 分类；没有事件时保持 unknown，不改变既有 Adapter 或历史 projection。
 当前结构化 Diff 未接通，逐 Run Usage/费用缺少可靠数据时保持未知；Session 累计值与原生预览不补造缺失信息。
 具体边界由 [Hermes Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md)拥有。
+
+
+<a id="native-subagent-command"></a>
+## Native subagent display（activity-v5）
+
+当前规则见 [Run Process Detail Surface v58](../contracts/run-process-detail-surface-v58.md)。
+Core normalizer 的 `runtimeToolType=agent` 进入 `tool / tool.agent`，Renderer 只消费 Canonical 类型。
+规则仅用于新 operation，Migration 219 不回填历史；v1–v4 仍按各自版本结算与读取。
+
+| 原生边界 | 准入名称与来源 |
+|---|---|
+| Codex app-server | `subAgentActivity(kind=started)` 原始 item 类型；collab `tool` 字段中的 spawn/wait/send/close/resume；独立 completion notice 排除 |
+| Claude、ZCode、Pi、Antigravity | 原生 tool name 中的 Agent/Task/TaskOutput/TaskStop、subagent、invoke_subagent；只匹配各 Adapter 支持的名字 |
+| ACP 结构化名称 | `toolName/name`，CodeBuddy `_meta[codebuddy.ai/toolName]`，Qoder `_meta.qoder.toolName`，Qwen `_meta.toolName`，OpenCode `_meta.name`；TRAE `_meta.traex.type=subagent_control` 的 action |
+| Grok Build | `_meta["x.ai/tool"].name`，`spawn_subagent` 为 agent；共享 `get_command_or_subagent_output` 保留普通工具类型与真实 task_ids 参数，不从名称推断其目标全是子代理 |
+| ACP 原生函数标签 | Kimi 的 Agent/TaskOutput/TaskStop，Command Code 的 agent，DSH 的 subagent 精确函数标签；Hermes 的固定 delegate_task 原生标签格式；不按任意标题文字推断 |
+| Copilot ACP | `kind=other + rawInput.agent_type + rawInput.prompt` 的 task 结构；read_agent 的固定原生函数标签、read kind 与 agent_id 入参；仅标题不准入 |
+| Qwen lifecycle | `_meta.source=background_task_completed/background_notification` 且 backgroundTask.kind=agent，独立通知不进入正文 |
+| TRAE lifecycle | 原生 `subagent:*:lifecycle:*` ID 且 rawOutput.type=subagent_completion 是通知，不作为调用 |
+
+公开任务入参只在已识别的委派／管理工具及 Grok 的共享后台结果读取工具中准入；其他工具原有 public command、query、文件事实及私有字段边界保持。
+字段实际实现与未知回退归 `runtime_subagent.rs`；独立正文过滤归 `execution_text.rs`，真实 Tool return 不走正文过滤。
+来源配对和匿名并发回退由 Prompt-local owner 覆盖；既有 ACP、Codex、Evidence、正文和 Renderer owners 覆盖生命周期与展示。
+实测及限制记录在[实施记录](../versions/v1.72/subagent-flat-execution.md)。

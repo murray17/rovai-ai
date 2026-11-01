@@ -48,6 +48,8 @@ mod simplification;
 mod single_chat_facts;
 #[path = "db_steer.rs"]
 mod steer;
+#[path = "db_subagent.rs"]
+mod subagent;
 #[path = "db_task_capability.rs"]
 mod task_capability;
 #[path = "db_teams.rs"]
@@ -57,6 +59,10 @@ mod web_pasted_text;
 #[cfg(test)]
 pub(crate) fn assert_task_capability_upgrade(database: &mut Database) {
     task_capability::assert_upgrade(database);
+}
+#[cfg(test)]
+pub(crate) fn assert_subagent_classifier_upgrade(database: &mut Database) {
+    subagent::assert_upgrade(database);
 }
 #[cfg(test)]
 pub(crate) fn assert_single_chat_facts_upgrade(database: &mut Database) {
@@ -502,7 +508,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 168;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 169;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -996,6 +1002,7 @@ struct CurrentMigrationState {
     v216: bool,
     v217: bool,
     v218: bool,
+    v219: bool,
 }
 
 impl CurrentMigrationState {
@@ -1017,6 +1024,15 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v219 {
+            let mut previous = *self;
+            previous.v219 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 169
+                && classifier == crate::canonical_activity::CLASSIFIER_VERSION
+                && self.v218
+                && previous.admits("v1.72", 168, V147_CLASSIFIER_VERSION);
+        }
         if self.v218 {
             let mut previous = *self;
             previous.v218 = false;
@@ -3716,7 +3732,9 @@ pub(crate) fn classify_startup_contract(
         let core_tables: i64 = connection.query_row(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_migration','agent_profile','camp','camp_message','agent_run','canonical_runtime_activity','event_log')",
             [], |row| row.get(0))?;
-        if core_tables != 7 || marker.classifier_version != V147_CLASSIFIER_VERSION {
+        if core_tables != 7
+            || marker.classifier_version != crate::canonical_activity::CLASSIFIER_VERSION
+        {
             return Ok(DatabaseContractClassification::Unknown(Some(marker)));
         }
         let complete: bool = connection.query_row(
@@ -3804,6 +3822,7 @@ pub(crate) fn classify_database_contract(
                 | 166
                 | 167
                 | 168
+                | 169
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3833,7 +3852,12 @@ pub(crate) fn classify_database_contract(
             && (marker.projection_schema_version < 161
                 || shared_environment::schema_matches(connection)?)
             && (marker.projection_schema_version < 155 || minimax::schema_matches(connection)?)
-            && marker.classifier_version == V147_CLASSIFIER_VERSION
+            && marker.classifier_version
+                == if marker.projection_schema_version >= 169 {
+                    crate::canonical_activity::CLASSIFIER_VERSION
+                } else {
+                    V147_CLASSIFIER_VERSION
+                }
             && simplification::current_structure_matches(connection)?
             && (marker.projection_schema_version < 146
                 || simplification::schema_matches(connection)?)
@@ -4054,7 +4078,7 @@ pub(crate) fn classify_database_contract(
     }
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
         && marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION
-        && marker.classifier_version == V147_CLASSIFIER_VERSION
+        && marker.classifier_version == crate::canonical_activity::CLASSIFIER_VERSION
     {
         Ok(DatabaseContractClassification::Current(marker))
     } else {
@@ -6130,7 +6154,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=215),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=216),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=217),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=218)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=218),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=219)
         "#,
         [],
         |row| {
@@ -6284,6 +6309,7 @@ fn load_current_migration_state(
                 v216: row.get(146)?,
                 v217: row.get(147)?,
                 v218: row.get(148)?,
+                v219: row.get(149)?,
             })
         },
     )
@@ -9575,6 +9601,9 @@ impl Database {
             if !self.schema_migration_applied(218)? {
                 migration_step!("migration_218", quote_text::migrate(self));
             }
+            if !self.schema_migration_applied(219)? {
+                migration_step!("migration_219", subagent::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10453,6 +10482,9 @@ impl Database {
         }
         if !self.schema_migration_applied(218)? {
             migration_step!("migration_218", quote_text::migrate(self));
+        }
+        if !self.schema_migration_applied(219)? {
+            migration_step!("migration_219", subagent::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -30900,6 +30932,8 @@ impl Database {
             |row| row.get(0),
         )?;
         match classifier.as_str() {
+            crate::canonical_activity::CLASSIFIER_VERSION
+                if self.schema_migration_applied(219)? => {}
             V147_CLASSIFIER_VERSION if self.schema_migration_applied(147)? => {}
             V142_CLASSIFIER_VERSION if self.schema_migration_applied(142)? => {}
             V116_CLASSIFIER_VERSION => {}
@@ -42199,6 +42233,7 @@ mod tests {
             v216: version >= 216,
             v217: version >= 217,
             v218: version >= 218,
+            v219: version >= 219,
         }
     }
 
@@ -42300,6 +42335,18 @@ mod tests {
     #[test]
     fn current_migration_state_admission_matrix() {
         let supported = [
+            (
+                "v1.72/schema 168 before subagent classifier",
+                "v1.72",
+                168,
+                218,
+            ),
+            (
+                "v1.72/schema 167 before literal quote text",
+                "v1.72",
+                167,
+                217,
+            ),
             (
                 "v1.72/schema 166 before Hermes user rules",
                 "v1.72",
@@ -42438,7 +42485,7 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                218,
+                219,
             ),
             (
                 "v1.72/schema 167 before literal quote text",
@@ -43004,7 +43051,9 @@ mod tests {
             ),
         ];
         for (name, contract, schema, through) in supported {
-            let classifier = if through >= 147 {
+            let classifier = if through >= 219 {
+                crate::canonical_activity::CLASSIFIER_VERSION
+            } else if through >= 147 {
                 V147_CLASSIFIER_VERSION
             } else if through >= 142 {
                 V142_CLASSIFIER_VERSION
@@ -43020,11 +43069,11 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(218);
+        let current = migration_state_through(219);
         assert!(current.admits(
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
-            V147_CLASSIFIER_VERSION,
+            crate::canonical_activity::CLASSIFIER_VERSION,
         ));
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
@@ -43099,174 +43148,183 @@ mod tests {
         missing_interruption.v209 = false;
         let mut missing_single_chat_facts = current;
         missing_single_chat_facts.v208 = false;
+        let mut missing_subagent_classifier = current;
+        missing_subagent_classifier.v219 = false;
         let rejected = [
+            (
+                "current marker without subagent classifier receipt",
+                missing_subagent_classifier,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without literal quote text receipt",
                 missing_quote_text,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Automation naming",
                 missing_automation_naming,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Team guidance limit migration",
                 missing_team_guidance_limit,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Hermes rules receipt",
                 missing_hermes_rules,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Hermes catalog receipt",
                 missing_hermes,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Team schema",
                 missing_teams,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without interruption facts",
                 missing_interruption,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without compact Single Chat facts",
                 missing_single_chat_facts,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without catalog/continuation convergence",
                 missing_convergence,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without pending draft retention",
                 missing_pending_draft,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without User projection",
                 missing_user_projection,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without member receipts",
                 missing_member_creation,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without session context migration",
                 missing_session_context,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without native ratio migration",
                 missing_native_ratio,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Thread convergence migration",
                 missing_thread_convergence,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without navigation summary migration",
                 missing_navigation_summary,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without execution lifecycle migration",
                 missing_execution_lifecycle,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Task single-description migration",
                 missing_task_description,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without notification Single Chat migration",
                 missing_notification_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi edit Diff classifier migration",
                 missing_pi_edit_diff_classifier,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Scheduled Automation migration",
                 missing_scheduled_automations,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current without command result storage receipt",
                 missing_command_result_storage,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current without Evidence compaction receipt",
                 missing_evidence_compaction,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current without classifier receipt",
                 missing_classifier,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "deployed source with future receipt",
@@ -43280,70 +43338,70 @@ mod tests {
                 missing_runtime_image_display_source,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Single Chat migration",
                 missing_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native execution migration",
                 missing_pi_native_execution,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-input migration",
                 missing_pi_native_input,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Source Attachment migration",
                 missing_source_attachments,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-capabilities migration",
                 missing_pi_native_capabilities,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi Runtime migration",
                 missing_pi_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without cancellation dispatch boundary",
                 missing_cancellation_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Runtime image migration",
                 missing_image_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Quick Chat picker migration",
                 missing_quick_chat_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "old picker marker with the new resolved constraint",
@@ -43357,7 +43415,7 @@ mod tests {
                 missing_index_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "old joined marker with a newer index migration",
@@ -43385,7 +43443,7 @@ mod tests {
                 missing_intermediate,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "one marker beyond source",
@@ -43399,14 +43457,14 @@ mod tests {
                 current,
                 "v99.0",
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "future schema",
                 current,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION + 1,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
         ];
         for (name, state, contract, schema, classifier) in rejected {
@@ -49162,7 +49220,7 @@ mod tests {
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION.to_string(),
+                crate::canonical_activity::CLASSIFIER_VERSION.to_string(),
             )
         );
         assert!(!directory.join("inactive-data-quarantine").exists());

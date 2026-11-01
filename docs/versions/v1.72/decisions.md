@@ -3,10 +3,28 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-30
+last_updated: 2026-11-01
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d71"></a>
+## V1.72-D71：原生子代理沿用平铺 command，状态归本次工具调用
+
+- 状态：accepted
+- 日期：2026-11-01
+- 授权：User 在子代理 Thread sequence 10/12 确认通用 command、机器人图标与单文本详情，sequence 16 授权真实模型测试，sequence 22 要求独立 worktree 实施。
+- 当前权威：[Run Process Detail Surface v58](../../contracts/run-process-detail-surface-v58.md)、[执行记录架构](../../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime Activity Registry](../../runtime-activity/registry.md)。
+
+同步委派可能直接返回报告，异步启动、读取报告与独立完成通知则是不同事实。选择一条真实调用一行，按已记录顺序平铺主／子工具，
+只在有原生字段证据时标记类型和归属；已确认的子代理正文与不能确定作者的并发文本在正文聚合前过滤，工具实际返回保留。
+启动调用只显示自身状态，独立通知不冒充启动结果；工具名称、真实参数、报告和通用错误读取都沿普通 command。
+
+接受协议未转发子工具时没有其内部步骤，也接受 Copilot/Qoder 等匿名并发输出无法安全展示的限制。只做显示归属，不增加
+子任务调度、自动续跑、后台开关或日志补采。未选择代理树、子代理面板、按工具名／时间配对或按结果文案推断任务成功。
+
+分类语义以 Migration 219 原子切换到 schema 169/activity-v5；旧 Evidence 不回填，已有 operation 按原分类器继续归约。
+代价是旧版本应用不能直接打开升级后的数据库；迁移失败事务回滚，历史业务数据保持。实现与验收见[实施记录](subagent-flat-execution.md)。
 
 <a id="v1-72-d70"></a>
 ## V1.72-D70：可选历史文件与单个 Runtime 故障不阻断原工作区

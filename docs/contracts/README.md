@@ -681,7 +681,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Execution Record Storage v3（当前）](execution-record-storage-v3.md) | 新操作去掉同结果重复 diff、预览总预算、独立摘要减少进度正文写入；旧格式保持 |
 | [Execution Record Storage v2（历史）](execution-record-storage-v2.md) | 新操作与活动共用一行、小字段兼容读取、按需 diff，保留旧格式与 v1 回收 |
 | [Execution Record Storage v1（历史）](execution-record-storage-v1.md) | 新操作独立输入／结果、按页组合预览、旧格式收尾与会话删除 Blob 候选登记 |
-| [Run Process Detail Surface v57（当前）](run-process-detail-surface-v57.md) | 手动停止保留静态执行条与最终耗时，继续／重试图标入口，受理续做后持久收起 |
+| [Run Process Detail Surface v58（当前）](run-process-detail-surface-v58.md) | 原生子代理平铺普通 command、来源隔离、机器人图标与稳定更新 |
+| [Run Process Detail Surface v57（历史）](run-process-detail-surface-v57.md) | 手动停止保留静态执行条与最终耗时，继续／重试图标入口，受理续做后持久收起 |
 | [Run Process Detail Surface v56（历史）](run-process-detail-surface-v56.md) | 启动文案统一、Delivery 准备／排队简化、中性停止反馈；仅改展示，图标保留在时间线上 |
 | [Run Process Detail Surface v55（历史）](run-process-detail-surface-v55.md) | 执行行按 Run 输入引用原消息，支持批量、按需历史定位，共用会话“回到最新”；保留身份、模型与执行控制 |
 | [Run Process Detail Surface v54（历史）](run-process-detail-surface-v54.md) | 独立执行行复用队员卡片与模型浮层，显示本 Run 的模型与强度；精确 Run 身份衔接不变 |

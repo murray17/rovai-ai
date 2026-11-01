@@ -81,6 +81,7 @@ export type LiveRuntimeEvent = {
   executionEpoch?: number | null
   eventType: string
   revision?: number | null
+  sequence?: number | null
   changeSequence?: number | null
   outputTruncated?: boolean | null
   payload: unknown
@@ -93,7 +94,7 @@ export type ExecutionPlanStep = {
   status: 'pending' | 'inProgress' | 'completed'
 }
 
-export type ActivityIconKind = 'terminal' | 'file' | 'file-read' | 'file-write' | 'web' | 'tool' | 'rovai' | 'runtime' | 'unknown'
+export type ActivityIconKind = 'terminal' | 'file' | 'file-read' | 'file-write' | 'web' | 'tool' | 'agent' | 'rovai' | 'runtime' | 'unknown'
 
 export type ShellReadSummary = {
   title: string
@@ -400,11 +401,12 @@ export function liveRuntimeEventFromCore(
     executionEpoch: numberField(params, 'executionEpoch'),
     eventType: event.method,
     revision: numberField(params, 'revision'),
+    sequence: numberField(params, 'sequence'),
     changeSequence: numberField(params, 'changeSequence'),
     outputTruncated: typeof params.outputTruncated === 'boolean' ? params.outputTruncated : null,
     payload: Object.prototype.hasOwnProperty.call(params, 'payload') ? params.payload : params,
     canonical: canonicalRuntimeActivity(params.canonical),
-    createdAt: stringField(asRecord(params.payload), 'blockStartedAt') ?? createdAt
+    createdAt: stringField(params, 'occurredAt') ?? stringField(asRecord(params.payload), 'blockStartedAt') ?? createdAt
   }
 }
 
@@ -417,6 +419,7 @@ export function liveRuntimeEventFromExecutionEvidence(
     executionEpoch: evidence.executionEpoch,
     eventType: evidence.eventType,
     revision: evidence.revision,
+    sequence: evidence.sequence,
     changeSequence: evidence.changeSequence,
     outputTruncated: evidence.outputTruncated,
     payload: evidence.payload,
@@ -1077,6 +1080,7 @@ function shouldPreferCompleteEvidence(
   const candidateRank = phaseRank(candidate.phase)
   const currentRank = phaseRank(current.phase)
   return candidateRank > currentRank
+    || (candidate.id === current.id && (candidate.revision ?? 0) > (current.revision ?? 0))
     || (candidateRank === currentRank && candidate.sequence > current.sequence)
 }
 
@@ -1172,11 +1176,11 @@ function runtimeActionEvidenceText(
   let evidenceText: string | null = null
   if (evidenceText === null) {
     const output = fullEvidenceValue(payload.output)
-    const command = runtimeActionShellCommand(payload)
+    const command = canonical?.semanticKind === 'tool.agent' ? null : runtimeActionShellCommand(payload)
     const commandDetail = command ? shellCommandDetailText(command) : null
     evidenceText = commandDetail
       ? shellCommandDetail(commandDetail, output)
-      : output ?? fullEvidenceValue(payload.input)
+      : [fullEvidenceValue(payload.input), output].filter((value, index, all) => value != null && all.indexOf(value) === index).join('\n') || null
   }
   return searchEvidenceText(typedSearchQuery(payload, canonical), evidenceText)
 }
@@ -1333,6 +1337,14 @@ export function executionActivityTitle(
     return 'Web 搜索'
   }
   if (domain === 'tool') {
+    if (canonical?.semanticKind === 'tool.agent' && canonical.toolName) {
+      let input = asRecord(payload).input
+      if (typeof input === 'string') {
+        try { input = JSON.parse(input) } catch { input = null }
+      }
+      const description = stringField(asRecord(input), 'description')?.trim().replace(/\s+/g, ' ')
+      return description ? `${canonical.toolName} · ${description}` : canonical.toolName
+    }
     if (canonical?.toolName) return canonical.toolName
     if (runtimeTitle) return runtimeTitle
     return '工具调用'
@@ -1393,6 +1405,9 @@ export function executionActivityCurrentInstruction(
     ?.replaceAll('Runtime 工具调用', '工具调用')
     .replaceAll('Runtime 活动', '系统活动')
   const domain = canonical?.activityDomain ?? 'unknown'
+  if (domain === 'tool' && canonical?.semanticKind === 'tool.agent') {
+    return executionActivityTitle(canonical, asRecord(payload))
+  }
 
   if (domain === 'shell') {
     return publicShellCommandPresentation(payload)
@@ -1436,6 +1451,7 @@ export function activityIconKind(
     return 'file'
   }
   if (canonical?.activityDomain === 'tool') {
+    if (canonical.semanticKind === 'tool.agent') return 'agent'
     if (canonical.semanticKind === 'tool.web.search') return 'web'
     if (
       canonical.sourceAuthority === 'core'

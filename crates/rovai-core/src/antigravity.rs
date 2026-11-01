@@ -1644,12 +1644,25 @@ fn normalize_antigravity_tool_step(
         let cached_command = capture.started_shell_commands.remove(&tool_call_id);
         observed_command.or(cached_command)
     };
-    let input = command.map(|command| serde_json::json!({"command": command}));
+    let agent_tool = crate::runtime_subagent::is_agent_tool(
+        crate::agent_profile::AdapterKind::AntigravityApp,
+        tool_name,
+    );
+    let input = if agent_tool {
+        tool_info
+            .get("parameters")
+            .filter(|value| !value.is_null())
+            .and_then(|value| serde_json::to_string_pretty(value).ok())
+            .map(Value::String)
+    } else {
+        command.map(|command| serde_json::json!({"command": command}))
+    };
     Ok(Some(AntigravityRuntimeEvent {
         event_type: "runtime.action",
         payload: serde_json::json!({
             "toolCallId": tool_call_id,
             "toolName": tool_name,
+            "runtimeToolType": if agent_tool { Some("agent") } else { None },
             "status": status,
             "kind": antigravity_tool_kind(tool_name),
             "input": input,

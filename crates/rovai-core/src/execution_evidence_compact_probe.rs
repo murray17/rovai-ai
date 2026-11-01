@@ -20,6 +20,73 @@ pub(super) fn assert_storage(
             ],
         )
         .unwrap();
+    // Existing v4 operations must keep their classifier across the atomic v5
+    // marker upgrade, including formats which store canonical facts on the row.
+    let mut frozen = Vec::new();
+    for format in [3, 4] {
+        let input = json!({"toolCallId":format!("frozen-agent-{format}"),"toolName":"delegate_task",
+            "kind":"execute","status":"started","input":{"task":"Read the fixture"}});
+        let started = with_operation_storage_for_test(format, || {
+            ExecutionEvidenceService
+                .record_runtime_event(db, store, run, epoch, "runtime.action", &input)
+                .unwrap()
+                .unwrap()
+        });
+        db.connection().execute("UPDATE agent_run_execution_evidence SET activity_meta_json=json_set(activity_meta_json,'$.classifierVersion','activity-v4') WHERE id=?1",[&started.id]).unwrap();
+        frozen.push((format, started));
+    }
+    crate::db::assert_subagent_classifier_upgrade(db);
+    for (format, started) in frozen {
+        let report = json!({"toolCallId":format!("frozen-agent-{format}"),"toolName":"delegate_task",
+            "runtimeToolType":"agent","kind":"execute","status":"completed","output":"Actual child report"});
+        let terminal = ExecutionEvidenceService
+            .record_runtime_event(db, store, run, epoch, "runtime.action", &report)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal.id, started.id);
+        assert_eq!(terminal.sequence, started.sequence);
+        assert_eq!(
+            terminal.canonical.as_ref().unwrap().classifier_version,
+            "activity-v4"
+        );
+        assert_eq!(
+            terminal
+                .canonical
+                .as_ref()
+                .unwrap()
+                .semantic_kind
+                .as_deref(),
+            Some("shell.execute")
+        );
+        assert_eq!(terminal.payload["output"], "Actual child report");
+        let mut fresh = report;
+        fresh["toolCallId"] = json!(format!("new-agent-{format}"));
+        let fresh = ExecutionEvidenceService
+            .record_runtime_event(db, store, run, epoch, "runtime.action", &fresh)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            fresh.canonical.as_ref().unwrap().classifier_version,
+            "activity-v5"
+        );
+        assert_eq!(
+            fresh.canonical.as_ref().unwrap().semantic_kind.as_deref(),
+            Some("tool.agent")
+        );
+        assert_eq!(fresh.canonical.as_ref().unwrap().outcome, "succeeded");
+        let history =
+            crate::execution_window::read_page(db, camp, run, Some(started.sequence + 1), 1)
+                .unwrap();
+        assert_eq!(history.evidence[0].id, started.id);
+        assert_eq!(
+            history.evidence[0]
+                .canonical
+                .as_ref()
+                .unwrap()
+                .classifier_version,
+            "activity-v4"
+        );
+    }
     let fields = (0..24)
         .map(|i| (format!("field_{i:02}"), json!("界🙂\n".repeat(1000))))
         .collect::<Map<_, _>>();

@@ -450,6 +450,16 @@ impl ExecutionEvidenceService {
                 &evidence.phase,
                 &evidence.payload,
             );
+            let v4_facts = canonical_activity::classify_evidence_with_version(
+                canonical_activity::V4_CLASSIFIER_VERSION,
+                agent_run_id,
+                execution_epoch,
+                &id,
+                &evidence.event_type,
+                &evidence.kind,
+                &evidence.phase,
+                &evidence.payload,
+            );
             let previous_facts = canonical_activity::classify_evidence_with_version(
                 canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                 agent_run_id,
@@ -489,6 +499,7 @@ impl ExecutionEvidenceService {
                 &evidence.occurred_at,
                 EvidenceActivityClassifications {
                     current: &facts,
+                    v4: &v4_facts,
                     previous: &previous_facts,
                     intermediate: &intermediate_facts,
                     legacy: &legacy_facts,
@@ -1054,6 +1065,16 @@ impl ExecutionEvidenceService {
             phase,
             &payload,
         );
+        let v4_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::V4_CLASSIFIER_VERSION,
+            agent_run_id,
+            execution_epoch,
+            &id,
+            event_type,
+            kind,
+            phase,
+            &payload,
+        );
         let previous_facts = canonical_activity::classify_evidence_with_version(
             canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
             agent_run_id,
@@ -1093,6 +1114,7 @@ impl ExecutionEvidenceService {
             &occurred_at,
             EvidenceActivityClassifications {
                 current: &facts,
+                v4: &v4_facts,
                 previous: &previous_facts,
                 intermediate: &intermediate_facts,
                 legacy: &legacy_facts,
@@ -1629,7 +1651,11 @@ impl ExecutionEvidenceService {
             )?;
         }
 
-        let facts = canonical_activity::classify_evidence(
+        let classifier = load_canonical_for_evidence(&transaction, &id)?
+            .map(|activity| activity.classifier_version)
+            .unwrap_or_else(|| canonical_activity::CLASSIFIER_VERSION.to_owned());
+        let facts = canonical_activity::classify_evidence_with_version(
+            &classifier,
             agent_run_id,
             execution_epoch,
             &id,
@@ -1651,6 +1677,16 @@ impl ExecutionEvidenceService {
                 (storage_version == 4).then_some(&next_combined),
             )?
         } else {
+            let v4_facts = canonical_activity::classify_evidence_with_version(
+                canonical_activity::V4_CLASSIFIER_VERSION,
+                agent_run_id,
+                execution_epoch,
+                &id,
+                &next_event_type,
+                &next_kind,
+                &next_phase,
+                &next_combined,
+            );
             let previous_facts = canonical_activity::classify_evidence_with_version(
                 canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                 agent_run_id,
@@ -1690,6 +1726,7 @@ impl ExecutionEvidenceService {
                 &occurred_at,
                 EvidenceActivityClassifications {
                     current: &facts,
+                    v4: &v4_facts,
                     previous: &previous_facts,
                     intermediate: &intermediate_facts,
                     legacy: &legacy_facts,
@@ -2630,6 +2667,13 @@ fn evidence_classification(
     event_type: &str,
     payload: &Value,
 ) -> Option<(&'static str, &'static str)> {
+    if matches!(
+        event_type,
+        "agent.text.delta" | "runtime.plan" | "runtime.plan.delta"
+    ) && !crate::runtime::is_root_output(payload)
+    {
+        return None;
+    }
     match event_type {
         "agent.reasoning.summary.delta" | "agent.thought.delta" => {
             Some(("reasoning_summary", "updated"))
@@ -2756,6 +2800,9 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
                 .filter(|value| !value.is_null())
                 .or_else(|| public_error.and_then(|error| error.get("code")));
             let mut normalized = serde_json::json!({
+                "operationId": payload.get("operationId"),
+                "runtimeSource": payload.get("runtimeSource"),
+                "runtimeToolType": payload.get("runtimeToolType"),
                 "toolCallId": payload.get("toolCallId"),
                 "status": payload.get("status"),
                 "kind": payload.get("kind"),
@@ -2798,6 +2845,7 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         "activity.started" | "activity.completed" => {
             let item = payload.get("item").unwrap_or(&Value::Null);
             serde_json::json!({
+                "runtimeToolType": payload.get("runtimeToolType"),
                 "runtimeDiff": payload.get("runtimeDiff"),
                 "runtimeFileOperation": payload.get("runtimeFileOperation"),
                 "reasonCode": payload.get("reasonCode"),
@@ -3464,6 +3512,7 @@ fn upsert_unified_activity(
 
 struct EvidenceActivityClassifications<'a> {
     current: &'a EvidenceActivityFacts,
+    v4: &'a EvidenceActivityFacts,
     previous: &'a EvidenceActivityFacts,
     intermediate: &'a EvidenceActivityFacts,
     legacy: &'a EvidenceActivityFacts,
@@ -3495,12 +3544,13 @@ fn upsert_canonical_activity(
             WHERE agent_run_id = ?1
               AND execution_epoch = ?2
               AND operation_id = ?3
-              AND classifier_version IN (?4, ?5, ?6, ?7)
+              AND classifier_version IN (?4, ?5, ?6, ?7, ?8)
             ORDER BY CASE classifier_version
                 WHEN ?4 THEN 0
-                WHEN ?5 THEN 1
-                WHEN ?6 THEN 2
-                ELSE 3
+                WHEN ?8 THEN 1
+                WHEN ?5 THEN 2
+                WHEN ?6 THEN 3
+                ELSE 4
             END
             LIMIT 1
             "#,
@@ -3512,6 +3562,7 @@ fn upsert_canonical_activity(
                 canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                 canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
+                canonical_activity::V4_CLASSIFIER_VERSION,
             ],
             canonical_activity_row,
         )
@@ -3520,6 +3571,7 @@ fn upsert_canonical_activity(
         .as_ref()
         .map(|projection| projection.classifier_version.as_str())
     {
+        Some(canonical_activity::V4_CLASSIFIER_VERSION) => classifications.v4,
         Some(canonical_activity::PREVIOUS_CLASSIFIER_VERSION) => classifications.previous,
         Some(canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION) => classifications.intermediate,
         Some(canonical_activity::LEGACY_CLASSIFIER_VERSION) => classifications.legacy,
@@ -3661,7 +3713,7 @@ fn load_canonical_for_evidence(
               ON evidence.agent_run_id = activity.agent_run_id
              AND evidence.execution_epoch = activity.execution_epoch
             WHERE evidence.id = ?1
-              AND activity.classifier_version IN (?2, ?3, ?4, ?5)
+              AND activity.classifier_version IN (?2, ?3, ?4, ?5, ?6)
               AND EXISTS (
                   SELECT 1
                   FROM json_each(activity.source_evidence_ids_json)
@@ -3669,9 +3721,10 @@ fn load_canonical_for_evidence(
               )
             ORDER BY CASE activity.classifier_version
                 WHEN ?2 THEN 0
-                WHEN ?3 THEN 1
-                WHEN ?4 THEN 2
-                ELSE 3
+                WHEN ?6 THEN 1
+                WHEN ?3 THEN 2
+                WHEN ?4 THEN 3
+                ELSE 4
             END
             LIMIT 1
             "#,
@@ -3681,6 +3734,7 @@ fn load_canonical_for_evidence(
                 canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                 canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
+                canonical_activity::V4_CLASSIFIER_VERSION,
             ],
             canonical_activity_row,
         )
@@ -4221,6 +4275,16 @@ mod tests {
             "terminal",
             &payload,
         );
+        let v4_facts = canonical_activity::classify_evidence_with_version(
+            canonical_activity::V4_CLASSIFIER_VERSION,
+            "run-v1",
+            1,
+            "terminal-evidence",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
         let previous_facts = canonical_activity::classify_evidence_with_version(
             canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
             "run-v1",
@@ -4293,6 +4357,7 @@ mod tests {
             "2026-08-29T00:00:00Z",
             EvidenceActivityClassifications {
                 current: &current_facts,
+                v4: &v4_facts,
                 previous: &previous_facts,
                 intermediate: &intermediate_facts,
                 legacy: &legacy_facts,
@@ -4418,6 +4483,7 @@ mod tests {
             "2026-09-06T00:00:00Z",
             EvidenceActivityClassifications {
                 current: &current,
+                v4: &current,
                 previous: &previous,
                 intermediate: &intermediate,
                 legacy: &legacy,
@@ -4505,6 +4571,7 @@ mod tests {
             "2026-09-07T00:00:00Z",
             EvidenceActivityClassifications {
                 current: &current_v3,
+                v4: &current_v3,
                 previous: &previous_v3,
                 intermediate: &intermediate_v3,
                 legacy: &legacy_v3,
@@ -4517,6 +4584,59 @@ mod tests {
             canonical_activity::PREVIOUS_CLASSIFIER_VERSION
         );
         assert_eq!(projection_v3.semantic_kind.as_deref(), Some("file.read"));
+        transaction.commit().unwrap();
+        let agent_payload = json!({"toolCallId":"agent-v4", "toolName":"delegate_task",
+            "kind":"execute", "runtimeToolType":"agent", "status":"completed"});
+        let classify = |version| {
+            canonical_activity::classify_evidence_with_version(
+                version,
+                "run-v4",
+                1,
+                "terminal-v4",
+                "runtime.action",
+                "tool_call",
+                "terminal",
+                &agent_payload,
+            )
+        };
+        let current_v4 = classify(canonical_activity::CLASSIFIER_VERSION);
+        let v4 = classify(canonical_activity::V4_CLASSIFIER_VERSION);
+        let v3 = classify(canonical_activity::PREVIOUS_CLASSIFIER_VERSION);
+        let v2 = classify(canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION);
+        let v1 = classify(canonical_activity::LEGACY_CLASSIFIER_VERSION);
+        assert_eq!(current_v4.semantic_kind.as_deref(), Some("tool.agent"));
+        assert_eq!(v4.semantic_kind.as_deref(), Some("shell.execute"));
+        database.connection().execute("INSERT INTO canonical_runtime_activity(
+            agent_run_id,execution_epoch,operation_id,classifier_version,activity_domain,semantic_kind,
+            phase,outcome,credibility,coverage_level,source_authority,source_evidence_ids_json,
+            first_evidence_sequence,last_evidence_sequence,revision,created_at,updated_at)
+            VALUES('run-v4',1,?1,'activity-v4','shell','shell.execute','started','unknown',
+                'runtime_structured','fine_grained','runtime','[\"started-v4\"]',1,1,1,datetime('now'),datetime('now'))",
+            [&current_v4.operation_id]).unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        let projection = upsert_canonical_activity(
+            &transaction,
+            "run-v4",
+            1,
+            2,
+            "terminal-v4",
+            "2026-11-01T00:00:00Z",
+            EvidenceActivityClassifications {
+                current: &current_v4,
+                v4: &v4,
+                previous: &v3,
+                intermediate: &v2,
+                legacy: &v1,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            projection.classifier_version,
+            canonical_activity::V4_CLASSIFIER_VERSION
+        );
+        assert_eq!(projection.semantic_kind.as_deref(), Some("shell.execute"));
+        assert_eq!(projection.phase, "terminal");
         transaction.commit().unwrap();
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

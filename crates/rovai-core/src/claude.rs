@@ -2301,8 +2301,12 @@ fn normalize_claude_runtime_events(
         }
         _ => {}
     }
-    if !root {
-        for item in &mut normalized {
+    for item in &mut normalized {
+        crate::runtime_subagent::mark_agent_tool(
+            crate::agent_profile::AdapterKind::ClaudeCodeCli,
+            &mut item.payload,
+        );
+        if !root {
             item.payload["runtimeRootOutput"] = serde_json::json!(false);
         }
     }
@@ -2351,6 +2355,15 @@ fn claude_tool_started(
 }
 
 fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Value> {
+    if crate::runtime_subagent::is_agent_tool(
+        crate::agent_profile::AdapterKind::ClaudeCodeCli,
+        tool_name,
+    ) {
+        return input
+            .filter(|input| !input.is_null())
+            .and_then(|input| serde_json::to_string_pretty(input).ok())
+            .map(Value::String);
+    }
     if !tool_name.eq_ignore_ascii_case("bash") {
         return None;
     }
