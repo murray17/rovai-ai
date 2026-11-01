@@ -131,14 +131,18 @@ export class FileEditStore {
   }
   private tabIds(doc: FileEditDocument): string[] { return [...this.tabs].filter(([, value]) => value === doc).map(([id]) => id) }
 
-  async checkDisk(doc: FileEditDocument): Promise<void> {
+  /** Undefined means the check could not complete; false confirms the saved version. */
+  async checkDisk(doc: FileEditDocument, interactive = true): Promise<boolean | undefined> {
     if (doc.saving) return
     if (doc.unknown) { await this.reconcile(doc); return }
+    const version = doc.version
     const result = await this.api.readEditableFile!(doc.access).catch(() => null)
+    if (this.#disposed || doc.saving || doc.version !== version) return
     if (!result?.ok || result.value.key !== doc.key) { doc.error = uiAttribute('无法重新加载，修改已保留'); this.changed(); return }
-    if (result.value.version === doc.version) { this.onSaved?.(this.tabIds(doc)); return }
+    if (result.value.version === doc.version) { if (interactive) this.onSaved?.(this.tabIds(doc)); return false }
     doc.conflict = result.value; doc.error = uiAttribute('文件已在外部更新'); this.changed()
-    await this.handleConflict(doc)
+    if (interactive) await this.handleConflict(doc)
+    return true
   }
 
   async reconcile(doc: FileEditDocument): Promise<boolean> {

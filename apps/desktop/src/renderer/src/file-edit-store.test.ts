@@ -39,6 +39,18 @@ describe('window file editing buffers', () => {
     expect(store.get('other')).toBe(doc)
   })
 
+  it('ignores an external-update check that returns an older version after saving', async () => {
+    const { store, api, doc } = await fixture()
+    store.change(doc, 'saved')
+    const read = deferred<FileEditResult>(); api.readEditableFile.mockReturnValueOnce(read.promise)
+    const check = store.checkDisk(doc, false)
+    api.saveTextFile.mockResolvedValueOnce(snapshot('saved', 'v2'))
+    await store.save(doc); store.change(doc, 'later draft')
+    read.resolve(snapshot('original', 'v1')); expect(await check).toBeUndefined()
+    expect(doc).toMatchObject({ draft: 'later draft', savedText: 'saved', version: 'v2', error: null, conflict: undefined })
+    expect(store.dialog).toBeNull()
+  })
+
   it('reconciles an unknown result by reading, never resubmits, and retains later input', async () => {
     const { store, api, doc } = await fixture()
     store.change(doc, 'A'); api.saveTextFile.mockRejectedValueOnce(new Error('connection lost'))

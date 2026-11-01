@@ -12090,21 +12090,58 @@ impl Core {
             "filePreview.readEditable" | "filePreview.saveText" => {
                 let params: crate::file_edit::EditRequest =
                     serde_json::from_value(request.params.clone())?;
-                if !matches!(
-                    params.source.kind.as_str(),
-                    "camp_workspace" | "message_reference" | "project_file"
-                ) {
-                    return Ok(crate::file_edit::failure("edit_unavailable"));
-                }
-                let resolved = if params.source.kind == "project_file" {
-                    self.resolve_project_file(&params.source).await?
+                let resolved = if params.source["kind"] == "attachment" {
+                    let locator: LocalAttachmentOwnerLocator =
+                        serde_json::from_value(params.source["locator"].clone())?;
+                    let source = {
+                        let database = self.database.lock().await;
+                        rovai_core::local_attachment_source::load_source_attachment_for_client(
+                            &database,
+                            &locator,
+                            &request.client,
+                        )?
+                    };
+                    // Original-file links are editable; managed historical copies are not.
+                    let Some(source) = source else {
+                        return Ok(crate::file_edit::failure("edit_unavailable"));
+                    };
+                    let parent = std::path::Path::new(&source.source_path)
+                        .parent()
+                        .context("Source file has no parent")?
+                        .to_string_lossy()
+                        .into_owned();
+                    Some(
+                        crate::file_preview_authority::ResolvedFilePreviewSource::FileTarget {
+                            camp_id: locator.camp_id().to_owned(),
+                            source_kind: "attachment".into(),
+                            source_identity: source.id,
+                            root_path: parent.clone(),
+                            base_path: parent,
+                            raw_reference: source.source_path,
+                            allow_children: true,
+                        },
+                    )
+                } else if params.source["kind"] == "project_file" {
+                    self.resolve_project_file(&serde_json::from_value(params.source.clone())?)
+                        .await?
                 } else {
+                    let source: ResolveFilePreviewSourceParams =
+                        serde_json::from_value(params.source.clone())?;
+                    if source.kind == "run_evidence"
+                        && source.action.as_deref() != Some("open_current")
+                    {
+                        return Ok(crate::file_edit::failure("edit_unavailable"));
+                    }
                     let database = self.database.lock().await;
-                    resolve_file_preview_source(
-                        &database,
-                        &ManagedBlobStore::new(&self.data_dir),
-                        params.source.clone(),
-                    )?
+                    if source.kind == "skill_reference" {
+                        resolve_skill_preview_source(&database, &self.data_dir, &source)?
+                    } else {
+                        resolve_file_preview_source(
+                            &database,
+                            &ManagedBlobStore::new(&self.data_dir),
+                            source,
+                        )?
+                    }
                 };
                 let saving = request.method == "filePreview.saveText";
                 tokio::task::spawn_blocking(move || {

@@ -742,7 +742,7 @@ describe('automatic file refresh', () => {
       else a.actions.hidePane()
       await advance(1000)
       expect(api.reload).not.toHaveBeenCalled()
-      expect(a.getSnapshot().tabs.find(tab => tab.id === first.id)).toMatchObject({ hasExternalUpdate: true })
+      expect(a.getSnapshot().tabs.find(tab => tab.id === first.id)).toMatchObject({ hasExternalUpdate: false, needsRefresh: true })
     })
 
     it.each(['refresh', 'cold'] as const)('rechecks visibility before %s after waiting for resource admission', async mode => {
@@ -762,7 +762,7 @@ describe('automatic file refresh', () => {
       admission.resolve(); await advance(0)
       expect(api.reload).not.toHaveBeenCalled()
       expect(api.restore).not.toHaveBeenCalled()
-      expect(active(a)).toMatchObject({ isRefreshing: false, hasExternalUpdate: true, refreshError: null })
+      expect(active(a)).toMatchObject({ isRefreshing: false, hasExternalUpdate: false, needsRefresh: true, refreshError: null })
       if (mode === 'cold') expect(active(a).loadState).toBe('cold')
       a.actions.showPane(); await advance(0)
       expect(mode === 'refresh' ? api.reload : api.restore).toHaveBeenCalledTimes(1)
@@ -809,7 +809,7 @@ describe('automatic file refresh', () => {
       expect(api.reload).toHaveBeenCalledTimes(1)
       expect(active(a).content).toBe(first.content)
       read.resolve(textResult('earlier save')); await advance(0)
-      expect(active(a).hasExternalUpdate).toBe(true)
+      expect(active(a)).toMatchObject({ hasExternalUpdate: false, needsRefresh: true })
       await advance()
       expect(api.reload).toHaveBeenCalledTimes(2)
       expect(active(a).content).toMatchObject({ text: 'last save' })
@@ -851,7 +851,12 @@ describe('automatic file refresh', () => {
         return result
       })
       const reserve = vi.spyOn(owner, 'reserveHtml')
+      const announced: boolean[] = []
+      const unsubscribe = owner.subscribe(() => announced.push(active(a).hasExternalUpdate))
       update('a', [first.previewKey!]); await advance(1000)
+      a.actions.hidePane(); a.actions.showPane(); await advance()
+      unsubscribe()
+      expect(announced.every(value => !value)).toBe(true)
       expect(active(a)).toMatchObject({ file: first.file, content: first.content, isRefreshing: false, hasExternalUpdate: false, refreshError: null })
       expect(active(a).candidate).toBeUndefined()
       expect(api.prepareHtmlSite).toHaveBeenCalledTimes(1)
@@ -862,6 +867,33 @@ describe('automatic file refresh', () => {
       expect(active(a).htmlSource?.text).toBe('<p>original source</p>')
       expect(api.readText).toHaveBeenCalledTimes(1)
       expect(active(a).requestGeneration).toBe(first.requestGeneration)
+    })
+
+    it('checks a dirty file before announcing a real external change without replacing its draft or undo history', async () => {
+      const { owner, api, update } = fixture()
+      let disk = { key: 'current-file', text: 'cached body', version: '1' }
+      api.readEditableFile = vi.fn(async () => ({ ok: true as const, value: disk }))
+      api.saveTextFile = vi.fn()
+      const a = await open(owner, 'a'), first = active(a)
+      await owner.edits.attach(first.id, first.file!)
+      const doc = owner.edits.get(first.id)!
+      const editor = EditorState.create({ doc: disk.text, extensions: [history()] })
+        .update({ changes: { from: 0, insert: 'draft ' } }).state
+      doc.editorState = editor
+      owner.edits.change(doc, editor.doc.toString())
+      update('a', [first.previewKey!]); await advance()
+      expect(active(a)).toMatchObject({ hasExternalUpdate: false, needsRefresh: false })
+      expect(api.reload).not.toHaveBeenCalled()
+      disk = { ...disk, text: 'external', version: '2' }
+      update('a', [first.previewKey!])
+      expect(active(a).hasExternalUpdate).toBe(false)
+      await advance()
+      expect(active(a).hasExternalUpdate).toBe(true)
+      expect(doc).toMatchObject({ draft: 'draft cached body', savedText: 'cached body', conflict: disk })
+      expect(doc.editorState).toBe(editor)
+      expect(undoDepth(editor)).toBe(1)
+      expect(owner.edits.dialog).toBeNull()
+      expect(api.saveTextFile).not.toHaveBeenCalled()
     })
 
     it.each(['digest', 'file identity', 'preview key'] as const)('loads again when the %s differs despite equal size and mtime', async change => {
@@ -887,7 +919,7 @@ describe('automatic file refresh', () => {
       expect(active(a).content).toMatchObject({ text: 'changed body' })
     })
 
-    it.each(['manual', 'error', 'released handle'] as const)('fully loads the same version for %s recovery', async entry => {
+    it.each(['manual', 'error', 'released handle'] as const)('loads unchanged content only when %s needs recovery', async entry => {
       const { owner, api, update } = fixture()
       const a = await open(owner, 'a'), first = active(a)
       const original = vi.mocked(api.reload).getMockImplementation()!
@@ -920,8 +952,8 @@ describe('automatic file refresh', () => {
       if (entry === 'manual') await a.actions.reload(first.id)
       else { a.actions.hidePane(); a.actions.showPane() }
       await advance()
-      expect(api.readText).toHaveBeenCalledTimes(2)
-      expect(active(a)).toMatchObject({ content: { text: 'reloaded body' }, isRefreshing: false, refreshError: null })
+      expect(api.readText).toHaveBeenCalledTimes(entry === 'manual' ? 1 : 2)
+      expect(active(a)).toMatchObject({ content: { text: entry === 'manual' ? 'cached body' : 'reloaded body' }, isRefreshing: false, refreshError: null })
     })
 
     it('keeps a new notification arriving during an unchanged candidate check', async () => {
@@ -937,7 +969,7 @@ describe('automatic file refresh', () => {
       update('a', [first.previewKey!]); await advance()
       update('a', [first.previewKey!])
       pending.resolve(result); await advance(0)
-      expect(active(a).hasExternalUpdate).toBe(true)
+      expect(active(a)).toMatchObject({ hasExternalUpdate: false, needsRefresh: true })
       expect(api.readText).toHaveBeenCalledTimes(1)
       vi.mocked(api.readText).mockResolvedValueOnce(textResult('actual later change'))
       await advance()

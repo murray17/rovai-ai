@@ -114,7 +114,7 @@ function attachmentAuthorityTarget(
 }
 
 export class CoreFilePreviewSourceAuthority implements FilePreviewSourceAuthority {
-  edit(saving: boolean, input: { source: OpenFilePreviewRequest; path: string; root: string; text?: string; expectedVersion?: string }): Promise<FileEditResult> {
+  edit(saving: boolean, input: { source: OpenFilePreviewRequest; path: string; text?: string; expectedVersion?: string }): Promise<FileEditResult> {
     return this.core.request<FileEditResult>((saving ? 'filePreview.saveText' : 'filePreview.readEditable') as CoreMethod, input)
   }
   constructor(

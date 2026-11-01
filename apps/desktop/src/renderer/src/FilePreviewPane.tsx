@@ -426,7 +426,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   const downloadAction = downloadAvailable ? <FileDownloadAction key={tab.id} tab={tab} /> : null
   const showPath = tab.loadState === 'ready' && previewPathIsVisible(tab.presentation)
   const showUpdate = tab.loadState === 'ready' && Boolean(tab.file)
-    && (tab.hasExternalUpdate || tab.isRefreshing)
+    && tab.hasExternalUpdate
   const updateAction = showUpdate ? (
     <button
       className="file-preview-update-action"

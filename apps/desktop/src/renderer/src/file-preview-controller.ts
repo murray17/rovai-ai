@@ -31,6 +31,7 @@ export interface FilePreviewTabModel {
   error: FilePreviewErrorPayload | null
   requestGeneration: number
   hasExternalUpdate: boolean
+  needsRefresh?: boolean
   externalUpdateVersion: number
   isRefreshing: boolean
   refreshError: string | null
@@ -626,7 +627,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
           content: preloaded?.content ?? null,
           error: null,
           requestGeneration: targetRequestGeneration,
-          hasExternalUpdate: file.hasExternalUpdate,
+          hasExternalUpdate: false,
+          needsRefresh: file.hasExternalUpdate,
           externalUpdateVersion: file.hasExternalUpdate ? tab.externalUpdateVersion + 1 : tab.externalUpdateVersion,
           isRefreshing: false,
           refreshError: null,
@@ -1007,12 +1009,12 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     clearRefreshTimer(tabId)
     const tab = tabsRef.current.find(entry => entry.id === tabId)
     if (!isVisible(tabId) || tab?.kind !== 'file' || tab.loadState !== 'ready'
-      || !tab.hasExternalUpdate || tab.isRefreshing || tab.refreshError) return
+      || !tab.needsRefresh || tab.isRefreshing || tab.refreshError) return
     refreshTimers.set(tabId, setTimeout(() => {
       refreshTimers.delete(tabId)
       const latest = tabsRef.current.find(entry => entry.id === tabId)
       if (isVisible(tabId) && latest?.kind === 'file' && latest.loadState === 'ready'
-        && latest.hasExternalUpdate && !latest.isRefreshing && !latest.refreshError) void reload(tabId, true)
+        && latest.needsRefresh && !latest.isRefreshing && !latest.refreshError) void reload(tabId, true)
     }, 300))
   }
   // Called only by display/activation entry points, never ordinary state updates.
@@ -1021,7 +1023,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     const tab = tabsRef.current.find(entry => entry.id === tabId)
     if (tab?.kind !== 'file' || tab.loadState === 'opening' || tab.isRefreshing) return
     if (tab.content) {
-      if (tab.hasExternalUpdate || !tab.file || tab.refreshError) void reload(tabId, true)
+      if (tab.needsRefresh || tab.hasExternalUpdate || !tab.file || tab.refreshError) void reload(tabId, true)
     } else if (tab.loadState === 'cold') restoreTab(tabId, true)
   }
 
@@ -1170,7 +1172,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     setTabs(tabs => tabs.map(entry => entry.id !== tab.id ? entry : {
       ...tab, ...loaded,
       file, candidate: undefined, loadState: 'ready', isRefreshing: false, refreshError: null,
-      hasExternalUpdate: file.hasExternalUpdate || tab.externalUpdateVersion !== refreshVersions.get(tab.id),
+      hasExternalUpdate: false,
+      needsRefresh: file.hasExternalUpdate || tab.externalUpdateVersion !== refreshVersions.get(tab.id),
       reading: loaded.content.kind === 'page'
         ? { ...tab.reading, visibleLine: loaded.content.page.startLine, codeScrollTop: 0 }
         : tab.reading,
@@ -1194,14 +1197,24 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     if (previous.file) void api.release({ handleId: previous.file.handleId })
   }
   const reload = async (tabId: string, visibleOnly = false, afterSave = false): Promise<void> => {
-    if (!afterSave && owner.edits?.protects(tabId)) {
-      if (!visibleOnly) await owner.edits.checkDisk(owner.edits.get(tabId)!)
-      return
-    }
     const tab = tabsRef.current.find(entry => entry.id === tabId)
     if (disposed || tab?.kind !== 'file') return
     if (tab.isRefreshing) {
       if (afterSave) pendingSavedRefreshes.add(tabId)
+      return
+    }
+    if (!afterSave && owner.edits?.protects(tabId)) {
+      const doc = owner.edits.get(tabId)!
+      if (doc.saving || visibleOnly && !isVisible(tabId)) return
+      const observed = tab.externalUpdateVersion
+      setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, isRefreshing: true } : entry))
+      const changed = await owner.edits.checkDisk(doc, !visibleOnly)
+      setTabs(tabs => tabs.map(entry => entry.id === tabId && entry.kind === 'file' ? {
+        ...entry, isRefreshing: false, hasExternalUpdate: changed === true,
+        needsRefresh: entry.externalUpdateVersion !== observed
+      } : entry))
+      if (pendingSavedRefreshes.delete(tabId)) void reload(tabId, false, true)
+      else scheduleRefresh(tabId)
       return
     }
     if (tab.loadState === 'opening'
@@ -1223,7 +1236,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       await owner.sync()
       if (!current()) return
       if (visibleOnly && !isVisible(tabId)) {
-        setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, isRefreshing: false, hasExternalUpdate: true } : entry))
+        setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, isRefreshing: false, needsRefresh: true } : entry))
         return
       }
       if (oldFile) {
@@ -1241,7 +1254,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       if (!candidate) throw new Error(uiAttribute('无法重新取得文件，已保留当前预览。'))
       if (!current()) return
       const version = oldFile?.contentVersion
-      if (visibleOnly && oldFile && tab.content && !tab.refreshError
+      if (oldFile && tab.content && !tab.refreshError
         && oldFile.previewKey === candidate.previewKey
         && version?.size === candidate.contentVersion.size && version.mtimeMs === candidate.contentVersion.mtimeMs
         && version.fileId === candidate.contentVersion.fileId
@@ -1250,7 +1263,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         const changed = candidate.hasExternalUpdate
         setTabs(tabs => tabs.map(entry => entry.id !== tabId || entry.kind !== 'file' ? entry : {
           ...entry, isRefreshing: false,
-          hasExternalUpdate: changed || entry.externalUpdateVersion !== refreshVersions.get(tabId)
+          hasExternalUpdate: false,
+          needsRefresh: changed || entry.externalUpdateVersion !== refreshVersions.get(tabId)
         }))
         return
       }
@@ -1276,7 +1290,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       else commitCandidate(next)
     } catch (error) {
       if (current()) setTabs(tabs => tabs.map(entry => entry.id !== tabId ? entry : {
-        ...entry, isRefreshing: false,
+        ...entry, isRefreshing: false, hasExternalUpdate: false,
         refreshError: error instanceof Error ? error.message : uiAttribute('重新加载失败')
       }))
     } finally {
@@ -1462,7 +1476,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     externalUpdate: (previewKeys: string[]) => {
       const changed = new Set(previewKeys)
       setTabs(tabs => tabs.map(tab => tab.kind === 'file' && tab.previewKey && changed.has(tab.previewKey)
-        ? { ...tab, hasExternalUpdate: true, externalUpdateVersion: tab.externalUpdateVersion + 1 } : tab))
+        ? { ...tab, needsRefresh: true, externalUpdateVersion: tab.externalUpdateVersion + 1 } : tab))
       const active = tabsRef.current.find(tab => tab.id === activeTabIdRef.current)
       if (active?.kind === 'file' && active.previewKey && changed.has(active.previewKey)) scheduleRefresh(active.id)
     },

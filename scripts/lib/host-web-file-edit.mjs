@@ -4,16 +4,17 @@ import { join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { request as httpRequest } from 'node:http'
+import { randomUUID } from 'node:crypto'
 
 // Extends the existing Host pipe/HTTP owner with real Desktop file admission and
 // disk writes. The caller owns isolated Core, workspace and cleanup.
-export async function exerciseFileEditing({ host, call, fileCall, session, otherSession, threadId, workspace, fixture }) {
+export async function exerciseFileEditing({ host, call, fileCall, session, otherSession, threadId, workspace, fixture, originalAttachment }) {
   const root = resolve(import.meta.dirname, '../..')
   const require = createRequire(import.meta.url)
   const esbuild = createRequire(require.resolve('vite'))('esbuild')
   const bundle = join(fixture, 'desktop-file-edit.cjs')
-  await esbuild.build({ stdin: { contents: `export { FilePreviewService } from './apps/desktop/src/main/file-preview/file-preview-service'; export { CoreFilePreviewSourceAuthority } from './apps/desktop/src/main/file-preview/file-preview-authority'; export { FilePreviewResources } from './apps/desktop/src/renderer/src/file-preview-resources'; export { createBrowserHtmlPreview } from './apps/web/src/html-preview';`, resolveDir: root, loader: 'ts' }, outfile: bundle, bundle: true, platform: 'node', format: 'cjs' })
-  const { FilePreviewService, CoreFilePreviewSourceAuthority, FilePreviewResources, createBrowserHtmlPreview } = await import(pathToFileURL(bundle).href)
+  await esbuild.build({ stdin: { contents: `export { FilePreviewService } from './apps/desktop/src/main/file-preview/file-preview-service'; export { CoreFilePreviewSourceAuthority } from './apps/desktop/src/main/file-preview/file-preview-authority'; export { FilePreviewResources } from './apps/desktop/src/renderer/src/file-preview-resources'; export { filePreviewSessionStore } from './apps/desktop/src/renderer/src/file-preview-session'; export { EditorState } from '@codemirror/state'; export { history, undoDepth } from '@codemirror/commands'; export { createBrowserHtmlPreview } from './apps/web/src/html-preview';`, resolveDir: root, loader: 'ts' }, outfile: bundle, bundle: true, platform: 'node', format: 'cjs' })
+  const { FilePreviewService, CoreFilePreviewSourceAuthority, FilePreviewResources, filePreviewSessionStore, EditorState, history, undoDepth, createBrowserHtmlPreview } = await import(pathToFileURL(bundle).href)
   const native = { selectRoot: async () => null, confirmOpen: async () => false, openPath: async () => '', revealPath() {}, copyText() {}, publishExternalUpdate() {} }
   const authority = new CoreFilePreviewSourceAuthority(host)
   const desktop = new FilePreviewService(authority, native)
@@ -48,6 +49,7 @@ export async function exerciseFileEditing({ host, call, fileCall, session, other
     assert.equal(await readFile(path, 'utf8'), '\ufeffsaved from directory')
     await fileCall(session, 'release', { handleId: projectAccess.handleId })
     await desktop.release(901, { handleId: projectDesktop.value.file.handleId })
+    await exerciseCurrentFileEntries({ desktop, call, fileCall, session, threadId, fixture, projectSource, FilePreviewResources, filePreviewSessionStore, EditorState, history, undoDepth })
     await writeFile(path, '\ufeffconst number = 1;\r\n// trailing  ')
     const opened = await desktop.open(901, source)
     assert.equal(opened.ok, true, JSON.stringify(opened))
@@ -103,10 +105,90 @@ export async function exerciseFileEditing({ host, call, fileCall, session, other
     assert.equal((await fileCall(session, 'saveTextFile', { ...webAccess, text: 'recreate', expectedVersion: overwrite.value.version })).ok, false)
     await assert.rejects(readFile(path), { code: 'ENOENT' })
     await exerciseHtmlRefresh({ desktop, fileCall, session, threadId, workspace, FilePreviewResources, createBrowserHtmlPreview })
+    if (originalAttachment) {
+      const original = await readFile(originalAttachment.path, 'utf8')
+      await desktop.bindThread(901, originalAttachment.source.threadId)
+      for (const client of ['Desktop', 'Web']) {
+        const api = currentFileApi(client, desktop, fileCall, session)
+        const opened = await api.open(originalAttachment.source)
+        assert.equal(opened.ok, true, JSON.stringify(opened))
+        const file = opened.value.file, access = { handleId: file.handleId, expectedGeneration: file.contentGeneration }
+        const baseline = await api.readEditableFile(access)
+        assert.equal(baseline.ok, true, JSON.stringify(baseline))
+        const saved = await api.saveTextFile({ ...access, text: `${client} original link`, expectedVersion: baseline.value.version })
+        assert.equal(saved.ok, true, JSON.stringify(saved))
+        assert.equal(await readFile(originalAttachment.path, 'utf8'), `${client} original link`)
+        assert.equal((await api.saveTextFile({ ...access, text: original, expectedVersion: saved.value.version })).ok, true)
+        await api.release({ handleId: file.handleId })
+      }
+    }
     console.log('File editing: Desktop and Web real Host writes/readback; pending-save external conflict; scoped handles, explicit overwrite and deletion; production save → HTML reload/candidate → fresh Desktop HTTP and Web document bytes verified.')
   } finally {
     if (webHandle) await fileCall(session, 'release', { handleId: webHandle })
     await desktop.closeAll()
+  }
+}
+
+function currentFileApi(client, desktop, fileCall, session) {
+  const call = (method, request) => client === 'Desktop' ? desktop[method](901, request) : fileCall(session, method, request)
+  return {
+    bindThread: async () => {}, onExternalUpdate: () => () => {},
+    open: request => call('open', request), restore: request => call('open', request),
+    reopen: request => call('reopen', request), readText: request => call('readText', request),
+    reload: request => call('reload', request), release: request => call('release', request),
+    readEditableFile: request => client === 'Desktop' ? desktop.editText(901, request, false) : call('readEditableFile', request),
+    saveTextFile: request => client === 'Desktop' ? desktop.editText(901, request, true) : call('saveTextFile', request),
+  }
+}
+
+async function exerciseCurrentFileEntries({ desktop, call, fileCall, session, threadId, fixture, projectSource, FilePreviewResources, filePreviewSessionStore, EditorState, history, undoDepth }) {
+  const external = join(fixture, 'outside-note.txt'), externalLink = pathToFileURL(external).href
+  await writeFile(external, 'outside original')
+  // Isolated test conversation only; execution:null never starts a Runtime or a Member.
+  const sent = await call(session, 'camp.messages.send', { commandId: randomUUID(), threadId,
+    content: { version: 2, segments: [{ kind: 'text', text: `[Project](editable.ts) [Outside](${externalLink})` }] },
+    sourceAttachments: [], quotes: [], replyToThreadMessageId: null, execution: null })
+  const messageId = sent.commandResult.payload.threadMessageId
+  const originalDocument = globalThis.document
+  globalThis.document = { activeElement: null }
+  try {
+    for (const client of ['Desktop', 'Web']) {
+      filePreviewSessionStore.discard(threadId)
+      const api = currentFileApi(client, desktop, fileCall, session), owner = new FilePreviewResources(api)
+      try {
+        owner.activate(threadId)
+        const preview = owner.session(threadId)
+        const opened = await preview.actions.open(projectSource)
+        assert.equal(opened.kind, 'preview')
+        const tab = () => preview.getSnapshot().tabs.find(tab => tab.id === opened.tabId)
+        await waitFor(owner, () => tab()?.content)
+        await owner.edits.attach(opened.tabId, tab().file)
+        const doc = owner.edits.get(opened.tabId)
+        assert.ok(doc, `${client} directory file is editable`)
+        doc.editorState = EditorState.create({ doc: doc.draft, extensions: [history()] })
+          .update({ changes: { from: 0, insert: 'unsaved ' } }).state
+        const editor = doc.editorState
+        owner.edits.change(doc, editor.doc.toString())
+        const linked = await preview.actions.open({ kind: 'message_reference', threadId, messageId, rawReference: 'editable.ts' })
+        assert.deepEqual(linked, opened, `${client} link and directory share one tab`)
+        assert.equal(preview.getSnapshot().tabs.length, 1)
+        assert.equal(owner.edits.get(opened.tabId), doc)
+        assert.equal(doc.draft, editor.doc.toString())
+        assert.equal(doc.editorState, editor); assert.equal(undoDepth(editor), 1)
+        const outside = await api.open({ kind: 'message_reference', threadId, messageId, rawReference: externalLink })
+        assert.equal(outside.ok, true, JSON.stringify(outside))
+        const file = outside.value.file, access = { handleId: file.handleId, expectedGeneration: file.contentGeneration }
+        const baseline = await api.readEditableFile(access)
+        assert.equal(baseline.ok, true, JSON.stringify(baseline))
+        const saved = await api.saveTextFile({ ...access, text: `outside saved by ${client}`, expectedVersion: baseline.value.version })
+        assert.equal(saved.ok, true, JSON.stringify(saved))
+        assert.equal(await readFile(external, 'utf8'), `outside saved by ${client}`)
+        await api.release({ handleId: file.handleId })
+      } finally { owner.dispose(); filePreviewSessionStore.discard(threadId) }
+    }
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
   }
 }
 

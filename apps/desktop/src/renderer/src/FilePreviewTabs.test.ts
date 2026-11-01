@@ -387,10 +387,15 @@ describe('FilePreviewPane path presentation', () => {
       displayPath: 'hui.html',
       pathPresentation: 'file_name_only'
     })
-    external.hasExternalUpdate = true
+    external.isRefreshing = true
     preview.tabs = [external]
     preview.activeTab = external
     preview.activeTabId = external.id
+
+    expect(renderPane()).not.toContain('file-preview-update-row')
+    expect(renderPane()).not.toContain('正在重新加载')
+    external.isRefreshing = false
+    external.hasExternalUpdate = true
 
     const markup = renderPane()
 

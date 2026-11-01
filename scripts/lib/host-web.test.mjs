@@ -592,7 +592,8 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal((await fileCall(first, 'readText', { handleId: preview.value.file.handleId, expectedGeneration: preview.value.file.contentGeneration })).value.text, 'selected-204')
     await fileCall(first, 'release', { handleId: preview.value.file.handleId })
     assert.equal((await browse('release', scope.value.scopeId)).ok, true)
-    await exerciseFileEditing({ host, call, fileCall, session: first, otherSession: second, threadId: fileCampId, workspace, fixture })
+    await exerciseFileEditing({ host, call, fileCall, session: first, otherSession: second, threadId: fileCampId, workspace, fixture,
+      originalAttachment: { source: { kind: 'attachment', threadId, locator: messageLocator }, path: bound.sourcePath } })
     const prepareDownload = (session, body) => authorized(session, 'downloads', { method: 'POST', body: JSON.stringify(body) })
     const grant = async (source, session = first) => {
       const response = await prepareDownload(session, { kind: 'source', source })
