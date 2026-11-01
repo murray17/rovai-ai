@@ -2199,7 +2199,7 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 }
 .camp-topbar.has-file-preview.file-preview-compact,
 .workspace-grid.file-preview-open.inspector-collapsed.file-preview-compact { grid-template-columns: minmax(0, 1fr); }
-.camp-topbar.file-preview-compact .topbar-conversation-context { display: none; }
+.camp-topbar.has-file-preview.file-preview-compact .topbar-conversation-context { display: none; }
 .camp-topbar.file-preview-compact .file-preview-tabs { border-left: 0; }
 .workspace-grid.file-preview-open.file-preview-compact .timeline-pane,
 .workspace-grid.file-preview-open.file-preview-compact .conversation-controls { display: none; }
