@@ -23,7 +23,8 @@ User 已确认 [Surface v58](../../contracts/run-process-detail-surface-v58.md) 
 - Renderer 复用 `ExecutionToolGroup` 与普通详情文本区，只增加机器人图标。按首次 `sequence` 排序，同 ID 结果更新不移动位置。
   相邻主／子工具共用步骤分组；结果缓存按 revision/changeSequence 刷新，旧请求不能覆盖新结果，刷新保留文本节点、焦点和滚动。
 
-Copilot/Qoder 匿名并发文本无法凭协议确认作者，委派活跃时保守过滤；后台模式无法证明子任务结束时维持过滤。
+Copilot/Qoder 匿名并发文本无法凭协议确认作者，委派活跃时保守过滤；后台启动成功但无法证明子任务结束时维持过滤。
+启动明确失败或取消时解除该次调用的过滤；其他仍活跃的调用继续保留自己的过滤。
 TRAE 根消息有 `messageId`，转发的匿名 child chunk 单独处理。这可能减少根代理的过程文字，不影响实际工具报告。
 原生未返回调用终态时保持未知，不把根 Run 完成变成子任务成功。
 
@@ -108,5 +109,39 @@ Core 的 CLI 工具记录通过权威 Evidence 读取进入 UI，不保证每条
 - 定向 slow-tests owners 通过：Prompt 来源状态机、Canonical 版本、迁移准入矩阵、实际新库重开、交错正文、Codex 归一、ACP 稀疏终态与权限元数据、公开任务参数。
 - Evidence 生命周期及历史分类 owner 17 tests 通过，覆盖 v1–v4 冻结与新 v5、存储格式 3/4 的原位结束、升级中 marker 写入失败后 receipt 回滚、旧行不重写。
 - `cargo fmt --all --check`、`git diff --check`、文档测试及固定 base 的通用文档门禁通过。
+
+## 评审修补
+
+针对 `d9606b8f4` 的读取与正文归属缺口，在原路径内修补：
+
+- 文件预览的 storage 3/4 版本列表和 storage 1/2 查询补入 v4；历史 canonical 查询按 v5、v4、v3、v2、v1 选择。
+  不改历史行，不回填分类器。
+- Claude 只让 root 的流式与最终正文更新正文状态；带 `parent_tool_use_id` 的纯正文 assistant 包不再绕过过滤，
+  混合包中的实际工具调用及工具返回继续保留。
+- 后台启动明确失败或取消后，该调用不再维持匿名正文过滤；迟到进度不能重新打开过滤，其他并发调用不受影响。
+- 同一 command 从内联正文切换到按需读取时保留已显示的文本节点；加载、重试与旧请求隔离继续走通用组件。
+
+回归扩展既有 owner，没有新增 Rust 测试函数或测试框架：`run_activity_file_uses_the_exact_evidence_and_mission_worktree`
+覆盖四种存储格式的 v4 文件预览及 append-only 来源定位；`snapshot_batches_canonical_activity_for_the_full_evidence_window`
+覆盖旧 canonical 的版本优先级、摘要与完整读取；Claude 正文 owner 覆盖子正文与主正文身份交错；Prompt 来源 owner
+覆盖 Copilot/Qoder 失败、取消、其他并发任务与迟到进度。前端沿用生产组件的隔离 Electron fixture，验证内联转按需读取。
+这些缺口使用确定性的原生事件和存储样例复现；本轮不把前一节的真实模型结果当作修补后的重新验收。
+
+本轮结果：修补前的三个后端 owner 和 command 组件用例按预期失败；修补后定向 Rust 8 项通过
+（上述四项，以及既有正文聚合、Claude 工具返回、usage 和 thinking owners）。
+`pnpm typecheck`、`pnpm test`（Vitest 3,023 passed／2 skipped；Node 365 passed／2 skipped）、
+`pnpm test:command-view`、格式检查与 `DOCS_BASE_REF=d9606b8f4 pnpm docs:check:ci` 通过。
+组件截图已复核；内联转按需读取、revision 乱序、焦点与滚动均由真实生产组件验证。
+
+最小复现命令：
+
+```sh
+cargo test -p rovai-core --features slow-tests --lib -j2 -- \
+  public_text_streams_and_success_fallback_create_narration_without_thinking \
+  display_calls_keep_scoped_identity_and_exclude_unattributed_child_prose \
+  snapshot_batches_canonical_activity_for_the_full_evidence_window \
+  run_activity_file_uses_the_exact_evidence_and_mission_worktree
+pnpm test:command-view
+```
 
 实际平台为 macOS arm64；本次没有 Windows/Linux 真实运行或完整打包安装验收。后台原生能力、缺少事件与认证失败分别保留，不合并成“18 种均支持”。

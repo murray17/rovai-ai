@@ -172,12 +172,14 @@ function ToolCallDetail({
     previousEvidenceId.current = evidenceId
     requestSequence.current += 1
     restoreFocusAfterLoad.current = false
-    setResult({
+    setResult((current) => ({
       evidenceId,
       status: evidenceId ? 'idle' : 'ready',
-      text: evidenceId ? '' : detail,
+      // The same command may acquire deferred evidence after inline content.
+      // Keep its text node mounted while that first full result is loading.
+      text: evidenceId ? (current.evidenceId === null ? current.text : '') : detail,
       errorDetail: null
-    })
+    }))
   }, [evidenceId, evidenceVersion])
 
   useEffect(() => {

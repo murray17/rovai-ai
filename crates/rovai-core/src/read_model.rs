@@ -3721,14 +3721,14 @@ pub(crate) fn attach_canonical_activity_projection(
               ON activity.agent_run_id = target.agent_run_id
              AND activity.execution_epoch = target.execution_epoch
             JOIN json_each(activity.source_evidence_ids_json) AS source
-            WHERE activity.classifier_version IN (?2, ?3, ?4, ?5)
+            WHERE activity.classifier_version IN (?2, ?3, ?4, ?5, ?6)
         )
         SELECT requested.evidence_id,
                activity.operation_id, activity.classifier_version,
                activity.activity_domain,
                activity.semantic_kind, activity.tool_name,
                activity.presentation_hint,
-               CASE WHEN ?6 THEN json_set(activity.diff_projection_json, '$.entries', json('[]'))
+               CASE WHEN ?7 THEN json_set(activity.diff_projection_json, '$.entries', json('[]'))
                     ELSE activity.diff_projection_json END,
                activity.phase, activity.outcome,
                activity.credibility, activity.coverage_level,
@@ -3745,7 +3745,8 @@ pub(crate) fn attach_canonical_activity_projection(
                    WHEN ?2 THEN 0
                    WHEN ?3 THEN 1
                    WHEN ?4 THEN 2
-                   ELSE 3
+                   WHEN ?5 THEN 3
+                   ELSE 4
                  END
         "#,
     )?;
@@ -3753,6 +3754,7 @@ pub(crate) fn attach_canonical_activity_projection(
         params![
             requested_json,
             crate::canonical_activity::CLASSIFIER_VERSION,
+            crate::canonical_activity::V4_CLASSIFIER_VERSION,
             crate::canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
             crate::canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
             crate::canonical_activity::LEGACY_CLASSIFIER_VERSION,
@@ -7199,6 +7201,58 @@ mod slow_tests {
                 .iter()
                 .all(|evidence| evidence.canonical.is_some())
         );
+
+        // Legacy rows can retain several frozen projections; read the newest
+        // supported classifier, including v4 after the v5 upgrade.
+        let selected = snapshot.execution_evidence[0].clone();
+        let original = selected.canonical.as_ref().unwrap();
+        for version in ["activity-v2", "activity-v3", "activity-v4", "activity-v5"] {
+            database.connection().execute(
+                "INSERT INTO canonical_runtime_activity(
+                    agent_run_id, execution_epoch, operation_id, classifier_version,
+                    activity_domain, semantic_kind, tool_name, presentation_hint,
+                    phase, outcome, credibility, coverage_level, source_authority,
+                    source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence,
+                    revision, created_at, updated_at)
+                 SELECT agent_run_id, execution_epoch, operation_id, ?1,
+                    activity_domain, semantic_kind, tool_name, presentation_hint,
+                    phase, outcome, credibility, coverage_level, source_authority,
+                    source_evidence_ids_json, first_evidence_sequence, last_evidence_sequence,
+                    revision, created_at, updated_at
+                 FROM canonical_runtime_activity WHERE agent_run_id=?2 AND operation_id=?3 AND classifier_version='activity-v1'",
+                params![version, agent_run_id, original.operation_id],
+            ).unwrap();
+        }
+        for version in [
+            "activity-v5",
+            "activity-v4",
+            "activity-v3",
+            "activity-v2",
+            "activity-v1",
+        ] {
+            for metadata_only in [false, true] {
+                let mut historical = vec![selected.clone()];
+                attach_canonical_activity_projection(
+                    database.connection(),
+                    &mut historical,
+                    metadata_only,
+                )
+                .unwrap();
+                let canonical = historical
+                    .iter()
+                    .find(|item| item.id == selected.id)
+                    .unwrap()
+                    .canonical
+                    .as_ref()
+                    .unwrap();
+                assert_eq!(canonical.classifier_version, version);
+                assert_eq!(canonical.operation_id, original.operation_id);
+                assert_eq!(canonical.source_evidence_ids, original.source_evidence_ids);
+            }
+            if version != "activity-v1" {
+                database.connection().execute("DELETE FROM canonical_runtime_activity WHERE agent_run_id=?1 AND classifier_version=?2", params![agent_run_id, version]).unwrap();
+            }
+        }
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

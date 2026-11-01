@@ -198,6 +198,7 @@ struct DisplayCall {
     delegation_open: bool,
     background: bool,
     finished: bool,
+    launch_failed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -313,11 +314,13 @@ impl AcpExecutionDisplay {
                 )
             );
             if launch {
+                call.launch_failed |=
+                    matches!(update["status"].as_str(), Some("failed" | "cancelled"));
                 call.finished |= matches!(
                     update["status"].as_str(),
                     Some("completed" | "failed" | "cancelled")
                 );
-                call.delegation_open = call.background || !call.finished;
+                call.delegation_open = !call.launch_failed && (call.background || !call.finished);
             }
         }
         if call.child {
@@ -404,6 +407,44 @@ mod tests {
                 .unwrap()["runtimeRootOutput"],
             false
         );
+
+        // An explicit launch failure releases only its own anonymous-text gate,
+        // and late progress must not reopen it.
+        for (adapter, tool) in [
+            (AdapterKind::CopilotCli, "task"),
+            (AdapterKind::QoderCli, "Agent"),
+        ] {
+            for status in ["failed", "cancelled"] {
+                let mut state = AcpExecutionDisplay::default();
+                let mut launch = background.clone();
+                launch["update"]["toolName"] = json!(tool);
+                state.observe(adapter, "prompt", &launch);
+                let mut other = launch.clone();
+                other["update"]["toolCallId"] = json!("other-background");
+                state.observe(adapter, "prompt", &other);
+                let mut failed = background_finish.clone();
+                failed["update"]["status"] = json!(status);
+                let result = state.observe(adapter, "prompt", &failed).unwrap();
+                assert_eq!(result["update"]["status"], status);
+                assert_eq!(
+                    state.observe(adapter, "prompt", &prose).unwrap()["runtimeRootOutput"],
+                    false
+                );
+                failed["update"]["toolCallId"] = json!("other-background");
+                state.observe(adapter, "prompt", &failed);
+                assert_eq!(
+                    state.observe(adapter, "prompt", &prose).unwrap()["runtimeRootOutput"],
+                    true
+                );
+                launch["update"]["sessionUpdate"] = json!("tool_call_update");
+                launch["update"]["status"] = json!("in_progress");
+                state.observe(adapter, "prompt", &launch);
+                assert_eq!(
+                    state.observe(adapter, "prompt", &prose).unwrap()["runtimeRootOutput"],
+                    true
+                );
+            }
+        }
 
         let mut state = AcpExecutionDisplay::default();
         let root = json!({"sessionId":"session", "update":{"sessionUpdate":"tool_call","toolCallId":"same","toolName":"Read","status":"pending"}});

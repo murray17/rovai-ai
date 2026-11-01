@@ -27,7 +27,7 @@ const progress = buildLiveExecutionProgress(evidence.map(item => ({ ...item, cre
 const items = progress.items.filter(item => item.kind === 'tool')
 const reads: string[] = []
 let fail = true
-let agentRevision = 1
+let agentRevision = 0
 let showAgent = false
 const pendingAgentReads = new Map<number, () => void>()
 const agentInput = JSON.stringify({ description: '读取文件并返回报告', prompt: 'Read fixture.txt', run_in_background: false }, null, 2)
@@ -37,14 +37,15 @@ function agentEvidence(): AgentRunExecutionEvidenceView {
     revision: agentRevision, changeSequence: agentRevision, canonical: {
       ...canonical('agent-call', false), classifierVersion: 'activity-v5', sourceAuthority: 'runtime',
       credibility: 'runtime_structured', semanticKind: 'tool.agent', toolName: 'Agent', presentationHint: 'Agent', revision: agentRevision
-    }, payload: { toolName: 'Agent', kind: 'other', status: 'completed', input: agentInput } }
+    }, payload: { toolName: 'Agent', kind: 'other', status: 'completed', input: agentInput,
+      ...(agentRevision === 0 ? { output: agentOutput(0) } : {}) } }
 }
 window.rovai = {
   request: async (method: string, params: { evidenceId: string }) => {
     if (method === 'agentRunEvidence.getContent' && params.evidenceId === 'agent-evidence') {
       const revision = agentRevision
       reads.push(`${params.evidenceId}:${revision}`)
-      if (revision === 2) await new Promise<void>(resolve => pendingAgentReads.set(revision, resolve))
+      if (revision === 1 || revision === 2) await new Promise<void>(resolve => pendingAgentReads.set(revision, resolve))
       return { payload: { ...agentEvidence().payload as object, output: agentOutput(revision) } }
     }
     if (method !== 'agentRunEvidence.getContent' || params.evidenceId !== 'shell-evidence') throw new Error('Wrong evidence source')
@@ -63,7 +64,8 @@ function render(theme = 'day'): void {
   root.render(<main style={{ padding: 24, maxWidth: 760, margin: 'auto' }}>
     <p>模拟数据 · Command View 隔离验收</p>
     <ToolActivityGroup key={showAgent ? 'agent' : 'shell'} threadId="fixture-camp" runId="fixture-run" runStatus="succeeded"
-      liveTail={false} cancelling={false} items={displayedItems} completeEvidence={selectCompleteExecutionEvidence(displayedEvidence)}
+      liveTail={false} cancelling={false} items={displayedItems}
+      completeEvidence={selectCompleteExecutionEvidence(showAgent && agentRevision === 0 ? [] : displayedEvidence)}
       onFileOpenError={message => { throw new Error(message) }} />
   </main>)
 }

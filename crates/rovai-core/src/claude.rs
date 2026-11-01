@@ -1983,6 +1983,9 @@ fn normalize_claude_runtime_events(
             let block_type = block.get("type").and_then(Value::as_str);
             if block_type == Some("text") {
                 validate_claude_stream_session(event, expected_session_id)?;
+                if !root {
+                    return Ok(normalized);
+                }
                 if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
                     state.stream_text_item(index);
                 }
@@ -2088,6 +2091,9 @@ fn normalize_claude_runtime_events(
                 return Ok(normalized);
             };
             validate_claude_stream_session(event, expected_session_id)?;
+            if !root {
+                return Ok(normalized);
+            }
             let index = event
                 .pointer("/event/index")
                 .and_then(Value::as_u64)
@@ -2122,39 +2128,42 @@ fn normalize_claude_runtime_events(
                 return Ok(normalized);
             };
             validate_claude_stream_session(event, expected_session_id)?;
-            let packet_replay = nonempty_string(event.get("uuid"))
-                .is_some_and(|id| state.completed_text_packets.contains_key(&id));
-            if !packet_replay && let Some(id) = event.pointer("/message/id").and_then(Value::as_str)
-            {
-                if state
-                    .native_message_id
-                    .as_deref()
-                    .is_some_and(|previous| previous != id)
+            if root {
+                let packet_replay = nonempty_string(event.get("uuid"))
+                    .is_some_and(|id| state.completed_text_packets.contains_key(&id));
+                if !packet_replay
+                    && let Some(id) = event.pointer("/message/id").and_then(Value::as_str)
                 {
+                    if state
+                        .native_message_id
+                        .as_deref()
+                        .is_some_and(|previous| previous != id)
+                    {
+                        state.reset_text_items();
+                    }
+                    state.native_message_id = Some(id.to_owned());
+                } else if !packet_replay && state.message_text_completed {
+                    state.message_ordinal = state.message_ordinal.saturating_add(1);
+                    state.native_message_id = None;
                     state.reset_text_items();
                 }
-                state.native_message_id = Some(id.to_owned());
-            } else if !packet_replay && state.message_text_completed {
-                state.message_ordinal = state.message_ordinal.saturating_add(1);
-                state.native_message_id = None;
-                state.reset_text_items();
-            }
-            let mut text_items = state.completed_text_items(event, blocks).into_iter();
-            for block in blocks {
-                if block.get("type").and_then(Value::as_str) == Some("text")
-                    && let Some(text) = block.get("text").and_then(Value::as_str)
-                {
-                    state.text_delta_emitted = true;
-                    if !packet_replay {
-                        state.message_text_completed = true;
-                    }
-                    normalized.push(ClaudeCodeRuntimeEvent {
+                let mut text_items = state.completed_text_items(event, blocks).into_iter();
+                for block in blocks {
+                    if block.get("type").and_then(Value::as_str) == Some("text")
+                        && let Some(text) = block.get("text").and_then(Value::as_str)
+                    {
+                        state.text_delta_emitted = true;
+                        if !packet_replay {
+                            state.message_text_completed = true;
+                        }
+                        normalized.push(ClaudeCodeRuntimeEvent {
                         event_type: "agent.text.completed",
                         payload: serde_json::json!({
                             "itemId": text_items.next().context("Claude text packet changed its public block shape")?,
                             "text": text,
                         }),
                     });
+                    }
                 }
             }
             let tool_blocks = blocks
@@ -4198,6 +4207,63 @@ mod tests {
         let emit = |state: &mut ClaudeCodeStreamState, event: Value| {
             normalize_claude_runtime_events(&event, session_id, state).unwrap()
         };
+        // Child packets cannot enter narration or consume the root's text IDs.
+        let mut state = ClaudeCodeStreamState::default();
+        emit(
+            &mut state,
+            json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"message_start","message":{"id":"root-message"}}}),
+        );
+        emit(
+            &mut state,
+            json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"content_block_start","index":1,"content_block":{"type":"text"}}}),
+        );
+        for event in [
+            json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"child-message"}}}),
+            json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}),
+            json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"child progress"}}}),
+            json!({"type":"assistant","uuid":"child-text-packet","message":{"id":"child-message","content":[{"type":"text","text":"child report"}]}}),
+        ] {
+            let mut event = event;
+            event["session_id"] = json!(session_id);
+            event["parent_tool_use_id"] = json!("parent-agent-call");
+            assert!(emit(&mut state, event).is_empty());
+        }
+        assert!(
+            !state.text_delta_emitted,
+            "child prose must not suppress the root final fallback"
+        );
+        let tools = emit(
+            &mut state,
+            json!({"type":"assistant","session_id":session_id,
+            "parent_tool_use_id":"parent-agent-call","message":{"id":"child-message","content":[
+                {"type":"text","text":"child tool progress"},
+                {"type":"tool_use","id":"child-bash","name":"Bash","input":{"command":"pwd"}}]}}),
+        );
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].event_type, "runtime.action");
+        assert_eq!(tools[0].payload["runtimeRootOutput"], false);
+        let results = emit(
+            &mut state,
+            json!({"type":"user","session_id":session_id,
+            "parent_tool_use_id":"parent-agent-call","message":{"content":[
+                {"type":"tool_result","tool_use_id":"child-bash","is_error":false,"content":"/fixture"}]}}),
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].payload["output"], "/fixture");
+        let root = emit(
+            &mut state,
+            json!({"type":"assistant","session_id":session_id,
+            "message":{"id":"root-message","content":[{"type":"text","text":"root reply"}]}}),
+        );
+        assert_eq!(root.len(), 1);
+        assert_eq!(
+            root[0].payload["itemId"],
+            "claude-text-native:root-message:1"
+        );
+        assert_eq!(root[0].payload["text"], "root reply");
+
         for batched_completion in [false, true] {
             let mut state = ClaudeCodeStreamState::default();
             emit(
