@@ -689,6 +689,7 @@ struct AcpPromptObservation {
     delivery_id: String,
     assistant_suffix: AcpAssistantSuffixCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
+    execution_display: crate::runtime_subagent::AcpExecutionDisplay,
     unsupported_interaction: bool,
     questionnaire_request_ids: BTreeSet<String>,
     native_usage_message_ids: BTreeSet<String>,
@@ -703,6 +704,7 @@ impl AcpPromptObservation {
             delivery_id,
             assistant_suffix: AcpAssistantSuffixCollector::default(),
             observed_tools: HashMap::new(),
+            execution_display: crate::runtime_subagent::AcpExecutionDisplay::default(),
             unsupported_interaction: false,
             questionnaire_request_ids: BTreeSet::new(),
             native_usage_message_ids: BTreeSet::new(),
@@ -6263,6 +6265,17 @@ impl AcpRuntime {
         observation.images.observe(self.host.adapter_kind, message)
     }
 
+    /// Enrich only execution display facts inside the existing Prompt fence.
+    pub async fn execution_display_params(&self, prompt: &str, params: &Value) -> Option<Value> {
+        let mut observation = self.active_observation.lock().await;
+        let observation = observation
+            .as_mut()
+            .filter(|state| state.prompt_id == prompt)?;
+        observation
+            .execution_display
+            .observe(self.adapter_kind(), prompt, params)
+    }
+
     pub async fn observe_message(
         &self,
         native_prompt_id: &str,
@@ -6323,6 +6336,8 @@ impl AcpRuntime {
             observation.unsupported_interaction = true;
         }
         if session_update == Some("agent_message_chunk")
+            && crate::runtime::is_root_output(params)
+            && crate::runtime::is_root_output(update)
             && let Some(text) = update.pointer("/content/text").and_then(Value::as_str)
         {
             let message_id = update
@@ -6334,7 +6349,10 @@ impl AcpRuntime {
                 .assistant_suffix
                 .observe_assistant_chunk(message_id, text);
         }
-        if matches!(session_update, Some("tool_call" | "tool_call_update")) {
+        if matches!(session_update, Some("tool_call" | "tool_call_update"))
+            && crate::runtime::is_root_output(params)
+            && crate::runtime::is_root_output(update)
+        {
             observation.assistant_suffix.observe_tool_activity();
         }
         if !matches!(session_update, Some("tool_call" | "tool_call_update")) {
@@ -6347,9 +6365,14 @@ impl AcpRuntime {
             update.get("status").and_then(Value::as_str),
             Some("completed" | "failed")
         );
+        let observation_key = if params["runtimeRootOutput"] == false {
+            update["operationId"].as_str().unwrap_or(native_item_id)
+        } else {
+            native_item_id
+        };
         let observed = observation
             .observed_tools
-            .entry(native_item_id.to_string())
+            .entry(observation_key.to_string())
             .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
@@ -6403,7 +6426,7 @@ impl AcpRuntime {
         }
         let observed = observation
             .observed_tools
-            .remove(native_item_id)
+            .remove(observation_key)
             .unwrap_or_default();
         let Some(mut completion) = completed_action(self.host.adapter_kind, params)? else {
             return Ok(None);
@@ -6510,7 +6533,15 @@ impl AcpRuntime {
             .await
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)
-            .and_then(|observation| observation.observed_tools.get(native_item_id))
+            .and_then(|observation| {
+                let key = observation
+                    .execution_display
+                    .unique_call_id(native_item_id)?;
+                observation
+                    .observed_tools
+                    .get(key)
+                    .or_else(|| observation.observed_tools.get(native_item_id))
+            })
             .map(|observed| ObservedAcpToolContext {
                 native_kind: observed.native_kind.clone(),
                 raw_input: observed.raw_input.clone(),
@@ -7132,6 +7163,9 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli {
         compatibility["nativeBackgroundPolicy"] = json!("disabled-v1");
     }
+    if frozen_runtime.adapter_kind == AdapterKind::QoderCli {
+        compatibility["nativeBackgroundPolicy"] = json!("agent-sessions-disabled-v1");
+    }
     if frozen_runtime.adapter_kind == AdapterKind::QwenCode {
         compatibility["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
     }
@@ -7538,6 +7572,8 @@ fn configure_runtime_command(
                 && workspace.access == "read_only";
             match runtime.adapter_kind {
                 AdapterKind::QoderCli => {
+                    // Keep native Agent calls synchronous after env overlays.
+                    command.env("QODER_ENABLE_AGENT_SESSIONS", "0");
                     command.arg("--permission-mode").arg(if legacy_read_only {
                         "dont_ask"
                     } else {
@@ -16603,6 +16639,94 @@ while IFS= read -r ignored; do :; done
             );
             assert!(args.iter().any(|arg| *arg == "yolo"));
             assert!(!args.iter().any(|arg| *arg == "--available-tools="));
+        }
+
+        // Qoder disables background Agent sessions at launch, retaining the
+        // existing Native Session identity and ordinary synchronous Agent tool.
+        let mut qoder = frozen.clone();
+        qoder.adapter_kind = AdapterKind::QoderCli;
+        qoder.permissions.adapter_kind = AdapterKind::QoderCli;
+        qoder.permissions.values = json!({"permission_mode":"bypass_permissions"});
+        let qoder_digest = runtime_compatibility_digest(
+            &qoder,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+        )
+        .unwrap();
+        let mut qoder_inputs = old_inputs.clone();
+        qoder_inputs["adapterKind"] = json!(AdapterKind::QoderCli);
+        qoder_inputs
+            .as_object_mut()
+            .unwrap()
+            .remove("nativeQuestionnairePolicy");
+        assert_ne!(
+            qoder_digest,
+            Some(canonical_json_digest(&qoder_inputs).unwrap())
+        );
+        qoder_inputs["nativeBackgroundPolicy"] = json!("agent-sessions-disabled-v1");
+        assert_eq!(
+            qoder_digest,
+            Some(canonical_json_digest(&qoder_inputs).unwrap())
+        );
+        let unchanged = freeze_native_session_compatibility(qoder.clone(), &workspace).unwrap();
+        assert_eq!(
+            unchanged.binding_compatibility_digest,
+            qoder.binding_compatibility_digest
+        );
+        assert_eq!(
+            unchanged.native_session_compatibility_key,
+            qoder.native_session_compatibility_key
+        );
+        for with_mcp in [false, true] {
+            let mut command = Command::new(&executable);
+            command.env("QODER_ENABLE_AGENT_SESSIONS", "1");
+            command.env("PROCESS_ONLY", "preserved");
+            let servers = if with_mcp {
+                BTreeMap::from([(
+                    "fixture".into(),
+                    McpServerDefinition::StreamableHttp {
+                        url: "https://mcp.invalid/example".into(),
+                        headers: BTreeMap::new(),
+                    },
+                )])
+            } else {
+                BTreeMap::new()
+            };
+            let mcp = configure_runtime_command(
+                &mut command,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &qoder,
+                false,
+                &servers,
+                &root,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                mcp.is_some(),
+                with_mcp,
+                "policy precedes the MCP early return"
+            );
+            for (key, value) in [
+                ("QODER_ENABLE_AGENT_SESSIONS", "0"),
+                ("PROCESS_ONLY", "preserved"),
+            ] {
+                assert_eq!(
+                    command
+                        .as_std()
+                        .get_envs()
+                        .find(|(name, _)| *name == key)
+                        .unwrap()
+                        .1
+                        .unwrap(),
+                    value
+                );
+            }
         }
 
         // Only the V2 launch policy changes; V1 and native Session identity

@@ -317,6 +317,10 @@ impl PiTextState {
                 }).collect();
         }
         let (event_type, mut payload) = normalize_event(message);
+        crate::runtime_subagent::mark_agent_tool(
+            crate::agent_profile::AdapterKind::Pi,
+            &mut payload,
+        );
         if matches!(
             event_type,
             "agent.thought.delta" | "agent.thought.started" | "agent.thought.completed"

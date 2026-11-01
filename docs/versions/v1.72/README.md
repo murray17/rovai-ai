@@ -6,10 +6,16 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-30
+last_updated: 2026-11-01
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 原生子代理平铺执行记录（2026-11-01）
+
+按 User 确认方案，在独立 worktree 收敛为普通 command：机器人图标、单文本详情、来源隔离、稳定首次记录顺序与既有步骤分组。
+当前规范为 [Surface v58](../../contracts/run-process-detail-surface-v58.md)，取舍见 [D72](decisions.md#v1-72-d72)，
+改动、迁移、测试归属与真实模型边界见[实施记录](subagent-flat-execution.md)。后续按 User 授权以原生 env 关闭 Qoder 后台 Agent，保留同步子代理；不新增调度或自动续跑。
 
 ## 轻量文件编辑（2026-10-29）
 

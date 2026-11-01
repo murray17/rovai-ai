@@ -2239,6 +2239,34 @@ pub fn completed_intercepted_action(
 }
 
 pub fn normalize_event(method: &str, params: &Value) -> (&'static str, Value) {
+    let item = &params["item"];
+    if matches!(method, "item/started" | "item/completed") && item["type"] == "subAgentActivity" {
+        // `kind=completed` is an independent child lifecycle notice, not the
+        // return of the earlier start invocation (and has a different ID).
+        if item["kind"] != "started" || !item["id"].is_string() {
+            return ("runtime.event", json!({"lifecycle":true}));
+        }
+        let completed = method == "item/completed";
+        return (
+            "runtime.action",
+            json!({
+                "toolCallId":item["id"], "toolName":"subAgentActivity", "runtimeToolType":"agent",
+                "operationId":format!("codex-call:{}", canonical_json_digest(&json!([params["threadId"], params["turnId"], item["id"]])).expect("JSON identity")),
+                "runtimeSource":{"threadId":params["threadId"],"turnId":params["turnId"]},
+                "kind":"tool", "status":if completed {"completed"} else {"in_progress"},
+                "output":completed.then(|| serde_json::to_string_pretty(item).expect("JSON item")),
+            }),
+        );
+    }
+    let (event, mut payload) = normalize_event_inner(method, params);
+    crate::runtime_subagent::mark_agent_tool(
+        crate::agent_profile::AdapterKind::CodexCli,
+        &mut payload,
+    );
+    (event, payload)
+}
+
+fn normalize_event_inner(method: &str, params: &Value) -> (&'static str, Value) {
     if let Some(compaction) = normalize_context_compaction_event(method, params) {
         return compaction;
     }
@@ -4036,6 +4064,23 @@ for line in sys.stdin:
 
     #[test]
     fn completed_command_is_normalized_without_persisting_raw_output() {
+        let started = json!({"threadId":"thread", "turnId":"turn", "item":{
+            "type":"subAgentActivity","id":"call-launch","kind":"started",
+            "agentThreadId":"child","agentPath":"/root/child","model":"model","reasoningEffort":"high"}});
+        let (start_type, start) = normalize_event("item/started", &started);
+        let (end_type, end) = normalize_event("item/completed", &started);
+        assert_eq!((start_type, end_type), ("runtime.action", "runtime.action"));
+        assert_eq!(start["operationId"], end["operationId"]);
+        assert_eq!(start["runtimeToolType"], "agent");
+        assert_eq!(end["status"], "completed");
+        assert!(end["input"].is_null()); // Native event did not disclose a task prompt.
+        assert!(end["output"].as_str().unwrap().contains("agentThreadId"));
+        let mut notification = started.clone();
+        notification["item"]["id"] = json!("subagent-completed-child");
+        notification["item"]["kind"] = json!("completed");
+        for method in ["item/started", "item/completed"] {
+            assert_eq!(normalize_event(method, &notification).0, "runtime.event");
+        }
         let terminal_params = json!({
             "threadId": "thread-1",
             "turnId": "turn-1",

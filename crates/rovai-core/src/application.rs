@@ -21887,6 +21887,8 @@ async fn process_agent_run_pi_message(
                         "evidenceId": evidence_id,
                         "revision": evidence.as_ref().and_then(|value| value.revision),
                         "changeSequence": evidence.as_ref().and_then(|value| value.change_sequence),
+                        "sequence": evidence.as_ref().map(|value| value.sequence),
+                        "occurredAt": evidence.as_ref().map(|value| &value.occurred_at),
                         "outputTruncated": evidence.as_ref().and_then(|value| value.output_truncated),
                         "payload": public_payload,
                         "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
@@ -22603,6 +22605,7 @@ async fn process_acp_events(
                             "executionEpoch":execution_epoch,"adapterKind":AdapterKind::ZcodeApp,
                             "nativeMethod":"_zcode/background","evidenceId":evidence.id,
                             "revision":evidence.revision,"changeSequence":evidence.change_sequence,
+                            "sequence":evidence.sequence,"occurredAt":evidence.occurred_at,
                             "outputTruncated":evidence.output_truncated,
                             "payload":evidence.payload,"canonical":evidence.canonical}),
                         );
@@ -23051,6 +23054,8 @@ async fn process_agent_run_acp_delta_batch(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -23326,8 +23331,19 @@ async fn process_agent_run_acp_message(
         )
         .await;
     }
+    let display_params = if method == "session/update" {
+        let Some(params) = runtime
+            .execution_display_params(native_prompt_id, &params)
+            .await
+        else {
+            return;
+        };
+        params
+    } else {
+        params.clone()
+    };
     let completed_action = match runtime
-        .observe_message(native_prompt_id, &method, &params)
+        .observe_message(native_prompt_id, &method, &display_params)
         .await
     {
         Ok(completion) => completion,
@@ -23339,7 +23355,7 @@ async fn process_agent_run_acp_message(
     let (event_type, payload) = normalize_acp_event_with_completion(
         adapter_kind,
         &method,
-        &params,
+        &display_params,
         completed_action.as_ref(),
     );
     if event_type == "runtime.usage" {
@@ -23390,6 +23406,8 @@ async fn process_agent_run_acp_message(
             "evidenceId": evidence_id,
             "revision": evidence.as_ref().and_then(|evidence| evidence.revision),
             "changeSequence": evidence.as_ref().and_then(|evidence| evidence.change_sequence),
+            "sequence": evidence.as_ref().map(|evidence| evidence.sequence),
+            "occurredAt": evidence.as_ref().map(|evidence| &evidence.occurred_at),
             "outputTruncated": evidence.as_ref().and_then(|evidence| evidence.output_truncated),
             "payload": public_payload,
             "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
@@ -23508,6 +23526,16 @@ fn normalize_acp_event_with_completion(
             ("agent.thought.delta", payload)
         }
         Some("tool_call") | Some("tool_call_update") => {
+            if crate::runtime_subagent::acp_lifecycle_notice(adapter_kind, &update) {
+                return ("runtime.event", json!({"lifecycle":true}));
+            }
+            let tool_name = crate::runtime_subagent::acp_tool_name(adapter_kind, &update);
+            let agent_tool = tool_name
+                .as_deref()
+                .is_some_and(|name| crate::runtime_subagent::is_agent_tool(adapter_kind, name));
+            let task_parameters = tool_name.as_deref().is_some_and(|name| {
+                rovai_core::runtime_subagent::exposes_task_parameters(adapter_kind, name)
+            });
             let public_command =
                 acp::public_acp_shell_command(adapter_kind, update.get("rawInput"))
                     .or_else(|| completion.and_then(|value| value.public_command.clone()));
@@ -23545,8 +23573,11 @@ fn normalize_acp_event_with_completion(
             let mut payload = json!({
                 "runtimeRootOutput": crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update),
                 "sessionUpdate": update.get("sessionUpdate"),
+                "operationId": update.get("operationId"),
+                "runtimeSource": update.get("runtimeSource"),
                 "toolCallId": update.get("toolCallId"),
-                "toolName": update.get("toolName"),
+                "toolName": tool_name,
+                "runtimeToolType": if agent_tool { Some("agent") } else { None },
                 "status": public_status,
                 "kind": public_kind,
                 "title": update.get("title"),
@@ -23558,8 +23589,12 @@ fn normalize_acp_event_with_completion(
                     (adapter_kind == AdapterKind::MinimaxCodeCli)
                         .then(|| public_acp_content_text(update.pointer("/rawOutput/content")))
                         .flatten()
-                }),
-                "input": public_command,
+                }).or_else(|| task_parameters.then(|| update.get("rawOutput")
+                    .filter(|value| !value.is_null()).and_then(|value| serde_json::to_string_pretty(value).ok())).flatten()),
+                "input": if task_parameters {
+                    update.get("rawInput").filter(|value| !value.is_null())
+                        .and_then(|value| serde_json::to_string_pretty(value).ok())
+                } else { public_command },
                 "rawInputDigest": update
                     .get("rawInput")
                     .and_then(|value| canonical_json_digest(value).ok())
@@ -23648,7 +23683,13 @@ fn normalize_acp_event_with_completion(
             }
             ("runtime.action", payload)
         }
-        Some("plan") => ("runtime.plan", update),
+        Some("plan") => {
+            let root =
+                crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update);
+            let mut update = update;
+            update["runtimeRootOutput"] = json!(root);
+            ("runtime.plan", update)
+        }
         Some("usage_update") => ("runtime.usage", update),
         _ => ("runtime.event", update),
     }
@@ -23995,6 +24036,8 @@ async fn process_runtime_event(
             "evidenceId": evidence.id,
             "revision": evidence.revision,
             "changeSequence": evidence.change_sequence,
+            "sequence": evidence.sequence,
+            "occurredAt": evidence.occurred_at,
             "outputTruncated": evidence.output_truncated,
             "payload": evidence.payload,
             "canonical": evidence.canonical,
@@ -24180,6 +24223,8 @@ async fn persist_runtime_compaction_display(
             "evidenceId": evidence.id,
             "revision": evidence.revision,
             "changeSequence": evidence.change_sequence,
+            "sequence": evidence.sequence,
+            "occurredAt": evidence.occurred_at,
             "outputTruncated": evidence.output_truncated,
             "payload": evidence.payload,
             "canonical": evidence.canonical,
@@ -25523,6 +25568,8 @@ async fn process_agent_run_codex_delta_batch(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -25579,6 +25626,8 @@ async fn persist_interrupted_codex_activities(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -25763,6 +25812,8 @@ async fn process_agent_run_codex_message(
             "evidenceId": evidence_id,
             "revision": evidence.as_ref().and_then(|evidence| evidence.revision),
             "changeSequence": evidence.as_ref().and_then(|evidence| evidence.change_sequence),
+            "sequence": evidence.as_ref().map(|evidence| evidence.sequence),
+            "occurredAt": evidence.as_ref().map(|evidence| &evidence.occurred_at),
             "outputTruncated": evidence.as_ref().and_then(|evidence| evidence.output_truncated),
             "payload": public_payload,
             "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
@@ -36863,6 +36914,67 @@ for line in sys.stdin:
 
     #[test]
     fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
+        for (adapter, name) in [
+            (AdapterKind::CopilotCli, "task"),
+            (AdapterKind::QoderCli, "Agent"),
+            (AdapterKind::KimiCodeCli, "TaskOutput"),
+            (AdapterKind::HermesCli, "delegate_task"),
+            (AdapterKind::KiroCli, "subagent"),
+        ] {
+            let input =
+                json!({"prompt":"Read the fixture","mode":"background","agent_id":"native-child"});
+            let receipt = json!({"task_id":"native-task","status":"dispatched"});
+            let (event, payload) = normalize_acp_event(
+                adapter,
+                "session/update",
+                &json!({"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"native-call","operationId":"scoped-call",
+                "toolName":name,"kind":"execute","status":"completed","rawInput":input,"rawOutput":receipt,
+                "runtimeSource":{"sessionId":"session","promptId":"prompt"}}}),
+            );
+            assert_eq!(event, "runtime.action");
+            assert_eq!(payload["runtimeToolType"], "agent");
+            assert_eq!(payload["toolName"], name);
+            assert_eq!(payload["operationId"], "scoped-call");
+            assert_eq!(
+                serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+                input
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
+                receipt
+            );
+            assert_eq!(payload["status"], "completed");
+        }
+        // Kiro names its call in vendor metadata; the terminal drops that
+        // metadata and returns the report as items/Text, not ACP content.
+        let mut display = crate::runtime_subagent::AcpExecutionDisplay::default();
+        let input = json!({"task":"Read the fixture","mode":"blocking","stages":[{"name":"reader","role":"kiro_default"}]});
+        let started = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","rawInput":input,"_meta":{"kiro":{"toolName":"subagent"}}}
+        })).unwrap();
+        let report =
+            json!({"items":[{"Text":"Pipeline completed: 1 stages finished.\nCHILD_REPORT"}]});
+        let completed = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","kind":"other","status":"completed","rawOutput":report}
+        })).unwrap();
+        assert_eq!(
+            started["update"]["operationId"],
+            completed["update"]["operationId"]
+        );
+        let (_, payload) = normalize_acp_event(AdapterKind::KiroCli, "session/update", &completed);
+        assert_eq!(payload["toolName"], "subagent");
+        assert_eq!(payload["runtimeToolType"], "agent");
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+            input
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
+            report
+        );
         for (status, name, omitted, has_patch) in [
             ("completed", "edit", false, true),
             ("completed", "write", false, true),

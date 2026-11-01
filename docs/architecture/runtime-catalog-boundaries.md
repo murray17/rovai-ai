@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-10-28
+last_updated: 2026-11-01
 ---
 
 # Runtime Catalog Boundaries
@@ -183,6 +183,13 @@ Runtime Startup Settings 保存本机程序路径及按 Runtime 隔离的通用�
 执行仍保留只读连接摘要、凭据来源引用和输出脱敏，以保持旧快照与 Host/binding 兼容隔离；
 内部历史快照名不代表可编辑 API 配置。队员模型选择使用原生目录及能力，不附加编辑器允许名单或
 推理强度 fallback。边界由 [Runtime Launch v59](../contracts/runtime-launch-and-verification-v59.md)拥有。
+
+### Qoder 原生后台子代理
+
+Rovai 启动 Qoder ACP 时，在环境合并后设置 `QODER_ENABLE_AGENT_SESSIONS=0`，保留原生同步 Agent。
+不写用户配置，不修改 Bootstrap、工具结果或 Session 绑定；仅 Host 兼容摘要记录固定策略，旧 Host 按现有机制重建。
+该开关限制 Agent 后台会话、命名队友及 `/subtask`，不代替 Bash 后台命令策略，也不新增异步续跑。
+原生版本与真实调用证据见[兼容性清单](../runtime-compatibility.md#2026-11-01-qoder-同步子代理启动策略)。
 
 ### 受管执行的原生自动记忆
 

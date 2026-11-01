@@ -71,6 +71,7 @@ type ToolResultLoadStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'failed'
 
 interface ToolResultViewState {
   evidenceId: string | null
+  evidenceVersion?: string
   status: ToolResultLoadStatus
   text: string
   errorDetail: string | null
@@ -149,6 +150,7 @@ function ToolCallDetail({
   const t = useUiText()
   const client = useThreadClient()
   const evidenceId = completeEvidence?.id ?? null
+  const evidenceVersion = `${evidenceId}:${completeEvidence?.revision ?? 0}:${completeEvidence?.changeSequence ?? 0}`
   const outputWasTruncated = !inputOnly && completeEvidence?.outputTruncated === true
   const resultLabel = outputWasTruncated ? t('结果') : t('完整结果')
   const [result, setResult] = useExecutionRetainedState<ToolResultViewState>(`result:${resultKey}:${evidenceId}`, () => ({
@@ -165,17 +167,20 @@ function ToolCallDetail({
   const scrollHelpId = useId()
 
   useEffect(() => {
+    requestSequence.current += 1
     if (previousEvidenceId.current === evidenceId) return
     previousEvidenceId.current = evidenceId
     requestSequence.current += 1
     restoreFocusAfterLoad.current = false
-    setResult({
+    setResult((current) => ({
       evidenceId,
       status: evidenceId ? 'idle' : 'ready',
-      text: evidenceId ? '' : detail,
+      // The same command may acquire deferred evidence after inline content.
+      // Keep its text node mounted while that first full result is loading.
+      text: evidenceId ? (current.evidenceId === null ? current.text : '') : detail,
       errorDetail: null
-    })
-  }, [detail, evidenceId])
+    }))
+  }, [evidenceId, evidenceVersion])
 
   useEffect(() => {
     if (evidenceId !== null) return
@@ -192,12 +197,13 @@ function ToolCallDetail({
     if (!completeEvidence) return
     const sequence = ++requestSequence.current
     restoreFocusAfterLoad.current = restoreFocus
-    setResult({
+    setResult((current) => ({
       evidenceId: completeEvidence.id,
+      evidenceVersion,
       status: 'loading',
-      text: '',
+      text: current.evidenceId === completeEvidence.id ? current.text : '',
       errorDetail: null
-    })
+    }))
     try {
       const response = await client.request<{ payload: unknown }>(
         'agentRunEvidence.getContent',
@@ -211,31 +217,33 @@ function ToolCallDetail({
       if (requestSequence.current !== sequence) return
       setResult({
         evidenceId: completeEvidence.id,
+        evidenceVersion,
         status: fullText === null ? 'empty' : 'ready',
         text: fullText ?? '',
         errorDetail: null
       })
     } catch (error) {
       if (requestSequence.current !== sequence) return
-      setResult({
+      setResult((current) => ({
         evidenceId: completeEvidence.id,
+        evidenceVersion,
         status: 'failed',
-        text: '',
+        text: current.evidenceId === completeEvidence.id ? current.text : '',
         errorDetail: readErrorMessage(error, '').trim()
-      })
+      }))
     }
-  }, [client, threadId, completeEvidence])
+  }, [client, threadId, completeEvidence, evidenceVersion])
 
   useEffect(() => {
     if (
       expanded
       && completeEvidence
       && result.evidenceId === completeEvidence.id
-      && result.status === 'idle'
+      && (result.status === 'idle' || result.evidenceVersion !== evidenceVersion)
     ) {
       void loadCompleteResult(false)
     }
-  }, [completeEvidence, expanded, loadCompleteResult, result.evidenceId, result.status])
+  }, [completeEvidence, expanded, loadCompleteResult, result.evidenceId, result.evidenceVersion, result.status, evidenceVersion])
 
   useLayoutEffect(() => {
     if (!restoreFocusAfterLoad.current) return undefined
@@ -268,7 +276,7 @@ function ToolCallDetail({
 
   return (
     <div className="tool-call-detail" aria-busy={result.status === 'loading'}>
-      {result.status === 'ready' && (
+      {(result.status === 'ready' || result.text.length > 0) && (
         <>
           <span className="sr-only" id={scrollHelpId}>{scrollHelp}</span>
           <pre
@@ -927,6 +935,13 @@ export function RuntimeRetryNotice({ diagnostic }: {
 
 export function ToolCallIcon({ iconKind }: { iconKind: ActivityIconKind }): JSX.Element {
   const icon = ({
+    agent: (
+      <>
+        <rect x="3" y="4.5" width="10" height="8" rx="2" />
+        <path d="M8 4.5V2M1.5 7v3M14.5 7v3M6 10h4" />
+        <path d="M5.5 7.5h.01M10.5 7.5h.01" strokeWidth="2" />
+      </>
+    ),
     terminal: (
       <>
         <rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2" />

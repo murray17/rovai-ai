@@ -11,7 +11,8 @@ use crate::agent_profile::AdapterKind;
 pub const LEGACY_CLASSIFIER_VERSION: &str = "activity-v1";
 pub const INTERMEDIATE_CLASSIFIER_VERSION: &str = "activity-v2";
 pub const PREVIOUS_CLASSIFIER_VERSION: &str = "activity-v3";
-pub const CLASSIFIER_VERSION: &str = "activity-v4";
+pub const V4_CLASSIFIER_VERSION: &str = "activity-v4";
+pub const CLASSIFIER_VERSION: &str = "activity-v5";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeActivityMappingDescriptor {
@@ -110,6 +111,9 @@ pub(crate) fn classify_with_structure_for_version(
     evidence_kind: &str,
     payload: &Value,
 ) -> (String, Option<String>, bool) {
+    if classifier_version == CLASSIFIER_VERSION && payload["runtimeToolType"] == "agent" {
+        return structured_domain("tool", "tool.agent");
+    }
     let runtime_kind = payload
         .get("kind")
         .and_then(Value::as_str)

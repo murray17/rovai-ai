@@ -18,7 +18,7 @@ use crate::{
 
 pub use crate::runtime_activity_mapping::{
     CLASSIFIER_VERSION, INTERMEDIATE_CLASSIFIER_VERSION, LEGACY_CLASSIFIER_VERSION,
-    PREVIOUS_CLASSIFIER_VERSION,
+    PREVIOUS_CLASSIFIER_VERSION, V4_CLASSIFIER_VERSION,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -154,11 +154,16 @@ pub fn classify_evidence_with_version(
         );
     let file_operation = runtime_file_operation::operation_from_evidence(payload);
     let file_operation_path = runtime_file_operation::path_from_evidence(payload);
-    let diff_projection = runtime_diff::projection_from_evidence(payload, evidence_id)
-        .filter(|_| classifier_version == CLASSIFIER_VERSION || !is_pi_edit_diff_evidence(payload));
+    let diff_projection =
+        runtime_diff::projection_from_evidence(payload, evidence_id).filter(|_| {
+            matches!(
+                classifier_version,
+                CLASSIFIER_VERSION | V4_CLASSIFIER_VERSION
+            ) || !is_pi_edit_diff_evidence(payload)
+        });
     if matches!(
         classifier_version,
-        CLASSIFIER_VERSION | PREVIOUS_CLASSIFIER_VERSION
+        CLASSIFIER_VERSION | V4_CLASSIFIER_VERSION | PREVIOUS_CLASSIFIER_VERSION
     ) && file_operation.is_some_and(|operation| operation.operation_kind == "read")
     {
         activity_domain = "file".to_string();
@@ -762,6 +767,17 @@ mod tests {
             &payload,
         );
 
+        let v4 = classify_evidence_with_version(
+            V4_CLASSIFIER_VERSION,
+            "run-pi",
+            1,
+            "evidence-pi-edit",
+            "runtime.action",
+            "tool_call",
+            "terminal",
+            &payload,
+        );
+        assert_eq!(current.diff_projection, v4.diff_projection);
         assert!(current.diff_projection.is_some());
         assert!(previous.diff_projection.is_none());
         assert_eq!(current.activity_domain, "file");

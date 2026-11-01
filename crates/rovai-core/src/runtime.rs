@@ -40,6 +40,9 @@ use crate::{
 /// adapter strips private payload fields. Native Session/turn fencing still
 /// belongs to the transport; this helper cannot establish ownership by itself.
 pub fn is_root_output(payload: &Value) -> bool {
+    if payload.get("runtimeRootOutput") == Some(&Value::Bool(false)) {
+        return false;
+    }
     [
         payload,
         &payload["_meta"],
@@ -50,6 +53,7 @@ pub fn is_root_output(payload: &Value) -> bool {
         &payload["assistantMessageEvent"]["partial"],
         &payload["payload"],
         &payload["payload"]["_meta"],
+        &payload["_meta"]["github.com/copilot"],
     ]
     .iter()
     .all(|value| {
@@ -65,6 +69,7 @@ pub fn is_root_output(payload: &Value) -> bool {
             "opencode/child-session",
             "subAgentId",
             "source_agent_id",
+            "codebuddy.ai/parentToolCallId",
             "replay",
             "isReplay",
             "historical",

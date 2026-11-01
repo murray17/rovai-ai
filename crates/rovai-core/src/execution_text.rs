@@ -216,6 +216,14 @@ pub(crate) fn observe(
     let completion =
         event == "agent.text.completed" || (event == "activity.completed" && native_text);
     let boundary = event == "agent.text.boundary";
+    // Child/ambiguous prose must be rejected before it can join an anonymous
+    // root block. Tool returns, including text reports, are a different stream.
+    if (is_text_delta(event) || native_text || completion || boundary || private_reasoning)
+        && (!crate::runtime::is_root_output(payload)
+            || !crate::runtime::is_root_output(&payload["item"]))
+    {
+        return Ok(Some(None));
+    }
     if !admitted(database, run, epoch)? {
         return Ok(
             if is_text_delta(event)
@@ -774,6 +782,13 @@ mod slow_tests {
                 .unwrap()
         };
         let delta = "正文🙂".repeat(16);
+        for payload in [
+            json!({"delta":"CHILD_PROSE","runtimeRootOutput":false}),
+            json!({"delta":"CHILD_PROSE","parentToolCallId":"parent"}),
+            json!({"delta":"CHILD_PROSE","_meta":{"codebuddy.ai/parentToolCallId":"parent"}}),
+        ] {
+            assert!(write(&mut database, "agent.text.delta", payload).is_none());
+        }
         let first = write(
             &mut database,
             "agent.text.delta",

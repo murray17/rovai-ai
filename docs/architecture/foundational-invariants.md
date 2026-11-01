@@ -516,6 +516,9 @@ last_updated: 2026-10-29
 - Runtime source event、Execution Evidence、Canonical Runtime Activity 和 Renderer presentation 是四个显式层。Runtime/Core 只声明它们真实观测或介入的事实；新 command/tool operation 在可靠原生/Core identity 下归约为一条可变生命周期 Evidence，无法可靠关联与独立事实继续使用追加记录；公开文本按独立正文块定稿。生命周期行保留稳定展示 `sequence`，每次有效变更同事务递增行 `revision` 与 Run-wide `changeSequence`，语义重复不推进；所有层继续保留来源和原始观测边界。正文与命令保留原值且不做敏感文本匹配或替换；新 Tool 普通输出只在 Runtime 已完成 Agent 投递后，由统一持久化投影保留最长 7,680 UTF-8 字节，后缀永久舍弃。Core classifier 拥有 canonical 语义；Renderer 只本地化/分组/呈现。任一层都不能用未报告行为、进程消失、命令文本或 UI 提示补写“已执行”。字段与读取边界见 [Run Process Detail Surface v46](../contracts/run-process-detail-surface-v46.md)。
 - Canonical Runtime Activity 是 Core 从已准入 Evidence 当前 revision 构建、持久但可重建的版本化投影，不是新的效果真源。Lifecycle/Read Side 只从选定的 canonical projection 派生，不跳过它直接从 Runtime 标题或 evidence payload 猜状态。terminal-only、迟到 started 和互斥终态使用同一 reducer；迟到字段只补缺失，terminal 不回退，冲突 outcome 保持 `unsettled`。
 - `source_event_key` 与 Core-scoped `operationId` 是严格分离的身份：前者只在一个已声明 observation scope 内去重单个来源事件，后者才能跨 phase/evidence 合并同一操作。Core 只接受协议原生 ID、自有调用/receipt 关联或 Adapter 按封闭规则构造的可证明身份；不用时间、文本、路径或顺序相似性聚合。重放使用同一规则得到同一 identity/归约结果。
+- 原生子代理工具与主代理工具平铺并复用普通 command；子代理独立正文和无法确认归属的并发文字在正文聚合前过滤，
+  实际工具返回仍属于对应调用。启动调用不承担子任务生命周期；独立完成通知不覆盖启动输出。来源身份、顺序与结果缓存
+  规则见 [Run Process Detail Surface v58](../contracts/run-process-detail-surface-v58.md)。
 - Activity Domain（历史字段名 `capabilityKind`）是稳定顶层观测域；可选 `semanticKind` 只能在 Evidence 支持时细分，`presentationHint` 永不成为 canonical semantics。Domain/kind 词汇扩展必须在 Mapping Registry 注册、版本化并提供 replay fixture；无证据时保留已有域或 `unknown`。
 - `activity-v3` 的 Core 只保留 Runtime 明确 title，不生成本地化默认标题、Codex commandActions 标题或文件
   basename 标题；中文 fallback 与可靠 typed path 的阅读／编辑标题由 Renderer 拥有。Rovai 类型图标只由
@@ -523,10 +526,10 @@ last_updated: 2026-10-29
   command 中的 `rovai` 字样识别。
 - `phase` 只表示 started/progress/terminal 位置，`outcome` 独立表示证据支持的结果。乱序、冲突、waiting、Run 终态和 recovery 使用同一 reducer，不能从进程退出或 UI 消失猜 success/cancelled。Runtime 明确报告连续性中断时，未结算 operation 使用 `phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`；只有 Runtime 的权威取消终态才能写成 `cancelled`，仍可恢复的 Host 失联继续属于 recovery 而不是 interruption terminal。
 - 每个 operation 的 classifier/version 首次建立后固定。分类升级必须显式选择“只切换新 operation”或“建立平行
-  reprojection”；无论哪种都不得静默改写历史或让 live operation 中途换语义。当前 `activity-v3` 采用前者：
-  Migration 142 原子切换 current marker 和 receipt，既有 v1/v2 operation 继续用原版本结算，新 operation 才建立 v3。
+  reprojection”；无论哪种都不得静默改写历史或让 live operation 中途换语义。当前 `activity-v5` 采用前者：
+  Migration 219 原子切换 schema 169 的 marker 与 receipt，既有 v1–v4 operation 继续用原版本结算，新 operation 才建立 v5。
 - Read Side 可以按已声明的兼容窗口同时读取多个 classifier version，但必须有确定性优先级且不把双读冒充历史
-  replay。当前 v3/v2/v1 读取仅让原有 row 与新 row 都可见；没有批量回填、平行 projection、mapping digest 或任意
+  replay。当前 v5/v4/v3/v2/v1 读取仅让原有 row 与新 row 都可见；没有批量回填、平行 projection、mapping digest 或任意
   Evidence replay 基础设施，因而不得声称这些能力已经存在。
 - Runtime-reported Command Diff 只能由 Adapter/version 明确声明为完整 snapshot、exact mutation 或完整
   before/after 的结构化字段进入已准入 Evidence lifecycle 或独立 snapshot，并归约为既有 Canonical Activity 的 typed
