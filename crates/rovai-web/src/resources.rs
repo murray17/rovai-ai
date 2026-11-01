@@ -182,7 +182,13 @@ pub(super) async fn download_preview(
 fn is_core_file_source_kind(kind: Option<&str>) -> bool {
     matches!(
         kind,
-        Some("camp_workspace" | "message_reference" | "run_evidence" | "run_activity_file")
+        Some(
+            "project_file"
+                | "camp_workspace"
+                | "message_reference"
+                | "run_evidence"
+                | "run_activity_file"
+        )
     )
 }
 
@@ -305,6 +311,14 @@ fn preview_key(handle: &Handle) -> String {
     key.update(b"rovai-web-preview-v1\0");
     key.update(handle.client.as_bytes());
     key.update(handle.path.as_os_str().as_encoded_bytes());
+    if handle.source["kind"] == "project_file" {
+        key.update(
+            handle.source["rawReference"]
+                .as_str()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+    }
     format!("web:{:x}", key.finalize())
 }
 
@@ -343,6 +357,8 @@ async fn metadata(
         .to_lowercase();
     let (kind, mime) = if let Some(mime) = image_mime(&content.prefix) {
         ("image", mime)
+    } else if handle.source["kind"] == "project_file" && (content.has_nul || !content.text) {
+        ("unsupported", "application/octet-stream")
     } else {
         ensure!(!content.has_nul && content.text, "decode_failed");
         // HTML bytes travel only through authenticated, generation-bound reads.
@@ -643,7 +659,7 @@ async fn file_operation(
         let source = handle.restore.as_ref().unwrap_or(&handle.source);
         if !matches!(
             source["kind"].as_str(),
-            Some("camp_workspace" | "message_reference")
+            Some("camp_workspace" | "message_reference" | "project_file")
         ) {
             return Ok(rovai_core::file_edit::failure("edit_unavailable"));
         }

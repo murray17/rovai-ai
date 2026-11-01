@@ -7,7 +7,7 @@ import { request as httpRequest } from 'node:http'
 
 // Extends the existing Host pipe/HTTP owner with real Desktop file admission and
 // disk writes. The caller owns isolated Core, workspace and cleanup.
-export async function exerciseFileEditing({ host, fileCall, session, otherSession, threadId, workspace, fixture }) {
+export async function exerciseFileEditing({ host, call, fileCall, session, otherSession, threadId, workspace, fixture }) {
   const root = resolve(import.meta.dirname, '../..')
   const require = createRequire(import.meta.url)
   const esbuild = createRequire(require.resolve('vite'))('esbuild')
@@ -23,6 +23,32 @@ export async function exerciseFileEditing({ host, fileCall, session, otherSessio
   let webHandle
   try {
     await desktop.bindThread(901, threadId)
+    // Directory browsing is a real Host capability on both transports. Closing
+    // it must not revoke an already opened file's independent preview/edit source.
+    const browse = async (action, input = {}, editor = session) => call(editor, 'projectFiles.request', { threadId, action, ...input })
+    const scope = (await browse('resolve')).value
+    const listed = (await browse('list', { scopeId: scope.scopeId })).value
+    const entry = listed.entries.find(entry => entry.name === 'editable.ts')
+    assert.ok(entry, 'a file absent from conversation messages is discoverable')
+    assert.equal((await browse('list', { scopeId: scope.scopeId }, otherSession)).ok, false)
+    const projectSource = (await browse('open', { scopeId: scope.scopeId, entryId: entry.id })).value
+    const projectDesktop = await desktop.open(901, projectSource)
+    assert.equal(projectDesktop.ok, true, JSON.stringify(projectDesktop))
+    assert.equal(projectDesktop.value.file.displayPath, 'editable.ts')
+    const projectWeb = await fileCall(session, 'open', projectSource)
+    assert.equal(projectWeb.ok, true, JSON.stringify(projectWeb))
+    await browse('watch', { scopeId: scope.scopeId, entryIds: [] })
+    await writeFile(join(workspace, 'created-by-external-process.txt'), 'external')
+    assert.ok((await browse('poll', { scopeId: scope.scopeId, revision: 0 })).value.revision > 0)
+    await browse('release', { scopeId: scope.scopeId })
+    const projectAccess = { handleId: projectWeb.value.file.handleId, expectedGeneration: projectWeb.value.file.contentGeneration }
+    const projectRead = await fileCall(session, 'readEditableFile', projectAccess)
+    assert.equal(projectRead.ok, true, JSON.stringify(projectRead))
+    assert.equal((await fileCall(session, 'saveTextFile', { ...projectAccess, text: 'saved from directory', expectedVersion: projectRead.value.version })).ok, true)
+    assert.equal(await readFile(path, 'utf8'), '\ufeffsaved from directory')
+    await fileCall(session, 'release', { handleId: projectAccess.handleId })
+    await desktop.release(901, { handleId: projectDesktop.value.file.handleId })
+    await writeFile(path, '\ufeffconst number = 1;\r\n// trailing  ')
     const opened = await desktop.open(901, source)
     assert.equal(opened.ok, true, JSON.stringify(opened))
     const file = opened.value.file

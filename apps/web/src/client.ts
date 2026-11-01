@@ -53,6 +53,7 @@ class ConnectionUnavailable extends Error {
 export type WorkspaceListing = { name: string; projectPath: string; parentPath: string | null; roots: string[]; directories: { name: string; projectPath: string }[]; nextOffset: number | null }
 
 export const WEB_OPERATIONS = [
+  'projectFiles.request',
   'threads.rename',
   'threads.delete',
   'threads.deletionIssues',

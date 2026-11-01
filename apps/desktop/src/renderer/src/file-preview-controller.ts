@@ -7,6 +7,7 @@ import { prepareHtmlPreviewSite } from './file-preview-html-site'
 import { agentRunFileChangeHasReviewableDiff } from './file-changes-presentation'
 import { filePreviewPresentationFromFile, filePreviewPresentationFromRequest, filePreviewSessionStore, filePreviewSourceKey, filePreviewTabMatchesResolvedFile, resolvedFilePreviewSource, restorableFilePreviewRequest, stableFilePreviewSourceKey, type FilePreviewPresentation, type FilePreviewPresentationHint, type FilePreviewReadingState, type FilePreviewSessionSnapshot, type FilePreviewTabSnapshot } from './file-preview-session'
 export type FilePreviewContent =
+  | { kind: 'unsupported' }
   | { kind: 'markdown'; text: string; tabToken: string; assetBasePath: string }
   | { kind: 'code' | 'text' | 'patch'; text: string }
   | { kind: 'html'; preview: FilePreviewHtmlSite }
@@ -303,6 +304,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   > => {
     const request = { handleId: file.handleId, expectedGeneration: file.contentGeneration }
     try {
+      if (file.kind === 'unsupported') return { ok: true, content: { kind: 'unsupported' }, pageOffsets: [], pageIndex: 0 }
       if (file.kind === 'image') {
         const result = await api.readBinary(request)
         if (!result.ok) return result

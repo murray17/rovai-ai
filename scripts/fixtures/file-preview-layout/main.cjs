@@ -774,7 +774,8 @@ app.whenReady().then(async () => {
   })
 
   await check('tabs shrink equally before minimum-width overflow, and expand again after closing', async () => {
-    await viewport(1_540)
+    // The fixed directory control occupies one additional 36px toolbar slot.
+    await viewport(1_604)
     const tabs = async () => { await snapshot(); return run('window.previewTest.tabSnapshot()') }
     const equalWidths = (state, width) => state.tabs.forEach(tab => closeTo(tab.width, width, 'Equal tab widths'))
     await run('window.previewTest.openTab(0)')
@@ -825,7 +826,7 @@ app.whenReady().then(async () => {
     await run('window.previewTest.setTheme("night")')
     await snapshot()
     await capture('tabs-minimum-night')
-    await viewport(1_540)
+    await viewport(1_604)
     const expanded = await tabs()
     closeTo(expanded.tabs[0].width, shrinking.tabs[0].width, 'Widening the preview expands tabs')
     assert.equal(expanded.overflow, false)

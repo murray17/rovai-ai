@@ -26,8 +26,14 @@ import {
 import { UiText, uiAttribute } from './interface-language'
 import { splitterScale, useCollapsibleSplitter, type FoldEdge } from './useCollapsibleSplitter'
 import { SplitterFeedback } from './SplitterFeedback'
+import { useProjectFiles } from './ProjectFilesContext'
+import { ProjectFilesPane } from './ProjectFilesPane'
 
 interface FilePreviewLayoutValue {
+  directoryWidth: number
+  directoryReservedWidth: number
+  directoryMaximum: number
+  directoryDrawer: boolean
   threadId: string | null
   visible: boolean
   activityMode: boolean
@@ -76,6 +82,7 @@ export function FilePreviewLayoutProvider({
   children: ReactNode
 }): React.JSX.Element {
   const [readingExpanded, updateExpanded] = useState(false)
+  const browser = useProjectFiles()
   const [foldPreview, setFoldPreview] = useState<FoldEdge | null>(null)
   const readingPositions = useRef<Array<{ element: HTMLElement; top: number; left: number }>>([])
   const rememberConversation = useCallback(() => {
@@ -207,7 +214,13 @@ export function FilePreviewLayoutProvider({
   }, [])
   const ratio = preferredRatio ?? initialRatios.get(threadId ?? '') ?? DEFAULT_FILE_PREVIEW_RATIO
   const width = dragWidth ?? filePreviewWidthForRatio(availableWidth, ratio)
+  const directorySpace = availableWidth - (visible && !expanded ? width : 0) - 420
+  const directoryDrawer = compact || directorySpace < 180
+  const directoryMaximum = Math.max(180, Math.min(520, directoryDrawer ? availableWidth - 24 : directorySpace))
+  const directoryWidth = Math.min(directoryMaximum, Math.max(180, browser?.width ?? 228))
+  const directoryReservedWidth = browser?.visible && !directoryDrawer ? directoryWidth : 0
   const value = useMemo<FilePreviewLayoutValue>(() => ({
+    directoryWidth, directoryReservedWidth, directoryMaximum, directoryDrawer,
     threadId,
     visible,
     activityMode,
@@ -222,20 +235,21 @@ export function FilePreviewLayoutProvider({
     availableWidth,
     resizing: dragWidth !== null,
     className: [
+      directoryReservedWidth ? 'project-files-inline' : '',
       compact ? 'file-preview-compact' : '',
       expanded ? 'file-preview-expanded' : '',
       foldPreview === 'minimum' ? 'file-preview-folded' : '',
       dragWidth !== null ? 'is-file-preview-resizing' : '',
       snapping ? 'is-file-preview-snapping' : ''
     ].filter(Boolean).join(' '),
-    style: { '--file-preview-width': `${Math.round(width)}px` } as CSSProperties,
+    style: { '--file-preview-width': `${Math.round(width)}px`, '--project-files-width': `${Math.round(directoryReservedWidth)}px` } as CSSProperties,
     workspace,
     workspaceRef: setWorkspace,
     previewWidth,
     commitWidth,
     cancelResize,
     resetRatio
-  }), [expanded, foldPreview, setExpanded, rememberConversation, previewCollapse, activityMode, availableWidth, cancelResize, commitWidth, compact, dragWidth, previewWidth, resetRatio, snapping, threadId, visible, width, workspace])
+  }), [directoryWidth, directoryReservedWidth, directoryMaximum, directoryDrawer, expanded, foldPreview, setExpanded, rememberConversation, previewCollapse, activityMode, availableWidth, cancelResize, commitWidth, compact, dragWidth, previewWidth, resetRatio, snapping, threadId, visible, width, workspace])
 
   return <FilePreviewInitialWidthContext.Provider value={initializeMinimumWidth}>
     <FilePreviewLayoutContext.Provider value={value}>{children}</FilePreviewLayoutContext.Provider>
@@ -254,10 +268,10 @@ export function FilePreviewWorkspace({ children, hidden }: { children: ReactNode
   const layout = useOptionalFilePreviewLayout()
   return <div
     ref={layout?.workspaceRef}
-    className={`workspace-grid inspector-collapsed${layout?.visible ? ` file-preview-open ${layout.className}` : ''}`}
-    style={layout?.visible ? layout.style : undefined}
+    className={`workspace-grid inspector-collapsed ${layout?.className ?? ''}${layout?.visible ? ' file-preview-open' : ''}`}
+    style={layout?.style}
     hidden={hidden}
-  >{children}</div>
+  >{children}<ProjectFilesPane /></div>
 }
 
 export function FilePreviewResizeHandle({ onClose }: { onClose(): void }): React.JSX.Element | null {

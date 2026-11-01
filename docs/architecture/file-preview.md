@@ -255,3 +255,14 @@ Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.r
 Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core 重新解析业务来源，数据库锁之外的 blocking pool
 使用 `file_edit` 执行串行、带摘要基线的同目录替换。没有第二份 Node/Web 写入实现，也没有持久操作账本。
 字段和失败行为见 [File Preview v24](../contracts/file-preview-v24.md)，界面见[文件预览区](../ui/components/file-preview.md#轻量文本编辑)。
+
+## 项目目录浏览
+
+`ProjectFilesStore` 按 Thread 保留展开项、搜索、选中和滚动位置，独立于预览 session 的显隐和标签。
+`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v25](../contracts/file-preview-v25.md) 请求。
+Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；该命令不进入普通写命令队列或数据库事务。
+
+每个正在浏览的作用域共享一组非递归目录监听；变更通知只使可见目录缓存失效，与现有文件预览监听各负其责。
+关闭目录释放作用域，但已打开的 `project_file` 仍由原预览资源 owner 持有。根变化时旧来源失败，不换到另一根。
+目录条目不读取正文；树、搜索、标签共用现有 `ProjectFileIcon`，导航使用界面字体，代码正文沿用 CodeMirror 等宽字体。
+没有文件管理、工作副本选择器、后台索引、搜索续传或新的编辑框架。目录中的不支持格式只显示信息与现有主动打开/下载操作。
