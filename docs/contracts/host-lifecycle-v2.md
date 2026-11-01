@@ -5,7 +5,7 @@ authority: headless-host-startup-and-controlled-stop
 status: accepted
 version: 2
 source_version: v1.59
-last_updated: 2026-09-14
+last_updated: 2026-11-02
 ---
 
 # Host Lifecycle v2
@@ -37,15 +37,17 @@ Host 自动创建尚不存在的必要目录。切换 data-dir 选择另一实�
 | 登录 Token / Web Sessions | 私有 `web-auth.json`；旧 `server-token` 仅在首次创建统一文档时导入 |
 
 不要求用户填写内部 `--skill-library-root`、`--mcp-config-path` 或 `--runtime-camp-files-root`。
-Runtime root 只允许精确实例 key 对应的根内位置；继续检查符号链接、其他受管目录重叠、本地目录所有权、
-独占锁及 root/data identity marker。不能通过放开任意嵌套路径实现集中存储。
+Runtime root 只允许精确实例 key 对应的根内位置，按实际使用准备；不为启动预先创建旧 Runtime root marker。
+实际文件操作仍检查符号链接、其他受管目录重叠、本地目录所有权与实例归属。不能通过放开任意嵌套路径实现集中存储。
 用户项目、source 附件原路径、Agent CLI 安装、原生认证及会话不属于本次集中存储范围。
 
 ## 数据准入与兼容
 
 Core 仍先取得 data-dir 独占 lease，再检查 SQLite authority、执行必要迁移和启动恢复。同目录第二 Host
 明确报占用并以非零退出，不终止原 owner。已有兼容数据库正常打开，不清空；损坏、未来 schema、残缺
-authority 继续按现行准入拒绝。曾建立 Runtime root 的实例若主库消失，不再次以空库初始化。
+authority 继续按现行准入拒绝。已有数据库、旧 Runtime root marker 或持久 Web 认证文档表明曾存在 authority 时，
+主库消失不得再次以空库初始化。统一 Web 认证文档只在 Core 准入后创建；首次启动前读取 bootstrap Token 不创建
+该文档，也不将新实例误判为丢失数据库。认证文档损坏或不可读仍明确失败，不重置，不增加新标记文件。
 
 没有 `server-layout.json` 的已有数据库或 MCP/Skills/实例等自有资源被识别为 Desktop/旧预览布局，返回 `server_legacy_layout`，不改动
 该目录权限或数据。继续使用其原 `rovai-host run` 命令和完整关联路径；本轮不新增 Desktop 迁移或通用迁移向导。
