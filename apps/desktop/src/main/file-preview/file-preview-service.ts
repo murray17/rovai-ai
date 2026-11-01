@@ -4,7 +4,7 @@ import { createPreviewFileSource } from '../../../../../packages/html-preview/sr
 import { createHash, randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from 'node:path'
-import type { FileHandle } from 'node:fs/promises'
+import { stat, type FileHandle } from 'node:fs/promises'
 import type {
   FilePreviewRetentionState,
   FileEditAccess, FileEditResult, SaveTextFileRequest,
@@ -94,7 +94,7 @@ export type FilePreviewAuthorityResult =
     }
 
 export interface FilePreviewSourceAuthority {
-  edit?(saving: boolean, input: { source: OpenFilePreviewRequest; path: string; root: string; text?: string; expectedVersion?: string }): Promise<FileEditResult>
+  edit?(saving: boolean, input: { source: OpenFilePreviewRequest; path: string; text?: string; expectedVersion?: string }): Promise<FileEditResult>
   resolve(request: Exclude<OpenFilePreviewRequest, { kind: 'child_of_handle' | 'authorized_root' }>): Promise<FilePreviewAuthorityResult | null>
 }
 
@@ -459,14 +459,10 @@ export class FilePreviewService {
     const record = this.#recordOrNull(webContentsId, request.handleId)
     if (!record || record.generation !== request.expectedGeneration || !this.#authority.edit
       || !['code', 'text', 'markdown', 'html'].includes(record.classification.kind)) return unavailable
-    const source = record.request.kind === 'child_of_handle'
-      ? await this.#independentRestoreRequest(record.request, record.threadId, record.canonicalPath) : record.request
-    if (!source || !['camp_workspace', 'message_reference', 'project_file'].includes(source.kind)) return unavailable
-    // The Host re-resolves this source. Display paths never become write authority.
-    const root = source.kind === 'camp_workspace' ? await this.#canonicalWorkspaceRoot(record.threadId)
-      : await canonicalizeExistingPath(record.reopenTarget.rootPath).catch(() => null)
-    if (!root || !pathIsWithin(root, record.canonicalPath)) return unavailable
-    return this.#authority.edit(saving, { source, path: record.canonicalPath, root,
+    const source = record.restoreRequest ?? record.request
+    if (source.kind === 'child_of_handle') return unavailable
+    // Reuse the resolved current file regardless of entry or project membership.
+    return this.#authority.edit(saving, { source, path: record.canonicalPath,
       ...('text' in request ? { text: request.text, expectedVersion: request.expectedVersion } : {}) })
   }
 
@@ -1082,8 +1078,12 @@ export class FilePreviewService {
       throw error
     }
     const handleId = randomUUID()
+    const parent = await stat(dirname(opened.canonicalPath)).catch(async error => {
+      await opened.file.close().catch(() => undefined)
+      throw error
+    })
     const previewKey = createHash('sha256')
-      .update(`${webContentsId}\0${target.threadId}\0${opened.canonicalPath}${request.kind === 'project_file' ? `\0${target.sourceIdentity}` : ''}`)
+      .update(`${webContentsId}\0${target.threadId}\0${opened.canonicalPath}\0${parent.dev}:${parent.ino || parent.birthtimeMs}`)
       .digest('hex')
     const allowChildren = target.allowChildren ?? target.sourceKind !== 'attachment'
     const capabilities: FilePreviewCapability[] = ['read', 'open_in_system']
@@ -1092,7 +1092,7 @@ export class FilePreviewService {
       capabilities.push('preview_asset')
     }
     const pathProjection = await this.#pathProjection(target, opened)
-    const restoreRequest = await this.#independentRestoreRequest(request, target.threadId, opened.canonicalPath)
+    const restoreRequest = await this.#independentRestoreRequest(webContentsId, request, target.threadId, opened.canonicalPath)
     try {
       this.#requireBinding(webContentsId, binding, target.threadId)
     } catch (error) {
@@ -1205,14 +1205,21 @@ export class FilePreviewService {
   }
 
   async #independentRestoreRequest(
+    webContentsId: number,
     request: OpenFilePreviewRequest,
     threadId: string,
     canonicalPath: string
   ): Promise<RestoreFilePreviewRequest | undefined> {
+    if (request.kind === 'authorized_root' || request.kind === 'attachment' && request.locator.owner === 'composer') {
+      return { kind: 'camp_workspace', threadId, rawReference: canonicalPath }
+    }
     if (request.kind !== 'child_of_handle') return undefined
+    const parent = this.#recordOrNull(webContentsId, request.parentHandleId)
+    if (!parent || parent.request.kind === 'attachment'
+      || parent.request.kind === 'child_of_handle' && !parent.restoreRequest) return undefined
     const root = await this.#canonicalWorkspaceRoot(threadId)
     const rawReference = root ? workspaceRelativeReference(root, canonicalPath) : null
-    return rawReference ? { kind: 'camp_workspace', threadId, rawReference } : undefined
+    return { kind: 'camp_workspace', threadId, rawReference: rawReference ?? canonicalPath }
   }
 
   async #canonicalWorkspaceRoot(threadId: string): Promise<string | null> {
@@ -1308,15 +1315,7 @@ export class FilePreviewService {
       || binding.threadId !== notification.threadId
       || binding.generation !== notification.bindingGeneration
     ) return
-    const changed = new Set(notification.previewKeys)
-    for (const record of this.#handles.values()) {
-      if (
-        record.webContentsId === notification.webContentsId
-        && record.threadId === notification.threadId
-        && record.bindingGeneration === notification.bindingGeneration
-        && changed.has(record.previewKey)
-      ) record.hasExternalUpdate = true
-    }
+    // A watcher invalidates a version; it does not prove that the file changed.
     this.#native.publishExternalUpdate(notification)
   }
 

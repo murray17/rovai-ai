@@ -40,6 +40,7 @@ export interface FilePreviewFileTabSnapshot {
   reading?: FilePreviewReadingState
   kind: 'file'
   id: string
+  openedFromDirectory?: boolean
   sourceRequest: RestorableFilePreviewRequest | null
   presentation: FilePreviewPresentation
 }
@@ -66,7 +67,13 @@ export interface ExecutionTabSnapshot {
   reading?: FilePreviewReadingState
 }
 
-export type FilePreviewTabSnapshot = FilePreviewFileTabSnapshot | FilePreviewChangesTabSnapshot | MissionActivityTabSnapshot | ExecutionTabSnapshot
+export interface FilePickerTabSnapshot {
+  kind: 'file_picker'
+  id: string
+  reading?: FilePreviewReadingState
+}
+
+export type FilePreviewTabSnapshot = FilePreviewFileTabSnapshot | FilePreviewChangesTabSnapshot | MissionActivityTabSnapshot | ExecutionTabSnapshot | FilePickerTabSnapshot
 
 export interface FilePreviewSessionSnapshot {
   tabs: FilePreviewTabSnapshot[]
@@ -78,7 +85,7 @@ const DEFAULT_SESSION_LIMIT = filePreviewRetentionLimits.snapshots
 
 function copySnapshot(snapshot: FilePreviewSessionSnapshot): FilePreviewSessionSnapshot {
   return {
-    tabs: snapshot.tabs.map((tab) => tab.kind === 'mission_activity' || tab.kind === 'execution'
+    tabs: snapshot.tabs.map((tab) => tab.kind === 'mission_activity' || tab.kind === 'execution' || tab.kind === 'file_picker'
       ? { ...tab, reading: tab.reading ? { ...tab.reading } : undefined }
       : tab.kind === 'file_change'
       ? {

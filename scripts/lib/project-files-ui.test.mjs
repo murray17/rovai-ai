@@ -11,7 +11,7 @@ import react from '@vitejs/plugin-react'
 import electron from 'electron'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
-test('real project browser preserves independent panes, native resizing, search and file previews', { timeout: 120_000 }, async t => {
+test('real project browser links the file entry and sidecar, preserves resizing, search and file previews', { timeout: 120_000 }, async t => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-project-browser-ui-')))
   t.diagnostic(`Isolated userData: ${join(fixture, 'userData')}; Core: ${join(fixture, 'data')}; Skills: ${join(fixture, 'data/skills')}`)

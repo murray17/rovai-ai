@@ -9,6 +9,10 @@ export function previewTabPresentation(tab: PreviewTabModel, language: Interface
   displayPath: string
   icon: ResourceVisualKind
 } {
+  if (tab.kind === 'file_picker') {
+    const label = translateUi(language, '打开文件')
+    return { fileName: label, displayPath: label, icon: 'text' }
+  }
   if (tab.kind === 'mission_activity') {
     const label = translateUi(language, '活动')
     return { fileName: label, displayPath: label, icon: 'text' }

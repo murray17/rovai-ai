@@ -1,5 +1,5 @@
 /* The file workspace has a neutral canvas; navigation and other surfaces retain their palette. */
-.camp-topbar.has-project-files, .project-files-workspace, .file-preview-document-panel, .project-files-quick {
+.camp-topbar.has-project-files, .project-files-workspace, .file-preview-document-panel {
   --conversation-surface: var(--file-canvas);
   --surface: var(--file-canvas);
   --surface-hover: var(--file-hover);
@@ -29,7 +29,7 @@
 .camp-topbar.has-project-files:not(.has-file-preview) .topbar-conversation-context { padding-right: 94px; }
 .camp-topbar.has-project-files.project-files-inline { grid-template-columns: minmax(0, 1fr) var(--project-files-width); }
 .camp-topbar.has-project-files.has-file-preview.project-files-inline,
-.workspace-grid.inspector-collapsed.file-preview-open.project-files-inline { grid-template-columns: minmax(0, 1fr) var(--file-preview-width) var(--project-files-width); }
+.workspace-grid.inspector-collapsed.file-preview-open.project-files-inline { grid-template-columns: minmax(0, 1fr) calc(var(--file-preview-width) - var(--project-files-width)) var(--project-files-width); }
 .camp-topbar.has-project-files.has-file-preview.project-files-inline { --file-preview-tabs-end-padding: 98px; }
 .workspace-grid.inspector-collapsed.project-files-inline:not(.file-preview-open) { grid-template-columns: minmax(0, 1fr) var(--project-files-width); }
 .camp-topbar.has-project-files.has-file-preview.file-preview-expanded { grid-template-columns: minmax(0, 1fr); }
@@ -41,7 +41,7 @@
 .project-files-project > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-files-project.context-project:hover { color: var(--ink); }
 .project-files-toggle { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
-.project-files-toggle:hover { color: var(--ink); }
+.project-files-toggle:hover, .project-files-toggle[data-active="true"] { color: var(--ink); }
 .project-files-toggle[aria-expanded="true"] { color: var(--ink); background: var(--surface-muted); }
 .project-files-toggle svg { width: 16px; height: 16px; }
 .project-folder-icon { width: 14px; height: 14px; flex: 0 0 16px; color: var(--muted); }
@@ -79,9 +79,4 @@
 .project-files-resize:focus-visible { outline: 1px solid var(--control-line); outline-offset: -2px; }
 html.project-files-resizing, html.project-files-resizing * { cursor: col-resize !important; user-select: none !important; }
 html.project-files-resizing iframe { pointer-events: none; }
-:root .dialog-content.app-dialog.project-files-quick { top: 15vh; transform: translateX(-50%); padding: 0; width: min(560px, calc(100vw - 32px)); max-height: 65vh; display: flex; flex-direction: column; border: 1px solid var(--file-line); border-radius: 6px; background: var(--file-canvas); font-family: inherit; font-size: 13px; font-weight: 400; animation: none; }
-.project-files-quick .project-files-search { flex-basis: 46px; margin: 0; padding: 0 12px; border: 0; border-bottom: 1px solid var(--file-line); border-radius: 0; }
-.project-files-quick .project-files-rows { min-height: 80px; }
-.app-shell-camp > .file-preview-resize-handle.is-shell-divider { margin-right: calc(var(--file-preview-width) + var(--project-files-width, 0px) - 1px); }
-.mission-workspace-host > .file-preview-resize-handle.is-shell-divider { right: calc(var(--file-preview-width) + var(--project-files-width, 0px)); }
 @container camp-shell (max-width: 1329px) { .project-files-project.context-project, .project-files-project + .context-sep { display: none; } }

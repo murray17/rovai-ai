@@ -7,6 +7,8 @@ describe('shortcut identity and admission', () => {
   it('round trips defaults with side buttons unbound on both platforms', () => {
     for (const platform of ['darwin', 'win32'] as const) expect(parseShortcutPreferences(shortcutDefaults(), platform)).toEqual(shortcutDefaults())
     expect(shortcutDefaults().mouse).toEqual({ side1: null, side2: null })
+    expect(shortcutDefaults().bindings).not.toHaveProperty('quick-open')
+    expect(Object.values(shortcutDefaults().bindings)).not.toContain('Mod+P')
   })
   it('keeps macOS Control distinct from Command through capture, persistence and display', () => {
     const control = normalizeShortcut(key({ ctrlKey: true }), 'darwin')!

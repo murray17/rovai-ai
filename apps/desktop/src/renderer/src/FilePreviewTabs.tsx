@@ -7,7 +7,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import { useFilePreview, useFilePreviewApi, canDownloadFile } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
-import { ProjectFileIcon } from './ProjectFileIcon'
+import { ProjectFileIcon, DirectoryTreeIcon } from './ProjectFileIcon'
 import { Icon } from './MissionControls'
 import { ExecutionIcon } from './ExecutionIcons'
 import { previewTabLabel, previewTabLabels, previewTabPresentation } from './file-preview-tab-presentation'
@@ -286,7 +286,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
           onWheel={() => { arrowScrollTarget.current = null }}
           onPointerDown={() => { arrowScrollTarget.current = null }}
         >
-          {tabs.length === 0 && <span className="file-preview-tabs-empty"><UiText zh={"文件预览"} /></span>}
+          {tabs.length === 0 && <span className="file-preview-tabs-empty"><UiText zh={"文件与变更"} /></span>}
           {tabs.map((tab, index) => {
             const active = tab.id === activeTabId
             const label = tabLabels.get(tab.id) ?? previewTabLabel(tab, language)
@@ -338,7 +338,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   onClick={() => activate(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                 >
-                  {tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
+                  {tab.kind === 'file_picker' ? <DirectoryTreeIcon className="file-preview-tab-icon" /> : tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
                     <ExecutionIcon className="icon file-preview-execution-icon" />
                   ) : tab.kind === 'file' ? <ProjectFileIcon fileName={fileName} /> : <FilePreviewTabIcon
                     kind={icon}
