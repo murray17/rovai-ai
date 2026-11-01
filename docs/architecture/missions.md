@@ -2,7 +2,7 @@
 document_type: architecture
 authority: mission-architecture
 status: accepted
-last_updated: 2026-10-31
+last_updated: 2026-11-01
 ---
 
 # Missions
@@ -57,19 +57,38 @@ managed branch. Checkout observation is a separate best-effort read: branch plus
 unavailable. It is neither persisted nor allowed to change resource ownership. A branch change, missing managed
 branch, detached `HEAD`, checkout-observation failure or unavailable Diff base cannot alone block Runtime launch.
 Rovai does not switch or adopt branches and does not rewrite the fixed base.
+Within a single preparation call, an existing workspace that entered `ready` and remains intact reuses its
+completed identity validation after the generation/token-conditional ready update. It does not run the same
+full validation again at common exit. First creation, missing-workspace recovery and cleanup-failure recovery
+retain their final audit. Final execution-directory validation, the post-work database/deletion fence and
+frozen execution-workspace checks still run for normal reuse; no validation result survives the call.
 
 MissionGit computes cumulative changes from the recorded `base_sha` to the current Worktree content with an
 independent temporary index, including committed, staged, unstaged and untracked changes. One changes request
 returns checkout observation and file list together. Its bounded process-local `viewId` retains only request
-association and file metadata, not a temporary index or historical content. A file request regenerates a private
-index and current list, rejects an association that is no longer applicable, and then runs the path-scoped Diff.
+association and file metadata, not a temporary index or historical content. Under [Mission v14](../contracts/mission-v14.md),
+a file request verifies the workspace and selected trusted path association, prepares a private index for only
+the selected existing leaf paths, and reads raw metadata, statistics and patch in one path-scoped Diff.
+Other file changes and checkout changes do not require a fresh whole-workspace list. An absent target never
+falls back to unqualified index preparation; a file replaced by a directory cannot expand to its children.
+Before explicit intent-to-add, a literal-path-scoped `ls-files --others --ignored --exclude-standard --directory`
+query against the same private index omits currently ignored untracked targets, including ignored parent
+directories. Tracked files remain eligible regardless of matching ignore rules. A selected Gitlink directory
+must still be the exact root reported by Git before its path joins preparation; an old `160000` mode alone
+cannot authorize adding a replacement ordinary directory. Otherwise its copied index entry is left intact,
+preserving the usual diff of a tracked but deinitialized submodule without adding directory contents.
 The normal list-read path uses three Git processes: one combined `rev-parse` reads and validates the Worktree root,
 Git/admin/common directories, real/shared index paths, `HEAD`, actual branch and fixed base; one private-index
 `git -c core.splitIndex=false add -A -N` prepares tracked and untracked entries; and one combined raw/numstat Diff
 produces the file set. Index and shared-index files are copied with filesystem operations, and the real index is
 never written. Repositories without a materialized index or with another exceptional layout may use an additional
-safe initialization or diagnostic call. `missions.fileDiff` repeats the current-view read before its path-scoped
-patch call so `same_view` remains authoritative; no long-lived Git-result cache, watcher, worker or timer is added.
+safe initialization or diagnostic call. A normal single-file detail uses four Git processes: the identity
+observation, target ignore query, target-scoped index preparation and one raw/numstat/patch call, without a
+whole-list read. Gitlink directories additionally require the local root observation. Absent leaves skip the
+ignore query and add; currently ignored untracked leaves skip add. Both still copy the real/shared index.
+Unresolvable selected items use the existing refresh
+result; true Git/I/O failures remain errors. The post-read workspace fence stays in place. No long-lived
+Git-result cache, watcher, worker or timer is added.
 Multiple outstanding handles prevent a late old list request from replacing the newer handle; Renderer also
 discards superseded responses and clears file detail on refresh. This deliberately provides a current dynamic
 view, not a filesystem-atomic snapshot or a workspace versioning system. Git and actual files are the authority,
@@ -123,7 +142,7 @@ board return, retaining the same Thread draft and preview ownership. Renderer co
 Core's cleanup capability and does not infer it from Mission status. Deletion defaults to leaving worktree and
 branch in place. Optional cleanup records its intent in the same transaction that deletes the Mission, removes
 the card immediately, and exposes only failed orphan work through the existing cleanup route; retained resources
-never enter that route. Protocol and failure behavior live in [Mission v13](../contracts/mission-v13.md); UI in
+never enter that route. Protocol and failure behavior live in [Mission v14](../contracts/mission-v14.md); UI in
 [Mission board](../ui/components/mission-board.md). Reasons for the durable workspace and simplified model
 interface are in [V1.59-D11](../versions/v1.59/decisions.md#v1-59-d11); the explicit minimal cleanup choice is in
 [V1.59-D14](../versions/v1.59/decisions.md#v1-59-d14). Global discovery and current-only mutation are explained
@@ -145,7 +164,7 @@ The shared Composer has a Mission mode for individual references and Enter-to-ne
 broadcast semantics in this surface. Renderer derives pending invitations from the current document and current
 membership; it does not maintain a second invite list. Core validates identities again at save. Model-facing
 Mission reads retain the existing readable `description` field, while UI reads receive the ordered structure.
-Storage/upgrade and legacy text replacement semantics are owned by [Mission v13](../contracts/mission-v13.md).
+Storage/upgrade and legacy text replacement semantics are owned by [Mission v14](../contracts/mission-v14.md).
 
 ## Saved Team creation
 
@@ -154,7 +173,7 @@ selection and description member IDs to the existing Thread creation transaction
 authoritative roster and Lead, adds distinct mentioned members, and freezes nonempty guidance together with
 the Thread. Mission insertion remains in the same transaction. There is no live Team binding or Mission-specific
 Bootstrap path; editing/deleting Teams cannot change existing Mission Threads. General defaults only initialize
-the dialog; Mission creation never writes one-click preferences. See [Mission v13](../contracts/mission-v13.md).
+the dialog; Mission creation never writes one-click preferences. See [Mission v14](../contracts/mission-v14.md).
 
 If any Mission has no persisted workspace plan yet, existing records cannot rule out the path its first
 preparation will choose. Ordinary dispatch conservatively retains the gate in this case, including a

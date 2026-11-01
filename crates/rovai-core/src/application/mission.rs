@@ -310,6 +310,8 @@ impl Core {
             mission_workspace::persist_plan(database.connection(), &workspace)?;
             workspace
         };
+        let ready_on_entry = workspace.state == "ready";
+        let mut validated_ready_reuse = false;
         if workspace.state == "cleanup_failed"
             && !workspace.cleanup_finished()
             && cleanup_diagnostic_is_recoverable(&workspace)
@@ -400,6 +402,7 @@ impl Core {
                 workspace.cleanup_expected_branch_oid = None;
                 workspace.cleanup_worktree_removed = false;
                 workspace.cleanup_branch_removed = false;
+                validated_ready_reuse = ready_on_entry;
             } else {
                 let branch_oid = git.branch_oid(&workspace).await?;
                 // Remove only a stale registration carrying this workspace's owner marker.
@@ -584,7 +587,11 @@ impl Core {
             }
             workspace.state = "ready".into();
         }
-        git.validate_execution_workspace(&workspace).await?;
+        // Only an intact workspace that entered ready has already completed
+        // this validation. Creation and recovery retain their final audit.
+        if !validated_ready_reuse {
+            git.validate_execution_workspace(&workspace).await?;
+        }
         let actual = git::validate_workspace_directory(
             Path::new(&workspace.working_directory),
             &self.data_dir,

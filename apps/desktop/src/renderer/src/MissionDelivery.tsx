@@ -515,9 +515,10 @@ function MissionDiff({files, selected, baseSha, snapshotReady, snapshotEpoch, ca
   const contentRef = useRef<HTMLDivElement>(null), mobileToggleRef = useRef<HTMLButtonElement>(null), layoutRef = useRef<HTMLDivElement>(null), separatorRef = useRef<HTMLDivElement>(null)
   const widthRef = useRef(280), preferredWidth = useRef<number | null>(null)
   const [treeWidth, setTreeWidth] = useState(280), [splitBounds, setSplitBounds] = useState({ min: 200, max: 600, total: 0 }), [resizing, setResizing] = useState(false)
-  const selectedFile = files.find(file => file.id === selected) ?? files[0]
+  const listedFile = files.find(file => file.id === selected) ?? files[0]
   const cached = cache.get(selected)
   const diff = cached ?? (result?.fileId === selected && result.epoch === snapshotEpoch ? result.diff : null)
+  const selectedFile = diff?.file ?? listedFile
   const activeFailure = failure?.fileId === selected && failure.epoch === snapshotEpoch ? failure : null
   const error = activeFailure?.kind === 'stale' ? uiAttribute("变更已过期，请刷新后查看。") : activeFailure?.message ?? ''
   useEffect(() => {
