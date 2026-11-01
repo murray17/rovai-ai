@@ -15,7 +15,12 @@ import { createPortal } from 'react-dom'
 import {
   DEFAULT_FILE_PREVIEW_RATIO,
   FILE_PREVIEW_RATIO_STORAGE_KEY,
+  MIN_CONVERSATION_WIDTH,
   MIN_FILE_PREVIEW_WIDTH,
+  DEFAULT_DIRECTORY_WIDTH,
+  MIN_DIRECTORY_WIDTH,
+  MAX_DIRECTORY_WIDTH,
+  MIN_DIRECTORY_READING_WIDTH,
   filePreviewDragWidth,
   filePreviewRatioForWidth,
   filePreviewRatioFromStoredValue,
@@ -214,10 +219,13 @@ export function FilePreviewLayoutProvider({
   }, [])
   const ratio = preferredRatio ?? initialRatios.get(threadId ?? '') ?? DEFAULT_FILE_PREVIEW_RATIO
   const width = dragWidth ?? filePreviewWidthForRatio(availableWidth, ratio)
-  const directorySpace = availableWidth - (visible && !expanded ? width : 0) - 420
-  const directoryDrawer = compact || directorySpace < 180
-  const directoryMaximum = Math.max(180, Math.min(520, directoryDrawer ? availableWidth - 24 : directorySpace))
-  const directoryWidth = Math.min(directoryMaximum, Math.max(180, browser?.width ?? 228))
+  // The outer split owns the entire sidecar. Its directory resizes only the inner reading area.
+  const sidecarWidth = compact || expanded ? availableWidth : width
+  const directorySpace = visible ? sidecarWidth - MIN_DIRECTORY_READING_WIDTH : availableWidth - MIN_CONVERSATION_WIDTH
+  const directoryDrawer = compact || directorySpace < MIN_DIRECTORY_WIDTH
+  const directoryMaximum = Math.max(MIN_DIRECTORY_WIDTH, Math.min(MAX_DIRECTORY_WIDTH,
+    directoryDrawer ? (visible ? sidecarWidth : availableWidth) - 24 : directorySpace))
+  const directoryWidth = Math.min(directoryMaximum, Math.max(MIN_DIRECTORY_WIDTH, browser?.width ?? DEFAULT_DIRECTORY_WIDTH))
   const directoryReservedWidth = browser?.visible && !directoryDrawer ? directoryWidth : 0
   const value = useMemo<FilePreviewLayoutValue>(() => ({
     directoryWidth, directoryReservedWidth, directoryMaximum, directoryDrawer,

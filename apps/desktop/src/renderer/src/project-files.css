@@ -29,7 +29,7 @@
 .camp-topbar.has-project-files:not(.has-file-preview) .topbar-conversation-context { padding-right: 94px; }
 .camp-topbar.has-project-files.project-files-inline { grid-template-columns: minmax(0, 1fr) var(--project-files-width); }
 .camp-topbar.has-project-files.has-file-preview.project-files-inline,
-.workspace-grid.inspector-collapsed.file-preview-open.project-files-inline { grid-template-columns: minmax(0, 1fr) var(--file-preview-width) var(--project-files-width); }
+.workspace-grid.inspector-collapsed.file-preview-open.project-files-inline { grid-template-columns: minmax(0, 1fr) calc(var(--file-preview-width) - var(--project-files-width)) var(--project-files-width); }
 .camp-topbar.has-project-files.has-file-preview.project-files-inline { --file-preview-tabs-end-padding: 98px; }
 .workspace-grid.inspector-collapsed.project-files-inline:not(.file-preview-open) { grid-template-columns: minmax(0, 1fr) var(--project-files-width); }
 .camp-topbar.has-project-files.has-file-preview.file-preview-expanded { grid-template-columns: minmax(0, 1fr); }
@@ -79,6 +79,4 @@
 .project-files-resize:focus-visible { outline: 1px solid var(--control-line); outline-offset: -2px; }
 html.project-files-resizing, html.project-files-resizing * { cursor: col-resize !important; user-select: none !important; }
 html.project-files-resizing iframe { pointer-events: none; }
-.app-shell-camp > .file-preview-resize-handle.is-shell-divider { margin-right: calc(var(--file-preview-width) + var(--project-files-width, 0px) - 1px); }
-.mission-workspace-host > .file-preview-resize-handle.is-shell-divider { right: calc(var(--file-preview-width) + var(--project-files-width, 0px)); }
 @container camp-shell (max-width: 1329px) { .project-files-project.context-project, .project-files-project + .context-sep { display: none; } }

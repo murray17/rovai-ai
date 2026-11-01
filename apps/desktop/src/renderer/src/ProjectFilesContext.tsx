@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FilePreviewApi, ProjectFilesApi } from '@contracts'
 import { ProjectFilesStore } from './project-files-store'
+import { DEFAULT_DIRECTORY_WIDTH, MIN_DIRECTORY_WIDTH, MAX_DIRECTORY_WIDTH } from './file-preview-layout'
 import { useShortcutAction } from './ShortcutProvider'
 
 const visibleKey = 'rovai.project-files.visible'
@@ -27,7 +28,7 @@ export function ProjectFilesProvider({ api, threadId, onConnectionRestored, chil
     return value
   }, [api, stores, threadId])
   const [visible, setVisible] = useState(() => stored(visibleKey) === 'true')
-  const [width, updateWidth] = useState(() => Math.max(180, Math.min(520, Number(stored(widthKey)) || 228)))
+  const [width, updateWidth] = useState(() => Math.max(MIN_DIRECTORY_WIDTH, Math.min(MAX_DIRECTORY_WIDTH, Number(stored(widthKey)) || DEFAULT_DIRECTORY_WIDTH)))
   const trigger = useRef<HTMLElement | null>(null)
   const restoreFocus = useCallback(() => { requestAnimationFrame(() => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }) }) }, [])
   const hide = useCallback((restore = false) => { setVisible(false); remember(visibleKey, 'false'); if (restore) restoreFocus() }, [restoreFocus])
@@ -36,8 +37,8 @@ export function ProjectFilesProvider({ api, threadId, onConnectionRestored, chil
     setVisible(current => { remember(visibleKey, String(!current)); if (current) restoreFocus(); return !current })
   }, [restoreFocus])
   const setWidth = useCallback((next: number, commit = false) => {
-    updateWidth(Math.max(0, Math.min(520, next)))
-    if (commit) remember(widthKey, String(Math.max(180, Math.min(520, next))))
+    updateWidth(Math.max(0, Math.min(MAX_DIRECTORY_WIDTH, next)))
+    if (commit) remember(widthKey, String(Math.max(MIN_DIRECTORY_WIDTH, Math.min(MAX_DIRECTORY_WIDTH, next))))
   }, [])
   useEffect(() => {
     if (visible) void store?.activate()

@@ -5,6 +5,7 @@ import { useProjectFiles } from './ProjectFilesContext'
 import { ProjectFilesStore } from './project-files-store'
 import { useOptionalFilePreview } from './FilePreviewContext'
 import { useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
+import { DEFAULT_DIRECTORY_WIDTH, MIN_DIRECTORY_WIDTH, MAX_DIRECTORY_WIDTH } from './file-preview-layout'
 import { useCollapsibleSplitter, splitterScale } from './useCollapsibleSplitter'
 import { uiAttribute } from './interface-language'
 import { useShortcutLabel } from './ShortcutProvider'
@@ -105,9 +106,9 @@ export function ProjectFilesPane(): React.JSX.Element | null {
   const browser = useProjectFiles(), layout = useOptionalFilePreviewLayout(), preview = useOptionalFilePreview()
   const initialize = useInitializeFilePreviewMinimumWidth()
   const pane = useRef<HTMLElement>(null)
-  const width = layout?.directoryWidth ?? 228, maximum = layout?.directoryMaximum ?? 520
+  const width = layout?.directoryWidth ?? DEFAULT_DIRECTORY_WIDTH, maximum = layout?.directoryMaximum ?? MAX_DIRECTORY_WIDTH
   const splitter = useCollapsibleSplitter({
-    size: width, minimum: 180, maximum, direction: -1, collapsed: false, disabled: !browser?.visible,
+    size: width, minimum: MIN_DIRECTORY_WIDTH, maximum, direction: -1, collapsed: false, disabled: !browser?.visible,
     scopeKey: browser?.store?.threadId, scale: () => splitterScale(layout?.workspace ?? null), capture: () => width,
     onPreview: next => browser?.setWidth(next), onCommit: next => browser?.setWidth(next, true),
     onCollapse: () => browser?.hide(true), onCancel: before => browser?.setWidth(before),
@@ -129,10 +130,10 @@ export function ProjectFilesPane(): React.JSX.Element | null {
       {layout?.directoryDrawer && <button className="project-files-scrim" tabIndex={-1} aria-label={uiAttribute('隐藏文件目录')} onClick={() => browser.hide(true)}/>}
       <aside id="project-files-pane" ref={pane} className={`project-files-pane${layout?.directoryDrawer ? ' is-drawer' : ''}`} style={{ width }} aria-label={uiAttribute('文件目录')}
         onKeyDown={event => { if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); browser.hide(true) } }}>
-        <div className="project-files-resize" role="separator" aria-label={uiAttribute('调整文件目录宽度')} aria-orientation="vertical" aria-valuemin={180} aria-valuemax={Math.round(maximum)} aria-valuenow={Math.round(width)} tabIndex={0} {...splitter.handlers}
+        <div className="project-files-resize" role="separator" aria-label={uiAttribute('调整文件目录宽度')} aria-orientation="vertical" aria-valuemin={MIN_DIRECTORY_WIDTH} aria-valuemax={Math.round(maximum)} aria-valuenow={Math.round(width)} tabIndex={0} {...splitter.handlers}
           onKeyDown={event => {
-            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const next = width + (event.key === 'ArrowLeft' ? 24 : -24); if (next < 180) browser.hide(true); else browser.setWidth(Math.min(maximum, next), true) }
-            else if (event.key === 'Home') { event.preventDefault(); browser.setWidth(228, true) }
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const next = width + (event.key === 'ArrowLeft' ? 24 : -24); if (next < MIN_DIRECTORY_WIDTH) browser.hide(true); else browser.setWidth(Math.min(maximum, next), true) }
+            else if (event.key === 'Home') { event.preventDefault(); browser.setWidth(DEFAULT_DIRECTORY_WIDTH, true) }
           }}/>
         <FileTree store={browser.store} onOpen={open}/>
       </aside>
