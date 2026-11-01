@@ -198,12 +198,15 @@ fn operation(
         anyhow::bail!("source_not_authorized");
     };
     let root = fs::canonicalize(root_path).context("source_not_authorized")?;
-    ensure!(root == request.root, "source_not_authorized");
+    // Node realpath and Rust canonicalize use different Windows path prefixes.
+    let requested_root = fs::canonicalize(&request.root).context("source_not_authorized")?;
+    ensure!(root == requested_root, "source_not_authorized");
     let candidate =
         crate::file_reference_path::reference_path(&raw_reference, Path::new(&base_path))?;
     let path = fs::canonicalize(&candidate).context("file_not_found")?;
+    let requested_path = fs::canonicalize(&request.path).context("file_not_found")?;
     ensure!(
-        path == request.path && path.starts_with(&root),
+        path == requested_path && path.starts_with(&root),
         "source_not_authorized"
     );
     let lock = file_lock(&path);
@@ -279,7 +282,8 @@ mod tests {
             let root =
                 std::env::temp_dir().join(format!("rovai-text-edit-{}", uuid::Uuid::new_v4()));
             fs::create_dir(&root).unwrap();
-            let root = fs::canonicalize(root).unwrap();
+            // Desktop uses Node realpath, which omits the Windows verbatim prefix.
+            let root = dunce::simplified(&fs::canonicalize(root).unwrap()).to_path_buf();
             let path = root.join("example.ts");
             fs::write(&path, bytes).unwrap();
             Self { root, path }
