@@ -7,7 +7,7 @@ last_updated: 2026-10-30
 # 当前规范与决定理由导航
 
 原生子代理平铺 command：[Surface v58](../contracts/run-process-detail-surface-v58.md)、[会话组件](../ui/components/conversation-workspace.md)；
-状态归本次调用与匿名文本过滤的取舍见 [V1.72-D71](../versions/v1.72/decisions.md#v1-72-d71)。
+状态归本次调用与匿名文本过滤的取舍见 [V1.72-D72](../versions/v1.72/decisions.md#v1-72-d72)。
 
 可选存储与单个 Runtime 的故障范围：[Availability-first Runtime](../architecture/availability-first-runtime.md#optional-startup-boundary)、[Runtime 设置](../contracts/runtime-launch-and-verification-v74.md#本机配置的局部故障)、[附件](../contracts/camp-attachment-v12.md#历史存储的故障范围)及 [MCP 快照](../contracts/input-snapshot-storage-v1.md#mcp-snapshot-storage-layout)；保留残留、继续服务的选择见 [V1.72-D70](../versions/v1.72/decisions.md#v1-72-d70)。
 
@@ -120,7 +120,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Thread 文件预览
 
-- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v23](../contracts/file-preview-v23.md)、[Thread 文件预览区](../ui/components/file-preview.md)及[Thread 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
+- 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v24](../contracts/file-preview-v24.md)、[Thread 文件预览区](../ui/components/file-preview.md)及[Thread 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
 - 窗口保留与刷新取舍：[V1.59-D07](../versions/v1.59/decisions.md#v1-59-d07)。
 - HTML 运行环境理由：[V1.58-D07](../versions/v1.58/decisions.md#v1-58-d07)。
 - 理由来源：[V1.30-D01–D06](../versions/v1.30/decisions.md#v1-30-d01)、[V1.37-D04](../versions/v1.37/decisions.md#v1-37-d04)、[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)、[V1.42-D01](../versions/v1.42/decisions.md#v1-42-d01)、[V1.51-D01](../versions/v1.51/decisions.md#v1-51-d01)、[V1.51-D02](../versions/v1.51/decisions.md#v1-51-d02)、[V1.52-D01](../versions/v1.52/decisions.md#v1-52-d01)及[V1.55-D01](../versions/v1.55/decisions.md#v1-55-d01)；[V1.30-D07](../versions/v1.30/decisions.md#v1-30-d07) 的选区方案与 [V1.39-D05](../versions/v1.39/decisions.md#v1-39-d05) 的 inline-code 存在性探测已被替代。
@@ -384,3 +384,5 @@ MiniMax Code 的 ACP、Host 与精确恢复边界由[当前架构](../architectu
 Hermes 初始/真实更新的 user 层规则与取消压缩补发见 [R2](../versions/v1.72/model-context-change-hermes-first-input.md)
 和 [补发边界](../architecture/native-session-bootstrap-redelivery.md#hermes-完成通知与下一普通输入)。
 D62–D66 保留历史理由，其私有启动/补发/维护路径不再是当前规范。
+
+轻量文件编辑当前规范：[File Preview v24](../contracts/file-preview-v24.md)、[编辑架构](../architecture/file-preview.md#轻量文本编辑)；取舍见 [V1.72-D71](../versions/v1.72/decisions.md#v1-72-d71)。

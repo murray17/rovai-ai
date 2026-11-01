@@ -25,6 +25,7 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { id: 'forward', name: '前进', group: 'navigation', binding: 'Mod+]' },
   { id: 'missions', name: '打开使命页', group: 'navigation', binding: null },
   { id: 'automations', name: '打开定时任务页', group: 'navigation', binding: null },
+  { id: 'save-file', name: '保存当前文件', group: 'files', binding: 'Mod+S', editable: true },
   { id: 'find', name: '查找当前内容', group: 'files', binding: 'Mod+F', editable: true },
   { id: 'next', name: '下一个查找结果', group: 'files', binding: 'Mod+G', editable: true },
   { id: 'previous', name: '上一个查找结果', group: 'files', binding: 'Mod+Shift+G', editable: true },

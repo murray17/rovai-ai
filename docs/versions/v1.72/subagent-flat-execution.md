@@ -8,7 +8,7 @@ last_updated: 2026-11-01
 
 # 原生子代理平铺 command
 
-User 已确认 [Surface v58](../../contracts/run-process-detail-surface-v58.md) 与 [D71](decisions.md#v1-72-d71)。
+User 已确认 [Surface v58](../../contracts/run-process-detail-surface-v58.md) 与 [D72](decisions.md#v1-72-d72)。
 本次独立 worktree 为 `rovai/subagent-flat-execution`，基于 `b3c9522d3`，先带入原生协议调研，再实施生产链路。
 未替换日常 App、未改模型上下文、任务调度或自动续跑；不涉及 Cline/Cursor。
 最初的平铺实现保留后台策略；后续按 User 明确授权增加 Qoder 原生 env 限制，见末尾补验。

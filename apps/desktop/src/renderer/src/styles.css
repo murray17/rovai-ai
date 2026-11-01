@@ -1636,7 +1636,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   height: 28px;
   flex: 1 1 auto;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 0 4px 0 8px;
   overflow: hidden;
   border: 0;
@@ -1650,8 +1650,10 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   flex: 1 1 0;
   padding-inline-end: 16px;
   overflow: hidden;
-  font-size: 10.5px;
-  font-weight: 600;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
   text-align: start;
   white-space: nowrap;
 }
@@ -9559,3 +9561,10 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 @media (min-width: 1800px) {
   .public-agent-message { --agent-message-prose-width: 780px; }
 }
+
+/* Editing adds only controls within the existing path row. */
+.file-preview-edit-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.file-preview-edit-actions:empty { display: none; }
+.file-preview-tab-dirty { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; opacity: .75; }
+.file-preview-saved-preview { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.file-preview-saved-preview[hidden] { display: none; }

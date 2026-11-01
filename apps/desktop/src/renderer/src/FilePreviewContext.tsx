@@ -1,3 +1,4 @@
+import { FileEditContext, FileEditDialogs } from './FileEditContext'
 import { uiAttribute } from './interface-language'
 import { memo, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -114,11 +115,16 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
   useLayoutEffect(() => { resources.activate(threadId) }, [resources, threadId])
   useEffect(() => {
     const release = resources.retainOwner()
-    const dispose = (): void => resources.dispose()
-    window.addEventListener('beforeunload', dispose)
-    return () => { window.removeEventListener('beforeunload', dispose); release() }
+    const beforeUnload = (event: BeforeUnloadEvent): void => {
+      if (resources.edits.shouldWarnOnUnload()) { event.preventDefault(); event.returnValue = '' }
+    }
+    const online = (): void => { for (const doc of resources.edits.documents.values()) if (doc.unknown) void resources.edits.reconcile(doc) }
+    const unsubscribeConnection = api.onConnectionRestored?.(online)
+    window.addEventListener('beforeunload', beforeUnload)
+    window.addEventListener('online', online)
+    return () => { window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('online', online); unsubscribeConnection?.(); release() }
   }, [resources])
-  return <FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
+  return <FileEditContext.Provider value={resources.edits}><FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
     <FilePreviewLayoutProvider threadId={threadId} visible={!!threadId && value.paneVisible} activityMode={value.activeTab?.kind === 'mission_activity'}>
       <FileFindProvider activeTabId={value.activeTabId} visible={!!threadId && value.paneVisible}>
         <ExecutionPreviewHostContext.Provider value={executionHosts}>
@@ -128,7 +134,8 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
         </ExecutionPreviewHostContext.Provider>
       </FileFindProvider>
     </FilePreviewLayoutProvider>
-  </FilePreviewContext.Provider></FilePreviewApiContext.Provider>
+    <FileEditDialogs />
+  </FilePreviewContext.Provider></FilePreviewApiContext.Provider></FileEditContext.Provider>
 }
 
 export function useFilePreview(): FilePreviewContextValue {

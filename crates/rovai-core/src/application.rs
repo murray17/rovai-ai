@@ -12052,6 +12052,30 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "filePreview.readEditable" | "filePreview.saveText" => {
+                let params: crate::file_edit::EditRequest =
+                    serde_json::from_value(request.params.clone())?;
+                if !matches!(
+                    params.source.kind.as_str(),
+                    "camp_workspace" | "message_reference"
+                ) {
+                    return Ok(crate::file_edit::failure("edit_unavailable"));
+                }
+                let resolved = {
+                    let database = self.database.lock().await;
+                    resolve_file_preview_source(
+                        &database,
+                        &ManagedBlobStore::new(&self.data_dir),
+                        params.source.clone(),
+                    )?
+                };
+                let saving = request.method == "filePreview.saveText";
+                tokio::task::spawn_blocking(move || {
+                    crate::file_edit::execute(params, resolved, saving)
+                })
+                .await
+                .context("File edit task failed")
+            }
             "filePreview.resolveSource" => {
                 let params: ResolveFilePreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;
@@ -34121,36 +34145,7 @@ done
                 },
             )
             .unwrap();
-        let agent_run_id = sent.result.payload["agentRunIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
-                [&agent_run_id],
-            )
-            .unwrap();
-        // Tool output is bounded before persistence. A plan explanation uses
-        // the ordinary managed-Blob path that this concurrency test reads.
-        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
-        let evidence = ExecutionEvidenceService
-            .record_runtime_event(
-                &mut database,
-                &ManagedBlobStore::new(&data_dir),
-                &agent_run_id,
-                1,
-                "runtime.plan",
-                &json!({
-                    "explanation": secret,
-                    "plan": [],
-                }),
-            )
-            .unwrap()
-            .unwrap();
-        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
-        let evidence_id = evidence.id.clone();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
 
         let mission_git = crate::mission_workspace::MissionGit::new(git_path.clone()).unwrap();
         let repository = mission_git.inspect(&source).await.unwrap().unwrap();
@@ -34183,7 +34178,7 @@ done
         mission_git.materialize(&workspace).await.unwrap();
         workspace.state = "ready".into();
         fs::write(worktree.join("tracked.txt"), "changed\n").unwrap();
-        let database = Database::open_with_runtime_camp_files_root(
+        let mut database = Database::open_with_runtime_camp_files_root(
             &data_dir,
             attachment_views.root(),
             attachment_views.root_identity_digest(),
@@ -34196,6 +34191,57 @@ done
                 [&workspace.id],
             )
             .unwrap();
+        // Current sends enqueue Deliveries. Claim only after the real Mission
+        // workspace is ready instead of expecting the retired immediate Run IDs.
+        let prepared = crate::delivery_queue::capture_prepared_batch_workspace(
+            &database,
+            &camp_id,
+            AgentRunWorkspace {
+                execution_root: workspace.working_directory.clone(),
+                access: "write".into(),
+                isolation: "git_worktree".into(),
+            },
+            json!({"workingDirectory": workspace.working_directory, "branch": workspace.branch}),
+        )
+        .unwrap();
+        let workspaces =
+            crate::delivery_queue::BatchWorkspaces::from([(camp_id.clone(), Ok(prepared))]);
+        let agent_run_id = crate::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+            &mut database,
+            1,
+            &workspaces,
+            &[],
+        )
+        .unwrap()
+        .pop()
+        .expect("ready Mission Delivery should be claimed");
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+        // Tool output is bounded before persistence. A plan explanation uses
+        // the ordinary managed-Blob path that this concurrency test reads.
+        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
+        let evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                &agent_run_id,
+                1,
+                "runtime.plan",
+                &json!({
+                    "explanation": secret,
+                    "plan": [],
+                }),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
+        let evidence_id = evidence.id.clone();
+
         let database_path = database.path().to_path_buf();
         drop(database);
         drop(attachment_views);
@@ -34920,6 +34966,76 @@ done
         *core.runtime_search_environment.write().await = Arc::new(
             RuntimeSearchEnvironment::for_test_paths(3, vec![wrapper_root.clone()]),
         );
+
+        // Normal ready reuse performs one complete identity validation. Count
+        // this chain only, not every Git operation involved in dispatch.
+        fs::write(&release, "ready reuse").unwrap();
+        let reused = core
+            .prepare_mission_workspace(&candidate, &source)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reused, prepared);
+        let calls = fs::read_to_string(&invocations).unwrap();
+        for query in ["--show-toplevel", "--git-common-dir", "--git-dir"] {
+            assert_eq!(
+                calls
+                    .lines()
+                    .filter(|line| line.split_whitespace().any(|arg| arg == query))
+                    .count(),
+                1,
+                "normal ready reuse must validate identity once: {query}\n{calls}"
+            );
+        }
+        let admin = std::process::Command::new(&git_path)
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--path-format=absolute", "--git-dir"])
+            .output()
+            .unwrap();
+        assert!(admin.status.success());
+        let admin = PathBuf::from(String::from_utf8(admin.stdout).unwrap().trim());
+        for marker in ["rovai-mission-owner", "gitdir"] {
+            let path = admin.join(marker);
+            let original = fs::read(&path).unwrap();
+            fs::write(&path, "wrong-owner-or-registration").unwrap();
+            assert!(
+                core.prepare_mission_workspace(&candidate, &source)
+                    .await
+                    .is_err(),
+                "ready reuse must still reject an invalid {marker}"
+            );
+            fs::write(&path, original).unwrap();
+        }
+
+        // A non-destructive cleanup failure can become ready inside this call,
+        // but it is still a recovery path and keeps the final validation.
+        {
+            let database = core.database.lock().await;
+            database.connection().execute(
+                "UPDATE mission_workspace SET state='cleanup_failed',diagnostic='mission.workspace_dirty' WHERE camp_id=?1",
+                [&camp_id],
+            ).unwrap();
+        }
+        fs::write(&invocations, "").unwrap();
+        assert!(
+            core.prepare_mission_workspace(&candidate, &source)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let recovery_calls = fs::read_to_string(&invocations).unwrap();
+        assert!(
+            recovery_calls
+                .lines()
+                .filter(|line| line.split_whitespace().any(|arg| arg == "--show-toplevel"))
+                .count()
+                >= 2,
+            "cleanup failure recovery must not take the normal-reuse shortcut: {recovery_calls}"
+        );
+        fs::remove_file(&release).unwrap();
+        fs::remove_file(&entered).unwrap();
+        fs::write(&invocations, "").unwrap();
 
         let prepare_task = tokio::spawn({
             let core = core.clone();

@@ -69,7 +69,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 
 | 合同 | 范围 |
 | --- | --- |
-| [Mission v13（当前）](mission-v13.md) | Mission 复用 Team 创建、权威名册与描述邀请合并、不可变 Thread 指引 |
+| [Mission v14（当前）](mission-v14.md) | 单文件 Diff 仅验证工作区与选中路径，详情统计与 patch 同次读取；正常 ready 复用仅做一次身份校验 |
+| [Mission v13（历史）](mission-v13.md) | Mission 复用 Team 创建、权威名册与描述邀请合并、不可变 Thread 指引 |
 | [Mission v12（历史）](mission-v12.md) | 结构化个人提及与描述原子保存、自动加入队外成员；Agent 仍读取 description 文本 |
 | [Mission v11（历史）](mission-v11.md) | 继承 v10；清理请求只做领域准入，worker 的正常成功路径最多启动 4 个 Git 进程，安全拒绝保留可用工作区与可重试诊断 |
 | [Mission v10（历史）](mission-v10.md) | 继承 v9；Worktree 归属与受管分支删除解耦，安全保留非受管分支、脏现场与不可达 detached 提交，并恢复未发生删除的失败状态；其重复预检与同步拒绝由 v11 替代 |
@@ -307,7 +308,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Skill Content Preview v1（历史）](skill-content-preview-v1.md) | 旧 Library Revision 或导入候选的只读内容合同；当前原生 Skill 原址预览见 Skills Rebuild v1 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
-| [File Preview v23（当前）](file-preview-v23.md) | Desktop 最近定位复用、同版本自动刷新跳过内容与 HTML 准备；候选与更新水位保持 |
+| [File Preview v24（当前）](file-preview-v24.md) | 当前项目 UTF-8 文本编辑、共享 Host 手动保存、摘要冲突及窗口草稿保留 |
+| [File Preview v23（历史）](file-preview-v23.md) | Desktop 最近定位复用、同版本自动刷新跳过内容与 HTML 准备；候选与更新水位保持 |
 | [File Preview v22（历史）](file-preview-v22.md) | 当前可见文件自动刷新、后台按需更新、失败阻断与分页行号恢复；复用候选刷新和既有通知 |
 | [File Preview v21（历史）](file-preview-v21.md) | 精确归因内部诊断 CSP 拒绝，中性降级并停止当前文档无效重试；保留作者策略与真实错误 |
 | [File Preview v20（历史）](file-preview-v20.md) | 无 Diff 的终态 Read/Write 文件操作由精确 Run Evidence 授权预览，保留 Diff、根外绝对路径和 Run 工作目录解析 |

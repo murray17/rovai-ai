@@ -137,6 +137,9 @@ export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDir
     bindThread: async () => { /* Thread tab state stays in the shared React provider; every resource carries an exact source. */ },
     open: request => opened('open', request), restore: request => opened('restore', request), reopen: request => opened('reopen', request),
     readText: request => transport.files('readText', request),
+    onConnectionRestored: listener => transport.onConnectionChanged(() => { if (transport.connectionState === 'live') listener() }),
+    readEditableFile: request => transport.files('readEditableFile', request),
+    saveTextFile: request => transport.files('saveTextFile', request),
     readPage: request => transport.files('readPage', request), resolveLine: request => transport.files('resolveLine', request),
     readChildImage: async request => {
       const result = await transport.fileBytes('readChildImage', request)
