@@ -266,9 +266,10 @@ export function useOptionalFilePreviewLayout(): FilePreviewLayoutValue | null {
 
 export function FilePreviewWorkspace({ children, hidden }: { children: ReactNode; hidden?: boolean }): React.JSX.Element {
   const layout = useOptionalFilePreviewLayout()
+  const browser = useProjectFiles()
   return <div
     ref={layout?.workspaceRef}
-    className={`workspace-grid inspector-collapsed ${layout?.className ?? ''}${layout?.visible ? ' file-preview-open' : ''}`}
+    className={`workspace-grid inspector-collapsed ${layout?.className ?? ''}${layout?.visible ? ' file-preview-open' : ''}${browser?.store ? ' project-files-workspace' : ''}`}
     style={layout?.style}
     hidden={hidden}
   >{children}<ProjectFilesPane /></div>

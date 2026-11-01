@@ -1862,7 +1862,6 @@ export interface ProjectFilesRequest {
   scopeId?: string
   entryId?: string
   entryIds?: string[]
-  offset?: number
   query?: string
   queryRevision?: number
   revision?: number
@@ -1872,7 +1871,7 @@ export interface ProjectFilesApi {
   request<T>(request: ProjectFilesRequest): Promise<ProjectFilesResult<T>>
 }
 export interface ProjectFilesScope { scopeId: string; rootId: string; name: string; revision: number }
-export interface ProjectFilesPage { entries: ProjectFileEntry[]; nextOffset: number | null; partial: boolean }
+export interface ProjectFilesPage { entries: ProjectFileEntry[]; partial: boolean }
 
 export interface FilePreviewApi {
   projectFiles?: ProjectFilesApi

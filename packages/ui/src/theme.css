@@ -1,5 +1,13 @@
 /* Shared Porcelain Day / Steel Night tokens; owned by the existing Desktop theme contract. */
 :root {
+  /* Neutral project browsing and file reading canvas. */
+  --file-canvas: #ffffff;
+  --file-hover: #f0f0f0;
+  --file-selected: #e8e8e8;
+  --file-line: #e5e5e5;
+  --file-ink: #282828;
+  --file-muted: #707070;
+
   /* Settings controls and observed runtime usage series. */
   --monitoring-input: #393b3d;
   --monitoring-output: #657f9b;
@@ -216,6 +224,14 @@
 }
 
 :root[data-theme="night"] {
+  /* Neutral project browsing and file reading canvas. */
+  --file-canvas: #1b1b1b;
+  --file-hover: #2b2b2b;
+  --file-selected: #343434;
+  --file-line: #343434;
+  --file-ink: #dedede;
+  --file-muted: #a0a0a0;
+
   --monitoring-input: #d5d6d8;
   --monitoring-output: #8ca7c6;
   --monitoring-read: #86b098;
@@ -404,6 +420,14 @@
 
 /* 晨雾 — palette only; shared production components own all interactions. */
 :root[data-theme-id="horizon"] {
+  /* Neutral project browsing and file reading canvas. */
+  --file-canvas: #ffffff;
+  --file-hover: #f0f0f0;
+  --file-selected: #e8e8e8;
+  --file-line: #e5e5e5;
+  --file-ink: #282828;
+  --file-muted: #707070;
+
   --monitoring-input: #393b3d;
   --monitoring-output: #657f9b;
   --monitoring-read: #698273;
@@ -597,6 +621,14 @@
 
 /* 朝霞 — palette only; shared production components own all interactions. */
 :root[data-theme-id="classic-red"] {
+  /* Neutral project browsing and file reading canvas. */
+  --file-canvas: #ffffff;
+  --file-hover: #f0f0f0;
+  --file-selected: #e8e8e8;
+  --file-line: #e5e5e5;
+  --file-ink: #282828;
+  --file-muted: #707070;
+
   --monitoring-input: #393b3d;
   --monitoring-output: #657f9b;
   --monitoring-read: #698273;
@@ -790,6 +822,14 @@
 
 /* 绯夜 — palette only; shared production components own all interactions. */
 :root[data-theme-id="ember"] {
+  /* Neutral project browsing and file reading canvas. */
+  --file-canvas: #1b1b1b;
+  --file-hover: #2b2b2b;
+  --file-selected: #343434;
+  --file-line: #343434;
+  --file-ink: #dedede;
+  --file-muted: #a0a0a0;
+
   --monitoring-input: #d5d6d8;
   --monitoring-output: #8ca7c6;
   --monitoring-read: #86b098;

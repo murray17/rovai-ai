@@ -3,7 +3,10 @@
 use anyhow::{Context, Result, ensure};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ignore::WalkBuilder;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{
+    Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+    event::{AccessKind, AccessMode},
+};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -23,7 +26,36 @@ use tokio::sync::Notify;
 use crate::{db::Database, file_preview_authority::ResolvedFilePreviewSource};
 
 const LEASE: Duration = Duration::from_secs(60);
-const MAX_ENTRIES: usize = 32_768;
+
+fn invalidates_directory(event: &Event) -> bool {
+    event.need_rescan()
+        || matches!(
+            event.kind,
+            EventKind::Any
+                | EventKind::Create(_)
+                | EventKind::Modify(_)
+                | EventKind::Remove(_)
+                | EventKind::Access(AccessKind::Close(AccessMode::Write))
+        )
+}
+
+// A reversible locator, not a per-file permission or server registration.
+fn entry_path(id: &str) -> Result<PathBuf> {
+    if id == "root" {
+        return Ok(PathBuf::new());
+    }
+    let relative = String::from_utf8(
+        URL_SAFE_NO_PAD.decode(id.strip_prefix("p:").context("entry_unavailable")?)?,
+    )?;
+    ensure!(
+        !relative.is_empty()
+            && Path::new(&relative)
+                .components()
+                .all(|c| matches!(c, Component::Normal(_))),
+        "entry_unavailable"
+    );
+    Ok(relative.into())
+}
 
 #[derive(Clone)]
 pub struct Binding {
@@ -126,7 +158,6 @@ pub struct Request {
     pub scope_id: Option<String>,
     pub entry_id: Option<String>,
     pub entry_ids: Option<Vec<String>>,
-    pub offset: Option<usize>,
     pub query: Option<String>,
     pub query_revision: Option<u64>,
     pub revision: Option<u64>,
@@ -151,7 +182,6 @@ struct Scope {
     thread: String,
     root: PathBuf,
     identity: String,
-    entries: Mutex<HashMap<String, PathBuf>>,
     watch: Mutex<WatchState>,
     revision: AtomicU64,
     changed: Notify,
@@ -168,13 +198,7 @@ impl Scope {
         self.changed.notify_waiters();
     }
     fn path(&self, id: &str) -> Result<PathBuf> {
-        let relative = self
-            .entries
-            .lock()
-            .unwrap()
-            .get(id)
-            .cloned()
-            .context("entry_unavailable")?;
+        let relative = entry_path(id).context("entry_unavailable")?;
         let candidate = self.root.join(relative);
         let path = fs::canonicalize(&candidate).context("entry_unavailable")?;
         ensure!(path.starts_with(&self.root), "entry_unavailable");
@@ -184,7 +208,8 @@ impl Scope {
         );
         Ok(path)
     }
-    fn entry(&self, path: &Path) -> Result<Entry> {
+    fn entry(&self, item: &ignore::DirEntry) -> Result<Entry> {
+        let path = item.path();
         let relative = path.strip_prefix(&self.root)?;
         let name = path
             .file_name()
@@ -194,17 +219,20 @@ impl Scope {
         let relative_path = relative.to_str().context("entry_unavailable")?.to_owned();
         #[cfg(windows)]
         let relative_path = relative_path.replace('\\', "/");
-        let id = format!("{:x}", Sha256::digest(relative_path.as_bytes()));
-        let mut entries = self.entries.lock().unwrap();
-        ensure!(
-            entries.contains_key(&id) || entries.len() < MAX_ENTRIES,
-            "browse_limit"
-        );
-        entries.insert(id.clone(), relative.into());
-        let target = fs::canonicalize(path).ok();
-        let directory = target.as_ref().is_some_and(|p| p.is_dir());
-        let unavailable = target.as_ref().is_none_or(|p| !p.starts_with(&self.root))
-            || (directory && fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()));
+        let id = format!("p:{}", URL_SAFE_NO_PAD.encode(relative_path.as_bytes()));
+        let kind = item.file_type().context("entry_unavailable")?;
+        // Ordinary entries already belong to the validated walk. Resolve links only;
+        // actual opens/expansions validate the current target against the root.
+        let (directory, unavailable) = if kind.is_symlink() {
+            let target = fs::canonicalize(path).ok();
+            let directory = target.as_ref().is_some_and(|p| p.is_dir());
+            (
+                directory,
+                directory || target.as_ref().is_none_or(|p| !p.starts_with(&self.root)),
+            )
+        } else {
+            (kind.is_dir(), !kind.is_dir() && !kind.is_file())
+        };
         Ok(Entry {
             id,
             name,
@@ -233,7 +261,11 @@ impl Scope {
                 move |event: notify::Result<notify::Event>| {
                     let Some(scope) = weak.upgrade() else { return };
                     match event {
-                        Ok(event) if !event.paths.iter().any(|p| p.starts_with(&scope.root)) => {
+                        Ok(event)
+                            if !invalidates_directory(&event)
+                                || (!event.need_rescan()
+                                    && !event.paths.iter().any(|p| p.starts_with(&scope.root))) =>
+                        {
                             return;
                         }
                         Err(_) => {
@@ -306,7 +338,6 @@ impl ProjectFiles {
                 thread: request.thread_id,
                 root: path.clone(),
                 identity: identity.clone(),
-                entries: Mutex::new(HashMap::from([("root".into(), PathBuf::new())])),
                 watch: Mutex::new(WatchState {
                     watcher: None,
                     paths: HashSet::new(),
@@ -408,13 +439,7 @@ impl ProjectFiles {
                 let id = request.entry_id.context("entry_unavailable")?;
                 let path = scope.path(&id)?;
                 ensure!(path.is_file(), "entry_unavailable");
-                let relative = scope
-                    .entries
-                    .lock()
-                    .unwrap()
-                    .get(&id)
-                    .cloned()
-                    .context("entry_unavailable")?;
+                let relative = entry_path(&id)?;
                 let reference =
                     URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(&scope.identity, relative))?);
                 Ok(json!({"kind":"project_file","threadId":scope.thread,"rawReference":reference}))
@@ -485,7 +510,7 @@ fn browse(scope: &Scope, request: &Request, cancel: &AtomicBool) -> Result<Value
                 continue;
             }
         }
-        match scope.entry(item.path()) {
+        match scope.entry(&item) {
             Ok(entry) => entries.push(entry),
             Err(_) => {
                 partial = true;
@@ -502,15 +527,7 @@ fn browse(scope: &Scope, request: &Request, cancel: &AtomicBool) -> Result<Value
             .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
             .then(a.name.cmp(&b.name))
     });
-    let offset = if searching {
-        0
-    } else {
-        request.offset.unwrap_or(0).min(20_000)
-    };
-    let next = (!searching && entries.len() > offset + 200).then_some(offset + 200);
-    Ok(
-        json!({"entries":entries.into_iter().skip(offset).take(if searching {100} else {200}).collect::<Vec<_>>(),"nextOffset":next,"partial":partial}),
-    )
+    Ok(json!({"entries":entries,"partial":partial}))
 }
 
 #[cfg(test)]
@@ -557,7 +574,7 @@ mod tests {
             .await
     }
     #[tokio::test]
-    async fn lazy_listing_search_and_pages_keep_filters_and_bounds_in_non_git_projects() {
+    async fn lazy_listing_and_search_keep_filters_and_bounds_in_non_git_projects() {
         let fixture = Fixture::new();
         let service = Arc::new(ProjectFiles::default());
         fs::create_dir(fixture.0.join("src")).unwrap();
@@ -598,17 +615,8 @@ mod tests {
             fs::write(fixture.0.join(format!("page-{index:03}.txt")), "").unwrap();
         }
         let first = call(&service, &fixture, "list", Some(scope), json!({})).await;
-        let second = call(
-            &service,
-            &fixture,
-            "list",
-            Some(scope),
-            json!({"offset":200}),
-        )
-        .await;
-        assert_eq!(first["value"]["entries"].as_array().unwrap().len(), 200);
-        assert_eq!(first["value"]["nextOffset"], 200);
-        assert!(second["value"]["nextOffset"].is_null());
+        assert_eq!(first["value"]["entries"].as_array().unwrap().len(), 213);
+        assert_eq!(first["value"]["partial"], false);
         assert!(
             call(
                 &service,
@@ -636,6 +644,31 @@ mod tests {
         std::os::unix::fs::symlink(&fixture.0, fixture.0.join("cycle")).unwrap();
         let resolved = call(&service, &fixture, "resolve", None, json!({})).await;
         let scope = resolved["value"]["scopeId"].as_str().unwrap();
+        // Opening an unlisted file works: there is no registration capacity to exhaust.
+        assert_eq!(
+            call(
+                &service,
+                &fixture,
+                "open",
+                Some(scope),
+                json!({"entryId": format!("p:{}", URL_SAFE_NO_PAD.encode("same #1.txt"))})
+            )
+            .await["ok"],
+            true
+        );
+        for relative in ["../other.txt", "/etc/passwd", "src/../../other.txt"] {
+            assert_eq!(
+                call(
+                    &service,
+                    &fixture,
+                    "open",
+                    Some(scope),
+                    json!({"entryId": format!("p:{}", URL_SAFE_NO_PAD.encode(relative))})
+                )
+                .await["ok"],
+                false
+            );
+        }
         let listed = call(&service, &fixture, "list", Some(scope), json!({})).await;
         let entries = listed["value"]["entries"].as_array().unwrap();
         #[cfg(unix)]
@@ -705,6 +738,25 @@ mod tests {
     }
     #[tokio::test]
     async fn native_changes_invalidate_visible_directories_and_release_cancels_poll() {
+        use notify::event::{CreateKind, Flag, ModifyKind, RemoveKind};
+        for kind in [
+            AccessKind::Open(AccessMode::Any),
+            AccessKind::Read,
+            AccessKind::Close(AccessMode::Read),
+        ] {
+            assert!(!invalidates_directory(&Event::new(EventKind::Access(kind))));
+        }
+        for kind in [
+            EventKind::Create(CreateKind::Any),
+            EventKind::Modify(ModifyKind::Any),
+            EventKind::Remove(RemoveKind::Any),
+            EventKind::Access(AccessKind::Close(AccessMode::Write)),
+        ] {
+            assert!(invalidates_directory(&Event::new(kind)));
+        }
+        assert!(invalidates_directory(
+            &Event::new(EventKind::Other).set_flag(Flag::Rescan)
+        ));
         let fixture = Fixture::new();
         let service = Arc::new(ProjectFiles::default());
         let resolved = call(&service, &fixture, "resolve", None, json!({})).await;

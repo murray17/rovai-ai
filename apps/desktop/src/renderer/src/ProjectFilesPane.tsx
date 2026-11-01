@@ -13,7 +13,7 @@ import { useShortcutLabel } from './ShortcutProvider'
 import './project-files.css'
 
 export function DirectoryTreeIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 3v11a2 2 0 0 0 2 2h3M4 7h5"/><rect x="9" y="4" width="7" height="5" rx="1"/><rect x="9" y="13" width="7" height="5" rx="1"/></svg>
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M4 7v10M4 7h5M4 17h5"/><rect x="9" y="4" width="11" height="6" rx="1.5"/><rect x="9" y="14" width="11" height="6" rx="1.5"/></svg>
 }
 export function ProjectFolderIcon(): React.JSX.Element {
   return <svg className="project-folder-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 5.5h6l1.5 2h7.5v9h-15z"/></svg>
@@ -33,7 +33,8 @@ function FileTree({ store, quick = false, onOpen }: { store: ProjectFilesStore; 
   const [focused, setFocused] = useState<string | null>(state.selected)
   const rows: Row[] = []
   function visit(parent: string, depth: number): void {
-    for (const entry of state.pages.get(parent)?.entries ?? []) {
+    const page = state.pages.get(parent)
+    for (const entry of page?.entries.slice(0, page.visibleCount) ?? []) {
       rows.push({ entry, depth, parent })
       if (entry.directory && state.expanded.has(entry.id)) visit(entry.id, depth + 1)
     }
@@ -97,7 +98,7 @@ function FileTree({ store, quick = false, onOpen }: { store: ProjectFilesStore; 
       {(state.loading || state.searching || state.pages.get('root')?.loading) && <div className="project-files-status" role="status">{uiAttribute('正在载入…')}</div>}
       {!problem && !state.loading && !state.searching && !rows.length && !(search ? state.results?.partial : state.pages.get('root')?.partial) && <div className="project-files-status">{uiAttribute(quick && !search ? '搜索文件' : search ? '没有匹配的文件' : '空目录')}</div>}
       {(search ? state.results?.partial : visiblePages.some(([, page]) => page.partial)) && <div className="project-files-status">{uiAttribute(search ? '结果未全部显示，请缩小搜索范围' : '部分目录内容未显示')}</div>}
-      {!search && visiblePages.filter(([, page]) => page.nextOffset !== null).map(([id, page]) => <button className="project-files-more" key={id} disabled={page.loading} onClick={() => { void store.load(id, true) }}>{uiAttribute('加载更多')}{id === 'root' ? '' : ` · ${rows.find(row => row.entry.id === id)?.entry.name ?? ''}`}</button>)}
+      {!search && visiblePages.filter(([, page]) => page.visibleCount < page.entries.length).map(([id, page]) => <button className="project-files-more" key={id} disabled={page.loading} onClick={() => store.showMore(id)}>{uiAttribute('加载更多')}{id === 'root' ? '' : ` · ${rows.find(row => row.entry.id === id)?.entry.name ?? ''}`}</button>)}
     </div>
   </>
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ProjectFilesApi, ProjectFilesPage, ProjectFilesRequest, ProjectFilesResult } from '@contracts'
 import { ProjectFilesStore } from './project-files-store'
 
-const page: ProjectFilesPage = { entries: [{ id: 'src', name: 'src', relativePath: 'src', directory: true, unavailable: false }], nextOffset: null, partial: false }
+const page: ProjectFilesPage = { entries: [{ id: 'src', name: 'src', relativePath: 'src', directory: true, unavailable: false }], partial: false }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 function fixture() {
   const searches: Array<ReturnType<typeof deferred<ProjectFilesResult<ProjectFilesPage>>>> = []
@@ -44,6 +44,24 @@ describe('project file navigation lifetime', () => {
     expect(store.scrollTop).toBe(124)
     expect(store.getSnapshot().scope!.scopeId).not.toBe(first)
     expect(calls.some(call => call.action === 'list' && call.entryId === 'src' && call.scopeId !== first)).toBe(true)
+    store.deactivate()
+  })
+  it('shows cached rows locally and refreshes the visible range with one bounded request', async () => {
+    const { api, calls } = fixture(), original = api.request
+    const entries = Array.from({ length: 650 }, (_, index) => ({ id: String(index), name: `file-${index}.ts`, relativePath: `file-${index}.ts`, directory: false, unavailable: false }))
+    api.request = async <T>(request: ProjectFilesRequest): Promise<ProjectFilesResult<T>> => request.action === 'list'
+      ? (calls.push(request), { ok: true, value: { entries, partial: false } as T }) : original<T>(request)
+    const store = new ProjectFilesStore('thread', api)
+    await store.activate()
+    expect(calls.filter(call => call.action === 'list')).toHaveLength(1)
+    expect(store.getSnapshot().pages.get('root')?.visibleCount).toBe(200)
+    store.showMore('root'); store.showMore('root')
+    expect(store.getSnapshot().pages.get('root')?.visibleCount).toBe(600)
+    expect(calls.filter(call => call.action === 'list')).toHaveLength(1)
+    await store.load('root')
+    expect(calls.filter(call => call.action === 'list')).toHaveLength(2)
+    expect(store.getSnapshot().pages.get('root')?.visibleCount).toBe(600)
+    expect(store.getSnapshot().pages.get('root')?.entries).toEqual(entries)
     store.deactivate()
   })
   it('a pending snapshot from a closed scope cannot suppress the newly opened snapshot', async () => {
