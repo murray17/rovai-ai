@@ -184,7 +184,7 @@ fn operation(
     ensure!(
         matches!(
             request.source.kind.as_str(),
-            "camp_workspace" | "message_reference"
+            "camp_workspace" | "message_reference" | "project_file"
         ),
         "edit_unavailable"
     );

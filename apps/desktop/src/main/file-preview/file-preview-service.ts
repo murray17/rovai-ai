@@ -57,6 +57,7 @@ const HTML_ASSET_BYTES = 8 * 1024 * 1024
 
 function canPresentProjectRelativePath(sourceKind: OpenFilePreviewRequest['kind']): boolean {
   return sourceKind === 'message_reference'
+    || sourceKind === 'project_file'
     || sourceKind === 'camp_workspace'
     || sourceKind === 'run_evidence'
     || sourceKind === 'run_activity_file'
@@ -80,7 +81,7 @@ export type FilePreviewAuthorityResult =
   | {
       kind: 'file_target'
       threadId: string
-      sourceKind: 'skill_reference' | 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence' | 'run_activity_file'
+      sourceKind: 'project_file' | 'skill_reference' | 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence' | 'run_activity_file'
       sourceIdentity: string
       rootPath: string
       basePath: string
@@ -460,7 +461,7 @@ export class FilePreviewService {
       || !['code', 'text', 'markdown', 'html'].includes(record.classification.kind)) return unavailable
     const source = record.request.kind === 'child_of_handle'
       ? await this.#independentRestoreRequest(record.request, record.threadId, record.canonicalPath) : record.request
-    if (!source || !['camp_workspace', 'message_reference'].includes(source.kind)) return unavailable
+    if (!source || !['camp_workspace', 'message_reference', 'project_file'].includes(source.kind)) return unavailable
     // The Host re-resolves this source. Display paths never become write authority.
     const root = source.kind === 'camp_workspace' ? await this.#canonicalWorkspaceRoot(record.threadId)
       : await canonicalizeExistingPath(record.reopenTarget.rootPath).catch(() => null)
@@ -1053,6 +1054,9 @@ export class FilePreviewService {
     }
     const fileName = target.displayName || opened.fileName
     const openRisk = target.openRisk === 'confirm' ? 'confirm' : classification.openRisk
+    if (classification.kind === 'system' && request.kind === 'project_file') {
+      classification = { ...classification, kind: 'unsupported' }
+    }
     if (classification.kind === 'system') {
       await opened.file.close().catch(() => undefined)
       if (!policy.nativeSideEffects
@@ -1079,7 +1083,7 @@ export class FilePreviewService {
     }
     const handleId = randomUUID()
     const previewKey = createHash('sha256')
-      .update(`${webContentsId}\0${target.threadId}\0${opened.canonicalPath}`)
+      .update(`${webContentsId}\0${target.threadId}\0${opened.canonicalPath}${request.kind === 'project_file' ? `\0${target.sourceIdentity}` : ''}`)
       .digest('hex')
     const allowChildren = target.allowChildren ?? target.sourceKind !== 'attachment'
     const capabilities: FilePreviewCapability[] = ['read', 'open_in_system']

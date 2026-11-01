@@ -309,6 +309,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     return api.readChildImage({ handleId: file.handleId, expectedGeneration: file.contentGeneration, rawReference })
   }, [api, file])
   if (!tab.content) return <div className="file-preview-empty-content" />
+  if (tab.content.kind === 'unsupported') return <UnsupportedFile tab={tab}/>
   if (tab.content.kind === 'markdown' && file) {
     return (
       <div className="file-preview-markdown" ref={root} tabIndex={0}
@@ -347,6 +348,13 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     return <PatchViewer tab={tab} />
   }
   return <SourceViewer tab={tab} />
+}
+
+function UnsupportedFile({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
+  const { openInSystem } = useFilePreview()
+  return <div className="file-preview-unavailable"><strong>{tab.file?.fileName}</strong><p>{uiAttribute('此文件暂不支持预览')}</p>
+    {tab.file?.capabilities.includes('open_in_system') && <button type="button" onClick={() => { void openInSystem(tab.id) }}>{uiAttribute('使用系统应用打开')}</button>}
+  </div>
 }
 
 function FileDownloadAction({ tab, full = false }: { tab: FilePreviewTabModel; full?: boolean }): React.JSX.Element {

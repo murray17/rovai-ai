@@ -9,6 +9,8 @@ export interface ShortcutDefinition {
   editable?: boolean
 }
 export const SHORTCUTS: readonly ShortcutDefinition[] = [
+  { id: 'project-files', name: '显示／隐藏文件目录', group: 'files', binding: 'Mod+Shift+E', editable: true },
+  { id: 'quick-open', name: '搜索项目文件', group: 'files', binding: 'Mod+P', editable: true },
   { id: 'execution', name: '展开／收起执行台', group: 'workspace', binding: 'Mod+1', editable: true },
   { id: 'members', name: '打开／收起队员', group: 'workspace', binding: 'Mod+2', editable: true },
   { id: 'dm', name: '打开／收起单聊', group: 'workspace', binding: 'Mod+3', editable: true },
@@ -69,6 +71,14 @@ export function shortcutKeyParts(binding: string | null, platform: NodeJS.Platfo
 }
 export function parseShortcutPreferences(value: unknown, platform: NodeJS.Platform): ShortcutPreferences | null {
   if (!record(value) || !exact(value, ['schemaVersion', 'bindings', 'mouse', 'sendMode']) || value.schemaVersion !== 2 || !record(value.bindings) || !record(value.mouse)) return null
+  // Catalog additions keep existing custom bindings. A previously assigned chord wins.
+  const bindings = { ...value.bindings }
+  for (const id of ['project-files', 'quick-open'] as const) if (!Object.hasOwn(bindings, id)) {
+    const binding = SHORTCUTS.find(row => row.id === id)!.binding
+    bindings[id] = Object.values(bindings).includes(binding) ? null : binding
+  }
+  value = { ...value, bindings }
+  if (!record(value) || !record(value.bindings) || !record(value.mouse)) return null
   if (!exact(value.bindings, SHORTCUTS.map(row => row.id)) || !exact(value.mouse, SHORTCUT_MOUSE_SIDES)) return null
   if (value.sendMode !== 'enter' && value.sendMode !== 'primary-enter') return null
   const used = new Set<string>()

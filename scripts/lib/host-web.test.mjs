@@ -573,7 +573,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(response.status, 200)
       return response.json()
     }
-    await exerciseFileEditing({ host, fileCall, session: first, otherSession: second, threadId: fileCampId, workspace, fixture })
+    await exerciseFileEditing({ host, call, fileCall, session: first, otherSession: second, threadId: fileCampId, workspace, fixture })
     const prepareDownload = (session, body) => authorized(session, 'downloads', { method: 'POST', body: JSON.stringify(body) })
     const grant = async (source, session = first) => {
       const response = await prepareDownload(session, { kind: 'source', source })

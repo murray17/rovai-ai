@@ -820,6 +820,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
     matches!(
         method,
         "health.check"
+            | "projectFiles.request"
             | "runtime.status.get"
             | "diagnostics.check"
             | "diagnostics.export"
@@ -2425,6 +2426,7 @@ struct ClaudeInputAcceptanceTarget<'a> {
 }
 
 struct Core {
+    project_files: Arc<crate::project_files::ProjectFiles>,
     execution_wake: crate::execution_wake::ExecutionWake,
     non_batch_retry_at: Mutex<Option<tokio::time::Instant>>,
     database: Arc<Mutex<Database>>,
@@ -2910,6 +2912,25 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    async fn resolve_project_file(
+        &self,
+        params: &ResolveFilePreviewSourceParams,
+    ) -> Result<Option<crate::file_preview_authority::ResolvedFilePreviewSource>> {
+        let binding = {
+            let database = self.database.lock().await;
+            crate::project_files::binding(&database, &params.camp_id).ok()
+        };
+        let Some(binding) = binding else {
+            return Ok(None);
+        };
+        let thread = params.camp_id.clone();
+        let reference = params.raw_reference.clone().unwrap_or_default();
+        tokio::task::spawn_blocking(move || {
+            crate::project_files::resolve_source(binding, thread, &reference).ok()
+        })
+        .await
+        .context("Project file resolution failed")
+    }
     async fn attachment_view_gate(&self, camp_id: &str) -> Arc<RwLock<()>> {
         let mut gates = self.attachment_view_gates.lock().await;
         gates
@@ -12052,16 +12073,32 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "projectFiles.request" => {
+                let params: crate::project_files::Request =
+                    serde_json::from_value(request.params.clone())?;
+                let binding = if matches!(params.action.as_str(), "release" | "cancelSearch") {
+                    None
+                } else {
+                    let database = self.database.lock().await;
+                    crate::project_files::binding(&database, &params.thread_id).ok()
+                };
+                Ok(self
+                    .project_files
+                    .request(request.client.id().to_owned(), binding, params)
+                    .await)
+            }
             "filePreview.readEditable" | "filePreview.saveText" => {
                 let params: crate::file_edit::EditRequest =
                     serde_json::from_value(request.params.clone())?;
                 if !matches!(
                     params.source.kind.as_str(),
-                    "camp_workspace" | "message_reference"
+                    "camp_workspace" | "message_reference" | "project_file"
                 ) {
                     return Ok(crate::file_edit::failure("edit_unavailable"));
                 }
-                let resolved = {
+                let resolved = if params.source.kind == "project_file" {
+                    self.resolve_project_file(&params.source).await?
+                } else {
                     let database = self.database.lock().await;
                     resolve_file_preview_source(
                         &database,
@@ -12079,6 +12116,11 @@ impl Core {
             "filePreview.resolveSource" => {
                 let params: ResolveFilePreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;
+                if params.kind == "project_file" {
+                    return Ok(serde_json::to_value(
+                        self.resolve_project_file(&params).await?,
+                    )?);
+                }
                 let database = self.database.lock().await;
                 let resolved = if params.kind == "skill_reference" {
                     resolve_skill_preview_source(&database, &self.data_dir, &params)?
@@ -20202,6 +20244,7 @@ async fn run_core(
     )?);
     let planned_shutdown = PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string());
     let core = Arc::new(Core {
+        project_files: Arc::new(crate::project_files::ProjectFiles::default()),
         execution_wake: database.execution_wake.clone(),
         delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
         agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
@@ -28800,6 +28843,7 @@ mod tests {
         )?);
 
         Ok(Core {
+            project_files: Arc::new(crate::project_files::ProjectFiles::default()),
             execution_wake: database.execution_wake.clone(),
             delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
             agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),

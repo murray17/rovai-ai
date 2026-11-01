@@ -7,6 +7,8 @@ import { FilePreviewExpandButton, useOptionalFilePreviewLayout } from './FilePre
 import { FilePreviewTabs } from './FilePreviewTabs'
 import { FileFindButton } from './FilePreviewFind'
 import { UiText, uiAttribute } from './interface-language'
+import { useProjectFiles } from './ProjectFilesContext'
+import { ProjectFilesButton, ProjectFolderIcon } from './ProjectFilesPane'
 
 export function AppHeader({
   threadTitle,
@@ -38,6 +40,7 @@ export function AppHeader({
   previewTabsInPane?: boolean
 }): React.JSX.Element {
   const filePreview = useOptionalFilePreview()
+  const browser = useProjectFiles()
   const previewLayout = useOptionalFilePreviewLayout()
   const previewVisible = Boolean(filePreview?.paneVisible)
   const title = threadTitle ?? uiAttribute('正在打开对话')
@@ -45,6 +48,7 @@ export function AppHeader({
   const previewControls = filePreview && <div className="file-preview-toggle-group">
     {filePreview.activeTab?.kind !== 'mission_activity' && filePreview.activeTab?.kind !== 'execution' && <FileFindButton />}
     <FilePreviewExpandButton />
+    <ProjectFilesButton />
     <button className="file-preview-toggle" type="button" aria-label={previewVisible ? uiAttribute("收起文件预览") : uiAttribute("展开文件预览")}
       title={previewVisible ? uiAttribute("收起文件预览") : uiAttribute("展开文件预览")} aria-expanded={previewVisible} aria-controls="file-preview-pane"
       onClick={previewVisible ? filePreview.hidePane : filePreview.showPane}>
@@ -53,8 +57,8 @@ export function AppHeader({
   </div>
   return (
     <header
-      className={`topbar camp-topbar ${leading ? 'mission-session-header ' : ''}${!previewTabsInPane && previewVisible ? `has-file-preview ${previewLayout?.className ?? ''}` : ''}`.trim()}
-      style={previewVisible && !previewTabsInPane ? previewLayout?.style : undefined}
+      className={`topbar camp-topbar ${browser?.store ? 'has-project-files ' : ''}${leading ? 'mission-session-header ' : ''}${previewLayout?.className ?? ''} ${!previewTabsInPane && previewVisible ? 'has-file-preview' : ''}`.trim()}
+      style={!previewTabsInPane ? previewLayout?.style : undefined}
     >
       <div className="topbar-conversation-context">
         {leading}
@@ -69,7 +73,7 @@ export function AppHeader({
           : <PanelToggleIcon side="left" visible={false} />}</button>}
         {onBack && <MobileBack label={previewVisible ? uiAttribute("返回对话") : uiAttribute("返回对话列表")} onClick={previewVisible ? filePreview!.hidePane : onBack} />}
         <div className="context-breadcrumb" hidden={hideTitle}>
-          {contextLabel && <span className="context-project">{contextLabel}</span>}
+          {contextLabel && (browser?.store ? <button type="button" className="context-project project-files-project" title={uiAttribute('显示／隐藏文件目录')} aria-expanded={browser.visible} aria-controls="project-files-pane" onClick={event => browser.toggle(event.currentTarget)}><ProjectFolderIcon />{contextLabel}</button> : <span className="context-project">{contextLabel}</span>)}
           {contextLabel && <span className="context-sep" aria-hidden="true">›</span>}
           <h1 title={title}>{title}</h1>
         </div>

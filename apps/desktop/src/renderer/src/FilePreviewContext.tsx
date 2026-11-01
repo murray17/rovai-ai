@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import type { FilePreviewApi, ResolvedTheme } from '@contracts'
 import { desktopFilePreviewApi } from './desktop-file-preview-api'
 import { FilePreviewLayoutProvider, useOptionalFilePreviewLayout } from './FilePreviewLayout'
+import { ProjectFilesProvider } from './ProjectFilesContext'
 import { FileFindProvider } from './FilePreviewFind'
 import { FilePreviewResources } from './file-preview-resources'
 import { FilePreviewPaneContent } from './FilePreviewPane'
@@ -75,7 +76,7 @@ function PreviewDeck({ resources, anchor, resolvedTheme, missionActivity, regist
     return () => { observer.disconnect(); window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true) }
   }, [anchor, workspace])
   // The split context updates before a ResizeObserver delivery on a window resize.
-  const width = workspace && layout ? ((layout.compact || layout.expanded) ? layout.availableWidth : Math.round(layout.width)) : bounds?.fallbackWidth ?? 0
+  const width = workspace && layout ? ((layout.compact || layout.expanded) ? layout.availableWidth - layout.directoryReservedWidth : Math.round(layout.width)) : bounds?.fallbackWidth ?? 0
   const positioned = bounds && {
     top: bounds.top, height: bounds.height, width, left: bounds.right - width
   }
@@ -125,6 +126,7 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
     return () => { window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('online', online); unsubscribeConnection?.(); release() }
   }, [resources])
   return <FileEditContext.Provider value={resources.edits}><FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
+    <ProjectFilesProvider api={api.projectFiles} threadId={threadId} onConnectionRestored={api.onConnectionRestored}>
     <FilePreviewLayoutProvider threadId={threadId} visible={!!threadId && value.paneVisible} activityMode={value.activeTab?.kind === 'mission_activity'}>
       <FileFindProvider activeTabId={value.activeTabId} visible={!!threadId && value.paneVisible}>
         <ExecutionPreviewHostContext.Provider value={executionHosts}>
@@ -134,6 +136,7 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
         </ExecutionPreviewHostContext.Provider>
       </FileFindProvider>
     </FilePreviewLayoutProvider>
+    </ProjectFilesProvider>
     <FileEditDialogs />
   </FilePreviewContext.Provider></FilePreviewApiContext.Provider></FileEditContext.Provider>
 }

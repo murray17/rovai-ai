@@ -142,6 +142,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
         rawReference: string(input.rawReference)
       }
     case 'camp_workspace':
+    case 'project_file':
       return {
         kind: input.kind,
         threadId: threadId(input.threadId),
