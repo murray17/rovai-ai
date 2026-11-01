@@ -198,8 +198,8 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     const neighbor = tabs[index + 1] ?? tabs[index - 1]
     await close(tab.id)
     window.requestAnimationFrame(() => {
-      if (document.getElementById(tabDomId(tab.id))) focusTab(tab.id)
-      else if (neighbor) focusTab(neighbor.id)
+      if (document.getElementById(tabDomId(tab.id))) return
+      if (neighbor) focusTab(neighbor.id)
       else focusConversation()
     })
   }
