@@ -22,15 +22,16 @@ Governance: none；Status: ready。只推送工作分支，不创建 PR、不合
 
 删除详情中的 `prepare_diff_snapshot` 和 `same_view` 全清单／checkout 相等门槛。已有
 `viewId → fileId → raw_paths` 关联先验证 workspace ID、路径与 generation，再核对当前 Git
-注册、owner 和固定 base。私有 index 只对选中存在的叶路径准备 intent-to-add；删除路径跳过
-这一步，重命名保留两个可信路径但不把已消失的旧名传给 `git add`。一次限定路径的 Git 调用
+注册、owner 和固定 base。私有 index 只对选中存在且当前未被忽略的未跟踪路径，以及仍受跟踪的
+目标准备 intent-to-add；磁盘上已消失的路径跳过这一步，重命名保留两个可信路径但不把已消失的旧名传给 `git add`。一次限定路径的 Git 调用
 同时返回 raw、numstat、patch，详情不混用旧行数、binary 或模式。选中项无法对应时继续显式刷新。
-文件变目录不递归展开；中间链接、非法路径组件不进入读取。既有 Gitlink 语义保持。
+文件变目录不递归展开；中间链接、非法路径组件不进入读取。Gitlink 与忽略语义经下述补修验证。
 
 Renderer 仅将详情标题栏、图标、复制路径和统计改为 `fileDiff.file`；列表总计、缓存、
 请求合并、迟到响应隔离和显式刷新保持。列表读取仍执行原来的三组 Git 操作。
-普通详情从全清单准备加 patch 的四次 Git 调用，减少为身份观察、选中路径准备、目标 Diff 三次；
-没有无路径限定的 add 或全仓 raw/numstat。删除项可以省去 add。每次详情仍复制真实 index，
+初始精简将普通详情从全清单准备加 patch 的四次调用改为三次；本次补修增加一次限定目标的
+ignore 查询，当前普通详情为四次：身份观察、目标 ignore 查询、选中路径准备、目标 Diff。
+仍没有无路径限定的 add 或全仓 raw/numstat。消失或已忽略的未跟踪项省去 add。每次详情仍复制真实 index，
 split index 时还复制 shared index；完成即回收，不宣称消除所有写入、永久泄漏或速度百分比。
 
 回归归属保持在已有 `mission_workspace` 两个 Diff owner 中，未新增独立 Rust 测试函数。
@@ -119,10 +120,62 @@ Runtime 准入或共享 helper。最终版本的 smoke 另补报告尾部读取�
 
 两个独立提交：`fix: read mission file diffs without whole-workspace revalidation`
 （`ad8b609da5c0ffcb37e9f8d48927cd2981f89eb0`）及
-`fix: avoid duplicate validation when reusing ready mission workspaces`（本记录最终所在提交）。
+`fix: avoid duplicate validation when reusing ready mission workspaces`
+（`66fb3d57da10a2026745b7898a53536123209e41`）。
 分支保持在 `rovai/mission-read-simplification`，未合入的 worktree 保留。
 
 Windows 原生、完整 Desktop 与真实 Core 的联动、安装路径未验证。隔离 Electron 的 11 项通过
 和真实 Core/Runtime 的 6 次执行分别记账。两项非目标扩展测试的基线失败如上保留。
 私有 index／shared index 复制、既有详情缓存与手动刷新、无计划／归属不明时的 Mission 锁等待
 继续存在。未新增后台清理、恢复机制、持久验证状态或数据迁移。
+
+## 审查补修：忽略的删除项与取消暂存的新 Gitlink
+
+User sequence 65 指出两种未被前述验收覆盖的 Git 状态。本补修从分支
+`66fb3d57da10a2026745b7898a53536123209e41` 追加一个局部提交；核对远端 main 仍为
+`b3c9522d3bd63a6aea631cb0f71792e37650e664`。正常 ready 复用代码保持不变。
+
+目标准备先在复制的当前 index 上执行限定可信原始路径的
+`ls-files --others --ignored --exclude-standard --directory -z -- <paths>`，只跳过当前未跟踪且
+被忽略的项。`--directory` 不展开忽略目录，返回忽略父目录时按路径组件对应目标；
+沿用 `--literal-pathspecs` 和 NUL 路径边界。仍受跟踪、只是匹配 ignore 规则的文件不被跳过。
+没有使用 `add -f` 或吞掉失败；查询和 add 的真实 Git 错误继续报告。
+语义参考 [Git ls-files](https://git-scm.com/docs/git-ls-files)。
+
+选中 Gitlink 目录只有在 Git 当前报告的仓库根 canonical 后与该目录相等时，才进入精确路径的
+intent-to-add。新子模块取消暂存后可重新进入私有 index；被普通目录替换时，Git 发现到父仓库
+不能授权 add，保留复制 index 中的既有条目。正常 deinit 后仍受跟踪的 Gitlink 继续按其 index
+内容展示；无既有条目且已无法对应的项返回原刷新结果。没有递归 add、全仓清单重建、持久缓存
+或新身份状态；临时 index 的生命周期不变。
+
+回归继续扩展两个既有默认 feature Diff owner，没有新增独立 Rust 测试函数。macOS 原生
+Git 为 `2.50.1 (Apple Git-155)`，使用真实临时 repository / managed worktree 与本地子模块：
+
+| 场景 | 修复前实测 | 补修后的定向结果 |
+| --- | --- | --- |
+| `rm --cached`，忽略目标且磁盘文件保留 | `mission.temporary_index_failed`，Git 拒绝显式 add | 返回删除 patch，文件与真实 index 不变 |
+| 新子模块添加后 reset `.gitmodules` 和 Gitlink | `mission.changes_refresh_required` | 返回 `Subproject commit`，父子 index、`.git` 和 `.gitmodules` 不变 |
+
+修复前日志 `/private/tmp/rovai-mission-paths-before.log`：新增两个断言所在 owner 失败，另两项通过。
+补修后 `cargo test -p rovai-core --lib mission_workspace::tests -- --nocapture`：4 项通过；
+日志 `/private/tmp/rovai-mission-paths-after.log`。同时覆盖 tracked ignore 匹配、改变 ignore 后复用
+旧 deleted 选择、已暂存 Gitlink，以及旧 Gitlink 被普通目录替换时不执行 add。
+最终回归另包含忽略父目录、带方括号的字面文件名、ls-files 的精确路径范围及已暂存子模块
+正常 deinit 后仍能查看 Diff 的断言。
+
+补修验证按范围分别记录：
+
+- 最终定向 Git 回归：`cargo test -p rovai-core --lib mission_workspace::tests -- --nocapture`，
+  4 项通过，包含上述 deinit 与目录替换分支；日志 `/private/tmp/rovai-mission-paths-final-targeted.log`。
+- `pnpm test`：Vitest 259 文件、3022 项通过、2 项原有跳过；末段 Node 365 项通过、2 项 Windows-only 跳过。
+  首次执行中 Cline observer 的原断言把时间戳 `.999Z` 命中为禁用值 `999`，导致 Node 364 通过、
+  1 失败、2 跳过；无相关源码改动，单独复跑该 1 项和完整 `pnpm test` 均通过。
+  首次与复跑日志分别为 `/private/tmp/rovai-mission-paths-js.log`、`/private/tmp/rovai-mission-paths-js-rerun.log`。
+- `pnpm typecheck`、`pnpm check:rust`（workspace/all-targets）、`cargo fmt --all -- --check`、
+  `pnpm docs:test`、`pnpm docs:check`、以 `b3c9522d3` 为 base 的 `pnpm docs:check:ci` 通过。
+- 最终源码 `pnpm test:rust:pr`（默认 `cargo test --workspace`）：477 项通过、1 项原有 ignored
+  手动 Runtime 验收；无额外 feature。日志 `/private/tmp/rovai-mission-paths-final-rust.log`。
+
+前述真实 Core/Runtime 和 Electron 结果属于初始两个提交，不证明这两种新 Git 状态的完整
+Desktop 验收。此次补修未执行 Windows、Linux 原生、完整 Desktop / Runtime 与安装路径验收；
+用户提供的 Linux / Git 2.47.3 记录属于独立外部复现。只推送原工作分支，不创建 PR、合并或安装日常 App。

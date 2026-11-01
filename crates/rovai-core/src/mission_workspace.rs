@@ -1431,10 +1431,51 @@ impl MissionGit {
                 .await?;
             ensure!(output.status.success(), "mission.temporary_index_failed");
         }
-        // An absent selected file needs no intent-to-add entry. In particular,
-        // an empty selection must never become an unqualified whole-tree add.
-        if paths.is_some_and(|paths| paths.is_empty()) {
-            return Ok(temporary);
+        let mut paths = paths.map(|paths| paths.to_vec());
+        if let Some(paths) = paths.as_mut() {
+            if paths.is_empty() {
+                return Ok(temporary);
+            }
+            // Explicit add rejects ignored untracked paths, while the list's
+            // whole-tree add skips them. Ask Git against this same index copy:
+            // tracked paths remain eligible even when an ignore rule matches.
+            // ls-files honors literal pathspecs; --directory keeps ignored
+            // directories (including nested repositories) from being expanded.
+            let mut args = vec![
+                "ls-files".into(),
+                "--others".into(),
+                "--ignored".into(),
+                "--exclude-standard".into(),
+                "--directory".into(),
+                "-z".into(),
+                "--".into(),
+            ];
+            args.extend_from_slice(paths);
+            let ignored = self
+                .output(cwd, &args, Some(&temporary.index), None)
+                .await?;
+            ensure!(
+                ignored.status.success(),
+                "mission.temporary_index_failed: {}",
+                ignored.stderr.lossy_text()
+            );
+            let ignored = ignored
+                .stdout
+                .bytes
+                .split(|byte| *byte == 0)
+                .filter(|path| !path.is_empty())
+                .map(path_os_string)
+                .collect::<Result<Vec<_>>>()?;
+            // Git may return an ignored parent directory instead of the leaf.
+            paths.retain(|path| {
+                !ignored
+                    .iter()
+                    .any(|ignored| Path::new(path).starts_with(ignored))
+            });
+            // Empty/ignored selections must never become a whole-tree add.
+            if paths.is_empty() {
+                return Ok(temporary);
+            }
         }
         let mut args = vec![
             "-c".into(),
@@ -1445,7 +1486,7 @@ impl MissionGit {
             "--".into(),
         ];
         if let Some(paths) = paths {
-            args.extend_from_slice(paths);
+            args.extend(paths);
         }
         let prepared = self
             .output(cwd, &args, Some(&temporary.index), None)
@@ -1533,7 +1574,9 @@ impl MissionGit {
             .file(file_id)
             .context("mission.changes_refresh_required")?;
         let metadata = self.diff_metadata(workspace).await?;
-        let paths = selected.existing_leaf_paths(Path::new(&workspace.worktree_path))?;
+        let paths = selected
+            .existing_leaf_paths(self, Path::new(&workspace.worktree_path))
+            .await?;
         let temporary = self
             .temporary_index(workspace, &metadata, Some(&paths))
             .await?;
@@ -1929,7 +1972,7 @@ pub struct MissionChangedFile {
     raw_paths: Vec<Vec<u8>>,
 }
 impl MissionChangedFile {
-    fn existing_leaf_paths(&self, root: &Path) -> Result<Vec<OsString>> {
+    async fn existing_leaf_paths(&self, git: &MissionGit, root: &Path) -> Result<Vec<OsString>> {
         let mut existing = Vec::new();
         for raw in &self.raw_paths {
             let path = path_os_string(raw)?;
@@ -1955,13 +1998,29 @@ impl MissionChangedFile {
                         "mission.changes_refresh_required"
                     );
                 } else if metadata.is_dir() {
-                    // A file replaced by a directory must not expand the read
-                    // or intent-to-add operation to its children. Gitlinks are
-                    // the existing exception: Git reads the submodule entry.
+                    // A stale Gitlink mode cannot authorize recursive add of a
+                    // replacement directory. Git must still recognize this
+                    // exact directory as a repository, not discover its parent.
                     ensure!(
                         self.old_mode == "160000" || self.new_mode == "160000",
                         "mission.changes_refresh_required"
                     );
+                    let git_root = git
+                        .bytes(&target, &["rev-parse", "--show-toplevel"])
+                        .await?;
+                    let git_root = git_root
+                        .strip_suffix(b"\n")
+                        .context("mission.invalid_git_text")?;
+                    #[cfg(windows)]
+                    let git_root = git_root.strip_suffix(b"\r").unwrap_or(git_root);
+                    if fs::canonicalize(PathBuf::from(path_os_string(git_root)?))?
+                        == fs::canonicalize(&target)?
+                    {
+                        existing.push(path.clone());
+                    }
+                    // Otherwise leave the copied index alone. It may already
+                    // contain a valid Gitlink for a deinitialized submodule;
+                    // an absent entry remains absent, without recursive add.
                 } else {
                     ensure!(
                         metadata.is_file() || metadata.file_type().is_symlink(),
@@ -2604,6 +2663,90 @@ mod tests {
 
     #[tokio::test]
     async fn fixed_base_diff_is_final_net_content_without_mutating_real_index() {
+        {
+            let (_fixture, git, _repo, mut workspace) = fixture().await;
+            git.materialize(&workspace).await.unwrap();
+            workspace.state = "ready".into();
+            let cwd = Path::new(&workspace.worktree_path);
+            fs::write(
+                cwd.join(".gitignore"),
+                "ignored/\n/remove.txt\n/edit.txt\n/src/\n",
+            )
+            .unwrap();
+            git.bytes(cwd, &["rm", "--cached", "--", "remove.txt", "src/keep.txt"])
+                .await
+                .unwrap();
+            fs::write(cwd.join("edit.txt"), "tracked despite ignore\n").unwrap();
+            let index = git
+                .text(
+                    cwd,
+                    &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+                )
+                .await
+                .unwrap();
+            let index_before = fs::read(&index).unwrap();
+            let snapshot = git
+                .prepare_diff_snapshot(&workspace)
+                .await
+                .unwrap()
+                .into_snapshot();
+            for (path, body) in [("remove.txt", "remove\n"), ("src/keep.txt", "keep\n")] {
+                let removed = snapshot
+                    .files()
+                    .iter()
+                    .find(|file| file.path == path)
+                    .unwrap();
+                assert_eq!(removed.kind, "deleted");
+                let deleted = git
+                    .file_diff(&workspace, &snapshot, &removed.id)
+                    .await
+                    .unwrap();
+                assert_eq!(deleted.file.kind, "deleted");
+                assert!(deleted.patch.contains(&format!("-{body}")));
+                assert_eq!(fs::read(cwd.join(path)).unwrap(), body.as_bytes());
+            }
+            let tracked = snapshot
+                .files()
+                .iter()
+                .find(|file| file.path == "edit.txt")
+                .unwrap();
+            git.clear_invocations();
+            let edited = git
+                .file_diff(&workspace, &snapshot, &tracked.id)
+                .await
+                .unwrap();
+            assert!(edited.patch.contains("+tracked despite ignore"));
+            assert!(
+                git.take_invocations()
+                    .iter()
+                    .any(|args| args.iter().any(|arg| arg == "add")
+                        && args.last().is_some_and(|arg| arg == "edit.txt")),
+                "tracked paths matching an ignore pattern still participate in preparation"
+            );
+            assert_eq!(fs::read(&index).unwrap(), index_before);
+            assert_eq!(fs::read(cwd.join("remove.txt")).unwrap(), b"remove\n");
+            assert_eq!(
+                fs::read(cwd.join("edit.txt")).unwrap(),
+                b"tracked despite ignore\n"
+            );
+
+            // The old deleted label cannot decide preparation after the user
+            // changes the ignore rules and edits the still-untracked source.
+            fs::write(cwd.join(".gitignore"), "ignored/\n/edit.txt\n/src/\n").unwrap();
+            fs::write(cwd.join("remove.txt"), "visible again\n").unwrap();
+            let removed = snapshot
+                .files()
+                .iter()
+                .find(|file| file.path == "remove.txt")
+                .unwrap();
+            let visible = git
+                .file_diff(&workspace, &snapshot, &removed.id)
+                .await
+                .unwrap();
+            assert_eq!(visible.file.kind, "modified");
+            assert!(visible.patch.contains("+visible again"));
+            assert_eq!(fs::read(&index).unwrap(), index_before);
+        }
         let (_fixture, git, _repo, mut workspace) = fixture().await;
         git.materialize(&workspace).await.unwrap();
         workspace.state = "ready".into();
@@ -2627,6 +2770,7 @@ mod tests {
         };
         for (name, body) in [
             ("new.txt", b"new\n".as_slice()),
+            ("[e]dit.txt", b"literal name, not edit.txt\n"),
             (special_name, b"special\n"),
             ("empty", b""),
             ("binary", b"a\0b"),
@@ -2676,6 +2820,7 @@ mod tests {
             "renamed.txt",
             "remove.txt",
             "new.txt",
+            "[e]dit.txt",
             special_name,
             "empty",
             "binary",
@@ -2710,12 +2855,19 @@ mod tests {
         assert_eq!(diff.hunks[0].lines[0].old_line, Some(1));
         let detail_calls = git.take_invocations();
         for args in &detail_calls {
-            if args.iter().any(|arg| arg == "diff" || arg == "add") {
+            if args
+                .iter()
+                .any(|arg| arg == "diff" || arg == "add" || arg == "ls-files")
+            {
                 let separator = args.iter().position(|arg| arg == "--").unwrap();
                 assert_eq!(&args[separator + 1..], &["edit.txt"]);
             }
         }
-        assert_eq!(detail_calls.len(), 3, "metadata, target index, target diff");
+        assert_eq!(
+            detail_calls.len(),
+            4,
+            "metadata, target ignore check, target index, target diff"
+        );
         assert_eq!(
             detail_calls
                 .iter()
@@ -2735,7 +2887,14 @@ mod tests {
         );
         assert!(changed.patch.contains("+second line"));
         fs::write(cwd.join("edit.txt"), "final\n").unwrap();
-        for name in ["remove.txt", "new.txt", special_name, "empty", "binary"] {
+        for name in [
+            "remove.txt",
+            "new.txt",
+            "[e]dit.txt",
+            special_name,
+            "empty",
+            "binary",
+        ] {
             let file = files.iter().find(|file| file.path == name).unwrap();
             let detail = git
                 .file_diff(&workspace, &snapshot, &file.id)
@@ -2889,6 +3048,140 @@ mod tests {
 
     #[tokio::test]
     async fn private_index_preserves_conflicts_sparse_checkout_and_assume_unchanged() {
+        {
+            let (_fixture, git, repo, mut workspace) = fixture().await;
+            git.materialize(&workspace).await.unwrap();
+            workspace.state = "ready".into();
+            let cwd = Path::new(&workspace.worktree_path);
+            git.bytes(
+                cwd,
+                &[
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    "--",
+                    repo.root.to_str().unwrap(),
+                    "vendor/lib",
+                ],
+            )
+            .await
+            .unwrap();
+            git.bytes(cwd, &["reset", "HEAD", "--", ".gitmodules", "vendor/lib"])
+                .await
+                .unwrap();
+            assert!(
+                git.bytes(cwd, &["ls-files", "--stage", "--", "vendor/lib"])
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            let index = git
+                .text(
+                    cwd,
+                    &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+                )
+                .await
+                .unwrap();
+            let index_before = fs::read(&index).unwrap();
+            let submodule = cwd.join("vendor/lib");
+            let child_index = git
+                .text(
+                    &submodule,
+                    &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+                )
+                .await
+                .unwrap();
+            let child_index_before = fs::read(&child_index).unwrap();
+            let git_file = fs::read(submodule.join(".git")).unwrap();
+            let modules = fs::read(cwd.join(".gitmodules")).unwrap();
+            let snapshot = git
+                .prepare_diff_snapshot(&workspace)
+                .await
+                .unwrap()
+                .into_snapshot();
+            let selected = snapshot
+                .files()
+                .iter()
+                .find(|file| file.path == "vendor/lib")
+                .unwrap();
+            assert_eq!(selected.new_mode, "160000");
+            git.clear_invocations();
+            let diff = git
+                .file_diff(&workspace, &snapshot, &selected.id)
+                .await
+                .unwrap();
+            assert_eq!(diff.file, *selected);
+            assert!(
+                diff.patch
+                    .contains(&format!("+Subproject commit {}", workspace.base_sha))
+            );
+            assert!(
+                git.take_invocations()
+                    .iter()
+                    .any(|args| args.iter().any(|arg| arg == "add")
+                        && args.ends_with(&["--".into(), "vendor/lib".into()]))
+            );
+            assert_eq!(fs::read(&index).unwrap(), index_before);
+            assert_eq!(fs::read(&child_index).unwrap(), child_index_before);
+            assert_eq!(fs::read(submodule.join(".git")).unwrap(), git_file);
+            assert_eq!(fs::read(cwd.join(".gitmodules")).unwrap(), modules);
+
+            // A stale 160000 in the list does not authorize adding a directory
+            // which is no longer a repository at that exact path.
+            fs::remove_file(submodule.join(".git")).unwrap();
+            git.clear_invocations();
+            assert!(
+                git.file_diff(&workspace, &snapshot, &selected.id)
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("mission.changes_refresh_required")
+            );
+            assert!(
+                !git.take_invocations()
+                    .iter()
+                    .any(|args| args.iter().any(|arg| arg == "add"))
+            );
+            assert_eq!(fs::read(submodule.join("edit.txt")).unwrap(), b"original\n");
+            assert_eq!(fs::read(&index).unwrap(), index_before);
+            assert_eq!(fs::read(&child_index).unwrap(), child_index_before);
+            fs::write(submodule.join(".git"), git_file).unwrap();
+
+            git.bytes(cwd, &["add", "--", ".gitmodules", "vendor/lib"])
+                .await
+                .unwrap();
+            let tracked_index = fs::read(&index).unwrap();
+            assert_eq!(
+                git.file_diff(&workspace, &snapshot, &selected.id)
+                    .await
+                    .unwrap()
+                    .file,
+                *selected
+            );
+            assert_eq!(fs::read(&index).unwrap(), tracked_index);
+            // A normal deinit leaves a tracked Gitlink and an empty directory.
+            // Preserve its index-based diff without adding directory contents.
+            git.bytes(cwd, &["submodule", "deinit", "-f", "--", "vendor/lib"])
+                .await
+                .unwrap();
+            git.clear_invocations();
+            assert_eq!(
+                git.file_diff(&workspace, &snapshot, &selected.id)
+                    .await
+                    .unwrap()
+                    .file,
+                *selected
+            );
+            assert!(
+                !git.take_invocations()
+                    .iter()
+                    .any(|args| args.iter().any(|arg| arg == "add"))
+            );
+            assert_eq!(fs::read(&index).unwrap(), tracked_index);
+            assert_eq!(fs::read(&child_index).unwrap(), child_index_before);
+            assert_eq!(fs::read(cwd.join(".gitmodules")).unwrap(), modules);
+        }
         {
             let (_fixture, git, _repo, mut workspace) = fixture().await;
             git.materialize(&workspace).await.unwrap();

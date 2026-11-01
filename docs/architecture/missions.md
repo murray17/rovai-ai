@@ -71,14 +71,22 @@ a file request verifies the workspace and selected trusted path association, pre
 the selected existing leaf paths, and reads raw metadata, statistics and patch in one path-scoped Diff.
 Other file changes and checkout changes do not require a fresh whole-workspace list. An absent target never
 falls back to unqualified index preparation; a file replaced by a directory cannot expand to its children.
+Before explicit intent-to-add, a literal-path-scoped `ls-files --others --ignored --exclude-standard --directory`
+query against the same private index omits currently ignored untracked targets, including ignored parent
+directories. Tracked files remain eligible regardless of matching ignore rules. A selected Gitlink directory
+must still be the exact root reported by Git before its path joins preparation; an old `160000` mode alone
+cannot authorize adding a replacement ordinary directory. Otherwise its copied index entry is left intact,
+preserving the usual diff of a tracked but deinitialized submodule without adding directory contents.
 The normal list-read path uses three Git processes: one combined `rev-parse` reads and validates the Worktree root,
 Git/admin/common directories, real/shared index paths, `HEAD`, actual branch and fixed base; one private-index
 `git -c core.splitIndex=false add -A -N` prepares tracked and untracked entries; and one combined raw/numstat Diff
 produces the file set. Index and shared-index files are copied with filesystem operations, and the real index is
 never written. Repositories without a materialized index or with another exceptional layout may use an additional
-safe initialization or diagnostic call. A normal single-file detail uses the identity observation, target-scoped
-index preparation and one raw/numstat/patch call, without a whole-list read. It may skip index preparation for
-absent leaves, while still copying the real/shared index. Unresolvable selected items use the existing refresh
+safe initialization or diagnostic call. A normal single-file detail uses four Git processes: the identity
+observation, target ignore query, target-scoped index preparation and one raw/numstat/patch call, without a
+whole-list read. Gitlink directories additionally require the local root observation. Absent leaves skip the
+ignore query and add; currently ignored untracked leaves skip add. Both still copy the real/shared index.
+Unresolvable selected items use the existing refresh
 result; true Git/I/O failures remain errors. The post-read workspace fence stays in place. No long-lived
 Git-result cache, watcher, worker or timer is added.
 Multiple outstanding handles prevent a late old list request from replacing the newer handle; Renderer also
