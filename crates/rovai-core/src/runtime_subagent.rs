@@ -31,7 +31,7 @@ pub fn is_agent_tool(adapter: AdapterKind, name: &str) -> bool {
         AdapterKind::MinimaxCodeCli => matches!(name, "task" | "task_output" | "task_stop"),
         AdapterKind::CommandCodeCli => name == "agent",
         AdapterKind::GrokBuild => name == "spawn_subagent",
-        AdapterKind::DeepseekHarness => name == "subagent",
+        AdapterKind::DeepseekHarness | AdapterKind::KiroCli => name == "subagent",
         AdapterKind::HermesCli => name == "delegate_task",
         AdapterKind::TraeCnCli => matches!(
             name,
@@ -71,6 +71,7 @@ pub fn acp_tool_name(adapter: AdapterKind, update: &Value) -> Option<String> {
             match adapter {
                 AdapterKind::CodebuddyCli => update.pointer("/_meta/codebuddy.ai~1toolName"),
                 AdapterKind::QoderCli => update.pointer("/_meta/qoder/toolName"),
+                AdapterKind::KiroCli => update.pointer("/_meta/kiro/toolName"),
                 AdapterKind::QwenCode => update.pointer("/_meta/toolName"),
                 AdapterKind::OpencodeCli => update.pointer("/_meta/name"),
                 AdapterKind::GrokBuild => update.pointer("/_meta/x.ai~1tool/name"),
@@ -498,6 +499,11 @@ mod tests {
                 Some("Agent"),
             ),
             (
+                AdapterKind::KiroCli,
+                json!({"title":"Spawning agent crew","_meta":{"kiro":{"toolName":"subagent"}}}),
+                Some("subagent"),
+            ),
+            (
                 AdapterKind::QwenCode,
                 json!({"_meta":{"toolName":"agent"}}),
                 Some("agent"),
@@ -528,6 +534,11 @@ mod tests {
                 Some("spawn_subagent"),
             ),
             (AdapterKind::CopilotCli, json!({"title":"Agent"}), None),
+            (
+                AdapterKind::KiroCli,
+                json!({"title":"Spawning agent crew"}),
+                None,
+            ),
             (
                 AdapterKind::OpencodeCli,
                 json!({"title":"delegate_task: prose"}),

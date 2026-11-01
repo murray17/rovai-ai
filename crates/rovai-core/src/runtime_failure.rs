@@ -298,6 +298,17 @@ fn classify_high_value_runtime_error(
             true,
         );
     }
+    if runtime_kind == AdapterKind::ZcodeApp
+        && lower.contains("zcode account concurrency limit exceeded")
+    {
+        return (
+            RuntimeFailureOrigin::Runtime,
+            default_phase,
+            "runtime_rate_limited".to_string(),
+            "账号并发已达上限，请稍后重试".to_string(),
+            true,
+        );
+    }
     if contains_any(
         lower,
         &[
@@ -792,6 +803,24 @@ mod tests {
         assert_eq!(failure.code, "runtime_rate_limited");
         assert_eq!(failure.origin, RuntimeFailureOrigin::Runtime);
         assert!(failure.retryable);
+
+        let concurrency = public_runtime_failure_from_output(
+            AdapterKind::ZcodeApp,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            "runtime_prompt_runtime_error",
+            "ZCode 未能完成运行",
+            Some(
+                "ACP error -32000: Official ZCode request failed: ZCode account concurrency limit exceeded; reduce parallel requests or try again later",
+            ),
+            &[],
+            false,
+        );
+        assert_eq!(concurrency.code, "runtime_rate_limited");
+        assert_eq!(concurrency.summary, "账号并发已达上限，请稍后重试");
+        assert_eq!(concurrency.origin, RuntimeFailureOrigin::Runtime);
+        assert_eq!(concurrency.phase, RuntimeFailurePhase::Execution);
+        assert!(concurrency.retryable);
 
         let capacity = public_runtime_failure_from_output(
             AdapterKind::CodexCli,

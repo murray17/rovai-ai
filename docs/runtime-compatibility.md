@@ -1,10 +1,25 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-28
+last_updated: 2026-11-01
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-01 Kiro 登录后子代理与 ZCode 限流后补验
+
+macOS arm64、Kiro CLI **2.37.0** 登录后，隔离开发 App 的真实 `auto` 模型完成原生 `subagent`。
+标准 ACP 起始事件通过 `_meta.kiro.toolName` 给出函数名；同调用终态的 `rawOutput.items[].Text` 返回报告。
+补齐归一化后，真实重跑在同一普通 command 展示参数和含随机文件标记的报告，机器人图标与共用步骤分组已在 App 核对。
+独立 child Session 的 Read/summary 不在本次根调用接入范围；没有据列表通知创建新步骤或复制子正文。
+
+ZCode 内核 **0.17.0**、`new-provider/gpt-6.1-sol` 的先前失败为 Provider 明确返回账号并发上限，
+不是 Agent 工具执行失败；单独串行重跑 Agent 报告及根回合均成功。该已知错误现在映射为现有 `runtime_rate_limited`，
+仅公开固定原因，不转发任意 Provider payload。限流提示用确定性事件回归验证，没有为验错再次制造账号并发。
+
+Qoder CLI **1.1.76** 后台补跑的原生子任务实际完成，但根回合结束与后台通知衔接仍未通过：
+匿名正文被过滤后缺少可确认的最终输出，后续原生发布发生在 Rovai Run 结束后。首次启动未提交的更深原因未确认。
+同步对照保持通过；不将这一后台边界记为已修复。具体 Run 与回归见[补验记录](versions/v1.72/subagent-flat-execution.md#开发-app-问题补验)。
 
 ## 2026-10-28 Hermes 普通开放全部现有平台
 

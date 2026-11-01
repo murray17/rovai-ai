@@ -29,11 +29,17 @@ impl NativeTurnFailure {
             error[*field].as_str()
                 == Some("Our servers are currently overloaded. Please try again later.")
         });
+        let concurrency_limited = ["message", "underlyingErrorMessage"].iter().any(|field| {
+            error[*field].as_str()
+                == Some("Concurrency limit exceeded for account, please retry later")
+        });
         Self(
             if error["message"] == RUNTIME_HEADERS_UNAVAILABLE || (auth && captcha) {
                 RUNTIME_HEADERS_UNAVAILABLE
             } else if auth {
                 "ZCode authentication failed; check the official native account or provider configuration"
+            } else if concurrency_limited {
+                "ZCode account concurrency limit exceeded; reduce parallel requests or try again later"
             } else if overloaded {
                 "ZCode model service is overloaded; try again later"
             } else {
@@ -772,6 +778,14 @@ mod tests {
                 .is_err()
         );
         for (error, expected) in [
+            (
+                json!({"message":"Concurrency limit exceeded for account, please retry later","stack":"PRIVATE_KEY"}),
+                "ZCode account concurrency limit exceeded; reduce parallel requests or try again later",
+            ),
+            (
+                json!({"message":"Model request failed.","underlyingErrorMessage":"Concurrency limit exceeded for account, please retry later","data":{"Authorization":"PRIVATE_KEY"}}),
+                "ZCode account concurrency limit exceeded; reduce parallel requests or try again later",
+            ),
             (
                 json!({"message":"Model request failed.","underlyingErrorMessage":"Our servers are currently overloaded. Please try again later.","stack":"PRIVATE_KEY"}),
                 "ZCode model service is overloaded; try again later",

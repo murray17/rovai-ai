@@ -145,3 +145,39 @@ pnpm test:command-view
 ```
 
 实际平台为 macOS arm64；本次没有 Windows/Linux 真实运行或完整打包安装验收。后台原生能力、缺少事件与认证失败分别保留，不合并成“18 种均支持”。
+
+## 开发 App 问题补验
+
+本轮继续使用 `/private/tmp/rovai-subagent-app-demo-Rod71e/user-data` 与其独立 managed-skill-library/MCP，
+通过 `pnpm dev` 加载任务 worktree。日常 App 保持运行；以下是开发 App 与真实 LLM 结果，区别于前面的隔离 Core 验收。
+
+| 案例 | 实际结果 |
+|---|---|
+| ZCode `rvcamp_01m6b8f0xyfjhssxd6abhh1jcc` | 原失败 Run 的原生模型错误为 `Concurrency limit exceeded for account, please retry later`，此前 Agent 已成功。串行补跑 `a1a71b26-8a96-487c-a262-baa5a783cf1e` 成功，Agent 返回随机标记 `ROVAI_aacc7848`；完成说明发布成功 |
+| Kiro `rvcamp_01m6b8f43ef299qbh821rrhht0` | 登录后补跑 `ed9d7a6b-2c5e-4494-8c85-ee35ff2c21c9` 成功，但暴露工具名称/报告归一化遗漏。修补后重跑 `ac928ad6-7900-4246-8660-d819aa7e4136` 成功，唯一 subagent command 的实际输出含 `ROVAI_439bc466`，正文没有该报告标记 |
+| Qoder `rvcamp_01m6b8f8zafwhvs21mdjxj3npx` | 复核原生记录确认后台 child 已成功；补跑 `474cf7fd-991e-4476-852c-4b721f05e610` 的 `runtime_missing_final_output` 属于根回合/后台交接缺口，未修复。最初的 `runtime_launch_failed` 仅确认启动提交失败，不臆测凭据或 Provider 原因 |
+
+Kiro 另用既有原生协议探针得到标准 ACP 起始 metadata、同 ID 的完整 rawOutput，以及独立 child Session。
+只补 `runtime_subagent.rs` 的真实函数名来源和 agent 工具类型，让原有参数/结果路径生效。
+不增加后台调度、子任务状态或 UI。child Session 的内部工具维持现有接入边界，不从原生日志补造执行记录。
+真实版本及能力范围由[兼容性清单](../../runtime-compatibility.md#2026-11-01-kiro-登录后子代理与-zcode-限流后补验)记录。
+
+ZCode 将两个已知 error 字段中的精确并发错误映射到固定安全原因，并归入现有 `runtime_rate_limited`。
+未知错误仍走通用失败；认证优先级、历史失败记录、原有重试门槛与 Renderer 交互均不改。
+运行卡继续显示安全 detail，其他错误入口可显示中文 summary；没有为了演示再次触发真实并发限流。
+
+回归扩展原有 owners，不新增 Rust 测试函数：ZCode 原生事件 owner 覆盖两个已知字段与敏感字段隔离，
+公开错误 owner 覆盖限流分类；Prompt 来源及 ACP 参数 owner 覆盖 Kiro metadata、仅标题拒绝、同 ID 稀疏终态和完整报告。
+最小命令均通过：
+
+```sh
+cargo test -p rovai-core --lib zcode::events::tests::
+cargo test -p rovai-core --lib runtime_failure::tests::
+cargo test -p rovai-core --features extended-tests --lib runtime_subagent::
+cargo test -p rovai-core --features extended-tests --lib acp_tool_events_expose_only_the_public_command_and_payload_digests
+pnpm exec vitest run apps/desktop/src/renderer/src/RuntimeFailureNotice.test.ts apps/desktop/src/renderer/src/runtime-status.test.ts
+```
+
+上述 Rust 10 项、前端 33 项通过。ZCode 修补后的默认 workspace 回归 478 passed、1 ignored；之后的 Kiro
+名称归一化由两项定向 owner 和重建后的真实 App 重跑验证。App 展开详情已人工复核；Kiro 的实时末次通知与历史
+Evidence 的调用身份、Canonical 类型、状态和报告一致，旧失败记录保留。

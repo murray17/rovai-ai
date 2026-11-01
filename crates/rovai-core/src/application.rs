@@ -36803,6 +36803,7 @@ for line in sys.stdin:
             (AdapterKind::QoderCli, "Agent"),
             (AdapterKind::KimiCodeCli, "TaskOutput"),
             (AdapterKind::HermesCli, "delegate_task"),
+            (AdapterKind::KiroCli, "subagent"),
         ] {
             let input =
                 json!({"prompt":"Read the fixture","mode":"background","agent_id":"native-child"});
@@ -36829,6 +36830,35 @@ for line in sys.stdin:
             );
             assert_eq!(payload["status"], "completed");
         }
+        // Kiro names its call in vendor metadata; the terminal drops that
+        // metadata and returns the report as items/Text, not ACP content.
+        let mut display = crate::runtime_subagent::AcpExecutionDisplay::default();
+        let input = json!({"task":"Read the fixture","mode":"blocking","stages":[{"name":"reader","role":"kiro_default"}]});
+        let started = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","rawInput":input,"_meta":{"kiro":{"toolName":"subagent"}}}
+        })).unwrap();
+        let report =
+            json!({"items":[{"Text":"Pipeline completed: 1 stages finished.\nCHILD_REPORT"}]});
+        let completed = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","kind":"other","status":"completed","rawOutput":report}
+        })).unwrap();
+        assert_eq!(
+            started["update"]["operationId"],
+            completed["update"]["operationId"]
+        );
+        let (_, payload) = normalize_acp_event(AdapterKind::KiroCli, "session/update", &completed);
+        assert_eq!(payload["toolName"], "subagent");
+        assert_eq!(payload["runtimeToolType"], "agent");
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+            input
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
+            report
+        );
         for (status, name, omitted, has_patch) in [
             ("completed", "edit", false, true),
             ("completed", "write", false, true),
