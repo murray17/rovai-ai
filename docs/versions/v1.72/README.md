@@ -11,6 +11,13 @@ last_updated: 2026-10-30
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 轻量文件编辑（2026-10-29）
+
+已有预览链路增加当前项目 UTF-8 文本编辑、手动保存、未保存关闭确认与基本冲突处理；Desktop 和 Web 共用 Rust Host。
+沿用原有界面与 CodeMirror，不新增编辑页面、自动保存或持久草稿。目录 V12 仍为独立交互稿；本次不冒称目录服务已上线。
+规范见 [File Preview v24](../../contracts/file-preview-v24.md)，取舍见 [D71](decisions.md#v1-72-d71)。
+验证记录见[实施计划](implementation-plan.md#轻量文件编辑2026-10-29)。
+
 ## Mission 详情与复用校验精简（2026-11-01）
 
 单文件 Diff 只验证当前工作区和选中可信路径，移除全清单一致性拒绝与详情中的全仓准备。

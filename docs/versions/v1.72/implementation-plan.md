@@ -4464,3 +4464,85 @@ Mission 抽屉和 Diff 文件树已有最终指针提交与缩放换算，保留
 真实 Core/浏览器、能力、生命周期和已接受差异分别记录于
 [Linux 验收](../../research/command-code-runtime/linux-acceptance-2026-10-25.md)；
 公开范围见 [V1.72-D61](decisions.md#v1-72-d61)，不增加 Runtime 管理机制。
+
+## 轻量文件编辑（2026-10-29）
+
+新增 Host `file_edit` 写入逻辑、Desktop/Web 文件适配、窗口编辑状态和 CodeMirror 编辑视图；UI 仅增加源码切换、圆点和路径行保存图标。
+Worktree：`../rovai-ai-project-files-prototype`；分支 `rovai/project-files-prototype`；基线 `4d274ad0a`；Governance：none；Status：ready。
+Rust 写入单测 3 项通过；`pnpm test:rust:pr` 共 480 passed / 1 既有 ignored。完整 Vitest 为 3029 passed / 2 既有 skipped。
+窗口草稿回归覆盖提交 A／继续输入 B、迟到读取、结果未知核对、版本冲突、失败关闭和同文件多标签关闭后继续保存。
+Desktop/Web 前端构建与 TypeScript 检查通过；真实 preload 和原生窗口关闭夹具通过。
+现有 Host/Web 集成 owner 在隔离工作区调用 Desktop admission 和 Web HTTP 两条真实链路并完成磁盘回读；
+覆盖句柄归属、BOM/CRLF、JSON 转义后的请求大小、外部冲突、明确覆盖和删除后拒绝重建，无真实 Runtime。
+V13 继续以模拟目录承载浏览交互，复用生产编辑组件；人工检查中英文、浅色/深色、720px 窄窗、草稿与撤销保留、
+Markdown 保存后预览刷新、关闭确认和冲突取消。生产目录服务不由此次交互稿推导为已交付。
+当前仅验证 macOS 开发产物，不代表 Windows/Linux 发行包或压缩体积已验收。
+按 User 既有偏好提交并推送原分支，保留 worktree 待后续评审，不自动创建 PR。
+
+### V14 实测后的四项修订（2026-10-29，User seq37）
+
+复用 `../rovai-ai-project-files-prototype`，分支 `rovai/project-files-prototype`，本轮基线 `8d8aa769e`；
+Governance：none；Status：ready。保留当前字体、图标、路径行、草稿、撤销和关闭确认，不新增组件框架或编辑流程。
+
+1. 模拟保存等待后重新读取 Map 当前条目，再比较版本和写入；外部修改／删除不能让旧对象返回假成功。
+2. 目录只由自身展开状态控制。宽窗打开目录不打开预览、不创建虚拟标签；收起 sidecar、关闭最后一个文件都保留目录状态。
+   这条最新批复取代先前“目录入口同时打开 sidecar／打开文件占位标签”和“关闭目录来源标签联动关闭目录”的交互；
+   窄窗选文件后收起抽屉继续保留。删除原型中的虚拟标签与目录标签归属逻辑，不增加目录框架。
+3. 生产编辑状态核对未知保存结果时区分提交内容、保存前基线、真正外部变化；基线未变只恢复手动重试，不弹冲突、不自动重写。
+4. 生产编辑内容读取成功后才记已加载状态；临时失败保留预览，现有错误行提示“无法载入编辑内容／重试”，同版本可重试。
+   真正不支持编辑保持只读；不增加权限选择界面。
+
+验收继续分别记录原型与真实 Host：原型覆盖等待中的外部变化、目录独立显隐、核对三分支、首次编辑读取失败恢复；
+现有 `host-web` 隔离 owner 补 Desktop/Web 保存与外部变化交错，以及 HTML 源码真实写入后重新取得预览内容。
+不能以 HTML 内存 Map 或占位预览接口替代真实文件系统验收。目录服务仍不由本次原型推导为已经上线。
+
+验证结果：
+
+- 编辑 store 定向回归 13 项通过，其中新增 6 项覆盖未知保存三分支、覆盖保存的基线及首次读取失败；
+  连同预览资源、HTML 生命周期和 Web 预览生成共 84 项通过。原有 A/B 输入竞态、草稿与关闭保护继续通过。
+- `host-web` 既有隔离 owner 通过；真实 Desktop 保存请求在传输等待期间发生外部磁盘修改，Host 返回冲突且原内容保留。
+  Desktop/Web 均实际保存 HTML 并回读，由生产 `onSaved` 回调自动发起候选刷新，分别核验 HTTP 页面和 Web 生成文档内容；
+  HTML ready 提交由测试驱动，未将该集成断言当成真实浏览器像素验收。
+- V15 模拟用例通过等待期间的 Map 替换、删除拒绝、重开回读及原有浏览状态检查；变换后的 TypeScript 无诊断。
+- 实际 Safari 检查中文宽窗：两个入口互相开关、仅目录打开、sidecar 隐藏后目录保留、最后标签关闭后目录保留；
+  首次编辑读取失败提示与重试恢复、离线未写入核对不弹冲突、保留草稿并手动重试成功。
+  英文深色 720px 检查目录抽屉、选文件自动关闭、固定入口和原有源码／预览图标；截图与源码随 V15 交付。
+- `pnpm typecheck`、Desktop/Web 构建通过，无新增依赖。文档测试 10 项通过，并执行当前文档门禁。
+  Rust 生产代码未变，未重复全 Rust 套件；不推导 Windows/Linux 安装包、包体增量、崩溃恢复或外部进程强互斥。
+
+### 连续保存后的预览补刷（2026-10-29，User seq41）
+
+复用上述 worktree 与分支，基线 `ae7914205`；Governance：none；Status：ready。
+共享 controller 按文件合并“保存后待刷新”标记，当前刷新结束后读取最新已保存内容；关闭、淘汰与释放时清理。
+不更改布局、保存协议或编辑状态。新增一个 A→B→C 回归：延迟 HTML A，保存 B、输入 C，再完成 A；
+最终模拟磁盘／预览／保存基线均为 B，草稿 C、CodeMirror 光标、撤销历史及编辑滚动位置保留。
+已有迟到候选清理用例同时验证关闭、淘汰、冷却和释放后不会触发残留补刷。
+该用例在旧 controller 上因缺少第二次刷新失败，修复后通过；文件预览、编辑状态和 Web HTML 相关 85 项测试通过。
+`pnpm typecheck`、Desktop/Web 构建及文档治理单测 10 项通过。
+`pnpm docs:check`、以 `ae7914205` 为 base 的 `pnpm docs:check:ci` 通过。
+`pnpm test:rust:pr` 首轮 Core 433 通过、1 忽略，Runtime 子进程清理用例因
+`runtime_probe_stdout_cleanup_timed_out` 失败；保留首轮结果，不记为全量一次通过。
+单独重跑 `runtime_probe_process::tests::` 5 项通过，原 workspace 测试二进制复跑该模块同样通过；
+`cargo test --workspace --exclude rovai-core` 补跑其余包通过。本轮未改 Rust 代码或测试。
+本轮使用受控文件接口与 HTML 就绪回执验证共享 controller；没有新增浏览器或真实 Host 的端到端验收。
+
+### 文件编辑主线交付（2026-11-01，User seq67）
+
+复用原 worktree 与 `rovai/project-files-prototype`，合入 main `7fe673050`；用户明确要求 PR 合并与本机 App 安装。
+范围为当前项目文本编辑、手动保存、未保存保护和连续保存后的预览补刷；生产目录服务仍未接入，历史 Diff 仍只读。
+冲突合并保留主线 Thread 术语和文档导航，编辑决定改用未占用的 D71。CodeMirror commands 按实际 Renderer 用途声明为
+devDependency，避免在编译后的前端之外重复携带 npm 包；不升级其他依赖。
+
+合入后的本地验证：TypeScript、Desktop/Web 构建、文档治理通过；Vitest 3036 通过、2 既有跳过，Node 主套件
+365 通过、2 平台跳过。默认 Rust workspace 480 通过、0 失败、1 既有 ignored，包含共享写入的 3 个 owner。
+这些 owner 分别拥有格式与摘要冲突、不可回写来源拒绝、大小与同 Host 并发；先前没有写入合同，使用临时普通文件
+而不是数据库/模型夹具；最小命令为 `cargo test -p rovai-core --lib file_edit::tests::`。
+真实 preload 和原生关窗 owner 通过。隔离 Host/Web owner 经 Desktop admission 与 Web HTTP 完成真实磁盘保存、
+外部冲突、明确覆盖、删除拒绝以及 HTML 候选内容回读，无模型或日常数据访问。
+
+原生布局 owner 的旧断言分别依赖复制按钮加入前的表格 scroll 宽度、14px 文件图标和手写旧表格 DOM；
+调整为测量完整表格 frame、区分 16px 类型图标与 14px 操作图标，并复用生产 SafeMarkdown。
+只读夹具明确返回编辑不可用，不把缺少模拟方法误报为产品读取故障；没有为通过测试修改生产布局。
+修订后的完整原生预览 owner 通过，覆盖阅读状态、窄窗、主题、File Change、查找与自动刷新。
+macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；实际安装结果及打包 App 隔离验收记录随本次交付保存。
+本轮不据此推导 Windows/Linux、原用户数据副本或崩溃恢复验收。

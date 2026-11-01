@@ -186,81 +186,7 @@ fn is_core_file_source_kind(kind: Option<&str>) -> bool {
     )
 }
 
-// Resolve the path portion only. The production TS reference parser remains the
-// presentation owner for line/heading targets; Core validates the original source.
-fn reference_path(raw: &str, base: &std::path::Path) -> Result<PathBuf> {
-    ensure!(
-        raw.len() <= 16_384 && !raw.contains(['\0', '\r', '\n']),
-        "source_not_authorized"
-    );
-    let mut raw = raw.trim();
-    for (left, right) in [
-        ('`', '`'),
-        ('"', '"'),
-        ('\'', '\''),
-        ('(', ')'),
-        ('[', ']'),
-        ('{', '}'),
-        ('<', '>'),
-    ] {
-        if let Some(inner) = raw.strip_prefix(left).and_then(|s| s.strip_suffix(right)) {
-            raw = inner;
-            break;
-        }
-    }
-    let path = raw.split(['#', '?']).next().unwrap_or_default();
-    let path = if raw.contains('#') {
-        path
-    } else {
-        let positive =
-            |v: &str| !v.is_empty() && !v.starts_with('0') && v.bytes().all(|b| b.is_ascii_digit());
-        if let Some((prefix, suffix)) = path.rsplit_once(':') {
-            if positive(suffix) {
-                if let Some((file, line)) = prefix.rsplit_once(':') {
-                    if positive(line) { file } else { prefix }
-                } else {
-                    prefix
-                }
-            } else if suffix
-                .split_once('-')
-                .is_some_and(|(a, b)| positive(a) && positive(b))
-            {
-                prefix
-            } else {
-                path
-            }
-        } else {
-            path
-        }
-    };
-    ensure!(!path.is_empty(), "source_not_authorized");
-    // URL joining treats a Windows drive letter as a scheme. Normalize only
-    // absolute local-drive references, preserving the existing one-time URL decoding.
-    #[cfg(windows)]
-    let windows_absolute = {
-        let bytes = path.as_bytes();
-        (bytes.len() >= 3
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && matches!(bytes[2], b'/' | b'\\'))
-        .then(|| format!("file:///{}", path.replace('\\', "/")))
-    };
-    #[cfg(windows)]
-    let path = windows_absolute.as_deref().unwrap_or(path);
-    let url = if path.to_ascii_lowercase().starts_with("file://") {
-        url::Url::parse(path)?
-    } else {
-        let base = url::Url::from_directory_path(base)
-            .map_err(|_| anyhow::anyhow!("source_not_authorized"))?;
-        base.join(path)?
-    };
-    ensure!(
-        url.scheme() == "file" && url.host_str().is_none_or(|host| host == "localhost"),
-        "source_not_authorized"
-    );
-    url.to_file_path()
-        .map_err(|_| anyhow::anyhow!("source_not_authorized"))
-}
+use rovai_core::file_reference_path::reference_path;
 
 async fn resolve(state: &WebState, client: &DraftClient, source: &Value) -> Result<ResolvedSource> {
     if source["kind"] == "attachment" {
@@ -705,6 +631,37 @@ async fn file_operation(
         return Ok(json!({"released":true}));
     }
     reauthorize(state, client, &handle).await?;
+    if matches!(body.action.as_str(), "readEditableFile" | "saveTextFile") {
+        ensure!(
+            handle
+                .analysis
+                .as_ref()
+                .is_some_and(|analysis| Some(analysis.generation.as_str())
+                    == request["expectedGeneration"].as_str()),
+            "source_not_authorized"
+        );
+        let source = handle.restore.as_ref().unwrap_or(&handle.source);
+        if !matches!(
+            source["kind"].as_str(),
+            Some("camp_workspace" | "message_reference")
+        ) {
+            return Ok(rovai_core::file_edit::failure("edit_unavailable"));
+        }
+        let root = if source["kind"] == "camp_workspace" {
+            let resolved = resolve(state, client, source).await?;
+            resolved.root
+        } else {
+            handle.root.clone()
+        };
+        let reply = state.core.request_for_editor(
+            if body.action == "saveTextFile" { "filePreview.saveText" } else { "filePreview.readEditable" },
+            json!({"source":source,"path":handle.path,"root":root,"text":request.get("text"),"expectedVersion":request.get("expectedVersion")}),
+            client.clone(),
+        ).await?;
+        return Ok(reply
+            .result
+            .unwrap_or_else(|| rovai_core::file_edit::failure("source_not_authorized")));
+    }
     if matches!(body.action.as_str(), "reload" | "reopen") {
         ensure!(
             Some(handle.token.as_str()) == request["reopenToken"].as_str(),

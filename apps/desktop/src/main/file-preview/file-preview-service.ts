@@ -7,6 +7,7 @@ import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from '
 import type { FileHandle } from 'node:fs/promises'
 import type {
   FilePreviewRetentionState,
+  FileEditAccess, FileEditResult, SaveTextFileRequest,
   FileContentVersion,
   FileLocationTarget,
   FilePreviewApi,
@@ -92,6 +93,7 @@ export type FilePreviewAuthorityResult =
     }
 
 export interface FilePreviewSourceAuthority {
+  edit?(saving: boolean, input: { source: OpenFilePreviewRequest; path: string; root: string; text?: string; expectedVersion?: string }): Promise<FileEditResult>
   resolve(request: Exclude<OpenFilePreviewRequest, { kind: 'child_of_handle' | 'authorized_root' }>): Promise<FilePreviewAuthorityResult | null>
 }
 
@@ -449,6 +451,22 @@ export class FilePreviewService {
     } catch (error) {
       return this.#errorResult(error)
     }
+  }
+
+  async editText(webContentsId: number, request: FileEditAccess | SaveTextFileRequest, saving: boolean): Promise<FileEditResult> {
+    const unavailable: FileEditResult = { ok: false, error: { code: 'edit_unavailable', message: '此文件只支持阅读' } }
+    const record = this.#recordOrNull(webContentsId, request.handleId)
+    if (!record || record.generation !== request.expectedGeneration || !this.#authority.edit
+      || !['code', 'text', 'markdown', 'html'].includes(record.classification.kind)) return unavailable
+    const source = record.request.kind === 'child_of_handle'
+      ? await this.#independentRestoreRequest(record.request, record.threadId, record.canonicalPath) : record.request
+    if (!source || !['camp_workspace', 'message_reference'].includes(source.kind)) return unavailable
+    // The Host re-resolves this source. Display paths never become write authority.
+    const root = source.kind === 'camp_workspace' ? await this.#canonicalWorkspaceRoot(record.threadId)
+      : await canonicalizeExistingPath(record.reopenTarget.rootPath).catch(() => null)
+    if (!root || !pathIsWithin(root, record.canonicalPath)) return unavailable
+    return this.#authority.edit(saving, { source, path: record.canonicalPath, root,
+      ...('text' in request ? { text: request.text, expectedVersion: request.expectedVersion } : {}) })
   }
 
   async readText(

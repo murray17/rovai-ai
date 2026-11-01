@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EditorState } from '@codemirror/state'
+import { history, undoDepth } from '@codemirror/commands'
 import type { FilePreviewApi, ResolvedFilePreview, OpenFilePreviewRequest, FilePreviewTextContent } from '@contracts'
 import { FilePreviewResources } from './file-preview-resources'
 import { filePreviewSessionStore } from './file-preview-session'
@@ -933,6 +935,59 @@ describe('automatic file refresh', () => {
       expect(api.release).toHaveBeenCalledWith({ handleId: 'handle-3' })
     })
 
+    it('refreshes saved HTML B after delayed preview A while preserving unsaved editor C', async () => {
+      const { owner, api, update } = fixture()
+      let disk = '<p>original</p>', version = 0
+      const snapshot = () => ({ key: 'editable-page', text: disk, version: String(version) })
+      api.readEditableFile = vi.fn(async () => ({ ok: true as const, value: snapshot() }))
+      api.saveTextFile = vi.fn(async request => {
+        expect(request.expectedVersion).toBe(String(version))
+        disk = request.text; version++
+        return { ok: true as const, value: snapshot() }
+      })
+      const prepare = vi.mocked(api.prepareHtmlSite).getMockImplementation()!
+      vi.mocked(api.prepareHtmlSite).mockImplementation(async request => {
+        const text = disk, result = await prepare(request)
+        if (result.ok) result.value.sandboxedDocument = text
+        return result
+      })
+      const a = await open(owner, 'a', 'page.html'), first = active(a)
+      await owner.edits.attach(first.id, first.file!)
+      const doc = owner.edits.get(first.id)!
+      doc.editorState = EditorState.create({ doc: disk, extensions: [history()] })
+      const edit = (text: string) => {
+        doc.editorState = doc.editorState!.update({ changes: { from: 0, to: doc.editorState!.doc.length, insert: text }, selection: { anchor: 4 } }).state
+        owner.edits.change(doc, text)
+      }
+      edit('<p>A</p>'); expect(await owner.edits.save(doc)).toBe(true); await advance(0)
+      const candidateA = active(a).candidate!
+      expect(candidateA.loaded.content).toMatchObject({ kind: 'html', preview: { sandboxedDocument: '<p>A</p>' } })
+      edit('<p>B</p>'); expect(await owner.edits.save(doc)).toBe(true)
+      edit('<p>C</p>'); doc.scrollTop = 80
+      const editorC = doc.editorState!, undoCount = undoDepth(editorC)
+      expect(undoCount).toBeGreaterThan(0)
+      update('a', [first.previewKey!]); await advance()
+      expect(api.reload).toHaveBeenCalledTimes(1)
+      a.actions.completeHtmlRefresh(first.id, candidateA.file.handleId)
+      a.actions.displayed(first.id, candidateA.file.handleId)
+      await advance(0)
+      expect(api.reload).toHaveBeenCalledTimes(2)
+      const candidateB = active(a).candidate!
+      expect(candidateB.loaded.content).toMatchObject({ kind: 'html', preview: { sandboxedDocument: '<p>B</p>' } })
+      a.actions.completeHtmlRefresh(first.id, candidateB.file.handleId)
+      a.actions.displayed(first.id, candidateB.file.handleId)
+      await owner.edits.attach(first.id, candidateB.file)
+      await advance(1000)
+      expect(active(a)).toMatchObject({ content: { kind: 'html', preview: { sandboxedDocument: '<p>B</p>' } }, isRefreshing: false, candidate: undefined })
+      expect(disk).toBe('<p>B</p>')
+      expect(doc).toMatchObject({ savedText: '<p>B</p>', draft: '<p>C</p>', version: '2', scrollTop: 80 })
+      expect(doc.editorState).toBe(editorC)
+      expect(doc.editorState!.selection.main.anchor).toBe(4)
+      expect(undoDepth(doc.editorState!)).toBe(undoCount)
+      expect(api.saveTextFile).toHaveBeenCalledTimes(2)
+      expect(api.reload).toHaveBeenCalledTimes(2)
+    })
+
     it('waits for HTML readiness and merges changes while the candidate is loading', async () => {
       const { owner, api, update } = fixture()
       const a = await open(owner, 'a', 'page.html'), first = active(a)
@@ -1007,6 +1062,7 @@ describe('automatic file refresh', () => {
       const candidate = deferred<Awaited<ReturnType<FilePreviewApi['reload']>>>()
       vi.mocked(api.reload).mockReturnValueOnce(candidate.promise)
       update('a', [first.previewKey!]); await advance()
+      await a.actions.reload(first.id, false, true) // A saved refresh pending behind this read must also be discarded.
       if (action === 'close') a.actions.close(first.id)
       else if (action === 'evict') a.evict(first.id)
       else if (action === 'cool') a.cool()

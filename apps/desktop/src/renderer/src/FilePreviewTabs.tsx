@@ -1,3 +1,5 @@
+import { useFileEdits } from './FileEditContext'
+import { fileEditDirty } from './file-edit-store'
 import { useShortcutAction } from './ShortcutProvider'
 import { useThreadClient } from './camp-client'
 import { prefersReducedMotion } from './reduced-motion'
@@ -5,6 +7,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import { useFilePreview, useFilePreviewApi, canDownloadFile } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
+import { ProjectFileIcon } from './ProjectFileIcon'
 import { Icon } from './MissionControls'
 import { ExecutionIcon } from './ExecutionIcons'
 import { previewTabLabel, previewTabLabels, previewTabPresentation } from './file-preview-tab-presentation'
@@ -33,6 +36,7 @@ function revealTab(strip: HTMLDivElement, tab: HTMLElement): void {
 }
 
 export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
+  const edits = useFileEdits()
   const language = useInterfaceLanguage()
   const client = useThreadClient()
   const api = useFilePreviewApi()
@@ -186,13 +190,16 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     } catch (error) { announce(error instanceof Error ? error.message : uiAttribute('文件操作失败，请重试。')) }
   }
 
-  const closeAndRestoreFocus = (index: number): void => {
+  const closeAndRestoreFocus = async (index: number): Promise<void> => {
     const tab = tabs[index]
     if (!tab) return
     const neighbor = tabs[index + 1] ?? tabs[index - 1]
-    close(tab.id)
-    if (neighbor) focusTab(neighbor.id)
-    else focusConversation()
+    await close(tab.id)
+    window.requestAnimationFrame(() => {
+      if (document.getElementById(tabDomId(tab.id))) focusTab(tab.id)
+      else if (neighbor) focusTab(neighbor.id)
+      else focusConversation()
+    })
   }
 
   useEffect(() => client.onClosePreviewRequested?.(() => {
@@ -282,6 +289,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             const active = tab.id === activeTabId
             const label = tabLabels.get(tab.id) ?? previewTabLabel(tab, language)
             const { displayPath, fileName, icon } = previewTabPresentation(tab, language)
+            const dirty = fileEditDirty(edits?.get(tab.id))
             const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
             const statusLabel = tab.kind !== 'file' ? ''
               : tab.loadState === 'missing' ? uiAttribute('，找不到文件')
@@ -318,7 +326,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   className="file-preview-tab-activate"
                   type="button"
                   role="tab"
-                  aria-label={`${label}${statusLabel}${hasExternalUpdate ? uiAttribute("，有更新") : ''}`}
+                  aria-label={`${label}${dirty ? uiAttribute("，未保存") : ""}${statusLabel}${hasExternalUpdate ? uiAttribute("，有更新") : ''}`}
                   aria-selected={active}
                   aria-controls={panelDomId(tab.id)}
                   tabIndex={active ? 0 : -1}
@@ -330,12 +338,13 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                 >
                   {tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
                     <ExecutionIcon className="icon file-preview-execution-icon" />
-                  ) : <FilePreviewTabIcon
+                  ) : tab.kind === 'file' ? <ProjectFileIcon fileName={fileName} /> : <FilePreviewTabIcon
                     kind={icon}
-                    fileType={tab.kind === 'file' ? tab.file?.kind : 'file_change'}
+                    fileType="file_change"
                   />}
                   <span className="file-preview-tab-label">{label}</span>
-                  {hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
+                  {dirty && <i className="file-preview-tab-dirty" title={uiAttribute("未保存")} aria-hidden="true" />}
+                  {!dirty && hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
                 </button>
                 <button
                   className="file-preview-tab-close"

@@ -585,8 +585,9 @@ app.whenReady().then(async () => {
         const doc = document.querySelector('.file-preview-tab-panel:not([hidden]) .safe-markdown')
         const paragraph = [...doc.children].find(n => n.tagName === 'P')
         const table = doc.querySelector('.markdown-table-scroll')
+        const tableFrame = table.closest('.markdown-table-frame')
         return { document: doc.getBoundingClientRect().width, paragraph: paragraph.getBoundingClientRect().width,
-          table: table.getBoundingClientRect().width, scrolls: table.scrollWidth > table.clientWidth,
+          table: tableFrame.getBoundingClientRect().width, scrolls: table.scrollWidth > table.clientWidth,
           overflow: document.documentElement.scrollWidth > innerWidth }
       })()`)
       closeTo(wide.document, 1120, 'Wide preview expands the document track')
@@ -800,7 +801,7 @@ app.whenReady().then(async () => {
     equalWidths(crowded, 120)
     assert.equal(crowded.overflow, true)
     assert.ok(crowded.tabs.every(tab => tab.faded))
-    assert.ok(crowded.tabs.every(tab => tab.iconWidth === 14 && tab.closeWidth === 24))
+    assert.ok(crowded.tabs.every(tab => tab.iconWidth === (tab.fileIcon ? 16 : 14) && tab.closeWidth === 24))
     await capture('tabs-minimum-day')
 
     await run('document.querySelector("[role=tab]").focus()')
@@ -1239,7 +1240,7 @@ app.whenReady().then(async () => {
     assert.match(review.text, /历史新内容/)
     assert.equal(review.fileReads, reads, 'Historical review never reads the working file')
     assert.deepEqual(review.reviewRequests, [{ threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 }])
-    assert.deepEqual(review.tabs.map(tab => tab.icon), ['code', 'file_change'])
+    assert.deepEqual(review.tabs.map(tab => tab.icon), ['file', 'file_change'])
     assert.ok(review.tabs.every(tab => tab.iconVisible && tab.noDrag))
     assert.equal(review.headerDrag, 'drag')
     assert.ok(review.dragSpace >= 24)

@@ -563,6 +563,8 @@ const api: RovaiApi = {
     }
   },
   filePreview: {
+    readEditableFile(request) { return ipcRenderer.invoke('rovai:file-preview-read-editable', request) },
+    saveTextFile(request) { return ipcRenderer.invoke('rovai:file-preview-save-text', request) },
     updateRetention(state) { return ipcRenderer.invoke('rovai:file-preview-retention', state) },
     onResourcesReleased(listener) {
       const handler = (_event: Electron.IpcRendererEvent, value: { handleIds: string[] }): void => listener(value)
