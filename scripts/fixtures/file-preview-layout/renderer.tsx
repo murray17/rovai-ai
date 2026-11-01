@@ -13,6 +13,7 @@ import { filePreviewSessionStore } from '../../../apps/desktop/src/renderer/src/
 import { FilePreviewResizeHandle, FilePreviewWorkspace } from '../../../apps/desktop/src/renderer/src/FilePreviewLayout'
 import { FilePreviewPane } from '../../../apps/desktop/src/renderer/src/FilePreviewPane'
 import { FileReferenceLink } from '../../../apps/desktop/src/renderer/src/FileReferenceLink'
+import { SafeMarkdown } from '../../../apps/desktop/src/renderer/src/SafeMarkdown'
 import { StructuredMentionComposer } from '../../../apps/desktop/src/renderer/src/StructuredMentionComposer'
 import { FileOperationRow, ModifiedFileRow, ToolCallRow } from '../../../apps/desktop/src/renderer/src/ExecutionToolGroup'
 import { buildLiveExecutionProgress } from '../../../apps/desktop/src/shared/execution-presentation'
@@ -165,6 +166,9 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   return { ok: true as const, value: { kind: 'file_preview' as const, file: resolved } }
 }
 const api: FilePreviewApi = {
+  // This fixture owns read-only reading/layout; editing uses the Host integration owner.
+  readEditableFile: async () => ({ ok: false, error: { code: 'edit_unavailable', message: 'Read-only fixture' } }),
+  saveTextFile: async () => ({ ok: false, error: { code: 'edit_unavailable', message: 'Read-only fixture' } }),
   downloadSource: async request => { sourceDownloads.push(request); return { ok: true, value: { started: true } } },
   bindThread: async (threadId) => { campBindings.push(threadId) },
   open: async (request) => {
@@ -397,11 +401,13 @@ function Workspace(): React.JSX.Element {
                   onOpenReview={(evidenceFileId) => preview.openFileChanges('camp-1', operationOnlyChanges, evidenceFileId)}
                   onOpenCurrent={(evidenceFileId) => openCurrent(operationOnlyChanges, evidenceFileId)} />
               </div>
-              <div className="safe-markdown">
-                <p>宽代码和表格保持各自的横向滚动，会话仍可以收窄至 420px。</p>
-                <pre><code>{'const keepConversationReadable = '.repeat(12)}</code></pre>
-                <table><tbody><tr>{Array.from({ length: 8 }, (_, index) => <td key={index}>独立横向滚动的文件数据 {index}</td>)}</tr></tbody></table>
-              </div>
+              <SafeMarkdown>{[
+                '宽代码和表格保持各自的横向滚动，会话仍可以收窄至 420px。', '',
+                '```text', 'const keepConversationReadable = '.repeat(12), '```', '',
+                '| ' + Array.from({ length: 8 }, (_, index) => `文件 ${index}`).join(' | ') + ' |',
+                '| ' + Array(8).fill('---').join(' | ') + ' |',
+                '| ' + Array.from({ length: 8 }, (_, index) => `独立横向滚动的文件数据 ${index}`).join(' | ') + ' |'
+              ].join('\n')}</SafeMarkdown>
               <p style={{ marginTop: 900 }}>会话阅读位置保持在同一条内容中。</p>
             </div>
           </div>
@@ -725,7 +731,8 @@ Object.assign(window, { previewTest: {
           selected: tab.querySelector('[role="tab"]')?.getAttribute('aria-selected') === 'true',
           focused: tab.contains(document.activeElement),
           faded: getComputedStyle(label).maskImage !== 'none',
-          iconWidth: tab.querySelector('.file-preview-tab-icon')!.getBoundingClientRect().width,
+          fileIcon: Boolean(tab.querySelector('.project-file-icon')),
+          iconWidth: tab.querySelector('.file-preview-tab-icon, .project-file-icon')!.getBoundingClientRect().width,
           closeWidth: tab.querySelector('.file-preview-tab-close')!.getBoundingClientRect().width }
       })
     }
@@ -1058,7 +1065,8 @@ Object.assign(window, { previewTest: {
       selectedFile: review?.querySelector('.agent-run-file-review-pane-header code')?.textContent,
       selectedTab: element('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label'),
       tabs: [...document.querySelectorAll<HTMLElement>('[role="tab"]')].map((tab) => ({
-        label: tab.getAttribute('aria-label'), icon: tab.querySelector('svg')?.dataset.fileType,
+        label: tab.getAttribute('aria-label'),
+        icon: tab.querySelector('.project-file-icon') ? 'file' : tab.querySelector('svg')?.dataset.fileType,
         noDrag: region(tab.parentElement) === 'no-drag', iconVisible: tab.firstElementChild?.tagName === 'svg'
       })),
       sameReview: bookmarkedReview === scroll, reviewScroll: scroll?.scrollTop,
@@ -1110,7 +1118,7 @@ Object.assign(window, { previewTest: {
       approvalHeadingSingleLine: element('.approval-dock') ? ['.approval-dock-heading strong', '.approval-dock-heading span']
         .every(selector => style(selector, 'white-space') === 'nowrap') : null,
       recoveryTextWraps: element('.runtime-recovery-dock') ? style('.runtime-recovery-heading span:not(.runtime-recovery-symbol)', 'white-space') === 'normal' : null,
-      codeScrolls: style('.safe-markdown pre', 'overflow-x') === 'auto', tableScrolls: style('.safe-markdown table', 'overflow-x') === 'auto'
+      codeScrolls: style('.safe-markdown pre', 'overflow-x') === 'auto', tableScrolls: style('.safe-markdown .markdown-table-scroll', 'overflow-x') === 'auto'
     }
   }
 } })

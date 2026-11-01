@@ -4525,3 +4525,24 @@ Governance：none；Status：ready。保留当前字体、图标、路径行、�
 单独重跑 `runtime_probe_process::tests::` 5 项通过，原 workspace 测试二进制复跑该模块同样通过；
 `cargo test --workspace --exclude rovai-core` 补跑其余包通过。本轮未改 Rust 代码或测试。
 本轮使用受控文件接口与 HTML 就绪回执验证共享 controller；没有新增浏览器或真实 Host 的端到端验收。
+
+### 文件编辑主线交付（2026-11-01，User seq67）
+
+复用原 worktree 与 `rovai/project-files-prototype`，合入 main `7fe673050`；用户明确要求 PR 合并与本机 App 安装。
+范围为当前项目文本编辑、手动保存、未保存保护和连续保存后的预览补刷；生产目录服务仍未接入，历史 Diff 仍只读。
+冲突合并保留主线 Thread 术语和文档导航，编辑决定改用未占用的 D71。CodeMirror commands 按实际 Renderer 用途声明为
+devDependency，避免在编译后的前端之外重复携带 npm 包；不升级其他依赖。
+
+合入后的本地验证：TypeScript、Desktop/Web 构建、文档治理通过；Vitest 3036 通过、2 既有跳过，Node 主套件
+365 通过、2 平台跳过。默认 Rust workspace 480 通过、0 失败、1 既有 ignored，包含共享写入的 3 个 owner。
+这些 owner 分别拥有格式与摘要冲突、不可回写来源拒绝、大小与同 Host 并发；先前没有写入合同，使用临时普通文件
+而不是数据库/模型夹具；最小命令为 `cargo test -p rovai-core --lib file_edit::tests::`。
+真实 preload 和原生关窗 owner 通过。隔离 Host/Web owner 经 Desktop admission 与 Web HTTP 完成真实磁盘保存、
+外部冲突、明确覆盖、删除拒绝以及 HTML 候选内容回读，无模型或日常数据访问。
+
+原生布局 owner 的旧断言分别依赖复制按钮加入前的表格 scroll 宽度、14px 文件图标和手写旧表格 DOM；
+调整为测量完整表格 frame、区分 16px 类型图标与 14px 操作图标，并复用生产 SafeMarkdown。
+只读夹具明确返回编辑不可用，不把缺少模拟方法误报为产品读取故障；没有为通过测试修改生产布局。
+修订后的完整原生预览 owner 通过，覆盖阅读状态、窄窗、主题、File Change、查找与自动刷新。
+macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；实际安装结果及打包 App 隔离验收记录随本次交付保存。
+本轮不据此推导 Windows/Linux、原用户数据副本或崩溃恢复验收。
