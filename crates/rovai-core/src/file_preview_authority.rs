@@ -1343,6 +1343,66 @@ mod tests {
             std::fs::read_to_string(&external_file).unwrap(),
             "external\n"
         );
+        let blobs = ManagedBlobStore::new(&data_dir);
+        let history = || {
+            serde_json::to_value(
+                super::read_run_file_changes(&database, &blobs, "preview-camp", "preview-run", 1)
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let original_history = history();
+        // The existing source owner now verifies the actual write seam, including outside the Run root.
+        for (relative, evidence_file_id) in &evidence {
+            let path = if Path::new(relative).is_absolute() {
+                PathBuf::from(relative)
+            } else {
+                execution_root.join(relative)
+            }
+            .canonicalize()
+            .unwrap();
+            let source = json!({"kind":"run_evidence","threadId":"preview-camp","agentRunId":"preview-run",
+                "executionEpoch":1,"evidenceFileId":evidence_file_id,"action":"open_current"});
+            let access = |text, expected_version| crate::file_edit::EditRequest {
+                source: source.clone(),
+                path: path.clone(),
+                text,
+                expected_version,
+            };
+            let target = resolve_open_current(&database, &data_dir, evidence_file_id);
+            let read = crate::file_edit::execute(access(None, None), Some(target.clone()), false);
+            assert_eq!(read["ok"], true, "{read}");
+            let saved = crate::file_edit::execute(
+                access(
+                    Some("edited current\n".into()),
+                    Some(read["value"]["version"].as_str().unwrap().into()),
+                ),
+                Some(target),
+                true,
+            );
+            assert_eq!(saved["ok"], true, "{saved}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "edited current\n");
+            let historical = ResolvedFilePreviewSource::EvidenceReview {
+                camp_id: "preview-camp".into(),
+                agent_run_id: "preview-run".into(),
+                execution_epoch: 1,
+                evidence_file_id: evidence_file_id.clone(),
+            };
+            assert_eq!(
+                crate::file_edit::execute(access(Some("bad".into()), None), Some(historical), true)
+                    ["ok"],
+                false
+            );
+        }
+        assert_eq!(
+            history(),
+            original_history,
+            "editing current files does not rewrite historical evidence"
+        );
+        assert_eq!(
+            std::fs::read_to_string(project_root.join("src/shared.ts")).unwrap(),
+            "project\n"
+        );
         clean_run_workspace_fixture(database, data_dir, root);
     }
 

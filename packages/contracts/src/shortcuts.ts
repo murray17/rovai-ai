@@ -1,4 +1,5 @@
 export type ShortcutActionId =
+  | 'project-files'
   | 'save-file' | 'execution' | 'tasks' | 'members' | 'dm' | 'preview' | 'composer' | 'latest' | 'attach'
   | 'jump' | 'new' | 'sidebar' | 'settings' | 'back' | 'forward' | 'missions' | 'automations'
   | 'find' | 'next' | 'previous' | 'previous-tab' | 'next-tab' | 'reveal-file' | 'open-file'

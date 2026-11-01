@@ -67,8 +67,8 @@ export function parseCoreFilePreviewAuthorityResult(
     || !isAbsolute(value.basePath)
     || value.allowChildren !== true
   ) return null
-  if (request.kind === 'run_evidence') {
-    if (value.sourceKind !== 'run_evidence' || !boundedString(value.rawReference)) return null
+  if (request.kind === 'run_evidence' || request.kind === 'project_file') {
+    if (!boundedString(value.rawReference)) return null
   } else if (value.rawReference !== request.rawReference) return null
   return {
     kind: 'file_target',
@@ -114,7 +114,7 @@ function attachmentAuthorityTarget(
 }
 
 export class CoreFilePreviewSourceAuthority implements FilePreviewSourceAuthority {
-  edit(saving: boolean, input: { source: OpenFilePreviewRequest; path: string; root: string; text?: string; expectedVersion?: string }): Promise<FileEditResult> {
+  edit(saving: boolean, input: { source: OpenFilePreviewRequest; path: string; text?: string; expectedVersion?: string }): Promise<FileEditResult> {
     return this.core.request<FileEditResult>((saving ? 'filePreview.saveText' : 'filePreview.readEditable') as CoreMethod, input)
   }
   constructor(

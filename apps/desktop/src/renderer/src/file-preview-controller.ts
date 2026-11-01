@@ -7,6 +7,7 @@ import { prepareHtmlPreviewSite } from './file-preview-html-site'
 import { agentRunFileChangeHasReviewableDiff } from './file-changes-presentation'
 import { filePreviewPresentationFromFile, filePreviewPresentationFromRequest, filePreviewSessionStore, filePreviewSourceKey, filePreviewTabMatchesResolvedFile, resolvedFilePreviewSource, restorableFilePreviewRequest, stableFilePreviewSourceKey, type FilePreviewPresentation, type FilePreviewPresentationHint, type FilePreviewReadingState, type FilePreviewSessionSnapshot, type FilePreviewTabSnapshot } from './file-preview-session'
 export type FilePreviewContent =
+  | { kind: 'unsupported' }
   | { kind: 'markdown'; text: string; tabToken: string; assetBasePath: string }
   | { kind: 'code' | 'text' | 'patch'; text: string }
   | { kind: 'html'; preview: FilePreviewHtmlSite }
@@ -16,6 +17,7 @@ export type FilePreviewContent =
 export interface FilePreviewTabModel {
   kind: 'file'
   id: string
+  openedFromDirectory?: boolean
   sourceKey: string
   sourceAliases?: string[]
   cachedVersion?: ResolvedFilePreview['contentVersion']
@@ -29,6 +31,7 @@ export interface FilePreviewTabModel {
   error: FilePreviewErrorPayload | null
   requestGeneration: number
   hasExternalUpdate: boolean
+  needsRefresh?: boolean
   externalUpdateVersion: number
   isRefreshing: boolean
   refreshError: string | null
@@ -57,7 +60,12 @@ export interface FileChangesPreviewTabModel {
 
 export type MissionActivityTabModel = import('./file-preview-session').MissionActivityTabSnapshot
 export type ExecutionTabModel = import('./file-preview-session').ExecutionTabSnapshot
-export type PreviewTabModel = FilePreviewTabModel | FileChangesPreviewTabModel | MissionActivityTabModel | ExecutionTabModel
+export type FilePickerTabModel = import('./file-preview-session').FilePickerTabSnapshot
+export type PreviewTabModel = FilePreviewTabModel | FileChangesPreviewTabModel | MissionActivityTabModel | ExecutionTabModel | FilePickerTabModel
+
+export function isDirectoryPreviewTab(tab: PreviewTabModel): boolean {
+  return tab.kind === 'file_picker' || tab.kind === 'file' && tab.openedFromDirectory === true
+}
 
 export function canDownloadFile(tab: PreviewTabModel, api: FilePreviewApi): boolean {
   if (tab.kind !== 'file') return false
@@ -108,6 +116,7 @@ export interface FilePreviewContextValue {
   syncFileChanges(threadId: string, changes: readonly AgentRunFileChangesView[]): void
   openMissionActivity(missionId: string): void
   openExecution(): void
+  openProjectFiles(): void
   loadChanges(tabId: string, read: () => Promise<AgentRunFileChangesDetailView>, retry?: boolean): Promise<void>
   selectChangedFile(tabId: string, evidenceFileId: string): void
   showPane(): void
@@ -196,6 +205,7 @@ function restoredTab(snapshot: FilePreviewTabSnapshot): PreviewTabModel {
   return {
     kind: 'file',
     id: snapshot.id,
+    openedFromDirectory: snapshot.openedFromDirectory,
     sourceKey: snapshot.sourceRequest
       ? stableFilePreviewSourceKey(snapshot.sourceRequest, snapshot.presentation)
       : `unavailable:${snapshot.id}`,
@@ -276,11 +286,12 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
 
   const saveSession = (targetThreadId: string) => {
     const snapshot: FilePreviewSessionSnapshot = {
-      tabs: tabsRef.current.map((tab) => tab.kind === 'mission_activity' || tab.kind === 'execution' ? { ...tab } : tab.kind === 'file_change'
+      tabs: tabsRef.current.map((tab) => tab.kind === 'mission_activity' || tab.kind === 'execution' || tab.kind === 'file_picker' ? { ...tab } : tab.kind === 'file_change'
         ? { kind: 'file_change', id: tab.id, threadId: tab.threadId, changes: tab.changes, selectedEvidenceFileId: tab.selectedEvidenceFileId, reading: tab.reading }
         : {
           kind: 'file',
           id: tab.id,
+          openedFromDirectory: tab.openedFromDirectory,
           sourceRequest: tab.sourceRequest
             ? restorableFilePreviewRequest(tab.sourceRequest)
             : null,
@@ -303,6 +314,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   > => {
     const request = { handleId: file.handleId, expectedGeneration: file.contentGeneration }
     try {
+      if (file.kind === 'unsupported') return { ok: true, content: { kind: 'unsupported' }, pageOffsets: [], pageIndex: 0 }
       if (file.kind === 'image') {
         const result = await api.readBinary(request)
         if (!result.ok) return result
@@ -574,6 +586,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       setTabs(tabs => tabs.filter(tab => tab.id !== requestedTabId).map(tab => tab.id === duplicate.id
         ? {
           ...duplicate, sourceAliases: [...new Set([...(duplicate.sourceAliases ?? []), filePreviewSourceKey(request)])],
+          openedFromDirectory: duplicate.openedFromDirectory || requestedTab.openedFromDirectory,
           ...(file.target ? { file: duplicate.file ? { ...duplicate.file, target: file.target } : null, reading: undefined } : {})
         } : tab))
       if (activeTabIdRef.current === requestedTabId) showOpenedTab(duplicate.id, false, focusTab)
@@ -604,6 +617,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         ? {
           ...tab,
           sourceKey: installedSource.sourceKey,
+          openedFromDirectory: tab.openedFromDirectory || requestedTab.openedFromDirectory,
           sourceAliases: [...new Set([...(tab.sourceAliases ?? []), filePreviewSourceKey(request)])],
           sourceRequest: installedSource.sourceRequest,
           previewKey: file.previewKey,
@@ -613,7 +627,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
           content: preloaded?.content ?? null,
           error: null,
           requestGeneration: targetRequestGeneration,
-          hasExternalUpdate: file.hasExternalUpdate,
+          hasExternalUpdate: false,
+          needsRefresh: file.hasExternalUpdate,
           externalUpdateVersion: file.hasExternalUpdate ? tab.externalUpdateVersion + 1 : tab.externalUpdateVersion,
           isRefreshing: false,
           refreshError: null,
@@ -841,7 +856,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   }
 
   const committedRequests = new Map<string, Promise<FilePreviewOpenOutcome>>()
-  const open = async (
+  const openFile = async (
     request: OpenFilePreviewRequest,
     target?: FileLocationTarget,
     presentationHint?: FilePreviewPresentationHint,
@@ -916,6 +931,16 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     return performOpen(tabId, request, target, 'interactive', isNew, focusTab, true, rollback)
   }
 
+  const open = async (...args: Parameters<typeof openFile>): Promise<FilePreviewOpenOutcome> => {
+    const result = await openFile(...args)
+    if (args[0].kind === 'project_file' && result.kind === 'preview'
+      && tabsRef.current.some(tab => tab.kind === 'file' && tab.id === result.tabId)) {
+      setTabs(tabs => tabs.filter(tab => tab.kind !== 'file_picker').map(tab =>
+        tab.kind === 'file' && tab.id === result.tabId ? { ...tab, openedFromDirectory: true } : tab))
+    }
+    return result
+  }
+
   const restoreTab = (tabId: string, automatic: boolean): void => {
     const tab = tabsRef.current.find((entry) => entry.id === tabId)
     if (tab?.kind !== 'file' || !tab.sourceRequest) return
@@ -984,12 +1009,12 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     clearRefreshTimer(tabId)
     const tab = tabsRef.current.find(entry => entry.id === tabId)
     if (!isVisible(tabId) || tab?.kind !== 'file' || tab.loadState !== 'ready'
-      || !tab.hasExternalUpdate || tab.isRefreshing || tab.refreshError) return
+      || !tab.needsRefresh || tab.isRefreshing || tab.refreshError) return
     refreshTimers.set(tabId, setTimeout(() => {
       refreshTimers.delete(tabId)
       const latest = tabsRef.current.find(entry => entry.id === tabId)
       if (isVisible(tabId) && latest?.kind === 'file' && latest.loadState === 'ready'
-        && latest.hasExternalUpdate && !latest.isRefreshing && !latest.refreshError) void reload(tabId, true)
+        && latest.needsRefresh && !latest.isRefreshing && !latest.refreshError) void reload(tabId, true)
     }, 300))
   }
   // Called only by display/activation entry points, never ordinary state updates.
@@ -998,7 +1023,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     const tab = tabsRef.current.find(entry => entry.id === tabId)
     if (tab?.kind !== 'file' || tab.loadState === 'opening' || tab.isRefreshing) return
     if (tab.content) {
-      if (tab.hasExternalUpdate || !tab.file || tab.refreshError) void reload(tabId, true)
+      if (tab.needsRefresh || tab.hasExternalUpdate || !tab.file || tab.refreshError) void reload(tabId, true)
     } else if (tab.loadState === 'cold') restoreTab(tabId, true)
   }
 
@@ -1018,6 +1043,17 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     if (!existing) setTabs(tabs => [{ kind: 'execution', id: tabId }, ...tabs])
     activate(tabId)
     setOpenFeedback(previous => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew: !existing }))
+  }
+
+  const openProjectFiles = (): void => {
+    if (disposed || !threadId || !owner.isCurrent(threadId)) return
+    const picker = tabsRef.current.find(tab => tab.kind === 'file_picker')
+    if (picker) { activate(picker.id); return }
+    if (tabsRef.current.some(isDirectoryPreviewTab)) { showPane(); return }
+    const tabId = newCommandId()
+    setTabs(tabs => [...tabs, { kind: 'file_picker', id: tabId }])
+    activate(tabId)
+    setOpenFeedback(previous => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew: true }))
   }
 
   const move = (tabId: string, direction: -1 | 1) => {
@@ -1136,7 +1172,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     setTabs(tabs => tabs.map(entry => entry.id !== tab.id ? entry : {
       ...tab, ...loaded,
       file, candidate: undefined, loadState: 'ready', isRefreshing: false, refreshError: null,
-      hasExternalUpdate: file.hasExternalUpdate || tab.externalUpdateVersion !== refreshVersions.get(tab.id),
+      hasExternalUpdate: false,
+      needsRefresh: file.hasExternalUpdate || tab.externalUpdateVersion !== refreshVersions.get(tab.id),
       reading: loaded.content.kind === 'page'
         ? { ...tab.reading, visibleLine: loaded.content.page.startLine, codeScrollTop: 0 }
         : tab.reading,
@@ -1160,14 +1197,24 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     if (previous.file) void api.release({ handleId: previous.file.handleId })
   }
   const reload = async (tabId: string, visibleOnly = false, afterSave = false): Promise<void> => {
-    if (!afterSave && owner.edits?.protects(tabId)) {
-      if (!visibleOnly) await owner.edits.checkDisk(owner.edits.get(tabId)!)
-      return
-    }
     const tab = tabsRef.current.find(entry => entry.id === tabId)
     if (disposed || tab?.kind !== 'file') return
     if (tab.isRefreshing) {
       if (afterSave) pendingSavedRefreshes.add(tabId)
+      return
+    }
+    if (!afterSave && owner.edits?.protects(tabId)) {
+      const doc = owner.edits.get(tabId)!
+      if (doc.saving || visibleOnly && !isVisible(tabId)) return
+      const observed = tab.externalUpdateVersion
+      setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, isRefreshing: true } : entry))
+      const changed = await owner.edits.checkDisk(doc, !visibleOnly)
+      setTabs(tabs => tabs.map(entry => entry.id === tabId && entry.kind === 'file' ? {
+        ...entry, isRefreshing: false, hasExternalUpdate: changed === true,
+        needsRefresh: entry.externalUpdateVersion !== observed
+      } : entry))
+      if (pendingSavedRefreshes.delete(tabId)) void reload(tabId, false, true)
+      else scheduleRefresh(tabId)
       return
     }
     if (tab.loadState === 'opening'
@@ -1189,7 +1236,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       await owner.sync()
       if (!current()) return
       if (visibleOnly && !isVisible(tabId)) {
-        setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, isRefreshing: false, hasExternalUpdate: true } : entry))
+        setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...entry, isRefreshing: false, needsRefresh: true } : entry))
         return
       }
       if (oldFile) {
@@ -1207,7 +1254,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       if (!candidate) throw new Error(uiAttribute('无法重新取得文件，已保留当前预览。'))
       if (!current()) return
       const version = oldFile?.contentVersion
-      if (visibleOnly && oldFile && tab.content && !tab.refreshError
+      if (oldFile && tab.content && !tab.refreshError
         && oldFile.previewKey === candidate.previewKey
         && version?.size === candidate.contentVersion.size && version.mtimeMs === candidate.contentVersion.mtimeMs
         && version.fileId === candidate.contentVersion.fileId
@@ -1216,7 +1263,8 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         const changed = candidate.hasExternalUpdate
         setTabs(tabs => tabs.map(entry => entry.id !== tabId || entry.kind !== 'file' ? entry : {
           ...entry, isRefreshing: false,
-          hasExternalUpdate: changed || entry.externalUpdateVersion !== refreshVersions.get(tabId)
+          hasExternalUpdate: false,
+          needsRefresh: changed || entry.externalUpdateVersion !== refreshVersions.get(tabId)
         }))
         return
       }
@@ -1242,7 +1290,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       else commitCandidate(next)
     } catch (error) {
       if (current()) setTabs(tabs => tabs.map(entry => entry.id !== tabId ? entry : {
-        ...entry, isRefreshing: false,
+        ...entry, isRefreshing: false, hasExternalUpdate: false,
         refreshError: error instanceof Error ? error.message : uiAttribute('重新加载失败')
       }))
     } finally {
@@ -1422,13 +1470,13 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     retired,
     cool: () => { scopeGenerationRef.current += 1; committedLoads.clear(); for (const tab of tabsRef.current) session.evict(tab.id); session.id = newCommandId(); bindingPromiseRef.current = owner.sync() },
     setBinding: (binding: Promise<void>) => { bindingPromiseRef.current = binding },
-    actions: { open, openFileChanges, syncFileChanges, openMissionActivity, openExecution, loadChanges, selectChangedFile, showPane, hidePane, activate, move, close, closeMany, download, clearDownloadFeedback, openInSystem, revealInFolder, copyPath, toggleHtmlSource, reload, reopen, retry, changePage, saveReading, loadHtmlSource, saveHtmlSource, completeHtmlRefresh, displayed },
+    actions: { open, openFileChanges, syncFileChanges, openMissionActivity, openExecution, openProjectFiles, loadChanges, selectChangedFile, showPane, hidePane, activate, move, close, closeMany, download, clearDownloadFeedback, openInSystem, revealInFolder, copyPath, toggleHtmlSource, reload, reopen, retry, changePage, saveReading, loadHtmlSource, saveHtmlSource, completeHtmlRefresh, displayed },
     suspendRefresh,
     ensureActive: () => { if (activeTabIdRef.current) ensureVisibleTab(activeTabIdRef.current) },
     externalUpdate: (previewKeys: string[]) => {
       const changed = new Set(previewKeys)
       setTabs(tabs => tabs.map(tab => tab.kind === 'file' && tab.previewKey && changed.has(tab.previewKey)
-        ? { ...tab, hasExternalUpdate: true, externalUpdateVersion: tab.externalUpdateVersion + 1 } : tab))
+        ? { ...tab, needsRefresh: true, externalUpdateVersion: tab.externalUpdateVersion + 1 } : tab))
       const active = tabsRef.current.find(tab => tab.id === activeTabIdRef.current)
       if (active?.kind === 'file' && active.previewKey && changed.has(active.previewKey)) scheduleRefresh(active.id)
     },
@@ -1458,7 +1506,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       pendingSavedRefreshes.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
       if (!tab) return
-      if (tab.kind === 'mission_activity' || tab.kind === 'execution') return
+      if (tab.kind === 'mission_activity' || tab.kind === 'execution' || tab.kind === 'file_picker') return
       if (tab.kind === 'file_change') {
         changeRequests.delete(tabId)
         setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...tab, detail: undefined, detailBytes: undefined, detailStatus: undefined } : entry))

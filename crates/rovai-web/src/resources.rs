@@ -46,6 +46,7 @@ struct Handle {
     restore: Option<Value>,
     project_root: Option<PathBuf>,
     name: String,
+    preview_key: String,
     token: String,
     version: Value,
     analysis: Option<Arc<content::Analysis>>,
@@ -182,7 +183,13 @@ pub(super) async fn download_preview(
 fn is_core_file_source_kind(kind: Option<&str>) -> bool {
     matches!(
         kind,
-        Some("camp_workspace" | "message_reference" | "run_evidence" | "run_activity_file")
+        Some(
+            "project_file"
+                | "camp_workspace"
+                | "message_reference"
+                | "run_evidence"
+                | "run_activity_file"
+        )
     )
 }
 
@@ -300,12 +307,22 @@ fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn preview_key(handle: &Handle) -> String {
+async fn preview_key(client: &str, path: &std::path::Path) -> Result<String> {
     let mut key = Sha256::new();
     key.update(b"rovai-web-preview-v1\0");
-    key.update(handle.client.as_bytes());
-    key.update(handle.path.as_os_str().as_encoded_bytes());
-    format!("web:{:x}", key.finalize())
+    key.update(client.as_bytes());
+    key.update(path.as_os_str().as_encoded_bytes());
+    let parent = tokio::fs::metadata(path.parent().context("file_not_found")?).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        key.update(format!("{}:{}", parent.dev(), parent.ino()));
+    }
+    #[cfg(not(unix))]
+    {
+        key.update(format!("{:?}", parent.created().ok()));
+    }
+    Ok(format!("web:{:x}", key.finalize()))
 }
 
 fn page_range(text: &str, offset: u64, maximum: u64) -> Result<(usize, usize)> {
@@ -343,6 +360,8 @@ async fn metadata(
         .to_lowercase();
     let (kind, mime) = if let Some(mime) = image_mime(&content.prefix) {
         ("image", mime)
+    } else if handle.source["kind"] == "project_file" && (content.has_nul || !content.text) {
+        ("unsupported", "application/octet-stream")
     } else {
         ensure!(!content.has_nul && content.text, "decode_failed");
         // HTML bytes travel only through authenticated, generation-bound reads.
@@ -364,7 +383,7 @@ async fn metadata(
             },
         )
     };
-    let preview_key = preview_key(handle);
+    let preview_key = &handle.preview_key;
     let (display_path, presentation) = if let Some(relative) = handle
         .project_root
         .as_ref()
@@ -482,7 +501,7 @@ async fn file_operation(
                 Err(_) => true,
             };
             if changed {
-                let key = preview_key(&handle);
+                let key = handle.preview_key.clone();
                 if let Some(camp_id) = handle.source["threadId"].as_str() {
                     updates.entry(camp_id.to_owned()).or_default().push(key);
                 }
@@ -535,14 +554,19 @@ async fn file_operation(
                 .and_then(|s| s.to_str())
                 .context("source_not_authorized")?
                 .to_owned();
-            // Match Desktop: only project children get a durable independent
-            // restore request. External children retain their exact parent source.
+            // Current file links keep an exact independent source, including outside the project.
             let workspace = json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":"."});
-            let restore = if let Ok(root) = resolve(state, client, &workspace).await {
-                path.strip_prefix(&root.root).ok().and_then(|relative| relative.to_str()).map(|relative|
-                    json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":relative}))
-            } else {
+            let restore = if parent.source["kind"] == "attachment" {
                 None
+            } else {
+                let root = resolve(state, client, &workspace).await.ok();
+                let reference = root
+                    .as_ref()
+                    .and_then(|root| path.strip_prefix(&root.root).ok())
+                    .unwrap_or(&path);
+                Some(
+                    json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":reference}),
+                )
             };
             Handle {
                 path,
@@ -577,6 +601,7 @@ async fn file_operation(
                 root: resolved.root,
                 allow_children: resolved.allow_children,
                 name: resolved.name,
+                preview_key: String::new(),
                 preview_token: new_token()?,
                 session: session.clone(),
                 token: new_token()?,
@@ -584,6 +609,7 @@ async fn file_operation(
                 analysis: None,
             }
         };
+        handle.preview_key = preview_key(client.id(), &handle.path).await?;
         let (file, analysis) = metadata(&handle, &id, &permit).await?;
         handle.analysis = Some(analysis);
         handle.version = file["contentVersion"].clone();
@@ -641,21 +667,9 @@ async fn file_operation(
             "source_not_authorized"
         );
         let source = handle.restore.as_ref().unwrap_or(&handle.source);
-        if !matches!(
-            source["kind"].as_str(),
-            Some("camp_workspace" | "message_reference")
-        ) {
-            return Ok(rovai_core::file_edit::failure("edit_unavailable"));
-        }
-        let root = if source["kind"] == "camp_workspace" {
-            let resolved = resolve(state, client, source).await?;
-            resolved.root
-        } else {
-            handle.root.clone()
-        };
         let reply = state.core.request_for_editor(
             if body.action == "saveTextFile" { "filePreview.saveText" } else { "filePreview.readEditable" },
-            json!({"source":source,"path":handle.path,"root":root,"text":request.get("text"),"expectedVersion":request.get("expectedVersion")}),
+            json!({"source":source,"path":handle.path,"text":request.get("text"),"expectedVersion":request.get("expectedVersion")}),
             client.clone(),
         ).await?;
         return Ok(reply

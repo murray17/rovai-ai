@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-10-29
+last_updated: 2026-11-01
 ---
 
 # File Preview Architecture
@@ -41,7 +41,7 @@ explicit local-link click
   只借用同一 Tab shell 和分栏 host，不进入文件 controller、resource owner 或恢复来源。Tab shell 不拥有文件能力
   或当前文件事实。
 
-当前项目普通文本补齐轻量编辑；历史证据、附件资产与分页内容仍只读。文字选择与系统复制不连接 Composer 写入、消息持久化或 Agent input；
+当前磁盘普通文本补齐轻量编辑，不因打开入口或项目归属区别；历史证据、托管附件快照与分页内容仍只读。文字选择与系统复制不连接 Composer 写入、消息持久化或 Agent input；
 引用能力不在当前组件图内。
 
 `Files Changed` 卡片的入口由 Renderer 根据冻结的 `presentationKind` 路由：可靠差异进入不可变 Review，
@@ -122,14 +122,14 @@ binding generation 和 canonical 文件身份；复制始终使用重验后的 c
 capabilityRoot + capabilities + contentVersion + contentGeneration`。逻辑句柄随预览 session 保留，不设空闲 TTL；
 底层描述符空闲 30 分钟可关闭。每窗口最多 64 项，满额先回收非可见、可恢复且无必要操作的最旧句柄。
 
-`previewKey` 由窗口、Thread 与已校验的 canonical path 摘要生成，仅用于 Renderer Tab 去重；不包含消息/Run 来源或行号，
+`previewKey` 由窗口、Thread、已校验的 canonical path 及所在目录磁盘身份摘要生成，仅用于 Renderer Tab 去重；不包含目录/消息/Run 来源或行号，
 同一实际文件从不同入口打开仍激活现有 Tab。已有同一来源标签热命中直接复用；真正打开新来源时单独校验并创建来源绑定的 handle。
 已加载 Tab 只按 `previewKey` 去重，不把不同执行根中的同名相对路径合并；只有尚无 `previewKey` 的冷恢复 Tab 才使用
 Main 签发的稳定来源路径匹配。去重不升级权限。
 `reopenToken` 在 Main 绑定各自原始来源链；刷新或句柄过期时重新验证来源、realpath 和文件身份并最多自动重试一次。子文件成功打开后获得
-独立 token，父 Tab 关闭不撤销子 Tab。若 `child_of_handle` 最终打开的是当前 Thread 业务工作区内的普通文件，Main 还会
-独立读取当前 Thread/workspace authority、重新 canonicalize 工作区根并签发相对工作区根的 `camp_workspace`
-`restoreRequest`；它不保存或延长父 handle，也不把项目外临时能力升级为业务来源。
+独立 token，父 Tab 关闭不撤销子 Tab。普通文档的 `child_of_handle` 成功打开后，Main 使用既有 `camp_workspace`
+`restoreRequest` 记录项目内相对路径或项目外 canonical 绝对路径，不延长父 handle。
+托管附件派生内容不转成普通当前文件来源；原文件附件直接按既有 source attachment 解析。
 
 ## Thread 文件会话与恢复
 
@@ -160,11 +160,12 @@ Main 将 `{threadId, previewSessionId, bindingGeneration}` 与当前导航分开
 完整读取边界见 [Host Web v8](../contracts/host-web-v8.md)。
 
 共享 controller 在当前可见文件收到变化通知后以 300ms 末尾防抖自动刷新，发起前重新检查可见性；
-后台标签与隐藏 Thread 只标记更新。所有重新显示入口统一检查更新、能力回收与冷恢复。
+后台标签与隐藏 Thread 只记录待核对状态，不直接亮起更新提示。所有重新显示入口统一检查待核对、能力回收与冷恢复。
 首次加载完成后也检查待更新版本，手动/自动刷新及 HTML 候选等待共用已有忙碌状态，
-成功后有更晚更新才按可见性补刷。自动刷新取得候选后，若同一文件的版本未变且原句柄/内容有效、
+成功后有更晚通知才按可见性补刷。刷新取得候选后，若同一文件的版本未变且原句柄/内容有效、
 刷新前无错误，则在 HTML 容量预留前释放候选并跳过内容准备，只消费本轮开始的通知水位。
-Desktop 使用文件身份与属性，Web 还比较既有摘要；手动刷新和恢复完整加载。
+Desktop 使用文件身份与属性，Web 还比较既有摘要；错误或无句柄恢复完整加载。
+确有变化且无草稿时静默提交候选；有草稿时复用编辑读取比较已保存版本，仅在确认变化后提示，保留草稿与撤销历史。
 失败保留旧内容并阻断通知触发的重试；明确用户入口才可再次尝试。
 计时器随隐藏、关闭、淘汰、session 换代或释放清理。分页按可见行号在新内容中重新定位，
 缩短时回落到最后有效行，不跨版本复用字节偏移。完整行为见 [File Preview v24](../contracts/file-preview-v24.md)。
@@ -254,4 +255,21 @@ Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.r
 
 Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core 重新解析业务来源，数据库锁之外的 blocking pool
 使用 `file_edit` 执行串行、带摘要基线的同目录替换。没有第二份 Node/Web 写入实现，也没有持久操作账本。
+当前文件的编辑资格由格式、完整内容和实际写权限决定，不使用入口白名单或项目内限制；历史证据和托管快照仍只读。
 字段和失败行为见 [File Preview v24](../contracts/file-preview-v24.md)，界面见[文件预览区](../ui/components/file-preview.md#轻量文本编辑)。
+
+## 项目目录浏览
+
+`ProjectFilesStore` 按 Thread 保留展开项、搜索、选中和滚动位置，不随目录隐藏丢失。目录入口同时展开 sidecar，
+由现有预览 session 持有不占文件句柄的 `file_picker` 空标签；第一次目录文件打开后替换为普通文件标签。
+文件标签的 `openedFromDirectory` 标记随 session 保留、去重时合并；最后一个目录来源标签关闭后收起目录，
+不连带关闭仅从会话链接打开的标签。目录可单独折叠，sidecar 隐藏时暂停目录显示和监听，保留浏览状态。
+`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v26.md) 请求。
+Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；该命令不进入普通写命令队列或数据库事务。
+
+每个正在浏览的作用域共享一组非递归目录监听；变更通知只使可见目录缓存失效，与现有文件预览监听各负其责。
+关闭目录释放作用域，但已打开的 `project_file` 仍由原预览资源 owner 持有。根变化时旧来源失败，不换到另一根。
+单层只做一次有界读取，前端本地分批显示，刷新不逐页重复扫描。条目用可逆相对路径定位，不维护逐文件登记表；
+普通条目直接使用目录遍历返回的类型，链接及实际访问时再解析目标。监听忽略打开、读取等非变更事件。
+目录条目不读取正文；树、搜索、标签共用现有 `ProjectFileIcon`，导航使用界面字体，代码正文沿用 CodeMirror 等宽字体。
+没有文件管理、工作副本选择器、后台索引、搜索续传或新的编辑框架。目录中的不支持格式只显示信息与现有主动打开/下载操作。

@@ -1589,6 +1589,12 @@ export interface AttachmentRevealResult {
 
 export type OpenFilePreviewRequest =
   | {
+      kind: 'project_file'
+      threadId: string
+      /** Host-issued reference to the current root generation and file. */
+      rawReference: string
+    }
+  | {
       kind: 'skill_reference'
       threadId: string
       skillId: string
@@ -1640,7 +1646,7 @@ export type OpenFilePreviewRequest =
     }
 
 export type RestoreFilePreviewRequest = Extract<OpenFilePreviewRequest, {
-  kind: 'skill_reference' | 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence' | 'run_activity_file'
+  kind: 'project_file' | 'skill_reference' | 'message_reference' | 'camp_workspace' | 'attachment' | 'run_evidence' | 'run_activity_file'
 }>
 
 export interface ReopenFilePreviewRequest {
@@ -1673,6 +1679,7 @@ export interface ParsedFileReference {
 }
 
 export type FilePreviewKind =
+  | 'unsupported'
   | 'markdown'
   | 'html'
   | 'code'
@@ -1842,7 +1849,32 @@ export type FileEditResult = { ok: true; value: EditableFileSnapshot } | {
 export interface FileEditAccess { handleId: string; expectedGeneration: string }
 export interface SaveTextFileRequest extends FileEditAccess { text: string; expectedVersion: string }
 
+export interface ProjectFileEntry {
+  id: string
+  name: string
+  relativePath: string
+  directory: boolean
+  unavailable: boolean
+}
+export interface ProjectFilesRequest {
+  threadId: string
+  action: 'resolve' | 'list' | 'search' | 'cancelSearch' | 'watch' | 'poll' | 'open' | 'release'
+  scopeId?: string
+  entryId?: string
+  entryIds?: string[]
+  query?: string
+  queryRevision?: number
+  revision?: number
+}
+export type ProjectFilesResult<T> = { ok: true; value: T } | { ok: false; error: { code: string } }
+export interface ProjectFilesApi {
+  request<T>(request: ProjectFilesRequest): Promise<ProjectFilesResult<T>>
+}
+export interface ProjectFilesScope { scopeId: string; rootId: string; name: string; revision: number }
+export interface ProjectFilesPage { entries: ProjectFileEntry[]; partial: boolean }
+
 export interface FilePreviewApi {
+  projectFiles?: ProjectFilesApi
   onConnectionRestored?(listener: () => void): () => void
   readEditableFile?(request: FileEditAccess): Promise<FileEditResult>
   saveTextFile?(request: SaveTextFileRequest): Promise<FileEditResult>
@@ -4252,6 +4284,7 @@ export interface UpdateAutomationCommand {
 }
 
 export type CoreMethod =
+  | 'projectFiles.request'
   | 'preferences.tasks.get'
   | 'preferences.tasks.set'
   | 'teams.list'

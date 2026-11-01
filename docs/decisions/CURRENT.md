@@ -120,6 +120,8 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Thread 文件预览
 
+- 项目目录与独立入口：[File Preview v26](../contracts/file-preview-v26.md)、[项目目录浏览](../architecture/file-preview.md#项目目录浏览)；取舍见 [V1.72-D73](../versions/v1.72/decisions.md#v1-72-d73)、[V1.72-D74](../versions/v1.72/decisions.md#v1-72-d74)。v26 继承下列阅读与编辑契约。
+
 - 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v24](../contracts/file-preview-v24.md)、[Thread 文件预览区](../ui/components/file-preview.md)及[Thread 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
 - 窗口保留与刷新取舍：[V1.59-D07](../versions/v1.59/decisions.md#v1-59-d07)。
 - HTML 运行环境理由：[V1.58-D07](../versions/v1.58/decisions.md#v1-58-d07)。

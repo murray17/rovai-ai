@@ -21,9 +21,14 @@ it('preserves corrupt input until an explicit successful save', async () => {
   expect(store.get().degraded).toBe(false)
 })
 it('persists keyboard and mouse together, survives reload, and does not expose mutable state', async () => {
-  const { path, store } = await fixture(); await store.load()
+  const { path, store } = await fixture()
   const preferences = shortcutDefaults(); preferences.bindings.latest = 'Ctrl+Shift+K'; preferences.mouse.side1 = 'latest'; preferences.sendMode = 'primary-enter'
+  const original = JSON.stringify({ ...preferences, bindings: { ...preferences.bindings, 'quick-open': 'Mod+P' }, mouse: { ...preferences.mouse, side2: 'quick-open' } })
+  await writeFile(path, original); await store.load()
+  expect(store.get()).toEqual({ revision: 0, preferences, degraded: false })
+  expect(await readFile(path, 'utf8')).toBe(original)
   await store.save({ expectedRevision: 0, preferences })
+  expect(JSON.parse(await readFile(path, 'utf8'))).toEqual(preferences)
   preferences.bindings.latest = null
   const loaded = new ShortcutPreferencesStore(path, 'darwin'); await loaded.load()
   expect(loaded.get().preferences.bindings.latest).toBe('Ctrl+Shift+K')

@@ -1,6 +1,6 @@
 //! Small, optimistic text writes shared by Desktop and Web Host transports.
 //! Call on the blocking pool, after Core resolves the business source.
-use crate::file_preview_authority::{ResolveFilePreviewSourceParams, ResolvedFilePreviewSource};
+use crate::file_preview_authority::ResolvedFilePreviewSource;
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -18,9 +18,8 @@ pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditRequest {
-    pub source: ResolveFilePreviewSourceParams,
+    pub source: Value,
     pub path: PathBuf,
-    pub root: PathBuf,
     pub text: Option<String>,
     pub expected_version: Option<String>,
 }
@@ -60,7 +59,7 @@ struct Snapshot {
     permissions: fs::Permissions,
 }
 
-fn snapshot(path: &Path, root: &Path) -> Result<Snapshot> {
+fn snapshot(path: &Path) -> Result<Snapshot> {
     let metadata = fs::symlink_metadata(path).context("file_not_found")?;
     ensure!(
         metadata.is_file() && !metadata.file_type().is_symlink(),
@@ -110,7 +109,8 @@ fn snapshot(path: &Path, root: &Path) -> Result<Snapshot> {
         !text.contains('\r') && (!crlf || !raw.replace("\r\n", "").contains('\n')),
         "edit_unavailable"
     );
-    let root_id = identity(&fs::metadata(root).context("source_not_authorized")?);
+    let parent = path.parent().context("source_not_authorized")?;
+    let root_id = identity(&fs::metadata(parent).context("source_not_authorized")?);
     let key = format!(
         "{:x}",
         Sha256::digest(format!("{root_id}\0{}", path.display()))
@@ -181,15 +181,7 @@ fn operation(
     resolved: Option<ResolvedFilePreviewSource>,
     saving: bool,
 ) -> Result<Value> {
-    ensure!(
-        matches!(
-            request.source.kind.as_str(),
-            "camp_workspace" | "message_reference"
-        ),
-        "edit_unavailable"
-    );
     let Some(ResolvedFilePreviewSource::FileTarget {
-        root_path,
         base_path,
         raw_reference,
         ..
@@ -197,21 +189,15 @@ fn operation(
     else {
         anyhow::bail!("source_not_authorized");
     };
-    let root = fs::canonicalize(root_path).context("source_not_authorized")?;
-    // Node realpath and Rust canonicalize use different Windows path prefixes.
-    let requested_root = fs::canonicalize(&request.root).context("source_not_authorized")?;
-    ensure!(root == requested_root, "source_not_authorized");
     let candidate =
         crate::file_reference_path::reference_path(&raw_reference, Path::new(&base_path))?;
     let path = fs::canonicalize(&candidate).context("file_not_found")?;
+    // Desktop's Node realpath omits the verbatim prefix used by Rust on Windows.
     let requested_path = fs::canonicalize(&request.path).context("file_not_found")?;
-    ensure!(
-        path == requested_path && path.starts_with(&root),
-        "source_not_authorized"
-    );
+    ensure!(path == requested_path, "source_not_authorized");
     let lock = file_lock(&path);
     let _guard = lock.lock().map_err(|_| anyhow::anyhow!("write_failed"))?;
-    let before = snapshot(&path, &root)?;
+    let before = snapshot(&path)?;
     if !saving {
         return Ok(json!({"ok":true,"value":value(&before)}));
     }
@@ -256,14 +242,14 @@ fn operation(
         fs::canonicalize(&candidate).ok().as_ref() == Some(&path),
         "file_not_found"
     );
-    let latest = snapshot(&path, &root)?;
+    let latest = snapshot(&path)?;
     if latest.version != expected {
         let mut result = failure("edit_conflict");
         result["current"] = value(&latest);
         return Ok(result);
     }
     fs::rename(&temporary.0, &path)?;
-    let saved = snapshot(&path, &root).context("save_unknown")?;
+    let saved = snapshot(&path).context("save_unknown")?;
     ensure!(saved.bytes == output, "save_unknown");
     Ok(json!({"ok":true,"value":value(&saved)}))
 }
@@ -282,7 +268,7 @@ mod tests {
             let root =
                 std::env::temp_dir().join(format!("rovai-text-edit-{}", uuid::Uuid::new_v4()));
             fs::create_dir(&root).unwrap();
-            // Desktop uses Node realpath, which omits the Windows verbatim prefix.
+            // Exercise the ordinary paths produced by Desktop's Node realpath.
             let root = dunce::simplified(&fs::canonicalize(root).unwrap()).to_path_buf();
             let path = root.join("example.ts");
             fs::write(&path, bytes).unwrap();
@@ -306,7 +292,6 @@ mod tests {
                 EditRequest {
                     source,
                     path: self.path.clone(),
-                    root: self.root.clone(),
                     text: text.map(str::to_owned),
                     expected_version: version.map(str::to_owned),
                 },

@@ -98,6 +98,7 @@ export function classifyFilePreview(
   const textMime = TEXT_MIME.get(extension)
   if (textMime) return { extension, mime: textMime, kind: textKind('text', size), openRisk }
   try {
+    if (sample.includes(0)) return { extension, mime: 'application/octet-stream', kind: 'system', openRisk }
     decoder.decode(sample)
     return { extension, mime: 'text/plain', kind: textKind('text', size), openRisk }
   } catch {

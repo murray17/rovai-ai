@@ -127,13 +127,14 @@ export function createThreadAdapter(transport: ConsoleClient, selectWorkspaceDir
         ? restorableFilePreviewRequest(request as RestoreFilePreviewRequest) : null)
       if (source) sources.set(result.value.file.handleId, source)
       syncWatch()
-      if (request && typeof request === 'object' && 'rawReference' in request && typeof request.rawReference === 'string') {
+      if (request && typeof request === 'object' && 'rawReference' in request && typeof request.rawReference === 'string' && !('kind' in request && request.kind === 'project_file')) {
         result.value.file.target = parseFileReference(request.rawReference)?.target
       }
     }
     return result
   }
   const files: FilePreviewApi = {
+    projectFiles: { request: input => transport.request('projectFiles.request', input) },
     bindThread: async () => { /* Thread tab state stays in the shared React provider; every resource carries an exact source. */ },
     open: request => opened('open', request), restore: request => opened('restore', request), reopen: request => opened('reopen', request),
     readText: request => transport.files('readText', request),

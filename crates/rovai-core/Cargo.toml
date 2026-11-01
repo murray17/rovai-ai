@@ -35,6 +35,8 @@ toml_edit = "0.25"
 uuid = { version = "1", features = ["serde", "v4", "v7"] }
 url = "2"
 unicode-normalization = "0.1"
+notify = "8.2.1"
+ignore = "0.4.34"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }

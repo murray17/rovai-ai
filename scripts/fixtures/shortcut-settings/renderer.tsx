@@ -88,7 +88,7 @@ Object.assign(window, { shortcutTest: {
   snapshot: () => state.settings?.snapshot, save: (preferences: Parameters<ShortcutPreferencesApi['save']>[0]['preferences']) => state.settings!.save(preferences),
   probeTarget: (run: (target: EventTarget | null) => void) => state.settings!.register('tasks', { priority: 100, run }),
   composer: (text: string) => setComposerText(text), sends: () => sends,
-  language: (interfaceLanguage: 'en' | 'zh-CN') => initializeInterfaceLanguage({ interfaceLanguage }),
+  language: (interfaceLanguage: 'en' | 'zh-CN') => initializeInterfaceLanguage({ interfaceLanguage, interfaceLanguagePreference: interfaceLanguage, systemLanguage: interfaceLanguage, languageRevision: 1, readError: null }),
   theme: (value: string) => { document.documentElement.dataset.theme = value },
   openFile: (rawReference = 'docs/interaction-review.md') => commands!.open({ kind: 'camp_workspace', rawReference, threadId: model.get().snapshot.thread.id })
 } })

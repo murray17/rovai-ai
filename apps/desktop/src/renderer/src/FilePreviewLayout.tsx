@@ -15,7 +15,12 @@ import { createPortal } from 'react-dom'
 import {
   DEFAULT_FILE_PREVIEW_RATIO,
   FILE_PREVIEW_RATIO_STORAGE_KEY,
+  MIN_CONVERSATION_WIDTH,
   MIN_FILE_PREVIEW_WIDTH,
+  DEFAULT_DIRECTORY_WIDTH,
+  MIN_DIRECTORY_WIDTH,
+  MAX_DIRECTORY_WIDTH,
+  MIN_DIRECTORY_READING_WIDTH,
   filePreviewDragWidth,
   filePreviewRatioForWidth,
   filePreviewRatioFromStoredValue,
@@ -26,8 +31,14 @@ import {
 import { UiText, uiAttribute } from './interface-language'
 import { splitterScale, useCollapsibleSplitter, type FoldEdge } from './useCollapsibleSplitter'
 import { SplitterFeedback } from './SplitterFeedback'
+import { useProjectFiles } from './ProjectFilesContext'
+import { ProjectFilesPane } from './ProjectFilesPane'
 
 interface FilePreviewLayoutValue {
+  directoryWidth: number
+  directoryReservedWidth: number
+  directoryMaximum: number
+  directoryDrawer: boolean
   threadId: string | null
   visible: boolean
   activityMode: boolean
@@ -76,6 +87,7 @@ export function FilePreviewLayoutProvider({
   children: ReactNode
 }): React.JSX.Element {
   const [readingExpanded, updateExpanded] = useState(false)
+  const browser = useProjectFiles()
   const [foldPreview, setFoldPreview] = useState<FoldEdge | null>(null)
   const readingPositions = useRef<Array<{ element: HTMLElement; top: number; left: number }>>([])
   const rememberConversation = useCallback(() => {
@@ -207,7 +219,16 @@ export function FilePreviewLayoutProvider({
   }, [])
   const ratio = preferredRatio ?? initialRatios.get(threadId ?? '') ?? DEFAULT_FILE_PREVIEW_RATIO
   const width = dragWidth ?? filePreviewWidthForRatio(availableWidth, ratio)
+  // The outer split owns the entire sidecar. Its directory resizes only the inner reading area.
+  const sidecarWidth = compact || expanded ? availableWidth : width
+  const directorySpace = sidecarWidth - MIN_DIRECTORY_READING_WIDTH
+  const directoryDrawer = compact || directorySpace < MIN_DIRECTORY_WIDTH
+  const directoryMaximum = Math.max(MIN_DIRECTORY_WIDTH, Math.min(MAX_DIRECTORY_WIDTH,
+    directoryDrawer ? sidecarWidth - 24 : directorySpace))
+  const directoryWidth = Math.min(directoryMaximum, Math.max(MIN_DIRECTORY_WIDTH, browser?.width ?? DEFAULT_DIRECTORY_WIDTH))
+  const directoryReservedWidth = browser?.visible && !directoryDrawer ? directoryWidth : 0
   const value = useMemo<FilePreviewLayoutValue>(() => ({
+    directoryWidth, directoryReservedWidth, directoryMaximum, directoryDrawer,
     threadId,
     visible,
     activityMode,
@@ -222,20 +243,21 @@ export function FilePreviewLayoutProvider({
     availableWidth,
     resizing: dragWidth !== null,
     className: [
+      directoryReservedWidth ? 'project-files-inline' : '',
       compact ? 'file-preview-compact' : '',
       expanded ? 'file-preview-expanded' : '',
       foldPreview === 'minimum' ? 'file-preview-folded' : '',
       dragWidth !== null ? 'is-file-preview-resizing' : '',
       snapping ? 'is-file-preview-snapping' : ''
     ].filter(Boolean).join(' '),
-    style: { '--file-preview-width': `${Math.round(width)}px` } as CSSProperties,
+    style: { '--file-preview-width': `${Math.round(width)}px`, '--project-files-width': `${Math.round(directoryReservedWidth)}px` } as CSSProperties,
     workspace,
     workspaceRef: setWorkspace,
     previewWidth,
     commitWidth,
     cancelResize,
     resetRatio
-  }), [expanded, foldPreview, setExpanded, rememberConversation, previewCollapse, activityMode, availableWidth, cancelResize, commitWidth, compact, dragWidth, previewWidth, resetRatio, snapping, threadId, visible, width, workspace])
+  }), [directoryWidth, directoryReservedWidth, directoryMaximum, directoryDrawer, expanded, foldPreview, setExpanded, rememberConversation, previewCollapse, activityMode, availableWidth, cancelResize, commitWidth, compact, dragWidth, previewWidth, resetRatio, snapping, threadId, visible, width, workspace])
 
   return <FilePreviewInitialWidthContext.Provider value={initializeMinimumWidth}>
     <FilePreviewLayoutContext.Provider value={value}>{children}</FilePreviewLayoutContext.Provider>
@@ -252,12 +274,13 @@ export function useOptionalFilePreviewLayout(): FilePreviewLayoutValue | null {
 
 export function FilePreviewWorkspace({ children, hidden }: { children: ReactNode; hidden?: boolean }): React.JSX.Element {
   const layout = useOptionalFilePreviewLayout()
+  const browser = useProjectFiles()
   return <div
     ref={layout?.workspaceRef}
-    className={`workspace-grid inspector-collapsed${layout?.visible ? ` file-preview-open ${layout.className}` : ''}`}
-    style={layout?.visible ? layout.style : undefined}
+    className={`workspace-grid inspector-collapsed ${layout?.className ?? ''}${layout?.visible ? ' file-preview-open' : ''}${browser?.store ? ' project-files-workspace' : ''}`}
+    style={layout?.style}
     hidden={hidden}
-  >{children}</div>
+  >{children}<ProjectFilesPane /></div>
 }
 
 export function FilePreviewResizeHandle({ onClose }: { onClose(): void }): React.JSX.Element | null {

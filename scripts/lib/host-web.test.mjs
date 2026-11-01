@@ -573,7 +573,27 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(response.status, 200)
       return response.json()
     }
-    await exerciseFileEditing({ host, fileCall, session: first, otherSession: second, threadId: fileCampId, workspace, fixture })
+    // The browser transport consumes the same bounded directory result and opens
+    // its selected file through the existing preview service, without a page cursor.
+    await mkdir(join(workspace, 'web-browse'))
+    for (let index = 0; index < 205; index++) await writeFile(join(workspace, 'web-browse', `leaf-${index}.txt`), `selected-${index}`)
+    const browse = (action, scopeId, params = {}) => call(first, 'projectFiles.request', { threadId: fileCampId, action, scopeId, ...params })
+    const scope = await browse('resolve')
+    assert.equal(scope.ok, true)
+    const search = await browse('search', scope.value.scopeId, { query: 'web-browse/leaf-204.txt', queryRevision: 1 })
+    assert.equal(search.value.entries.length, 1, 'Web searches unexpanded directories')
+    const listing = await browse('list', scope.value.scopeId, { entryId: `p:${Buffer.from('web-browse').toString('base64url')}` })
+    assert.equal(listing.value.entries.length, 205, 'one Web request returns the bounded layer beyond 200 visible rows')
+    assert.equal(listing.value.partial, false)
+    assert.equal('nextOffset' in listing.value, false)
+    const selected = await browse('open', scope.value.scopeId, { entryId: search.value.entries[0].id })
+    const preview = await fileCall(first, 'open', selected.value)
+    assert.equal(preview.ok, true)
+    assert.equal((await fileCall(first, 'readText', { handleId: preview.value.file.handleId, expectedGeneration: preview.value.file.contentGeneration })).value.text, 'selected-204')
+    await fileCall(first, 'release', { handleId: preview.value.file.handleId })
+    assert.equal((await browse('release', scope.value.scopeId)).ok, true)
+    await exerciseFileEditing({ host, call, fileCall, session: first, otherSession: second, threadId: fileCampId, workspace, fixture,
+      originalAttachment: { source: { kind: 'attachment', threadId, locator: messageLocator }, path: bound.sourcePath } })
     const prepareDownload = (session, body) => authorized(session, 'downloads', { method: 'POST', body: JSON.stringify(body) })
     const grant = async (source, session = first) => {
       const response = await prepareDownload(session, { kind: 'source', source })
