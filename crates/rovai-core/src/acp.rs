@@ -7163,6 +7163,9 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli {
         compatibility["nativeBackgroundPolicy"] = json!("disabled-v1");
     }
+    if frozen_runtime.adapter_kind == AdapterKind::QoderCli {
+        compatibility["nativeBackgroundPolicy"] = json!("agent-sessions-disabled-v1");
+    }
     if frozen_runtime.adapter_kind == AdapterKind::QwenCode {
         compatibility["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
     }
@@ -7569,6 +7572,8 @@ fn configure_runtime_command(
                 && workspace.access == "read_only";
             match runtime.adapter_kind {
                 AdapterKind::QoderCli => {
+                    // Keep native Agent calls synchronous after env overlays.
+                    command.env("QODER_ENABLE_AGENT_SESSIONS", "0");
                     command.arg("--permission-mode").arg(if legacy_read_only {
                         "dont_ask"
                     } else {
@@ -16634,6 +16639,94 @@ while IFS= read -r ignored; do :; done
             );
             assert!(args.iter().any(|arg| *arg == "yolo"));
             assert!(!args.iter().any(|arg| *arg == "--available-tools="));
+        }
+
+        // Qoder disables background Agent sessions at launch, retaining the
+        // existing Native Session identity and ordinary synchronous Agent tool.
+        let mut qoder = frozen.clone();
+        qoder.adapter_kind = AdapterKind::QoderCli;
+        qoder.permissions.adapter_kind = AdapterKind::QoderCli;
+        qoder.permissions.values = json!({"permission_mode":"bypass_permissions"});
+        let qoder_digest = runtime_compatibility_digest(
+            &qoder,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+        )
+        .unwrap();
+        let mut qoder_inputs = old_inputs.clone();
+        qoder_inputs["adapterKind"] = json!(AdapterKind::QoderCli);
+        qoder_inputs
+            .as_object_mut()
+            .unwrap()
+            .remove("nativeQuestionnairePolicy");
+        assert_ne!(
+            qoder_digest,
+            Some(canonical_json_digest(&qoder_inputs).unwrap())
+        );
+        qoder_inputs["nativeBackgroundPolicy"] = json!("agent-sessions-disabled-v1");
+        assert_eq!(
+            qoder_digest,
+            Some(canonical_json_digest(&qoder_inputs).unwrap())
+        );
+        let unchanged = freeze_native_session_compatibility(qoder.clone(), &workspace).unwrap();
+        assert_eq!(
+            unchanged.binding_compatibility_digest,
+            qoder.binding_compatibility_digest
+        );
+        assert_eq!(
+            unchanged.native_session_compatibility_key,
+            qoder.native_session_compatibility_key
+        );
+        for with_mcp in [false, true] {
+            let mut command = Command::new(&executable);
+            command.env("QODER_ENABLE_AGENT_SESSIONS", "1");
+            command.env("PROCESS_ONLY", "preserved");
+            let servers = if with_mcp {
+                BTreeMap::from([(
+                    "fixture".into(),
+                    McpServerDefinition::StreamableHttp {
+                        url: "https://mcp.invalid/example".into(),
+                        headers: BTreeMap::new(),
+                    },
+                )])
+            } else {
+                BTreeMap::new()
+            };
+            let mcp = configure_runtime_command(
+                &mut command,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &qoder,
+                false,
+                &servers,
+                &root,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                mcp.is_some(),
+                with_mcp,
+                "policy precedes the MCP early return"
+            );
+            for (key, value) in [
+                ("QODER_ENABLE_AGENT_SESSIONS", "0"),
+                ("PROCESS_ONLY", "preserved"),
+            ] {
+                assert_eq!(
+                    command
+                        .as_std()
+                        .get_envs()
+                        .find(|(name, _)| *name == key)
+                        .unwrap()
+                        .1
+                        .unwrap(),
+                    value
+                );
+            }
         }
 
         // Only the V2 launch policy changes; V1 and native Session identity

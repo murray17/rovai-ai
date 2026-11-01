@@ -6,6 +6,17 @@ last_updated: 2026-11-01
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-01 Qoder 同步子代理启动策略
+
+macOS arm64、Qoder CLI **1.1.81**、`deepseek/deepseek-v4-flash-pg` 的原生 ACP 对照确认：
+`QODER_ENABLE_AGENT_SESSIONS=1` 返回异步启动回执；设为 `0` 后仍调用普通 Agent，子 Read 完成后报告由同一 Agent 调用返回。
+Rovai 在合并环境后直接注入 `0`，不改全局配置。命名队友和 `/subtask` 同样受限，Bash 后台命令不由此开关管理。
+这是当前版本安装包与真实调用验证的原生开关，尚未列入公开环境变量表；不据此宣称所有历史版本或平台均通过。
+开发 App 补验与回归证据见[实施记录](versions/v1.72/subagent-flat-execution.md#qoder-同步启动策略补验)。
+隔离开发 App 恢复原先失败的同一原生 Session 后成功：模型仍传 `run_in_background:true`，
+但实际 Qoder 进程环境为 `0`，Agent 直接返回子报告，没有异步启动回执；主代理成功发布完成说明。
+原始参数和旧失败均保留，不将关闭后台的通过结果表述为支持异步续跑。
+
 ## 2026-11-01 Kiro 登录后子代理与 ZCode 限流后补验
 
 macOS arm64、Kiro CLI **2.37.0** 登录后，隔离开发 App 的真实 `auto` 模型完成原生 `subagent`。

@@ -10,7 +10,8 @@ last_updated: 2026-11-01
 
 User 已确认 [Surface v58](../../contracts/run-process-detail-surface-v58.md) 与 [D71](decisions.md#v1-72-d71)。
 本次独立 worktree 为 `rovai/subagent-flat-execution`，基于 `b3c9522d3`，先带入原生协议调研，再实施生产链路。
-未替换日常 App、未改模型上下文、后台限制、任务调度或自动续跑；不涉及 Cline/Cursor。
+未替换日常 App、未改模型上下文、任务调度或自动续跑；不涉及 Cline/Cursor。
+最初的平铺实现保留后台策略；后续按 User 明确授权增加 Qoder 原生 env 限制，见末尾补验。
 
 ## 实现边界
 
@@ -181,3 +182,31 @@ pnpm exec vitest run apps/desktop/src/renderer/src/RuntimeFailureNotice.test.ts 
 上述 Rust 10 项、前端 33 项通过。ZCode 修补后的默认 workspace 回归 478 passed、1 ignored；之后的 Kiro
 名称归一化由两项定向 owner 和重建后的真实 App 重跑验证。App 展开详情已人工复核；Kiro 的实时末次通知与历史
 Evidence 的调用身份、Canonical 类型、状态和报告一致，旧失败记录保留。
+
+## Qoder 同步启动策略补验
+
+User 在原生开关对照和直接 env 传递说明后，明确要求接入并用开发包重试。
+仅在 Qoder 专属启动分支、普通环境及 Built-in 环境合并后设置 `QODER_ENABLE_AGENT_SESSIONS=0`。
+Host compatibility 增加 `nativeBackgroundPolicy=agent-sessions-disabled-v1`；不改变 Session compatibility、Bootstrap、
+输入选择或上下文证据，不重写已确认的模型上下文说明。没有用户配置文件、新状态机、后台任务管理器或 UI 改动。
+
+扩展既有 `warm_compatibility_matches_process_inputs_across_acp_adapters` owner，覆盖同名启动环境覆盖、
+其余变量保留、有／无 MCP 的提前返回、新旧 Host 摘要区别和 Native Session 身份保持；不新增 Rust 测试函数。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib warm_compatibility_matches_process_inputs_across_acp_adapters`。
+隔离开发 App 仍使用前述 fixture，通过 `pnpm dev` 重建；启动父进程故意继承 `QODER_ENABLE_AGENT_SESSIONS=1`，
+实际 Qoder ACP 子进程的同名环境值为 `0`。Host 二进制 SHA-256 为
+`af3eb80d3223e83c244ebb96e9602e672698571bab9d4df11e241ae858c2c3a5`。
+本机 Qoder **1.1.81**、真实 `deepseek/deepseek-v4-flash-pg` 结果如下：
+
+- 原 Thread `rvcamp_01m6b8f8zafwhvs21mdjxj3npx`，新 Run `6a614725-1d7f-43d5-8e7a-6b9c081108ce` 为 `succeeded`。
+- 恢复原生 Session `93d18aa5-1257-4c4b-ac35-81aec6c2abce`；没有清空 Session 或重放旧失败。
+- 模型仍提交 `name` 与 `run_in_background:true`，原生开关强制普通 Agent 同步执行，实际输出直接包含
+  `CHILD_REPORT_BEGIN`、随机文件标记 `ROVAI_02e89a7f`、琥珀色、数量 3、`CHILD_REPORT_END`。
+  原始入参不删改；没有 `Async agent launched successfully.` 回执。
+- 唯一 Agent 与唯一 child Read 都成功，主代理公开完成说明成功；narration 不含子报告或随机文件标记。
+- App 人工复核机器人图标、普通单文本详情、同一「已完成 4 个步骤」分组，包含 Agent、Read、发布 shell 和
+  Built-in send 记录；此前两次失败保留。开发 App 停留在成功报告处供 User 查看。
+
+原始本机证据在上述 fixture 的 `evidence/qoder-cli-background/qoder-sync-policy-*`，
+仅发布脱敏结果；没有替换日常 App。兼容性清单追加证据后同步其冻结摘要，未改变平台准入状态。
+定向 owner、格式检查、文档单测 10 项和 diff-aware 文档门禁通过；默认 workspace 复验 478 passed、1 ignored。
