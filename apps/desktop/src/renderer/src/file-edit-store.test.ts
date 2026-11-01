@@ -133,14 +133,16 @@ describe('window file editing buffers', () => {
     expect(api.saveTextFile).toHaveBeenLastCalledWith(expect.objectContaining({ handleId: 'handle', expectedGeneration: 'handle' }))
   })
 
-  it('does not offer overwrite for a replaced working directory and retains a failed close', async () => {
+  it('does not offer overwrite for a replaced directory and closes only after explicit discard without saving', async () => {
     const { store, api, doc } = await fixture(); store.change(doc, 'draft')
     api.saveTextFile.mockResolvedValueOnce({ ok: false, error: { code: 'edit_conflict', message: 'conflict' }, current: { key: 'replacement-directory', text: 'outside', version: 'other' } })
     expect(await store.save(doc)).toBe(false); expect(store.dialog).toBeNull(); expect(doc.conflict).toBeUndefined()
     const close = store.confirmClose(['tab']); expect(store.dialog?.kind).toBe('close')
-    api.saveTextFile.mockResolvedValueOnce({ ok: false, error: { code: 'write_failed', message: 'failed' } })
-    store.dialog!.resolve('save'); expect(await close).toBe(false)
+    store.dialog!.resolve('cancel'); expect(await close).toBe(false)
     expect(doc.draft).toBe('draft'); expect(fileEditDirty(doc)).toBe(true)
+    const confirmed = store.confirmClose(['tab'])
+    store.dialog!.resolve('discard'); expect(await confirmed).toBe(true)
+    expect(api.saveTextFile).toHaveBeenCalledTimes(1)
     expect(store.shouldWarnOnUnload()).toBe(true); store.acceptExit(); expect(store.shouldWarnOnUnload()).toBe(false)
     store.change(doc, 'later'); expect(store.shouldWarnOnUnload()).toBe(true)
   })

@@ -8907,6 +8907,14 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 :root .app-dialog :is(.primary-button,.quiet-button,.danger-button,.approve-button) { min-height:36px; border-radius:7px; font-size:12.5px; font-weight:500; }
 :root .app-dialog .quiet-button { background:transparent; border-color:transparent; }
 :root .app-dialog .quiet-button:hover:not(:disabled) { background:var(--surface-hover); }
+:root .app-dialog.file-close-dialog { width:min(440px,calc(100vw - 32px)); }
+.file-close-dialog .app-dialog-header { padding-bottom:0; }
+.file-close-dialog .app-dialog-title { overflow-wrap:anywhere; }
+.file-close-dialog .app-dialog-footer { padding-top:22px; }
+.file-close-dialog .dialog-actions { position:static; background:transparent; }
+.file-close-dialog .dialog-actions button { min-width:64px; }
+:root .file-close-dialog .quiet-button:focus-visible { background:var(--surface-hover); }
+:root .file-close-dialog .danger-button:focus-visible { background:color-mix(in srgb,var(--danger) 10%,var(--danger-soft)); }
 /* User-confirmed danger treatment: pale red surface + red text, in both themes. */
 :is(.app-dialog,.compact-dialog) :is(.danger-button,.compact-danger) { color:var(--danger); background:var(--danger-soft); border:1px solid transparent; box-shadow:none; font-weight:500; }
 :is(.app-dialog,.compact-dialog) :is(.danger-button,.compact-danger):hover:not(:disabled) { color:var(--danger); background:color-mix(in srgb,var(--danger) 10%,var(--danger-soft)); border-color:color-mix(in srgb,var(--danger) 22%,transparent); }

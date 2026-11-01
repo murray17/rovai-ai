@@ -205,8 +205,7 @@ export class FileEditStore {
     for (const doc of docs) if (pending(doc)) {
       if (doc.saving) { doc.error = uiAttribute('正在保存，请稍后关闭'); this.changed(); return false }
       const choice = await this.ask('close', doc)
-      if (choice === 'cancel') return false
-      if (choice === 'save' && (!await this.save(doc) || pending(doc))) return false
+      if (choice !== 'discard') return false
     }
     return true
   }
