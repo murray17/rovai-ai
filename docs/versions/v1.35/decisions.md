@@ -121,7 +121,7 @@ Host 只提交所有 published Bot 的完整 `isInChat` 快照。普通群首次
 `camp.member.add/remove` 与 exact source generation 同步。话题首次只使用当前 mentions，父群新增不自动扩张；
 只有话题内显式目标或 A2A exact target 且其 Bot 仍在父群时，才按需调用同一 add。移出统一走既有 remove。
 
-当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-camp-membership)、
+当前规范见 [飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-thread-membership)、
 [Feishu Channel v2](../../contracts/feishu-channel-v2.md#6-camp-创建roster-与-admission)和
 [Camp Membership v1](../../contracts/camp-membership-v1.md)。
 
@@ -647,7 +647,7 @@ reconciliation；但 latest roster 立即成为 future-admission fence，新的�
 - **更新 roster 时取消正在运行的 Run：** 破坏已经冻结的执行上下文和历史可解释性；
 - **只在周期 sweep 同步：** A2A/Gather/retry 可能在下一次 sweep 前按旧 roster 创建 Run。
 
-当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-camp-membership)、
+当前规范见[飞书渠道架构](../../architecture/feishu-channel.md#bot-roster-与-thread-membership)、
 [Feishu Channel v2](../../contracts/feishu-channel-v2.md#6-camp-创建roster-与-admission)和
 [Camp Membership v1](../../contracts/camp-membership-v1.md)。
 

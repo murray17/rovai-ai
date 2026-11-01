@@ -6830,15 +6830,13 @@ export function executionDeliveryQueuePresentation(process: AgentExecutionProces
 } {
   const runs = process.runs.filter(run => run.agentId === agentId && run.invocationKind !== 'single_chat')
   const active = runs.some(run => NON_TERMINAL_RUNS.has(run.status))
-  const cleanup = runs.some(run => !NON_TERMINAL_RUNS.has(run.status)
-    && run.cancelRequestedAt !== null && run.cancelAcknowledgedAt === null)
-  const blocked = active || cleanup || process.waitingDeliveries.some(delivery =>
+  const blocked = active || process.waitingDeliveries.some(delivery =>
     delivery.recipientAgentId === agentId && delivery.waitCondition != null)
   return {
     label: blocked ? '排队中' : '准备中…',
     tone: 'neutral',
     blocked,
-    detail: active ? '等待上一轮完成' : cleanup ? '等待上次执行清理完成' : null
+    detail: active ? '等待上一轮完成' : null
   }
 }
 

@@ -153,30 +153,44 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
         };
         let first_path = json!(context.directory.join("first-cli").to_string_lossy());
         let second_path = json!(context.directory.join("second-cli").to_string_lossy());
-        let prepared =
-            runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, first_path.clone())])
-                .unwrap();
+        let prepared = runtime_startup::prepare_save(
+            &db,
+            kind,
+            vec![edit(Value::Null, first_path.clone())],
+            None,
+        )
+        .unwrap();
         let first = runtime_startup::commit_save(&mut db, kind, prepared, 1).unwrap();
         assert!(first.reconnect_required);
-        let prepared =
-            runtime_startup::prepare_save(&db, kind, vec![edit(first_path, second_path.clone())])
-                .unwrap();
+        let prepared = runtime_startup::prepare_save(
+            &db,
+            kind,
+            vec![edit(first_path, second_path.clone())],
+            None,
+        )
+        .unwrap();
         let second = runtime_startup::commit_save(&mut db, kind, prepared, 2).unwrap();
         assert!(second.configuration.environment.is_empty());
-        let replay =
-            runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, second_path.clone())])
-                .unwrap();
+        let replay = runtime_startup::prepare_save(
+            &db,
+            kind,
+            vec![edit(Value::Null, second_path.clone())],
+            None,
+        )
+        .unwrap();
         assert!(
             replay.edits.is_empty(),
             "an already-applied target is not another edit"
         );
         assert!(replay.conflicts.is_empty());
         let conflict =
-            runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, Value::Null)]).unwrap();
+            runtime_startup::prepare_save(&db, kind, vec![edit(Value::Null, Value::Null)], None)
+                .unwrap();
         assert_eq!(conflict.conflicts.len(), 1);
         assert_eq!(conflict.conflicts[0].current, second_path);
         let prepared =
-            runtime_startup::prepare_save(&db, kind, vec![edit(second_path, Value::Null)]).unwrap();
+            runtime_startup::prepare_save(&db, kind, vec![edit(second_path, Value::Null)], None)
+                .unwrap();
         db.connection().execute_batch("CREATE TEMP TRIGGER fail_startup BEFORE UPDATE ON runtime_startup_setting BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END;").unwrap();
         assert!(runtime_startup::commit_save(&mut db, kind, prepared, 3).is_err());
         db.connection()
@@ -234,6 +248,7 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
                 json!(unchanged.configuration.program_path),
                 Value::Null,
             )],
+            None,
         )
         .unwrap();
         db.connection().execute_batch("CREATE TEMP TRIGGER fail_common BEFORE INSERT ON runtime_common_environment BEGIN SELECT RAISE(ABORT,'common write failure'); END;").unwrap();
@@ -249,7 +264,7 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
         db.connection()
             .execute_batch("DROP TRIGGER fail_common")
             .unwrap();
-        let prepared = runtime_startup::prepare_save(&db, kind, vec![]).unwrap();
+        let prepared = runtime_startup::prepare_save(&db, kind, vec![], None).unwrap();
         let saved =
             runtime_startup::commit_save_with_common(&mut db, kind, prepared, 3, Some(&shared))
                 .unwrap();
@@ -265,6 +280,65 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
                 .contains("fixture-common-private")
         );
         assert_eq!(std::fs::read(context.path()).unwrap(), contents.as_bytes());
+
+        // The same versioned editor repairs a damaged local record. Loading
+        // peers must succeed, and no discovery/default credential is selected.
+        let before = runtime_startup::load(&db, kind).unwrap();
+        for broken in [
+            "{broken",
+            r#"{"programPath":42}"#,
+            r#"{"programPath":"relative"}"#,
+        ] {
+            db.connection()
+                .execute_batch("PRAGMA ignore_check_constraints=ON")
+                .unwrap();
+            db.connection().execute("UPDATE runtime_startup_setting SET configuration_json=?2 WHERE runtime_kind=?1", rusqlite::params![kind.as_str(), broken]).unwrap();
+            db.connection()
+                .execute_batch("PRAGMA ignore_check_constraints=OFF")
+                .unwrap();
+            let invalid = runtime_startup::load(&db, kind).unwrap();
+            assert!(invalid.configuration.configuration_error.is_some());
+            let all = runtime_startup::load_all(&db).unwrap();
+            assert!(all[&kind].ensure_environment_available().is_err());
+            let search =
+                crate::runtime_discovery::RuntimeSearchEnvironment::for_test_paths(1, vec![])
+                    .with_startup_configurations(all);
+            assert!(search.candidates(kind, std::iter::empty()).is_empty());
+            let correction = || vec![edit(Value::Null, Value::Null)];
+            assert!(runtime_startup::prepare_save(&db, kind, correction(), None).is_err());
+            let conflict = runtime_startup::prepare_save(
+                &db,
+                kind,
+                correction(),
+                Some(invalid.revision.saturating_sub(1)),
+            )
+            .unwrap();
+            assert_eq!(conflict.current.revision, invalid.revision);
+            assert_eq!(conflict.conflicts.len(), 1);
+            let latest_revision = conflict.current.revision;
+            assert!(runtime_startup::commit_save(&mut db, kind, conflict, 4).is_err());
+            let unchanged: String = db
+                .connection()
+                .query_row(
+                    "SELECT configuration_json FROM runtime_startup_setting WHERE runtime_kind=?1",
+                    [kind.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(unchanged, broken);
+            let prepared =
+                runtime_startup::prepare_save(&db, kind, correction(), Some(latest_revision))
+                    .unwrap();
+            let repaired = runtime_startup::commit_save(&mut db, kind, prepared, 4).unwrap();
+            assert!(repaired.reconnect_required);
+            assert!(repaired.configuration.configuration_error.is_none());
+            assert!(
+                runtime_startup::load_all(&db).unwrap()[&kind]
+                    .ensure_environment_available()
+                    .is_ok()
+            );
+        }
+        assert!(runtime_startup::load(&db, kind).unwrap().revision > before.revision);
     }
     // A first common-only save must preserve legacy manual paths for runtimes
     // without a native custom-API reader too.
@@ -277,7 +351,7 @@ fn startup_saves_preserve_native_files_and_merge_only_local_preferences() {
         .to_string_lossy()
         .into_owned();
     db.connection().execute("INSERT INTO adapter_installation(id,adapter_kind,executable_path,command_name,installation_class,source,auth_scope,created_at,updated_at) VALUES('legacy-shared-pi','pi',?1,'pi','managed_default','manual','default',datetime('now'),datetime('now'))", [&legacy_path]).unwrap();
-    let prepared = runtime_startup::prepare_save(&db, kind, vec![]).unwrap();
+    let prepared = runtime_startup::prepare_save(&db, kind, vec![], None).unwrap();
     assert_eq!(
         prepared.configuration.program_path.as_ref(),
         Some(&legacy_path)

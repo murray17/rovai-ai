@@ -43,7 +43,7 @@ shutdown/reap、图片和 Usage 观察均不属于 Approval/Receipt，保持既�
 | Decisions | 已更新 | [V1.48-D01](decisions.md#v1-48-d01)记录 Pi 原生执行与 Rovai Approval/Receipt 退役；CURRENT 已纳入导航 |
 | Contracts | 已更新 | [Runtime Launch and Verification v36](../../contracts/runtime-launch-and-verification-v36.md)替代 v35，定义单一原生启动、薄 Extension、`agent_start` admission 与历史 Receipt 边界 |
 | Architecture | 已更新 | Runtime 基础不变量与 Catalog 同步 Pi project trust、原生 Tool、薄 Extension、无 permission options 与无 active Receipt 边界 |
-| UI | 已更新 | [队员工作区 brief](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)记录 Pi 不展示 Rovai Approval；既有 capability-driven Renderer 无需新增生产分支 |
+| UI | 已更新 | [队员工作区 brief](../../ui/surfaces/member-workspace.md)记录 Pi 不展示 Rovai Approval；既有 capability-driven Renderer 无需新增生产分支 |
 | Runtime Activity | 已更新 | Pi Tool 继续映射原生结构化 lifecycle，但不再宣称 bash/edit/write 由 Rovai 审批 |
 | Runtime compatibility | 已更新 | 历史实测证据保留；当前产品结论改为 native tools、无 permission options、无 active Receipt，平台仍 Preview/NotQualified |
 | Documentation routing | 已更新 | 文档任务导航、Contracts 索引、版本指针和当前决定导航均指向 Runtime Launch v36 / v1.48 当前边界 |

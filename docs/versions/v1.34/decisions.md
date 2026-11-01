@@ -20,7 +20,7 @@ last_updated: 2026-08-31
 Camp 只保存三态覆盖，使用持久 Runtime 绑定代次使旧选择失效。新 Run 冻结该值，通过 Claude 单次
 inline settings 或 Codex 单 Turn 字段下发，不修改原生默认。当前规范由
 [Camp Member Fast v1](../../contracts/camp-member-fast-v1.md) 和
-[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界) 拥有。
+[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#thread-队员-fast-边界) 拥有。
 
 ### 后果
 

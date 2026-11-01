@@ -50,7 +50,7 @@ last_updated: 2026-08-31
 不迁移或清理历史数据，不改变事件订阅、完整 Snapshot/History 或导航语义，不影响 Fast 或模型上下文。
 采用现有 v1.34 的维护修正，无需版本切换；理由与边界见
 [Camp Open Read Path](../../architecture/camp-open-read-path.md)，测试准入和最小命令见
-[测试说明](../../development/testing.md#campopen-业务读取边界)。
+[测试说明](../../development/testing.md#thread-open-业务读取边界)。
 
 禁止读取事件表的 SQLite authorizer 回归通过。固定业务数据、无关事件为 5 万/50 万/500 万时，
 每次投影 SQL VM 步数均为 1883；instrumented debug 读取中位数分别约 1.65/1.84/1.75 ms。

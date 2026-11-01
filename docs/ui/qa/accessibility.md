@@ -25,7 +25,7 @@ last_updated: 2026-10-25
 ## Dialogs, drawers and popovers
 
 模态 Radix Dialog/Drawer 负责 focus trap 与 Esc。仅按 surface 合同恢复指定入口焦点，其余关闭不自动回焦。
-新对话遵循其 [brief](../../../apps/desktop/.impeccable/surfaces/new-conversation-dialog.md)，头像选择/裁切遵循
+新对话遵循其 [brief](../surfaces/new-conversation-dialog.md)，头像选择/裁切遵循
 [队员身份](../components/member-identity.md)；回焦不滚动、不增加装饰。提交中可阻止关闭，但必须显示忙碌状态。
 非模态锚定 Popover 不设 focus trap，保留 Esc、点击外部与必要输入定位。原有运行配置下拉框交互不重做。
 Approval Dock 是非模态且不得遮住 Composer/Stop。

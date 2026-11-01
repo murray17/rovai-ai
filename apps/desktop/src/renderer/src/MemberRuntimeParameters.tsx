@@ -475,11 +475,11 @@ function ModelFields({
   const [optionRead, setOptionRead] = useState<{ key: string; status: 'loading' | 'ready' | 'failed' } | null>(null)
   const [optionLoadingKey, setOptionLoadingKey] = useState<string | null>(null)
   const [optionRetry, setOptionRetry] = useState(0)
-  const pendingModelSwitch = useRef<{ key: string; model: string } | null>(null)
-  const latest = useRef({ draft, onChange, onOpenModelCatalog, selectedModel })
-  latest.current = { draft, onChange, onOpenModelCatalog, selectedModel }
+  const latest = useRef({ onOpenModelCatalog })
+  latest.current = { onOpenModelCatalog }
 
   const updateCatalog = (catalog: RuntimeModelCatalogView): void => {
+    if (catalog.refreshStatus === 'failed' && catalog.models.length === 0) return
     // The model menu and selected-model options read can finish out of order.
     // A late catalog snapshot must not erase newer reasoning capabilities.
     setLive(current => current?.identity === identity
@@ -488,28 +488,13 @@ function ModelFields({
   }
 
   useEffect(() => {
-    // Saving freezes the submitted draft. A later capability result may update
-    // the menu, but must no longer clean up that now-saved selection.
-    if (disabled) pendingModelSwitch.current = null
     if (!isDsh || draft.model.mode !== 'explicit' || disabled || !pageActive) return
     let active = true
     let loadingTimer: ReturnType<typeof setTimeout> | undefined
     setOptionLoadingKey(null)
     const target = { modelId: draft.model.modelId, dshSource: draft.model.dshSource }
-    const accept = (model: ModelDescriptor): void => {
-      if (!active) return
-      setOptionRead({ key: targetKey, status: 'ready' })
-      // Only a deliberate model change can discard incompatible draft options.
-      // Refreshing a saved selection never rewrites it.
-      if (pendingModelSwitch.current?.key === targetKey) {
-        const pending = pendingModelSwitch.current
-        pendingModelSwitch.current = null
-        const current = latest.current.draft
-        if (dshOptionReadKey(identity, current.model) !== targetKey
-          || JSON.stringify(current.model) !== pending.model) return
-        const next = explicitSelection(model, current.model, true)
-        if (JSON.stringify(next) !== JSON.stringify(current.model)) latest.current.onChange({ ...current, model: next })
-      }
+    const accept = (): void => {
+      if (active) setOptionRead({ key: targetKey, status: 'ready' })
     }
     setOptionRead({ key: targetKey, status: 'loading' })
     const read = latest.current.onOpenModelCatalog
@@ -532,7 +517,7 @@ function ModelFields({
       if (!active) return
       const cachedModel = publish(cached)
       if (cachedModel && cached.refreshStatus === 'not_required' && dshModelOptionsResolved(cachedModel, target.dshSource)) {
-        accept(cachedModel)
+        accept()
         return
       }
       // Fast cache hits never flash a loading indicator; only the actual read can show one.
@@ -542,7 +527,7 @@ function ModelFields({
       const model = publish(catalog)
       if (!model || !['completed', 'not_required'].includes(catalog.refreshStatus)
         || !dshModelOptionsResolved(model, target.dshSource)) throw new Error('Model options unavailable')
-      accept(model)
+      accept()
     }).catch(() => {
       if (active) setOptionRead({ key: targetKey, status: 'failed' })
     }).finally(() => {
@@ -560,16 +545,8 @@ function ModelFields({
   }, [isDsh, targetKey, pageActive])
 
   const readStatus = optionRead?.key === targetKey ? optionRead.status : 'loading'
-  const changeModel = (next: MemberRuntimeDraft): void => {
-    if (isDsh && dshOptionReadKey(identity, next.model) !== targetKey) {
-      pendingModelSwitch.current = { key: dshOptionReadKey(identity, next.model), model: JSON.stringify(next.model) }
-    }
-    onChange(next)
-  }
-
   const setOption = (value: string): void => {
     if (!explicit || !optionKey) return
-    pendingModelSwitch.current = null
     const options = { ...explicit.options }
     if (value) options[optionKey] = value
     else delete options[optionKey]
@@ -600,7 +577,7 @@ function ModelFields({
         draft={draft}
         disabled={disabled}
         onOpenModelCatalog={onOpenModelCatalog}
-        onChange={changeModel}
+        onChange={onChange}
         onCatalogChange={updateCatalog}
       />
 
@@ -615,9 +592,7 @@ function ModelFields({
           defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
             : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
           choices={[
-            ...(optionInvalid ? [{ value: optionValue, label: optionsKnown
-              ? uiAttribute("当前目录未提供 · {0}", String(optionValue))
-              : uiAttribute('尚未核对 · {0}', optionValue), disabled: true }] : []),
+            ...(optionInvalid ? [{ value: optionValue, label: uiAttribute('尚未核对 · {0}', optionValue) }] : []),
             ...(option?.values ?? []).filter(choice => adapterKind !== 'hermes-cli' || choice.value !== 'runtime_default')
               .map(choice => ({ ...choice, disabled: isDsh && !optionsKnown }))
           ]}
@@ -625,7 +600,7 @@ function ModelFields({
       )}
       {isDsh && explicit && !disabled && readStatus === 'failed' && (
         <div className="runtime-parameter-unavailable" role="status">
-          <UiText zh="暂时无法读取思考强度，已保留当前选择。" />
+          <UiText zh="思考强度尚未核对，已保留当前选择。" />
           <button type="button" className="quiet-button" onClick={() => setOptionRetry((value) => value + 1)}><UiText zh="重试" /></button>
         </div>
       )}
@@ -664,7 +639,6 @@ function RuntimeModelPicker({
   const models = activeLiveCatalog
     ? selectableModels(activeLiveCatalog.models)
     : initialModels
-  const canFilterOptions = modelCatalogCanValidateOptions(initialCache, liveCatalog)
   const explicit = draft.model.mode === 'explicit' ? draft.model : null
   const selectedModel = explicit
     ? models.find((model) => model.id === explicit.modelId) ?? null
@@ -697,7 +671,7 @@ function RuntimeModelPicker({
     void onOpenModelCatalog()
       .then((catalog) => {
         if (generation !== requestGeneration.current || catalog.runtimeKind !== adapterKind) return
-        setLiveCatalog(catalog)
+        if (catalog.refreshStatus !== 'failed' || catalog.models.length > 0) setLiveCatalog(catalog)
         onCatalogChange(catalog)
         if (models.length === 0 && catalog.models.length > 0) recordFirstDisplay(false)
         setRefreshFailed(catalog.refreshStatus === 'failed')
@@ -718,9 +692,8 @@ function RuntimeModelPicker({
       return
     }
     const model = models.find((candidate) => candidate.id === value)
-    if (model) onChange({ ...draft, model: explicitSelection(model, draft.model,
-      canFilterOptions && adapterKind !== 'deepseek-harness' && adapterKind !== 'pi') })
-    else onChange({ ...draft, model: { mode: 'explicit', modelId: value, options: {} } })
+    if (model) onChange({ ...draft, model: explicitSelection(model, draft.model) })
+    else onChange({ ...draft, model: { mode: 'explicit', modelId: value, options: { ...explicit?.options } } })
   }
 
   const statusCopy = modelCatalogStatusCopy(cache, {
@@ -803,19 +776,6 @@ export function liveCatalogIsAtLeastAsRecent(
   return Date.parse(liveObservedAt) >= Date.parse(initialObservedAt)
 }
 
-export function modelCatalogCanValidateOptions(
-  installationCache: RuntimeModelCatalogCache,
-  liveCatalog: RuntimeModelCatalogView | null
-): boolean {
-  const activeLiveCatalog = liveCatalogIsAtLeastAsRecent(liveCatalog, installationCache)
-    ? liveCatalog
-    : null
-  const cache = activeLiveCatalog?.cache ?? installationCache
-  // A local response for the same observation cannot undo Core's later expiry.
-  return modelCatalogIsServiceable(cache)
-    && (cache.observedAt !== installationCache.observedAt || modelCatalogIsServiceable(installationCache))
-}
-
 function latestCatalogRefreshFailed(installation: AdapterInstallation, cache: RuntimeModelCatalogCache): boolean {
   if (installation.adapterKind === 'pi') return false
   const attempt = installation.lastProbeAttempt
@@ -841,8 +801,8 @@ export function modelCatalogStatusCopy(
   if (state.loading) return uiAttribute("正在获取模型列表…")
   if (state.refreshFailed) {
     return state.servingCachedModels
-      ?uiAttribute("暂时无法更新模型列表，已保留上次结果。")
-      :uiAttribute("暂时无法获取模型列表，请重试。")
+      ?uiAttribute("模型与参数尚未核对，已保留上次结果。")
+      :uiAttribute("模型与参数尚未核对，已保留当前选择。")
   }
   if (state.refreshStatus === 'scheduled' || state.refreshStatus === 'joined') {
     return uiAttribute("正在更新模型列表…")
@@ -857,20 +817,11 @@ export function modelCatalogStatusCopy(
 
 export function explicitSelection(
   model: ModelDescriptor,
-  previous: ModelSelection,
-  canFilterOptions: boolean
+  previous: ModelSelection
 ): ModelSelection {
   const previousOptions = previous.mode === 'explicit' ? previous.options : {}
-  // Expired history can form a draft, but cannot prove that an override is unsupported.
-  const options = canFilterOptions
-    ? Object.fromEntries(Object.entries(previousOptions).filter(([key, value]) => (
-        typeof value === 'string'
-        && model.options.some((option) => (
-          option.key === key
-          && option.values.some((choice) => choice.value === value)
-        ))
-      )))
-    : { ...previousOptions }
+  // Discovery never removes explicit native options, including unlisted values.
+  const options = { ...previousOptions }
   return {
     mode: 'explicit',
     modelId: model.id,

@@ -4,7 +4,7 @@ contract: input-snapshot-storage-v1
 authority: context-snapshot-storage-and-current-database-admission
 status: accepted
 version: 1
-last_updated: 2026-10-26
+last_updated: 2026-10-31
 ---
 
 # Input snapshot storage and database admission
@@ -62,14 +62,20 @@ presence alone is not success: the canonical file must pass the existing permiss
 content and frozen-exposure checks. A concurrent loser may reuse only a validated winner;
 neither later global configuration nor a failed publisher overwrites it. Missing frozen material
 keeps the existing error and legacy-empty exception, without refreezing current global settings.
-Existing maintenance removes terminal/orphan Run roots and interrupted hidden staging directories.
 
-Grok newly generated plugins use the shared `grok-mcp-plugin-v2-` prefix. Adapter initialization
-cleans only that prefix of Grok plugin directories under its private `external-mcp`, after existing
-process recovery and before enabling Host creation. Old Grok prefixes remain untouched; other
-adapters retain their existing prefix rules. Healthy subsystems skip reinitialization; cleanup
-failure degrades only the corresponding optional Runtime subsystem. Host-held
-`EphemeralMcpConfigFile` retains normal release cleanup and lives through Host reuse.
+Existing MCP root, Run and snapshot/epoch directories are used according to actual filesystem
+access. A usable Unix `0755` directory or an inherited/broader Windows directory DACL does not
+reject preparation, publication or reuse, including tasks with no external MCP servers. These
+operations do not repair existing directory permissions or require WRITE_DAC. New directories
+and canonical files retain creation-time private permissions; canonical-file permission checks,
+directory type/reparse checks and Windows native path/volume/identity checks remain. Genuine
+read, write or atomic commit failures propagate without replacing the retained snapshot.
+
+Bounded background maintenance removes a Run root only when an existing terminal Run and its actual cleanup acknowledgment prove that it is no longer used. Unknown, orphaned, unacknowledged and interrupted hidden directories are retained. Enumeration and deletion run outside the database lock; a short lock rechecks the receipt and renames the exact root to a unique discard path. Each loop consumes the shared entry/time budget.
+
+Grok newly generated plugins retain the `grok-mcp-plugin-v2-` prefix. Adapter initialization does not sweep historical MCP files, plugin directories or Claude input files. Old prefixes and unknown ownership are retained, and cleanup failure never changes Runtime availability. Host-held `EphemeralMcpConfigFile` retains exact-file release cleanup and lives through Host reuse.
+
+An unreadable or invalid global MCP file is projected through the existing `configStatus: invalid` and warning codes for new unfrozen Runs. Ordinary tasks may execute with those related tools unavailable. This never rewrites a frozen snapshot to empty configuration or marks a failed load ready. Built-in tools retain their independent checks. The original configuration is preserved, including failed legacy migrations.
 
 ## Database opening and upgrade
 

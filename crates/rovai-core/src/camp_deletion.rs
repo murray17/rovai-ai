@@ -16,7 +16,9 @@ use crate::{
         DomainCommandGateway, EntityReference, sealed,
     },
     db::Database,
-    runtime::ExecutionRuntimeService,
+    runtime::{
+        ExecutionRuntimeService, RuntimeCleanupScope, runtime_cleanup_blocked_since_connection,
+    },
 };
 
 const AUTOMATIC_RETRY_LIMIT: i64 = 5;
@@ -419,6 +421,7 @@ impl ThreadDeletionService {
         attachment_views: &ThreadAttachmentViewStore,
         candidate: &ThreadDeletionCandidate,
         cleanup: &PreparedThreadAttachmentCleanup,
+        active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
     ) -> Result<()> {
         let transaction = database
             .connection_mut()
@@ -435,9 +438,13 @@ impl ThreadDeletionService {
             marker.as_deref() == Some(candidate.operation_id.as_str()),
             "Thread deletion marker changed before business commit"
         );
-        let unconfirmed = unconfirmed_runtime_cleanup_count(&transaction, &candidate.camp_id)?;
         ensure!(
-            unconfirmed == 0,
+            runtime_cleanup_blocked_since_connection(
+                &transaction,
+                active_executions,
+                RuntimeCleanupScope::Camp(&candidate.camp_id),
+            )?
+            .is_none(),
             "Thread execution cleanup is unconfirmed; deletion remains fenced"
         );
         let workspace_cleanup_scheduled =
@@ -613,32 +620,6 @@ fn existing_operation(connection: &Connection, camp_id: &str) -> Result<Option<(
             Ok((operation_id.to_string(), created_at))
         })
         .transpose()
-}
-
-fn unconfirmed_runtime_cleanup_count(connection: &Connection, camp_id: &str) -> Result<i64> {
-    Ok(connection.query_row(
-        r#"
-        SELECT COUNT(*)
-        FROM (
-            SELECT agent_run.id
-            FROM agent_run
-            WHERE agent_run.invocation_kind = 'batch'
-              AND agent_run.camp_id = ?1
-              AND agent_run.cancel_requested_at IS NOT NULL
-              AND agent_run.cancel_acknowledged_at IS NULL
-            UNION ALL
-            SELECT agent_run.id
-            FROM agent_run
-            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-            WHERE agent_run.invocation_kind IS NOT 'batch'
-              AND camp_turn.camp_id = ?1
-              AND agent_run.cancel_requested_at IS NOT NULL
-              AND agent_run.cancel_acknowledged_at IS NULL
-        )
-        "#,
-        [camp_id],
-        |row| row.get(0),
-    )?)
 }
 
 fn retry_delay(attempt: i64) -> Duration {

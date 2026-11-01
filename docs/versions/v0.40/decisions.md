@@ -392,7 +392,7 @@ prefix and all Library, Assignment, projection, safety, and presentation decisio
 ### References
 
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](../v0.37/decisions.md#adr-0105)
-- [Skill settings UI strategy](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Skill settings UI strategy](../../ui/surfaces/settings-workspace.md)
 - [Domain terminology](../../../CONTEXT.md)
 <!-- legacy-adr-body:end id=ADR-0109 -->
 <!-- legacy-adr:end id=ADR-0109 -->

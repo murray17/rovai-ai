@@ -137,58 +137,74 @@ impl Core {
             tokio::task::spawn_blocking(move || resolve_source_attachments_for_run(&sources))
                 .await
                 .context("Source Attachment input resolver task failed")??;
-        let (context, input) = {
-            let mut database = self.database.lock().await;
-            if !rovai_core::steer::active_input_availability(
-                database.connection(),
-                &pending.agent_run_id,
-                pending.execution_epoch,
-            )?
-            .ready
-                || ExecutionRuntimeService::default()
-                    .load_agent_run_execution(
-                        &database,
-                        &pending.agent_run_id,
-                        pending.execution_epoch,
-                    )?
-                    .is_none()
-            {
-                let tx = database.connection_mut().transaction()?;
-                rovai_core::steer::return_to_queue(
-                    &tx,
-                    &pending.delivery_id,
-                    &chrono::Utc::now().to_rfc3339(),
+        let mut reads = rovai_core::context::LegacyAttachmentReads::new();
+        let (context, input) = loop {
+            let attempt: Result<_> = async {
+                let mut database = self.database.lock().await;
+                if !rovai_core::steer::active_input_availability(
+                    database.connection(),
+                    &pending.agent_run_id,
+                    pending.execution_epoch,
+                )?
+                .ready
+                    || ExecutionRuntimeService::default()
+                        .load_agent_run_execution(
+                            &database,
+                            &pending.agent_run_id,
+                            pending.execution_epoch,
+                        )?
+                        .is_none()
+                {
+                    let tx = database.connection_mut().transaction()?;
+                    rovai_core::steer::return_to_queue(
+                        &tx,
+                        &pending.delivery_id,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )?;
+                    tx.commit()?;
+                    return Ok(None);
+                }
+                let context = ContextService.materialize_with_attachment_reads(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    None,
+                    None,
+                    &paths,
+                    &MaterializeContextRequest {
+                        agent_run_id: &pending.agent_run_id,
+                        execution_epoch: pending.execution_epoch,
+                        charter_delivery_mode:
+                            rovai_core::context::charter_delivery_mode_for_adapter(
+                                execution.runtime.adapter_kind,
+                            ),
+                        max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
+                    },
+                    Some(&pending.delivery_id),
+                    &reads,
                 )?;
-                tx.commit()?;
-                return Ok(());
+                let ContextMaterialization::Ready(context) = context else {
+                    return Ok(None);
+                };
+                let input = ContextService.prepare_input_delivery_for_context(
+                    &mut database,
+                    &pending.agent_run_id,
+                    pending.execution_epoch,
+                    &context,
+                )?;
+                if input.status != "prepared" {
+                    return Ok(None);
+                }
+                Ok(Some((context, input)))
             }
-            let context = ContextService.materialize_message_delivery(
-                &mut database,
-                &ManagedBlobStore::new(&self.data_dir),
-                &pending.delivery_id,
-                &paths,
-                &MaterializeContextRequest {
-                    agent_run_id: &pending.agent_run_id,
-                    execution_epoch: pending.execution_epoch,
-                    charter_delivery_mode: rovai_core::context::charter_delivery_mode_for_adapter(
-                        execution.runtime.adapter_kind,
-                    ),
-                    max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
-                },
-            )?;
-            let ContextMaterialization::Ready(context) = context else {
-                return Ok(());
-            };
-            let input = ContextService.prepare_input_delivery_for_context(
-                &mut database,
-                &pending.agent_run_id,
-                pending.execution_epoch,
-                &context,
-            )?;
-            if input.status != "prepared" {
-                return Ok(());
+            .await;
+            match attempt {
+                Ok(Some(prepared)) => break prepared,
+                Ok(None) => return Ok(()),
+                Err(error) => {
+                    self.resolve_pending_legacy_attachment_reads(error, &mut reads)
+                        .await?
+                }
             }
-            (context, input)
         };
         let images = if let ActiveInputRuntime::Pi(pi) = &runtime {
             self.prepare_pi_input_images(&input.id, &context.rendered_payload, pi)

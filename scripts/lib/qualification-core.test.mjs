@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { frozenMemberRuntimeDifferences, qualificationRuntimePrivateDiagnostic, sameProcessIdentity } from './qualification-core.mjs'
+import { frozenMemberRuntimeDifferences, selectFrozenRuntimeInstallations, qualificationRuntimePrivateDiagnostic, sameProcessIdentity } from './qualification-core.mjs'
 
 test('frozen Runtime configuration is exact while static readiness does not reject a verified installation', () => {
   const member = { adapterKind: 'codex-cli', model: { mode: 'explicit', modelId: 'model', options: { reasoning_effort: 'medium' } },
@@ -8,6 +8,8 @@ test('frozen Runtime configuration is exact while static readiness does not reje
   const profile = { runtimeReadiness: { status: 'ready', blockers: [] }, runtimeConfiguration: structuredClone(member), auth: 'private-auth' }
   assert.deepEqual(frozenMemberRuntimeDifferences(member, profile), [])
   profile.runtimeReadiness.status = 'installed_unverified'
+  assert.deepEqual(frozenMemberRuntimeDifferences(member, profile), [])
+  profile.runtimeReadiness.status = 'light_ready'
   assert.deepEqual(frozenMemberRuntimeDifferences(member, profile), [])
   profile.runtimeReadiness.blockers = [{ code: 'runtime_missing' }]
   assert.deepEqual(frozenMemberRuntimeDifferences(member, profile), [
@@ -26,6 +28,19 @@ test('frozen Runtime configuration is exact while static readiness does not reje
   ])
   assert.ok(frozenMemberRuntimeDifferences(member, null).some(diff => diff.actual === '<missing>'))
   assert.ok(!JSON.stringify(frozenMemberRuntimeDifferences(member, profile)).includes('private-auth'))
+})
+
+test('regression admits an installed executable without fabricating a successful deep probe', () => {
+  const installation = { adapterKind: 'codex-cli', installationClass: 'managed_default', authScope: 'default',
+    enabled: true, pathState: 'valid', executablePath: '/test/codex', snapshot: null }
+  assert.equal(selectFrozenRuntimeInstallations([installation], ['codex-cli']), null)
+  assert.equal(selectFrozenRuntimeInstallations([installation], ['codex-cli'], { allowUnverified: true })['codex-cli'], installation)
+  for (const mutation of [{ enabled: false }, { pathState: 'missing' }, { executablePath: null }, { authScope: 'other' }]) {
+    assert.equal(selectFrozenRuntimeInstallations([{ ...installation, ...mutation }], ['codex-cli'], { allowUnverified: true }), null)
+  }
+  assert.equal(selectFrozenRuntimeInstallations([installation], ['codex-cli', 'claude-code'], { allowUnverified: true }), null)
+  const verified = { ...installation, snapshot: { probeStatus: 'ready' } }
+  assert.equal(selectFrozenRuntimeInstallations([verified], ['codex-cli'])['codex-cli'], verified)
 })
 
 test('long process waits reject a reused Windows PID by creation identity', () => {

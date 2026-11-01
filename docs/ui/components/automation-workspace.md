@@ -2,14 +2,14 @@
 document_type: ui-component-contract
 authority: renderer-automation-workspace
 status: accepted
-last_updated: 2026-10-27
+last_updated: 2026-10-30
 ---
 
 # Automation 工作区
 
 ## 一级入口与构图
 
-统一侧栏在使命板之后提供“定时任务”一级入口；使命板紧随记忆，两个入口各自只出现一次。工作区不依赖当前 Camp，进入前仍经过现有 Camp leave guard。
+统一侧栏提供“定时任务”一级入口，顺序由 [App Shell](app-shell-navigation.md) 定义。工作区不依赖当前 Thread，进入前仍经过现有 Thread leave guard。
 每次进入工作区首先显示与记忆页相同的居中总览：外层最大 1136px、水平内边距 28px，顶部包含
 标题、副标题“安排一次，按时执行。”与轻量浅底“+ 新建”，不显示装饰性英文页眉，下方是全部/开启/关闭筛选、搜索、任务列表和三个模板入口。
 读取到已有定义也不自动选择首项；空列表保留新建与模板，不同时铺开一个空编辑器。加载失败和没有匹配结果各有独立提示。
@@ -78,14 +78,14 @@ Renderer 使用 `cron-parser` 提供就地反馈，最终接受与求值仍由 C
 核心标签为运行中、正在停止、运行成功、运行失败、已跳过；跳过原因在详情中区分
 “错过触发时间”和“已有运行”。通知状态独立显示，因此成功运行可以呈现“运行成功 · 通知失败”。
 
-历史行有真实 `campId` 时可打开执行对话，复用 App 的既有 Camp activation，不建立 Automation 专用阅读器。
-运行中与失败记录也能查看执行过程；此入口不宣称存在成功结果。没有 Camp 的 skipped/派发失败行禁用打开动作。
+历史行有真实 `threadId` 时可打开执行对话，复用 App 的既有 Thread activation，不建立 Automation 专用阅读器。
+运行中与失败记录也能查看执行过程；此入口不宣称存在成功结果。没有 Thread 的 skipped/派发失败行禁用打开动作。
 成功结果仍只认 Core 冻结的 `resultMessageId`，通知失败不改变运行结果。
 
 ## 可访问性与主题
 
 所有表单控件有持久 label，计划参数仅在对应类型下出现；通知组合使用 fieldset/legend。任务行、模板和操作均可键盘触发，
-保留 DOM 焦点与键盘交互，焦点装饰遵循当前 DESIGN；手机不新增 focus ring。状态不能只依靠颜色；Day/Night 只使用现有语义 token，不增加主题专属业务结构。
+保留 DOM 焦点与键盘交互，焦点装饰遵循当前 DESIGN；手机不新增 focus ring。状态不能只依靠颜色；所有已注册配色使用同一组件结构与当前主题语义 Token。
 
 ## References
 

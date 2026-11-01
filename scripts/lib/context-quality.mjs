@@ -124,6 +124,24 @@ function distribution(rows) {
     trialsWithEvidenceGaps: rows.filter(row => row.verdict === 'indeterminate' || row.unknownReasons?.length).length }
 }
 
+function collectionSummary(trials) {
+  const gaps = []
+  const sections = Object.fromEntries(['quality', 'collaboration'].map(section => {
+    const items = trials.flatMap(trial => (section === 'quality' ? trial.quality.items : trial.collaboration)
+      .map(item => ({ ...item, caseId: trial.caseId, repeat: trial.repeat })))
+    const applicable = items.filter(item => item.applicable)
+    const missing = applicable.filter(item => !Object.hasOwn(values, item.verdict))
+    gaps.push(...missing.map(item => ({ caseId: item.caseId, repeat: item.repeat, section,
+      itemId: item.id ?? item.checklistItem, checklistItem: item.checklistItem ?? null,
+      reasonCode: item.reasonCode ?? 'metric_evidence_insufficient' })))
+    const evaluated = applicable.length - missing.length
+    return [section, { status: !applicable.length ? 'not_applicable' : missing.length ? 'incomplete' : 'complete',
+      planned: items.length, applicable: applicable.length, evaluated, unknown: missing.length,
+      notApplicable: items.length - applicable.length, coverage: ratio(evaluated, applicable.length) }]
+  }))
+  return { status: gaps.length ? 'incomplete' : 'complete', ...sections, gaps }
+}
+
 export function evaluateQualityAndCollaboration(plan, slots) {
   const scoring = validateScoring(plan.scoring, plan.cases), get = slotIndex(plan, slots)
   const arms = {}, qualityGaps = [], criticalFailures = [], changes = []
@@ -159,7 +177,8 @@ export function evaluateQualityAndCollaboration(plan, slots) {
       criticalBlockedTrials: trials.filter(trial => trial.critical.length).length,
       plannedTrials: trials.length, distinctCases: plan.cases.length
     }
-    arms[arm] = { quality: { ...aggregateDimensions(caseScores, scoring.dimensions), cases: caseScores }, collaboration, trials }
+    arms[arm] = { quality: { ...aggregateDimensions(caseScores, scoring.dimensions), cases: caseScores }, collaboration, trials,
+      collection: collectionSummary(trials) }
   }
   const comparison = { status: plan.mode === 'gate' ? 'comparable' : 'not_applicable', qualityDelta: null, groupChanges: {} }
   if (plan.mode === 'gate') {

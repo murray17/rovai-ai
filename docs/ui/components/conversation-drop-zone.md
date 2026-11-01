@@ -4,19 +4,19 @@ authority: camp-conversation-drop-zone
 status: accepted
 design_direction: porcelain-day-steel-night
 implementation_status: complete
-last_updated: 2026-09-19
+last_updated: 2026-10-30
 ---
 
-# Camp 会话区文件与文件夹拖放
+# Thread 会话区文件与文件夹拖放
 
 ## Scope
 
-ordinary Camp 的附件放置命中面是主会话列的完整两行：消息时间线、空状态、Agent 执行台、
+ordinary Thread 的附件放置命中面是主会话列的完整两行：消息时间线、空状态、Agent 执行台、
 Approval/Runtime Recovery Dock 和 Composer。左侧导航、右侧 Inspector、Execution Drawer、Dialog、
 Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不因本功能改变。
 
-拖放只修改当前已挂载 Renderer 的 Camp-local Composer 内容。`composerAttachments.prepare` 校验来源并由
-Main 记录 Camp+attachment authority；Active 与普通一键 Pending Camp snapshot 可跨切换、刷新和普通重启恢复，但不建立
+拖放只修改当前已挂载 Renderer 的 Thread-local Composer 内容。`composerAttachments.prepare` 校验来源并由
+Main 记录 Thread+attachment authority；Active 与普通一键 Pending Thread snapshot 可跨切换、刷新和普通重启恢复，但不建立
 Core-owned Draft 或 Pending 编辑会话。拖放本身不发送消息、
 不移动或复制宿主文件管理器中的原项目，也不改变光标、Mention/Skill 候选或 Inspector 状态。Agent 正在运行
 或队列已有 waiting Delivery 时仍可继续编辑；用户点击发送后，正文、引用和附件形成一个不可变发送快照，
@@ -26,14 +26,16 @@ Core-owned Draft 或 Pending 编辑会话。拖放本身不发送消息、
 ## Drag feedback
 
 - 只有 `DataTransfer.types` 含 `Files` 时进入接收态。统一接收层从消息时间线顶部连续延伸到 Composer
-  底部，主会话列内收 10px（窄屏 7px）显示不中断的 1.5px Steel 虚线框和低透明 Steel wash；Inspector
-  与导航保持原色。
+  底部，主会话列内收 10px（窄屏 7px）显示不中断的 1.5px 虚线框和低透明接收态底色；颜色沿用
+  该接收态的当前主题 Token，不将 Steel 固定为所有配色的接收态颜色。Inspector 与导航保持原色。
 - 原时间线、Agent 执行台、Execution Drawer 与 Composer 输入内容保持可读，不 blur、不重排、不隐藏。居中浮层使用
   308×92px 紧凑卡，主文案固定为“松手添加到当前消息”。
 - 单个目录能由 Chromium entry 明确识别时，次文案为“将引用此文件夹的当前位置，不会移动原文件”；
   其他 payload 使用“支持文件与文件夹 · 原位置移动或删除后可能不可用”，不猜测。
-- Composer 使用 Steel 边框和 focus ring，并在顶缘显示“将添加到这条消息”；Composer 整体不得浮在
-  统一接收层之上而截断 wash 或虚线框，也不得用不透明遮罩覆盖正文、Mention 或已有附件。
+- 仅在文件拖入的接收态，Composer 保留 `--conversation-focus` 边框与 `--conversation-focus-soft` 外圈，
+  并在顶缘显示“将添加到这条消息”。这是拖放目标反馈，不由 DOM focus 触发，也不扩展到普通输入聚焦。
+  Composer 整体不得浮在
+  统一接收层之上而截断接收态底色或虚线框，也不得用不透明遮罩覆盖正文、Mention 或已有附件。
 - 指针进入 Inspector 或其他非接收面时立即退出；主会话列子节点之间移动使用短延迟边界收敛，
   不闪烁。外部拖放被系统取消且 Chromium 未派发 `dragleave` 时，Drag feedback 必须在有界的
   drag-over 心跳超时后自行清除。Overlay 必须 `pointer-events: none`。
@@ -51,13 +53,11 @@ Core-owned Draft 或 Pending 编辑会话。拖放本身不发送消息、
 ## Layout and themes
 
 接收层永远只占 `.workspace-grid` 第一列的两行；Inspector 的 310/260px、自适应收起和 2K 阅读宽度
-不改变命中语义。Day/Night 使用同一 DOM 和现有 Porcelain/Steel tokens。1040×700 及以上不得产生
+不改变命中语义。所有已注册配色使用同一 DOM 与当前主题语义 Token，并遵循 [DESIGN.md](../../../DESIGN.md)。1040×700 及以上不得产生
 页面横向溢出，提示卡不得遮住 Inspector 或 Composer 归属提示；reduced motion 下取消进入动画。
 
 ## References
 
-- [方向原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
-- [设计说明](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
 - [Camp Attachment v10](../../contracts/camp-attachment-v10.md)
-- [Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)
-- [Camp 资源不变量](../../architecture/foundational-invariants.md#camp-resources)
+- [Camp Composer Draft v20](../../contracts/camp-composer-draft-v20.md)
+- [Thread 资源不变量](../../architecture/foundational-invariants.md#camp-resources)

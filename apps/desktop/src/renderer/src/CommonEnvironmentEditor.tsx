@@ -38,10 +38,10 @@ export function useCommonEnvironment(kind: AdapterKind, windows: boolean) {
   let parsed: Record<string,string> = {}, parseError = ''
   try { parsed = parseMemberEnvironment(text, windows, kind, undefined) } catch (e) { parseError = readErrorMessage(e) }
   const accept = (next: EnvironmentSnapshot): void => {
-    sequence.current++; setSnapshot(next); setText(environmentText(next.environment)); setError('')
+    sequence.current++; setSnapshot(next); setText(environmentText(next.environment)); setError(next.error ? t('通用环境变量无法读取。原记录已保留，请重新填写后保存。') : '')
   }
   const edit = (): { expectedRevision: number; json: string } => {
-    const problem = parseError
+    const problem = parseError || (snapshot?.error && text === environmentText(snapshot.environment) ? t('通用环境变量无法读取。原记录已保留，请重新填写后保存。') : '')
     if (problem || !snapshot) { setError(problem || t('正在读取…')); throw new Error(problem) }
     return { expectedRevision: snapshot.revision, json: JSON.stringify(parsed) }
   }

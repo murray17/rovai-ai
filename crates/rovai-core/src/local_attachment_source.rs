@@ -385,10 +385,6 @@ fn validate_display_name(value: &str) -> Result<()> {
         "Source Attachment display name is empty"
     );
     anyhow::ensure!(
-        value.chars().count() <= 120,
-        "Source Attachment display name exceeds 120 characters"
-    );
-    anyhow::ensure!(
         !value.chars().any(|character| {
             character.is_control()
                 || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
@@ -862,6 +858,7 @@ mod tests {
             "notes/a\\b.txt".to_string(),
             "报告 🌸.txt".to_string(),
             "🌸".repeat(120),
+            "🌸".repeat(121),
         ] {
             let mut reference = source_ref.clone();
             reference.display_name = name.clone();
@@ -878,7 +875,6 @@ mod tests {
         let mut invalid_names = vec![
             String::new(),
             " \u{00a0} ".to_string(),
-            "🌸".repeat(121),
             "line\nbreak.txt".to_string(),
             "null\0.txt".to_string(),
             "delete\u{007f}.txt".to_string(),

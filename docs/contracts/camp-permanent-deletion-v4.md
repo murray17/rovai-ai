@@ -5,7 +5,7 @@ authority: camp-deletion-asynchronous-acceptance-and-handoff
 status: accepted
 version: 4
 source_version: v1.65
-last_updated: 2026-10-18
+last_updated: 2026-10-29
 ---
 
 # Camp Permanent Deletion v4
@@ -89,8 +89,10 @@ Deletion Intent accepted
   -> journal completed + camp.deletion_completed
 ```
 
-协调器以通知快路和固定恢复 tick 扫描小批量到期对象。所有 Runtime 状态共用同一路径；Runtime 不存在也是可证明的
-完成结果，不能绕过 identity 核验。停止超时、隔离不明或残留 Starting 时记录可恢复失败，不能继续删库。
+协调器以通知快路和固定恢复 tick 扫描小批量到期对象。所有 Runtime 状态共用同一路径。停止目标和提交前检查
+均只包含现有内存中本次 Core 持有的精确 Run/epoch；前代缺 ACK、缺进程回执或未知身份不是当前占用，
+不能单独阻止删除，也不得伪造 ACK。当前目标不存在仍须得到真实的隔离结论，不能绕过 identity 核验；
+当前目标停止超时、隔离不明或 Fleet 残留 Starting 时记录可恢复失败，不能继续删库。
 
 业务删除事务必须同时：
 

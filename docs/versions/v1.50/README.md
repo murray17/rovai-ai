@@ -43,7 +43,7 @@ Source Attachment 基础设施上增加本地用户与单个 Camp Member 的私�
 | Decisions | 已更新 | [V1.50-D01](decisions.md#v1-50-d01)至[V1.50-D04](decisions.md#v1-50-d04)记录私有执行复用、结束语义、共享 Source Ref 与 Conversation-local FIFO；CURRENT 已纳入导航 |
 | Contracts | 已更新 | [Single Chat v2](../../contracts/single-chat-v2.md)在 v1 基础上收敛 exact-ID 结束和 Renderer 刷新合同；Contracts 索引已切换 current 入口 |
 | Architecture | 已更新 | [Single Chat Architecture](../../architecture/single-chat.md)及 Architecture 索引同步组件职责、公共附件复用和队列调度流 |
-| UI | 已更新 | [Camp 内单聊](../../ui/components/conversation-workspace.md#camp-内单聊)同步共享 AttachmentCard、运行中排队和 repair 编辑交互 |
+| UI | 已更新 | [Camp 内单聊](../../ui/components/conversation-workspace.md#thread-内单聊)同步共享 AttachmentCard、运行中排队和 repair 编辑交互 |
 | Runtime Activity | 确认无需更新 | Single Chat 继续复用既有 Execution Evidence 与 Canonical Activity 映射，没有新增 Runtime activity kind |
 | Runtime compatibility | 确认无需更新 | Runtime 目录、能力、版本与平台资格不变；各 Adapter 接收同一公共 resolved attachment paths |
 | Documentation routing | 已更新 | 文档任务导航、版本指针、Contracts/Architecture 索引和当前决定导航均指向当前 Single Chat 边界 |
@@ -58,4 +58,4 @@ Source Attachment 基础设施上增加本地用户与单个 Camp Member 的私�
 - [Single Chat Architecture](../../architecture/single-chat.md)
 - [Camp Attachment v8](../../contracts/camp-attachment-v8.md)
 - [Pending Camp Input v3](../../contracts/pending-camp-input-v3.md)
-- [Camp 内单聊 UI](../../ui/components/conversation-workspace.md#camp-内单聊)
+- [Camp 内单聊 UI](../../ui/components/conversation-workspace.md#thread-内单聊)

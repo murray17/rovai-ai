@@ -1082,10 +1082,10 @@ function normalizeSegment({
       && record.contentDigest !== `sha256:${sha256(segment.content)}`) {
     throw new Error('Judge workspace content does not match its Evidence Index digest')
   }
-  const content = redactUntrustedContent(
-    requireBoundedString(segment.content, 'Judge untrusted evidence', 50_000)
-  )
-  assertSafeUntrustedContent(content, forbiddenCanaries)
+  const rawContent = requireBoundedString(segment.content, 'Judge untrusted evidence', 50_000)
+  const content = segment.kind === 'test_output' ? mapReceiptStrings(rawContent, redactUntrustedContent) : redactUntrustedContent(rawContent)
+  if (segment.kind === 'test_output') mapReceiptStrings(content, text => { assertSafeUntrustedContent(text, forbiddenCanaries); return text })
+  else assertSafeUntrustedContent(content, forbiddenCanaries)
   return {
     segmentId: segment.segmentId,
     kind: segment.kind,
@@ -1098,10 +1098,22 @@ function normalizeSegment({
   }
 }
 
+// Redact decoded receipt strings: JSON's escaped newline after a Python colon
+// is not a Windows path. Preserve the receipt's typed fields and output bytes
+// except for actual private content, which remains explicitly redacted.
+function mapReceiptStrings(content, transform) {
+  let value
+  try { value = JSON.parse(content) } catch { return transform(content) }
+  const visit = entry => typeof entry === 'string' ? transform(entry)
+    : Array.isArray(entry) ? entry.map(visit)
+      : entry && typeof entry === 'object' ? Object.fromEntries(Object.entries(entry).map(([key, value]) => [key, visit(value)])) : entry
+  return JSON.stringify(visit(value))
+}
+
 function redactUntrustedContent(value) {
   return value
     .replace(/(?:\/Users|\/private|\/var\/folders|\/tmp)\/[A-Za-z0-9_./:@%+~=-]+/g, '[private-path-redacted]')
-    .replace(/[A-Za-z]:\\(?:[^\s"']+\\)*[^\s"']+/g, '[private-path-redacted]')
+    .replace(/(?<![A-Za-z0-9_])[A-Za-z]:\\(?:[^\s"']+\\)*[^\s"']+/g, '[private-path-redacted]')
     .replace(/\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/g, '[secret-redacted]')
     .replace(/\bAKIA[A-Z0-9]{16}\b/g, '[secret-redacted]')
     .replace(/((?:api[_-]?key|access[_-]?token|password|credential|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[secret-redacted]')
@@ -1114,7 +1126,7 @@ function assertSafeUntrustedContent(content, forbiddenCanaries) {
     }
   }
   if (/(?:\/Users|\/private|\/var\/folders|\/tmp)\//.test(content)
-      || /[A-Za-z]:\\(?:[^\s"']+\\)+/.test(content)
+      || /(?<![A-Za-z0-9_])[A-Za-z]:\\(?:[^\s"']+\\)+/.test(content)
       || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(content)
       || /\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b/.test(content)
       || /\bAKIA[A-Z0-9]{16}\b/.test(content)

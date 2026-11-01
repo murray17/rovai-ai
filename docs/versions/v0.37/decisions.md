@@ -501,7 +501,7 @@ inspector as “Skill 投递”.
 
 - [ADR-0150: Evidence-First Agent Codebase Analysis Bundled Skill](../v0.52/decisions.md#adr-0150)
 - [ADR-0017: Managed Skill Library and Runtime-Native Projection](../v0.08/decisions.md#adr-0017)
-- [Settings workspace UI strategy](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Settings workspace UI strategy](../../ui/surfaces/settings-workspace.md)
 - [Domain terminology](../../../CONTEXT.md)
 <!-- legacy-adr-body:end id=ADR-0105 -->
 <!-- legacy-adr:end id=ADR-0105 -->

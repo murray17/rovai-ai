@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-native-turn-and-isolation-boundaries
-last_updated: 2026-10-24
+last_updated: 2026-10-29
 ---
 
 # AgentRun Recovery
@@ -46,7 +46,7 @@ Runtime 已接受输入但最终结果无法对账时，Core：
 2. 将 AgentRun 结算为失败，并在内部记录 `accepted_input_outcome_unknown`；
 3. 禁止原输入自动或手工重放；
 4. 启动既有 Adapter stop/cleanup；
-5. 在隔离确认前阻止相关后继 dispatch。
+5. 对当前 Core 仍精确持有的执行，在隔离确认前阻止相关后继 dispatch。
 
 主界面把它作为普通红色执行失败展示，不要求用户理解 “unknown” 状态，提供用户主动继续图标；不提供手工释放清理门禁。
 新的用户消息只创建新的 waiting Delivery；它不替代对旧结果的事实判断。
@@ -68,22 +68,27 @@ Rovai 只管理 ACP 连接，不通过共享 Gateway 的退出或强杀宣称原
 不自动重放、不换 Session 绕过；未上线的私有恢复 CLI 已删除。当前限制见
 [Hermes 合同](../contracts/hermes-managed-runtime-v1.md#用户明确处理未知执行)。
 
-Run 可以先进入失败或取消终态，但 `(CampId, AgentId)` lane 只有在旧执行隔离被 Adapter 确认后才能继续 claim。
-隔离未确认时，后继输入保持 Delivery，不提前创建一个注定无法执行的 AgentRun。
+Run 可以先进入失败或取消终态；当前 Core 仍精确持有该 Run/epoch 且隔离未确认时，
+`(ThreadId, AgentId)` lane 的后继输入保持 Delivery，等待 Adapter 确认后再 claim。
 
-共享 execution root 的保护只在故障窗口生效：旧执行仍可能写该 root 时，暂缓同 root 的新 dispatch；正常执行之间不因
+共享 execution root 的保护只在故障窗口生效：当前 Core 仍精确持有的执行未清理时，暂缓同 root 的新 dispatch；正常执行之间不因
 共享 root 建立日常互斥。没有输出、撤销 Core 写权限、用户确认或新 Session 都不是清理证明。cleanup 完成后，Scheduler
 按普通 FIFO 规则继续；unknown 后默认使用新 Native Session，除非 Adapter 已能证明旧 native turn 结束。
 
-这是一条失败后的临时调度门禁，不是 Camp pause、工作区锁管理器或新的暂停/恢复产品。
+这是一条失败后的临时调度门禁，不是 Thread pause、工作区锁管理器或新的暂停/恢复产品。
+
+工作区准备、消息领取、共享 root 和任务 dispatch 共用同一判断：既有 launch/Fleet/one-shot 内存所有权中
+有匹配的 Run/epoch，且业务终态、请求过清理、ACK 缺失。重启后的旧 ACK 缺失、文件不可读或身份未知本身不是活跃冲突，
+不能阻止原会话、原成员或原 Runtime 的新任务。历史进程只做启动后一次有界维护；异常记录和旧 ACK 原样保留，
+不进入当前任务清理重试，不因放行新任务而宣称旧执行已停止，也不自动重投旧输入。
 
 ## 5. 精确 Stop
 
 用户 Stop 只接受 `agentRunId + version`，以 CAS 停止精确 Run。目标已终态或版本变化时返回
 `stale/already-terminal`，不得误停 successor。Stop 不暂停队列、不取消未 claim Delivery，不自动创建续做请求。
 
-取消事务保留 accepted/delivery_unknown 与可能已执行的效果证据，并请求 Adapter cleanup。只有 cleanup 确认后，后续
-Delivery 才按正常调度领取。计划关闭复用同一清理事实，但其 durable cancel-all cycle、writer/route barrier 和 report
+取消事务保留 accepted/delivery_unknown 与可能已执行的效果证据，并请求 Adapter cleanup。当前 Core 仍持有目标执行时，
+只有 cleanup 确认后后续 Delivery 才按正常调度领取。计划关闭复用同一清理事实，但其 durable cancel-all cycle、writer/route barrier 和 report
 仍由 Planned Shutdown 拥有。
 
 ## 6. 证据与展示
@@ -113,7 +118,7 @@ Fleet 的小型释放结果区分复用、回收、租约不存在和回收未�
 [AgentRun Continuation v3](../contracts/agent-run-continuation-v3.md) 是新的 User 授权。
 命令事务持久化内部授权、来源事实和 waiting Delivery；续做来源没有 message 外键，
 不创建消息记录或推进公开消息序号。独立队列序号保持 FIFO，已生成的公开记录保留原样；
-唯一 Scheduler 在旧执行清理完成后领取。
+唯一 Scheduler 按第 4 节当前执行所有权与清理判断领取；历史未知状态不持续占住 lane。
 原 Run 的业务输入集合限定范围，现有 Context builder 重建当前平台事实，不追加证据或恢复教学。
 同一来源可以多次主动继续，状态互不关联；幂等只绑定单次请求。会话兼容时复用当前绑定，换会话保留工作区。
 点击继续直接授权新执行，无需单独确认新会话。领取时未知 native turn 自动轮换；后续同一绑定的可信

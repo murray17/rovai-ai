@@ -15,8 +15,8 @@ last_updated: 2026-09-28
 读取字节；网络工作在最多两个后台任务中执行，不阻塞执行卡更新和其他消息维护。
 
 下载暂存只由 Host 持有。Core 在正常 Command Gateway 内检查 Request、绑定、重试代次和对话删除状态，再将文件
-写入现有 Camp 默认输出目录并记录 Source Ref。准备齐全后，现有 Collaboration seam 一次发布消息和 Delivery，
-后续 Context、图片预览、历史读取和 Camp 删除使用已有附件机制。Core 不持有飞书凭据，Host 不直接写数据库。
+写入现有 Thread 默认输出目录并记录 Source Ref。准备齐全后，现有 Collaboration seam 一次发布消息和 Delivery，
+后续 Context、图片预览、历史读取和 Thread 删除使用已有附件机制。Core 不持有飞书凭据，Host 不直接写数据库。
 
 资源、重试与准备结果存放在既有 aggregate JSON；不引入第二条消息队列或独立资产生命周期。单条失败有明确提示，
 不会让 Agent 只收到文字继续执行。字段和支持范围见
@@ -51,12 +51,12 @@ Renderer 渠道设置
           ├─ PendingCampBinding / frozen message FIFO
           ├─ ExternalPrincipal
           ├─ multi-Bot aggregate / durable inbound receipt FIFO
-          ├─ Camp、membership 与统一 admission
+          ├─ Thread、membership 与统一 admission
           ├─ Execution Web scope 复核与 exact AgentRun cancel
           └─ durable ChannelDelivery outbox
 ```
 
-Rust Core 是 Owner identity、项目目录投影、渠道会话/执行范围、Camp、消息、Delivery、Run、成员关系、排队和 Outbox 的
+Rust Core 是 Owner identity、项目目录投影、渠道会话/执行范围、Thread、消息、Delivery、Run、成员关系、排队和 Outbox 的
 唯一持久权威。
 Electron Main 与 Rust Core 共同位于渠道秘密边界：Main 拥有需要网络的 Feishu Host 与运行期 Cookie/Secret，Core 在
 `rovai.sqlite` 中拥有明文持久 credential/Session。Renderer 只获得设置投影与 Owner 操作，不获得 App
@@ -64,7 +64,7 @@ Secret、原始 `userId`、Session Cookie、Host 恢复游标或内部路由事�
 
 `ExternalPrincipal` 表达消息作者、上下文来源和回复目标。即使它代表已验证 Feishu Owner，也不是 `local_user`，不能
 连接账号、发布 Bot、维护路径或执行任何 Owner 命令。项目卡 callback 只有 exact pending binding 的窄批准能力。非 Owner
-没有消息入口；不会因私聊、群管理员身份或显式 `@` 获得 Camp、项目或本机权限。
+没有消息入口；不会因私聊、群管理员身份或显式 `@` 获得 Thread、项目或本机权限。
 
 ## 开发者会话与队员发布
 
@@ -189,18 +189,18 @@ credential/连接恢复不补发，也不新增欢迎消息 Outbox 或 receipt�
 ExternalPrincipal；后续 App/identity/tenant key 任一冲突都 fail closed。
 后续事件即使携带 `union_id` 或 tenant `user_id`，也只能用于补充归并和冲突检查，不能替代已冻结的
 `(app_id, open_id)`。Owner 仍以 ExternalPrincipal 写入；non-owner 私聊只允许一次节流提示，群/话题静默停止，
-并且都不能留下 conversation、aggregate、Principal、pending binding、Camp 或 Run。
+并且都不能留下 conversation、aggregate、Principal、pending binding、Thread 或 Run。
 
-Core 不再拥有 Owner 手工维护的 Channel ProjectBinding 目录。它从 Rovai 已存在的 directory Camp 事实投影 stable
+Core 不再拥有 Owner 手工维护的 Channel ProjectBinding 目录。它从 Rovai 已存在的 directory Thread 事实投影 stable
 Project Catalog：卡片只得到 opaque project ID 和 display name，canonical path 始终留在 Core。目录失效或项目退出
-当前事实源会标记 unavailable/archived；旧卡点击必须 fail closed。Camp 一旦创建即冻结当时的
+当前事实源会标记 unavailable/archived；旧卡点击必须 fail closed。Thread 一旦创建即冻结当时的
 `project_binding_kind + project_path`，项目目录变化不能自动改派。
 
 渠道会话 identity 按场景冻结：
 
-- 私聊：`provider + tenant + chat + receiving app`；首次 Owner 消息自动创建 Quick Chat binding generation/Camp；
-- 普通群：`provider + tenant + chat`；首次 Owner 显式 mention 选择项目或开始 Quick Chat，此后一个长期 Camp；
-- 话题：`provider + tenant + chat + canonical topic`；每个话题独立选择项目或 Quick Chat，并拥有独立 Camp。
+- 私聊：`provider + tenant + chat + receiving app`；首次 Owner 消息自动创建 Quick Chat binding generation/Thread；
+- 普通群：`provider + tenant + chat`；首次 Owner 显式 mention 选择项目或开始 Quick Chat，此后一个长期 Thread；
+- 话题：`provider + tenant + chat + canonical topic`；每个话题独立选择项目或 Quick Chat，并拥有独立 Thread。
 
 这里的“话题”只指父群本身 `chat_mode=topic` 的独立话题群中的 canonical topic。普通群
 `chat_mode=group` 内从单条消息开启的 thread 不受支持：事件携带非空 `thread_id` 时，Host 在 observation 前静默停止，
@@ -208,20 +208,20 @@ Project Catalog：卡片只得到 opaque project ID 和 display name，canonical
 消息锚点：根消息取自身 `message_id`，话题内回复取 `root_id`；`thread_id` 不得作为飞书 Reply API 的 `message_id`。
 
 精确 `/new` 只在 Owner 私聊中是控制命令。它要求当前没有 collecting aggregate 或尚未完成 publication admission 的入站行，关闭 active
-generation，保留旧 Camp，并立即创建新 Quick Chat Camp；控制文本不进入 CampMessage、Delivery、Run 或模型。群和话题
+generation，保留旧 Thread，并立即创建新 Quick Chat Thread；控制文本不进入 ThreadMessage、Delivery、Run 或模型。群和话题
 不解释 `/new`，也没有 rebind/change-project 命令。
 
 普通群/话题首次 finalize 时创建 `PendingCampBinding`，把原始 Structured Content、targets 和 canonical-first
-acknowledgement App 冻结到 FIFO；此时没有 CampMessage/Delivery/Run。同一会话后续 Owner mention 复用同一 pending row，
+acknowledgement App 冻结到 FIFO；此时没有 ThreadMessage/Delivery/Run。同一会话后续 Owner mention 复用同一 pending row，
 不重复发卡。frozen Bot 把唯一项目卡发回原群或原 Topic；卡片只公开可控的项目显示名，不公开 canonical path。
 callback 只信 envelope 的 operator identity 与 clicked message ID，并以 App-scoped Owner open ID、authoritative picker
 message ID、nonce、version、expiry、frozen App 和 CAS 防 non-owner、双击与重放。所有 roster/project 前置检查通过后，
-同一事务创建 immutable binding/Camp、消费 pending，再把 frozen messages 按 FIFO 提升到统一 admission；随后才通过
+同一事务创建 immutable binding/Thread、消费 pending，再把 frozen messages 按 FIFO 提升到统一 admission；随后才通过
 durable delivery 异步撤回卡片。项目失效时 Core 保留 pending、轮换 nonce/version 并更新原卡。
 
 Owner 也可在同一张卡选择“开始快速对话”，即使本机没有可用项目。它不是取消或跳过绑定：Core 使用自己受管的
-Quick Chat 目录，在同一 resolved 事务建立无 Project Catalog ID 的 binding/Camp，仍完成全部 Owner、卡片和 roster
-检查，并提升相同的 frozen FIFO。群/话题继续复用该 Camp，后续不能通过项目选择换绑；私聊及钉钉入口不变。
+Quick Chat 目录，在同一 resolved 事务建立无 Project Catalog ID 的 binding/Thread，仍完成全部 Owner、卡片和 roster
+检查，并提升相同的 frozen FIFO。群/话题继续复用该 Thread，后续不能通过项目选择换绑；私聊及钉钉入口不变。
 Migration 132 只放宽 resolved pending 的项目可空约束，保留全部历史字段、行与 FK 引用，其他状态约束不变。
 
 ## 入站、聚合与串行准入
@@ -250,14 +250,14 @@ observation N ─┘
 第一条 observation 永远不触发 admission、PendingCampBinding 或卡片；finalize 是独立命令。只有完整 canonical mention
 映射才能按顺序冻结第一个受管 Bot 为 `acknowledgementAppId`。不同 App 对同一 canonical message 的冻结
 payload 不一致时失败，缺少完整映射或预期 observation 时在三秒窗口后 fail closed。聚合只服务 transport
-dedup/aggregation，并在终态七天后清理；external message ID 不成为 Camp History 或 reply identity。
+dedup/aggregation，并在终态七天后清理；external message ID 不成为 Thread History 或 reply identity。
 
 Finalize 先重查 Owner、exact binding、项目、已发布 Bot 和群 roster。p2p 自动建立/复用 Quick Chat 后写入一个
 durable inbound receipt 行；未绑定 group/topic 只写 PendingCampBinding FIFO。Binding FIFO 只串行 publication admission，
 不等待 Agent 执行或外部回复。提升复用与本地用户发送相同的 `CollaborationService` 原子 seam，一次性创建唯一
-CampMessage 和每目标 waiting Delivery，并立即完成本次入站接收；Scheduler 之后按普通队列 claim 才创建 AgentRun。
-永久目标或授权错误终结该入站行并产生 attention delivery。任何 Channel 命令新建 Camp 时，Main 必须在释放数据库锁前
-materialize 空的 Published Attachment View，避免首次 claim 与 Camp 文件视图创建竞态。
+ThreadMessage 和每目标 waiting Delivery，并立即完成本次入站接收；Scheduler 之后按普通队列 claim 才创建 AgentRun。
+永久目标或授权错误终结该入站行并产生 attention delivery。任何 Channel 命令新建 Thread 时，Main 必须在释放数据库锁前
+materialize 空的 Published Attachment View，避免首次 claim 与 Thread 文件视图创建竞态。
 
 ## 外部引用与模型输入
 
@@ -269,25 +269,25 @@ observation 前拒绝。
 
 真正读取引用时，Host 对 `text | post` 复用锁定 Lark SDK normalizer，并保留原文 mention；`post` 只选择一个
 locale、只按 typed element schema 渲染，不能递归收集 `tag`、identity 或所有 locale 字符串。读取失败使用确定性
-不可读取文本。被引用消息不单独进入 Camp，飞书来源 CampMessage 的 `replyToCampMessageId` 始终为空，也不维护
-`externalMessageId -> CampMessageId` 投影。
+不可读取文本。被引用消息不单独进入 Thread，飞书来源 ThreadMessage 的 `replyToThreadMessageId` 始终为空，也不维护
+`externalMessageId -> ThreadMessageId` 投影。
 
 Core Context projector 把 ExternalQuote 通过标准 agent-facing projection 放入对应 `RUN_INPUT.messages[]` 项，并以
 内部 `author_type=external_principal` 保留来源身份；公开模型消息按 [Message Senders v1](../contracts/message-senders-v1.md) 投影为 `senderType=user`、`senderId=user`。Host 没有 prompt override，Agent 不接触 open ID、
 union ID、tenant key、chat ID 或 external message ID。
 
-## Bot roster 与 Camp membership
+## Bot roster 与 Thread membership
 
-Host 对父群中每个已发布 Bot 调用 `isInChat`，只有完整快照才提交 Core roster generation。普通群 Camp 首次创建
+Host 对父群中每个已发布 Bot 调用 `isInChat`，只有完整快照才提交 Core roster generation。普通群 Thread 首次创建
 使用当前全部 present Bot；以后完整快照通过 v1.29 已有 `camp.member.add/remove`、`feishu` source binding 和 exact
 reconciliation generation 同步。Bot 移出群走同一原子 cutover/reconciliation。
 
-独立话题群的父群 roster 是其全部 Topic Camp 的动态默认协作队员池。新 Topic Camp 首次创建时使用当前全部
+独立话题群的父群 roster 是其全部 Topic Thread 的动态默认协作队员池。新 Topic Thread 首次创建时使用当前全部
 present/published Rovai Bot 建立 membership，但首条消息仍只为明确 mention 的 targets 创建 waiting Delivery；因此“本轮
-初始目标”和“Camp 可协作队员”是两个独立集合。父群新增 Bot 后，完整快照通过同一 membership source 把它加入新旧
-Topic Camp；移出 Bot 后，从下一次 AgentRun 起不得再以它为目标，历史消息、历史 Run、Camp 和冻结项目不变。
+初始目标”和“Thread 可协作队员”是两个独立集合。父群新增 Bot 后，完整快照通过同一 membership source 把它加入新旧
+Topic Thread；移出 Bot 后，从下一次 AgentRun 起不得再以它为目标，历史消息、历史 Run、Thread 和冻结项目不变。
 
-Host 在新 Topic 建 Camp、每条 Owner 根消息和项目卡 resolve 前强制重读完整 `isInChat` 快照，并消费 Bot 加入/移出
+Host 在新 Topic 建 Thread、每条 Owner 根消息和项目卡 resolve 前强制重读完整 `isInChat` 快照，并消费 Bot 加入/移出
 事件与按需恢复。普通 A2A、waiting Delivery claim 与运输恢复等内部路径在真正物化 Topic AgentRun 前，由 Core 建立
 所需的下一 roster generation 门闩；Host tick 取得请求、重读父群并提交 generation，Core 完成 membership
 reconciliation 后才恢复物化。若目标已经移出则 fail closed。已经运行的 AgentRun 继续使用创建时冻结的执行上下文；
@@ -313,13 +313,13 @@ tick 会把旧 private picker 先失权并排入 recall，再在原 conversation
 `cardRevision` 若已有 external message ID，则轮换 version/nonce 并原位更新到当前 revision；若未落地的 `send` 以
 `format_error` 且无 external message ID 终结，则只轮换并重发一次。当前 revision 的同类失败不自动重发，避免持久错误形成循环。
 
-Core 只从已提交公开 CampMessage、Managed Attachment authority、AgentRun 公共 Evidence 和请求状态生成
+Core 只从已提交公开 ThreadMessage、Managed Attachment authority、AgentRun 公共 Evidence 和请求状态生成
 `ChannelDelivery`。Outbox 使用 priority、lease、attempt、退避和稳定 dedupe key；Main 发送成功后回写外部消息 ID，
-网络错误不会回滚 CampMessage。queue ack 只在真正排队时出现，admission 后删除或 recall，不再更新成“已开始”。
+网络错误不会回滚 ThreadMessage。queue ack 只在真正排队时出现，admission 后删除或 recall，不再更新成“已开始”。
 Agent 永久输出使用实际作者 Agent 的已发布 Bot；作者 Bot 不可用时不冒充其他队员，而是生成独立 attention。
 产品不提供 AgentRun 业务重试或 decline 操作面；Run 失败不回滚已完成的入站接收，也不阻塞同一 Binding 的后续 publication。
 
-入站 Request 直接领取的 Run，以及这些 Run 通过公开 A2A 消息触发的后续 Run，沿同一 Camp 的消息来源与 Delivery 链
+入站 Request 直接领取的 Run，以及这些 Run 通过公开 A2A 消息触发的后续 Run，沿同一 Thread 的消息来源与 Delivery 链
 归属到该 Request 的渠道会话，并各有一个 Core-owned execution console identity。Request 已完成也不截断这条链；
 Host 由后续 Delivery batch 领取、Run 启动和终态事件唤醒，以投递执行卡及待发正文。飞书 Card 2.0 只承担状态入口。收起态不再把正文、command、
 结果或进度复制进卡片；只保留 Owner callback“显示最近输出”、直接 `open_url`“打开执行台”和 Owner callback
@@ -343,11 +343,11 @@ Owner-only 权限面。
 确认至少一个渠道 Bot 当前为 `published` 才允许绑定。没有已发布 Bot 时不解析网卡或创建 server；首个 Bot 发布后自动
 尝试监听，最后一个退出已发布状态时关闭 listener、终止流并撤销内存 Grant。服务自动选择 RFC1918 IPv4，只接受设置页
 显式选择的 1024–65535 端口，不自动漂移。Token 明文只出现在 URL fragment 与页面内存；Main 只保存
-hash 和冻结的 `ChannelConversation/App/Camp/Agent/focusRun/maxRunCreatedAt` scope。服务关闭、卡片 recall 或 Main 重启会
+hash 和冻结的 `ChannelConversation/App/Thread/Agent/focusRun/maxRunCreatedAt` scope。服务关闭、卡片 recall 或 Main 重启会
 撤销内存 grant；不建立持久 Capability/撤销领域。
 
 浏览器先取当前 snapshot，再以 Fetch Streaming 建立 SSE。Main 每次都把冻结 scope 交给 Core，Core 复核 focus Run、
-渠道/App、Camp、队员、成员关系和历史上界，并只返回同 Camp/队员且不晚于 focus Run 的公开投影。Main 继续复用 shared
+渠道/App、Thread、队员、成员关系和历史上界，并只返回同 Thread/队员且不晚于 focus Run 的公开投影。Main 继续复用 shared
 execution grouping 与 result projector，把公开正文和连续操作组投影为页面所需的最小 shape；reasoning、完整工具输入、
 原始 patch、任意文件、终端/写入/审批能力、Cookie、Token 和敏感环境变量不跨出进程边界。网页使用当前双主题与连续时间线，
 外部触发者固定显示“你”；AgentRun、连续操作组和每个 Command 使用独立嵌套 disclosure，文件变化逐文件展开，不提供分页。
@@ -361,13 +361,13 @@ Core 既有 `terminal_pending / terminal_sealed` 与不可变 terminal snapshot 
 呈现旧双层折叠或终态分页。钉钉只消费共享的安全 command 标签，不消费飞书折叠结果。同一 ChannelConversation
 中同一队员的后继 Run 真正开始后，Host 撤回其更早且已封存的执行卡；旧 Run 仍在执行时保留停止入口，待它封存后撤回。
 排队未领取的 Run 和新 root request admission 均不触发执行卡撤回。Core 等待在途更新，并把 target revoked 当作幂等成功；
-执行卡不是 CampMessage，也不参与请求业务 settlement。
+执行卡不是 ThreadMessage，也不参与请求业务 settlement。
 
 公开 Agent 正文新建无标题 Card 2.0，不覆盖控制台、queue ack 或其他正文。正文下方的“发送给”行只消费 Core 从公共
-CampMessage 冻结的 `effective_recipient_ids_json` 提取的有序 A2A 接收对象及 Structured CurrentUserMention；
+ThreadMessage 冻结的 `effective_recipient_ids_json` 提取的有序 A2A 接收对象及 Structured CurrentUserMention；
 旧消息的未发送投递仍可从历史 MessageDelivery 恢复。多个原生 @ 用空格分隔。飞书专用正文从
 Structured Content 排除 CurrentUserMention，不改写源消息、Renderer/Agent Context，不按字面 `@你` 删除文字。
-卡片顶部的回复摘要只沿 CampMessage 的 `reply_to_camp_message_id` 读取同 Camp 的直接父消息，最多 3 行/240 个 Unicode
+卡片顶部的回复摘要只沿 ThreadMessage 的 `reply_to_camp_message_id` 读取同 Thread 的直接父消息，最多 3 行/240 个 Unicode
 字符，不读取 Human body cache 或嵌套 ExternalQuote，也不从 Topic root 推断关系；引用作者与摘要静态转义，不再触发 @。
 无关系不显示，父消息不可用只显示占位。Owner 名称只在 canonical Principal 与作者 Bot 账号匹配时使用该账号名称。
 原生 Bot ID 来自与作者同账号的已发布绑定，Owner ID 来自原 Principal 在发送 App 下的映射；缺失时显示静态名称，
@@ -375,7 +375,7 @@ Structured Content 排除 CurrentUserMention，不改写源消息、Renderer/Age
 长正文按 24KB 卡片预算完整拆分，每片仍回复同一 Topic root，仅第一张显示回复摘要，只有最后一张展示接收对象；Main 使用同 Bot SDK client
 发送 interactive，并以 delivery/分片稳定 UUID 覆盖飞书一小时内的重试去重。旧未发送 delivery 在 claim 内升级投影，
 已发送卡不回填；钉钉保持原输出格式。详细恢复及字段见 [Feishu Channel v6](../contracts/feishu-channel-v6.md#4-永久公开正文与接收对象)。
-公开 CampMessage 的 available
+公开 ThreadMessage 的 available
 Managed Attachment v2 引用逐个生成原生 image/file delivery：Main 发送前经 Core 重新解析 authority，并在读取后复核
 字节数与 digest；正文先终态，附件按 ordinal 依次发送且独立重试。单个附件最终失败只追加 attention，不重放正文或
 已成功附件。请求 settlement 只等待 terminal Turn 与永久正文、附件、attention；queue ack、控制台及 recall 不阻塞 FIFO。

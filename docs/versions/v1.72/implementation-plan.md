@@ -3,10 +3,77 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-29
+last_updated: 2026-10-30
 ---
 
 # v1.72 实施与验收
+
+## 评测指标采集修复（2026-10-30）
+
+独立 worktree 修复 Regression 静态 Runtime 准入、当前 lifecycle 命令证据关联及全指标采集汇总。
+三轮完整真实 LLM 评测后，质量 112/112、协作 17/17 采齐，未知为 0；最终质量 95.8333，
+DEMO-105 未交付报告、DEMO-106 声明佐证不足的扣分保留。采集验收完成，Gate 仍如实记录验收失败。
+实现、冻结身份、旧失败、Rust 测试归属与验证边界见[实施记录](evaluation-metric-coverage.md)，
+当前合同为 [Execution Evaluation v16](../../contracts/execution-evaluation-v16.md)。
+本次不修改题目、评分权重、产品模型上下文或生产数据库 schema。
+
+## 模型目录兼容与原生执行（2026-10-29）
+
+现场 Copilot 1.0.105 的 ACP `session/new` 返回重复 `auto`；旧共享快照校验以重复 ID 拒绝整份目录。
+共享归一化合并模型、参数与枚举，保留可用条目；缺少默认项不否定 Ready。目录失败保留已有有效缓存及
+成功时间。明确模型与参数不再被目录过滤、补默认值或阻断，ACP/Codex/Pi/Antigravity/ZCode 复用原生
+设置路径；MiniMax 的逐模型补充和 Pi Provider 异常局部处理。前端保留覆盖值并显示“尚未核对”。
+本次不新增日志、审批、schema 或模型上下文。规则由 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md) 拥有；属于可逆兼容修复，无需新增 Version Decision。
+
+验证归属：扩展既有 Adapter 目录矩阵、AgentProfile 保存／缓存 owner、ACP/Codex/Pi 真实协议进程 fixture、
+health 的目录／启动 owner 与 ZCode 内存协议 owner；不新增 Rust 测试函数。原“目录缺失或未枚举配置必须
+失败”、Pi 单 Provider 失败清空目录、Renderer 自动删除覆盖值的断言随旧行为退役，以原生调用／拒绝和
+保留用户意图断言替代。跨 Runtime 输入矩阵留在纯函数 owner，进程测试只证明原生协议传递。
+Renderer 复用参数单测与隔离 Electron Picker fixture；不使用日常 userData，不启动模型 Prompt。
+
+验证结果：
+
+- `cargo test --workspace`：479 passed、1 个既有 ignored；`cargo fmt --all --check` 通过。
+- `cargo test -p rovai-core --features slow-tests,extended-tests --lib` 的定向 owner：Adapter 目录矩阵、保存意图与缓存、
+  Codex/ACP/Pi 原生传参、ZCode 目录外模型、Antigravity 无目录启动、ACP 健康与 MiniMax 目录检查均通过。
+  ACP 进程 owner 独立运行通过，避免并发环境 fixture 临时 PATH 对 `env python3` 的干扰。
+- `pnpm typecheck`、`MemberRuntimeParameters.test.ts`（35 passed）、`pnpm test:runtime-model-picker` 通过。
+  隔离 Electron 验证失败抛错／空失败响应保留缓存、参数不清空、手填 ID、异步读取、Day/Night 和窗口缩放；
+  复核真实生产组件截图，无布局改动。Impeccable detect 返回空问题列表。
+- `pnpm docs:test`、`pnpm docs:check`、带固定 base 的 `pnpm docs:check:ci` 通过；新增生产日志扫描为空。
+- 真实 Copilot CLI 1.0.105，经本分支构建的 `rovai-host`、全新隔离 data/Skills/MCP 查询：24 个唯一模型、
+  `auto` 一项、`claude-opus-5.5` 保留 `low/medium/high/xhigh/max`。启动配置代次变更使首次请求 deferred，
+  同一隔离实例重读 completed/fresh；第二次正常目录读取 not_required 且目录相同。查询约 3.5 秒，无 Prompt。
+  隔离 Host 已关闭，临时数据与派生 Runtime files root 已清理，日常 App 配置未改。
+
+真实原生验证只覆盖 Copilot 的目录查询；其他 Runtime 用确定性协议 fixture，未声称付费模型调用或跨平台实机验收。
+
+提交 `9f10e14ae` 审查补修：既有目录矩阵复现 DSH 非对象 `_meta` 在写入 `dshSource` 时 panic；
+既有 Codex 请求 owner 复现数字 `reasoning_effort` 被 `.as_str()` 静默省略。共享归一化现局部忽略异常
+元数据，保留模型及重复条目的有效元数据；DSH 补充字段保留原元数据。提交 `61f9f701c` 同时加入了
+Codex 键／类型提前报错；该拦截误拒绝系统 Fast 审计字段，已由下述可用性补修撤销，目录外值透传保持。
+当时扩展原目录与请求 owner 的输入矩阵，没有新增 Rust 测试函数。
+当时定向命令 `cargo test -p rovai-core --features slow-tests,extended-tests --lib -- agent_runtime_adapter::tests codex::tests`
+通过 50 项，1 项既有真实 Runtime 手动测试保持 ignored；修复前两个回归 owner 均失败。
+
+Fast 可用性补修按 User 最新取舍执行：移除 Codex 新增的键／类型启动拦截，字符串 `reasoning_effort`
+原样映射到 `effort`。`serviceTier` 保持费用审计用途，发送仍只消费 `camp_fast`；开启、关闭、未设置
+分别发送 `priority`、`default`、省略 `serviceTierForTurn`。所有共享目录归一化、DSH 元数据保留、缓存和
+草稿保留修复不变；不新增日志、审批或目录白名单。未知键与非字符串参数的完整映射／错误呈现待后续
+完善，本轮不作为交付门槛。
+
+回归保留 DSH 异常元数据矩阵、目录外参数透传与原生 RPC 拒绝；撤销“异常输入必须提前拒绝”的断言。
+新增唯一 Core 启动 owner `codex_frozen_fast_and_model_selection_reach_native_requests`：既有 Adapter
+进程 fixture 直接调用 RPC，不能覆盖 Core 的启动前拦截，终态 owner 则只拥有退出／复用语义，因此不能
+靠辅助函数或重复终态断言证明该回归。它复用现有隔离 Core／Run fixture，经过正式 Fast 保存与冻结、
+完整配置持久化与加载、`launch_agent_run`，检查实际 `thread/start`、`turn/start` 请求；覆盖 Fast 三态
+与默认／显式模型的六种组合，不调用真实模型。最小命令：
+`cargo test -p rovai-core --features slow-tests,extended-tests --lib codex_frozen_fast_and_model_selection_reach_native_requests`。
+该 owner 修复前在默认模型 + Fast 开启时复现 `serviceTier has no native parameter mapping`，修复后
+六种组合全部通过；断言未设置时字段缺席，审计 `serviceTier` 不进入原生请求，目录外字符串完整传递。
+测试专用 task-local CLI 路径使正式 Core 启动仍使用临时夹具，不修改共享构建目录或日常 CLI，发布构建不含此入口。
+本轮复验：新增启动 owner 通过全部六种组合，Adapter/Codex 定向 50 passed / 1 个既有 ignored，
+`cargo test --workspace` 479 passed / 1 个既有 ignored；格式、文档通用门禁通过，新增生产日志语句为零。
 
 ## 数据库启动减重（2026-10-29）
 
@@ -2274,7 +2341,7 @@ ZCode 根调用结束/压缩触发合并读取，Pi/Antigravity 保留独立字�
 按 User 确认的 R2 HTML 稿落实普通侧栏与「关于与更新」。侧栏使用可读的透明状态入口，设置菜单图标与更新
 状态采用独立尺寸规则，修复状态被 22px 图标槽挤压的问题；英文窄栏允许入口另起一行。页面顶部合并当前
 版本、状态与操作，日志优先于折叠检查记录，版本号进入日志 Tab，下载只保留一处可见百分比。当前
-[设置 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md#关于与更新)同步实际 880px 阅读轨道。
+[设置 brief](../../ui/surfaces/settings-workspace.md#关于与更新)同步实际 880px 阅读轨道。
 
 当前/候选版本分离、语言切换、安全 Markdown、明确下载/安装、提示代次、只读 Desktop Web、Server 重连
 和精确发布回退链接继续原合同；无 Main/Core 更新状态机、API、Schema、发布源、模型上下文或 Runtime 变化。

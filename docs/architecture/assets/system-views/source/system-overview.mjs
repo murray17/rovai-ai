@@ -56,8 +56,8 @@ export function renderSystemOverview() {
 
   const containers =
     panel(18, 14, 1468, 132, '01  用户与工作入口', P.access, '提供目标与约束 · 参与讨论与验收 · 按需介入')
-    + panel(18, 208, 1468, 376, '02  长期队员与 Camp 协作空间', P.peer, 'Peer 协作 · 轻量 Lead · 持续身份')
-    + panel(334, 262, 1128, 299, 'Camp · 本次协作空间', P.peer, '未指定收件人时由 Default Lead 承接')
+    + panel(18, 208, 1468, 376, '02  长期队员与 Thread 协作空间', P.peer, 'Peer 协作 · 轻量 Lead · 持续身份')
+    + panel(334, 262, 1128, 299, 'Thread · 本次协作空间', P.peer, '未指定收件人时由 Default Lead 承接')
     + panel(18, 644, 1468, 318, '03  Rovai Core · 核心领域与执行控制', P.resource, 'Rust · 协作事实与领域操作由 Core 承载')
     + panel(18, 1040, 1468, 202, '04  本机 Coding Agent Runtimes', P.runtime, '代表性产品与协议 · 按已接入能力适配')
     + panel(18, 1310, 1468, 150, '05  工作资源与外部能力', P.resource, '本地工作区与 Runtime 配置保持用户所有');
@@ -89,8 +89,8 @@ export function renderSystemOverview() {
     + label(1262, 1283, '外部工具调用', 17, { color: P.toolkit.main });
 
   const entries =
-    tile(42, 67, 456, 61, '桌面工作台', 'React / Electron · Camp、单聊与执行查看', P.access)
-    + tile(524, 67, 456, 61, '飞书 / 钉钉渠道', '渠道消息与队员 Bot · 绑定 Camp 协作', P.access)
+    tile(42, 67, 456, 61, '桌面工作台', 'React / Electron · Thread、单聊与执行查看', P.access)
+    + tile(524, 67, 456, 61, '飞书 / 钉钉渠道', '渠道消息与队员 Bot · 绑定 Thread 协作', P.access)
     + tile(1006, 67, 456, 61, '本机自动化入口', '用户 CLI / 定时 Automation · 触发已授权工作', P.access);
 
   const team =
@@ -100,13 +100,13 @@ export function renderSystemOverview() {
     + `<path d="M60 349 H288" stroke="${P.peer.border}"/>`
     + label(60, 379, ['名称 · 团队角色 · 专业职责', '性格底色 · 工作准则', '成长课题 · 自身身份投影'], 17, { leading: 31 })
     + rect(59, 477, 230, 61, P.peer.soft, 'none', 7)
-    + label(75, 502, 'CampMember', 18, { weight: 600, color: P.peer.main })
-    + label(75, 525, '同一队员，跨 Camp 参与', 15.5, { color: P.muted })
+    + label(75, 502, 'ThreadMember', 18, { weight: 600, color: P.peer.main })
+    + label(75, 525, '同一队员，跨 Thread 参与', 15.5, { color: P.muted })
     + peer(364, 321, '队员 A')
     + peer(762, 321, 'Default Lead', true)
     + peer(1164, 321, '队员 B')
     + rect(358, 519, 262, 27, P.peer.soft, P.peer.border, 6)
-    + label(489, 538, '公共讨论 · CampMessage', 16, { anchor: 'middle', color: P.peer.main })
+    + label(489, 538, '公共讨论 · ThreadMessage', 16, { anchor: 'middle', color: P.peer.main })
     + rect(634, 519, 250, 27, P.responsibility.soft, P.responsibility.border, 6)
     + label(759, 538, '可选长期责任 · Task', 16, { anchor: 'middle', color: P.responsibility.main })
     + rect(898, 519, 250, 27, P.resource.soft, P.resource.border, 6)
@@ -115,9 +115,9 @@ export function renderSystemOverview() {
     + label(1300, 538, '成员名册 · 获授权的公共历史', 16, { anchor: 'middle', color: P.context.main });
 
   const core =
-    component(42, 708, 220, 223, 'A2A 消息与路由', 'CampMessage · Delivery', ['显式收件人 · 独立投递', '目标 FIFO · 有序 claim', '多输入 Run · 回复锚点'], P.peer)
+    component(42, 708, 220, 223, 'A2A 消息与路由', 'ThreadMessage · Delivery', ['显式收件人 · 独立投递', '目标 FIFO · 有序 claim', '多输入 Run · 回复锚点'], P.peer)
     + component(282, 708, 220, 223, '协作组织与责任', 'Task · Mission · Delivery', ['目标 · 负责人 · 验收', '普通消息 · 多人邀请', '业务对象各自结算'], P.responsibility)
-    + component(522, 708, 220, 223, '动态上下文', 'Bootstrap · ContextManifest', ['同伴名册 · 任务责任', '增量公共历史', '运行事实 · 工作区', '完整 RUN_INPUT 批次'], P.context)
+    + component(522, 708, 220, 223, '动态上下文', 'Bootstrap · ContextManifest', ['同伴名册 · 任务责任', 'Skills 索引 · 历史按需读', '运行事实 · 工作区', '完整 RUN_INPUT 批次'], P.context)
     + component(762, 708, 220, 223, '长期记忆', ['Hearth · Companion', 'Relationship'], ['用户审核 · 正式晋升', '修订 · 替代 · 退役 · 遗忘', '按 Scope 授权读取'], P.memory)
     + component(1002, 708, 220, 223, 'CLI + Skill Toolkit', 'Skill · CLI · Router', ['Skill 按需提供协作方法', 'rovai CLI 表达平台动作', '认证 IPC · Run 身份', '结构化结果 · 原生投影'], P.toolkit)
     + component(1242, 708, 220, 223, 'AgentRun 执行', 'AgentRun · Runtime Fleet', ['队列准入 · 执行配置', 'Runtime Adapter · 协议', '模型 / 权限 · 按能力接入', '原生事件 · 过程与结果'], P.runtime);

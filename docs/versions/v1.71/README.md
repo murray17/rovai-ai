@@ -28,7 +28,7 @@ Migration 175 将确切 v1.70/schema 124 升级为 v1.71/schema 125；通知 wir
 | Decisions | 已更新 | [D01](decisions.md#v1-71-d01)及[当前导航](../../decisions/CURRENT.md)记录通知图与执行聚合分离 |
 | Contracts | 已更新 | [Notification Episode v9](../../contracts/notification-episode-v9.md)、[Current User Attention v8](../../contracts/current-user-attention-v8.md)和[索引](../../contracts/README.md) |
 | Architecture | 已更新 | [通知架构](../../architecture/notification-episodes.md)及[索引](../../architecture/README.md) |
-| UI | 已更新 | [提醒界面](../../ui/components/notification-center.md)、[UI 索引](../../ui/README.md)、[设置页策略](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md) |
+| UI | 已更新 | [提醒界面](../../ui/components/notification-center.md)、[UI 索引](../../ui/README.md)、[设置页策略](../../ui/surfaces/settings-workspace.md) |
 | Runtime Activity | 确认无需更新 | 不改变 Activity identity、phase、outcome 或 Adapter 映射 |
 | Runtime compatibility | 确认无需更新 | 不接入或修改 Harness，不声明新的真实 Runtime 能力证据 |
 | Documentation routing | 已更新 | [文档入口](../../README.md)指向新的通知与注意力合同 |

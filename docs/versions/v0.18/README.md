@@ -19,7 +19,7 @@ last_updated: 2026-07-28
 > [ADR-0064](decisions.md#adr-0064)
 >
 > 当时长期记忆 UI 规范已删除，原文见 Git 历史；当前规范见
-> [Arctic Dawn 记忆](../../../apps/desktop/.impeccable/surfaces/memory-workspace.md)
+> [Arctic Dawn 记忆](../../ui/surfaces/memory-workspace.md)
 >
 > 详细设计：[architecture.md](architecture.md)
 >

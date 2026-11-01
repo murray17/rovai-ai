@@ -3,10 +3,44 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-29
+last_updated: 2026-10-30
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d70"></a>
+## V1.72-D70：可选历史文件与单个 Runtime 故障不阻断原工作区
+
+- 状态：accepted
+- 日期：2026-10-30
+- 授权：User sequence 31 确认六项全部实施，①②③优先、⑥同步、④⑤同轮；要求保留现场的原会话与原使命副本验收。
+- 当前权威：[Availability-first Runtime](../../architecture/availability-first-runtime.md#optional-startup-boundary)、[附件](../../contracts/camp-attachment-v12.md#历史存储的故障范围)、[Runtime 设置](../../contracts/runtime-launch-and-verification-v74.md#本机配置的局部故障)、[MCP 快照](../../contracts/input-snapshot-storage-v1.md#mcp-snapshot-storage-layout)、[文件变化与 Blob](../../architecture/runtime-file-change-observation.md#故障边界)。
+
+健康数据库仍可能被旧附件根身份、损坏临时记录、未使用 Runtime 配置或外部 MCP 文件阻断；把历史扫描移到后台但继续持有全局数据库锁，仍会阻塞原会话读取与新任务。选择把错误收窄到实际文件、Runtime 或工具，以现有状态与错误投影表达；Runtime discovery 独立启动，历史维护逐条有界且不随功能重试重跑。
+
+接受无法证明归属的残留继续占用磁盘，不通过全盘库存、额外持久队列或恢复服务换取彻底清理。保留实例锁、迁移事务、冻结 Run 快照、当前真实停止结果、具体目标身份检查和删除前的引用复核。损坏配置区别于缺失：保留原值及错误，只允许用户显式、版本检查后的修正，不自动换程序或账号。
+
+本决定替代当前规范中旧附件根身份/遍历决定全局准入、MCP 全局 ready 决定普通执行、Adapter 初始化必须清理旧文件的要求。派生视图可按需重建；不改数据库 schema、不补成功回执、不清空原会话。跨平台与原用户数据副本验收分别记录，开发启动或合成数据不能替代交付门槛。
+
+<a id="v1-72-d69"></a>
+## V1.72-D69：历史进程清理不决定工作区可用性
+
+- 状态：accepted
+- 日期：2026-10-29
+- 授权：User sequence 6 确认四条实施边界并要求独立 worktree；sequence 8 要求先验开发包，稍后退出日常 App。
+- 当前权威：[Availability-first Runtime](../../architecture/availability-first-runtime.md#optional-startup-boundary)、[Managed Process](../../contracts/managed-runtime-process-v2.md#macos-acp-descendants)、[Run recovery](../../architecture/agent-run-recovery.md#4-cleanuplane-与-execution-root)。
+
+前代 PID 被复用、身份查询无权限或账本损坏会通过启动恢复与 Adapter 初始化重复传播；即使打开窗口，旧任务缺 ACK
+也会在工作区准备、领取和共享目录门禁继续阻止新工作。选择 ready 后唯一有界后台尝试，逐条保留诊断，失败不降级运行环境。
+四处任务准入、Mission 清理入口/命令与会话删除统一使用现有内存中的精确 Run/epoch 所有权；
+历史缺 ACK 或未知状态不作为活跃冲突，也不回填虚假清理成功。排队提示只使用当前执行或 Core 的等待原因，
+不从历史 ACK 推断。该边界同样覆盖新会话在 App 崩溃、强制退出或断电后留下的记录。
+
+接受少量前代残留继续存在和旧清理事实保持未知，优先保证老用户在原会话、原成员、原 Runtime 继续工作。
+保留当前执行的真实停止/退出结果、共享进程范围和旧输入不自动重投语义。数据库打开、迁移和业务任务恢复仍各自报告真实错误。
+不选择持久清理队列、恢复服务、合并全部账本或全局放宽进程身份查询；这些方案增加机制或会让当前停止误报结果。
+本决定替代 D26 中“前代回收失败关闭启动准入”的当前要求，其他进程生命周期判断保持。无 schema 变更。
+
 
 <a id="v1-72-d06"></a>
 ## V1.72-D06：Claude Code 打印模式通过原生双向控制协议接入审批
@@ -297,7 +331,7 @@ AI 创建队员的专项窗口内生命周期继续由 D09 对应合同约束。
 
 - 状态：accepted
 - 日期：2026-10-06
-- 当前权威：[Camp Member Fast v3](../../contracts/camp-member-fast-v3.md)、[Runtime 边界](../../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)
+- 当前权威：[Camp Member Fast v3](../../contracts/camp-member-fast-v3.md)、[Runtime 边界](../../architecture/runtime-catalog-boundaries.md#thread-队员-fast-边界)
 
 ### 背景与选择
 
@@ -431,7 +465,7 @@ User 确认交互稿及模型仍读取 `@名字` 文字后，授权实现、创�
 
 - 状态：accepted
 - 日期：2026-10-09
-- 当前权威：[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md#4-ownership-and-termination)、[Windows Desktop Platform](../../architecture/windows-desktop-platform.md#3-managed-processes-and-shutdown)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md#后续执行与清理)、[Camp 会话工作区](../../ui/components/conversation-workspace.md#public-camp-v160-当前边界)
+- 当前权威：[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md#4-ownership-and-termination)、[Windows Desktop Platform](../../architecture/windows-desktop-platform.md#3-managed-processes-and-shutdown)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md#后续执行与清理)、[Camp 会话工作区](../../ui/components/conversation-workspace.md#public-thread-当前边界)
 
 ### 背景与选择
 
@@ -865,7 +899,7 @@ User 确认 1—5 一起实施。SQL 全文比对、上下文中间副本与摘�
 
 - 状态：accepted
 - 日期：2026-10-13
-- 当前权威：[Camp Membership v3](../../contracts/camp-membership-v3.md)、[成员生命周期](../../architecture/foundational-invariants.md#member-lifecycle)和[会话队员 UI](../../ui/components/conversation-workspace.md#camp-队员管理)
+- 当前权威：[Camp Membership v3](../../contracts/camp-membership-v3.md)、[成员生命周期](../../architecture/foundational-invariants.md#member-lifecycle)和[会话队员 UI](../../ui/components/conversation-workspace.md#thread-队员管理)
 
 ### 背景与选择
 
@@ -1451,8 +1485,8 @@ Desktop 最多追加一次启动重启，避免叠加 SQLite 5 秒等待。接�
 未选择继续增加 macOS/Windows 例外、自动修权、损坏库自动 quarantine 后建空库或引入新重试框架：这些选择或继续扩大
 状态空间，或会让老用户误见空会话。此决定替代历史启动票据/元数据复核与现有启动目录 ACL 模板的当前约束，保留历史理由。
 
-<a id="v1-72-d69"></a>
-## V1.72-D69：文件轻量编辑以 Host 乐观保存和窗口内草稿完成
+<a id="v1-72-d71"></a>
+## V1.72-D71：文件轻量编辑以 Host 乐观保存和窗口内草稿完成
 
 - 状态：accepted
 - 日期：2026-10-29

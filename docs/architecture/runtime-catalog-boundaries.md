@@ -158,6 +158,8 @@ continuation、Built-in Tool、Approval、cancel、terminal、process cleanup �
 
 ## 本机启动设置
 
+各 Runtime 的程序设置读取失败独立投影，不使 `load_all()` 整体失败。缺失才沿用默认；损坏保留原配置、错误与 revision，禁止静默使用默认程序或凭据。Owner 通过现有设置入口显式修正，复用 CAS 与刷新，无需重启 Core；当前字段及坏记录替换见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#本机配置的局部故障)。
+
 Runtime Startup Settings 保存本机程序路径及按 Runtime 隔离的通用环境变量。环境由 Core 私有加密存储管理，
 新 CLI 按 Host、可选的 Runtime 通用配置、队员覆盖合并，同名后者优先、不同名追加；删除队员条目恢复下层值。
 队员可选择是否继承通用配置，新队员默认继承，升级前非空队员配置保持独立。
@@ -166,7 +168,7 @@ Runtime Startup Settings 保存本机程序路径及按 Runtime 隔离的通用�
 新建 CLI 时合并当时的 Host＋通用＋队员环境，领取 Run 不读取；健康 Warm 复用不读取或解密最新配置。
 活着的 CLI 及其工具子进程保持启动环境，重建/冷恢复使用当前配置。环境不进入会话或 Run 历史，
 旧快照缺失或损坏不阻断执行；真实队员配置错误只失败对应任务，数据库整体错误仍上报。
-进程只在同一 Camp、同一队员的当前会话内复用，继续遵循各 Adapter 的工作目录、恢复与停止策略。
+进程只在同一 Thread、同一队员的当前会话内复用，继续遵循各 Adapter 的工作目录、恢复与停止策略。
 值不进入成员资料、公开命令、工具、事件或诊断导出；Owner 管理面使用遮蔽读取及显式查看。
 程序绝对路径仍属于安装发现，不由队员 PATH 偷换。详细字段、CAS、凭据保护、CLI 资格与迁移见
 [Runtime Launch v69](../contracts/runtime-launch-and-verification-v69.md)。
@@ -223,7 +225,7 @@ Host 的程序指纹与 Native Session 的协议／存储来源分别判断，�
 Windows 沿用 Registry／PATH 规则；只采集 PATH，失败仍走既有回退。主动检查即使旧入口存在也刷新，
 同次候选解析与检查进程使用该次搜索环境及 Runtime 通用配置。刷新保留已保存的路径和变量，输入比较、
 代次及并发保护沿用原机制。额外 shell 变量通过用户通用／队员配置传递，不增加版本管理器适配。
-精确范围见 [Runtime Launch v73](../contracts/runtime-launch-and-verification-v73.md)。
+精确范围见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md)。
 
 启动只静态解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity，不运行 Runtime。
 手动 rescan 保留未知或变化程序的有界版本补读，不执行认证或协议深检；单项检查只检查选中的 Runtime。
@@ -263,9 +265,9 @@ catalog。Rovai 只有在唯一内容的项目 Skill 同时通过新 Session adv
 边界明确时才建立 delivery group。当前 managed TRAE group 只写项目 `.trae/skills`；Runtime 兼容扫描到的
 `.agents/skills`、`.traecli/skills` 或用户目录不因此成为 Rovai-owned 投影目标。
 
-## Camp 队员 Fast 边界
+## Thread 队员 Fast 边界
 
-Camp Fast service 拥有可空偏好、保存绑定代次与 Run 冻结。活跃 Claude/Codex 绑定直接显示二态控件，首次保存
+Thread Fast service 拥有可空偏好、保存绑定代次与 Run 冻结。活跃 Claude/Codex 绑定直接显示二态控件，首次保存
 在现有事务/表中写入；不依赖版本、账号资格、schema 导出或健康快照。真实 Host 直接传递冻结参数，关闭值
 不能因资格未知而丢弃。正常 Host 初始化的原生默认复用现有字段作显示初值，用户选择优先；
 未启动或字段缺失时按钮不高亮，内部保持未知且不生成关闭覆盖。普通运行观察只属于对应 Run Evidence/Usage，不反写偏好。
@@ -277,11 +279,15 @@ Camp Fast service 拥有可空偏好、保存绑定代次与 Run 冻结。活跃
 模型目录只服务 Picker 和主动诊断，沿用既有 60 秒/24 小时缓存及身份失效规则，不新增缓存或 LKG。
 打开 Picker 才按需使用既有有界 Check Manager 刷新；页面打开、Runtime 切换及默认模型任务均不触发目录刷新。
 历史目录可用于展示，不能证明当前 executable 支持某个模型，也不能形成运行授权。
-刷新只写明确取得的目录证据；失败保留原诊断记录，Superseded 不提交错误身份的结果。
+刷新只写明确取得的目录证据；失败保留有效缓存及原诊断记录，不推进目录成功时间；Superseded 不提交错误身份的结果。
+共享 Adapter 层合并重复模型 ID 和选项，逐条忽略无法表示的目录数据，保留其余有效条目。没有默认项或
+当前模型不在候选列表中不否定原生 Session 可用性；单个 Provider／模型的补充异常不丢弃整个目录。
 
 Core 原子保存显式模型和选项的精确意图及静态权限配置；过期、缺失目录或历史失败不阻止保存。
-真实 Host 负责原生握手和选项传递，不静默替换或忽略。Claude Code 将已有模型 ID 与可传递的显式选项交给
-原生 CLI 判定；不能仅因枚举缺失或目录不包含该 ID 而拒绝正文。其他 Adapter 的原生模型设置协议保持原合同。
+真实 Host 负责原生握手和选项传递，不静默替换或忽略。全部 Adapter 将明确模型 ID 与显式选项交给
+原生 Runtime 判定；不能因目录缺失、未枚举 ID／参数／值或 setter 未回显目录拒绝执行。
+冻结和模型切换保留用户显式选项，不从目录补入默认值或自动删除覆盖值。原生错误继续沿用现有错误路径，
+不新增日志。界面读取失败显示“尚未核对”，保留当前选择及有效缓存。规则见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md)。
 默认模型不依赖目录，内部 sentinel 只用于审计和冻结，不向原生 Runtime 发送。
 
 成员配置只拥有模型策略，不拥有某次 Run 的实际模型。使用 `runtime_default` 时，Core 只能从当前
@@ -311,7 +317,7 @@ Claude、ACP、Codex 模型／初始化及 Codex 原生配置查询，不删除�
 但保存的队员配置保留。原生成功目录在刷新失败时继续按已有 stale/expired 边界读取，失败不能更新成功时间。
 `model.catalog.initialize` 保留为既有持久化能力名，专用查询或兼容查询均可建立该目录证据；查询失败
 不制造 Ready，界面独立表达目录不可用。已有模型和选项可原样保存并执行；默认项由用户主动选择，
-本期不增加任意模型 ID 输入。正式会话仍完成 initialize 协议／权限握手，但不再据其目录拒绝已有配置。
+Picker 允许填写明确模型 ID。正式会话仍完成 initialize 协议／权限握手，但不再据其目录拒绝已有配置。
 显式模型 ID 原样传给 `--model`，effort 原样传给 `--effort`；不能传递的键或非字符串选项明确拒绝，
 不把未知原生枚举值静默删除。运行时默认省略模型参数。字段与错误边界见
 [Runtime Launch v49](../contracts/runtime-launch-and-verification-v49.md)。
@@ -406,7 +412,7 @@ protected-tree deny。省略 cwd 时使用 execution root；显式 cwd 只要求
 派生路径。Runtime 的 sandbox/permission mode 与操作系统拥有 Shell/文件权限，Core
 不再通过 `scoped_path()` 建立第二层 Terminal cwd allowlist。Run cancel、detach、Host EOF/shutdown 与 fleet reap
 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr 使用有界私有 buffer，Terminal wire、
-output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
+output 与 error 不进入 Thread message 或 durable Evidence。字段与幂等合同见
 [ACP Client Terminal v3](../contracts/acp-client-terminal-v3.md)。
 
 <a id="native-home-probes"></a>
@@ -436,7 +442,7 @@ Kimi Code 的 ACP compatibility policy 使用通用 Client Terminal `local_bridg
 create/output/wait/kill/release、4 MiB output limit 与 capability-unavailable 分支；一次性隔离 Home initialize
 也返回 0.38.0 且接受 `terminal=true`。确定性 Host fixture 覆盖完整 wire、Run cancellation 与 cwd
 校验。macOS arm64 本机随后通过 Homebrew 升级到 0.38.0；隔离开发 App 的 Deep Probe 返回 authenticated/ready，
-真实 Camp AgentRun 经两次 Bash 调用读取 workspace cwd 与固定 marker 后成功结束，且未遗留 Kimi/Terminal 子进程。
+真实 Thread AgentRun 经两次 Bash 调用读取 workspace cwd 与固定 marker 后成功结束，且未遗留 Kimi/Terminal 子进程。
 
 Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时
 由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session。普通 Deep Probe
@@ -459,8 +465,8 @@ digest 不进入，Server 定义变化仍 fence 旧 Host。stdio、Streamable HT
 保持 Disabled；Compaction 通过 Kimi-only Prompt lifecycle correlation 与 idle/detached exact completion frame
 以 `best_effort` 接入。History Restore
 仅作为 load-only fallback。异步 command/config
-advertisement 只安全路由为私有 metadata，当前没有产品消费者，不作为遗留项。Rovai managed Skill 投影目标为
-`.kimi-code/skills`。
+advertisement 只安全路由为私有 metadata，当前没有产品消费者，不作为遗留项。Skills 使用共享的原址发现与
+受管文件索引，不建立新的项目投影，见 [Skills 架构](skills.md)。
 
 本机 `kimi 0.32.0` 使用 MiniMax M3 在 macOS arm64 完成真实 prompt、Shell allow/deny、六类 terminal output、
 Missing-Send、cancel 与 cleanup。早期 Built-in CLI `0/15` 是 fixture 在第一项 canonical operation 前错误检查
@@ -489,7 +495,7 @@ Grok 模型/provider 直接使用官方 `$GROK_HOME/config.toml` 的 `[models]`�
 官方配置摘要同时 fence warm Host 与 Native Session resume。
 
 Grok/MiniMax `<think>` 若由 Runtime 作为普通 `agent_message_chunk` 发出，就与其他 ACP agent text 一样原样
-进入执行台 Evidence、Camp final 与 Missing-Send，不做 provider-specific 清洗或重分类。`_x.ai/*`
+进入执行台 Evidence、Thread final 与 Missing-Send，不做 provider-specific 清洗或重分类。`_x.ai/*`
 notification 只作为已知 Session metadata/lifecycle 安全路由。Runtime Fleet LRU 保留 compatible warm
 Host/Session。三个宿主平台共享 `grok >= 1.0.0` 最低版本门；light discovery 低于门槛时为 `light_failed`，
 普通检查验证必要认证、初始化与当前模型，不演练恢复或重复设置模型；协议声明恢复支持不等于本次实测，
@@ -497,10 +503,14 @@ Host/Session。三个宿主平台共享 `grok >= 1.0.0` 最低版本门；light 
 只调用 exact `session/resume`；Grok 不声明或选择 `session.load` 产品能力，失败后只允许一次 fresh fallback。
 其他 Runtime 的通用 load/HistoryRestore 路径不变。
 
+Grok new/resume 均使用原 `cwd` 与 `additionalDirectories=[]`；`1.0.70` 拒绝 new 的非空附加目录。
+creation-only `_meta.rules`、Run tmp 环境绑定和文件访问错误保持，其他 ACP Adapter 仍按各自合同传递目录。
+具体请求边界见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#grok-cwd-only-session-参数)。
+
 External MCP 为 `AdditivePerRun / NativeWinsSkip`。`grok 0.2.118` 的 ACP Session 忽略 `mcpServers`，Core 因此
 在私有 Runtime 目录生成临时 Plugin 并用 process `--plugin-dir` 追加；`grok inspect --json` 已发现的所有
 native 名称都保留，冲突 Assignment skip，不同名 Server 可追加，完整集合进入 Host compatibility，Plugin 随
-Host 清理。Core 不写 project/user config。managed Skill 投影到 `.grok/skills`。Usage/Cost 保持 Disabled。
+Host 清理。Core 不写 project/user config；Skills 使用共享原址发现与受管文件索引。Usage/Cost 保持 Disabled。
 
 `grok-build × macos-arm64` 与 `grok-build × windows-x64` 分别绑定独立、目标主机生成的
 adapter-scoped qualification evidence；macOS x64 仍保持
@@ -527,9 +537,9 @@ Pi 0.84.4 是当前最低兼容版本；
 Skills、Context files、Prompt templates 与用户 Settings；`--approve` 只信任当前项目，不是 Tool Approval，也不改写
 用户全局 trust。Rovai 不提供 `--no-extensions` fallback，任何 Extension
 启动错误都保留真实诊断并直接失败。Pi Host 进入统一 Fleet，策略为 `resident_multi_session`：一个 Host 串行服务多个 Native Session，并发 Run 使用
-不同 Host。Pi 的复用归属是 Camp + member + 当前会话引用，canonical workspace 仍进入 process digest。
-同工作区不允许跨 Camp 或跨队员借用，删除失效仍保留。其他 Runtime 的
-Camp/member-scoped identity 不变。创建 gate 按 `(agent_run_id, execution_epoch)` singleflight，registry 锁不跨 IO。
+不同 Host。Pi 的复用归属是 Thread + member + 当前会话引用，canonical workspace 仍进入 process digest。
+同工作区不允许跨 Thread 或跨队员借用，删除失效仍保留。其他 Runtime 的
+Thread/member-scoped identity 不变。创建 gate 按 `(agent_run_id, execution_epoch)` singleflight，registry 锁不跨 IO。
 process key 不包含 Session、Bootstrap、Skills、model 或 Prompt；Fleet 以计入容量的 Starting reservation 在短锁内
 Reserve，并立即交给 Fleet-owned operation 锁外 Spawn、短锁内 Commit；同 Run/epoch waiter 共享结果且任意 waiter
 drop 不影响启动，不同 Run/Runtime 可以并发。Stop 使用短锁 Mark、锁外 reap、短锁 exact-operation Commit，同 Host
@@ -542,7 +552,7 @@ Session 身份、目录归属、扩展和当前模型，不演练新建/切回�
 隔离并清理测试 Session。
 
 Windows Pi Host 在自己的启动边界使用 `dunce::simplified` 将可安全表示的 canonical 本地 cwd 转为普通盘符路径，
-避免 Pi 默认 Session 目录编码保留 `\\?\` 中的 `?`。Camp、Fleet 与 Session 校验仍使用原 canonical identity；
+避免 Pi 默认 Session 目录编码保留 `\\?\` 中的 `?`。Thread、Fleet 与 Session 校验仍使用原 canonical identity；
 正式启动继续使用 Pi 原生 Session 目录策略。无法安全转换、仍需 verbatim 语法的长路径、特殊文件名或 UNC/device
 路径在 Pi 启动前返回明确兼容错误，不截断路径或静默改指向；Windows UNC workspace 的既有不准入范围不变。
 该适配只属于 Pi，其他 native EXE 的 Managed Process cwd 语义不变。
@@ -576,7 +586,7 @@ Extension 的未映射交互返回 cancelled/denied，不 poison Host。stderr�
 `agent_settled` 是唯一成功边界；Usage 只读 terminal assistant `message_end.message.usage`，未知
 reasoning/cost 保持 NULL。
 
-Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Camp Fast 当前仍 unsupported/hidden。macOS arm64、
+Pi Prompt images 已通过原生 RPC 接入，但结构化 Web Search 与 Thread Fast 当前仍 unsupported/hidden。macOS arm64、
 macOS x64 和 Windows x64 各自绑定 Pi 专属 immutable evidence revision，均为 `qualified / reasonCode=null`；普通
 discovery、检查、成员选择、Diagnostics 与 AgentRun 对三平台开放，UI 走正式 Runtime 展示且不再标记实验性。
 平台晋升不新增 Pi 已明确 unsupported/hidden 的能力。字段级行为见
@@ -585,7 +595,7 @@ discovery、检查、成员选择、Diagnostics 与 AgentRun 对三平台开放�
 
 ## 队员最高权限默认
 
-Runtime Host compatibility 还绑定 Camp Attachment View contract 4。Scheduler 在 Camp read admission 内完成
+Runtime Host compatibility 还绑定 Thread Attachment View contract 4。Scheduler 在 Thread read admission 内完成
 full verification；校验失败时释放 read admission，在 bounded write admission 内做一次 Authority rebuild/附件局部
 降级并重试。Claim 之前仍检查持久 publication writer intent；存在 unresolved pending/recovery operation 时 Run
 保持 queued，已成功 resolved 附件的当前 `recovery_required` 只省略该附件。一次 dispatch 的
@@ -635,7 +645,7 @@ Runtime Platform preview。当前没有可见 Settings Preview row；DeepSeek Ha
 ZCode 使用独立 Node.js 执行官方 App 自带的未修改内核，不执行 App 主程序。发现绑定官方 bundle，
 fingerprint 同时包含内核与独立 Node；PATH 中的社区
 CLI 不属于这个 Product Runtime。Core 内的协议翻译负责原生 NDJSON、Session/Input/Turn/Tool identity 与 callback，
-已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU；Host 复用以 Camp 为授权边界。Node prelude 的
+已有 AcpHost/Fleet 继续拥有 owner、epoch、停止、LRU；Host 复用以 Thread 为授权边界。Node prelude 的
 pipe-owned companion 在 Unix 补充回收原生 detached Bash 进程组；Windows 由原子 Job 拥有全部后代，
 以 Job 空集确认退出，不使用 Unix companion。生命周期细节由 Runtime Launch v44 拥有。
 内部 ACP shape 不改变公开协议来源。有原生后台任务的 Host 保留 Session/成员关联，禁止跨成员复用和空闲/容量回收；
@@ -755,7 +765,7 @@ DSH 的持久 Session 有进程锁；同一复用范围的配置变化先由共�
 
 Bootstrap 沿用已有 managed_system_prompt 交付模式与完整冻结字节。Core 写入 Host 私有目录中按 Native
 Session 绑定的文件，官方 systemPrompt section/variable 在每个模型步骤读取，校验 Session 与 SHA-256；
-子代理不继承 Camp 成员自身份。没有新增 Context section、字段、选择规则或 formatter/manifest 版本轴。
+子代理不继承 Thread 成员自身份。没有新增 Context section、字段、选择规则或 formatter/manifest 版本轴。
 原生 compaction 保留系统层，因此不增加文本 detector，也不把普通 assistant 文本当压缩完成信号。
 
 原生 tools/result 的同步只读 observer 为同一 Session/call 写入一次性结构化观测；Core 在共享 ACP ingress

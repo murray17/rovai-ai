@@ -1569,12 +1569,13 @@ impl CollaborationService {
     pub fn snapshot_pending_camps_for_startup_cleanup(
         &self,
         database: &Database,
+        created_before: &str,
     ) -> Result<Vec<String>> {
         let mut statement = database
             .connection()
-            .prepare("SELECT id FROM camp WHERE activation_state = 'pending' ORDER BY id")?;
+            .prepare("SELECT id FROM camp WHERE activation_state = 'pending' AND created_at < ?1 ORDER BY id LIMIT 32")?;
         Ok(statement
-            .query_map([], |row| row.get(0))?
+            .query_map([created_before], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?)
     }
 
@@ -7332,7 +7333,7 @@ mod slow_tests {
             "pending-abandoned-create",
         );
         let startup_candidates = service
-            .snapshot_pending_camps_for_startup_cleanup(&database)
+            .snapshot_pending_camps_for_startup_cleanup(&database, &chrono::Utc::now().to_rfc3339())
             .unwrap();
         let new_id = create_pending_camp(
             &service,
@@ -9266,8 +9267,17 @@ mod slow_tests {
         assert_eq!(row_count(&database, "camp"), 1);
         assert_eq!(row_count(&database, "camp_turn"), 0);
         assert_eq!(row_count(&database, "agent_run"), 1);
+        let epoch = database
+            .connection()
+            .query_row(
+                "SELECT execution_epoch FROM agent_run WHERE id=?1",
+                [&running_batch_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let current = crate::planned_shutdown::ActiveExecutionKey::new(&running_batch_id, epoch);
         let cleanup_targets = ExecutionRuntimeService::default()
-            .list_camp_runtime_cleanup_targets(&database, &camp_id)
+            .list_camp_runtime_cleanup_targets(&database, &camp_id, std::slice::from_ref(&current))
             .expect("force deletion should capture the active Runtime identity");
         assert_eq!(cleanup_targets.len(), 1);
         assert_eq!(cleanup_targets[0].adapter_kind, AdapterKind::CodexCli);
@@ -9292,6 +9302,51 @@ mod slow_tests {
             .unwrap()
             .unwrap();
         assert_eq!(runtime.count_nonterminal_agent_runs(&database).unwrap(), 0);
+        database.connection().execute(
+            "UPDATE agent_run SET cancel_requested_at='old-stop',cancel_reason_code='user_requested',cancel_acknowledged_at=NULL WHERE id=?1",
+            [&running_batch_id],
+        ).unwrap();
+        assert_eq!(
+            runtime
+                .list_camp_runtime_cleanup_targets(
+                    &database,
+                    &camp_id,
+                    std::slice::from_ref(&current)
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            runtime
+                .list_camp_runtime_cleanup_targets(&database, &camp_id, &[])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            runtime
+                .list_camp_runtime_cleanup_targets(
+                    &database,
+                    &camp_id,
+                    &[crate::planned_shutdown::ActiveExecutionKey::new(
+                        &running_batch_id,
+                        epoch + 1
+                    ),]
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT cancel_acknowledged_at IS NULL FROM agent_run WHERE id=?1",
+                    [&running_batch_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap(),
+            "selecting current cleanup targets must not fabricate a historical ACK"
+        );
         let forced = service
             .delete_camp_after_settlement(
                 &mut database,

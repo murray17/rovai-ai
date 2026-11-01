@@ -2,7 +2,7 @@
 document_type: ui-theme-index
 authority: renderer-theme-routing
 status: accepted
-last_updated: 2026-10-25
+last_updated: 2026-10-30
 ---
 
 # Renderer 主题
@@ -40,7 +40,7 @@ Theme Token → Shared Component → Surface Composition
 2. `index.html` 在 React 启动前按 `prefers-color-scheme` 写入初始 `data-theme`，避免先亮后暗。
 3. Renderer 收到 Main 的 `AppearanceSnapshot` 后，以其中 `resolvedTheme` 覆盖初始明暗模式，按 `preference` 与模式解析具体配色，
    同时更新 `data-theme-id` 和 `color-scheme`。
-4. 主题切换只更新根 Token、窗口背景与 Windows caption controls 配色；不得重新挂载页面、移动焦点，或改变 Camp、Tab、
+4. 主题切换只更新根 Token、窗口背景与 Windows caption controls 配色；不得重新挂载页面、移动焦点，或改变 Thread、Tab、
    Draft、滚动、选择、Dialog、Core/IPC 事实。
 
 实现真源是 [`theme.css`](../../../packages/ui/src/theme.css)、
@@ -50,10 +50,10 @@ Theme Token → Shared Component → Surface Composition
 ## 外观与阅读偏好
 
 外观页把主题、字号、阅读疏密、整页缩放与减少动态效果保存在 Desktop Main 的同一份本机偏好中，
-不产生 Camp、消息或 Core 领域事件。`AppearanceSnapshot` 同时提供保存的偏好与解析后的主题；
+不产生 Thread、消息或 Core 领域事件。`AppearanceSnapshot` 同时提供保存的偏好与解析后的主题；
 `AppearanceApi.updatePreferences` 只接受封闭字段的增量，主题专用入口继续保留其他阅读偏好。
 
-- 会话字号默认 13px，作用于 Camp／单聊正文与输入框；导航、消息时间、状态和操作按钮保留其原排版。
+- 会话字号默认 13px，作用于 Thread／单聊正文与输入框；导航、消息时间、状态和操作按钮保留其原排版。
 - 文档字号默认 15px，作用于 Markdown 文件正文，标题、表格与代码块等比例调整。
 - 代码字号默认 14px，作用于源码、纯文本和文件差异正文／行号。长行在阅读器内横向滚动。
 - 三种字号只接受 12–24px 的整数；标准／宽松调整正文行距与段落间距，不改变代码行距比例。
@@ -90,7 +90,8 @@ Web 使用同一外观页面、主题和阅读偏好模型，由浏览器入口�
 所有配色沿用相同消息几何与交互，不增加主题专属聚焦装饰、动画或功能。
 
 `--scrollbar-thumb` 拥有通用滚动块与 Mission 文件树底色，不复用选中区域色；
-Memory / Automation 的无彩色工作区使用 `--neutral-selected`。透明轨道、尺寸和拖动反馈保持一致。
+Memory 与 Automation 的滚动块局部使用 `--neutral-selected`；这不把 Automation 的操作色改为无彩色。
+透明轨道、尺寸和拖动反馈保持一致。
 
 `--execution-surface` 拥有执行台在底部、浮层和右侧标签中的统一阅读底色，包括头像状态背板与滚动渐隐。
 晨雾的会话使用轻暖白、执行台使用中性白；其他配色的执行台与会话底色一致。

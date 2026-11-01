@@ -2296,13 +2296,13 @@
   "模型默认": "Model default",
   "正在读取思考强度…": "Reading reasoning options…",
   "正在读取可选思考强度，当前选择仍可保存": "Reading reasoning options. Your current selection can still be saved.",
-  "暂时无法读取思考强度，已保留当前选择。": "Unable to read reasoning options. Your current selection is preserved.",
+  "思考强度尚未核对，已保留当前选择。": "Reasoning effort has not been checked. Your selection is preserved.",
   "该模型未提供可选思考档位。": "This model offers no selectable reasoning levels.",
   "正在获取模型列表…": "Fetching models…",
   "正在更新模型列表…": "Updating models…",
-  "暂时无法获取模型列表。": "Unable to fetch the model list.",
-  "暂时无法获取模型列表，请重试。": "Unable to fetch the model list. Try again.",
-  "暂时无法更新模型列表，已保留上次结果。": "Unable to update the model list. The previous result is preserved.",
+  "模型列表尚未核对。": "The model list has not been checked.",
+  "模型与参数尚未核对，已保留当前选择。": "Models and options have not been checked. Your selection is preserved.",
+  "模型与参数尚未核对，已保留上次结果。": "Models and options have not been checked. The previous result is preserved.",
   "运行参数": "Agent parameters",
   "模型、模型参数与智能体原生权限。": "Model, model parameters, and native Agent permissions.",
   "文件系统访问": "Filesystem access",
@@ -4218,5 +4218,8 @@
   "预览": "Preview",
   "保存（{0}）": "Save ({0})",
   "处理冲突": "Resolve conflict",
-  "内容又有修改，请重新处理冲突": "New edits were made. Resolve the conflict again."
+  "内容又有修改，请重新处理冲突": "New edits were made. Resolve the conflict again.",
+  "启动设置已损坏，请重新选择程序或恢复自动检测后保存。": "Startup settings are damaged. Select a program or restore automatic detection, then save.",
+  "通用环境变量无法读取。原记录已保留，请重新填写后保存。": "Shared environment variables could not be read. The original record is preserved. Enter replacement values and save.",
+  "配置异常": "Configuration error"
 }

@@ -5,7 +5,7 @@ upstream: Grok Build CLI
 authority: research-evidence-only
 status: validated
 admission: qualified
-last_updated: 2026-08-25
+last_updated: 2026-10-31
 ---
 
 # Grok Build Runtime 接入研究
@@ -28,8 +28,9 @@ Grok 不再声明或选择 `session.load` 产品能力，也不保留 `0.2.118` 
 其他 Runtime 使用。light discovery 对低于门槛或不可解析的版本 fail closed，Deep Probe / machine Ready 必须
 既看到 resume capability 对象，也对刚创建的 exact Session ID 成功调用一次 `session/resume`；不能只信广告。
 
-Grok `1.0.x` 明确拒绝 Resume 的非空 `additionalDirectories`。因此 `session/new` 继续携带 attachment root、Run tmp
-和 creation-only `_meta.rules`，`session/resume` 则固定发送 `additionalDirectories=[]`、空 `mcpServers` 且不带
+Grok Resume 拒绝非空 `additionalDirectories`；后续 `1.0.70 (f50904eaee6c)` 的 macOS arm64 原生对照也确认
+new 对非空数组返回 `-32602`，空数组与省略字段均可创建 Session。因此当前 new/resume 均发送
+`additionalDirectories=[]`；new 保留 creation-only `_meta.rules`，resume 保留空 `mcpServers` 且不带
 rules；其他 Runtime 的 Session 参数形状不变。Resume 后 attachment 与 Built-in CLI 是否仍满足运行边界必须由
 真实 cold-continuation 产品 smoke 证明，不能由 capability advertisement 推断。
 

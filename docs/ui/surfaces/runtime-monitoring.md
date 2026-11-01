@@ -1,7 +1,7 @@
 ---
 surface: runtime-monitoring
 status: current
-last_updated: 2026-09-08
+last_updated: 2026-10-30
 ---
 
 # Runtime Monitoring surface brief
@@ -51,7 +51,7 @@ The page never starts Provider reconciliation, pricing sync, retention, Runtime 
 ## Interaction and accessibility
 
 Filters have persistent visible labels, native keyboard behavior without decorative focus rings. A foreground filter request may
-show the loading state; a background failure preserves the last readable snapshot. Status and export feedback use
+show the loading state. Status and export feedback use
 appropriate live-region semantics without repeated announcements.
 
 Snapshot requests are single-flight. Poll only while the page is visible, at most once per 12 seconds. Coalesce event,
@@ -66,6 +66,6 @@ reduced-motion preferences.
 ## Authority
 
 Persistence, Coverage, Cost grain, refresh cadence and Snapshot shape are owned by the
-[Runtime Usage Monitoring v2 contract](../../../../docs/contracts/runtime-usage-monitoring-v2.md) and
-[Runtime Monitoring architecture](../../../../docs/architecture/runtime-monitoring.md). This brief owns presentation
+[Runtime Usage Monitoring v2 contract](../../contracts/runtime-usage-monitoring-v2.md) and
+[Runtime Monitoring architecture](../../architecture/runtime-monitoring.md). This brief owns presentation
 strategy only.

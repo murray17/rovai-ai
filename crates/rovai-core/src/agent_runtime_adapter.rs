@@ -1385,7 +1385,7 @@ impl AgentRuntimeAdapterRegistry {
                 Vec::new()
             },
             models: if ready {
-                pi_models(observation.raw_model_catalog.as_ref())?
+                pi_models(observation.raw_model_catalog.as_ref()).unwrap_or_default()
             } else {
                 Vec::new()
             },
@@ -1458,16 +1458,20 @@ pub fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
         return Ok(models);
     };
     for value in values {
-        let provider = value
+        let Some(provider) = value
             .get("provider")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
-            .context("Pi model catalog entry has no provider")?;
-        let model_id = value
+        else {
+            continue;
+        };
+        let Some(model_id) = value
             .get("id")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty())
-            .context("Pi model catalog entry has no id")?;
+        else {
+            continue;
+        };
         let query = form_urlencoded::Serializer::new(String::new())
             .append_pair("provider", provider)
             .append_pair("id", model_id)
@@ -1511,7 +1515,10 @@ pub fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
             options,
         });
     }
-    Ok(models)
+    if !values.is_empty() && models.len() == 1 {
+        anyhow::bail!("Pi model catalog contained no usable entries");
+    }
+    Ok(normalize_model_catalog(models))
 }
 
 #[derive(Debug, Default)]
@@ -1536,12 +1543,11 @@ impl CodexCliAdapterPolicy {
     ) -> Result<AdapterCapabilitySnapshot> {
         let ready = observation.probe_status == "ready";
         let models = if ready {
-            codex_models(
-                observation
-                    .raw_model_catalog
-                    .as_ref()
-                    .context("ready Codex probe did not return model/list")?,
-            )?
+            observation
+                .raw_model_catalog
+                .as_ref()
+                .and_then(|catalog| codex_models(catalog).ok())
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -1589,8 +1595,7 @@ impl CodexCliAdapterPolicy {
     }
 }
 
-/// Validate saved intent against evidence from the Host that will receive the input.
-/// Diagnostic catalogs must never substitute for this check.
+/// A model configuration cannot be represented by this native protocol mapping.
 #[derive(Debug)]
 pub struct LiveModelValidationError {
     pub code: &'static str,
@@ -1610,67 +1615,18 @@ impl std::fmt::Display for LiveModelValidationError {
 
 impl std::error::Error for LiveModelValidationError {}
 
-pub fn validate_live_model_selection(
-    models: &[ModelDescriptor],
-    model_id: &str,
-    options: &Value,
-) -> std::result::Result<(), LiveModelValidationError> {
-    let failure = |code, detail: String| LiveModelValidationError {
-        code,
-        model_id: model_id.to_string(),
-        detail,
-    };
-    let model = models
-        .iter()
-        .find(|model| model.id == model_id && !model.hidden && !model.deprecated)
-        .ok_or_else(|| {
-            failure(
-                "runtime_model_unavailable",
-                "the current Host did not advertise the selected model".to_string(),
-            )
-        })?;
-    let options = options.as_object().ok_or_else(|| {
-        failure(
-            "runtime_model_options_invalid",
-            "model options must be an object".to_string(),
-        )
-    })?;
-    for (key, value) in options {
-        let descriptor = model
-            .options
-            .iter()
-            .find(|option| option.key == *key)
-            .ok_or_else(|| {
-                failure(
-                    "runtime_model_option_unknown",
-                    format!("unadvertised model option: {key}"),
-                )
-            })?;
-        if !value
-            .as_str()
-            .is_some_and(|value| descriptor.values.iter().any(|choice| choice.value == value))
-        {
-            return Err(failure(
-                "runtime_model_option_invalid",
-                format!("unsupported value for model option {key}: {value}"),
-            ));
-        }
-    }
-    Ok(())
-}
-
 pub fn codex_models(catalog: &Value) -> Result<Vec<ModelDescriptor>> {
     let values = catalog
         .get("data")
         .and_then(Value::as_array)
         .context("Codex model/list catalog did not include data")?;
-    values
+    let models = values
         .iter()
-        .map(|value| {
+        .filter_map(|value| {
             let id = value
                 .get("id")
                 .and_then(Value::as_str)
-                .context("Codex model is missing id")?;
+                .filter(|id| !id.trim().is_empty())?;
             let display_name = value
                 .get("displayName")
                 .and_then(Value::as_str)
@@ -1704,7 +1660,7 @@ pub fn codex_models(catalog: &Value) -> Result<Vec<ModelDescriptor>> {
                     scope: RuntimeOptionScope::Run,
                 }]
             };
-            Ok(ModelDescriptor {
+            Some(ModelDescriptor {
                 description: None,
                 runtime_metadata: None,
                 id: id.to_string(),
@@ -1723,7 +1679,108 @@ pub fn codex_models(catalog: &Value) -> Result<Vec<ModelDescriptor>> {
                 options,
             })
         })
-        .collect()
+        .collect();
+    let models = normalize_model_catalog(models);
+    anyhow::ensure!(
+        !models.is_empty(),
+        "Codex model catalog contained no usable entries"
+    );
+    Ok(models)
+}
+
+pub fn model_catalog_has_usable_entries(models: &[ModelDescriptor]) -> bool {
+    models
+        .iter()
+        .any(|model| !model.id.trim().is_empty() && !model.id.ends_with("://runtime-default"))
+}
+
+/// Catalogs are discovery data. Merge repeated native IDs and salvage each usable
+/// model/option independently; the native Runtime owns execution acceptance.
+pub fn normalize_model_catalog(models: Vec<ModelDescriptor>) -> Vec<ModelDescriptor> {
+    let mut merged: Vec<ModelDescriptor> = Vec::new();
+    for mut model in models {
+        if model.id.trim().is_empty() {
+            continue;
+        }
+        if model.display_name.trim().is_empty() {
+            model.display_name.clone_from(&model.id);
+        }
+        model.runtime_metadata = model.runtime_metadata.filter(Value::is_object);
+        if let Some(existing) = merged.iter_mut().find(|entry| entry.id == model.id) {
+            if existing.display_name == existing.id && model.display_name != model.id {
+                existing.display_name = model.display_name;
+            }
+            if existing
+                .description
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+            {
+                existing.description = model.description;
+            }
+            match (&mut existing.runtime_metadata, model.runtime_metadata) {
+                (Some(Value::Object(old)), Some(Value::Object(new))) => old.extend(new),
+                (old @ None, new) => *old = new,
+                _ => {}
+            }
+            existing.is_default |= model.is_default;
+            existing.hidden &= model.hidden;
+            existing.deprecated &= model.deprecated;
+            existing.options.extend(model.options);
+        } else {
+            merged.push(model);
+        }
+    }
+    for model in &mut merged {
+        let mut options: Vec<ModelOptionDescriptor> = Vec::new();
+        for mut option in std::mem::take(&mut model.options) {
+            if option.key.trim().is_empty() || option.value_type != "enum" {
+                continue;
+            }
+            if option.label.trim().is_empty() {
+                option.label.clone_from(&option.key);
+            }
+            if let Some(existing) = options.iter_mut().find(|entry| entry.key == option.key) {
+                existing.values.extend(option.values);
+                if existing.default_value.is_none() {
+                    existing.default_value = option.default_value;
+                }
+            } else {
+                options.push(option);
+            }
+        }
+        for option in &mut options {
+            let mut values: Vec<ValueChoice> = Vec::new();
+            for mut value in std::mem::take(&mut option.values) {
+                if value.value.trim().is_empty() {
+                    continue;
+                }
+                if value.label.trim().is_empty() {
+                    value.label.clone_from(&value.value);
+                }
+                if let Some(existing) = values.iter_mut().find(|entry| entry.value == value.value) {
+                    if existing.label == existing.value {
+                        existing.label = value.label;
+                    }
+                } else {
+                    values.push(value);
+                }
+            }
+            option.default_value = option
+                .default_value
+                .take()
+                .filter(|value| !value.trim().is_empty());
+            // A native current/default value is useful even when its enum omits it.
+            if let Some(default) = &option.default_value
+                && !values.iter().any(|entry| &entry.value == default)
+            {
+                values.push(choice(default, default));
+            }
+            option.values = values;
+        }
+        options.retain(|option| !option.values.is_empty());
+        model.options = options;
+    }
+    merged
 }
 
 fn humanize_identifier(value: &str) -> String {
@@ -1904,7 +1961,6 @@ pub fn claude_code_models(response: &Value) -> Result<Vec<ModelDescriptor>> {
         .context(
             "claude_model_catalog_incompatible: model query did not return a non-empty models array",
         )?;
-    let mut seen = std::collections::BTreeSet::new();
     let mut models = vec![ModelDescriptor {
         id: CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
         display_name: "Claude Code runtime default".to_string(),
@@ -1916,17 +1972,15 @@ pub fn claude_code_models(response: &Value) -> Result<Vec<ModelDescriptor>> {
         options: Vec::new(),
     }];
     for row in rows {
-        let id = row
+        let Some(id) = row
             .get("value")
             .and_then(Value::as_str)
             .filter(|value| !value.trim().is_empty() && !value.chars().any(char::is_control))
-            .context(
-                "claude_model_catalog_incompatible: model entry has no valid selection value",
-            )?;
-        if id == CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID || !seen.insert(id) {
-            anyhow::bail!(
-                "claude_model_catalog_incompatible: duplicate or reserved selection value"
-            );
+        else {
+            continue;
+        };
+        if id == CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID {
+            continue;
         }
         let mut options = Vec::new();
         if row.get("supportsEffort").and_then(Value::as_bool) != Some(false)
@@ -1935,14 +1989,11 @@ pub fn claude_code_models(response: &Value) -> Result<Vec<ModelDescriptor>> {
         {
             let values = levels
                 .iter()
-                .map(|level| {
-                    let value = level
-                        .as_str()
-                        .filter(|value| !value.trim().is_empty())
-                        .context("claude_model_catalog_incompatible: invalid effort level")?;
-                    Ok(choice(value, value))
+                .filter_map(|level| {
+                    let value = level.as_str().filter(|value| !value.trim().is_empty())?;
+                    Some(choice(value, value))
                 })
-                .collect::<Result<Vec<_>>>()?;
+                .collect::<Vec<_>>();
             options.push(ModelOptionDescriptor {
                 key: "effort".to_string(),
                 label: "effort".to_string(),
@@ -1974,7 +2025,11 @@ pub fn claude_code_models(response: &Value) -> Result<Vec<ModelDescriptor>> {
             options,
         });
     }
-    Ok(models)
+    anyhow::ensure!(
+        models.len() > 1,
+        "claude_model_catalog_incompatible: no usable model entries"
+    );
+    Ok(normalize_model_catalog(models))
 }
 
 /// Survives retained-LKG projection, which deliberately drops current capability evidence.
@@ -2019,16 +2074,7 @@ impl ClaudeCodeCliAdapterPolicy {
         capabilities.sort();
         capabilities.dedup();
         let models = if ready {
-            if !claude_code_catalog_has_native_evidence(&observation.models)
-                || !capabilities
-                    .iter()
-                    .any(|value| value == CLAUDE_MODEL_CATALOG_CAPABILITY)
-            {
-                anyhow::bail!(
-                    "Claude Code ready snapshot requires an initialization model catalog"
-                );
-            }
-            observation.models
+            normalize_model_catalog(observation.models)
         } else {
             Vec::new()
         };
@@ -2139,7 +2185,6 @@ pub fn trae_machine_ready_requirements() -> Vec<String> {
         "executable.fingerprint",
         "acp.initialize",
         "session.new",
-        "model.dynamic_catalog",
         "permission.mode_catalog",
         "session.config_shape",
     ]
@@ -2174,7 +2219,7 @@ pub fn antigravity_models(model_ids: Vec<String>) -> Vec<ModelDescriptor> {
             options: Vec::new(),
         });
     }
-    models
+    normalize_model_catalog(models)
 }
 
 pub fn pi_machine_ready_requirements() -> Vec<String> {
@@ -2183,7 +2228,6 @@ pub fn pi_machine_ready_requirements() -> Vec<String> {
         "pi.rpc.host",
         "pi.rpc.managed_extension",
         "pi.rpc.get_state",
-        "model.dynamic_catalog",
         "session.new",
     ]
     .into_iter()
@@ -2291,31 +2335,14 @@ pub fn validate_machine_ready_snapshot(
                 .executable_fingerprint
                 .as_deref()
                 .is_none_or(str::is_empty)
-            || snapshot.models.is_empty()
             || snapshot.permission_options != dsh_permission_options()
-            || ![
-                "acp.initialize",
-                "session.new",
-                "session.resume",
-                "dsh.model_catalog",
-            ]
-            .iter()
-            .all(|required| snapshot.capabilities.iter().any(|value| value == required))
+            || !["acp.initialize", "session.new", "session.resume"]
+                .iter()
+                .all(|required| snapshot.capabilities.iter().any(|value| value == required))
         {
             anyhow::bail!(
-                "DeepSeek Harness ready snapshot requires a supported CLI version, grouped native model catalog and exact Session resume"
+                "DeepSeek Harness ready snapshot requires a supported CLI version, exact Session resume"
             );
-        }
-        return Ok(());
-    }
-    if adapter_kind == AdapterKind::ClaudeCodeCli && snapshot.probe_status == "ready" {
-        if !snapshot
-            .capabilities
-            .iter()
-            .any(|value| value == CLAUDE_MODEL_CATALOG_CAPABILITY)
-            || !claude_code_catalog_has_native_evidence(&snapshot.models)
-        {
-            anyhow::bail!("Claude Code ready snapshot requires an initialization model catalog");
         }
         return Ok(());
     }
@@ -2330,10 +2357,6 @@ pub fn validate_machine_ready_snapshot(
                 .protocols
                 .iter()
                 .any(|protocol| protocol == PI_MACHINE_PROTOCOL)
-            && snapshot
-                .models
-                .iter()
-                .any(|model| model.id == PI_RUNTIME_DEFAULT_MODEL_ID && model.is_default)
             && snapshot.permission_options.is_empty()
             && snapshot.native_session_compatibility_key.as_deref()
                 == Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY);
@@ -2359,7 +2382,6 @@ pub fn validate_machine_ready_snapshot(
                     .iter()
                     .any(|value| value == capability)
             })
-            && !snapshot.models.is_empty()
             && !snapshot.permission_options.is_empty();
         if !complete {
             anyhow::bail!(
@@ -2375,7 +2397,6 @@ pub fn validate_machine_ready_snapshot(
             &snapshot.capabilities,
         )?;
         if snapshot.authentication_status != "authenticated"
-            || snapshot.models.is_empty()
             || snapshot.permission_options.is_empty()
         {
             anyhow::bail!("Grok Build ready snapshot does not satisfy the machine Ready contract");
@@ -2390,10 +2411,7 @@ pub fn validate_machine_ready_snapshot(
         snapshot.executable_fingerprint.as_deref(),
         &snapshot.capabilities,
     )?;
-    if snapshot.authentication_status != "authenticated"
-        || snapshot.models.is_empty()
-        || snapshot.permission_options.is_empty()
-    {
+    if snapshot.authentication_status != "authenticated" || snapshot.permission_options.is_empty() {
         anyhow::bail!("TRAE ready snapshot does not satisfy the machine Ready contract");
     }
     Ok(())
@@ -2486,34 +2504,7 @@ fn acp_capability_snapshot(
     let session_result = observation.session_result.as_ref();
     let mut models = if ready {
         let session = session_result.context("ready ACP probe did not create a session")?;
-        match acp_model_catalog_for_adapter(adapter_kind, session) {
-            Ok(models) => models,
-            // Hermes owns native default and explicit model selection. A
-            // missing picker must not turn a successful Session into a failure.
-            Err(_) if adapter_kind == AdapterKind::HermesCli => Vec::new(),
-            Err(_)
-                if matches!(
-                    adapter_kind,
-                    AdapterKind::CopilotCli
-                        | AdapterKind::QoderCli
-                        | AdapterKind::CodebuddyCli
-                        | AdapterKind::QwenCode
-                        | AdapterKind::CursorAgent
-                ) =>
-            {
-                vec![ModelDescriptor {
-                    description: None,
-                    runtime_metadata: None,
-                    id: format!("{}://runtime-default", adapter_kind.as_str()),
-                    display_name: format!("{} runtime default", adapter_kind.as_str()),
-                    is_default: true,
-                    hidden: false,
-                    deprecated: false,
-                    options: Vec::new(),
-                }]
-            }
-            Err(error) => return Err(error),
-        }
+        acp_model_catalog_for_adapter(adapter_kind, session).unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -2792,26 +2783,24 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
     let mut flattened = Vec::new();
     for value in values {
         if value.get("group").is_some() {
-            flattened.extend(
-                value
-                    .get("options")
-                    .and_then(Value::as_array)
-                    .context("ACP model group has no options")?
-                    .iter()
-                    .cloned(),
-            );
+            if let Some(options) = value.get("options").and_then(Value::as_array) {
+                flattened.extend(options.iter().cloned());
+            }
         } else {
             flattened.push(value);
         }
     }
     let mut models = Vec::new();
     for value in flattened {
-        let id = value
+        let Some(id) = value
             .get("modelId")
             .or_else(|| value.get("value"))
             .or_else(|| value.get("id"))
             .and_then(Value::as_str)
-            .context("ACP model is missing an identifier")?;
+            .filter(|id| !id.trim().is_empty())
+        else {
+            continue;
+        };
         let display_name = value
             .get("name")
             .or_else(|| value.get("displayName"))
@@ -2819,8 +2808,11 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
             .and_then(Value::as_str)
             .unwrap_or(id);
         models.push(ModelDescriptor {
-            description: None,
-            runtime_metadata: None,
+            description: value
+                .get("description")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            runtime_metadata: value.get("_meta").cloned(),
             id: id.to_string(),
             display_name: display_name.to_string(),
             is_default: current_model.as_deref() == Some(id),
@@ -2832,6 +2824,7 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
     if models.is_empty() {
         anyhow::bail!("ACP model groups advertised no models");
     }
+    let mut models = normalize_model_catalog(models);
     models.sort_by(|left, right| {
         right
             .is_default
@@ -2862,7 +2855,12 @@ pub fn acp_model_catalog_for_adapter(
                 .pointer("/_meta/rovaiMinimaxModelOptions")
                 .and_then(|all| all.get(&model.id))
             {
-                serde_json::from_value(options.clone())?
+                options
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|option| serde_json::from_value(option.clone()).ok())
+                    .collect()
             } else if current.as_deref() == Some(model.id.as_str()) {
                 effort.clone().into_iter().collect()
             } else {
@@ -2896,32 +2894,14 @@ pub fn acp_model_catalog_for_adapter(
         );
     }
     if adapter_kind == AdapterKind::DeepseekHarness {
-        if let Some(option) = session_result
-            .get("configOptions")
-            .and_then(Value::as_array)
-            .and_then(|options| {
-                options
-                    .iter()
-                    .find(|option| option["id"] == "reasoning_effort")
-            })
-        {
-            anyhow::ensure!(
-                option
-                    .get("options")
-                    .and_then(Value::as_array)
-                    .is_some_and(|choices| choices
-                        .iter()
-                        .all(|choice| choice.get("value").and_then(Value::as_str).is_some())),
-                "DSH returned malformed reasoning options"
-            );
-        }
         let current = acp_runtime_model_id_from_session(session_result);
         for model in &mut models {
             // ACP configOptions describe the selected model, not the catalog.
             if current.as_deref() != Some(&model.id) {
                 model.options.clear();
             } else {
-                model.runtime_metadata = Some(json!({"dshOptionsResolved": true}));
+                model.runtime_metadata.get_or_insert_with(|| json!({}))["dshOptionsResolved"] =
+                    json!(true);
                 for option in &mut model.options {
                     // Empty is DSH's provider-default sentinel. Rovai represents
                     // model default by omitting the override altogether.
@@ -2984,7 +2964,7 @@ pub fn acp_model_catalog_for_adapter(
                 .then_with(|| left.display_name.cmp(&right.display_name))
         });
     }
-    Ok(models)
+    Ok(normalize_model_catalog(models))
 }
 
 /// A model switch returns the complete option state. Never retain the previous
@@ -3009,47 +2989,6 @@ pub fn dsh_model_config_after_selection(
         session["models"]["currentModelId"] = json!(requested_model);
     }
     Ok(session)
-}
-
-pub fn validate_dsh_model_options(session: &Value, model_id: &str, options: &Value) -> Result<()> {
-    let models = acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, session)?;
-    validate_live_model_selection(&models, model_id, options).map_err(|mut error| {
-        let reasoning = models
-            .iter()
-            .find(|model| model.id == model_id)
-            .and_then(|model| {
-                model
-                    .options
-                    .iter()
-                    .find(|option| option.key == "reasoning_effort")
-            })
-            .map(|option| option.values.as_slice())
-            .unwrap_or_default();
-        if let Some(value) = options.get("reasoning_effort")
-            && !reasoning
-                .iter()
-                .any(|choice| value.as_str() == Some(choice.value.as_str()))
-            && matches!(
-                error.code,
-                "runtime_model_option_unknown" | "runtime_model_option_invalid"
-            )
-        {
-            let choices = reasoning
-                .iter()
-                .map(|choice| choice.value.as_str())
-                .collect::<Vec<_>>()
-                .join(" / ");
-            let choices = if choices.is_empty() {
-                "无可选档位"
-            } else {
-                choices.as_str()
-            };
-            error.detail = format!(
-                "{model_id} 不支持当前设置的 {value}。可选档位：{choices}；也可使用“模型默认”。"
-            );
-        }
-        anyhow::Error::new(error)
-    })
 }
 
 fn acp_model_option(option: &Value) -> Option<ModelOptionDescriptor> {
@@ -4041,6 +3980,88 @@ mod tests {
 
     #[test]
     fn grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs() {
+        let acp = json!({"models":{"currentModelId":"absent-default", "availableModels":[
+            {"modelId":"auto"}, {"modelId":"auto","name":"Auto","description":"native auto","_meta":{"provider":"native"}},
+            {}, {"modelId":""}, {"modelId":"valid"}, {"group":"broken","options":false}
+        ]}, "configOptions":[
+            {"id":"reasoning_effort","currentValue":"future","options":[{"value":"high"},{"value":"high"},{"value":false}]},
+            {"id":"reasoning_effort","options":[{"value":"low"}]}
+        ]});
+        let catalogs = [
+            acp_model_catalog_for_adapter(AdapterKind::CopilotCli, &acp).unwrap(),
+            acp_model_catalog_for_adapter(AdapterKind::QwenCode, &acp).unwrap(),
+            codex_models(&json!({"data":[{"id":"auto"},{"id":"auto"},{},{"id":"valid"}]})).unwrap(),
+            claude_code_models(&json!({"models":[{"value":"auto"},{"value":"auto","supportedEffortLevels":["high",false,"high"]},{},{"value":"valid"}]})).unwrap(),
+            pi_models(Some(&json!([{"provider":"p","id":"auto"},{"provider":"p","id":"auto"},{},{"provider":"p","id":"valid"}]))).unwrap(),
+            antigravity_models(vec!["auto".into(), "auto".into(), "".into(), "valid".into()]),
+        ];
+        for models in &catalogs {
+            let selectable = models
+                .iter()
+                .filter(|model| !model.id.ends_with("://runtime-default"))
+                .collect::<Vec<_>>();
+            assert_eq!(selectable.len(), 2, "{models:?}");
+            assert_eq!(
+                normalize_model_catalog(models.clone()),
+                *models,
+                "normalization is idempotent"
+            );
+        }
+        let auto = catalogs[0].iter().find(|model| model.id == "auto").unwrap();
+        assert_eq!(auto.display_name, "Auto");
+        assert_eq!(
+            auto.runtime_metadata.as_ref().unwrap()["provider"],
+            "native"
+        );
+        assert_eq!(
+            auto.options[0].values,
+            vec![
+                choice("high", "high"),
+                choice("low", "low"),
+                choice("future", "future")
+            ]
+        );
+        // Native per-entry metadata is optional; malformed metadata cannot
+        // poison a DSH catalog or hide valid metadata from a duplicate entry.
+        for invalid in [
+            json!("bad"),
+            json!([]),
+            json!([1]),
+            json!(42),
+            json!(true),
+            Value::Null,
+        ] {
+            let session = json!({"models":{"currentModelId":"current", "availableModels":[
+                {"modelId":"current", "_meta":{"provider":"current-provider"}},
+                {"modelId":"partial", "_meta":invalid},
+                {"modelId":"duplicate", "_meta":invalid},
+                {"modelId":"duplicate", "_meta":{"provider":"retained-provider"}}
+            ]}, "_meta":{"rovaiDshModels":{"webProviders":[],"rejectedProviders":[],"diagnostics":[]},
+                "rovaiDshOptionsContext":"context-a"}});
+            let models =
+                acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &session).unwrap();
+            assert_eq!(models.len(), 3);
+            assert!(
+                models
+                    .iter()
+                    .all(|model| model.runtime_metadata.as_ref().unwrap()["dshSource"] == "native")
+            );
+            for (id, provider) in [
+                ("current", "current-provider"),
+                ("duplicate", "retained-provider"),
+            ] {
+                assert_eq!(
+                    models
+                        .iter()
+                        .find(|model| model.id == id)
+                        .unwrap()
+                        .runtime_metadata
+                        .as_ref()
+                        .unwrap()["provider"],
+                    provider
+                );
+            }
+        }
         let observation = AcpProbeObservation {
             adapter_kind: AdapterKind::HermesCli,
             reported_version: Some("0.22.4".into()),
@@ -4158,14 +4179,6 @@ mod tests {
             models[1].options.is_empty(),
             "effort must not leak across models"
         );
-        assert!(
-            validate_live_model_selection(
-                &models,
-                &models[0].id,
-                &json!({"thinkingEffort":"ultra"})
-            )
-            .is_err()
-        );
         let custom = json!({"models":{"currentModelId":"private-provider/custom-model","availableModels":[{"modelId":"builtin-model","name":"Builtin"}]}});
         let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();
         assert_eq!(command[0].id, "command-code-cli://runtime-default");
@@ -4212,16 +4225,16 @@ mod tests {
         ]});
         assert!(dsh_model_config_after_selection(&initial, &selected, native_id).is_err());
         let selected = dsh_model_config_after_selection(&initial, &selected, web_id).unwrap();
-        validate_dsh_model_options(&selected, web_id, &json!({"reasoning_effort":"xhigh"}))
-            .unwrap();
-        validate_dsh_model_options(&selected, web_id, &json!({})).unwrap();
-        let error =
-            validate_dsh_model_options(&selected, web_id, &json!({"reasoning_effort":"max"}))
-                .unwrap_err()
-                .to_string();
-        assert!(
-            error.contains(web_id) && error.contains("max") && error.contains("high / xhigh"),
-            "{error}"
+        let selected_models =
+            acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &selected).unwrap();
+        assert_eq!(
+            selected_models
+                .iter()
+                .find(|model| model.id == web_id)
+                .unwrap()
+                .options[0]
+                .values,
+            vec![choice("high", "high"), choice("xhigh", "xhigh")]
         );
         let no_effort = dsh_model_config_after_selection(
             &selected,
@@ -4239,22 +4252,12 @@ mod tests {
                 .options
                 .is_empty()
         );
-        assert!(
-            validate_dsh_model_options(&no_effort, web_id, &json!({"reasoning_effort":"high"}))
-                .is_err()
-        );
-        validate_dsh_model_options(&no_effort, web_id, &json!({})).unwrap();
         let malformed = json!({"configOptions":[selected["configOptions"][0].clone(),
             {"id":"reasoning_effort","options":[{"value":false}]}]});
-        assert!(acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &malformed).is_err());
-        let unrelated = validate_dsh_model_options(
-            &selected,
-            web_id,
-            &json!({"reasoning_effort":"high","unknown":"value"}),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(unrelated.contains("unknown") && !unrelated.contains("不支持当前设置"));
+        let salvaged =
+            acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &malformed).unwrap();
+        assert_eq!(salvaged.len(), 2);
+        assert!(salvaged.iter().all(|model| model.options.is_empty()));
         let session = json!({"configOptions":[{"id":"model","options":[
             {"group":"native","options":[{"value":native_id,"name":"Same"}]},
             {"group":"web","options":[{"value":web_id,"name":"Same"}]}
@@ -4284,7 +4287,6 @@ mod tests {
             acp_model_catalog_for_adapter(AdapterKind::DeepseekHarness, &rejected).unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].id, native_id);
-        assert!(validate_live_model_selection(&models, web_id, &json!({})).is_err());
         // Once the supplement is withdrawn, ACP may still advertise a native
         // model with that ID. It stays selectable with its native provenance.
         rejected["_meta"]["rovaiDshModels"]["webProviders"] = json!([]);
@@ -4694,6 +4696,10 @@ mod tests {
                 }
             );
             if let Some(levels) = expected {
+                if levels.is_empty() {
+                    assert!(descriptor.options.is_empty());
+                    continue;
+                }
                 let option = &descriptor.options[0];
                 assert_eq!(option.key, "thinking_level");
                 assert_eq!(option.scope, RuntimeOptionScope::Session);
@@ -5171,12 +5177,7 @@ mod tests {
                 last_error: None,
             })
             .expect("Copilot ACP may delegate model choice to its runtime default");
-        assert_eq!(runtime_default.models.len(), 1);
-        assert_eq!(
-            runtime_default.models[0].id,
-            "copilot-cli://runtime-default"
-        );
-        assert!(runtime_default.models[0].is_default);
+        assert!(runtime_default.models.is_empty());
     }
 
     #[test]
@@ -5470,16 +5471,14 @@ mod tests {
         legacy
             .capabilities
             .retain(|value| value != CLAUDE_MODEL_CATALOG_CAPABILITY);
-        assert!(validate_machine_ready_snapshot(AdapterKind::ClaudeCodeCli, &legacy).is_err());
+        validate_machine_ready_snapshot(AdapterKind::ClaudeCodeCli, &legacy).unwrap();
         for invalid in [
             json!({"model":"current-model"}),
             json!({}),
             json!({"models":[]}),
             json!({"models":[{"value":""}]}),
             json!({"models":[{"id":"not-a-selection-value"}]}),
-            json!({"models":[{"value":"same"},{"value":"same"}]}),
             json!({"models":[{"value":CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID}]}),
-            json!({"models":[{"value":"valid","supportedEffortLevels":[1]}]}),
         ] {
             assert!(claude_code_models(&invalid).is_err(), "{invalid}");
         }

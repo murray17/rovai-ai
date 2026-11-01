@@ -952,24 +952,13 @@ struct RuntimeOwnerRecordStore {
 
 impl RuntimeOwnerRecordStore {
     fn new(data_dir: &Path) -> Result<Self> {
-        let fleet_root = data_dir.join("runtime-fleet");
-        let root = fleet_root.join("owners");
-        #[cfg(windows)]
-        {
-            // Core already owns admission of its data root. These internal
-            // records need ordinary file access, not permission to change ACLs.
-            std::fs::create_dir_all(&root)?;
-        }
-        #[cfg(not(windows))]
-        {
-            crate::platform::prepare_private_directory(&fleet_root)?;
-            crate::platform::prepare_private_directory(&root)?;
-        }
+        // Historical storage is not startup authority. Prepare storage only
+        // when a new owned process actually needs to write its record.
+        let root = data_dir.join("runtime-fleet/owners");
         let store = Self {
             root,
             core_generation: uuid::Uuid::new_v4().to_string(),
         };
-        store.cleanup_stale();
         Ok(store)
     }
 
@@ -980,10 +969,16 @@ impl RuntimeOwnerRecordStore {
     fn write_record(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         #[cfg(windows)]
         {
+            std::fs::create_dir_all(&self.root)?;
             crate::platform::private_storage::atomic_write_bytes(path, bytes)
         }
         #[cfg(not(windows))]
         {
+            crate::platform::prepare_private_directory(
+                self.root
+                    .parent()
+                    .context("Fleet owner directory has no parent")?,
+            )?;
             crate::platform::private_storage::atomic_write_private_bytes(path, bytes)
         }
     }
@@ -1048,7 +1043,6 @@ impl RuntimeOwnerRecordStore {
     }
 
     fn confirmed_stop(&self, key: &RunLeaseKey) -> bool {
-        self.cleanup_stale();
         let Ok(entries) = std::fs::read_dir(&self.root) else {
             return false;
         };
@@ -1142,65 +1136,109 @@ impl RuntimeOwnerRecordStore {
             .count()
     }
 
-    fn cleanup_stale(&self) {
-        let Ok(entries) = std::fs::read_dir(&self.root) else {
+    fn cleanup_stale(&self, report: &mut crate::managed_process::HistoricalProcessCleanup) {
+        if report.expired() {
             return;
+        }
+        let entries = match std::fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => {
+                report.skip("fleet_directory", error);
+                return;
+            }
         };
-        for entry in entries.flatten() {
-            if entry.path().extension().is_none_or(|ext| ext != "json") {
-                continue;
+        for entry in entries {
+            if report.expired() {
+                break;
             }
-            let path = entry.path();
-            let record = std::fs::read(&path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<RuntimeOwnerRecord>(&bytes).ok());
-            let mut remove_record = record.is_none();
-            if let Some(mut _record) = record {
-                if _record.reaped {
-                    continue;
+            let result = (|| -> Result<bool> {
+                let entry = entry?;
+                if entry.path().extension().is_none_or(|ext| ext != "json") {
+                    return Ok(false);
+                }
+                anyhow::ensure!(
+                    entry.file_type()?.is_file() && entry.metadata()?.len() <= 2 * 1024 * 1024,
+                    "unsupported Fleet ownership file"
+                );
+                let path = entry.path();
+                let mut record: RuntimeOwnerRecord =
+                    serde_json::from_slice(&std::fs::read(&path)?)?;
+                if record.core_generation == self.core_generation || record.reaped {
+                    return Ok(false);
                 }
                 #[cfg(unix)]
-                if _record.core_generation != self.core_generation
-                    && _record.pid > 1
-                    && _record.pid != std::process::id()
-                    && unsafe { libc::getpgid(_record.pid as i32) == _record.process_group_id }
-                    && _record.process_start_identity.is_some_and(|expected| {
-                        owner_process_start_identity(_record.pid) == Some(expected)
-                    })
-                    && owner_process_matches(_record.pid, &_record.executable_path)
                 {
-                    unsafe {
-                        libc::killpg(_record.process_group_id, libc::SIGKILL);
+                    anyhow::ensure!(
+                        record.pid > 1
+                            && record.pid <= i32::MAX as u32
+                            && record.process_group_id > 1
+                            && record.pid != std::process::id(),
+                        "invalid historical Fleet process identity"
+                    );
+                    let deadline = report.record_deadline();
+                    let mut signalled = false;
+                    loop {
+                        anyhow::ensure!(
+                            std::time::Instant::now() < deadline,
+                            "historical Fleet process cleanup timed out"
+                        );
+                        let group = unsafe { libc::getpgid(record.pid as i32) };
+                        if group == -1 {
+                            let error = std::io::Error::last_os_error();
+                            if error.raw_os_error() == Some(libc::ESRCH) {
+                                break;
+                            }
+                            return Err(error.into());
+                        }
+                        let expected = record
+                            .process_start_identity
+                            .context("historical Fleet process start identity missing")?;
+                        let observed = owner_process_start_identity(record.pid)
+                            .context("historical Fleet process identity unavailable")?;
+                        if observed != expected {
+                            // The old process is gone; never signal the reused PID.
+                            break;
+                        }
+                        anyhow::ensure!(
+                            group == record.process_group_id
+                                && owner_process_matches(record.pid, &record.executable_path),
+                            "historical Fleet process ownership could not be confirmed"
+                        );
+                        if !signalled {
+                            if unsafe { libc::killpg(group, libc::SIGKILL) } != 0 {
+                                let error = std::io::Error::last_os_error();
+                                if error.raw_os_error() != Some(libc::ESRCH) {
+                                    return Err(error.into());
+                                }
+                            }
+                            signalled = true;
+                        }
+                        std::thread::sleep(
+                            Duration::from_millis(20)
+                                .min(deadline.saturating_duration_since(std::time::Instant::now())),
+                        );
                     }
-                }
-                #[cfg(unix)]
-                if unsafe { libc::getpgid(_record.pid as i32) == -1 } {
-                    remove_record = true;
-                }
-                #[cfg(windows)]
-                {
-                    // Neither a missing Job nor ActiveProcesses=0 proves that
-                    // every process handle has signaled. A restarted Core lacks
-                    // the original owner's complete membership/exit witnesses.
-                    // Scoped records require the durable receipt above.
-                    remove_record = _record.run_lease.is_none();
-                }
-                #[cfg(not(any(unix, windows)))]
-                {
-                    // Legacy records have no scoped cleanup obligation. A new
-                    // scoped record needs positive process-exit evidence.
-                    remove_record = _record.run_lease.is_none();
-                }
-                if remove_record && _record.run_lease.is_some() {
-                    _record.reaped = true;
-                    if let Ok(data) = serde_json::to_vec(&_record) {
-                        let _ = self.write_record(&path, &data);
+                    if record.run_lease.is_some() {
+                        record.reaped = true;
+                        self.write_record(&path, &serde_json::to_vec(&record)?)?;
+                    } else {
+                        std::fs::remove_file(path)?;
                     }
-                    remove_record = false;
+                    Ok(true)
                 }
-            }
-            if remove_record {
-                let _ = std::fs::remove_file(path);
+                #[cfg(not(unix))]
+                {
+                    // No original Job handle survives this Core restart. Keep
+                    // the old record honestly unconfirmed; it does not gate work.
+                    let _ = &mut record;
+                    anyhow::bail!("historical Fleet process has no current owned handle")
+                }
+            })();
+            match result {
+                Ok(true) => report.cleaned += 1,
+                Ok(false) => {}
+                Err(error) => report.skip("fleet_record", error),
             }
         }
     }
@@ -1377,6 +1415,33 @@ fn owner_process_arguments(pid: u32) -> Option<Vec<PathBuf>> {
 }
 
 impl AgentRuntimeFleetManager {
+    pub(crate) fn recover_previous_processes(
+        &self,
+        report: &mut crate::managed_process::HistoricalProcessCleanup,
+    ) {
+        if let Some(records) = &self.owner_records {
+            records.cleanup_stale(report);
+        }
+    }
+
+    /// Includes launch reservations and unreaped stops; never scans old files.
+    pub(crate) async fn active_execution_keys(
+        &self,
+    ) -> Vec<crate::planned_shutdown::ActiveExecutionKey> {
+        self.state
+            .lock()
+            .await
+            .process_by_run
+            .keys()
+            .map(|key| {
+                crate::planned_shutdown::ActiveExecutionKey::new(
+                    &key.agent_run_id,
+                    key.execution_epoch,
+                )
+            })
+            .collect()
+    }
+
     #[cfg(all(test, feature = "extended-tests"))]
     pub(crate) fn new(config: AgentRuntimeFleetConfig) -> Self {
         Self::with_owner_records(config, None, Arc::new(BuiltinToolLeaseRegistry::default()))
@@ -2003,17 +2068,21 @@ impl AgentRuntimeFleetManager {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
         };
-        let persisted_reap = self
-            .owner_records
-            .as_ref()
-            .is_some_and(|records| records.confirmed_stop(&key));
         let plan = {
             let Ok(_operation) = timeout_at(deadline, self.operations.lock()).await else {
                 return FleetReleaseOutcome::ReapUnconfirmed;
             };
             let mut state = self.state.lock().await;
             let Some(id) = state.process_by_run.get(&key).cloned() else {
-                return if state.reaped_leases.contains(&key) || persisted_reap {
+                let reaped = state.reaped_leases.contains(&key);
+                drop(state);
+                drop(_operation);
+                return if reaped
+                    || self
+                        .owner_records
+                        .as_ref()
+                        .is_some_and(|records| records.confirmed_stop(&key))
+                {
                     FleetReleaseOutcome::Reaped
                 } else {
                     FleetReleaseOutcome::NoMatchingLease
@@ -3862,6 +3931,60 @@ mod tests {
             FleetReleaseOutcome::NoMatchingLease
         );
 
+        #[cfg(unix)]
+        {
+            // Construction and a task-local stop must leave unrelated history
+            // alone. Only the explicit startup worker attempts it, per record.
+            let stale = RuntimeOwnerRecord {
+                pid: i32::MAX as u32,
+                process_group_id: i32::MAX,
+                reaped: false,
+                ..record.clone()
+            };
+            let stale_path = store.record_path("stale-host");
+            store
+                .write_record(&stale_path, &serde_json::to_vec(&stale).unwrap())
+                .unwrap();
+            let corrupt_path = store.record_path("corrupt-host");
+            store
+                .write_record(&corrupt_path, b"broken historical record")
+                .unwrap();
+            let restarted = RuntimeOwnerRecordStore::new(&root).unwrap();
+            assert!(!restarted.confirmed_stop(&key));
+            assert!(
+                !serde_json::from_slice::<RuntimeOwnerRecord>(&std::fs::read(&stale_path).unwrap())
+                    .unwrap()
+                    .reaped
+            );
+            let mut exhausted =
+                crate::managed_process::HistoricalProcessCleanup::new(Duration::ZERO);
+            restarted.cleanup_stale(&mut exhausted);
+            assert!(exhausted.budget_exhausted);
+            assert_eq!(exhausted.cleaned, 0);
+            let current = RuntimeOwnerRecord {
+                core_generation: restarted.core_generation.clone(),
+                run_lease: None,
+                ..stale
+            };
+            let current_path = restarted.record_path("current-host");
+            let current_bytes = serde_json::to_vec(&current).unwrap();
+            restarted
+                .write_record(&current_path, &current_bytes)
+                .unwrap();
+            let mut report =
+                crate::managed_process::HistoricalProcessCleanup::new(Duration::from_secs(3));
+            restarted.cleanup_stale(&mut report);
+            assert_eq!(report.cleaned, 1);
+            assert_eq!(report.skipped, 1);
+            assert!(restarted.confirmed_stop(&key));
+            assert_eq!(
+                std::fs::read(&corrupt_path).unwrap(),
+                b"broken historical record"
+            );
+            assert_eq!(report.diagnostics.len(), 1);
+            assert_eq!(std::fs::read(&current_path).unwrap(), current_bytes);
+        }
+
         #[cfg(windows)]
         {
             use crate::managed_process::{
@@ -4293,7 +4416,16 @@ mod tests {
         store.remove("kept");
         std::fs::remove_dir(&store.root).unwrap();
         std::fs::write(&store.root, b"keep this unexpected file").unwrap();
-        assert!(RuntimeOwnerRecordStore::new(&root).is_err());
+        let blocked = RuntimeOwnerRecordStore::new(&root).unwrap();
+        assert!(
+            blocked
+                .register("new-host", &fake_host("new-host"), None)
+                .is_err()
+        );
+        let mut report =
+            crate::managed_process::HistoricalProcessCleanup::new(Duration::from_secs(3));
+        blocked.cleanup_stale(&mut report);
+        assert_eq!(report.skipped, 1);
         assert_eq!(
             std::fs::read(&store.root).unwrap(),
             b"keep this unexpected file"

@@ -881,8 +881,6 @@ struct CodexTurnDiffSnapshot {
     diff: String,
 }
 
-pub(crate) use rovai_core::agent_runtime_adapter::LiveModelValidationError as CodexLiveModelValidationError;
-
 struct CodexThreadStartOptions<'a> {
     developer_instructions: Option<&'a str>,
     sandbox: &'a str,
@@ -989,72 +987,6 @@ impl CodexRuntime {
             .rpc("account/read", json!({"refreshToken": false}))
             .await?;
         Ok(authentication_available_from_account(&account))
-    }
-
-    pub async fn validate_explicit_model(&self, model_id: &str, options: &Value) -> Result<()> {
-        let mut cursor: Option<String> = None;
-        let mut pages = 0_u8;
-        loop {
-            let response = self
-                .rpc(
-                    "model/list",
-                    json!({
-                        "cursor": cursor,
-                        "includeHidden": true,
-                        "limit": 100,
-                    }),
-                )
-                .await
-                .map_err(|error| {
-                    anyhow::Error::new(CodexLiveModelValidationError {
-                        code: "runtime_model_catalog_unavailable",
-                        model_id: model_id.to_string(),
-                        detail: error.to_string(),
-                    })
-                })?;
-            let models = response
-                .get("data")
-                .and_then(Value::as_array)
-                .ok_or_else(|| {
-                    anyhow::Error::new(CodexLiveModelValidationError {
-                        code: "runtime_model_catalog_unavailable",
-                        model_id: model_id.to_string(),
-                        detail: "model/list did not return data".to_string(),
-                    })
-                })?;
-            if models.iter().any(|model| {
-                model.get("id").and_then(Value::as_str) == Some(model_id)
-                    && !model
-                        .get("hidden")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-            }) {
-                let catalog = rovai_core::agent_runtime_adapter::codex_models(&response)?;
-                rovai_core::agent_runtime_adapter::validate_live_model_selection(
-                    &catalog, model_id, options,
-                )?;
-                return Ok(());
-            }
-            cursor = response
-                .get("nextCursor")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            if cursor.is_none() {
-                return Err(anyhow::Error::new(CodexLiveModelValidationError {
-                    code: "runtime_model_unavailable",
-                    model_id: model_id.to_string(),
-                    detail: "the real Codex host did not advertise the saved model".to_string(),
-                }));
-            }
-            pages = pages.saturating_add(1);
-            if pages >= 100 {
-                return Err(anyhow::Error::new(CodexLiveModelValidationError {
-                    code: "runtime_model_catalog_unavailable",
-                    model_id: model_id.to_string(),
-                    detail: "model/list exceeded the pagination safety limit".to_string(),
-                }));
-            }
-        }
     }
 
     async fn start_or_resume_thread_with_config(
@@ -3276,6 +3208,7 @@ for line in sys.stdin:
             "missing",
             "invalid_option",
             "unknown_option",
+            "non_string_option",
             "auth_required",
             "init_failure",
             "memory_rejected",
@@ -3311,10 +3244,13 @@ for line in sys.stdin:
     elif method == 'model/list':
         response['result'] = {'data': [{'id': 'selected', 'supportedReasoningEfforts': [{'reasoningEffort': 'low'}]}]}
     elif method in ('thread/start', 'thread/resume'):
+        if scenario == 'missing': assert request['params']['model'] == 'gone'
         response['result'] = {'thread': {'id': 'thread-fixture'}}
         if scenario == 'default':
             response['result']['serviceTier'] = 'priority' if method == 'thread/start' else 'default'
     elif method == 'turn/start':
+        if scenario == 'invalid_option': assert request['params']['effort'] == 'high'
+        if scenario in ('unknown_option', 'non_string_option'): assert 'effort' not in request['params']
         with open(os.path.join(root, 'turns'), 'a') as log: log.write(json.dumps(request['params']) + '\n')
         if scenario == 'fast_rejected':
             response = {'id': request['id'], 'error': {'code': -32602, 'message': 'serviceTierForTurn was rejected'}}
@@ -3363,40 +3299,13 @@ for line in sys.stdin:
                     let authenticated = runtime.authentication_available().await.unwrap();
                     assert_eq!(authenticated, scenario != "auth_required");
                     let options = match scenario {
+                        "default" => json!({}),
                         "invalid_option" => json!({"reasoning_effort":"high"}),
                         "unknown_option" => json!({"unadvertised":"low"}),
+                        "non_string_option" => json!({"reasoning_effort":123}),
                         _ => json!({"reasoning_effort":"low"}),
                     };
-                    let validation =
-                        if authenticated && !matches!(scenario, "default" | "fast_rejected") {
-                            runtime
-                                .validate_explicit_model(
-                                    if scenario == "missing" {
-                                        "gone"
-                                    } else {
-                                        "selected"
-                                    },
-                                    &options,
-                                )
-                                .await
-                        } else {
-                            Ok(())
-                        };
-                    let expected_error = match scenario {
-                        "missing" => Some("runtime_model_unavailable"),
-                        "invalid_option" => Some("runtime_model_option_invalid"),
-                        "unknown_option" => Some("runtime_model_option_unknown"),
-                        _ => None,
-                    };
-                    assert_eq!(
-                        validation
-                            .as_ref()
-                            .err()
-                            .and_then(|error| error.downcast_ref::<CodexLiveModelValidationError>())
-                            .map(|error| error.code),
-                        expected_error
-                    );
-                    if authenticated && validation.is_ok() {
+                    if authenticated {
                         runtime
                             .start_or_resume_thread_with_config(
                                 &root,
@@ -3405,7 +3314,13 @@ for line in sys.stdin:
                                     developer_instructions: None,
                                     sandbox: "workspace-write",
                                     approval_policy: "on-request",
-                                    model: None,
+                                    model: (scenario != "default").then_some(
+                                        if scenario == "missing" {
+                                            "gone"
+                                        } else {
+                                            "selected"
+                                        },
+                                    ),
                                     config: None,
                                     runtime_workspace_roots: None,
                                     ephemeral: true,
@@ -3423,7 +3338,7 @@ for line in sys.stdin:
                             .start_turn_with_config(
                                 "task-body",
                                 None,
-                                None,
+                                options["reasoning_effort"].as_str(),
                                 if scenario == "fast_rejected" {
                                     Some("default")
                                 } else {
@@ -3530,10 +3445,22 @@ for line in sys.stdin:
                     .filter(|method| *method == "turn/start")
                     .count(),
                 attempts
-                    * usize::from(matches!(scenario, "default" | "explicit" | "fast_rejected"))
+                    * usize::from(matches!(
+                        scenario,
+                        "default"
+                            | "explicit"
+                            | "fast_rejected"
+                            | "missing"
+                            | "invalid_option"
+                            | "unknown_option"
+                            | "non_string_option"
+                    ))
+            );
+            assert!(
+                !requests.contains("model/list"),
+                "catalogs cannot gate native execution"
             );
             if matches!(scenario, "default" | "fast_rejected") {
-                assert!(!requests.contains("model/list"));
                 assert!(!requests.contains("config/read"));
                 assert_eq!(
                     requests
@@ -4331,6 +4258,12 @@ for line in sys.stdin:
         assert_eq!(request["summary"], "auto");
         assert_eq!(request["model"], "gpt-5.6");
         assert_eq!(request["effort"], "high");
+        for effort in [None, Some("future-native-value")] {
+            let request =
+                turn_start_request("thread-1", "next", Some("unlisted-model"), effort, None);
+            assert_eq!(request.get("effort").and_then(Value::as_str), effort);
+            assert_eq!(request["model"], "unlisted-model");
+        }
         for tier in [None, Some("priority"), Some("default")] {
             let request = turn_start_request("thread-1", "next", None, None, tier);
             assert_eq!(

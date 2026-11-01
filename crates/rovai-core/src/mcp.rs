@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -364,7 +365,6 @@ pub enum McpConfigMigrationOutcome {
     Missing,
     Unchanged,
     Migrated,
-    ResetInvalid,
 }
 
 struct LoadedConfig {
@@ -404,29 +404,22 @@ impl McpConfigStore {
             Err(error) => return Err(error).context("failed to inspect pre-release MCP config"),
         };
         if !metadata.file_type().is_file() || metadata.len() > MAX_CONFIG_BYTES {
-            fs::remove_file(&self.path).with_context(|| {
-                format!(
-                    "failed to remove unsupported pre-release MCP config {}",
-                    self.path.display()
-                )
-            })?;
-            return Ok(McpConfigMigrationOutcome::ResetInvalid);
+            anyhow::bail!("mcp.config_invalid: unsupported configuration preserved");
         }
 
-        let bytes = fs::read(&self.path)
-            .with_context(|| format!("failed to read MCP config {}", self.path.display()))?;
+        let bytes = read_config_bytes(&self.path)?;
         let mut document = match parse_json_no_duplicates::<Value>(&bytes) {
             Ok(Value::Object(document)) => document,
-            Ok(_) | Err(_) => return self.reset_invalid_pre_release_config(),
+            Ok(_) | Err(_) => return self.preserve_invalid_pre_release_config(),
         };
         let Some(Value::Object(mut mcp_servers)) = document.remove("mcpServers") else {
-            return self.reset_invalid_pre_release_config();
+            return self.preserve_invalid_pre_release_config();
         };
         let Some(Value::Object(mut rovai)) = document.remove("_rovai") else {
-            return self.reset_invalid_pre_release_config();
+            return self.preserve_invalid_pre_release_config();
         };
         let Some(Value::Object(server_metadata)) = rovai.get_mut("servers") else {
-            return self.reset_invalid_pre_release_config();
+            return self.preserve_invalid_pre_release_config();
         };
 
         let mut changed = false;
@@ -453,7 +446,7 @@ impl McpConfigStore {
                 server_metadata.remove(name);
             }
             let Some(Value::Array(assignments)) = rovai.get_mut("assignments") else {
-                return self.reset_invalid_pre_release_config();
+                return self.preserve_invalid_pre_release_config();
             };
             assignments.retain(|assignment| {
                 let server_id = assignment.get("serverId").and_then(Value::as_str);
@@ -465,11 +458,11 @@ impl McpConfigStore {
         document.insert("_rovai".to_string(), Value::Object(rovai));
         let mut config = match serde_json::from_value::<McpConfigFile>(Value::Object(document)) {
             Ok(config) => config,
-            Err(_) => return self.reset_invalid_pre_release_config(),
+            Err(_) => return self.preserve_invalid_pre_release_config(),
         };
         normalize_config(&mut config);
         if !validate_config(&config).is_empty() {
-            return self.reset_invalid_pre_release_config();
+            return self.preserve_invalid_pre_release_config();
         }
         if !changed {
             return Ok(McpConfigMigrationOutcome::Unchanged);
@@ -478,14 +471,8 @@ impl McpConfigStore {
         Ok(McpConfigMigrationOutcome::Migrated)
     }
 
-    fn reset_invalid_pre_release_config(&self) -> Result<McpConfigMigrationOutcome> {
-        fs::remove_file(&self.path).with_context(|| {
-            format!(
-                "failed to remove invalid pre-release MCP config {}",
-                self.path.display()
-            )
-        })?;
-        Ok(McpConfigMigrationOutcome::ResetInvalid)
+    fn preserve_invalid_pre_release_config(&self) -> Result<McpConfigMigrationOutcome> {
+        anyhow::bail!("mcp.config_invalid: invalid configuration preserved")
     }
 
     pub fn migrate_agent_ids(&self, mappings: &BTreeMap<String, String>) -> Result<bool> {
@@ -1082,22 +1069,34 @@ impl McpConfigStore {
     }
 
     fn load_or_initialize(&self) -> Result<LoadedConfig> {
-        if !self.path.exists() {
-            self.write_new(&McpConfigFile::empty())?;
+        if matches!(fs::symlink_metadata(&self.path), Err(error) if error.kind() == std::io::ErrorKind::NotFound)
+        {
+            // A raced or failed creation still reports the actual file state below.
+            let _ = self.write_new(&McpConfigFile::empty());
         }
-        let loaded = self.load()?;
-        #[cfg(windows)]
-        if loaded.config.is_some() && loaded.permission_issue {
-            // Management initialization admits a valid, current-user-owned
-            // config by tightening ACLs only. `inspect` stays strictly read-only.
-            self.repair_permissions()?;
-            return self.load();
-        }
-        Ok(loaded)
+        self.load()
     }
 
     fn load(&self) -> Result<LoadedConfig> {
-        if !self.path.exists() {
+        Ok(self.load_checked().unwrap_or_else(|_| LoadedConfig {
+            exists: true,
+            digest: "sha256:unreadable-mcp-config".into(),
+            config: None,
+            file_issue: Some(McpConfigIssue::new(
+                "mcp.config_unreadable",
+                "MCP 配置无法读取，请检查文件访问权限。原文件已保留。",
+                None,
+            )),
+            permission_issue: false,
+        }))
+    }
+
+    fn load_checked(&self) -> Result<LoadedConfig> {
+        let metadata = fs::symlink_metadata(&self.path);
+        if metadata
+            .as_ref()
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
             return Ok(LoadedConfig {
                 exists: false,
                 digest: "sha256:missing-mcp-config".to_string(),
@@ -1110,8 +1109,7 @@ impl McpConfigStore {
                 permission_issue: false,
             });
         }
-        let metadata = fs::symlink_metadata(&self.path)
-            .with_context(|| format!("failed to inspect MCP config {}", self.path.display()))?;
+        let metadata = metadata.context("failed to inspect MCP config")?;
         if !metadata.file_type().is_file() {
             return Ok(LoadedConfig {
                 exists: true,
@@ -1138,8 +1136,7 @@ impl McpConfigStore {
                 permission_issue: private_permission_issue(&self.path, &metadata)?,
             });
         }
-        let bytes = fs::read(&self.path)
-            .with_context(|| format!("failed to read MCP config {}", self.path.display()))?;
+        let bytes = read_config_bytes(&self.path)?;
         let digest = bytes_digest(&bytes);
         let permission_issue = private_permission_issue(&self.path, &metadata)?;
         let mut config = match parse_json_no_duplicates::<McpConfigFile>(&bytes) {
@@ -1895,6 +1892,18 @@ fn canonical_bytes(config: &McpConfigFile) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+fn read_config_bytes(path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(MAX_CONFIG_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 <= MAX_CONFIG_BYTES,
+        "MCP configuration is too large"
+    );
+    Ok(bytes)
+}
+
 fn bytes_digest(bytes: &[u8]) -> String {
     format!("sha256:{:x}", Sha256::digest(bytes))
 }
@@ -2218,16 +2227,14 @@ mod slow_tests {
     }
 
     #[test]
-    fn invalid_pre_release_config_is_removed_before_empty_initialization() {
+    fn invalid_pre_release_config_is_preserved_and_reported() {
         let (root, store) = temporary_store("invalid-clean-break");
         write_raw_config(&store, b"{broken");
 
-        assert_eq!(
-            store.migrate_pre_release_config().unwrap(),
-            McpConfigMigrationOutcome::ResetInvalid
-        );
-        assert!(!store.path().exists());
-        assert!(store.get(&agents()).unwrap().servers.is_empty());
+        assert!(store.migrate_pre_release_config().is_err());
+        let view = store.get(&agents()).unwrap();
+        assert_eq!(view.file_issue.unwrap().code, "mcp.config_parse_failed");
+        assert_eq!(fs::read(store.path()).unwrap(), b"{broken");
 
         let _ = fs::remove_dir_all(root);
     }
@@ -2748,8 +2755,8 @@ mod slow_tests {
     #[cfg(windows)]
     #[test]
     fn windows_permission_repair_restricts_an_owned_inherited_config() {
-        // Keep explicit repair, first management access and invalid-file
-        // preservation together as the owner of existing-config ACL admission.
+        // Management reads preserve bytes and ACLs; only the existing explicit
+        // repair action may change permissions on a validated owned config.
         for (automatic, valid_config) in [(false, true), (true, true), (true, false)] {
             let (root, store) = temporary_store("windows-permission-repair");
             let parent = store.path().parent().unwrap();
@@ -2779,7 +2786,7 @@ mod slow_tests {
 
             if automatic {
                 let view = store.get(&agents()).unwrap();
-                assert_eq!(view.permission_issue, !valid_config);
+                assert!(view.permission_issue);
                 assert_eq!(view.file_issue.is_none(), valid_config);
             } else {
                 store.repair_permissions().unwrap();
@@ -2787,13 +2794,13 @@ mod slow_tests {
 
             assert_eq!(
                 store.inspect(&agents()).unwrap().permission_issue,
-                !valid_config
+                automatic
             );
             assert_eq!(
                 private_directory_permissions_need_repair(store.path().parent().unwrap()).unwrap(),
-                !valid_config
+                automatic
             );
-            assert_eq!(open_private_read_file(store.path()).is_ok(), valid_config);
+            assert_eq!(open_private_read_file(store.path()).is_ok(), !automatic);
             assert_eq!(fs::read(store.path()).unwrap(), bytes);
             let _ = fs::remove_dir_all(root);
         }

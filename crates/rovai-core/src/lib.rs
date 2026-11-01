@@ -76,6 +76,7 @@ pub mod file_reference_path;
 pub mod git;
 pub mod local_attachment_snapshot;
 pub mod local_attachment_source;
+pub mod maintenance_budget;
 pub mod managed_attachment;
 pub mod managed_blob;
 pub mod managed_process;

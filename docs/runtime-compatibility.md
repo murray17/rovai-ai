@@ -1408,10 +1408,17 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 
 Grok continuation 为 compatible same-host Session → exact `session/resume` → 一次 continuity-lost replacement
 `session/new`。Grok 不再声明或选择 `session.load`，`0.2.118` HistoryRestore fallback 已删除；TRAE、Kimi 等
-其他 Runtime 的通用 load 路径不变。新 Session 继续携带 attachment root、Run tmp，并只在
-`session/new._meta.rules` 追加完整 Bootstrap；Grok Resume 固定发送 `additionalDirectories=[]`，不尝试更新
-creation-time roots，也不重新注入 creation-only rules。`grok-build:resume-v1` compatibility key 继续 fence
+其他 Runtime 的通用 load 路径不变。Grok new/resume 均发送 `additionalDirectories=[]`，保留原 `cwd`，并只在
+`session/new._meta.rules` 追加完整 Bootstrap；恢复时不重新注入 creation-only rules。
+macOS arm64 的 `grok 1.0.70 (f50904eaee6c)` 原生对照已确认 new 对非空目录数组返回 `-32602`，
+空数组与省略字段均成功；采用空数组与 resume 一致。该参数对照不替代真实任务、附件或跨 Core 续聊验收，
+也不代表本次完成了 Windows 验证。`grok-build:resume-v1` compatibility key 继续 fence
 官方配置、rules revision、Runtime identity、workspace、model 与 permission，变化时建立新 Session。
+
+本次 `1.0.70` 隔离 Core 实测已通过正式路径的 new，并进入 prompt；本机既有 `gpt-6.1-sol` Responses
+配置随后在 Grok 原生解析阶段报 `unknown variant response.metadata`，ACP 返回 `-32603`。此失败保留为
+独立的原生 Runtime／模型服务兼容阻断；没有替换账号、模型或过滤服务事件来制造成功。真实任务完成、
+附件／Run tmp 工具访问与跨 Core 成功续聊尚未通过，以下 `1.0.5` 的历史完整矩阵不能替代本次结果。
 
 macOS arm64 客户端使用 `grok 1.0.5 (5115b46bc909)`。真实 Deep Probe 在 Ready 前完成
 `session/new → exact-ID session/resume([]) → session/set_model`；Core 与 ACP Host 重启后，Host ID 改变而 Native

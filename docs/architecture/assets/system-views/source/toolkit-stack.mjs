@@ -28,7 +28,7 @@ function logo(filename, x, y, size = 44) {
 export function renderToolkitArchitecture() {
   const runtime =
     area(18, 14, 1468, 208, '原生 Agent Runtime', P.runtime, 'Session · 模型循环 · 原生工具')
-    + card(49, 91, 343, 100, 'Native Skill Discovery', '按需发现并读取方法', P.runtime, 22)
+    + card(49, 91, 343, 100, 'Skills 按需读取', '原生来源与 Rovai 文件指南', P.runtime, 22)
     + rect(492, 91, 521, 100, '#fff', P.runtime.border, 10)
     + label(514, 128, 'Agent / Native Session', 24, { color: P.runtime.main, weight: 600 })
     + logo('codex-color.svg', 518, 145, 29)
@@ -40,16 +40,16 @@ export function renderToolkitArchitecture() {
     + connection('M1018 142 H1106', P.runtime, { width: 2.3 });
 
   const toolkit =
-    area(18, 295, 704, 259, 'Skill Library · 协作方法', P.peer)
+    area(18, 295, 704, 259, 'Rovai Skills · 平台与工具箱', P.peer)
     + card(46, 371, 310, 72, 'campfire / review-duo', '', P.peer, 20)
     + card(380, 371, 314, 72, 'grill-duo', '', P.peer, 20)
     + card(46, 460, 310, 66, 'cli-operations', '', P.peer, 20)
     + card(380, 460, 314, 66, 'memory-stewardship', '', P.peer, 20)
     + area(764, 295, 722, 259, 'Rovai CLI · 平台动作', P.toolkit, '固定命令 · 精确 --help')
-    + ['send', 'mission', 'task', 'camp / history', 'memory', 'member', 'automation', 'single-chat'].map((name, i) =>
+    + ['send', 'mission', 'task', 'thread / history', 'memory', 'member', 'automation', 'single-chat'].map((name, i) =>
       chip(792 + i % 4 * 169, 376 + Math.floor(i / 4) * 78, 155, name, P.toolkit, name.length > 12 ? 16 : 18)).join('')
     + connection('M221 290 V228', P.peer, { width: 2.3 })
-    + label(250, 267, 'Skill Projection', 18, { color: P.peer.main })
+    + label(250, 267, 'Skills 索引', 18, { color: P.peer.main })
     + connection('M1284 227 V289', P.toolkit, { width: 2.3 })
     + label(1258, 267, '命令参数', 18, { color: P.toolkit.main, anchor: 'end' });
 
@@ -68,7 +68,7 @@ export function renderToolkitArchitecture() {
     + label(1429, 852, 'Run · Lease · Native Binding → 领域服务', 22, { color: P.context.main, anchor: 'end' })
     + [
       ['消息与协作', 'A2A · Task · Mission'],
-      ['历史检索', 'Camp · Single Chat'],
+      ['历史检索', 'Thread · Single Chat'],
       ['Memory', 'View · Search · Write'],
       ['队员资料', 'Member Profile'],
       ['定时任务', 'Automation'],

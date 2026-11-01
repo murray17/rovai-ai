@@ -324,22 +324,22 @@ ACP 的 `command_code_acp.rs`、System Mod、Cline、共享 ACP、文件证据�
 新增三个 `extended-tests` regression owner，分别拥有不能由纯函数覆盖的事务/进程边界：
 
 - `codex::tests::warm_host_ignores_unreadable_environment_and_new_process_loads_latest`：真实合成 CLI
-  经 Fleet 的创建任务读取配置；Warm A 不读取已损坏的新配置，新建失败不阻断其他 Camp，创建前保存的新值被读取。
+  经 Fleet 的创建任务读取配置；Warm A 不读取已损坏的新配置，新建失败不阻断其他 Thread，创建前保存的新值被读取。
   既有 Host 兼容测试不读取私有数据库，不能证明解密依赖是否仍在 Warm 路径。
 - `delivery_queue::tests::malformed_member_configuration_fails_its_lane_without_blocking_other_camps`：
-  坏队员配置失败结算、其他 Camp 同批领取、已有原生 Session 无快照继续。既有 SQL 故障 owner
+  坏队员配置失败结算、其他 Thread 同批领取、已有原生 Session 无快照继续。既有 SQL 故障 owner
   `history_query_failure_rolls_back_every_claim_in_the_transaction` 继续要求整体回滚，防止吞掉数据库错误。
 - `db::member_environment::tests::retirement_needs_no_old_ciphertext_or_key_and_preserves_member_configuration`：
   schema 142 损坏快照及缺 key 仍能退役；私有队员配置和业务数据保留，密钥恢复后原配置可读。
 
 最小命令先 `cargo test -p rovai-core --features extended-tests --lib -- --list` 确认 owner，再以对应
 模块或完整函数名过滤运行。`runtime_startup::tests` 继续负责变量输入规则；`runtime_fleet::tests`
-继续负责同 Camp/成员/当前会话隔离和工作目录兼容；`codex::tests` 的未知输入/原生恢复 owner 不变。
+继续负责同 Thread/成员/当前会话隔离和工作目录兼容；`codex::tests` 的未知输入/原生恢复 owner 不变。
 原生绑定重置复验 slow owner `manual_native_session_restart_keeps_conversation_identity_and_generation`。
 历史 v163 fixture 在重新 claim 前补齐 191/192/193，旧迁移数据保留与回滚断言不变。
 
 完整私有 RPC seam 使用 `node scripts/smoke-member-environment.mjs`（先构建 Core）；Host 数据、
-Skill Library、MCP 全隔离，CLI 与凭据均为 fixture。`node scripts/smoke-member-environment-ui.mjs`
+Skill 文件目录、MCP 全隔离，CLI 与凭据均为 fixture。`node scripts/smoke-member-environment-ui.mjs`
 使用生产组件验证保存回读、重置 CAS/活动任务拒绝、进程启动文案与双语移动布局，不启动 Core 或真实 Runtime。
 
 升级后原生续接使用 `node scripts/smoke-member-environment-upgrade.mjs /absolute/previous/rovai-core`
@@ -348,7 +348,7 @@ Skill Library、MCP 全隔离，CLI 与凭据均为 fixture。`node scripts/smok
 通过正式保存、发送、执行与重启路径生成旧绑定，默认 Host 同时具有可读取的原生连接。它检查升级后的
 实际 `--resume`/`thread/resume` 携带旧 Session ID、绑定代次保持，以及进程读取当前 Host＋队员配置。
 私有 RPC smoke 没有执行消息，单元/迁移测试只检查记录，均不能替代此跨版本进程边界。
-无需真实账号或模型；数据、Home、Skill Library 与 MCP 均使用自动清理的临时目录。
+无需真实账号或模型；数据、Home、Skill 文件目录与 MCP 均使用自动清理的临时目录。
 
 摘要选择的输入矩阵扩展既有 `agent_profile::slow_tests::discovered_entry_configures_and_freezes_without_health_evidence`，
 覆盖两种 Runtime 的旧绑定、默认 Host 绑定、未知摘要与原权限语义；不新增 Rust fixture owner。
@@ -590,7 +590,7 @@ Claude/Pi 空思考块和 ACP 订阅协商扩展已有 Runtime owner（`--featur
 `node --test scripts/lib/execution-state-transition.test.mjs` 验证真实浏览器布局、旧读取/旧 epoch 隔离与重连恢复。
 
 显式真实模型验收：`node scripts/smoke-runtime-thinking.mjs codex-cli copilot-cli claude-code-cli pi`。
-脚本使用独立 Core data-dir、Skill Library 与 Workspace，只保留 phase/标题长度和终态元数据。
+脚本使用独立 Core data-dir、Skill 文件目录与 Workspace，只保留 phase/标题长度和终态元数据。
 Pi 默认未开启思考时可用 `ROVAI_THINKING_PI_MODEL` 指定该机器已配置的原生模型 ID，在隔离成员上设置
 `thinking_level=high`；不修改全局配置。可选标题是否实际产生与原生 Runtime/模型有关，未观察到不能报告标题实测成功。
 
@@ -639,7 +639,7 @@ Desktop/Web 的原始文件检查共用 `packages/contracts/src/member-avatar-im
 `cargo build -p rovai-core --bin rovai-core` 后运行 `pnpm test:member-avatar-flow`：真实编辑器与
 Web 序列化适配调用独立 Core，覆盖动画预览、调整取景不重建 Blob URL、超宽图规范化后
 保存/重开/重新裁剪、页面刷新与渠道静态 PNG 首帧。夹具通过 Chromium 指定测试文件，不启动真实 Runtime；
-userData、Skill Library 和 MCP 路径均为本次临时目录，成功后清理。可通过
+userData、Skill 文件目录和 MCP 路径均为本次临时目录，成功后清理。可通过
 `ROVAI_CORE_BINARY` 指定已构建 Core，`ROVAI_KEEP_MEMBER_AVATAR_FIXTURE=1` 保留验收数据。
 
 ## Thread 执行查询
@@ -663,12 +663,12 @@ userData、Skill Library 和 MCP 路径均为本次临时目录，成功后清�
 本次不新增 Rust fixture owner；扩展 `channel::tests` 的既有附件准入与队列测试为飞书/钉钉矩阵，保留原有
 ready、retry、failed、deleted、folder 和 20＋2/FIFO 输入，并新增跨 Provider 下载候选/完成拒绝断言。
 修复前钉钉资源在 observe 被拒绝、tick 不返回附件、complete 只接受飞书 Host；这属于同一个持久队列到
-CampMessage/Delivery 的 seam，继续使用现有隔离 SQLite/文件 fixture。钉钉多 Bot owner 同时验证文本和图文，
+ThreadMessage/Delivery 的 seam，继续使用现有隔离 SQLite/文件 fixture。钉钉多 Bot owner 同时验证文本和图文，
 两个接收 Bot 使用不同 downloadCode 时仍冻结首观察 Bot 的 grant，绑定选择和下载完成后仅派发一次。
 最小命令为 `cargo test -p rovai-core --features extended-tests --lib channel::tests::`。
 
 Lark 入站资源下载扩展既有 `wrong_provider_hosts_are_rejected_by_every_lark_capable_handler` owner：
-同一 provider 世界内验证观察、待下载任务、错误 Host 拒绝、正确 Host 完成与 Camp Source Ref。
+同一 provider 世界内验证观察、待下载任务、错误 Host 拒绝、正确 Host 完成与 Thread Source Ref。
 Main 的飞书/Lark 参数化 owner 覆盖流式下载、临时文件清理、文件夹失败提示与各自完成请求路由。
 这不增加独立 Rust fixture owner；真实 Lark 租户权限仍按版本验收记录单独验证。
 
@@ -811,7 +811,7 @@ Host 参数验证 canonical Quick Chat/中文目录上的 `get_state`，不指�
 通过 `cargo test -p rovai-core --features extended-tests --bin rovai-core pi::host::tests::native_pi_host_starts_with_canonical_workspace -- --exact --ignored`
 显式执行。该 smoke 证明原生进程解释 cwd 的结果，不能由命令字段断言代替。
 
-### CampOpen 业务读取边界
+### Thread Open 业务读取边界
 
 `read_model::camp_open_slow_tests` 拥有 Open 的完整 SQLite 读取边界：authorizer 拒绝任何直接或间接
 `event_log` 读取后，带附件、Task、Run、Delivery、Approval 和活动 Evidence 的投影仍须成功。历史事件
@@ -828,9 +828,9 @@ cargo test -p rovai-core --features slow-tests --lib camp_open_slow_tests:: -- -
 pnpm test:camp-open-projection
 ```
 
-Electron 回归使用生产 adapter、CampWorkspace 与 CSS，验证空事件下的三类卡片、Task 业务原因、已加载
+Electron 回归使用生产 adapter、ThreadWorkspace 与 CSS，验证空事件下的三类卡片、Task 业务原因、已加载
 旧页与 DOM 阅读锚点，以及后台新消息不抢位置。排序/时钟回拨输入矩阵由既有 `App.test.ts` owner 负责。
-夹具创建临时绝对 `userData`，不启动 Core/SQLite/Skill Library/Runtime；`ROVAI_KEEP_CAMP_OPEN_FIXTURE=1`
+夹具创建临时绝对 `userData`，不启动 Core 或 Runtime，不访问日常数据；`ROVAI_KEEP_CAMP_OPEN_FIXTURE=1`
 保留测量和双主题截图。手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:camp-open-projection`。这些分别是数据库边界
 和生产组件组合测试，不冒充已安装 App 的真实会话端到端耗时。
 
@@ -865,7 +865,7 @@ writer-only owner 无法覆盖该解析链路，使用 extended-tests 的内存 
 既有 `claude::tests` 进程清理与 stdout owner 改为原生初始化/结构化输入夹具，保留原先的故障、取消、
 多结果和私有文件清理边界。原 Hook/完整工具输入匹配测试随生产路径退出，Git 保留旧实现。
 真实允许、拒绝、取消与 Core receipt 使用 `ROVAI_CLAUDE_APPROVAL_SMOKE=1 node scripts/smoke-claude-runtime.mjs`；
-实际 Desktop 点击由 `node scripts/accept-claude-permission.mjs` 在独立 userData/Skill Library/MCP 下验证。
+实际 Desktop 点击由 `node scripts/accept-claude-permission.mjs` 在独立 userData/Skill 文件目录/MCP 下验证。
 允许一次、拒绝之后追加原生记忆点击，核对隔离项目的 settings 只保存选中规则，再执行相同命令验证无新增
 Approval 且有本轮 Core send receipt 和 exact message；记忆按钮、scope 与 CLI 版本随证据保存。
 模型 Smoke 不进入普通 Rust 测试。旧 Hook Smoke 不作为原生协议通过记录。
@@ -978,7 +978,7 @@ Fleet receipt owner 继续验证精确 Run/epoch 的持久化回执与跨 Core �
 
 默认 fast suite 保留纯 parser/serde、确定性 policy、常量和最小原子 regression，并以 400 项作为当前
 反馈预算。`extended-tests` 承担大型模块矩阵、SQLite、子进程、并发与跨边界 owner；`slow-tests`
-承担需要完整 SQLite/Camp/Runtime fixture 的显式慢速场景，并隐式启用扩展层。每个数据库测试仍使用
+承担需要完整 SQLite/Thread/Runtime fixture 的显式慢速场景，并隐式启用扩展层。每个数据库测试仍使用
 独立 clone，不共享可写状态。
 
 `legacy-migration-tests` 会隐式启用 `slow-tests`，只在手动 `Full check` 的全特性门禁中运行：
@@ -1017,10 +1017,10 @@ ROVAI_REQUIRE_ELECTRON_INTEGRATION=1 pnpm test:desktop-bridge
 能力分类由 `pnpm test:electron-sandbox-capability` 独立验证；手动 Full check 也显式启用
 required 模式，防止未来迁移到 macOS runner 时把环境阻断当成通过。
 
-执行台的头像轨道与协作投递收件人行运行 `pnpm test:execution-avatar-rail`。夹具挂载真实 CampWorkspace，
+执行台的头像轨道与协作投递收件人行运行 `pnpm test:execution-avatar-rail`。夹具挂载真实 ThreadWorkspace，
 用原生指针和键盘验证队员轨道、来源归属、重复投递去重、0 / 1 / 2 / 16 / 48 人的完整单行与溢出名单，
 以及名单滚动、焦点返回、Escape 层级、承载位置切换和双主题尺寸适配。它只使用临时 `userData` 与封闭
-演示投影，不启动 Core、Skill Library 或模型，不访问日常数据；`ROVAI_KEEP_EXECUTION_AVATAR_FIXTURE=1`
+演示投影，不启动 Core 或模型，不访问日常数据；`ROVAI_KEEP_EXECUTION_AVATAR_FIXTURE=1`
 保留截图与 fixture。Core 的投递来源 SQL → DTO seam 由 `read_model::tests::public_delivery_projection_preserves_causal_source_not_target_lineage`
 独立验证，不用 UI 夹具代替数据库读取验证。
 
@@ -1048,11 +1048,11 @@ Approval/Recovery Dock，验证大屏中 481/480/450/420px 会话的容器断点
 的区域排除、预留空白及真实点击；系统标题栏双击的最大化/还原行为仍需平台验收。
 查询行为仍由会话查找测试拥有。纯宽度输入矩阵仍由 `file-preview-layout.test.ts` 拥有；
 静态 Markup/CSS 测试不能替代指针捕获、ResizeObserver 和浏览器布局组合。
-夹具只使用临时绝对 `userData` 与受控文件 API，不启动 Core/SQLite/Skill Library/Runtime，不读取真实 Camp。
+夹具只使用临时绝对 `userData` 与受控文件 API，不启动 Core 或 Runtime，不读取真实 Thread。
 `ROVAI_KEEP_FILE_PREVIEW_FIXTURE=1` 保留双主题、宽/窄窗口、关闭提示和 200%/reduced-motion 截图；
 默认清理本次夹具。手动 Full check 的 Linux job 使用 `xvfb-run -a pnpm test:file-preview-layout`。
 
-消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Camp、Markdown 与预览，
+消息文件引用运行 `pnpm test:file-reference-navigation`。它在同样隔离的真实 Electron 中挂载生产 Thread、Markdown 与预览，
 验证显式 Markdown 短文件名定位、行范围高亮、inline-code/正文不生成文件入口、字段误识别及 URL 中文尾部恢复；
 真实鼠标覆盖已有选区下的普通/带位置 Markdown 文件链接点击、链接内拖选不打开及其后的再次单击，键盘激活保持可用。
 并逐帧检查打开/关闭、键盘调宽和持续拖动时
@@ -1083,13 +1083,13 @@ pnpm test:composer-input
 验证可见正文、受控草稿值、焦点及页面存活。夹具隔离 `userData`，不启动 Core 或调用模型；不能用静态
 Markup 测试替代。无显示器 Linux 使用 `xvfb-run -a pnpm test:composer-input`，同一手动完整验证工作流覆盖相关改动。
 
-当前 Public Camp Composer 不再有 Core Draft 或未公开 Pending。`pnpm test:camp-open-projection` 的隔离
-Electron 夹具验证 Camp-local 草稿在业务投影刷新和重挂载后保留，并确认页面没有私有 Pending 队列；
-`camp-composer-local-store.test.ts` 验证续发目标只来自已接受的唯一非 Lead 路由，以及按 Camp 隔离、成功发送后
+当前 Public Thread Composer 不再有 Core Draft 或未公开 Pending。`pnpm test:camp-open-projection` 的隔离
+Electron 夹具验证 Thread-local 草稿在业务投影刷新和重挂载后保留，并确认页面没有私有 Pending 队列；
+`camp-composer-local-store.test.ts` 验证续发目标只来自已接受的唯一非 Lead 路由，以及按 Thread 隔离、成功发送后
 替换和无效快照拒绝。历史 `test:composer-continuation` 夹具依赖已退出的 Core Draft/Pending 接口，不能作为
 当前发布门禁。
 
-公共/单聊输入历史复用上述 CampOpen 与 `single-chat-panel` Electron 夹具的 `--input-history` 模式：
+公共/单聊输入历史复用上述 Thread Open 与 `single-chat-panel` Electron 夹具的 `--input-history` 模式：
 验证固定浏览列表、零历史请求、结构化预览、原草稿/Undo 保留、有效输入驱动发送及 pending 变化。
 最小命令为
 `node --test --test-concurrency=1 --test-name-pattern='input history' scripts/lib/camp-open-projection.test.mjs scripts/lib/single-chat-panel.test.mjs`。
@@ -1109,7 +1109,7 @@ Headless Host 的进程准入与 Unix 受控停止使用 `pnpm test:host-startup
 pnpm test:core-startup
 ```
 
-该入口构建真实 Core，在独立 data-dir/Skill Library/MCP config/Runtime Files Root 中注入可选存储故障，验证
+该入口构建真实 Core，在独立 data-dir/Skill 文件目录/MCP config/Runtime Files Root 中注入可选存储故障，验证
 authority ready、业务 RPC 可达和同进程重试；另验证 mandatory recovery 失败为结构化拒绝而不是 crash 或 false ready。
 不启动真实 Runtime 或调用模型。它拥有进程 seam，具体 cleanup/identity 规则仍由 Rust 单一 owner 测试；Rust fast CI
 同时执行它。Windows bootstrap composition 由 `windows-bootstrap.test.ts` 拥有，native DACL/helper/identity 由
@@ -1131,13 +1131,13 @@ Windows x64 job 验证。改动还涉及完整桌面挂载和恢复时，在遵�
 
 | 命令 | 默认或支持的 Runtime | 额外说明 |
 | --- | --- | --- |
-| `pnpm smoke:intake` | Codex | 创建 Git fixture；验证 Camp 消息、连续 Conversation、重启和删除 |
+| `pnpm smoke:intake` | Codex | 创建 Git fixture；验证 Thread 消息、连续 Conversation、重启和删除 |
 | `pnpm smoke:acp-runtime` | 已完成接入的 ACP Runtime（含 TRAE、Kimi、Grok） | `ROVAI_ACP_SMOKE_ADAPTER` 可选择单一 Runtime；命令矩阵断言公开 command output 进入 `runtime.action.payload.output`。TRAE 覆盖 warm Host/Session 与 exact `session/load` HistoryRestore；Grok `>= 1.0.0` 覆盖 warm Host/Session 与标准 ACP `session/resume`；Kimi/Grok 的普通 ACP agent text（包括 provider `<think>`）原样进入执行台与 final。Grok 正式 Host 使用官方 `$GROK_HOME/config.toml` 和 mode-0600 `.env`；隔离 Probe/Smoke 使用同一官方布局 |
 | `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume；两次无工具回复必须投影公开 narration；随后强制 `Bash` 固定 `printf`，断言公开 output、原生 tool-use ID 与同 Session/Conversation 关联。`ROVAI_CLAUDE_APPROVAL_SMOKE=1` 追加 `acceptEdits` 下真实 `rovai send` 允许一次、拒绝及待审批取消，核对 Action、Run 和消息效果 |
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 要求 `output.stream_json`，强制原生 `run_command` 固定 `printf` 并断言公开 output/step ID；另覆盖同 Session 续接、私有日志清理和 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:pi-runtime` | Pi 0.84.4+ | 复制官方 Pi auth/settings/models 到临时 0700 `PI_CODING_AGENT_DIR`，隔离 Probe/Native Session/data/workspace；验证 exact cold resume、warm LRU、managed receipt、allow/deny、cancel 无副作用、Action output、locator 隐私与结构化 Usage。自动设置只在 debug Core 有效的 Pi qualification override；结果不是正式平台资格 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
-| `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
+| `pnpm smoke:multi-agent` | Codex | 同一 ThreadTurn 的两个真实并发 AgentRun |
 | `pnpm smoke:builtin-cli` | 当前可执行 Runtime；平台和 debug 限制以脚本准入为准 | 先导 Run 通过真实 `rovai` lease 产生普通 Public A2A 与附件，另一 Thread 的 Run 以自己的 lease 执行公开历史 search/read，核对消息 identity、附件和输出 Schema。Operation 集合由脚本 `expectedOperations` 维护；覆盖 Automation、Mission、Member、Task、Memory、Thread 及公开发送。另验证旧 send 输入拒绝、冲突 recovery、release fence、Replay 与后续 Run 新 lease；不存在 Gather capture 或 completion 验收。脚本仍覆盖旧 `camp` 输入别名，输出使用当前 Thread 字段。transport-independent indeterminate 由 CLI response-loss test 覆盖；Pi debug 结果不晋升正式资格 |
 | `pnpm smoke:skills` | 历史受管 Skill Library 的 Codex 默认／十三 Runtime 矩阵 | 保留旧导入、Revision 与原投递路径的兼容验证；不作为 v1.70 原生 Skills／工具箱新路径通过证据。当前 UI 验收见[桌面 UI 验收](ui-acceptance.md)，模型上下文 Gate 见[评测](evaluation.md)；Cursor `.cursor/skills` 仍为 DocumentationOnly，Pi debug 结果不晋升正式资格 |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
@@ -1230,7 +1230,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 
 批量 SQL 新增 `monitoring::tests::execution_usage_batch_keeps_requested_scope_collection_and_sparse_fields`：
 该读接口此前没有独立 SQL owner；原有 Context 写入与 Usage 累计测试不拥有请求范围或 collection 过滤。
-一次内存 SQLite 最小表验证跨 Camp／旧 collection 拒绝、指定顺序、空范围、缺失与零、参数化查询及
+一次内存 SQLite 最小表验证跨 Thread／旧 collection 拒绝、指定顺序、空范围、缺失与零、参数化查询及
 终态 batch 通知资格（活动／missing／空范围不命中）；
 不建立完整 Database、迁移或 Runtime fixture。原实现逐 Run 查询的数值结果一致，新增失败语义是批量读取
 改变范围或稀疏语义。最小命令为 `cargo test -p rovai-core --lib execution_usage_batch_keeps_requested_scope`。
@@ -1238,7 +1238,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 `pnpm test:runtime-model-picker` 在隔离 Electron 中挂载生产模型、推理强度、权限与运行时选择组件，
 验证队员页和训练营共享字段的默认值、本地搜索、中文输入法、键盘与焦点、目录失败/迟到响应和双主题布局。
 覆盖 1040×700、1440×920、2560×1440 与 200% 缩放。它属于 `test:desktop:integration`；Linux 使用 `xvfb-run -a`。
-不启动 Core、Skill Library 或 Runtime。`ROVAI_KEEP_RUNTIME_PICKER_FIXTURE=1` 保留截图；
+不启动 Core 或 Runtime，不访问日常数据。`ROVAI_KEEP_RUNTIME_PICKER_FIXTURE=1` 保留截图；
 `ROVAI_RUNTIME_PICKER_FIXTURE` 可指定已存在、位于系统临时目录下且以 `rovai-runtime-picker-` 开头的独立绝对路径。
 
 `pnpm test:notification-attention` 在隔离 Electron 中挂载生产通知 Controller 与 CSS，验证当前公屏 / 精确
@@ -1253,7 +1253,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 并覆盖双主题、最小窗口与 420px 会话列。临时 `userData` 与日常 App 隔离，不启动 Core 或 Runtime；
 `ROVAI_KEEP_APPROVAL_FIXTURE=1` 保留截图，默认清理。手动 Full check 的 Linux job 使用 `xvfb-run -a`。
 
-`pnpm test:camp-fast-layout` 使用生产 CampWorkspace/CSS 的独立 Electron fixture，无需打包或 Core。
+`pnpm test:camp-fast-layout` 使用生产 ThreadWorkspace/CSS 的独立 Electron fixture，无需打包或 Core。
 关闭的模拟 API 只提供成员偏好与 Draft；临时 userData 与日常 App 完全分离，不调用模型。
 它拥有 Fast 的 1280×720/窄屏/大屏布局、日夜主题、键盘焦点、失败保留、直接静默切换、旧观测不影响偏好与初始默认。
 同一 owner 验证打开/切换零资格请求、三态保存、同成员保存去重、跨成员并发、绑定与迟到回执隔离；
@@ -1288,7 +1288,7 @@ Dialog 验收，专项结果不能替代默认全套结果。
 
 ### 主动检查的环境刷新
 
-当前语义由 [Runtime Launch v73](../contracts/runtime-launch-and-verification-v73.md) 拥有。
+当前语义由 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md) 拥有。
 `runtime_check_refresh_tests` 是 macOS/Windows Check Manager、保存 CAS、正式状态与草稿隔离的集成 owner：使用可注入的
 基础环境读取器、UUID 临时目录、私有 SQLite 和合成程序，不读取真实 Runtime 安装或账号。
 它覆盖旧入口仍存在时主动检查刷新 PATH、未变输入不推进代次及独立检查继续执行、目录变化、原路径升级、
@@ -1307,12 +1307,12 @@ pnpm test:settings-workspace
 ```
 
 Renderer 复用生产设置组件和既有隔离 Electron fixture，增加恢复自动、失败预览及离开后迟到结果检查。
-测试中的 `userData` 与 Skill Library 均属于临时夹具，不启动真实 Core 或 Runtime。
+测试中的 `userData` 与 Skill 文件目录均属于临时夹具，不启动真实 Core 或 Runtime。
 
 ### 通用隔离规则
 
 - Smoke 应使用临时 Core `data-dir`、临时工作区和独立配置投影；不得读写日常
-  Rovai-ai SQLite。
+  Rovai AI SQLite。
 - Runtime Smoke 会继承当前进程可见的上游认证环境，但不应改写用户级 Runtime 配置。
 - 选择 Pi 的 smoke 必须把官方 auth/settings/models 以 0600 复制到测试专用 0700 `PI_CODING_AGENT_DIR`，并让
   Probe 使用自己的 `--session-dir`；禁止把测试 prompt、Session 或 MCP/Skill exposure 写入用户 Pi Session 历史。
@@ -1329,7 +1329,7 @@ Renderer 复用生产设置组件和既有隔离 Electron fixture，增加恢复
 分别验证 History 初始化、query 内部画布、依赖加载及错误诊断。服务路径和访问矩阵由 `packages/html-preview`
 Vitest owner 负责，窗口/代际释放由 Main 既有 service owner 负责，文件布局与查找继续归 `test:file-preview-layout`。
 
-所有浏览器使用临时绝对 userData/profile，Electron 不启动 Core、Runtime 或日常 Skill Library。
+所有浏览器使用临时绝对 userData/profile，Electron 不启动 Core 或 Runtime，不访问日常 Skill 文件目录。
 `ROVAI_TEST_CHROME` 指定普通 Chrome 路径；缺失时该项标记未运行，不能宣称跨端验收已通过。
 `ROVAI_HTML_HISTORY_SAMPLE` 和 `ROVAI_HTML_CANVAS_SAMPLE` 可提供两份独立原稿，测试仅复制、核验摘要并验证实际正文与
 子画布联动；`ROVAI_KEEP_HTML_PREVIEW_FIXTURE=1` 保留临时资源和截图。详见
@@ -1354,7 +1354,7 @@ Vitest owner 负责，窗口/代际释放由 Main 既有 service owner 负责，
 既有 `scripts/lib/host-web.test.mjs` owner 覆盖本机/HTTP 双入口、一次性导入、并发字段保留、重启及损坏记录。
 `pnpm package:mac:daily` 后，`node scripts/smoke-web-preferences.mjs <输出目录>` 验证实际 Main 的旧偏好导入、
 Web 通用设置回显、跨端保存、创建弹窗默认勾选、一键 Pending 创建和刷新。脚本创建独立 userData/Skill/MCP 与 Chrome profile；
-仅 Runtime 可用性使用浏览器响应夹具，以免触发真实模型或修改用户 Runtime 配置。持久设置与 Camp 创建仍走实际包内 Host。
+仅 Runtime 可用性使用浏览器响应夹具，以免触发真实模型或修改用户 Runtime 配置。持久设置与 Thread 创建仍走实际包内 Host。
 截图通过正式主题选择控件切换日夜，并验证新建按钮中性色。该证据不代替真实 Runtime、Windows 或第二实体设备验收。
 
 真实 HTTP owner 验证本机签发与 HTTP 兑换接线、双客户端竞争、旧票据撤销，以及公共操作不能签发票据。
@@ -1400,8 +1400,8 @@ Windows 平台实测独立记录，不能由此 macOS 浏览器结果推断。
 传输结果不确定、同一内部请求重放、大小受限 IPC 与当前 lease 仍由 CLI transport 和 Core invocation 的既有 owner 保留。
 
 改写既有 `team_tool::tests::attachment_send_keeps_source_path_and_dispatches_without_projection_gate`，
-覆盖工作区、外部只读源、Run 临时源、默认输出、目录、跨 Camp 原路径、替换保存及源消失后内部重放；
-扩展既有 Camp 删除 journal、Pi 当前图片、Desktop file preview、Host HTTP/Chrome HTML 和临时实例清理 owner。
+覆盖工作区、外部只读源、Run 临时源、默认输出、目录、跨 Thread 原路径、替换保存及源消失后内部重放；
+扩展既有 Thread 删除 journal、Pi 当前图片、Desktop file preview、Host HTTP/Chrome HTML 和临时实例清理 owner。
 定向验证：`cargo test -p rovai-core --features extended-tests --lib attachment_send_keeps_source_path`、
 `cargo test -p rovai-core --bin rovai`、`node --test scripts/lib/host-web-html.test.mjs scripts/lib/host-web.test.mjs`；
 完整 Core library 与 Context slow suite 继续执行，不用删除旧迁移测试换取通过。
@@ -1416,7 +1416,7 @@ DSH 原生精确 total 与缺失/矛盾分类，后者增加数值 Context、Ses
 实测报告必须独立列出字段可用性，不能用 null/null 的对照通过替代采集完整性。
 
 `node scripts/probe-runtime-execution-metrics.mjs <runtime-kind>` 创建独立 Core、bundled CLI、data-dir、
-Skill Library、MCP 和工作区，执行包含只读工具调用的原生用量／上下文任务，最长观察 8 分钟。
+Skill 文件目录、MCP 和工作区，执行包含只读工具调用的原生用量／上下文任务，最长观察 8 分钟。
 探针只保存原生字段形态、匿名身份、Token／Gauge 数值、观测时刻及持久化读回，不采集字符数量、
 速度、正文、思考正文或内容哈希；`rendererVerified` 固定为 false，不能作为界面验收。
 
@@ -1793,7 +1793,7 @@ node scripts/smoke-hermes-native-session.mjs /absolute/official-source /absolute
 ```
 
 真实分支读取当前原生配置中的默认模型及 Responses Provider，使用一次性用户 Home、独立 Core data、
-Skill Library、MCP 文件和未修改的源码副本。测试 relay 原样转发真实模型响应，凭据只留在测试进程内，
+Skill 文件目录、MCP 文件和未修改的源码副本。测试 relay 原样转发真实模型响应，凭据只留在测试进程内，
 不复制到 fixture；不生成工具调用或伪造模型回复。测试用 stdio observer 只记录 ACP 方法、Session、
 模型/模式等白名单元数据，不改变消息。它不是生产代理、插件或 CLI wrapper。
 两成员真实工具与 Send、原 Session 冷恢复、同值省略设置、目录外显式模型切换和固定 Skills 文件选择

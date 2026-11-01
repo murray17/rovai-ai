@@ -34,13 +34,6 @@ impl std::error::Error for SubsystemUnavailable {}
 /// Process-local feature gates, never database admission or substitute authority.
 pub(crate) struct CoreSubsystems(RwLock<BTreeMap<String, SubsystemSnapshot>>);
 
-#[derive(Default)]
-pub(crate) struct SubsystemInitialization {
-    // Retain exact already-retired targets across a failed filesystem cleanup.
-    // Retrying must neither rescan new Camps nor lose the failed directory IDs.
-    retired_camp_directories: Vec<String>,
-}
-
 impl CoreSubsystems {
     pub fn new() -> Self {
         let ids = [
@@ -136,12 +129,8 @@ pub(crate) fn runtime_subsystem_id(kind: AdapterKind) -> String {
     format!("runtime.{}", kind.as_str())
 }
 
-fn shared_execution_subsystem_ids(kind: AdapterKind) -> &'static [&'static str] {
-    if kind == AdapterKind::Pi {
-        &["skills", "builtin-tools"]
-    } else {
-        &["skills", "mcp", "builtin-tools"]
-    }
+fn shared_execution_subsystem_ids(_kind: AdapterKind) -> &'static [&'static str] {
+    &["skills", "builtin-tools"]
 }
 
 impl super::Core {
@@ -177,7 +166,7 @@ impl super::Core {
     pub(crate) async fn initialize_optional_subsystems(&self) {
         use super::*;
 
-        let mut initialization = self.subsystem_initialization.lock().await;
+        let _initialization = self.subsystem_initialization.lock().await;
         if self.planned_shutdown.shutdown_started() {
             return;
         }
@@ -224,21 +213,9 @@ impl super::Core {
             return;
         }
         if self.subsystems.begin("attachments") {
-            let result = {
-                let mut database = self.database.lock().await;
-                (|| -> Result<_> {
-                    ManagedAttachmentStore::for_database(&database).reconcile(&mut database)?;
-                    self.attachment_views
-                        .reconcile(&mut database, &ThreadAttachmentStore::new(&self.data_dir))?;
-                    unresolved_publication_camp_ids(&database)
-                })()
-            };
-            let result = result.map(|camps| {
-                for camp_id in camps {
-                    self.request_camp_attachment_projection(&camp_id);
-                }
-            });
-            self.finish_subsystem("attachments", result);
+            // Historical derived views are rebuilt by the individual operation.
+            // New source references have no global view-reconciliation prerequisite.
+            self.finish_subsystem("attachments", Ok(()));
         }
         tokio::task::yield_now().await;
 
@@ -246,15 +223,18 @@ impl super::Core {
             return;
         }
         if self.subsystems.begin("mcp") {
-            let result = {
-                let database = self.database.lock().await;
-                (|| -> Result<()> {
-                    let config = self.mcp_config()?;
-                    config.migrate_pre_release_config()?;
-                    config.migrate_agent_ids(&database.agent_id_aliases()?)?;
-                    Ok(())
-                })()
-            };
+            let aliases = self.database.lock().await.agent_id_aliases();
+            let config = self.mcp_config().cloned();
+            let result = tokio::task::spawn_blocking(move || -> Result<()> {
+                let config = config?;
+                let aliases = aliases?;
+                config.migrate_pre_release_config()?;
+                config.migrate_agent_ids(&aliases)?;
+                Ok(())
+            })
+            .await
+            .context("MCP initialization task failed")
+            .and_then(|result| result);
             self.finish_subsystem("mcp", result);
         }
         tokio::task::yield_now().await;
@@ -295,95 +275,9 @@ impl super::Core {
             .await;
             self.finish_subsystem("skills", result);
         }
-        tokio::task::yield_now().await;
-
-        if self.planned_shutdown.shutdown_started() {
-            return;
-        }
-        if self.subsystems.begin("maintenance") {
-            let search_summary = self.runtime_search_environment.read().await.summary();
-            let mut database = self.database.lock().await;
-            let mut errors = Vec::new();
-            macro_rules! maintain {
-                ($stage:literal, $result:expr) => {
-                    if let Err(error) = $result {
-                        errors.push(format!("{}: {error:#}", $stage));
-                    }
-                };
-            }
-            let attachments = ThreadAttachmentStore::new(&self.data_dir);
-            maintain!(
-                "attachment_cleanup",
-                attachments.cleanup_expired(&mut database)
-            );
-            maintain!(
-                "pending_camp_cleanup",
-                (|| -> Result<()> {
-                    let camps = CollaborationService::default()
-                        .discard_empty_pending_camps_on_startup(
-                            &mut database,
-                            &self.startup_pending_camp_ids,
-                        )?;
-                    for camp in &camps {
-                        emit_navigation_invalidated(
-                            &self.output,
-                            "camps.discardPending",
-                            Some(camp),
-                        );
-                    }
-                    initialization.retired_camp_directories.extend(camps);
-                    Ok(())
-                })()
-            );
-            initialization.retired_camp_directories.retain(|camp| {
-                let legacy = attachments.remove_camp(camp);
-                let output = rovai_core::storage_layout::remove_camp_attachment_output(
-                    database.runtime_camp_files_root(),
-                    camp,
-                );
-                if let Err(error) = legacy.and(output) {
-                    errors.push(format!("pending_camp_directory: {error:#}"));
-                    true
-                } else {
-                    false
-                }
-            });
-            maintain!(
-                "runtime_search_generation",
-                database.record_runtime_search_environment_generation(
-                    search_summary.generation,
-                    &search_summary.created_at
-                )
-            );
-            if self.subsystems.require("skills").is_ok() {
-                maintain!(
-                    "skill_staging_cleanup",
-                    self.skill_library.cleanup_expired_staging()
-                );
-                maintain!(
-                    "skill_revision_cleanup",
-                    self.skill_library.cleanup_orphan_revisions(&database)
-                );
-            }
-            maintain!(
-                "mcp_projection_cleanup",
-                self.mcp_projection.cleanup_terminal_and_orphaned(&database)
-            );
-            maintain!(
-                "file_change_projection",
-                AgentRunFileChangeProjector
-                    .recover_terminal_runs(&mut database, &ManagedBlobStore::new(&self.data_dir))
-            );
-            drop(database);
-            self.finish_subsystem(
-                "maintenance",
-                if errors.is_empty() {
-                    Ok(())
-                } else {
-                    Err(anyhow::anyhow!(errors.join("; ")))
-                },
-            );
-        }
+        // Historical cleanup is started once by run_core, independently of
+        // feature initialization/retry. Unknown old attachment and Skill trees
+        // are retained: directory age alone cannot prove exclusive ownership.
     }
 }
 
@@ -392,12 +286,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pi_dispatch_does_not_depend_on_the_mcp_subsystem() {
-        assert!(!shared_execution_subsystem_ids(AdapterKind::Pi).contains(&"mcp"));
-        assert!(
-            shared_execution_subsystem_ids(AdapterKind::CodexCli).contains(&"mcp"),
-            "peer Runtime MCP gates must remain unchanged"
-        );
+    fn ordinary_dispatch_does_not_depend_on_external_mcp() {
+        for kind in AdapterKind::ALL {
+            assert!(!shared_execution_subsystem_ids(kind).contains(&"mcp"));
+            assert!(shared_execution_subsystem_ids(kind).contains(&"builtin-tools"));
+        }
     }
 
     #[test]

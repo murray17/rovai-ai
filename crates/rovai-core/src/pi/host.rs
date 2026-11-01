@@ -297,7 +297,6 @@ pub(crate) struct PiHost {
     incoming: mpsc::UnboundedSender<PiIncoming>,
     alive: AtomicBool,
     poisoned: AtomicBool,
-    provider_registration_failed: AtomicBool,
     streaming: AtomicBool,
     retire_after_steer: AtomicBool,
     sequence: AtomicU64,
@@ -570,7 +569,6 @@ impl PiHost {
             incoming: launch.incoming.clone(),
             alive: AtomicBool::new(true),
             poisoned: AtomicBool::new(false),
-            provider_registration_failed: AtomicBool::new(false),
             streaming: AtomicBool::new(false),
             retire_after_steer: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
@@ -795,16 +793,6 @@ impl PiHost {
     }
 
     async fn route_message(&self, message: Value) {
-        // Native RPC exposes extension registration failures separately from a
-        // successful get_available_models response. Only this typed event is
-        // catalog evidence; generic stderr and unrelated extension errors aren't.
-        if message.get("type").and_then(Value::as_str) == Some("extension_error")
-            && message.get("event").and_then(Value::as_str) == Some("register_provider")
-            && message.get("error").and_then(Value::as_str).is_some()
-        {
-            self.provider_registration_failed
-                .store(true, Ordering::Release);
-        }
         if message.get("type").and_then(Value::as_str) == Some("extension_ui_request")
             && message.get("method").and_then(Value::as_str) == Some("setStatus")
             && message.get("statusKey").and_then(Value::as_str)
@@ -1115,35 +1103,11 @@ impl PiHost {
                 ));
             }
         }
-        let mut available_thinking_levels = None;
         if frozen_runtime.model.model_id != PI_RUNTIME_DEFAULT_MODEL_ID {
-            let available_models = self
-                .command("get_available_models", json!({}))
-                .await
-                .map_err(|error| {
-                    activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
-                })?;
             let (provider, model_id) = parse_explicit_model_id(&frozen_runtime.model.model_id)
                 .map_err(|error| {
                     activation_failure(PiActivationFailureKind::ConfigurationFailed, error)
                 })?;
-            let selected_model = available_models
-                .pointer("/data/models")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .find(|model| {
-                    model.get("provider").and_then(Value::as_str) == Some(provider.as_str())
-                        && model.get("id").and_then(Value::as_str) == Some(model_id.as_str())
-                });
-            let Some(selected_model) = selected_model else {
-                return Err(activation_failure(
-                    PiActivationFailureKind::ConfigurationFailed,
-                    format!("Pi explicit provider={provider} model={model_id} is unavailable"),
-                ));
-            };
-            available_thinking_levels =
-                crate::agent_runtime_adapter::pi_thinking_levels(selected_model);
             if activated_state
                 .pointer("/data/model/provider")
                 .and_then(Value::as_str)
@@ -1209,14 +1173,10 @@ impl PiHost {
             .and_then(Value::as_str)
             .filter(|requested| *requested != thinking_level)
         {
-            let available = available_thinking_levels
-                .as_ref()
-                .map(|levels| format!(", available={}", levels.join(",")))
-                .unwrap_or_default();
             return Err(activation_failure(
                 PiActivationFailureKind::ConfigurationFailed,
                 format!(
-                    "Pi provider={provider} model={model_id} did not apply thinking_level: requested={requested}, observed={thinking_level}{available}"
+                    "Pi provider={provider} model={model_id} did not apply thinking_level: requested={requested}, observed={thinking_level}"
                 ),
             ));
         }
@@ -2148,9 +2108,6 @@ pub(crate) async fn model_catalog_probe(executable: &Path) -> Result<Value> {
     if !host.shutdown_and_reap_with_status().await {
         bail!("Pi catalog Host did not shutdown and reap within the grace period");
     }
-    if host.provider_registration_failed.load(Ordering::Acquire) {
-        bail!("Pi catalog observation included a native Provider registration failure");
-    }
     result
 }
 
@@ -2160,19 +2117,7 @@ async fn read_probe_model_catalog(host: &PiHost) -> Result<Value> {
         .pointer("/data/models")
         .cloned()
         .context("Pi probe model catalog is unavailable")?;
-    let models = catalog
-        .as_array()
-        .context("Pi probe model catalog is malformed")?;
-    if models.iter().any(|model| {
-        ["provider", "id"].iter().any(|key| {
-            model
-                .get(key)
-                .and_then(Value::as_str)
-                .is_none_or(|value| value.trim().is_empty())
-        })
-    }) {
-        bail!("Pi probe model catalog contains an invalid entry");
-    }
+    anyhow::ensure!(catalog.is_array(), "Pi probe model catalog is malformed");
     Ok(catalog)
 }
 
@@ -2182,10 +2127,9 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
     let private_runtime_dir = probe_root.join("private");
     let session_dir = probe_root.join("sessions");
     let result = async {
-        let raw_model_catalog = read_probe_model_catalog(&host).await?;
-        let models = raw_model_catalog
-            .as_array()
-            .expect("catalog reader validated array");
+        let raw_model_catalog = read_probe_model_catalog(&host)
+            .await
+            .unwrap_or_else(|_| json!([]));
         let state = host.command("get_state", json!({})).await?;
         let locator_root = private_runtime_dir.join("probe-locator");
         let (session_id, session_file, provider, model, thinking, _) = validate_host_state(
@@ -2213,13 +2157,6 @@ pub(crate) async fn machine_ready_probe(executable: &Path) -> Result<PiMachineRe
             probe_root,
         )?;
         validate_probe_session_file_directory(&session_file, &session_dir)?;
-        if !models.iter().any(|entry| {
-            entry.get("provider").and_then(Value::as_str) == Some(provider.as_str())
-                && entry.get("id").and_then(Value::as_str) == Some(model.as_str())
-        }) {
-            bail!("Pi current model is absent from the available model catalog");
-        }
-
         Ok(PiMachineReadyProbe {
             model_fingerprint: short_digest(format!("{provider}\0{model}\0{thinking}").as_bytes()),
             raw_model_catalog,
@@ -3127,16 +3064,9 @@ done
             "catalog-only private root must also be cleaned"
         );
 
-        // Native RPC's register_provider event is observable even when the
-        // catalog response succeeds. No completeness field is added to the RPC.
+        // One failed provider must not discard other providers' valid models.
         std::fs::write(root.join("provider-error"), "").unwrap();
-        assert!(
-            model_catalog_probe(&executable)
-                .await
-                .unwrap_err()
-                .to_string()
-                .contains("registration failure")
-        );
+        assert_eq!(model_catalog_probe(&executable).await.unwrap(), catalog);
         std::fs::remove_file(root.join("provider-error")).unwrap();
         // Internal ModelRuntime.getError() has no RPC representation. A valid
         // partial-looking list, with only arbitrary stderr, remains an observation.
@@ -3174,6 +3104,7 @@ done
             (true, "minimax", "MiniMax-M3", None, "high", 0),
             (true, "minimax", "MiniMax-M3", Some("low"), "low", 0),
             (true, "minimax", "next", None, "medium", 1),
+            (true, "minimax", "not-in-catalog", None, "medium", 1),
             (true, "other", "MiniMax-M3", None, "medium", 1),
             (true, "minimax", "next", Some("low"), "low", 1),
             (true, "minimax", "MiniMax-M3", Some("max"), "high", 0),
@@ -3225,15 +3156,14 @@ done
                 })
                 .collect::<Vec<_>>();
             assert_eq!(
-                &commands[..3],
+                &commands[..2],
                 [
                     if restore {
                         "switch_session"
                     } else {
                         "new_session"
                     },
-                    "get_state",
-                    "get_available_models"
+                    "get_state"
                 ]
             );
             assert_eq!(
@@ -3249,6 +3179,11 @@ done
                     .filter(|command| *command == "set_thinking_level")
                     .count(),
                 usize::from(requested.is_some())
+            );
+            assert!(
+                !commands
+                    .iter()
+                    .any(|command| command == "get_available_models")
             );
             assert_eq!(commands.last().unwrap(), "get_state");
             assert_eq!(

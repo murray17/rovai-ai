@@ -538,6 +538,9 @@ impl RuntimeSearchEnvironment {
         manual_candidates: impl IntoIterator<Item = PathBuf>,
     ) -> Vec<RuntimeExecutableCandidate> {
         if let Some(configuration) = self.startup_configurations.get(&kind) {
+            if configuration.configuration_error.is_some() {
+                return Vec::new();
+            }
             if let Some(path) = &configuration.program_path {
                 let path = PathBuf::from(path);
                 #[cfg(target_os = "macos")]
@@ -780,6 +783,9 @@ fn effective_startup_configuration(
 }
 
 pub fn ensure_runtime_environment_available(kind: AdapterKind) -> Result<()> {
+    if let Some(configuration) = effective_startup_configuration(kind) {
+        configuration.ensure_configuration_available()?;
+    }
     // A member's captured launch map has already resolved its inheritance. An
     // independent member must not depend on the shared credential record.
     if LAUNCH_ENVIRONMENT
@@ -1013,6 +1019,13 @@ pub fn discover_runtime_entry_from_candidates(
 ) {
     let observed_at = chrono::Utc::now().to_rfc3339();
     for candidate in candidates {
+        if search
+            .startup_configuration(kind)
+            .configuration_error
+            .is_some()
+        {
+            break;
+        }
         if !is_runtime_entrypoint_file(&candidate.path) {
             continue;
         }
@@ -1073,7 +1086,18 @@ pub fn discover_runtime_entry_from_candidates(
             version_probe_succeeded: None,
             search_generation: search.generation,
             observed_at,
-            diagnostic_code: Some("runtime_not_found".to_string()),
+            diagnostic_code: Some(
+                if search
+                    .startup_configuration(kind)
+                    .configuration_error
+                    .is_some()
+                {
+                    "runtime_startup_configuration_invalid"
+                } else {
+                    "runtime_not_found"
+                }
+                .into(),
+            ),
             entrypoint_locator_identity: None,
         },
         None,
@@ -1090,7 +1114,18 @@ pub async fn discover_runtime_version(
         .is_err()
     {
         observation.version_probe_succeeded = Some(false);
-        observation.diagnostic_code = Some("runtime_common_environment_unavailable".into());
+        observation.diagnostic_code = Some(
+            if search
+                .startup_configuration(observation.runtime_kind)
+                .configuration_error
+                .is_some()
+            {
+                "runtime_startup_configuration_invalid"
+            } else {
+                "runtime_common_environment_unavailable"
+            }
+            .into(),
+        );
         return;
     }
     with_runtime_configuration(
@@ -2166,6 +2201,7 @@ mod tests {
             crate::runtime_startup::RuntimeStartupConfiguration {
                 custom_api_snapshot: None,
                 common_environment_unavailable: false,
+                configuration_error: None,
                 program_path: Some(
                     directory
                         .join("manual/codex")

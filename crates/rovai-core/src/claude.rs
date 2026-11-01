@@ -40,7 +40,7 @@ use tokio::{
 use crate::{
     builtin_tool_runtime::BuiltinToolProcessConfig,
     claude_control::{self, ClaudeControl, ControlReadGuard},
-    runtime_mcp::{remove_stale_mcp_configs, write_ephemeral_additive_mcp_config},
+    runtime_mcp::write_ephemeral_additive_mcp_config,
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -104,49 +104,6 @@ impl Drop for ClaudeLaunchFile {
             && let Err(error) = std::fs::remove_file(&self.0)
         {
             eprintln!("Claude Code pre-spawn launch file cleanup failed: {error}");
-        }
-    }
-}
-
-fn remove_stale_claude_inputs(private_runtime_dir: &Path) {
-    let directory = private_runtime_dir.join("claude-inputs");
-    if !directory.exists() {
-        return;
-    }
-    let directory =
-        match rovai_core::platform::private_storage::prepare_private_directory(&directory) {
-            Ok(directory) => directory,
-            Err(error) => {
-                eprintln!("Claude Code stale input directory could not be inspected: {error:#}");
-                return;
-            }
-        };
-    let entries = match std::fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) => {
-            eprintln!("Claude Code stale inputs could not be listed: {error}");
-            return;
-        }
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                eprintln!("Claude Code stale input entry could not be read: {error}");
-                continue;
-            }
-        };
-        let name = entry.file_name();
-        let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".txt")) else {
-            continue;
-        };
-        if uuid::Uuid::parse_str(stem).is_err()
-            || !entry.file_type().is_ok_and(|kind| kind.is_file())
-        {
-            continue;
-        }
-        if let Err(error) = std::fs::remove_file(entry.path()) {
-            eprintln!("Claude Code stale input {name:?} could not be removed: {error}");
         }
     }
 }
@@ -342,6 +299,15 @@ pub struct ClaudeCodeCliRuntimeAdapter {
 }
 
 impl ClaudeCodeCliRuntimeAdapter {
+    pub(crate) fn active_execution_keys(&self) -> Vec<crate::planned_shutdown::ActiveExecutionKey> {
+        self.active
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .map(|(id, epoch)| crate::planned_shutdown::ActiveExecutionKey::new(id, *epoch))
+            .collect()
+    }
+
     #[cfg(all(test, feature = "extended-tests"))]
     pub fn new(data_dir: &Path) -> Result<Self> {
         let adapter = Self::deferred(data_dir);
@@ -365,8 +331,6 @@ impl ClaudeCodeCliRuntimeAdapter {
             )
         })?;
         restrict_directory_permissions(private_runtime_dir)?;
-        remove_stale_mcp_configs(private_runtime_dir)?;
-        remove_stale_claude_inputs(private_runtime_dir);
         Ok(())
     }
 

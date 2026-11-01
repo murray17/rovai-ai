@@ -1,5 +1,4 @@
 ---
-version: 7
 slug: "memory-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemoryLibrary.tsx"
 related_targets:
@@ -73,8 +72,8 @@ danger confirmation. Renderer success follows Core, not optimistic presentation.
 
 ## Inheritance and validation
 
-Inherit [`DESIGN.md`](../../../../DESIGN.md), theme contracts and the
-[accessibility baseline](../../../../docs/ui/qa/accessibility.md). This brief owns presentation only; Memory scope,
+Inherit [`DESIGN.md`](../../../DESIGN.md), theme contracts and the
+[accessibility baseline](../qa/accessibility.md). This brief owns presentation only; Memory scope,
 authority, review policy, capacities, persistence and concurrency remain in current Contracts and Core.
 `pnpm test:memory-workspace-ui` exercises production components with an isolated transport fixture, including day/night 2K/scaled layouts, Windows title-bar clearance, review exit paths, draft recovery and failed-refresh protection. Real SQLite,
 restart, scheduling conflicts and permanent erasure remain covered by `pnpm accept:memory-ui` against an isolated App.

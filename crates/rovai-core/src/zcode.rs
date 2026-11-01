@@ -581,9 +581,6 @@ impl NativeConfig {
         } else {
             &Value::Null
         };
-        if model.is_none() && (main.is_null() || (self.app_config && main.is_string())) {
-            bail!("ZCode selected model not present in official configuration");
-        }
         let kind = main
             .get("kind")
             .or_else(|| provider.get("kind"))
@@ -813,14 +810,13 @@ impl NativeConfig {
     }
 
     pub fn session_catalog(&self, session_id: &str, snapshot: &Value) -> Result<Value> {
-        let native = snapshot
-            .pointer("/settings/model")
-            .context("ZCode native model catalog missing")?;
+        let Some(native) = snapshot.pointer("/settings/model") else {
+            return Ok(json!({"sessionId": session_id}));
+        };
         let current = native["current"]["providerId"]
             .as_str()
             .zip(native["current"]["modelId"].as_str())
-            .map(|(provider, model)| format!("{provider}/{model}"))
-            .context("ZCode current model missing")?;
+            .map(|(provider, model)| format!("{provider}/{model}"));
         let expected = self.runtime_model(None)?;
         let matches_expected = if self.protocol == NativeProtocol::ProviderRegistry {
             expected["model"].is_null()
@@ -829,10 +825,10 @@ impl NativeConfig {
         } else {
             native["current"] == expected["model"]
         };
-        if !matches_expected {
+        if current.is_some() && !matches_expected {
             bail!("ZCode did not select the configured native default model");
         }
-        let models = native["available"].as_array().context("ZCode model choices missing")?.iter().filter_map(|choice| {
+        let models = native["available"].as_array().into_iter().flatten().filter_map(|choice| {
             if choice.get("disabledReason").and_then(Value::as_str).is_some_and(|reason| !reason.is_empty()) {
                 return None;
             }
@@ -842,9 +838,6 @@ impl NativeConfig {
             self.runtime_model(Some(&id)).ok()?;
             Some(json!({"modelId":id,"name":choice.get("label").and_then(Value::as_str).unwrap_or(model)}))
         }).collect::<Vec<_>>();
-        if !models.iter().any(|model| model["modelId"] == current) {
-            bail!("ZCode configured model is unavailable in native catalog");
-        }
         Ok(
             json!({"sessionId":session_id,"models":{"currentModelId":current,"availableModels":models}}),
         )
@@ -1166,6 +1159,21 @@ mod tests {
                 .len(),
             1
         );
+        let mut absent = snapshot.clone();
+        absent["settings"]["model"]["available"] =
+            json!([{}, {"ref":{"providerId":"byok","modelId":"new-unlisted"}}]);
+        assert_eq!(
+            native.session_catalog("session", &absent).unwrap()["models"]["currentModelId"],
+            "byok/alias"
+        );
+        assert_eq!(
+            native.session_catalog("session", &json!({})).unwrap(),
+            json!({"sessionId":"session"})
+        );
+        assert_eq!(
+            native.runtime_model(Some("byok/new-unlisted")).unwrap()["model"]["modelId"],
+            "new-unlisted"
+        );
         assert!(!public.to_string().contains("PRIVATE_CANARY"));
         assert!(!native.digest.contains("PRIVATE_CANARY"));
         let changed = NativeConfig::load_layers(
@@ -1272,10 +1280,11 @@ mod tests {
                 .runtime_model(Some("builtin:zai-coding-plan/blocked"))
                 .is_err()
         );
-        assert!(
+        assert_eq!(
             signed_in
                 .runtime_model(Some("builtin:zai-start-plan/deleted"))
-                .is_err()
+                .unwrap()["model"]["modelId"],
+            "deleted"
         );
         let registry = signed_in.app_provider_registry().unwrap().unwrap();
         assert_eq!(registry["providers"].as_array().unwrap().len(), 1);

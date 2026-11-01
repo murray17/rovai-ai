@@ -284,17 +284,18 @@ impl AgentRunFileChangeProjector {
         load_card(database, agent_run_id, execution_epoch)
     }
 
-    pub fn recover_terminal_runs(
+    pub(crate) fn terminal_recovery_candidates(
         &self,
-        database: &mut Database,
-        blob_store: &ManagedBlobStore,
-    ) -> Result<usize> {
+        database: &Database,
+        after_run_id: Option<&str>,
+    ) -> Result<Vec<(String, i64)>> {
         let candidates = {
             let mut statement = database.connection().prepare(
                 r#"
                 SELECT agent_run.id, agent_run.execution_epoch
                 FROM agent_run
                 WHERE agent_run.status IN ('succeeded', 'failed', 'cancelled')
+                  AND (?1 IS NULL OR agent_run.id > ?1)
                   AND (
                       NOT EXISTS (
                           SELECT 1 FROM agent_run_file_change_projection AS projection
@@ -318,15 +319,25 @@ impl AgentRunFileChangeProjector {
                       WHERE evidence.agent_run_id = agent_run.id
                         AND evidence.execution_epoch = agent_run.execution_epoch
                   )
-                ORDER BY agent_run.ended_at, agent_run.id
+                ORDER BY agent_run.id LIMIT 8
                 "#,
             )?;
             statement
-                .query_map([], |row| {
+                .query_map([after_run_id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
+        Ok(candidates)
+    }
+
+    #[cfg(test)]
+    pub fn recover_terminal_runs(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+    ) -> Result<usize> {
+        let candidates = self.terminal_recovery_candidates(database, None)?;
         let mut recovered = 0_usize;
         for (agent_run_id, execution_epoch) in candidates {
             match self.project_terminal_run(database, blob_store, &agent_run_id, execution_epoch) {
@@ -2807,6 +2818,83 @@ mod tests {
                 .unwrap()
                 .status,
             "no_changes"
+        );
+
+        // A full failed batch must not monopolize every bounded recovery pass.
+        for index in 0..9 {
+            let run = format!("recovery-run-{index:02}");
+            database.connection().execute(
+                r#"INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id, initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence, responsibility_key,
+                    start_reason, purpose, completion_role, effective_config_json, workspace_json,
+                    status, idempotency_key, runtime_adapter_kind, execution_epoch, created_at, started_at, updated_at
+                ) SELECT ?1, camp_turn_id, conversation_id, 0, 0, ?1, start_reason, purpose,
+                    completion_role, effective_config_json, workspace_json, 'running', ?1,
+                    runtime_adapter_kind, execution_epoch, created_at, started_at, updated_at
+                  FROM agent_run WHERE id = 'file-change-run-0'"#, [&run],
+            ).unwrap();
+            ExecutionEvidenceService.record_runtime_event(&mut database, &blob_store, &run, 1, "runtime.action", &json!({
+                "eventId": run, "toolCallId": run, "status": "completed", "kind": "edit",
+                "runtimeFileOperation": { "adapterKind": "qoder-cli", "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed", "operationKind": "write", "path": "recovered.txt" }
+            })).unwrap().unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET status='failed', ended_at=?2 WHERE id=?1",
+                    params![run, now],
+                )
+                .unwrap();
+            if index < 8 {
+                database
+                    .connection()
+                    .execute_batch("PRAGMA ignore_check_constraints=ON")
+                    .unwrap();
+                database.connection().execute(
+                    "UPDATE agent_run_execution_evidence SET operation_id=NULL, content_blob_id=NULL, payload_preview_json='{broken' WHERE agent_run_id=?1",
+                    [&run],
+                ).unwrap();
+                database
+                    .connection()
+                    .execute_batch("PRAGMA ignore_check_constraints=OFF")
+                    .unwrap();
+            }
+        }
+        let first_batch = AgentRunFileChangeProjector
+            .terminal_recovery_candidates(&database, None)
+            .unwrap();
+        assert_eq!(first_batch.len(), 8);
+        for (run, epoch) in &first_batch {
+            assert!(
+                AgentRunFileChangeProjector
+                    .project_terminal_run(&mut database, &blob_store, run, *epoch)
+                    .is_err()
+            );
+        }
+        let cursor = &first_batch.last().unwrap().0;
+        let next_batch = AgentRunFileChangeProjector
+            .terminal_recovery_candidates(&database, Some(cursor))
+            .unwrap();
+        assert_eq!(next_batch, vec![("recovery-run-08".into(), 1)]);
+        assert!(
+            AgentRunFileChangeProjector
+                .project_terminal_run(&mut database, &blob_store, &next_batch[0].0, 1)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            AgentRunFileChangeProjector
+                .terminal_recovery_candidates(&database, Some(&next_batch[0].0))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            AgentRunFileChangeProjector
+                .terminal_recovery_candidates(&database, None)
+                .unwrap(),
+            first_batch,
+            "wrapping keeps failed records eligible for a later retry"
         );
 
         drop(database);

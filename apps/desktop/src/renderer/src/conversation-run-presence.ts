@@ -1,6 +1,7 @@
 import type { AgentRunView, ThreadMessageView } from '@contracts'
 import { agentRunIsStarting, agentRunPresentation, buildLiveExecutionProgress, type ActivityIconKind, type LiveRuntimeEvent } from './ui-model'
 import { uiAttribute } from './interface-language'
+import { localizedExecutionStepTitle } from './execution-step-language'
 import type { ThreadConversationTimelineItem } from './ThreadWorkspace'
 
 export interface ConversationRunPresenceSlot {
@@ -175,7 +176,7 @@ export function runPresencePreview(run: AgentRunView, events: readonly LiveRunti
   const latest = progress.items.findLast(item => item.kind === 'tool' || item.kind === 'narration' && item.body.trim())
   if (latest?.kind === 'tool') return {
     kind: 'command',
-    text: singleLine(latest.step.publicCommand || latest.step.currentInstruction || latest.step.title),
+    text: singleLine(localizedExecutionStepTitle(latest.step, true)),
     iconKind: latest.step.publicCommand && latest.step.iconKind === 'unknown' ? 'terminal' : latest.step.iconKind
   }
   if (latest?.kind === 'narration') return { kind: 'narration', text: currentNarrationLine(latest.body) }

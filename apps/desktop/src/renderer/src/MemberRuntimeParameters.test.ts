@@ -15,7 +15,6 @@ import {
   displayableInstallationModels,
   explicitSelection,
   liveCatalogIsAtLeastAsRecent,
-  modelCatalogCanValidateOptions,
   modelCatalogStatusCopy,
   runtimeDraftForMember,
   runtimeModelSelectionAvailable,
@@ -84,15 +83,7 @@ describe('runtime model catalog source', () => {
     expect(liveCatalogIsAtLeastAsRecent(unavailable, unavailableCache)).toBe(true)
   })
 
-  it('does not let a local status validate an observation Core has expired', () => {
-    const expiredCache = { ...cached.cache, status: 'expired' as const }
-    expect(liveCatalogIsAtLeastAsRecent(cached, expiredCache)).toBe(true)
-    expect(modelCatalogCanValidateOptions(expiredCache, cached)).toBe(false)
-    expect(modelCatalogCanValidateOptions(expiredCache, { ...cached, cache: { ...cached.cache, status: 'fresh' } })).toBe(false)
-    expect(modelCatalogCanValidateOptions(expiredCache, refreshed)).toBe(true)
-    expect(modelCatalogCanValidateOptions(cached.cache, refreshed)).toBe(true)
-    expect(modelCatalogCanValidateOptions(refreshed.cache, cached)).toBe(true)
-  })
+
 })
 
 describe('explicit model changes', () => {
@@ -107,37 +98,37 @@ describe('explicit model changes', () => {
     }]
   }
 
-  it('carries only explicit key and value pairs supported by the new model', () => {
+  it('preserves explicit options regardless of the new model catalog', () => {
     expect(explicitSelection(model, {
       mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'high' }
-    }, true)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: { reasoning_effort: 'high' } })
+    })).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: { reasoning_effort: 'high' } })
     expect(explicitSelection(model, {
       mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'xhigh' }
-    }, true)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: {} })
+    })).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: { reasoning_effort: 'xhigh' } })
     expect(explicitSelection({ ...model, options: [] }, {
       mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'high' }
-    }, true)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: {} })
+    })).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: { reasoning_effort: 'high' } })
     expect(explicitSelection(model, {
       mode: 'explicit', modelId: 'runtime/model', options: { effort: 'high' }
-    }, true)).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: {} })
-    expect(explicitSelection(model, { mode: 'runtime_default' }, true)).toEqual({
+    })).toEqual({ mode: 'explicit', modelId: 'runtime/next', options: { effort: 'high' } })
+    expect(explicitSelection(model, { mode: 'runtime_default' })).toEqual({
       mode: 'explicit', modelId: 'runtime/next', options: {}
     })
     for (const dshSource of ['native', 'web'] as const) {
       expect(explicitSelection({ ...model, runtimeMetadata: { dshSource } }, {
         mode: 'explicit', modelId: model.id, options: {},
         dshSource: dshSource === 'web' ? 'native' : 'web'
-      }, true)).toEqual({ mode: 'explicit', modelId: model.id, options: {}, dshSource })
+      })).toEqual({ mode: 'explicit', modelId: model.id, options: {}, dshSource })
     }
     expect(explicitSelection(model, {
       mode: 'explicit', modelId: 'old-web', options: {}, dshSource: 'web'
-    }, true)).toEqual({ mode: 'explicit', modelId: model.id, options: {} })
+    })).toEqual({ mode: 'explicit', modelId: model.id, options: {} })
   })
 
   it('retains an explicit value while an expired historical catalog cannot verify the new model', () => {
     expect(explicitSelection({ ...model, options: [] }, {
       mode: 'explicit', modelId: 'runtime/model', options: { reasoning_effort: 'high' }
-    }, false)).toEqual({
+    })).toEqual({
       mode: 'explicit', modelId: 'runtime/next', options: { reasoning_effort: 'high' }
     })
   })
@@ -270,10 +261,8 @@ describe('member runtime parameters', () => {
       ...installation.memberRuntimeDefaults!, model: saved
     })
     expect(draft.model).toEqual(saved)
-    const canFilter = modelCatalogCanValidateOptions(installation.modelCatalog, null)
-    expect(canFilter).toBe(false)
     expect(explicitSelection({ ...installation.snapshot!.models[0], id: saved.modelId, options: [] },
-      saved, canFilter)).toMatchObject({ mode: 'explicit', options: saved.options })
+      saved)).toMatchObject({ mode: 'explicit', options: saved.options })
     expect(runtimeModelSelectionAvailable(installation, draft.model)).toBe(true)
     expect(runtimeModelSelectionAvailable(installation, { mode: 'runtime_default' })).toBe(true)
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
@@ -319,7 +308,7 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('Runtime Model')
     expect(modelCatalogStatusCopy(installation.modelCatalog, {
       loading: false, refreshFailed: true, servingCachedModels: true, refreshStatus: 'failed'
-    })).toBe('暂时无法更新模型列表，已保留上次结果。')
+    })).toBe('模型与参数尚未核对，已保留上次结果。')
   })
 
   it.each([
@@ -367,7 +356,7 @@ describe('member runtime parameters', () => {
       ['known', [], '', null],
       ['unknown', [], '', null],
       ['unknown', [], 'max', '尚未核对 · max'],
-      ['known', ['off'], 'high', '当前目录未提供 · high'],
+      ['known', ['off'], 'high', '尚未核对 · high'],
     ] as const) {
       const model = installation.snapshot!.models[0]
       model.runtimeMetadata = { piThinkingSchemaVersion: 1, piThinkingState: state }

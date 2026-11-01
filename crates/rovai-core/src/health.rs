@@ -429,6 +429,10 @@ pub async fn refresh_model_catalog_for_selection(
             Ok(models)
         }
     }?;
+    anyhow::ensure!(
+        crate::agent_runtime_adapter::model_catalog_has_usable_entries(&models),
+        "Runtime model catalog contained no usable entries"
+    );
     Ok(RefreshedModelCatalog {
         models,
         dsh_preparation,
@@ -921,7 +925,7 @@ pub async fn antigravity_launch_preflight_at(path: &Path) -> AntigravityCapabili
 
 async fn antigravity_probe_at(
     path: &Path,
-    include_version: bool,
+    full_check: bool,
     fingerprint: Option<&str>,
     known_version: Option<&str>,
     known_capabilities: &[String],
@@ -956,7 +960,7 @@ async fn antigravity_probe_at(
     };
     let reported_version = if let Some(version) = known_version {
         Some(version.to_owned())
-    } else if include_version {
+    } else if full_check {
         let mut version_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
         version_command.arg("--version");
         let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
@@ -1152,6 +1156,24 @@ async fn antigravity_probe_at(
         {
             capabilities.push("input.stream_json".to_string());
         }
+    }
+
+    if !full_check {
+        capabilities.push("process.interrupt".to_string());
+        return AntigravityCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::AntigravityApp.as_str(),
+                Some(path_text),
+                reported_version,
+                fingerprint,
+                AgentRuntimeProbeStatus::Ready,
+                capabilities,
+                Vec::new(),
+                None,
+                probed_at,
+            ),
+            models: Vec::new(),
+        };
     }
 
     let model_output = antigravity_model_output(&canonical).await;
@@ -2251,13 +2273,6 @@ async fn run_acp_probe_with_scope(
                 if !crate::dsh::selected_route_available(preparation, model_id, source) {
                     bail!("所选 DSH 模型来源不可用；未切换到同名的其他来源");
                 }
-                let models =
-                    crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
-                crate::agent_runtime_adapter::validate_live_model_selection(
-                    &models,
-                    model_id,
-                    &json!({}),
-                )?;
                 let default_model =
                     crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
                 write_json_line(stdin, &json!({
@@ -2292,13 +2307,8 @@ async fn run_acp_probe_with_scope(
                 // provider change is involved. Restore its initial selection afterward.
                 let models =
                     crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
-                anyhow::ensure!(
-                    models.len() <= 256,
-                    "MiniMax model catalog exceeds probe bound"
-                );
                 let original =
-                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session)
-                        .context("MiniMax default model missing")?;
+                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
                 let mut options = serde_json::Map::new();
                 for (index, model) in models.iter().enumerate() {
                     let id = 1000 + index as u64;
@@ -2310,30 +2320,27 @@ async fn run_acp_probe_with_scope(
                     let Ok(selected) = read_rpc_result(lines, id).await else {
                         continue;
                     };
-                    anyhow::ensure!(
-                        crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
-                            .as_deref()
-                            == Some(model.id.as_str()),
-                        "MiniMax did not confirm model selection"
-                    );
-                    let chosen = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                    if crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
+                        .as_deref()
+                        != Some(model.id.as_str())
+                    {
+                        continue;
+                    }
+                    let Some(chosen) = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
                         kind, &selected,
-                    )?
-                    .into_iter()
-                    .find(|entry| entry.id == model.id)
-                    .context("MiniMax selected model missing")?;
+                    )
+                    .ok()
+                    .and_then(|models| models.into_iter().find(|entry| entry.id == model.id)) else {
+                        continue;
+                    };
                     options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
                 }
-                write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":2000, "method":"session/set_config_option",
-                    "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
-                let restored = read_rpc_result(lines, 2000).await?;
-                anyhow::ensure!(
-                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&restored)
-                        .as_deref()
-                        == Some(original.as_str()),
-                    "MiniMax did not restore probe selection"
-                );
-                session["configOptions"] = restored["configOptions"].clone();
+                if let Some(original) = original {
+                    let id = 1000 + models.len() as u64;
+                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
+                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
+                    let _ = read_rpc_result(lines, id).await;
+                }
                 session["_meta"]["rovaiMinimaxModelOptions"] = Value::Object(options);
             }
             let _session_id = session
@@ -2341,20 +2348,6 @@ async fn run_acp_probe_with_scope(
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .context("ACP session/new did not return sessionId")?;
-            if matches!(
-                kind,
-                AdapterKind::KiroCli | AdapterKind::GrokBuild | AdapterKind::MinimaxCodeCli
-            ) {
-                let current_model =
-                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session)
-                        .context("ACP Session did not report its current model")?;
-                let models =
-                    crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
-                anyhow::ensure!(
-                    models.iter().any(|model| model.id == current_model),
-                    "ACP current model is absent from the available model catalog"
-                );
-            }
             Ok((initialize, Some(session)))
         };
         match timeout(deadline, exchange).await {
@@ -3015,15 +3008,10 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
         .collect();
     }
     if kind == AdapterKind::DeepseekHarness {
-        return [
-            "acp.initialize",
-            "session.new",
-            "session.resume",
-            "dsh.model_catalog",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+        return ["acp.initialize", "session.new", "session.resume"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
     }
 
     if kind == AdapterKind::ZcodeApp {
@@ -4075,7 +4063,10 @@ for line in sys.stdin:
                 legacy
                     .capabilities
                     .push("context.charter.managed_system_prompt".into());
-                assert!(!catalog_refresh_evidence_current(kind, &legacy));
+                assert!(
+                    catalog_refresh_evidence_current(kind, &legacy),
+                    "extra legacy metadata cannot invalidate usable catalog protocol evidence"
+                );
             }
         }
     }
@@ -4919,6 +4910,13 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapab
 IFS= read -r authenticate || exit 1
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
 IFS= read -r session || exit 1
+case "$session" in
+  *'"additionalDirectories":[]'*) ;;
+  *)
+    printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"Invalid params","data":"additionalDirectories is not supported: a session works only in its cwd"}}'
+    exit 0
+    ;;
+esac
 printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"grok-session","models":{"currentModelId":"minimax-m3","availableModels":[{"modelId":"minimax-m3","name":"MiniMax M3"}]}}}'
 while IFS= read -r ignored; do :; done
 "#,
@@ -4965,9 +4963,6 @@ while IFS= read -r ignored; do :; done
                 "missing_current",
                 "session_error",
             ] {
-                if kind != AdapterKind::HermesCli && !matches!(case, "listed" | "unlisted") {
-                    continue;
-                }
                 let mut result = json!({"sessionId":"s1","models":{"currentModelId":"native-model","availableModels":[{"modelId":"native-model","name":"Native"}]}});
                 match case {
                     "unlisted" => result["models"]["currentModelId"] = json!("missing"),
@@ -5024,7 +5019,7 @@ while IFS= read -r extra; do printf '%s\n' "$extra" >> "$log"; exit 43; done
                     false,
                 )
                 .await;
-                if case == "listed" || (kind == AdapterKind::HermesCli && case != "session_error") {
+                if case != "session_error" {
                     assert_eq!(
                         probe.result.status,
                         AgentRuntimeProbeStatus::Ready,

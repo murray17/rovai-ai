@@ -53,7 +53,7 @@ pub(crate) fn claim_mission_batches_with_fixture_workspaces(
     use crate::runtime::AgentRunWorkspace;
     use rusqlite::OptionalExtension;
     let mut prepared = crate::delivery_queue::BatchWorkspaces::new();
-    for (camp_id, project_path) in waiting_mission_batch_workspaces(database).unwrap() {
+    for (camp_id, project_path) in waiting_mission_batch_workspaces(database, &[]).unwrap() {
         let ready = database.connection().query_row(
             "SELECT working_directory,branch FROM mission_workspace WHERE camp_id=?1 AND state='ready' ORDER BY created_at,id LIMIT 1",
             [&camp_id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)),
@@ -75,8 +75,13 @@ pub(crate) fn claim_mission_batches_with_fixture_workspaces(
         let result = capture_prepared_batch_workspace(database, &camp_id, workspace, fact).unwrap();
         prepared.insert(camp_id, Ok(result));
     }
-    crate::delivery_queue::claim_waiting_delivery_batches_with_workspaces(database, 100, &prepared)
-        .unwrap()
+    crate::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+        database,
+        100,
+        &prepared,
+        &[],
+    )
+    .unwrap()
 }
 
 pub(crate) struct OwnedTestDatabase {

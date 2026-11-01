@@ -10,6 +10,7 @@ import test from 'node:test'
 import { composerDocumentForAddress } from './create-configured-camp.mjs'
 import {
   coreDataDirectoryArguments,
+  runtimeCampFilesRootForDataDirectory,
   removeEphemeralRuntimeCampFilesRoot
 } from './runtime-camp-files-root.mjs'
 
@@ -31,6 +32,19 @@ test('Thread output directories follow Pending presence and preserve zero-messag
     await core.ready
     await core.settled()
     const agent = (await core.request('members.list')).find(profile => profile.presence === 'present')
+    const legacyRoot = runtimeCampFilesRootForDataDirectory(dataDir)
+    await mkdir(legacyRoot, { recursive: true, mode: 0o700 })
+    await writeFile(join(legacyRoot, '.staging'), 'retain malformed historical staging')
+    const missionRequest = { commandId: randomUUID(), command: {
+      title: 'Mission without legacy View', description: 'No Runtime launch',
+      projectBindingKind: 'directory', projectPath: fixture,
+      memberAgentIds: [agent.agentId], defaultLeadAgentId: agent.agentId
+    } }
+    const mission = await core.request('missions.create', missionRequest)
+    assert.equal(mission.status, 'applied')
+    assert.equal((await core.request('missions.create', missionRequest)).payload.missionId, mission.payload.missionId)
+    assert.equal(await readFile(join(legacyRoot, '.staging'), 'utf8'), 'retain malformed historical staging')
+    await rm(join(legacyRoot, '.staging'))
     const threads = []
     for (const [activationState, present] of [['active', false], ['pending', false], ['pending', true]]) {
       const created = await core.request('threads.create', {
@@ -52,7 +66,7 @@ test('Thread output directories follow Pending presence and preserve zero-messag
     core = startCore(dataDir, skillRoot, mcpPath)
     await core.ready
     await core.settled()
-    await assert.rejects(lstat(emptyPending.outputRoot), { code: 'ENOENT' })
+    assert.ok(await lstat(emptyPending.source), 'background retirement preserves files without per-file ownership proof')
     assert.ok(core.notifications.some(event => event.method === 'navigation.invalidated'
       && event.params.reason === 'camps.discardPending' && event.params.threadId === emptyPending.threadId))
     await assert.rejects(core.request('host.thread.attachmentOutputRoot', { threadId: emptyPending.threadId }))
@@ -104,7 +118,8 @@ exit 1
   try {
     await core.ready
     await core.settled()
-    await core.request('runtime.product.ensure', { runtimeKind: 'codex-cli' })
+    await core.request('runtime.startup.save', { runtimeKind: 'codex-cli', expectedRevision: 0, configuration: { programPath: fakeCodex, environment: [] } })
+    await core.request('runtime.startup.inspect', { runtimeKind: 'codex-cli', configuration: { programPath: fakeCodex, environment: [] } })
     let sandboxExit = null
     const deadline = Date.now() + 10000
     while (Date.now() < deadline) {
@@ -127,11 +142,11 @@ exit 1
 // cannot prove that a healthy authority remains reachable after a filesystem error.
 test('optional startup failures preserve authority RPC and can recover without restarting Core', async (t) => {
   for (const scenario of [
-    { id: 'mcp', path: 'mcp.json', kind: 'directory', method: 'mcp.config.get' },
-    { id: 'skills', path: 'managed-skill-library/.staging', kind: 'file', method: 'skills.list' },
-    { id: 'runtime.claude-code-cli', path: 'runtime-private', kind: 'file' },
-    { id: 'runtime.grok-build', path: 'runtime/grok-build/external-mcp', kind: 'file' },
-    { id: 'maintenance', path: 'runtime/mcp', kind: 'file' }
+    { id: 'mcp', path: 'mcp.json', kind: 'directory', state: 'degraded', method: 'mcp.config.get' },
+    { id: 'skills', path: 'managed-skill-library/.staging', kind: 'file', state: 'ready' },
+    { id: 'runtime.claude-code-cli', path: 'runtime-private', kind: 'file', state: 'degraded' },
+    { id: 'runtime.grok-build', path: 'runtime/grok-build/external-mcp', kind: 'file', state: 'ready' },
+    { id: 'maintenance', path: 'runtime/mcp', kind: 'file', state: 'ready' }
   ]) {
     await t.test(scenario.id, async () => {
       const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-startup-availability-')))
@@ -160,16 +175,13 @@ test('optional startup failures preserve authority RPC and can recover without r
         'Main receives the authority assessment before Runtime storage admission')
         assert.ok(frame.subsystems.some((entry) => entry.state === 'initializing'), 'authority ready precedes optional initialization')
         const statuses = await core.settled()
-        assert.equal(statuses.find((entry) => entry.id === scenario.id)?.state, 'degraded')
+        assert.equal(statuses.find((entry) => entry.id === scenario.id)?.state, scenario.state)
         assert.ok((await core.request('members.list')).length > 0)
         assert.ok(await core.request('navigation.snapshot'))
         if (scenario.method) {
-          await assert.rejects(core.request(scenario.method), (error) =>
-            error.code === 'subsystem_unavailable'
-            && error.kind === 'infrastructure_failure'
-            && error.retryable === true
-            && error.details.subsystem === scenario.id
-          )
+          const configuration = await core.request(scenario.method)
+          assert.ok(configuration.fileIssue, 'management reads retain the actual file issue')
+          assert.equal(configuration.path, mcpPath)
         }
         assert.equal(core.process.exitCode, null, 'a local initializer failure must not kill Core')
         await rename(faultPath, `${faultPath}.retained`)
@@ -491,6 +503,7 @@ test('a startup retry cannot initialize a disappeared authority', async () => {
 })
 
 function startCore(dataDir, skillRoot, mcpPath, extraArgs = [], environment = {}) {
+  console.error(`Automatic isolated Core acceptance: data=${dataDir}; skills=${skillRoot}; MCP=${mcpPath}`)
   const spawnOptions = { cwd: repository, stdio: ['pipe', 'pipe', 'pipe'] }
   if (Object.keys(environment).length > 0) {
     spawnOptions.env = { ...process.env, ...environment }
@@ -588,7 +601,7 @@ function startCore(dataDir, skillRoot, mcpPath, extraArgs = [], environment = {}
 
 // RPC -> immutable search snapshot -> child environment -> restart is the owner
 // seam. Input-name cases stay in runtime_startup's unit matrix.
-test('startup settings keep drafts private and persist only the selected Runtime environment', { skip: process.platform === 'win32', timeout: 90_000 }, async () => {
+test('startup settings keep drafts private and persist only the selected Runtime shared environment', { skip: process.platform === 'win32', timeout: 90_000 }, async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-runtime-startup-settings-')))
   const dataDir = join(fixture, 'data')
   const defaultProgram = join(fixture, 'default-codex')
@@ -610,22 +623,45 @@ exit 1
     const runtimeKind = 'codex-cli'
     const initial = await core.request('runtime.startup.get', { runtimeKind })
     assert.equal(initial.revision, 0)
-    const configuration = { programPath: selectedProgram, environment: [{ name: 'STARTUP_TEST_VALUE', value: 'draft-private-value' }] }
-    const inspected = await core.request('runtime.startup.inspect', { runtimeKind, configuration })
+    const configuration = { programPath: selectedProgram, environment: [] }
+    const commonEnvironment = { expectedRevision: 0, json: JSON.stringify({ STARTUP_TEST_VALUE: 'draft-private-value' }) }
+    const inspected = await core.request('runtime.startup.inspect', { runtimeKind, configuration, commonEnvironment })
     assert.equal(inspected.status, 'recognized')
     assert.equal(await readFile(marker, 'utf8'), 'draft-private-value')
     assert.equal((await core.request('runtime.startup.get', { runtimeKind })).revision, 0)
-    const checked = await core.request('runtime.startup.check', { runtimeKind, configuration })
-    assert.equal(checked.status, 'authentication_required')
+    const checked = await core.request('runtime.startup.check', { runtimeKind, configuration, commonEnvironment })
+    assert.equal(checked.status, 'check_failed', 'a fixture that closes the protocol is not a healthy Runtime')
     assert.equal((await core.request('runtime.startup.get', { runtimeKind })).revision, 0)
     assert.ok(!JSON.stringify(core.notifications).includes('draft-private-value'))
-    configuration.environment[0].value = 'saved-private-value'
-    const saved = await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration })
+    commonEnvironment.json = JSON.stringify({ STARTUP_TEST_VALUE: 'saved-private-value' })
+    const saved = await core.request('runtime.startup.save', { runtimeKind, edits: [{ path: ['programPath'], before: null, after: selectedProgram, label: 'program' }], commonEnvironment })
     assert.equal(saved.revision, 1)
+    await core.request('runtime.startup.inspect', { runtimeKind, configuration })
     assert.equal(await readFile(marker, 'utf8'), 'saved-private-value')
-    assert.equal((await core.request('runtime.startup.get', { runtimeKind: 'pi' })).configuration.environment.length, 0)
+    assert.deepEqual((await core.request('runtime.startup.get', { runtimeKind: 'pi' })).commonEnvironment.environment, {})
     assert.equal((await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration })).revision, 1, 'retrying the same write is idempotent')
-    await assert.rejects(core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration: { ...configuration, environment: [] } }))
+    await assert.rejects(core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration: { programPath: null, environment: [] } }))
+    // Two settings windows: the first keeps its repair draft while the second
+    // advances the damaged record. The conflict response must enable a retry.
+    const database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+    try {
+      database.exec('PRAGMA ignore_check_constraints=ON')
+      database.prepare(`INSERT INTO runtime_startup_setting(runtime_kind, revision, configuration_json, updated_at)
+        VALUES ('pi', 7, '{broken', ?) ON CONFLICT(runtime_kind) DO UPDATE SET
+        revision=7, configuration_json='{broken'`).run(new Date().toISOString())
+      const firstWindow = await core.request('runtime.startup.get', { runtimeKind: 'pi' })
+      assert.ok(firstWindow.configuration.configurationError)
+      database.exec("UPDATE runtime_startup_setting SET revision=8 WHERE runtime_kind='pi'")
+      const repair = { runtimeKind: 'pi', expectedRevision: firstWindow.revision,
+        edits: [{ path: ['programPath'], before: null, after: null, label: 'program' }] }
+      const conflict = await core.request('runtime.startup.save', repair)
+      assert.equal(conflict.status, 'conflict')
+      assert.equal(conflict.latest.revision, 8)
+      assert.equal(conflict.conflicts.length, 1)
+      const repaired = await core.request('runtime.startup.save', { ...repair, expectedRevision: conflict.latest.revision })
+      assert.equal(repaired.revision, 9)
+      assert.equal(repaired.configuration.configurationError, undefined)
+    } finally { database.close() }
     await core.close()
     core = startCore(dataDir, join(dataDir, 'managed-skill-library'), join(dataDir, 'mcp.json'), [], environment)
     await core.ready
@@ -636,7 +672,7 @@ exit 1
     const health = await core.request('runtime.discovery.rescan', {})
     assert.equal(health.runtimeAvailability.find(item => item.runtimeKind === runtimeKind).discovery.discoveryStatus, 'missing', 'an invalid explicit path does not fall back to the old/default program')
     await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 1, configuration: { programPath: null, environment: [] } })
-    const restored = await core.request('health.check')
+    const restored = await core.request('runtime.discovery.rescan', { interactiveShell: false })
     assert.equal(restored.runtimeAvailability.find(item => item.runtimeKind === runtimeKind).discovery.executablePath, defaultProgram)
     assert.ok(!JSON.stringify([...core.notifications, restored]).includes('saved-private-value'))
     assert.equal(process.env.STARTUP_TEST_VALUE, undefined)

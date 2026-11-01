@@ -8,15 +8,15 @@ last_updated: 2026-10-19
 
 # Skills 来源、配置与模型投递
 
-Skills 是模型可按需读取的文件指南，不改变工具、权限、消息路由或协作资格。当前字段见 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md)，输入版本轴见 [Bootstrap v6](../contracts/native-session-bootstrap-v6.md) 与 [ContextManifest v40/v42](../contracts/context-manifest-evidence-v42.md)；旧 Library 和项目投递的恢复边界见 [历史 Skill Projection](skill-projection-reconciliation.md)。
+Skills 是模型可按需读取的文件指南，不改变工具、权限、消息路由或协作资格。当前字段见 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md)，输入版本轴见 [Bootstrap v6](../contracts/native-session-bootstrap-v6.md) 与 [ContextManifest](../contracts/context-manifest-evidence-v44.md)；旧 Library 和项目投递的恢复边界见 [历史 Skill Projection](skill-projection-reconciliation.md)。
 
 ## 四种来源
 
 | 来源 | 当前用途 | 权威与生命周期 |
 | --- | --- | --- |
-| Rovai 平台两项 | 新 Native Session 的固定 `ROVAI_PLATFORM_SKILLS` 索引 | Core 从执行 Host 的受管根读取；`cli-operations`、`memory-stewardship` 固定存在于集合中，缺源或无效 frontmatter 阻止新 Bootstrap 准备。 |
-| Rovai 工具箱五项 | 每队员配置和本 Run 显式选用，形成 `ROVAI_ADDITIONAL_SKILLS` | Core 数据库 `member_toolbox_skill` 是长期选择真源；每次 preparation 冻结完整 section，不向项目创建新投影。 |
-| Harness 原生用户／项目 Skill | Settings 只读用户来源；当前 Camp `/` 候选读全队相关 Runtime 的用户和项目来源 | 文件在 Harness 原址；Core 只读发现、按规范路径去重、按来源记录身份。现有发现模块在本 Core 实例内按目录共享有界原始元数据，队员规则与 Camp 聚合按需重算；缓存不是模型输入或加载证明。 |
+| Rovai 平台两项 | Bootstrap 的固定 `ROVAI_PLATFORM_SKILLS` 索引 | Core 从执行 Host 的受管根读取；`cli-operations`、`memory-stewardship` 固定存在于集合中，缺源或无效 frontmatter 阻止新 Bootstrap 准备。 |
+| Rovai 工具箱五项 | 每队员配置和本 Run 显式选用，形成 `ROVAI_ADDITIONAL_SKILLS` | Core 数据库 `member_toolbox_skill` 是长期选择真源；公共 claim 冻结本次索引，不向项目创建新投影。 |
+| Harness 原生用户／项目 Skill | Settings 只读用户来源；当前 Thread `/` 候选读全队相关 Runtime 的用户和项目来源 | 文件在 Harness 原址；Core 只读发现、按规范路径去重、按来源记录身份。现有发现模块在本 Core 实例内按目录共享有界原始元数据，队员规则与 Thread 聚合按需重算；缓存不是模型输入或加载证明。 |
 | 旧 Skill Library／Revision／项目投影 | 历史数据、审计和旧 Run 恢复 | `skill`、`skill_revision`、受管 Revision 与 observation 保留；不进入新索引或候选。启动和升级不扫描或清理项目文件；项目入口仅在用户显式操作时按所有权、active Run 和 root access 规则处理。 |
 
 受管文件同步仅操作九个 Rovai 发布目录，且不跟随来源或目标的符号链接。受管根来自执行 Host 的 Core data-dir 规则，不能使用 Renderer 前台路径或模型侧 `~`。旧 Library 的启停和 Runtime group assignment 不转为队员配置；迁移及新建队员只默认选择 `member-studio`。用户显式关闭后，Core 重启不重新开启。
@@ -28,15 +28,15 @@ Skills 是模型可按需读取的文件指南，不改变工具、权限、消�
 ```text
 Renderer / 结构化 SkillMention(skillId, nameAtSend)
   → Core 来源登记与消息提交
-  → AgentRun claim 冻结 Selection v2（来源身份、发送时名称、消息/segment 位置）
-  → preparation 解析路径并冻结 Resolution v2、每消息链接、动态索引及 digest
-  → ContextManifest 保存 exact payload bytes/digest
+  → 公共 claim 冻结 Selection v2、来源解析、每消息链接、动态索引与完整预算
+  → preparation 重验可用性；可移除失效链接，不新增 claim 后的链接
+  → ContextManifest 保存最终输入 Blob 与必要恢复材料
   → Runtime Input Delivery 记录实际接受
 ```
 
 `rovai:<name>` 只指向工具箱闭合集；`native:<canonical-path-hash>` 只指向已由 Core 发现登记的原生入口；旧 UUID 按历史来源处理。同名不同文件保持不同身份，同一真实文件的多入口按目标归并。失效引用仍随消息发送，解析为 unavailable 并省略消息局部文件链接；不能改绑同名技能。模型可见的 `skills[{name,path}]` 仅在该条消息实际选择且来源仍可用时出现。原生 Skill 不进入任一 Rovai 索引。
 
-平台索引随新 Binding 的 Bootstrap 冻结；当前 v6 将可选 `TEAM_GUIDANCE` 放在身份之后、平台索引之前，Skills section 本身不变。旧 Binding 保留原版本的 Bootstrap。动态工具箱索引在每个新 Run 重新计算，具体版本组合由当前 ContextManifest 合同拥有。相同 Run 的重试和恢复复用冻结字节，不重新读取随后变化的配置。原生 Runtime 在已接受的单次 Run 内自行 compaction 时，Core 不发送第二条只含 Skills 的任务消息。Core 控制的 Bootstrap redelivery 仍投递该 Binding 已冻结的完整 Bootstrap。
+平台索引随本 Run 的启动材料冻结，具体投递由 Runtime 规则决定；后续 Run 可以使用当前材料，不以旧 Binding 的 Bootstrap 为续聊门槛。`TEAM_GUIDANCE` 位于身份之后、平台索引之前。公共 claim 同时固定动态工具箱索引和实际字节预算，见 [Profile 13](../contracts/context-delivery-profile-v13.md)。同一 Run/Binding/generation 的已准备输入保持冻结，不重新读取后续配置；补发也使用该次适用的完整 Bootstrap，不发送第二条只含 Skills 的任务消息。新 Manifest 不复制退役的独立 proof/digest，恢复边界见 [Input Snapshot Storage](../contracts/input-snapshot-storage-v1.md)。
 
 ## 旧格式与失败边界
 

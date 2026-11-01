@@ -72,6 +72,37 @@ test('partial verdicts are half-value only in quality, never collaboration succe
   assert.equal(r.arms.candidate.quality.total,93.75)
   assert.equal(r.arms.candidate.collaboration.groups.coordination.rates.satisfied.value,0)
   assert.equal(r.arms.candidate.collaboration.groups.coordination.counts.partially_satisfied,1)
+  assert.equal(r.arms.candidate.collection.status, 'complete')
+  assert.equal(r.arms.candidate.collection.quality.coverage.value, 1)
+  assert.equal(r.arms.candidate.collection.collaboration.coverage.value, 1)
+})
+
+test('all applicable metric coverage includes low scores, noncritical gaps, missing trials and frozen N/A', () => {
+  const p = { ...plan(['DEMO-103', 'DEMO-102']), mode: 'weekly' }
+  const teamwork = slot(p, 'candidate', 'DEMO-103'), solo = slot(p, 'candidate', 'DEMO-102')
+  const contribution = teamwork.semanticItems.find(item => item.checklistItem.endsWith('contribution_value'))
+  contribution.verdict = 'not_satisfied'
+  let report = compareResults(p, [teamwork, solo], contracts)
+  assert.equal(report.assessment.arms.candidate.collection.status, 'complete')
+  const collection = report.assessment.arms.candidate.collection
+  assert.equal(collection.collaboration.applicable, 4)
+  assert.equal(collection.collaboration.notApplicable, 6)
+  assert.equal(collection.collaboration.evaluated, 4)
+  contribution.state = 'disagreed'
+  report = compareResults(p, [teamwork, solo], contracts)
+  assert.equal(report.conclusions.evaluation, 'incomplete')
+  assert.equal(report.assessment.arms.candidate.quality.total, 100)
+  assert.equal(report.assessment.arms.candidate.collection.collaboration.unknown, 1)
+  assert.ok(report.evidenceGaps.some(gap => gap.code === 'collaboration_evaluation_incomplete'
+    && gap.checklistItem === contribution.checklistItem))
+  const missing = evaluateQualityAndCollaboration(p, [solo]).arms.candidate.collection
+  assert.equal(missing.collaboration.evaluated, 0)
+  assert.equal(missing.collaboration.applicable, 4)
+  assert.ok(missing.gaps.every(gap => gap.caseId === 'DEMO-103' && gap.reasonCode === 'not_run'))
+  const single = evaluateQualityAndCollaboration({ ...plan(['DEMO-102']), mode: 'weekly' }, [solo]).arms.candidate.collection
+  assert.equal(single.collaboration.status, 'not_applicable')
+  assert.equal(single.collaboration.coverage.value, null)
+  assert.equal(single.status, 'complete')
 })
 test('planned missing Trials remain unknown and repetitions are not distinct Cases', () => {
   const p=plan(['DEMO-106'],3)
@@ -158,6 +189,10 @@ test('evaluator failure cannot hide an independent arm or View evidence gap',()=
   assert.ok(report.evidenceGaps.some(item=>item.arm==='baseline'))
   assert.ok(report.evidenceGaps.some(item=>item.checklistItem?.startsWith('SER.collaboration.')))
   assert.equal(report.assessment.arms.candidate.quality.total,null)
+  const collection = report.assessment.arms.candidate.collection
+  assert.equal(collection.status, 'incomplete')
+  assert.ok(collection.gaps.some(gap => gap.section === 'quality' && gap.reasonCode === 'judge_execution_failed'))
+  assert.ok(collection.gaps.some(gap => gap.section === 'collaboration' && gap.reasonCode === 'judge_disagreement'))
 })
 
 test('current scoring freezes v12 substantiation semantics without changing case weights',async()=>{

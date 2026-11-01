@@ -10,7 +10,7 @@ last_updated: 2026-10-21
 ## 组件关系
 
 ```text
-CampMessage / AgentRun / Delivery / Mission / Task / Approval source transaction
+ThreadMessage / AgentRun / Delivery / Mission / Task / Approval source transaction
   └─ Notification write projection
        ├─ immutable Occurrence
        ├─ mutable Occurrence Disposition
@@ -31,7 +31,7 @@ Electron Main ── allowlisted JSON-RPC adapter only
 Renderer Attention Controller
   ├─ lightweight unread high-water baseline
   ├─ exact Change Journal signal queue + invalidation
-  ├─ foreground-only transient heads-up + attentive active-Camp quiet scope
+  ├─ foreground-only transient heads-up + attentive active-Thread quiet scope
   └─ exact visible-source acknowledgement
 ```
 
@@ -51,7 +51,7 @@ Clear 改写。
 
 ## Read hydration
 
-持久 Episode 不复制展示数据。Core 在 read transaction 中连接当前 Camp、CampTurn、AgentRun、Approval、CampMessage
+持久 Episode 不复制展示数据。Core 在 read transaction 中连接当前 Thread、ThreadTurn、AgentRun、Approval、ThreadMessage
 与 AgentProfile，生成 closed `primarySemantic`、reason counts/states、message summary、current display name
 和 typed actions。来源不存在或 tombstoned 时 action `available=false`；Episode identity 与用户 disposition
 仍保留。标题/显示名/availability 改变不会写 Journal 或增加 attention revision。
@@ -67,15 +67,15 @@ Eligible Attention；其旧 pending signal 按 identity 失效。Episode `primar
 推荐/展示动作，不是全部 attention identity 的索引。
 
 会话区是可见性传感器，不拥有通知集合。它只在前台“会话”视图中收集与时间线视口相交的
-`messageId/campTurnId/agentRunId`，以及实际展开可见的 pending `approvalId`。Core 的
-`acknowledgeVisibleSources()` 再以当前用户、Camp、Active Attention 与 Renderer 已观察 Journal high-water
+`messageId/threadTurnId/agentRunId`，以及实际展开可见的 pending `approvalId`。Core 的
+`acknowledgeVisibleSources()` 再以当前用户、Thread、Active Attention 与 Renderer 已观察 Journal high-water
 交叉验证并原子确认；因此普通导航可以自然消角标，但屏幕外来源和边界后新到达的通知不会被顺带读掉。
 Episode 推荐动作从不参与该来源集合。执行台由稳定 Portal 在底部、Inspector 与右侧宿主间移动，AgentRun
 观察和定位以该 Portal 为边界；右侧宿主位于会话根节点之外，不能退回以会话 DOM root 推断可见性。
 
-临时浮层另有 Renderer-local quiet scope：窗口可见且有焦点、Camp workspace 是当前产品 surface 时，同 Camp
-的所有语义 signal 在 Journal 归约中不入队，已在队列中的同 Camp signal 也移除且不在离开后重放。该策略只改变
-瞬时呈现，不进入 `acknowledgeVisibleSources()` 输入，不写 Disposition，也不清除未读；其他 Camp、其他页面或
+临时浮层另有 Renderer-local quiet scope：窗口可见且有焦点、Thread workspace 是当前产品 surface 时，同 Thread
+的所有语义 signal 在 Journal 归约中不入队，已在队列中的同 Thread signal 也移除且不在离开后重放。该策略只改变
+瞬时呈现，不进入 `acknowledgeVisibleSources()` 输入，不写 Disposition，也不清除未读；其他 Thread、其他页面或
 失焦窗口仍沿用 preference、队列与暂停计时。
 
 持久通知中心、全局通知入口和未读总数徽标当前不进入生产 Renderer。Core 的 Episode/Occurrence/Journal
@@ -106,7 +106,7 @@ Episode 推荐动作从不参与该来源集合。执行台由稳定 Portal 在�
 ## 保留
 
 Journal 可以独立截断并提升 floor。Episode 只有在所有来源终结后才进入数量/时间回收候选；可重新出现的
-Episode 不因 clear 一天而删除；Clear 覆盖的历史未确认来源不再阻止终结 Episode 回收。删除 Episode 前写 remove change，Camp aggregate 删除则由同一事务级
+Episode 不因 clear 一天而删除；Clear 覆盖的历史未确认来源不再阻止终结 Episode 回收。删除 Episode 前写 remove change，Thread aggregate 删除则由同一事务级
 cascade 和 Journal trigger 收口。
 
 ## References
@@ -118,12 +118,12 @@ cascade 和 Journal trigger 收口。
 
 ## 公屏与单聊注意力
 
-本机 Owner 通知通过精确 Run 的冻结目的地标识单聊，审批从 Action / Run 解析；不把 Camp ID 当作私有
+本机 Owner 通知通过精确 Run 的冻结目的地标识单聊，审批从 Action / Run 解析；不把 Thread ID 当作私有
 阅读身份。单聊的终态摘要与审批 Dock 回报精确可见来源，公屏在单聊面板打开时停止回报可见来源。
-当前前台 Camp workspace 对全部临时卡片保持静默，已读仍要求实际可见内容。Migration 146 限定完成 satisfaction 的对话
+当前前台 Thread workspace 对全部临时卡片保持静默，已读仍要求实际可见内容。Migration 146 限定完成 satisfaction 的对话
 范围，单聊结束按原 Occurrence invalidation 撤回队列。卡片只包含来源与信息，剩余提醒由轻入口按需查看。
 
-Delivery-first batch Run 由 Migration 164 增加 `agent_run` Occurrence source；不创建 CampTurn。Renderer 的
+Delivery-first batch Run 由 Migration 164 增加 `agent_run` Occurrence source；不创建 ThreadTurn。Renderer 的
 `open_agent_run` 动作先打开对应承载位置，再选择成员并定位 exact Run；右侧位置显式打开 Execution 标签，紧凑
 布局保留该目标面板。只有 Portal 内该执行节点实际可见才回报确认。
 
@@ -133,7 +133,7 @@ Delivery-first batch Run 由 Migration 164 增加 `agent_run` Occurrence source�
 [Notification Episode v9](../contracts/notification-episode-v9.md) 由全部消息输入和产出关联形成通知专属图。
 `notification_round` 只记录成功结算的连通分量与相关 Run，不参与 claim、预算、权限或 Context。
 Run 成功、Delivery 结算和消息发布都可触发检查；waiting/claimed 或任何非成功分支阻止成功提醒。
-`notification_round_probe` 是同事务触发入口，提交时为空，不是后台队列。旧 CampTurn 终态 producer 退出，
+`notification_round_probe` 是同事务触发入口，提交时为空，不是后台队列。旧 ThreadTurn 终态 producer 退出，
 历史 Occurrence 保留；新 Single Chat 回复使用私有最终消息与原 Conversation/Run。
 
 Mission/Task command 的真实状态变化同事务调用通知 source adapter；同状态、只改 sourceMessageId 和用户自己的

@@ -40668,11 +40668,10 @@ mod tests {
              VALUES('run-old',1,'unavailable','message-old',2,'old',29)",
             [],
         ).unwrap_err();
-        assert!(
-            old_insert
-                .to_string()
-                .contains("must use ContextManifest v40")
-        );
+        assert!(old_insert.to_string().contains(&format!(
+            "must use ContextManifest v{}",
+            crate::context_contract::PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
+        )));
         for (column, invalid) in [
             ("claim_previous_public_boundary_sequence", -1),
             ("claim_has_additional_public_messages", 2),
@@ -42439,6 +42438,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                218,
+            ),
+            (
+                "v1.72/schema 167 before literal quote text",
+                "v1.72",
+                167,
                 217,
             ),
             (
@@ -43015,7 +43020,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(217);
+        let current = migration_state_through(218);
         assert!(current.admits(
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
@@ -43088,11 +43093,20 @@ mod tests {
         missing_hermes.v216 = false;
         let mut missing_hermes_rules = current;
         missing_hermes_rules.v217 = false;
+        let mut missing_quote_text = current;
+        missing_quote_text.v218 = false;
         let mut missing_interruption = current;
         missing_interruption.v209 = false;
         let mut missing_single_chat_facts = current;
         missing_single_chat_facts.v208 = false;
         let rejected = [
+            (
+                "current marker without literal quote text receipt",
+                missing_quote_text,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Automation naming",
                 missing_automation_naming,
@@ -43756,7 +43770,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(217));
+        assert_eq!(state, migration_state_through(218));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")

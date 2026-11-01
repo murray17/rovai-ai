@@ -3517,6 +3517,36 @@ mod tests {
                 .unwrap()
                 .unwrap();
 
+            if completed_daily {
+                let current = database
+                    .connection()
+                    .query_row(
+                        "SELECT id,execution_epoch FROM agent_run WHERE camp_id=?1 LIMIT 1",
+                        [&target.camp_id],
+                        |row| {
+                            Ok(crate::planned_shutdown::ActiveExecutionKey::new(
+                                row.get::<_, String>(0)?,
+                                row.get(1)?,
+                            ))
+                        },
+                    )
+                    .unwrap();
+                database.connection().execute(
+                    "UPDATE agent_run SET cancel_requested_at='old-stop',cancel_reason_code='user_requested',cancel_acknowledged_at=NULL WHERE id=?1",
+                    [&current.agent_run_id],
+                ).unwrap();
+                let error = deletion
+                    .commit_business_delete(&mut database, &views, &candidate, &cleanup, &[current])
+                    .unwrap_err();
+                assert!(
+                    error
+                        .to_string()
+                        .contains("Thread execution cleanup is unconfirmed")
+                );
+                // The following empty ownership snapshot represents a later
+                // Core generation. It may delete without repairing that ACK.
+            }
+
             // Fail after the occurrence/CASCADE deletes. Five attempts are
             // required to prove rollback and the persisted attention threshold.
             database
@@ -3528,7 +3558,7 @@ mod tests {
                 .unwrap();
             for attempt in 1..=5 {
                 let error = deletion
-                    .commit_business_delete(&mut database, &views, &candidate, &cleanup)
+                    .commit_business_delete(&mut database, &views, &candidate, &cleanup, &[])
                     .unwrap_err();
                 assert!(
                     format!("{error:#}").contains("injected Thread deletion failure"),
@@ -3580,7 +3610,7 @@ mod tests {
             let candidate = deletion.due_camps(&database, 1).unwrap().remove(0);
             assert_eq!(candidate.operation_id, operation_id);
             deletion
-                .commit_business_delete(&mut database, &views, &candidate, &cleanup)
+                .commit_business_delete(&mut database, &views, &candidate, &cleanup, &[])
                 .unwrap();
             views
                 .complete_camp_delete_cleanup(

@@ -238,6 +238,16 @@ export function compareResults(plan, slots, contracts) {
   const assessment = plan.scoring ? evaluateQualityAndCollaboration(plan, slots) : null
   if (assessment) {
     problems.push(...assessment.qualityGaps)
+    for (const [arm, result] of Object.entries(assessment.arms)) {
+      for (const gap of result.collection.gaps) {
+        if (gap.section !== 'collaboration' || gap.reasonCode === 'judge_execution_failed') continue
+        // Critical unknowns already have their specific record below. All other
+        // applicable collaboration checks must also prevent a complete report.
+        if (!plan.cases.find(item => item.id === gap.caseId).criticalSemantic.includes(gap.checklistItem)) {
+          problems.push({ ...gap, arm, code: 'collaboration_evaluation_incomplete' })
+        }
+      }
+    }
     for (const item of assessment.criticalFailures) {
       if (item.verdict === 'indeterminate') problems.push({ ...item, code: 'critical_collaboration_evidence_insufficient' })
       else if (item.arm === 'candidate' && !regressions.some(row => row.caseId === item.caseId && row.repeat === item.repeat && row.checklistItem === item.checklistItem)) regressions.push({ ...item, code: 'critical_collaboration_acceptance_failed', newRegression: false })
@@ -338,6 +348,8 @@ export async function runPlan(planPath, outputRoot) {
           const result = history.current
           slot.state = result.validity === 'valid' && result.evaluationState === 'complete' ? 'complete' : 'insufficient'
           slot.hardOutcome = result.hardOutcome ?? result.overall
+          if (slot.state !== 'complete') slot.reason = result.preDispatchError?.message
+            ?? result.postDispatchError?.message ?? 'Trial execution or evidence collection did not complete'
           slot.locator = `trials/${id}`
           const read = async name => { try { return await json(join(trialDirectory, name)) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }
           slot.rules = evaluateCaseRules(item.rules, { collaboration: await read('collaboration-ledger.json'), tools: await read('tool-call-ledger.json'), memoryBefore: await read('context-memory-before.json'), memoryAfter: await read('context-memory-after.json') })

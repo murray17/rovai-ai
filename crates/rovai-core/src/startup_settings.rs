@@ -140,7 +140,7 @@ impl Core {
         );
         let initial_legacy_save = params.configuration.is_some();
         let edits = match (params.edits, params.configuration, params.expected_revision) {
-            (Some(edits), None, None) => edits,
+            (Some(edits), None, _) => edits,
             (None, Some(configuration), Some(revision)) => {
                 ensure!(
                     params.common_environment.is_none(),
@@ -153,7 +153,7 @@ impl Core {
                 let saved = runtime_startup::load(&*self.database.lock().await, kind)?;
                 let same = saved.configuration.program_path == configuration.program_path
                     && saved.configuration.environment == configuration.environment;
-                if same && saved.revision > 0 {
+                if same && saved.revision > 0 && saved.configuration.configuration_error.is_none() {
                     return Ok(serde_json::to_value(runtime_startup::saved_response(
                         saved,
                     ))?);
@@ -162,11 +162,25 @@ impl Core {
                     saved.revision == revision,
                     "启动设置已被更新，请保留草稿并再次保存。"
                 );
-                runtime_startup::ordinary_edits(kind, &saved.configuration, &configuration)
+                if saved.configuration.configuration_error.is_some() {
+                    vec![runtime_startup::FieldEdit {
+                        path: vec!["programPath".into()],
+                        before: Value::Null,
+                        after: json!(configuration.program_path),
+                        label: String::new(),
+                    }]
+                } else {
+                    runtime_startup::ordinary_edits(kind, &saved.configuration, &configuration)
+                }
             }
             _ => anyhow::bail!("启动设置保存格式无效。"),
         };
-        let prepared = runtime_startup::prepare_save(&*self.database.lock().await, kind, edits)?;
+        let prepared = runtime_startup::prepare_save(
+            &*self.database.lock().await,
+            kind,
+            edits,
+            params.expected_revision,
+        )?;
         if !prepared.conflicts.is_empty() {
             return Ok(
                 json!({"status":"conflict", "latest":runtime_startup::saved_response(prepared.current), "conflicts":prepared.conflicts}),

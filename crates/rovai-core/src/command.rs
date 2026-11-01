@@ -277,7 +277,7 @@ impl DomainCommandGateway {
                 "camp.deletion_in_progress",
                 json!({
                     "campId": envelope.camp_id,
-                    "message": "Camp deletion is already in progress",
+                    "message": "Thread deletion is already in progress",
                 }),
             )
         } else {

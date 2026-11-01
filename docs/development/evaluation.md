@@ -8,7 +8,7 @@ last_updated: 2026-09-11
 
 **来源材料预检查：** Judge v12 将持久化用户材料作为独立来源段，调用前生成 `task-source-preflight-*.json`。`unavailable` 时检查缺失、摘要、范围或预算原因，不能以 Fixture 内容替代运行证据。评分 2.10 需以同一新标准重评整个比较集合，不能拼接旧版已通过项和新版单项分数。字段与边界见 [Semantic Judge Views v12](../contracts/semantic-judge-views-v12.md)。
 
-本页拥有开发者操作流程。判断规则见 [Execution Evaluation v15](../contracts/execution-evaluation-v15.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
+本页拥有开发者操作流程。判断规则见 [Execution Evaluation v16](../contracts/execution-evaluation-v16.md)，组件边界见[双轨架构](../architecture/execution-evaluation.md)，实际交付与未完成验收从[当前版本指针](../versions/README.md)进入。Node 使用仓库要求的版本，命令详情由 `pnpm eval:gate --help`、`pnpm eval:daily --help` 和 `rovai app --help` 提供。
 
 声明审计区分已支持、已证伪、未充分佐证与真正未知。未充分佐证是交付质量扣分，不是事实已被证明错误；评测器缺数据仍不能算队员失败。
 
@@ -143,6 +143,14 @@ Main 先把规则统计、HTML／SVG 和分析输入写入指定工作区；每�
 
 ## 报告解读与维护
 
+报告的“指标采集完整性”单独列出所有适用质量与协作检查的已采集数、未采集数和预声明不适用数。
+低分和不满足属于有效判定；未知、未运行和 Judge 故障不算已采集。质量覆盖仍按原权重计算，
+检查个数覆盖不改变分数。即使某协作项不是 Gate 关键项，缺少其判定仍不能宣称评价完整。
+`assessment.arms.<arm>.collection.gaps` 用于逐项定位；协议恢复和新真实执行分别保留，不混为新增样本。
+
+隔离 Regression 使用 Core 当前安装与执行准入。静态安装没有 deep-probe snapshot 时，Runner
+保留未知版本/能力和实际可执行文件摘要，不等待旧式 ready 记录；真正运行失败仍按实际证据报告。
+
 - 日曲线分两组：Run 失败率、A2A 失败率及终态覆盖率、Core／Runtime 工具失败率；Run 数量／取消、未结束交接、两项记忆计数。HTML 直接显示比例、分子／分母、可比变化和覆盖，支持最近 7／30／90 天；未知不补零，当前记忆计数保持不可用。
 - 工具失败比例为 `failed / (failed + succeeded)`；`denied`、`cancelled`、`not_executed` 等观测状态分别保留，不计入这个分母。应连同这些数量和 coverage 阅读，不能把低比例解释成权限检查或用户任务都成功。
 - 值得追查的异常：失败原因集中、A2A pending 等待堆积、先失败再 retry 的增长、工具覆盖降低导致比例看似改善、Runtime／模型版本变化后的异常。已有时间字段可作样本定位，第一版不发布未经定义的延迟或成本曲线。
@@ -188,4 +196,4 @@ reportDefinitionVersion=3 区分当日交接群组未结束数与包含跨日的
 cargo run -p rovai-core --features slow-tests --example export_execution_trace -- /absolute/confirmed/rovai.sqlite /private/params.json /private/new-trace.json
 ```
 
-参数文件使用既有 `since`、`until`、`campIds`、`excludeCampIds`、`excludeAutomationIds`；数据库路径必须来自明确来源。此入口只读、无迁移或 Core/Runtime 启动，拒绝覆盖输出，执行原有行数／字节限制。它不证明安装版 CLI 或每日 Automation 已部署，不属于 Agent CLI help/context，也不新增产品权限入口。
+参数文件使用 `since`、`until`、`threadIds`、`excludeThreadIds`、`excludeAutomationIds`；数据库路径必须来自明确来源。此入口只读、无迁移或 Core/Runtime 启动，拒绝覆盖输出，执行原有行数／字节限制。它不证明安装版 CLI 或每日 Automation 已部署，不属于 Agent CLI help/context，也不新增产品权限入口。

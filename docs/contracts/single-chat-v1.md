@@ -258,7 +258,7 @@ Camp 公屏或 Runtime 文案重建私有 transcript。用户正文和附件居�
 Composer 复用 Camp 输入面的附件入口、AttachmentCard、“↵ 发送 · ⇧↵ 换行”提示和发送按钮；`Enter` 发送、
 `Shift+Enter` 换行，IME 合成期间不提交。active Run 时空 Composer 的主要动作是“停止”；一旦有正文或附件，主要动作
 仍为“发送”并创建 Pending。队列展示顺序、`needs_repair` 原因及编辑/删除入口，编辑中可增删和重排公共附件卡片。
-完整组件规范见 [Camp 内单聊](../ui/components/conversation-workspace.md#camp-内单聊)。
+完整组件规范见 [Camp 内单聊](../ui/components/conversation-workspace.md#thread-内单聊)。
 
 稳定拒绝码至少包括：
 

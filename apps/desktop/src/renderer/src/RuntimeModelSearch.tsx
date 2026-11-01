@@ -159,7 +159,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
             <span className="runtime-model-specify-copy"><span><UiText zh="使用" /></span><code>{candidate}</code></span>
           </button>}
           {!filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
-            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在获取模型列表…") : failed ? uiAttribute("暂时无法获取模型列表。") : uiAttribute("当前没有可选的固定模型。")}
+            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在获取模型列表…") : failed ? uiAttribute("模型列表尚未核对。") : uiAttribute("当前没有可选的固定模型。")}
           </p>}
         </div>
         <div className="runtime-picker-default">

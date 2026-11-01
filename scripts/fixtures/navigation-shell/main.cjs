@@ -191,6 +191,43 @@ app.whenReady().then(async () => {
     assert.equal((await status(runningSelector)).color,'rgb(162, 166, 170)','The running ring is neutral gray in Night')
     await capture('sidecar-v3-default-night')
     await run('document.documentElement.dataset.theme="day";window.navigationTest.setPlatform("win32")');await moveAway()
+    // Check actual text clipping after resize and content changes, including the action reveal.
+    const label = selector => run(`(() => {
+      const e=document.querySelector(${JSON.stringify(selector)}), r=e.getBoundingClientRect(), c=getComputedStyle(e);
+      return {text:e.textContent,title:e.title,overflow:e.dataset.overflow,mask:c.maskImage,filter:c.filter,left:r.left,right:r.right,width:r.width};
+    })()`)
+    const projectLabel=projectSelector+' .navigation-title', runningLabel=runningSelector+' .navigation-title'
+    const shortLabel='[data-thread-id="rvcamp_01h47kvsy5fk1shh6w1g60eec1"] .navigation-title'
+    assert.equal((await label(shortLabel)).mask,'none','Short conversation names stay clear')
+    await run('window.navigationTest.setLongLabels(true)');await moveAway()
+    const projectRest=await label(projectLabel)
+    assert.equal(projectRest.overflow,'true')
+    assert.notEqual(projectRest.mask,'none')
+    assert.equal(projectRest.filter,'none','The fade never blurs glyphs')
+    assert.equal(projectRest.title,projectRest.text,'The full project name remains accessible')
+    assert.equal((await label(runningLabel)).overflow,'true')
+    const projectBounds=await run(`document.querySelector(${JSON.stringify(projectSelector)}).getBoundingClientRect().right`)
+    assert.equal(projectBounds-projectRest.right,8,'Hidden project actions reserve no title slots')
+    mouse('mouseMove',await point(projectSelector));await settle()
+    const projectHover=await label(projectLabel)
+    assert.equal(projectRest.width-projectHover.width,44,'Project actions release their width when hidden')
+    assert.equal(projectRest.left,projectHover.left,'Action reveal keeps the title baseline stable')
+    await moveAway()
+    const shortRest=await label(shortLabel)
+    mouse('mouseMove',await point('[data-thread-id="rvcamp_01h47kvsy5fk1shh6w1g60eec1"]'));await settle()
+    assert.equal(shortRest.width-(await label(shortLabel)).width,24,'An icon-free conversation uses the hidden action space')
+    await moveAway();await capture('navigation-title-fade-day')
+    await click('.conversation-jump')
+    const searchTitle='.command-palette-item .navigation-title[title^="会话长标题"]'
+    const searchProject='.command-palette-project .navigation-title[title^="Rovai AI"]'
+    assert.equal((await label(searchTitle)).overflow,'true')
+    assert.notEqual((await label(searchTitle)).mask,'none')
+    assert.notEqual((await label(searchProject)).mask,'none')
+    await capture('navigation-title-fade-search');await key('Escape')
+    await run('document.documentElement.dataset.theme="night"');await moveAway();await capture('navigation-title-fade-night')
+    assert.notEqual((await label(runningLabel)).mask,'none')
+    await run('document.documentElement.dataset.theme="day";window.navigationTest.setLongLabels(false)');await moveAway()
+    assert.equal((await label(projectLabel)).mask,'none','A renamed short project clears its old overflow mask')
     assert.equal(await width(),270)
     assert.equal(await run('document.querySelector(".windows-application-menu-item").getBoundingClientRect().left > document.querySelector(".navigation-collapse-button").getBoundingClientRect().right'),true)
     const initialRenders=await run('window.navigationTest.renders()')

@@ -333,8 +333,6 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
             .is_empty()
     );
     // One damaged common record cannot prevent Host startup or independent members.
-    let encrypted: Vec<u8> = database.connection().query_row(
-        "SELECT ciphertext FROM runtime_common_environment WHERE runtime_kind='pi' AND revision=2", [], |r| r.get(0)).unwrap();
     database.connection().execute("UPDATE runtime_common_environment SET ciphertext=x'00' WHERE runtime_kind='pi' AND revision=2", []).unwrap();
     let startup = crate::runtime_startup::load_all(&database).unwrap();
     assert!(
@@ -350,7 +348,38 @@ fn private_versions_preserve_credentials_and_new_launches_read_current_configura
     );
     assert!(current_for_launch(database.connection(), a, AdapterKind::Pi).is_ok());
     assert!(current_for_launch(database.connection(), MUWA_AGENT_ID, AdapterKind::Pi).is_err());
-    database.connection().execute("UPDATE runtime_common_environment SET ciphertext=?1 WHERE runtime_kind='pi' AND revision=2", [encrypted]).unwrap();
+    let damaged = common::get(database.connection(), AdapterKind::Pi).unwrap();
+    assert_eq!(damaged["revision"], 2);
+    assert!(damaged["error"].is_string());
+    assert!(
+        common::prepare(
+            database.connection(),
+            AdapterKind::Pi,
+            common_edit(1, json!({}))
+        )
+        .is_err()
+    );
+    common::prepare(
+        database.connection(),
+        AdapterKind::Pi,
+        common_edit(2, json!({})),
+    )
+    .unwrap()
+    .commit(database.connection())
+    .unwrap();
+    assert!(
+        common::get(database.connection(), AdapterKind::Pi)
+            .unwrap()
+            .get("error")
+            .is_none()
+    );
+    assert!(
+        crate::runtime_startup::load_all(&database)
+            .unwrap()
+            .get(&AdapterKind::Pi)
+            .is_none_or(|configuration| configuration.ensure_environment_available().is_ok())
+    );
+    assert_eq!(database.connection().query_row("SELECT ciphertext FROM runtime_common_environment WHERE runtime_kind='pi' AND revision=2", [], |r| r.get::<_, Vec<u8>>(0)).unwrap(), vec![0]);
     database
         .connection()
         .execute(

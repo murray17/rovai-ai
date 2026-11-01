@@ -161,6 +161,17 @@ async fn reap_antigravity_process(
 }
 
 impl AntigravityAppRuntimeAdapter {
+    pub(crate) async fn active_execution_keys(
+        &self,
+    ) -> Vec<crate::planned_shutdown::ActiveExecutionKey> {
+        self.active
+            .lock()
+            .await
+            .keys()
+            .map(|(id, epoch)| crate::planned_shutdown::ActiveExecutionKey::new(id, *epoch))
+            .collect()
+    }
+
     #[cfg(test)]
     pub fn new(data_dir: &Path) -> Result<Self> {
         let adapter = Self::deferred(data_dir);
@@ -176,15 +187,6 @@ impl AntigravityAppRuntimeAdapter {
     }
 
     pub fn initialize_storage(&self) -> Result<()> {
-        let legacy_log_dir = self.log_dir.with_file_name("agy");
-        if legacy_log_dir.exists() {
-            std::fs::remove_dir_all(&legacy_log_dir).with_context(|| {
-                format!(
-                    "failed to remove legacy Antigravity companion logs {}",
-                    legacy_log_dir.display()
-                )
-            })?;
-        }
         let log_dir = &self.log_dir;
         std::fs::create_dir_all(log_dir).with_context(|| {
             format!(
@@ -423,14 +425,6 @@ impl AntigravityAppRuntimeAdapter {
                 "Antigravity initialization failed: {}",
                 preflight.result.detail.unwrap_or_default()
             );
-        }
-        if request.runtime.model.source == "explicit" {
-            let models = rovai_core::agent_runtime_adapter::antigravity_models(preflight.models);
-            rovai_core::agent_runtime_adapter::validate_live_model_selection(
-                &models,
-                &request.runtime.model.model_id,
-                &request.runtime.model.options,
-            )?;
         }
         let log_path = self.log_dir.join(format!(
             "{}-{}-{}.log",
@@ -2704,7 +2698,7 @@ printf '%s\n' '{{"event":"result","result":{{"conversation_id":"{session}","stat
 case "$1" in
   --version) echo 'version query must not run' >&2; exit 99 ;;
   --help) printf '%s\n' '--print --conversation --model --mode --sandbox --add-dir --log-file --print-timeout'; exit 0 ;;
-  models) printf '%s\n' 'test-model'; exit 0 ;;
+  models) echo 'catalog must not gate execution' >&2; exit 99 ;;
 esac
 printf '%s\n' "$@" > .agy-args
 log_file=""
@@ -2732,6 +2726,8 @@ echo "finished"
             Arc::new(AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize"));
         let run_id = uuid::Uuid::new_v4().to_string();
         let mut request = fake_antigravity_request(&workspace, &executable, run_id.clone());
+        request.runtime.model.source = "explicit".to_string();
+        request.runtime.model.model_id = "unlisted-native-model".to_string();
         let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
         let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (handoff_sender, handoff_receiver) = oneshot::channel();
@@ -2767,6 +2763,7 @@ echo "finished"
         let arguments = std::fs::read_to_string(workspace.join(".agy-args"))
             .expect("legacy fixture should record its arguments");
         assert!(!arguments.contains("--output-format"));
+        assert!(arguments.contains("--model\nunlisted-native-model"));
         assert!(
             runtime_event_receiver.try_recv().is_err(),
             "legacy text output must remain run-level"
@@ -3237,8 +3234,15 @@ exec sleep 30
         .expect("fake Antigravity companion should be written");
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
             .expect("fake Antigravity companion should be executable");
+        let legacy_log = root.join("runtime-private/agy/previous-run.log");
+        std::fs::create_dir_all(legacy_log.parent().unwrap()).unwrap();
+        std::fs::write(&legacy_log, b"retained historical companion log").unwrap();
         let adapter =
             Arc::new(AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize"));
+        assert_eq!(
+            std::fs::read(&legacy_log).unwrap(),
+            b"retained historical companion log"
+        );
         let run_id = uuid::Uuid::new_v4().to_string();
         let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
         let request = AntigravityRunRequest {
@@ -3321,6 +3325,10 @@ exec sleep 30
                 .expect("private log directory should exist")
                 .next()
                 .is_none()
+        );
+        assert_eq!(
+            std::fs::read(&legacy_log).unwrap(),
+            b"retained historical companion log"
         );
         // Cancellation during the prompt-free exception must never spawn --print.
         std::fs::write(

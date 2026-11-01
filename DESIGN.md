@@ -46,8 +46,9 @@ add component-level theme colors, automatic inversion or theme-specific markup.
 |---|---|
 | Solid primary action | `--conversation-action`, `--conversation-action-hover`, `--conversation-action-contrast` |
 | Action text and selected control marks on a surface | `--conversation-action-ink`; ordinary labels use `--ink` |
+| Ordinary functional icons | Inherit control text via `currentColor`: `--ink`, `--muted` or `--faint` for ordinary controls; contrast foreground for solid buttons |
 | Checked checkbox, radio, switch and range accent | Current theme action family; never the OS default accent, `--brand`, `--workspace-steel` or `--focus` |
-| Navigation and row selection | The surface's selection/hover tokens; neutral readable text, no colored left stripe |
+| Navigation and row selection | Quiet selection surfaces and neutral text, no colored left stripe; retain selection independently of hover |
 | Brand | `--brand` / `--brand-*`, `--rail-logo`, `--ember`; only for an explicitly assigned brand role |
 | Semantic state | Dedicated success, attention, danger and info tokens plus text, icon or shape |
 | Identity | Eight stable `--identity-*` tokens; never state or selection |
@@ -56,6 +57,7 @@ add component-level theme colors, automatic inversion or theme-specific markup.
 
 - Apply the same control rules inside Portal-mounted menus, dialogs and sheets. Do not depend on a page-local alias reaching a Portal.
 - Action colors follow the selected palette; do not describe them as always black, white or neutral.
+- Blue/Steel is not the default icon color or background. Semantic icons and documented component feedback keep their assigned tokens.
 - Memory content, notices and dialogs use the achromatic `--memory-*` family, including local actions. Its shared navigation keeps the selected App theme.
 - Preserve dedicated component tokens for reading surfaces, links, search matches and Runtime configuration; do not replace them with a generic accent.
 
@@ -98,9 +100,8 @@ add component-level theme colors, automatic inversion or theme-specific markup.
 - **Buttons:** primary actions use the action family; secondary and workspace creation entries use quiet tonal surfaces.
   Destructive actions use `--danger-soft` and `--danger`. Mission Worktree cleanup keeps its documented ordinary action treatment.
   Preserve existing pressed behavior; fixed-position controls must not shift their hit area. Disabled labels remain legible.
-- **Inputs and selection:** use the input surface and visible labels. Apply the Colors table to checked and disabled states.
+- **Inputs and selection:** use the input surface and visible labels.
   Keep DOM focus, caret, IME and keyboard navigation without extra focus rings, glow, focus-only borders or search underlines.
-- **Navigation:** retain selected state independently of hover. Selected conversation and teammate rows use a quiet surface and neutral text, without a left stripe.
 - **Splitters:** use one 1px boundary; hover/drag changes it to `--resize-line` without thickening or a short grip.
   Preserve wide hit areas, keyboard resizing, reset, cancellation and final-pointer coordinates under zoom.
   Collapsible panes stop at minimum width; dragging another 64px folds immediately during the gesture over 160ms.

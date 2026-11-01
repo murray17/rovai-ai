@@ -87,23 +87,26 @@ export async function removeEphemeralRuntimeCampFilesRoot(
   try {
     marker = JSON.parse(await readFile(markerPath, 'utf8'))
   } catch (error) {
-    if (error?.code === 'ENOENT') return false
-    throw error
+    if (error?.code !== 'ENOENT') throw error
   }
   const expectedPlatform = platform === 'darwin' ? 'macos' : platform
   if (
-    (marker?.schemaVersion !== 1 && marker?.schemaVersion !== 2)
+    marker && ((marker.schemaVersion !== 1 && marker.schemaVersion !== 2)
     || marker.instanceKey !== instanceKey(canonicalDataDirectory)
-    || marker.platform !== expectedPlatform
+    || marker.platform !== expectedPlatform)
   ) {
     throw new Error('Refusing to clean a Runtime Files Root with a mismatched ownership marker')
   }
 
-  // The validated ephemeral instance owns both legacy Runtime files and ordinary
+  // The canonical temporary data directory derives this unique instance path.
+  // New Cores no longer create historical identity markers. The fixture owns both
+  // legacy Runtime files and ordinary
   // output files. rm unlinks symlinks; it never follows them into an external source.
   await rm(join(dirname(root), 'attachments'), { recursive: true, force: true })
-  await makeTreeRemovableWithoutFollowingLinks(root)
-  await rm(root, { recursive: true, force: false })
+  if (await lstat(root).catch(error => { if (error.code === 'ENOENT') return null; throw error })) {
+    await makeTreeRemovableWithoutFollowingLinks(root)
+    await rm(root, { recursive: true, force: false })
+  }
   try {
     await rmdir(dirname(root))
   } catch (error) {

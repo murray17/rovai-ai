@@ -116,7 +116,7 @@ managed-delivery rules. ADR-0105 continues to own enablement, assignment, projec
 - [ADR-0130: Public A2A Messages and Unified Message Delivery](../v0.45/decisions.md#adr-0130)
 - [Camp Message Send v2](../../contracts/camp-message-send-v2.md)
 - [v0.49 overview](README.md)
-- [Skill settings UI strategy](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Skill settings UI strategy](../../ui/surfaces/settings-workspace.md)
 - [Domain terminology](../../../CONTEXT.md)
 <!-- legacy-adr-body:end id=ADR-0144 -->
 <!-- legacy-adr:end id=ADR-0144 -->

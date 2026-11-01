@@ -23,7 +23,7 @@ User 最初在主题设计 Thread sequence 18 确认使用独立 worktree 实施
 - 更新当前 UI/theme 文档；不改变模型上下文、数据库 schema、发布版本或 Runtime 能力。无需新 Version Decision。
 
 当前规则由[主题注册](../../ui/themes/README.md)、[设计系统](../../../DESIGN.md)及
-[设置 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)拥有。
+[设置 brief](../../ui/surfaces/settings-workspace.md)拥有。
 
 ## Validation
 

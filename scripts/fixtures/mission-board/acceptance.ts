@@ -304,6 +304,9 @@ export async function runMissionAcceptance(): Promise<{ ok: true; cases: string[
   originalDiffTrigger.click()
   await until(() => document.querySelector('.mission-diff-dialog'), 'Cumulative diff dialog opens')
   await until(() => document.querySelector('.mission-diff-reading header strong')?.textContent === 'src/mission.ts', 'First selected file diff loads')
+  await until(() => document.querySelector('.mission-diff-line'), 'Current target patch is visible')
+  check(document.querySelector('.diff-header-stats')?.textContent === '+1−1', 'Detail statistics describe the current target read, not the retained list')
+  check(document.querySelector('.diff-dialog-summary .mission-diff-counts')?.textContent === '+43−20', 'Aggregate statistics still describe the retained list')
   const diffDialogWidth = document.querySelector('.mission-diff-dialog')!.getBoundingClientRect().width
   const diffReadingBounds = document.querySelector('.mission-diff-reading')!.getBoundingClientRect()
   const diffHeaderIconBounds = document.querySelector('.mission-diff-reading > header > .node-icon')!.getBoundingClientRect()

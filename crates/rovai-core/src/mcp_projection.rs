@@ -31,8 +31,8 @@ use crate::{
 
 #[cfg(windows)]
 use crate::platform::private_storage::{
-    admit_private_directory, commit_private_directory_temporary, create_private_bytes,
-    create_private_directory, open_private_read_file, prepare_private_directory,
+    admit_data_directory, commit_private_directory_temporary, create_private_bytes,
+    create_private_directory, open_private_read_file_in_data_directory, prepare_data_directory,
 };
 
 const MCP_PROJECTION_SCHEMA_VERSION: u32 = 2;
@@ -181,7 +181,7 @@ impl McpProjectionService {
     pub fn prepare(
         &self,
         database: &Database,
-        config_store: &McpConfigStore,
+        config_store: Result<&McpConfigStore>,
         request: &McpProjectionRequest<'_>,
     ) -> Result<PreparedMcpProjection> {
         validate_request(request)?;
@@ -221,46 +221,67 @@ impl McpProjectionService {
         self.load_and_validate(&target, request, None)
     }
 
-    pub fn cleanup_terminal_and_orphaned(&self, database: &Database) -> Result<usize> {
-        if !self.root.exists() {
-            return Ok(0);
+    pub fn cleanup_terminal(
+        &self,
+        database: &tokio::sync::Mutex<Database>,
+        budget: &mut crate::maintenance_budget::MaintenanceBudget,
+    ) -> usize {
+        if let Err(error) =
+            crate::camp_attachment_view::reject_existing_symlink_components(&self.root)
+        {
+            budget.report("MCP cleanup target", error);
+            return 0;
         }
-        ensure_private_directory(&self.root)?;
+        let entries = match fs::read_dir(&self.root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return 0,
+            Err(error) => {
+                budget.report("MCP enumeration", error);
+                return 0;
+            }
+        };
         let mut removed = 0;
-        for entry in fs::read_dir(&self.root)? {
-            let entry = entry?;
-            let path = entry.path();
-            let file_type = entry.file_type()?;
-            if !file_type.is_dir() {
-                continue;
+        for entry in entries {
+            if !budget.take() {
+                break;
             }
-            let run_id = entry.file_name().to_string_lossy().to_string();
-            let status = database
-                .connection()
-                .query_row(
-                    "SELECT status FROM agent_run WHERE id = ?1",
-                    [&run_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
-            if status
-                .as_deref()
-                .is_none_or(|status| matches!(status, "succeeded" | "failed" | "cancelled"))
-            {
-                fs::remove_dir_all(&path)?;
-                removed += 1;
-                continue;
-            }
-            for child in fs::read_dir(&path)? {
-                let child = child?;
-                if child.file_name().to_string_lossy().starts_with('.')
-                    && child.file_type()?.is_dir()
-                {
-                    fs::remove_dir_all(child.path())?;
+            let result = (|| -> Result<bool> {
+                let entry = entry?;
+                if !entry.file_type()?.is_dir() {
+                    return Ok(false);
                 }
+                let run_id = entry.file_name().to_string_lossy().into_owned();
+                if Uuid::parse_str(&run_id).is_err() {
+                    return Ok(false);
+                }
+                let discarded = {
+                    let Ok(database) = database.try_lock() else {
+                        return Ok(false);
+                    };
+                    let stopped: bool = database.connection().query_row(
+                        "SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND status IN ('succeeded','failed','cancelled') AND cancel_acknowledged_at IS NOT NULL)",
+                        [&run_id], |row| row.get(0),
+                    )?;
+                    // Neither directory age, a missing Run nor an unacknowledged
+                    // terminal is evidence that a process no longer uses its files.
+                    if !stopped {
+                        return Ok(false);
+                    }
+                    ensure_snapshot_directory(&self.root)?;
+                    ensure_snapshot_directory(&entry.path())?;
+                    let discarded = self.root.join(format!("discard-{}", Uuid::new_v4()));
+                    fs::rename(entry.path(), &discarded)?;
+                    discarded
+                };
+                crate::maintenance_budget::remove_owned_tree(&discarded, budget)
+            })();
+            match result {
+                Ok(true) => removed += 1,
+                Ok(false) => {}
+                Err(error) => budget.report("MCP cleanup", error),
             }
         }
-        Ok(removed)
+        removed
     }
 
     fn find_previous(
@@ -272,7 +293,7 @@ impl McpProjectionService {
         if !run_root.exists() {
             return Ok(None);
         }
-        ensure_private_directory(&run_root)?;
+        ensure_snapshot_directory(&run_root)?;
         let mut found: Option<(Vec<u8>, String)> = None;
         for entry in fs::read_dir(&run_root)? {
             let entry = entry?;
@@ -330,9 +351,9 @@ impl McpProjectionService {
         layout: SnapshotLayout,
         bytes: &[u8],
     ) -> Result<()> {
-        ensure_or_create_private_directory(&self.root)?;
+        prepare_snapshot_directory(&self.root)?;
         let run_root = self.run_root(agent_run_id);
-        ensure_or_create_private_directory(&run_root)?;
+        prepare_snapshot_directory(&run_root)?;
         let target = self.target_path(agent_run_id, execution_epoch, layout);
         if target.exists() {
             return Ok(());
@@ -376,12 +397,12 @@ impl McpProjectionService {
         layout: SnapshotLayout,
         bytes: &[u8],
     ) -> Result<()> {
-        ensure_or_create_private_directory(&self.root)?;
+        prepare_snapshot_directory(&self.root)?;
         let run_root = self.run_root(agent_run_id);
-        ensure_or_create_private_directory(&run_root)?;
+        prepare_snapshot_directory(&run_root)?;
         let target = self.target_path(agent_run_id, execution_epoch, layout);
         if target.exists() {
-            ensure_private_directory(&target)?;
+            ensure_snapshot_directory(&target)?;
             return Ok(());
         }
         let temporary = run_root.join(format!(".{execution_epoch}-{}.tmp", Uuid::new_v4()));
@@ -393,7 +414,7 @@ impl McpProjectionService {
                 && layout == SnapshotLayout::Run
                 && target.join("canonical.json").exists()
             {
-                ensure_private_directory(&target)?;
+                ensure_snapshot_directory(&target)?;
                 let _ = fs::remove_dir_all(&temporary);
                 return Ok(());
             }
@@ -402,7 +423,7 @@ impl McpProjectionService {
         if result.is_err() {
             let _ = fs::remove_dir_all(&temporary);
             if layout == SnapshotLayout::Epoch && target.exists() {
-                ensure_private_directory(&target)?;
+                ensure_snapshot_directory(&target)?;
                 return Ok(());
             }
         }
@@ -426,7 +447,7 @@ impl McpProjectionService {
         request: &McpProjectionRequest<'_>,
         frozen: Option<&McpExposureSnapshot>,
     ) -> Result<PreparedMcpProjection> {
-        ensure_private_directory(target)?;
+        ensure_snapshot_directory(target)?;
         let canonical_path = target.join("canonical.json");
         let (bytes, projection_digest) = read_private_projection_bytes(&canonical_path)?;
         let projection = parse_projection(&bytes, request)?;
@@ -475,11 +496,27 @@ impl McpProjectionService {
 }
 
 fn materialize_projection(
-    config_store: &McpConfigStore,
+    config_store: Result<&McpConfigStore>,
     request: &McpProjectionRequest<'_>,
 ) -> Result<ProjectionFile> {
     let known = [request.agent_id.to_string()].into_iter().collect();
-    let (view, config) = config_store.get_with_raw(&known)?;
+    let (view, config) = match config_store.and_then(|store| store.get_with_raw(&known)) {
+        Ok(value) => value,
+        Err(_) => {
+            let capability =
+                AgentRuntimeAdapterRegistry::default().mcp_projection(request.adapter_kind);
+            let mut projection = empty_legacy_projection(request);
+            projection.exposure.config_digest = "sha256:unavailable-mcp-config".into();
+            projection.exposure.config_status = "invalid".into();
+            projection.exposure.projection_mode = capability.external_mcp_projection;
+            projection.exposure.same_name_policy = capability.same_name_policy;
+            projection
+                .exposure
+                .warnings
+                .push("mcp.config_unavailable".into());
+            return Ok(projection);
+        }
+    };
     let capability = AgentRuntimeAdapterRegistry::default().mcp_projection(request.adapter_kind);
     let mut exposure = McpExposureSnapshot {
         schema_version: MCP_PROJECTION_SCHEMA_VERSION,
@@ -908,7 +945,7 @@ fn read_private_projection_bytes(path: &Path) -> Result<(Vec<u8>, String)> {
 
 #[cfg(windows)]
 fn read_private_projection_bytes(path: &Path) -> Result<(Vec<u8>, String)> {
-    let mut file = open_private_read_file(path)?;
+    let mut file = open_private_read_file_in_data_directory(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() || metadata.len() > MAX_PROJECTION_BYTES {
         anyhow::bail!("private MCP projection exceeds its regular-file size contract");
@@ -930,49 +967,42 @@ fn read_private_projection_bytes(_path: &Path) -> Result<(Vec<u8>, String)> {
 }
 
 #[cfg(unix)]
-fn ensure_or_create_private_directory(path: &Path) -> Result<()> {
+fn prepare_snapshot_directory(path: &Path) -> Result<()> {
     if path.exists() {
-        return ensure_private_directory(path);
+        return ensure_snapshot_directory(path);
     }
-    // Set privacy at creation, so a concurrent publisher never observes the
-    // directory between mkdir and chmod and rejects otherwise valid storage.
+    // Protect new directories at creation; preserve existing permissions.
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(path)
         .with_context(|| format!("failed to create private MCP directory {}", path.display()))?;
-    ensure_private_directory(path)
+    ensure_snapshot_directory(path)
 }
 
 #[cfg(windows)]
-fn ensure_or_create_private_directory(path: &Path) -> Result<()> {
-    prepare_private_directory(path)?;
+fn prepare_snapshot_directory(path: &Path) -> Result<()> {
+    prepare_data_directory(path)?;
     Ok(())
 }
 
 #[cfg(unix)]
-fn ensure_private_directory(path: &Path) -> Result<()> {
+fn ensure_snapshot_directory(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_dir() {
         anyhow::bail!("private MCP path is not a directory: {}", path.display());
-    }
-    if metadata.permissions().mode() & 0o077 != 0 {
-        anyhow::bail!(
-            "private MCP directory permissions are too broad: {}",
-            path.display()
-        );
     }
     Ok(())
 }
 
 #[cfg(windows)]
-fn ensure_private_directory(path: &Path) -> Result<()> {
-    admit_private_directory(path)?;
+fn ensure_snapshot_directory(path: &Path) -> Result<()> {
+    admit_data_directory(path)?;
     Ok(())
 }
 
 #[cfg(not(any(unix, windows)))]
-fn ensure_private_directory(_path: &Path) -> Result<()> {
+fn ensure_snapshot_directory(_path: &Path) -> Result<()> {
     anyhow::bail!("private MCP projection storage is unsupported on this platform")
 }
 
@@ -990,6 +1020,44 @@ mod tests {
         let store = McpConfigStore::new(root.join("home/.rovai/mcp.json"));
         let service = McpProjectionService::new(&root.join("data"));
         (root, database, store, service)
+    }
+
+    fn broaden_directory_permissions(path: &Path) -> Vec<u8> {
+        fs::create_dir_all(path).unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("icacls")
+                .arg(path)
+                .arg("/inheritance:e")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "icacls failed: {output:?}");
+            assert!(crate::platform::private_storage::admit_private_directory(path).is_err());
+        }
+        directory_permissions(path)
+    }
+
+    fn directory_permissions(path: &Path) -> Vec<u8> {
+        #[cfg(unix)]
+        {
+            fs::metadata(path)
+                .unwrap()
+                .permissions()
+                .mode()
+                .to_ne_bytes()
+                .to_vec()
+        }
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("icacls")
+                .arg(path)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "icacls failed: {output:?}");
+            output.stdout
+        }
     }
 
     fn request<'a>(
@@ -1076,6 +1144,20 @@ mod tests {
     #[test]
     fn projection_filters_assignment_and_keeps_secrets_out_of_exposure() {
         let (root, database, store, service) = fixture();
+        // A restored, usable directory must not prevent even an empty MCP
+        // projection. Keep directory permissions unchanged for both adapters.
+        let root_permissions = broaden_directory_permissions(&service.root);
+        for adapter in [AdapterKind::CodexCli, AdapterKind::ClaudeCodeCli] {
+            let run_id = Uuid::new_v4().to_string();
+            let run_root = service.run_root(&run_id);
+            let permissions = broaden_directory_permissions(&run_root);
+            let prepared = service
+                .prepare(&database, Ok(&store), &request(&run_id, 1, &root, adapter))
+                .unwrap();
+            assert!(prepared.servers.is_empty());
+            assert_eq!(prepared.snapshot.config_status, "ready");
+            assert_eq!(directory_permissions(&run_root), permissions);
+        }
         create_effective(
             &store,
             "docs",
@@ -1085,7 +1167,7 @@ mod tests {
         let prepared = service
             .prepare(
                 &database,
-                &store,
+                Ok(&store),
                 &request(&run_id, 1, &root, AdapterKind::CodexCli),
             )
             .unwrap();
@@ -1119,7 +1201,8 @@ mod tests {
             0o600
         );
         #[cfg(windows)]
-        assert!(open_private_read_file(&prepared.canonical_path).is_ok());
+        assert!(open_private_read_file_in_data_directory(&prepared.canonical_path).is_ok());
+        assert_eq!(directory_permissions(&service.root), root_permissions);
         drop(database);
         let _ = fs::remove_dir_all(root);
     }
@@ -1139,10 +1222,18 @@ mod tests {
         let first = service
             .prepare(
                 &database,
-                &store,
+                Ok(&store),
                 &request(&run_id, 1, &root, AdapterKind::CodexCli),
             )
             .unwrap();
+        let directories = [
+            service.root.clone(),
+            service.run_root(&run_id),
+            first.canonical_path.parent().unwrap().to_path_buf(),
+        ];
+        let permissions = directories
+            .each_ref()
+            .map(|path| broaden_directory_permissions(path));
         store
             .update(
                 crate::mcp::UpdateMcpServerParams {
@@ -1157,7 +1248,7 @@ mod tests {
         let recovered = service
             .prepare(
                 &database,
-                &store,
+                Ok(&store),
                 &request(&run_id, 2, &root, AdapterKind::CodexCli),
             )
             .unwrap();
@@ -1169,6 +1260,9 @@ mod tests {
             panic!("expected stdio");
         };
         assert_eq!(command, "old-command");
+        for (path, permissions) in directories.iter().zip(permissions) {
+            assert_eq!(directory_permissions(path), permissions);
+        }
         drop(database);
         let _ = fs::remove_dir_all(root);
     }
@@ -1181,6 +1275,7 @@ mod tests {
         let root = std::env::temp_dir().join(format!("rovai-mcp-race-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         let service = McpProjectionService::new(&root);
+        broaden_directory_permissions(&service.root);
         let run_id = Uuid::new_v4().to_string();
         let request = request(&run_id, 1, &root, AdapterKind::CodexCli);
         let target = service.target_path(&run_id, 1, SnapshotLayout::Run);
@@ -1212,6 +1307,15 @@ mod tests {
         assert_eq!(winners[0].projection_digest, winners[1].projection_digest);
         assert_eq!(winners[0].canonical_path, winners[1].canonical_path);
         assert_eq!(fs::read_dir(service.run_root(&run_id)).unwrap().count(), 1);
+        let permissions = broaden_directory_permissions(&target);
+        assert_eq!(
+            service
+                .load_and_validate(&target, &request, None)
+                .unwrap()
+                .projection_digest,
+            winners[0].projection_digest
+        );
+        assert_eq!(directory_permissions(&target), permissions);
 
         // An existing invalid winner is never overwritten or silently accepted.
         let bytes = fs::read(&winners[0].canonical_path).unwrap();
@@ -1245,7 +1349,7 @@ mod tests {
         let unsupported = service
             .prepare(
                 &database,
-                &store,
+                Ok(&store),
                 &request(&run_id, 1, &root, AdapterKind::AntigravityApp),
             )
             .unwrap();
@@ -1265,7 +1369,7 @@ mod tests {
         let codex = service
             .prepare(
                 &database,
-                &store,
+                Ok(&store),
                 &request(&codex_run_id, 1, &root, AdapterKind::CodexCli),
             )
             .unwrap();
@@ -1284,7 +1388,7 @@ mod tests {
             service
                 .prepare(
                     &database,
-                    &store,
+                    Ok(&store),
                     &request(&codex_run_id, 1, &root, AdapterKind::CodexCli),
                 )
                 .is_err()
@@ -1305,7 +1409,7 @@ mod tests {
         let prepared = service
             .prepare(
                 &database,
-                &store,
+                Ok(&store),
                 &request(&run_id, 1, &root, AdapterKind::CodexCli),
             )
             .unwrap();
@@ -1321,8 +1425,16 @@ mod tests {
             McpExposureStatus::MissingEnvironment
         );
         assert!(prepared.canonical_path.exists());
-        assert_eq!(service.cleanup_terminal_and_orphaned(&database).unwrap(), 1);
-        assert!(!prepared.canonical_path.exists());
+        let database = tokio::sync::Mutex::new(database);
+        let mut budget = crate::maintenance_budget::MaintenanceBudget::new(
+            32,
+            std::time::Duration::from_secs(1),
+        );
+        assert_eq!(service.cleanup_terminal(&database, &mut budget), 0);
+        assert!(
+            prepared.canonical_path.exists(),
+            "unknown ownership preserves the snapshot"
+        );
         drop(database);
         let _ = fs::remove_dir_all(root);
     }
@@ -1341,7 +1453,7 @@ mod tests {
         let prepared = service
             .prepare(
                 &database,
-                &store,
+                Ok(&store),
                 &request(&run_id, 1, &root, AdapterKind::CodexCli),
             )
             .unwrap();
@@ -1446,7 +1558,9 @@ mod tests {
         create_effective(&store, "docs", r#"{"command":"node"}"#);
         let run_id = Uuid::new_v4().to_string();
         let codex_request = request(&run_id, 1, &root, AdapterKind::CodexCli);
-        let mut prepared = service.prepare(&database, &store, &codex_request).unwrap();
+        let mut prepared = service
+            .prepare(&database, Ok(&store), &codex_request)
+            .unwrap();
         prepared.finalize_native_name_conflicts(&BTreeSet::from(["Docs".to_string()]));
         let entry = prepared
             .snapshot
@@ -1465,7 +1579,7 @@ mod tests {
 
         let recovered_request = request(&run_id, 2, &root, AdapterKind::CodexCli);
         let mut recovered = service
-            .prepare(&database, &store, &recovered_request)
+            .prepare(&database, Ok(&store), &recovered_request)
             .unwrap();
         recovered.finalize_native_name_conflicts(&BTreeSet::from(["docs".to_string()]));
         assert_eq!(recovered.snapshot, prepared.snapshot);

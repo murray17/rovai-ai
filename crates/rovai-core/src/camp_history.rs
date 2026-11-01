@@ -2299,7 +2299,7 @@ fn load_attachments(
                         &attachment_id,
                     )
                 } else {
-                    crate::camp_attachment_view::resolve_published_attachment_path(
+                    crate::camp_attachment::legacy_attachment_source_path(
                         transaction,
                         &camp_id,
                         &attachment_id,

@@ -135,6 +135,7 @@ function Fixture(): React.JSX.Element {
     }
     if (kind === 'deepseek-harness' && state.dshPublished) return Promise.resolve(state.dshPublished)
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))
+    if (mode === 'failed-empty') return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog, observedAt: '2026-10-29T00:00:00Z' }, models: [], refreshStatus: 'failed', diagnosticCode: 'runtime_model_catalog_refresh_failed' })
     const modelsWithLowOnlyTarget = installation.snapshot!.models.map(model => model.id === 'vendor/model-1'
       ? { ...model, options: [{ ...model.options[0], values: [{ value: 'low', label: 'Low' }] }] }
       : model)

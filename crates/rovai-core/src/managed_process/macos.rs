@@ -130,7 +130,18 @@ fn signal_audited(pid: i32, version: i32, signal: i32) -> io::Result<()> {
 
 // Cancellation requires a fresh snapshot: a shared TTL may predate the last
 // fork and leave a stdio-holding child alive after its root has been killed.
-fn snapshot() -> io::Result<Vec<Identity>> {
+fn check_deadline(deadline: Option<Instant>) -> io::Result<()> {
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "historical process cleanup budget exhausted",
+        ));
+    }
+    Ok(())
+}
+
+fn snapshot_before(deadline: Option<Instant>) -> io::Result<Vec<Identity>> {
+    check_deadline(deadline)?;
     let mut pids = vec![0_i32; 32768];
     // SAFETY: the output points at a writable PID array. Type 1 is PROC_ALL_PIDS.
     let bytes =
@@ -142,10 +153,13 @@ fn snapshot() -> io::Result<Vec<Identity>> {
     }
     // SAFETY: geteuid has no preconditions.
     let uid = unsafe { libc::geteuid() };
-    let rows = pids[..bytes as usize / 4]
-        .iter()
-        .filter_map(|pid| identity(*pid).ok().flatten().filter(|row| row.uid == uid))
-        .collect();
+    let mut rows = Vec::new();
+    for pid in &pids[..bytes as usize / 4] {
+        check_deadline(deadline)?;
+        if let Some(row) = identity(*pid).ok().flatten().filter(|row| row.uid == uid) {
+            rows.push(row);
+        }
+    }
     Ok(rows)
 }
 
@@ -239,11 +253,16 @@ impl ProcessTree {
     }
 
     pub(super) fn capture(&mut self) -> io::Result<()> {
-        let rows = snapshot()?;
+        self.capture_before(None)
+    }
+
+    fn capture_before(&mut self, deadline: Option<Instant>) -> io::Result<()> {
+        let rows = snapshot_before(deadline)?;
         let mut changed = false;
         loop {
             let count = self.ledger.processes.len();
             for row in rows.iter() {
+                check_deadline(deadline)?;
                 if let Some(owned) = self.ledger.processes.get_mut(&row.unique) {
                     // exec may advance PID version without changing the process's
                     // unique identity. Refresh only that already-owned identity.
@@ -285,7 +304,12 @@ impl ProcessTree {
     }
 
     pub(super) fn is_empty(&self) -> io::Result<bool> {
+        self.is_empty_before(None)
+    }
+
+    fn is_empty_before(&self, deadline: Option<Instant>) -> io::Result<bool> {
         for process in self.ledger.processes.values() {
+            check_deadline(deadline)?;
             if process.alive()? {
                 return Ok(false);
             }
@@ -304,9 +328,14 @@ impl ProcessTree {
     }
 
     pub(super) fn retire(&self) -> io::Result<()> {
-        if !self.is_empty()? {
+        self.retire_before(None)
+    }
+
+    fn retire_before(&self, deadline: Option<Instant>) -> io::Result<()> {
+        if !self.is_empty_before(deadline)? {
             return Err(io::Error::other("managed process cleanup unconfirmed"));
         }
+        check_deadline(deadline)?;
         let Some(path) = self.path.as_ref() else {
             return Ok(());
         };
@@ -317,62 +346,131 @@ impl ProcessTree {
     }
 }
 
-pub(super) fn recover(directory: &Path) -> io::Result<()> {
-    if !directory.exists() {
-        return Ok(());
+pub(super) fn recover(directory: &Path, report: &mut super::HistoricalProcessCleanup) {
+    recover_with_owner_query(directory, report, Identity::alive);
+}
+
+fn recover_with_owner_query(
+    directory: &Path,
+    report: &mut super::HistoricalProcessCleanup,
+    owner_alive: impl Fn(&Identity) -> io::Result<bool>,
+) {
+    if report.expired() {
+        return;
     }
-    let boot = boot_session()?;
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(error) => {
+            report.skip("owned_process_directory", error);
+            return;
+        }
+    };
+    let current = boot_session().and_then(|boot| {
+        identity(std::process::id() as i32)?
+            .map(|owner| (boot, owner))
+            .ok_or_else(|| io::Error::other("current Core identity unavailable"))
+    });
+    let (boot, owner) = match current {
+        Ok(current) => current,
+        Err(error) => {
+            report.skip("current_core_identity", error);
+            return;
+        }
+    };
+    for entry in entries {
+        if report.expired() {
+            break;
+        }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                report.skip("owned_process_entry", error);
+                continue;
+            }
+        };
         if entry.path().extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        let metadata = entry.metadata()?;
-        // Private same-UID regular files only; never follow a substituted symlink.
-        if !entry.file_type()?.is_file()
-            || metadata.uid() != unsafe { libc::geteuid() }
-            || metadata.mode() & 0o077 != 0
-            || metadata.len() > 2 * 1024 * 1024
-        {
-            return Err(io::Error::other("invalid managed process ledger"));
-        }
-        let ledger: Ledger =
-            serde_json::from_slice(&fs::read(entry.path())?).map_err(io::Error::other)?;
-        if ledger.schema != 1
-            || !ledger.processes.contains_key(&ledger.root)
-            || ledger
-                .processes
-                .values()
-                .any(|p| p.pid <= 1 || p.uid != ledger.owner.uid)
-        {
-            return Err(io::Error::other("invalid managed process ownership"));
-        }
-        if ledger.boot != boot {
-            fs::remove_file(entry.path())?;
-            continue;
-        }
-        if ledger.owner.alive()? {
-            continue;
-        }
-        let mut tree = ProcessTree {
-            ledger,
-            path: Some(entry.path()),
-        };
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            tree.capture()?;
-            tree.signal(libc::SIGKILL)?;
-            if tree.is_empty()? {
-                tree.retire()?;
-                break;
-            }
-            if Instant::now() >= deadline {
-                return Err(io::Error::other("orphan Runtime cleanup unconfirmed"));
-            }
-            std::thread::sleep(Duration::from_millis(20));
+        match recover_record(
+            &entry,
+            &boot,
+            &owner,
+            report.record_deadline(),
+            &owner_alive,
+        ) {
+            Ok(true) => report.cleaned += 1,
+            Ok(false) => report.skipped += 1,
+            Err(error) => report.skip("owned_process_record", error),
         }
     }
-    Ok(())
+}
+
+fn recover_record(
+    entry: &fs::DirEntry,
+    boot: &str,
+    owner: &Identity,
+    deadline: Instant,
+    owner_alive: &impl Fn(&Identity) -> io::Result<bool>,
+) -> io::Result<bool> {
+    check_deadline(Some(deadline))?;
+    let metadata = entry.metadata()?;
+    // Private same-UID regular files only; never follow a substituted symlink.
+    if !entry.file_type()?.is_file()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o077 != 0
+        || metadata.len() > 2 * 1024 * 1024
+    {
+        return Err(io::Error::other("invalid managed process ledger"));
+    }
+    let ledger: Ledger =
+        serde_json::from_slice(&fs::read(entry.path())?).map_err(io::Error::other)?;
+    if ledger.schema != 1
+        || !ledger.processes.contains_key(&ledger.root)
+        || ledger
+            .processes
+            .values()
+            .any(|p| p.pid <= 1 || p.uid != ledger.owner.uid)
+    {
+        return Err(io::Error::other("invalid managed process ownership"));
+    }
+    if ledger.boot != boot {
+        fs::remove_file(entry.path())?;
+        return Ok(true);
+    }
+    // New Hosts may write ledgers while this worker runs. The immutable
+    // kernel lifetime identity excludes this Core without a startup scan.
+    if (ledger.owner.unique == owner.unique && ledger.owner.uid == owner.uid)
+        || owner_alive(&ledger.owner)?
+    {
+        return Ok(false);
+    }
+    let mut tree = ProcessTree {
+        ledger,
+        path: Some(entry.path()),
+    };
+    loop {
+        check_deadline(Some(deadline))?;
+        tree.capture_before(Some(deadline))?;
+        let mut signal_result = Ok(());
+        for process in tree.ledger.processes.values().rev() {
+            check_deadline(Some(deadline))?;
+            if let Err(error) = process.signal(libc::SIGKILL) {
+                signal_result = Err(error);
+            }
+        }
+        // Other captured processes were still attempted; an unreadable
+        // identity never permits retiring the file as confirmed empty.
+        signal_result?;
+        check_deadline(Some(deadline))?;
+        if tree.is_empty_before(Some(deadline))? {
+            tree.retire_before(Some(deadline))?;
+            return Ok(true);
+        }
+        std::thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
 }
 
 #[cfg(all(test, feature = "extended-tests"))]
@@ -418,26 +516,128 @@ mod tests {
             child.alive().unwrap(),
             "helper must leave a live detached child"
         );
-        let recovery = recover(&directory);
+        // Preserve the incident shape: one old owner PID cannot be queried,
+        // while another valid old tree and a current Core tree share the batch.
+        let mut current = ProcessTree::new(other.id() as i32).unwrap();
+        current.track(&directory).unwrap();
+        let current_path = current.path.clone().unwrap();
+        let current_bytes = fs::read(&current_path).unwrap();
+        let write = |path: &Path, bytes: &[u8]| {
+            fs::write(path, bytes).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+        };
+        let denied_owner = Identity {
+            pid: 42,
+            unique: u64::MAX,
+            parent: 0,
+            version: 1,
+            uid: unsafe { libc::geteuid() },
+        };
+        let denied = Ledger {
+            schema: 1,
+            boot: boot_session().unwrap(),
+            owner: denied_owner.clone(),
+            root: other_identity.unique,
+            processes: BTreeMap::from([(other_identity.unique, other_identity.clone())]),
+        };
+        let denied_path = directory.join("permission-query.json");
+        let denied_bytes = serde_json::to_vec(&denied).unwrap();
+        write(&denied_path, &denied_bytes);
+        for n in 0..20 {
+            write(
+                &directory.join(format!("corrupt-{n}.json")),
+                format!("{}{{", " ".repeat(n)).as_bytes(),
+            );
+        }
+        let mut unsupported = denied;
+        unsupported.schema = 2;
+        write(
+            &directory.join("unsupported.json"),
+            &serde_json::to_vec(&unsupported).unwrap(),
+        );
+        let wrong_mode = directory.join("wrong-mode.json");
+        write(&wrong_mode, b"{}");
+        fs::set_permissions(&wrong_mode, fs::Permissions::from_mode(0o644)).unwrap();
+        let mut recycled = other_identity.clone();
+        recycled.unique = u64::MAX - 9;
+        let reused_pid_path = directory.join("reused-pid.json");
+        let reused_pid = Ledger {
+            schema: 1,
+            boot: boot_session().unwrap(),
+            owner: Identity {
+                unique: u64::MAX - 1,
+                ..denied_owner
+            },
+            root: recycled.unique,
+            processes: BTreeMap::from([(recycled.unique, recycled)]),
+        };
+        write(&reused_pid_path, &serde_json::to_vec(&reused_pid).unwrap());
+        let mut no_budget = super::super::HistoricalProcessCleanup::new(Duration::ZERO);
+        recover(&directory, &mut no_budget);
+        assert!(no_budget.budget_exhausted);
+        assert_eq!(no_budget.cleaned, 0);
+        assert!(child.alive().unwrap());
+        let mut report = super::super::HistoricalProcessCleanup::new(Duration::from_secs(3));
+        recover_with_owner_query(&directory, &mut report, |owner| {
+            if owner.unique == u64::MAX {
+                Err(io::Error::from_raw_os_error(libc::EPERM))
+            } else if owner.unique == u64::MAX - 1 {
+                Ok(false)
+            } else {
+                owner.alive()
+            }
+        });
         let gone = !child.alive().unwrap();
         let unrelated_alive = other_identity.alive().unwrap();
         // Ensure fixture-owned children are reaped even when an assertion fails.
         child.signal(libc::SIGKILL).unwrap();
         other_identity.signal(libc::SIGKILL).unwrap();
         other.wait().unwrap();
-        recovery.unwrap();
+        assert_eq!(fs::read(&denied_path).unwrap(), denied_bytes);
+        assert_eq!(fs::read(&current_path).unwrap(), current_bytes);
+        assert!(
+            !reused_pid_path.exists(),
+            "known PID reuse retires only the old record"
+        );
+        assert_eq!(
+            report.cleaned, 2,
+            "bad files cannot abort the valid old tree or reused PID record"
+        );
+        assert_eq!(report.skipped, 24);
+        assert_eq!(
+            report.diagnostics.len(),
+            16,
+            "diagnostics must remain bounded"
+        );
         assert!(gone, "restart must reclaim the exact prior Core tree");
         assert!(
             unrelated_alive,
             "recovery must preserve another owned test process"
         );
-        recover(&directory).unwrap();
-        assert!(!fs::read_dir(&directory).unwrap().any(|e| {
-            e.unwrap()
-                .path()
-                .extension()
-                .is_some_and(|ext| ext == "json")
-        }));
+        // Directory/read/unlink failures are diagnostics, with the files left
+        // in place. They do not change shared identity/stop semantics.
+        let unreadable = directory.join("unreadable");
+        fs::create_dir(&unreadable).unwrap();
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+        let mut unreadable_report =
+            super::super::HistoricalProcessCleanup::new(Duration::from_secs(1));
+        recover(&unreadable, &mut unreadable_report);
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(unreadable_report.skipped, 1);
+        assert!(unreadable_report.diagnostics[0].contains("owned_process_directory"));
+        let undeletable = directory.join("undeletable");
+        fs::create_dir(&undeletable).unwrap();
+        let mut old_boot = reused_pid;
+        old_boot.boot = "previous-system-boot".into();
+        let old_path = undeletable.join("old.json");
+        write(&old_path, &serde_json::to_vec(&old_boot).unwrap());
+        fs::set_permissions(&undeletable, fs::Permissions::from_mode(0o500)).unwrap();
+        let mut unlink_report = super::super::HistoricalProcessCleanup::new(Duration::from_secs(1));
+        recover(&undeletable, &mut unlink_report);
+        fs::set_permissions(&undeletable, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(unlink_report.cleaned, 0);
+        assert_eq!(unlink_report.skipped, 1);
+        assert!(old_path.exists());
         fs::remove_dir_all(directory).unwrap();
     }
 

@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-10-29
+last_updated: 2026-10-30
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -15,8 +15,42 @@ last_updated: 2026-10-29
 
 已有预览链路增加当前项目 UTF-8 文本编辑、手动保存、未保存关闭确认与基本冲突处理；Desktop 和 Web 共用 Rust Host。
 沿用原有界面与 CodeMirror，不新增编辑页面、自动保存或持久草稿。目录 V12 仍为独立交互稿；本次不冒称目录服务已上线。
-规范见 [File Preview v24](../../contracts/file-preview-v24.md)，取舍见 [D69](decisions.md#v1-72-d69)。
+规范见 [File Preview v24](../../contracts/file-preview-v24.md)，取舍见 [D71](decisions.md#v1-72-d71)。
 验证记录见[实施计划](implementation-plan.md#轻量文件编辑2026-10-29)。
+
+## Mission 详情与复用校验精简（2026-11-01）
+
+单文件 Diff 只验证当前工作区和选中可信路径，移除全清单一致性拒绝与详情中的全仓准备。
+正常 ready 工作区复用的完整身份校验仅执行一次；创建、恢复、删除竞争和 Mission 锁范围保持。
+当前规则见 [Mission v14](../../contracts/mission-v14.md)，回归与隔离验收范围见
+[实施记录](mission-read-simplification.md)。只推送工作分支，不合并或安装。
+
+## 可选启动与历史维护减重（2026-10-30，实施中）
+
+六项同轮处理：旧附件根不参加启动/任务准入，临时 Blob 逐条有界恢复，Runtime 配置逐项报错，外部 MCP 降级投影，Adapter 不清扫历史输入，发现与维护分开调度。沿用锁、事务、错误状态和显式配置版本检查，不新增恢复系统。
+取舍见 [D70](decisions.md#v1-72-d70)，改动、回归归属及尚未完成的原用户数据副本、Windows 和安装门槛见 [实施记录](optional-startup-availability.md)。未完成门槛不能用单元测试或新会话成功替代。
+
+## 评测指标采集修复（2026-10-30）
+
+按 User 授权修复 Gate/Weekly 的当前执行兼容与指标采集；保留 12 个通用任务、原评分及合理扣分。
+三轮真实 LLM 验证后，质量 112/112、协作 17/17 采齐，未知为 0；质量 95.8333，硬验收 11/12，
+真实扣分及任务失败保留。完整结果见[实施记录](evaluation-metric-coverage.md)，当前字段见
+[Execution Evaluation v16](../../contracts/execution-evaluation-v16.md)。本轮为单臂采集验收，未进行产品基线比较。
+
+## 历史进程恢复减重（2026-10-29）
+
+历史 ledger/Fleet 清理移出 Core 与 Adapter 启动门槛，只在 ready 后做一次有界后台尝试。
+任务准入、Mission 清理和会话删除共用当前 Run/epoch 所有权判断；旧 ACK 缺失、记录损坏、不可读和身份未知不阻止新工作或资源清理，
+也不自动重投旧输入或补写清理成功。当前任务停止保留实际结果，无新表、队列或恢复服务。
+取舍见 [D69](decisions.md#v1-72-d69)，实施、安装路径回归与尚待完成的原会话副本验收见
+[实施记录](startup-recovery-simplification.md)。
+
+## 模型目录兼容与原生执行（2026-10-29）
+
+按 User 明确授权统一目录兼容策略：共享合并重复模型 ID，坏条目局部处理；读取失败保留选择、参数与有效缓存，
+显示“尚未核对”。全部 Runtime 的明确模型与参数交给原生协议，不依据目录增加执行门槛，不新增日志或审批。
+当前规范见 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md)，验证归属与结果见
+[实施记录](implementation-plan.md#模型目录兼容与原生执行2026-10-29)。不改 schema、模型上下文或发布版本。
 
 ## 数据库启动减重（2026-10-29）
 
@@ -323,7 +357,7 @@ Claude Code、Copilot、Qwen 正式启动禁用提问工具；Kimi 与 Qwen 的�
 按 User 确认稿实现无蓝色的记忆工作区、压缩通知和编辑界面。保留副标题、三项摘要、审核入口和新增通知，
 增加“全部”范围，移除容量展示与治理筛选，详情/版本逐级展开；新增与修订使用中性主按钮。
 修复修订通知误报新建/共同范围，边界与验证见[实施记录](implementation-plan.md#记忆工作区-r42026-10-19)，
-布局规范见[Memory surface brief](../../../apps/desktop/.impeccable/surfaces/memory-workspace.md)。
+布局规范见[Memory surface brief](../../ui/surfaces/memory-workspace.md)。
 
 ## Antigravity 长任务与工具收尾（2026-10-19）
 
@@ -1014,7 +1048,7 @@ Context 当前按 [Execution Metrics v7](../../contracts/runtime-execution-metri
 增加落盘后失效提示，v7 扩展到运行中有效提交。生产 Renderer 的 500 Run 动态验收、最低层竞争和字段引用证据见
 [读取生命周期验收](../../research/runtime-monitoring/execution-metrics-refresh-verification-2026-10-01.md)。
 
-执行台分别呈现每 Run 原生四项用量与当前原生 Session 上下文。2026-10-02 按用户要求移除全部 Runtime 的输出测速，包括 Core 字符计数、临时接口、前端轮询与显示；思考内容仍隔离于公开 Evidence 和 Renderer。用量复用 Monitoring Run summary；Migration 178 增加当前 Session 上下文小投影，把 v1.72/schema 127 升至 schema 128；Migration 179 以原子增量升级现有 schema 128 至 129，保留当前上下文数据并独立承接原生比例，不从比例反推数量；Migration 180 在合入 Thread 命名后收口至 schema 130，保留两条已部署路径的业务数据和冻结证据。没有真实回包的 Runtime 字段维持未验证，不回填历史 Run 的结束上下文。字段与 UI 规则由 [Runtime Execution Metrics v7](../../contracts/runtime-execution-metrics-v7.md) 和 [Camp 会话工作区](../../ui/components/conversation-workspace.md#camp-执行过程) 拥有；最新用量、上下文和 App 核验见[原生边界验收](../../research/runtime-monitoring/native-boundaries-verification-2026-10-01.md)，早期[第二轮记录](../../research/runtime-monitoring/execution-metrics-verification-2026-09-29.md)和[v3 长回合验收](../../research/runtime-monitoring/observable-output-v3-verification-2026-09-30.md)保留各自范围。
+执行台分别呈现每 Run 原生四项用量与当前原生 Session 上下文。2026-10-02 按用户要求移除全部 Runtime 的输出测速，包括 Core 字符计数、临时接口、前端轮询与显示；思考内容仍隔离于公开 Evidence 和 Renderer。用量复用 Monitoring Run summary；Migration 178 增加当前 Session 上下文小投影，把 v1.72/schema 127 升至 schema 128；Migration 179 以原子增量升级现有 schema 128 至 129，保留当前上下文数据并独立承接原生比例，不从比例反推数量；Migration 180 在合入 Thread 命名后收口至 schema 130，保留两条已部署路径的业务数据和冻结证据。没有真实回包的 Runtime 字段维持未验证，不回填历史 Run 的结束上下文。字段与 UI 规则由 [Runtime Execution Metrics v7](../../contracts/runtime-execution-metrics-v7.md) 和 [Camp 会话工作区](../../ui/components/conversation-workspace.md#thread-执行过程) 拥有；最新用量、上下文和 App 核验见[原生边界验收](../../research/runtime-monitoring/native-boundaries-verification-2026-10-01.md)，早期[第二轮记录](../../research/runtime-monitoring/execution-metrics-verification-2026-09-29.md)和[v3 长回合验收](../../research/runtime-monitoring/observable-output-v3-verification-2026-09-30.md)保留各自范围。
 
 ## 并行交付：公开 Composer 队外 Mention
 
@@ -1093,7 +1127,7 @@ Claude Code 保留 `--print` 结构化输出，增加 stream-json 输入与 stdi
 | Decisions | 已更新 | [V1.72-D01](decisions.md#v1-72-d01)记录独立 Lark provider；[V1.72-D02](decisions.md#v1-72-d02)记录侧栏摘要与范围读取；[V1.72-D03](decisions.md#v1-72-d03)记录 Lark 入站附件复用与 Host 隔离；[V1.72-D04](decisions.md#v1-72-d04)记录钉钉签名链接与旧排队卡收口；[V1.72-D05](decisions.md#v1-72-d05)记录发送前邀请；[V1.72-D06](decisions.md#v1-72-d06)记录 Claude 原生双向审批，并新增 [V1.72-D07](decisions.md#v1-72-d07) 记录 Thread 命名及旧绑定兼容，均同步当前决定导航 |
 | Contracts | 已更新 | 新增 [First-run Onboarding v6](../../contracts/first-run-onboarding-v6.md)，以 Desktop schema 3 冻结逐人 Runtime 复制与恢复；发布 [Lark Channel v1](../../contracts/lark-channel-v1.md)与 [Feishu Channel v17](../../contracts/feishu-channel-v17.md)，Feishu v16 降为历史；补充 [Navigation Read v1](../../contracts/navigation-read-v1.md)、[Skills Rebuild v2](../../contracts/skills-rebuild-v2.md)、[App Update v7](../../contracts/app-update-v7.md)（继承 v6 日期来源，增加双语发布与 Renderer 显示副本选择）、[Runtime Launch v49](../../contracts/runtime-launch-and-verification-v49.md)与钉钉出站 [DingTalk Channel v14](../../contracts/dingtalk-channel-v14.md)；Composer 邀请只组合现有成员加入与发送命令，不改变两者合同；公开命名由 [Thread Naming v1](../../contracts/thread-naming-v1.md) 覆盖，新上下文与工具输出分别为 [ContextManifest v32](../../contracts/context-manifest-evidence-v32.md) 和 [Built-in Transport v33](../../contracts/builtin-tool-transport-v33.md)；新增 [Transport v41](../../contracts/builtin-tool-transport-v41.md) 与 [Member Avatar v4](../../contracts/member-avatar-v4.md)，统一 Agent 头像读取及内置取景坐标 |
 | Architecture | 已更新 | 新增 [Lark 渠道架构](../../architecture/lark-channel.md)；[飞书渠道架构](../../architecture/feishu-channel.md)移除 `larksuite.com` 并改指 v17；[侧栏刷新](../../architecture/desktop-navigation-refresh.md)与[Skills 来源](../../architecture/skills.md)说明局部读取及目录缓存；[钉钉渠道架构](../../architecture/dingtalk-channel.md)补齐原生附件出站与重试边界；[Public Camp Composer](../../architecture/camp-composer-draft.md#发送)说明邀请与发布命令边界；[Desktop App Updates](../../architecture/desktop-app-updates.md)补齐随包发布日期来源；[架构导航](../../architecture/README.md) 明确 Thread 命名覆盖与稳定存储边界；[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md#claude-code-权限审批回调)说明 Claude 权限回调边界；[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)同步单头像物化与失败隔离 |
-| UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)增加 Lark 页签、品牌显示与未验收提示，并明确只读网页执行台的历史区、生产组件及重连呈现；[Camp 命名](../../contracts/channel-camp-naming-v1.md)和[统一侧栏](../../ui/components/app-shell-navigation.md)补齐 Lark 来源及范围刷新；[结构化 Mention](../../ui/components/structured-mentions.md#member-typeahead)和[会话工作区](../../ui/components/conversation-workspace.md#camp-composer)说明待邀请反馈；公开英文名称统一为 Thread，中文继续用对话，草稿和导航持久状态兼容旧字段 |
+| UI | 已更新 | [渠道设置](../../ui/components/channel-settings.md)增加 Lark 页签、品牌显示与未验收提示，并明确只读网页执行台的历史区、生产组件及重连呈现；[Camp 命名](../../contracts/channel-camp-naming-v1.md)和[统一侧栏](../../ui/components/app-shell-navigation.md)补齐 Lark 来源及范围刷新；[结构化 Mention](../../ui/components/structured-mentions.md#member-typeahead)和[会话工作区](../../ui/components/conversation-workspace.md#thread-composer)说明待邀请反馈；公开英文名称统一为 Thread，中文继续用对话，草稿和导航持久状态兼容旧字段 |
 | Runtime Activity | 确认无需更新 | Canonical Activity、Adapter mapping 与 Registry 的事件语义保持；Thread 只更新公开范围字段及读取投影，原始证据先验摘要 |
 | Runtime compatibility | 已更新 | Claude Code 使用 `--print` 双向 stream-json 与原生 ID 审批；真实 Runtime 与 Desktop 点击证据记录在[兼容性台账](../../runtime-compatibility.md)，平台资格不据此扩大。Agent 指令英文化保持 Binding 兼容轴，生效边界见[变更说明](model-context-change-agent-english.md)；Thread 更名保留 Charter compatibility 16 与 Antigravity 原绑定工具身份 |
 | Documentation routing | 已更新 | 文档任务入口、合同索引、架构索引、当前决定导航与版本指针路由到 Lark v1、Feishu v17、Navigation Read v1、DingTalk v14 与 v1.72；版本内新增[Agent 指令变更说明](model-context-change-agent-english.md)及完整对照；新增 Thread r2、前后对照、验收记录及上述当前合同入口；成员头像／CLI 当前入口切至 v2／v40，加入 [get R3 确认稿](model-context-change-member-avatar-read.md) |
@@ -1335,3 +1369,8 @@ Windows 实测与残余边界见[Windows Preview 开放](command-code-native-sim
 真实 Core/浏览器、能力、生命周期和已接受差异分别记录于
 [Linux 验收](../../research/command-code-runtime/linux-acceptance-2026-10-25.md)；
 公开范围见 [V1.72-D61](decisions.md#v1-72-d61)，不增加 Runtime 管理机制。
+
+## 局部可用性检查精简（2026-10-31）
+
+原路径附件显示名、ACP 恢复等待、原生 Skill 正文预览与普通任务的 Mission 等待按独立提交收窄。
+工作边界、回归证据与未验证项见[实施记录](usability-check-simplification.md)。

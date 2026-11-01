@@ -5,13 +5,14 @@ authority: accepted-runtime-input-failure-and-execution-isolation
 status: accepted
 version: 8
 source_version: v1.72
-last_updated: 2026-10-08
+last_updated: 2026-10-29
 ---
 
 # Accepted Input Recovery v8
 
 继承 [v7](accepted-input-recovery-v7.md) 的原投递不可重放、旧终态/证据保留、late ACK fencing、
-清理和 lane/工作区隔离。User 点击继续已经授权新的执行，不再单独要求新会话确认。
+清理和 lane/工作区隔离。隔离门禁限定为当前 Core 精确持有的 Run/epoch；历史缺 ACK、记录不可读或身份未知
+不阻止新任务，旧证据原样保留，不自动重投。User 点击继续已经授权新的执行，不再单独要求新会话确认。
 
 按 [AgentRun Continuation v2](agent-run-continuation-v2.md) 自动选择会话：旧 native turn 结果未知时
 默认新会话；后续同一绑定、epoch 与 native turn 匹配的可信原生成功或非会话失效失败终态，

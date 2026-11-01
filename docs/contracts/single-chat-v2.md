@@ -279,7 +279,7 @@ Composer 复用 Camp 输入面的附件入口、AttachmentCard、“↵ 发送 �
 `singleChat.list` 只更新 active 列表，轮询和事件刷新不改变目标或 loading。空闲时停止轮询，运行期约 800ms 只读取当前
 Conversation；面板收起时使目标请求失效并停止后台刷新。
 
-完整组件规范见 [Camp 内单聊](../ui/components/conversation-workspace.md#camp-内单聊)。
+完整组件规范见 [Camp 内单聊](../ui/components/conversation-workspace.md#thread-内单聊)。
 
 稳定拒绝码至少包括：
 

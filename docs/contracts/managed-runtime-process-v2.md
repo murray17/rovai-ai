@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-28
+last_updated: 2026-10-29
 ---
 
 # Managed Runtime Process v2
@@ -176,8 +176,13 @@ Native shell 可创建独立进程组，回收不能只依赖 `killpg`。Darwin 
 每个 Host 在现有 Runtime 私有目录保存 mode 0600 的原子 ownership ledger，父目录 mode 0700；记录
 boot session、Core owner 和已观测祖先，不保存 argv、Prompt、凭据或工具输出。运行时采集与显式清理复用
 同一 ledger。确认整棵已捕获树不再运行才移除记录；读写、身份或信号失败保留未确认状态。
-Core 在开放 readiness 前处理前代 ledger；仅同次系统启动且原 owner 已消失时回收，失败则关闭启动准入。
-旧 boot 的记录只清除文件，不向可能复用 PID 的新进程发信号。
+Core ready 后从唯一启动位置在阻塞工作线程尝试一轮前代 ledger 与 Fleet owner record 清理；不持有数据库锁，
+不在 RPC 请求循环等待进程退出，不进入 Adapter 初始化、功能重试或当前任务 Stop。全部目录共用三秒预算，
+单条最多 250ms，诊断最多 16 条、每条 512 字符；单条异常继续下一条，总预算耗尽结束本轮。
+仅原 owner 已消失或旧 Fleet generation 的记录进入回收；当前 Core 的 owner/generation 始终排除。
+旧 boot 的记录只清除文件，不向可能复用 PID 的新进程发信号。PID 复用按原生命周期已消失处理，不触碰新进程。
+损坏、格式不支持、权限异常、身份未知和文件 I/O 失败保留未清理状态及有限诊断，不产生 authority_recovery_failed，
+不降级 Runtime，也不补写业务 cleanup ACK。历史清理是否完成不决定工作区是否可用；当前执行的 Stop/退出仍按实际结果确认。
 
 这是既有 Unix 回收的补强，不是 Windows Job/cgroup：未观测且已消失的中间祖先、跨 UID 后代、Core 停止后
 直到再次启动前的空窗不受此记录保证。macOS 使用 XNU libproc 的固定结构与 PID-version signal 接口，

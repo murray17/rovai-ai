@@ -82,7 +82,7 @@ Coverage 只对已由协议或真实 Fixture 证明 eligible 的 logical AgentRu
 | ADR | 已更新 | [ADR-0205](decisions.md#adr-0205)替代 ADR-0201，冻结最小五表、稀疏 Usage、保留和读取边界。 |
 | Contracts | 已更新 | [Runtime Usage Monitoring v2](../../contracts/runtime-usage-monitoring-v2.md)替代 v1，定义 parser、persistence、Snapshot 与刷新合同。 |
 | Architecture | 已更新 | [Runtime Monitoring](../../architecture/runtime-monitoring.md)收缩为 in-memory Usage buffer、短 Flush、五表 Projection/Rollup 与单 Snapshot read side。 |
-| UI | 已更新 | [Runtime Monitoring surface brief](../../../apps/desktop/.impeccable/surfaces/runtime-monitoring.md)删除三 Tab 和可靠性面板，只保留 Usage 汇总、趋势与分组表。 |
+| UI | 已更新 | [Runtime Monitoring surface brief](../../ui/surfaces/runtime-monitoring.md)删除三 Tab 和可靠性面板，只保留 Usage 汇总、趋势与分组表。 |
 | Runtime Activity | 确认无需更新 | Runtime Activity 与 Execution Evidence authority 未改变；本版明确禁止 Usage 进入 Evidence。 |
 | Runtime compatibility | 确认无需更新 | 不改变 Runtime 产品准入或版本结论；各字段 Eligibility 由 parser Fixture 拥有，不扩大 Runtime 支持声明。 |
 | Documentation routing | 已更新 | 文档导航、ADR CURRENT/HISTORY、Contract/Architecture 索引切换到 ADR-0205 与 v2 合同。 |

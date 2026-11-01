@@ -733,22 +733,56 @@ fn validate_frozen_runtime_columns(
     Ok(())
 }
 
+pub(crate) enum RuntimeCleanupScope<'a> {
+    Conversation(&'a str, Option<&'a str>),
+    Camp(&'a str),
+    ExecutionRoot(&'a str),
+}
+
+/// Only a precisely owned execution in this Core can make a missing cleanup
+/// acknowledgement block new work. Historical uncertainty is not ownership.
+/// Callers take the existing launch/Fleet/one-shot snapshot under the database
+/// lock; no historical records or OS process queries belong in this read path.
 pub(crate) fn runtime_cleanup_blocked_since_connection(
     connection: &Connection,
-    conversation_id: &str,
-    excluded_agent_run_id: Option<&str>,
+    active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
+    scope: RuntimeCleanupScope<'_>,
 ) -> Result<Option<String>> {
+    if active_executions.is_empty() {
+        return Ok(None);
+    }
+    let executions = serde_json::to_string(
+        &active_executions
+            .iter()
+            .map(|key| (&key.agent_run_id, key.execution_epoch))
+            .collect::<Vec<_>>(),
+    )?;
+    let (conversation, camp, root, excluded) = match scope {
+        RuntimeCleanupScope::Conversation(id, excluded) => (Some(id), None, None, excluded),
+        RuntimeCleanupScope::Camp(id) => (None, Some(id), None, None),
+        RuntimeCleanupScope::ExecutionRoot(root) => (None, None, Some(root), None),
+    };
     Ok(connection.query_row(
         r#"
-        SELECT MIN(cancel_requested_at)
-        FROM agent_run
-        WHERE conversation_id = ?1
-          AND (?2 IS NULL OR id <> ?2)
-          AND cancel_requested_at IS NOT NULL
-          AND cancel_acknowledged_at IS NULL
-          AND status IN ('succeeded', 'failed', 'cancelled')
+        SELECT MIN(run.cancel_requested_at)
+        FROM json_each(?1) AS owned
+        JOIN agent_run AS run
+          ON run.id = json_extract(owned.value, '$[0]')
+         AND run.execution_epoch = json_extract(owned.value, '$[1]')
+        JOIN conversation ON conversation.id = run.conversation_id
+        LEFT JOIN camp_turn ON camp_turn.id = run.camp_turn_id
+        LEFT JOIN camp ON camp.id = COALESCE(run.camp_id, camp_turn.camp_id, conversation.camp_id)
+        WHERE run.cancel_requested_at IS NOT NULL
+          AND run.cancel_acknowledged_at IS NULL
+          AND run.status IN ('succeeded', 'failed', 'cancelled')
+          AND (?5 IS NULL OR run.id <> ?5)
+          AND ((?2 IS NOT NULL AND run.conversation_id = ?2)
+            OR (?3 IS NOT NULL AND camp.id = ?3)
+            OR (?4 IS NOT NULL AND COALESCE(
+                json_extract(run.workspace_json, '$.executionRoot'), camp.project_path
+            ) = ?4))
         "#,
-        params![conversation_id, excluded_agent_run_id],
+        params![executions, conversation, camp, root, excluded],
         |row| row.get(0),
     )?)
 }
@@ -1284,6 +1318,7 @@ impl ExecutionRuntimeService {
         &self,
         database: &Database,
         camp_id: &str,
+        active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
     ) -> Result<Vec<ThreadRuntimeCleanupTarget>> {
         let mut statement = database.connection().prepare(
             r#"
@@ -1326,6 +1361,11 @@ impl ExecutionRuntimeService {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows
             .into_iter()
+            .filter(|(run_id, epoch, _)| {
+                active_executions
+                    .iter()
+                    .any(|key| key.agent_run_id == *run_id && key.execution_epoch == *epoch)
+            })
             .filter_map(|(agent_run_id, execution_epoch, adapter_kind)| {
                 Some(ThreadRuntimeCleanupTarget {
                     agent_run_id,
@@ -1341,7 +1381,7 @@ impl ExecutionRuntimeService {
         database: &Database,
         limit: i64,
     ) -> Result<Vec<AgentRunCancellationCandidate>> {
-        self.list_cancellation_candidates_page(database, limit, 0)
+        self.list_cancellation_candidates_page(database, limit, 0, None)
     }
 
     pub(crate) fn list_cancellation_candidates_page(
@@ -1349,10 +1389,24 @@ impl ExecutionRuntimeService {
         database: &Database,
         limit: i64,
         offset: i64,
+        active_executions: Option<&[crate::planned_shutdown::ActiveExecutionKey]>,
     ) -> Result<Vec<AgentRunCancellationCandidate>> {
         if !(1..=100).contains(&limit) {
             anyhow::bail!("AgentRun cancellation limit must be between 1 and 100");
         }
+        if active_executions.is_some_and(|keys| keys.is_empty()) {
+            return Ok(Vec::new());
+        }
+        let active_executions = active_executions
+            .map(|keys| {
+                serde_json::to_string(
+                    &keys
+                        .iter()
+                        .map(|key| (&key.agent_run_id, key.execution_epoch))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .transpose()?;
         let mut statement = database.connection().prepare(
             r#"
             SELECT agent_run.id, COALESCE(agent_run.camp_id, camp_turn.camp_id),
@@ -1370,12 +1424,17 @@ impl ExecutionRuntimeService {
             WHERE agent_run.cancel_requested_at IS NOT NULL
               AND agent_run.cancel_acknowledged_at IS NULL
               AND agent_run.status IN ('succeeded', 'failed', 'cancelled')
+              AND (?3 IS NULL OR EXISTS (
+                  SELECT 1 FROM json_each(?3) AS owned
+                  WHERE agent_run.id = json_extract(owned.value, '$[0]')
+                    AND agent_run.execution_epoch = json_extract(owned.value, '$[1]')
+              ))
             ORDER BY agent_run.updated_at, agent_run.id
             LIMIT ?1 OFFSET ?2
             "#,
         )?;
         Ok(statement
-            .query_map([limit, offset], |row| {
+            .query_map(params![limit, offset, active_executions], |row| {
                 Ok(AgentRunCancellationCandidate {
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -2942,11 +3001,12 @@ impl ExecutionRuntimeService {
         database: &Database,
         conversation_id: &str,
         agent_run_id: &str,
+        active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
     ) -> Result<Option<String>> {
         runtime_cleanup_blocked_since_connection(
             database.connection(),
-            conversation_id,
-            Some(agent_run_id),
+            active_executions,
+            RuntimeCleanupScope::Conversation(conversation_id, Some(agent_run_id)),
         )
     }
 

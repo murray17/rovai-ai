@@ -381,12 +381,13 @@ export interface CommandHealth {
 export interface RuntimeEnvironmentVariable { name: string; value: string }
 
 export interface RuntimeStartupConfiguration {
+  configurationError?: string
   programPath: string | null
   environment: RuntimeEnvironmentVariable[]
 }
 
 export interface RuntimeStartupSettings {
-  commonEnvironment?: { revision: number; environment: Record<string, string> }
+  commonEnvironment?: { revision: number; environment: Record<string, string>; error?: string }
   runtimeKind: AdapterKind
   revision: number
   configuration: RuntimeStartupConfiguration

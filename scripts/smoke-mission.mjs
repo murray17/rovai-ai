@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, writeFile, readFile, access, realpath } from 'node:fs/promises'
+import { mkdir, writeFile, readFile, access, realpath, copyFile, chmod, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { homedir } from 'node:os'
 import { createInterface } from 'node:readline'
 import { resolve, join, dirname, isAbsolute } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
-import { configureProductRuntime } from './configure-product-runtime.mjs'
 
 // Explicit real-Runtime acceptance, never part of unit tests. No daily App data.
 const [coreArgument, outputArgument] = process.argv.slice(2)
@@ -17,12 +18,22 @@ const coreExecutable = await realpath(resolve(coreArgument)), requestedOutput = 
 await mkdir(requestedOutput, { recursive: false, mode: 0o700 })
 const output = await realpath(requestedOutput)
 const dataDirectory = join(output, 'core-data'), skillLibraryRoot = join(output, 'skill-library')
+const nativeDirectory = join(output, 'native-codex')
+const nativeSource = process.env.CODEX_HOME ?? join(homedir(), '.codex')
+const modelId = process.env.ROVAI_SMOKE_MODEL ?? 'gpt-5.6-sol'
+await mkdir(nativeDirectory, { mode: 0o700 })
+for (const name of ['auth.json', 'config.toml']) {
+  try {
+    await copyFile(join(nativeSource, name), join(nativeDirectory, name))
+    await chmod(join(nativeDirectory, name), 0o600)
+  } catch (error) { if (error.code !== 'ENOENT') throw error }
+}
 // Login-shell dotfiles on the developer machine can replace Core's candidate CLI PATH.
 // Keep the two-product acceptance channel independent of the installed daily CLI.
 const shellDirectory = join(output, 'shell')
 const source = join(output, 'project'), project = join(source, 'packages/app'), plain = join(output, 'plain')
 await Promise.all([mkdir(dataDirectory), mkdir(skillLibraryRoot), mkdir(shellDirectory), mkdir(project, { recursive: true }), mkdir(plain)])
-console.log(JSON.stringify({ channel: 'automatic_acceptance', coreExecutable, dataDirectory, skillLibraryRoot, shellDirectory, output }))
+console.log(JSON.stringify({ channel: 'automatic_acceptance', coreExecutable, dataDirectory, skillLibraryRoot, nativeDirectory, shellDirectory, output }))
 const gitExecutable = execFileSync('/usr/bin/which', ['git'], { encoding: 'utf8' }).trim()
 const git = (cwd, ...args) => execFileSync(gitExecutable, ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
 git(source, 'init', '-b', 'main'); git(source, 'config', 'user.name', 'Mission Fixture'); git(source, 'config', 'user.email', 'fixture@example.invalid')
@@ -31,11 +42,12 @@ git(source, 'add', '.'); git(source, 'commit', '-m', 'fixture base')
 const baseSha = git(source, 'rev-parse', 'HEAD')
 await writeFile(join(project, 'tracked.txt'), 'source dirty content\n')
 await writeFile(join(project, 'private-untracked.txt'), 'must not copy\n')
-const report = { schemaVersion: 1, startedAt: new Date().toISOString(), output, baseSha, cases: [], runs: [], status: 'running' }
+const report = { schemaVersion: 1, startedAt: new Date().toISOString(), output, baseSha, coreExecutable,
+  coreSha256: createHash('sha256').update(await readFile(coreExecutable)).digest('hex'), modelId, cases: [], runs: [], status: 'running' }
 let client, db
 function startCore() {
   const child = spawn(coreExecutable, [...coreDataDirectoryArguments(dataDirectory), '--skill-library-root', skillLibraryRoot,
-    '--mcp-config-path', join(dataDirectory, 'mcp.json')], { cwd: repository, env: { ...process.env, ZDOTDIR: shellDirectory }, stdio: ['pipe', 'pipe', 'pipe'] })
+    '--mcp-config-path', join(dataDirectory, 'mcp.json')], { cwd: repository, env: { ...process.env, CODEX_HOME: nativeDirectory, ZDOTDIR: shellDirectory }, stdio: ['pipe', 'pipe', 'pipe'] })
   const pending = new Map(), errors = []; let id = 0, stopped = false
   child.stderr.on('data', chunk => { errors.push(String(chunk)); void writeFile(join(output, 'core-stderr.log'), errors.join('')) })
   const closed = once(child, 'close')
@@ -71,7 +83,7 @@ async function createProfile(displayName) {
 async function setRuntime(agentId) {
   const profile = await client.request('members.get', { agentId })
   applied(await command('members.runtime.set', { agentId, expectedVersion: profile.version, adapterKind: 'codex-cli',
-    model: { mode: 'explicit', modelId: 'gpt-5.6-sol', options: { reasoning_effort: 'medium' } },
+    model: { mode: 'explicit', modelId, options: { reasoning_effort: 'medium' } },
     permissions: { adapterKind: 'codex-cli', schemaVersion: 1, values: { sandbox_mode: 'danger-full-access', approval_policy: 'never' } } }))
 }
 async function createMission(title, description, path, members) {
@@ -129,7 +141,14 @@ try {
   client = startCore(); await client.request('members.list')
   db = new DatabaseSync(join(dataDirectory, 'rovai.sqlite')); db.exec('PRAGMA busy_timeout=5000')
   const members = [await createProfile('Mission Lead'), await createProfile('Mission Reviewer')]
-  await configureProductRuntime(client.request, 'codex-cli', members); for (const member of members) await setRuntime(member)
+  await client.request('runtime.product.check', { runtimeKind: 'codex-cli' })
+  const installation = (await client.request('runtime.installations.list')).find(candidate =>
+    candidate.adapterKind === 'codex-cli' && candidate.installationClass === 'managed_default'
+    && candidate.authScope === 'default')
+  assert(installation, 'The Codex product entry must exist for this explicit Runtime acceptance')
+  report.runtime = { adapterKind: installation.adapterKind, executablePath: installation.executablePath,
+    version: installation.snapshot?.reportedVersion, probeStatus: installation.snapshot?.probeStatus }
+  for (const member of members) await setRuntime(member)
   const follower = join(output, 'follower.mjs'), lead = join(output, 'lead.mjs'), continuation = join(output, 'continuation.mjs'), detached = join(output, 'detached.mjs'), rebuilt = join(output, 'rebuilt.mjs'), nonGit = join(output, 'non-git.mjs')
   await writeFile(follower, generatedPreamble + `assert.equal(info.status,'not_started');\nconst updated=cli(['mission','update'],{description:'已由非队长核对交付与工作区'});assert.equal(updated.changed,true);\nconst status=cli(['mission','status'],{status:'completed'});assert.equal(status.changed,true);\nconst completed=cli(['mission','get']);assert.equal(completed.status,'completed');assert.equal(completed.sourceMessageId,null);\nconst sent=cli(['send'],{publicOnly:true,body:'MISSION_FOLLOWER_OK：共享工作区与无来源状态更新已验证。'});\nwriteFileSync(join(output,'follower-evidence.json'),JSON.stringify({cwd:process.cwd(),info,updated,status,completed,sent}));\n`)
   await writeFile(lead, generatedPreamble + `assert.equal(info.status,'not_started');assert.equal(readFileSync('tracked.txt','utf8'),'base\\n');assert(!existsSync('private-untracked.txt'));\nconst updated=cli(['mission','update'],{title:'已验证持久工作区'});assert.equal(updated.changed,true);\nconst git=(...args)=>execFileSync(${JSON.stringify(gitExecutable)},args,{encoding:'utf8'}).trim();\nwriteFileSync('tracked.txt','committed\\n');git('add','tracked.txt');git('commit','-m','mission fixture committed');\nwriteFileSync('tracked.txt','staged\\n');git('add','tracked.txt');writeFileSync('tracked.txt','current net\\n');\nwriteFileSync('new.txt','new untracked\\n');writeFileSync('secret.ignored','ignored\\n');writeFileSync('delivery.md','# Mission delivery\\n实际 Agent 文件交付。\\n');\nconst sent=cli(['send'],{publicOnly:true,body:'MISSION_LEAD_FILE_OK',files:[resolve('delivery.md')]});\nconst delegated=cli(['send'],{to:[${JSON.stringify(members[1])}],body:${JSON.stringify(`执行本次使命验收：node ${shellQuote(follower)}。脚本完成后结束本轮。`)}});\nwriteFileSync(join(output,'lead-evidence.json'),JSON.stringify({cwd:process.cwd(),info,updated,sent,delegated}));\n`)
@@ -173,8 +192,16 @@ try {
   assert.equal(typeof changes.viewId, 'string'); assert.equal(changes.diffError, null)
   assert.deepEqual(changes.files.map(file => file.path).sort(), ['packages/app/delivery.md', 'packages/app/new.txt', 'packages/app/tracked.txt'])
   const tracked = changes.files.find(file => file.path.endsWith('tracked.txt'))
+  await writeFile(join(workspace.working_directory, 'new.txt'), 'unrelated change after listing\n')
+  const indexPath = git(workspace.worktree_path, 'rev-parse', '--path-format=absolute', '--git-path', 'index')
+  const indexBytes = await readFile(indexPath)
+  const previewFiles = ['tracked.txt', 'new.txt', 'delivery.md']
+  const previewBytes = await Promise.all(previewFiles.map(file => readFile(join(workspace.working_directory, file))))
   const patch = await client.request('missions.fileDiff', { missionId: mission.missionId, fileId: tracked.id, viewId: changes.viewId })
   assert(patch.patch.includes('-base') && patch.patch.includes('+current net')); assert(!patch.patch.includes('staged'))
+  assert.equal(patch.file.additions, 1); assert.equal(patch.file.deletions, 1)
+  assert.deepEqual(await readFile(indexPath), indexBytes)
+  assert.deepEqual(await Promise.all(previewFiles.map(file => readFile(join(workspace.working_directory, file)))), previewBytes)
   assert.equal(git(workspace.worktree_path, 'ls-files', '--stage', '-z'), indexBefore)
   const delivery = await client.request('missions.delivery', { missionId: mission.missionId })
   assert.equal(delivery.workspace.managedBranch, workspace.branch)
@@ -182,15 +209,17 @@ try {
   assert(deliveryMessage?.attachments.some(attachment => attachment.displayName === 'delivery.md'))
   await writeFile(join(output, 'delivery.json'), JSON.stringify({ delivery, changes, patch }, null, 2))
   report.cases.push('fixed-base net diff includes commits, index, working tree and untracked files; the published Agent message retains its source attachment')
+  report.cases.push('first target detail survives unrelated changes after listing; detail statistics match the current patch and preview preserves exact real-index and user-file bytes')
   git(workspace.worktree_path, 'switch', '-c', 'external/mission-validation')
   git(source, 'branch', '-D', workspace.branch)
   assert.throws(() => git(source, 'rev-parse', '--verify', `refs/heads/${workspace.branch}`))
   const switched = await client.request('missions.changes', { missionId: mission.missionId })
   assert.deepEqual(switched.checkoutState, { kind: 'branch', branch: 'external/mission-validation', head: git(workspace.worktree_path, 'rev-parse', 'HEAD') })
   assert.equal(typeof switched.viewId, 'string'); assert.deepEqual(switched.files.map(file => file.path), changes.files.map(file => file.path))
-  await assert.rejects(client.request('missions.fileDiff', { missionId: mission.missionId, fileId: tracked.id, viewId: changes.viewId }), /mission.changes_refresh_required/)
+  const sameTarget = await client.request('missions.fileDiff', { missionId: mission.missionId, fileId: tracked.id, viewId: changes.viewId })
+  assert.deepEqual(sameTarget, patch)
   await client.request('missions.fileDiff', { missionId: mission.missionId, fileId: tracked.id, viewId: switched.viewId })
-  report.cases.push('activity view follows the actual checkout while managed branch identity stays unchanged; old file views are rejected without reusing their temporary index')
+  report.cases.push('activity view follows the actual checkout while managed branch identity stays unchanged; an existing target association remains readable against the fixed base after branch changes')
   db.close(); db = null; await client.stop(); client = startCore(); await client.request('members.list')
   db = new DatabaseSync(join(dataDirectory, 'rovai.sqlite')); db.exec('PRAGMA busy_timeout=5000')
   await sendMessage(mission.threadId, `只验证原使命目录和当前状态：node ${shellQuote(continuation)}。不要推进或重开使命。`)
@@ -255,10 +284,14 @@ try {
   assert.equal(db.prepare('SELECT count(*) n FROM mission_workspace WHERE mission_id=?').get(mission.missionId).n, 0)
   report.cases.push('dirty cleanup is refused asynchronously without leaving cleanup_failed; a legacy untouched failure recovers on retry; clean non-managed checkout cleanup preserves its branch and the next Run rebuilds through the preparation path')
   report.runs = [...rebuiltSnapshot.agentRuns, ...plainSnapshot.agentRuns].map(({ id, status, workspace }) => ({ id, status, workspace }))
+  // Product checks are asynchronous; record the observed version after actual
+  // execution rather than waiting for an obsolete profile readiness state.
+  report.runtime.version = db.prepare('SELECT reported_version FROM adapter_capability_snapshot WHERE installation_id=?').get(installation.id)?.reported_version ?? null
   report.status = 'passed'
 } catch (error) {
   report.status = 'failed'; report.error = String(error.stack ?? error); process.exitCode = 1
 } finally {
   db?.close(); await client?.stop(); report.finishedAt = new Date().toISOString()
+  for (const name of ['auth.json', 'config.toml']) await rm(join(nativeDirectory, name), { force: true })
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2))
 }

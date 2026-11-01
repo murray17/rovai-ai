@@ -16,6 +16,9 @@ use crate::{
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RuntimeStartupConfiguration {
     pub program_path: Option<String>,
+    /// A stored record is present but unusable. Never treat it as automatic discovery.
+    #[serde(skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub configuration_error: Option<String>,
     #[serde(default)]
     pub environment: Vec<RuntimeEnvironmentVariable>,
     /// Resolved by the Host from its private stored references, never accepted from clients.
@@ -28,7 +31,9 @@ pub struct RuntimeStartupConfiguration {
 
 impl PartialEq for RuntimeStartupConfiguration {
     fn eq(&self, other: &Self) -> bool {
-        self.program_path == other.program_path && self.environment == other.environment
+        self.program_path == other.program_path
+            && self.environment == other.environment
+            && self.configuration_error == other.configuration_error
     }
 }
 
@@ -74,7 +79,15 @@ pub struct FieldConflict {
 }
 
 impl RuntimeStartupConfiguration {
+    pub fn ensure_configuration_available(&self) -> Result<()> {
+        if let Some(error) = &self.configuration_error {
+            anyhow::bail!("{error}");
+        }
+        Ok(())
+    }
+
     pub fn ensure_environment_available(&self) -> Result<()> {
+        self.ensure_configuration_available()?;
         ensure!(
             !self.common_environment_unavailable,
             "Common environment credentials are unavailable; restore the local credential key or configuration"
@@ -150,21 +163,32 @@ fn load_record(
             ).optional()?;
         return Ok((0, configuration));
     };
-    let mut value: serde_json::Value = serde_json::from_str(&json)?;
-    // Ignore legacy UI selection; native configuration alone chooses the connection.
-    if let Some(object) = value.as_object_mut() {
-        object.remove("_connectionMode");
-        object.remove("customApi");
-        object.insert("environment".into(), serde_json::json!([]));
-    }
-    Ok((u64::try_from(revision)?, serde_json::from_value(value)?))
+    let parsed = (|| -> Result<RuntimeStartupConfiguration> {
+        let mut value: serde_json::Value = serde_json::from_str(&json)?;
+        // Ignore retired fields; common environment has its own owner.
+        if let Some(object) = value.as_object_mut() {
+            object.remove("_connectionMode");
+            object.remove("customApi");
+            object.insert("environment".into(), serde_json::json!([]));
+        }
+        serde_json::from_value::<RuntimeStartupConfiguration>(value)?.validated(cfg!(windows))
+    })();
+    // Keep the stored bytes and revision. Only an explicit version-checked save
+    // can replace this record; parsing failure is never an absent preference.
+    let configuration = parsed.unwrap_or_else(|_| RuntimeStartupConfiguration {
+        configuration_error: Some("启动设置已损坏，请重新选择程序或恢复自动检测后保存。".into()),
+        ..Default::default()
+    });
+    Ok((u64::try_from(revision)?, configuration))
 }
 
 pub fn load(database: &Database, kind: AdapterKind) -> Result<RuntimeStartupSettings> {
     let (revision, mut configuration) = load_record(database.connection(), kind)?;
     // Read-only compatibility and redaction evidence. No native settings or keys
     // are exposed by the editor, and a native parse error cannot block local prefs.
-    configuration.custom_api_snapshot = native_snapshot(kind, &configuration, database.path());
+    if configuration.configuration_error.is_none() {
+        configuration.custom_api_snapshot = native_snapshot(kind, &configuration, database.path());
+    }
     Ok(RuntimeStartupSettings {
         runtime_kind: kind,
         revision,
@@ -211,19 +235,30 @@ pub fn sensitive_environment(kind: AdapterKind, name: &str) -> bool {
 pub fn load_all(database: &Database) -> Result<BTreeMap<AdapterKind, RuntimeStartupConfiguration>> {
     let mut configurations = BTreeMap::new();
     for kind in AdapterKind::ALL {
-        let mut settings = load(database, kind)?;
+        let mut settings = load(database, kind).unwrap_or_else(|_| RuntimeStartupSettings {
+            runtime_kind: kind,
+            revision: 0,
+            configuration: RuntimeStartupConfiguration {
+                configuration_error: Some("无法读取启动设置，请检查此运行时的本机配置。".into()),
+                ..Default::default()
+            },
+            reconnect_required: false,
+        });
         // Keep the Host and unrelated runtimes usable when a private record is
         // damaged, but never let shared probes silently use another credential.
-        if apply_common(database.connection(), kind, &mut settings.configuration).is_err() {
+        if settings.configuration.configuration_error.is_none()
+            && apply_common(database.connection(), kind, &mut settings.configuration).is_err()
+        {
             settings.configuration.common_environment_unavailable = true;
             settings.configuration.custom_api_snapshot = None;
         }
         if settings.revision != 0
+            || settings.configuration.configuration_error.is_some()
             || settings.configuration.common_environment_unavailable
             || !settings.configuration.environment.is_empty()
             || settings.configuration.custom_api_snapshot.is_some()
         {
-            configurations.insert(kind, settings.configuration.validated(cfg!(windows))?);
+            configurations.insert(kind, settings.configuration);
         }
     }
     Ok(configurations)
@@ -305,9 +340,16 @@ pub fn prepare_save(
     database: &Database,
     kind: AdapterKind,
     edits: Vec<FieldEdit>,
+    expected_revision: Option<u64>,
 ) -> Result<PreparedSave> {
     ensure!(edits.len() <= 512, "修改字段过多。");
     let current = load(database, kind)?;
+    let revision_changed = expected_revision.is_some_and(|revision| revision != current.revision);
+    let replacing_invalid = current.configuration.configuration_error.is_some();
+    ensure!(
+        !replacing_invalid || (expected_revision.is_some() && edits.len() == 1),
+        "启动设置已损坏，请重新读取后选择程序或恢复自动检测并保存。"
+    );
     let visible = public(current.clone());
     let mut value = editable(kind, &visible.configuration);
     let mut conflicts = Vec::new();
@@ -319,10 +361,10 @@ pub fn prepare_save(
             "修改字段无效或重复。"
         );
         let now = value_at(&value, &edit.path).clone();
-        if now == edit.after {
+        if now == edit.after && !replacing_invalid && !revision_changed {
             continue;
         }
-        if now != edit.before {
+        if now != edit.before || revision_changed {
             conflicts.push(FieldConflict {
                 edit: edit.clone(),
                 current: now,
@@ -332,6 +374,7 @@ pub fn prepare_save(
         changed.push(edit.clone());
     }
     let mut configuration = current.configuration.clone();
+    configuration.configuration_error = None;
     configuration.program_path = serde_json::from_value(value["programPath"].clone())?;
     let hidden_names = current
         .configuration
@@ -510,6 +553,7 @@ pub(crate) fn snapshot_from_connection_with_environment(
         return Ok(None);
     }
     let (_, configuration) = load_record(connection, kind)?;
+    configuration.ensure_configuration_available()?;
     let Some(database_path) = connection.path() else {
         return Ok(None);
     };
@@ -547,6 +591,7 @@ mod tests {
         let config = |names: &[&str]| RuntimeStartupConfiguration {
             custom_api_snapshot: None,
             common_environment_unavailable: false,
+            configuration_error: None,
             program_path: None,
             environment: names
                 .iter()
@@ -706,6 +751,7 @@ mod tests {
                 RuntimeStartupConfiguration {
                     custom_api_snapshot: None,
                     common_environment_unavailable: false,
+                    configuration_error: None,
                     program_path: None,
                     environment: vec![RuntimeEnvironmentVariable {
                         name: key.into(),

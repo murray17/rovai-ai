@@ -25,8 +25,8 @@ use rovai_core::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_run_image::{AcpImageAccumulator, RuntimeImageObservation},
     agent_runtime_adapter::{
-        AcpClientTerminalMode, AgentRuntimeAdapterRegistry, acp_model_catalog_for_adapter,
-        acp_runtime_model_id_from_session, write_kiro_additive_agent_config,
+        AcpClientTerminalMode, AgentRuntimeAdapterRegistry, acp_runtime_model_id_from_session,
+        write_kiro_additive_agent_config,
     },
     builtin_tool_transport::BUILTIN_TOOL_CONTRACT_VERSION,
     command::canonical_json_digest,
@@ -64,9 +64,8 @@ use crate::{
         RuntimeCompatibilityKey, RuntimeProcessHost,
     },
     runtime_mcp::{
-        EphemeralMcpConfigFile, external_acp_server, remove_stale_mcp_configs,
-        write_ephemeral_additive_mcp_config, write_ephemeral_copilot_config,
-        write_ephemeral_grok_mcp_plugin,
+        EphemeralMcpConfigFile, external_acp_server, write_ephemeral_additive_mcp_config,
+        write_ephemeral_copilot_config, write_ephemeral_grok_mcp_plugin,
     },
 };
 
@@ -3344,7 +3343,12 @@ impl AcpHost {
         Ok(())
     }
 
-    async fn settle_loading_replay(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
+    async fn settle_loading_replay(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        wait_for_history: bool,
+    ) -> Result<()> {
         let response_received_at = Instant::now();
         loop {
             let wait_for = {
@@ -3363,12 +3367,18 @@ impl AcpHost {
                 else {
                     bail!("ACP Session loading route failed Host/Run fencing");
                 };
-                let grace_remaining = ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE
-                    .saturating_sub(response_received_at.elapsed());
-                let quiet_remaining = last_event_at.map_or(Duration::ZERO, |last_event_at| {
-                    ACP_HISTORY_RESTORE_QUIET_PERIOD.saturating_sub(last_event_at.elapsed())
-                });
-                let required_wait = grace_remaining.max(quiet_remaining);
+                // A successful resume does not replay history. Both restore methods
+                // still pass the same exact owner/phase transition above.
+                let required_wait = if wait_for_history {
+                    let grace_remaining = ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE
+                        .saturating_sub(response_received_at.elapsed());
+                    let quiet_remaining = last_event_at.map_or(Duration::ZERO, |last_event_at| {
+                        ACP_HISTORY_RESTORE_QUIET_PERIOD.saturating_sub(last_event_at.elapsed())
+                    });
+                    grace_remaining.max(quiet_remaining)
+                } else {
+                    Duration::ZERO
+                };
                 if required_wait.is_zero() {
                     route.phase = AcpSessionPhase::Ready;
                     return Ok(());
@@ -4960,7 +4970,12 @@ pub(crate) fn build_acp_new_session_params(
         adapter_kind,
         AdapterKind::CursorAgent | AdapterKind::DeepseekHarness | AdapterKind::MinimaxCodeCli
     ) {
-        params["additionalDirectories"] = json!(additional_directories);
+        // Grok 1.0.70 accepts cwd-only sessions and rejects non-empty extra roots.
+        params["additionalDirectories"] = if adapter_kind == AdapterKind::GrokBuild {
+            json!([])
+        } else {
+            json!(additional_directories)
+        };
     }
     if let Some(rules) = native_rules {
         params["_meta"] = json!({"rules": rules});
@@ -5216,12 +5231,12 @@ impl AcpRuntime {
             continuation,
             new_session_native_rules,
         )?;
-        let (session_id, prebound_session) = match continuation {
+        let (session_id, restore_method) = match continuation {
             AcpSessionContinuation::ReuseSameHost => (
                 existing_session_id
                     .context("same-Host ACP continuation has no Session ID")?
                     .to_string(),
-                false,
+                None,
             ),
             AcpSessionContinuation::Resume | AcpSessionContinuation::HistoryRestore => {
                 let existing_session_id =
@@ -5320,7 +5335,7 @@ impl AcpRuntime {
                     return Err(anyhow::anyhow!(reason).context(AcpSessionRestoreError));
                 }
                 *self.session_result.write().await = Some(result);
-                (existing_session_id.to_string(), true)
+                (existing_session_id.to_string(), Some(method))
             }
             AcpSessionContinuation::New => {
                 let params = build_acp_new_session_params(
@@ -5337,7 +5352,7 @@ impl AcpRuntime {
                     .and_then(Value::as_str)
                     .context("ACP Session response did not include sessionId")?
                     .to_string();
-                (session_id, false)
+                (session_id, None)
             }
         };
         if self.session_result.read().await.is_none()
@@ -5428,51 +5443,25 @@ impl AcpRuntime {
                     }));
                 }
             }
-            let session_result = session_result.as_ref().ok_or_else(|| {
-                anyhow::Error::new(AcpLiveModelValidationError {
-                    code: "runtime_model_catalog_unavailable",
+            // Pass explicit intent to the native setter even when the optional
+            // catalog is absent, incomplete, or does not enumerate this value.
+            if !model_options
+                .as_object()
+                .is_some_and(|options| options.values().all(Value::is_string))
+            {
+                return Err(anyhow::Error::new(AcpLiveModelValidationError {
+                    code: "runtime_model_options_invalid",
                     model_id: model.to_string(),
-                    detail: "the real ACP Session did not expose its catalog".to_string(),
-                })
-            })?;
-            let models = acp_model_catalog_for_adapter(self.host.adapter_kind, session_result)
-                .map_err(|error| {
-                    anyhow::Error::new(AcpLiveModelValidationError {
-                        code: "runtime_model_catalog_unavailable",
-                        model_id: model.to_string(),
-                        detail: error.to_string(),
-                    })
-                })?;
-            if matches!(
-                self.host.adapter_kind,
-                AdapterKind::DeepseekHarness | AdapterKind::MinimaxCodeCli
-            ) {
-                if !model_options
-                    .as_object()
-                    .is_some_and(|options| options.values().all(Value::is_string))
-                {
-                    return Err(anyhow::Error::new(AcpLiveModelValidationError {
-                        code: "runtime_model_options_invalid",
-                        model_id: model.to_string(),
-                        detail: "Model options must be an object of native string values"
-                            .to_string(),
-                    }));
-                }
-                rovai_core::agent_runtime_adapter::validate_live_model_selection(
-                    &models,
-                    model,
-                    &json!({}),
-                )?;
-            } else {
-                rovai_core::agent_runtime_adapter::validate_live_model_selection(
-                    &models,
-                    model,
-                    model_options,
-                )?;
+                    detail: "Model options must be an object of native string values".to_string(),
+                }));
             }
             if self.host.adapter_kind == AdapterKind::CodebuddyCli
                 && model.starts_with("custom-local:")
-                && acp_runtime_model_id_from_session(session_result).as_deref() == Some(model)
+                && session_result
+                    .as_ref()
+                    .and_then(acp_runtime_model_id_from_session)
+                    .as_deref()
+                    == Some(model)
             {
                 // This custom model was selected by the host's --model argument.
                 // CodeBuddy omits it from set_config_option's built-in choices.
@@ -5483,32 +5472,6 @@ impl AcpRuntime {
                 self.set_model(&session_id, model).await?;
             } else {
                 self.set_config_option(&session_id, "model", model).await?;
-            }
-            if self.host.adapter_kind == AdapterKind::MinimaxCodeCli {
-                let selected = self
-                    .session_result
-                    .read()
-                    .await
-                    .clone()
-                    .context("MiniMax selected model has no option state")?;
-                rovai_core::agent_runtime_adapter::validate_live_model_selection(
-                    &acp_model_catalog_for_adapter(self.host.adapter_kind, &selected)?,
-                    model,
-                    model_options,
-                )?;
-            }
-            if self.host.adapter_kind == AdapterKind::DeepseekHarness {
-                let selected = self
-                    .session_result
-                    .read()
-                    .await
-                    .clone()
-                    .context("DSH model selection has no option state")?;
-                crate::agent_runtime_adapter::validate_dsh_model_options(
-                    &selected,
-                    model,
-                    model_options,
-                )?;
             }
             if self.host.adapter_kind == AdapterKind::CodebuddyCli {
                 // Freeze the acknowledged selection, not session/new's old
@@ -5640,7 +5603,7 @@ impl AcpRuntime {
                     .await?;
             }
         }
-        self.finish_session_attachment(&session_id, prebound_session)
+        self.finish_session_attachment(&session_id, restore_method)
             .await?;
         Ok(session_id)
     }
@@ -5648,11 +5611,11 @@ impl AcpRuntime {
     async fn finish_session_attachment(
         &self,
         session_id: &str,
-        prebound_session: bool,
+        restore_method: Option<&str>,
     ) -> Result<()> {
-        if prebound_session {
+        if let Some(method) = restore_method {
             self.host
-                .settle_loading_replay(session_id, &self.owner)
+                .settle_loading_replay(session_id, &self.owner, method == "session/load")
                 .await?;
         } else {
             self.host
@@ -5729,44 +5692,17 @@ impl AcpRuntime {
                 }),
             )
             .await?;
-        if self.host.adapter_kind == AdapterKind::MinimaxCodeCli {
-            let options = result["configOptions"]
-                .as_array()
-                .context("Runtime did not return configuration state")?;
-            ensure!(
-                options
-                    .iter()
-                    .any(|option| option["id"] == config_id && option["currentValue"] == value),
-                "Runtime did not confirm requested configuration"
-            );
+        // Successful native replies need not repeat the catalog or selected value.
+        // Consume any returned option state without turning missing metadata into
+        // an execution failure.
+        if let Some(options) = result.get("configOptions").filter(|value| value.is_array()) {
             let mut selected = self
                 .session_result
                 .read()
                 .await
                 .clone()
-                .context("Runtime Session has no option state")?;
-            selected["configOptions"] = result["configOptions"].clone();
-            *self.session_result.write().await = Some(selected.clone());
-            self.host
-                .remember_session(session_id, Some(&selected))
-                .await;
-        }
-        if self.host.adapter_kind == AdapterKind::DeepseekHarness {
-            let previous = self
-                .session_result
-                .read()
-                .await
-                .clone()
-                .context("DSH Session has no option state")?;
-            let model = if config_id == "model" {
-                value.to_string()
-            } else {
-                acp_runtime_model_id_from_session(&previous)
-                    .context("DSH Session has no selected model")?
-            };
-            let selected = crate::agent_runtime_adapter::dsh_model_config_after_selection(
-                &previous, &result, &model,
-            )?;
+                .unwrap_or_else(|| json!({}));
+            selected["configOptions"] = options.clone();
             *self.session_result.write().await = Some(selected.clone());
             self.host
                 .remember_session(session_id, Some(&selected))
@@ -6832,19 +6768,6 @@ impl AcpCliRuntimeAdapter {
         let kind = self.kind;
         if !launchable_acp_adapter(kind) {
             bail!("{} is not a launchable ACP Adapter", kind.as_str());
-        }
-        #[cfg(target_os = "macos")]
-        ManagedProcess::recover_descendants(&self.private_runtime_dir.join("owned-processes"))?;
-        if matches!(
-            kind,
-            AdapterKind::CopilotCli
-                | AdapterKind::GrokBuild
-                | AdapterKind::KiroCli
-                | AdapterKind::QoderCli
-                | AdapterKind::CodebuddyCli
-                | AdapterKind::QwenCode
-        ) {
-            remove_stale_mcp_configs(&self.private_runtime_dir)?;
         }
         Ok(())
     }
@@ -9838,7 +9761,9 @@ mod route_policy_tests {
                 .count(),
             1
         );
-        assert_eq!(params["additionalDirectories"].as_array().unwrap().len(), 2);
+        assert_eq!(params["cwd"], "/workspace");
+        assert_eq!(params["mcpServers"], json!([]));
+        assert_eq!(params["additionalDirectories"], json!([]));
 
         let additional_directories = ["/attachments".to_string(), "/run-tmp".to_string()];
         let resume = build_acp_resume_session_params(
@@ -9865,6 +9790,35 @@ mod route_policy_tests {
             other["additionalDirectories"],
             json!(["/attachments", "/run-tmp"])
         );
+        let mcp_servers = [json!({"name":"example", "command":"example-mcp", "args":[], "env":[]})];
+        for kind in [
+            AdapterKind::GrokBuild,
+            AdapterKind::QwenCode,
+            AdapterKind::CursorAgent,
+            AdapterKind::DeepseekHarness,
+            AdapterKind::MinimaxCodeCli,
+        ] {
+            let params = build_acp_new_session_params(
+                kind,
+                "/workspace",
+                &mcp_servers,
+                &additional_directories,
+                None,
+            );
+            assert_eq!(params["cwd"], "/workspace");
+            assert_eq!(params["mcpServers"], json!(mcp_servers));
+            assert!(params.get("_meta").is_none());
+            match kind {
+                AdapterKind::GrokBuild => assert_eq!(params["additionalDirectories"], json!([])),
+                AdapterKind::QwenCode => {
+                    assert_eq!(
+                        params["additionalDirectories"],
+                        json!(additional_directories)
+                    );
+                }
+                _ => assert!(params.get("additionalDirectories").is_none()),
+            }
+        }
     }
 
     #[test]
@@ -12522,6 +12476,7 @@ while IFS= read -r ignored; do :; done
                     }],
                     custom_api_snapshot: None,
                     common_environment_unavailable: false,
+                    configuration_error: None,
                 },
             );
         crate::runtime_discovery::with_runtime_configuration(
@@ -14111,15 +14066,26 @@ while IFS= read -r ignored; do :; done
             let executable = root.join("traecli");
             make_executable(
                 &executable,
-                r#"#!/bin/sh
-IFS= read -r initialize || exit 1
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
-IFS= read -r session || exit 1
-printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]},"sessionId":"session-live-model","models":{"currentModelId":"trae-default","availableModels":[{"modelId":"trae-default","name":"TRAE Default"}]}}}'
-IFS= read -r configuration || exit 1
-printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"configuration refused after successful resume"}}'
-while IFS= read -r ignored; do :; done
+                &format!(
+                    r#"#!/usr/bin/python3
+import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    result = {{}}
+    if request['method'] == 'initialize': result = {{'protocolVersion':1, 'agentCapabilities':{{}}}}
+    elif request['method'] in ('session/new', 'session/resume'):
+        result = {{'sessionId':'session-live-model', 'modes':{{'currentModeId':'default','availableModes':[{{'id':'default','name':'Default'}}]}}}}
+    response = {{'jsonrpc':'2.0', 'id':request['id'], 'result':result}}
+    if request['method'] == 'session/set_config_option' and {configuration_rejected}:
+        response = {{'jsonrpc':'2.0','id':request['id'],'error':{{'code':-32602,'message':'configuration refused after successful resume'}}}}
+    print(json.dumps(response), flush=True)
 "#,
+                    configuration_rejected = if configuration_rejected {
+                        "True"
+                    } else {
+                        "False"
+                    }
+                ),
             );
             let frozen = frozen_trae_runtime(&executable);
             let workspace =
@@ -14157,7 +14123,7 @@ while IFS= read -r ignored; do :; done
                 None,
             );
 
-            let error = runtime
+            let result = runtime
                 .start_or_resume_session(
                     configuration_rejected.then_some("session-live-model"),
                     AcpSessionCapabilities {
@@ -14170,32 +14136,26 @@ while IFS= read -r ignored; do :; done
                     } else {
                         "claude-opus-5"
                     },
-                    &json!({}),
+                    &json!({"reasoning_effort":"high"}),
                     &BTreeMap::new(),
                 )
-                .await
-                .expect_err("a model absent from the real Session catalog must fail closed");
-            assert!(
-                error.downcast_ref::<AcpSessionRestoreError>().is_none(),
-                "a model/configuration error after activation must not authorize session replacement"
-            );
+                .await;
             if configuration_rejected {
+                let error = result.unwrap_err();
+                assert!(error.downcast_ref::<AcpSessionRestoreError>().is_none());
                 assert!(
                     format!("{error:#}").contains("configuration refused after successful resume")
                 );
                 assert!(host.knows_session("session-live-model").await);
             } else {
-                let validation = error
-                    .downcast_ref::<AcpLiveModelValidationError>()
-                    .expect("typed catalog failure");
-                assert_eq!(validation.code, "runtime_model_unavailable");
+                assert_eq!(result.unwrap(), "session-live-model");
             }
 
             host.shutdown().await;
             std::fs::remove_dir_all(root).unwrap();
         }
         // The same Host seam must allow Hermes to decide selections outside its
-        // picker, while preserving strict catalog behavior for the adapter above.
+        // picker, using the same native acceptance boundary as the adapter above.
         // A fresh Host per attachment covers both new and cold resume responses.
         for resume in [false, true] {
             for (case, source, current_model, current_mode, target, failure, expected) in [
@@ -14459,11 +14419,12 @@ for line in sys.stdin:
     async fn history_restore_replay_is_quarantined_and_only_current_prompt_accepts_input() {
         // Command uses the same transport and goes straight to native restore;
         // the fixture deliberately has no session/list response.
-        for (kind, control_outcome) in [
-            (AdapterKind::TraeCnCli, "end_turn"),
-            (AdapterKind::CommandCodeCli, "end_turn"),
-            (AdapterKind::CommandCodeCli, "error"),
-            (AdapterKind::CommandCodeCli, "cancelled"),
+        for (kind, control_outcome, resume_fallback) in [
+            (AdapterKind::TraeCnCli, "end_turn", false),
+            (AdapterKind::TraeCnCli, "end_turn", true),
+            (AdapterKind::CommandCodeCli, "end_turn", false),
+            (AdapterKind::CommandCodeCli, "error", false),
+            (AdapterKind::CommandCodeCli, "cancelled", false),
         ] {
             let root = std::env::temp_dir().join(format!(
                 "rovai-acp-resume-quarantine-{}",
@@ -14477,6 +14438,19 @@ for line in sys.stdin:
             } else {
                 json!({"jsonrpc":"2.0","id":4,"result":{"stopReason":control_outcome,"usage":{"totalTokens":999999}}})
             };
+            let fallback_response = if resume_fallback {
+                format!(
+                    r#"printf '%s\n' '{{"jsonrpc":"2.0","id":2,"error":{{"code":-32601,"message":"resume unavailable"}}}}'
+IFS= read -r load || exit 1
+printf '%s\n' "$load" >> '{}'
+"#,
+                    protocol_log.display()
+                )
+            } else {
+                String::new()
+            };
+            let restore_response_id = if resume_fallback { 3 } else { 2 };
+            let first_prompt_id = restore_response_id + 1;
             make_executable(
                 &executable,
                 &format!(
@@ -14489,10 +14463,11 @@ printf '%s\n' "$initialize" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
 IFS= read -r resume || exit 1
 printf '%s\n' "$resume" >> '{}'
+{fallback_response}
 printf '%s\n' '{{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{{"sessionId":"session-old","toolCall":{{"toolCallId":"historical-tool"}},"options":[]}}}}'
 IFS= read -r quarantined_permission || exit 1
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
-prompt_id=3
+printf '%s\n' '{{"jsonrpc":"2.0","id":{restore_response_id},"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
+prompt_id={first_prompt_id}
 if [ -n "$ROVAI_COMMAND_CODE_BOOTSTRAP_ROOT" ]; then
   IFS= read -r mode || exit 1
   printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{}}}}'
@@ -14571,7 +14546,7 @@ while IFS= read -r ignored; do :; done
                 .start_or_resume_session(
                     Some("session-old"),
                     AcpSessionCapabilities {
-                        can_resume: false,
+                        can_resume: resume_fallback,
                         can_load_history: true,
                     },
                     "runtime_default",
@@ -14667,11 +14642,81 @@ while IFS= read -r ignored; do :; done
                 }) if message.get("method").and_then(Value::as_str)
                     == Some("rovai/acp_prompt_completed")
             ));
+            if kind == AdapterKind::TraeCnCli && !resume_fallback {
+                // Poll only the post-RPC attachment transition with uncontended locks.
+                // Resume must finish without registering a timer; load must remain pending.
+                // This observes the wait directly, without wall-clock performance assertions.
+                for (method, immediate) in [("session/resume", true), ("session/load", false)] {
+                    host.bind_session(
+                        &session_id,
+                        &runtime.owner,
+                        AcpSessionPhase::loading_replay(),
+                    )
+                    .await
+                    .unwrap();
+                    let mut attachment = std::pin::pin!(
+                        runtime.finish_session_attachment(&session_id, Some(method))
+                    );
+                    let polled = std::future::poll_fn(|cx| {
+                        std::task::Poll::Ready(std::future::Future::poll(attachment.as_mut(), cx))
+                    })
+                    .await;
+                    assert_eq!(polled.is_ready(), immediate, "{method}: {polled:?}");
+                    if let std::task::Poll::Ready(result) = polled {
+                        result.unwrap();
+                    }
+                }
+                for invalid in ["owner", "epoch", "protocol", "ready"] {
+                    host.bind_session(
+                        &session_id,
+                        &runtime.owner,
+                        AcpSessionPhase::loading_replay(),
+                    )
+                    .await
+                    .unwrap();
+                    {
+                        let mut routes = host.routes.write().await;
+                        let route = routes.get_mut(&session_id).unwrap();
+                        match invalid {
+                            "owner" => route.owner.agent_run_id = "another-run".into(),
+                            "epoch" => route.owner.execution_epoch += 1,
+                            "protocol" => {
+                                route.phase = AcpSessionPhase::ProtocolViolated {
+                                    reason: "test violation".into(),
+                                }
+                            }
+                            _ => route.phase = AcpSessionPhase::Ready,
+                        }
+                    }
+                    assert!(
+                        runtime
+                            .finish_session_attachment(&session_id, Some("session/resume"))
+                            .await
+                            .is_err()
+                    );
+                    if invalid == "protocol" {
+                        assert!(matches!(
+                            host.routes.read().await[&session_id].phase,
+                            AcpSessionPhase::ProtocolViolated { .. }
+                        ));
+                    }
+                    host.routes.write().await.remove(&session_id);
+                }
+                assert!(
+                    runtime
+                        .finish_session_attachment(&session_id, Some("session/resume"))
+                        .await
+                        .is_err()
+                );
+            }
             host.shutdown().await;
 
             let protocol = std::fs::read_to_string(&protocol_log).unwrap();
             assert!(protocol.contains("\"method\":\"session/load\""));
-            assert!(!protocol.contains("\"method\":\"session/resume\""));
+            assert_eq!(
+                protocol.contains("\"method\":\"session/resume\""),
+                resume_fallback
+            );
             assert!(!protocol.contains("\"method\":\"session/list\""));
             std::fs::remove_dir_all(root).unwrap();
         }
@@ -14679,12 +14724,30 @@ while IFS= read -r ignored; do :; done
 
     #[tokio::test]
     async fn history_restore_protocol_anomalies_fail_closed() {
-        for (case_name, restore_response, expected_error) in [
-            ("invalid-json", "not-json-history", "invalid protocol JSON"),
+        for (case_name, restore_response, expected_error, can_resume) in [
+            (
+                "invalid-json",
+                "not-json-history",
+                "invalid protocol JSON",
+                false,
+            ),
+            (
+                "resume-invalid-json",
+                "not-json-history",
+                "invalid protocol JSON",
+                true,
+            ),
             (
                 "different-session-id",
                 r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-other"}}"#,
                 "different Session ID",
+                false,
+            ),
+            (
+                "resume-different-session-id",
+                r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-other"}}"#,
+                "different Session ID",
+                true,
             ),
         ] {
             let root = std::env::temp_dir().join(format!(
@@ -14742,7 +14805,7 @@ while IFS= read -r ignored; do :; done
                 .start_or_resume_session(
                     Some("session-old"),
                     AcpSessionCapabilities {
-                        can_resume: false,
+                        can_resume,
                         can_load_history: true,
                     },
                     "runtime_default",
@@ -14766,7 +14829,7 @@ while IFS= read -r ignored; do :; done
                 let routes = host.routes.read().await;
                 assert!(!routes.contains_key("session-other"));
                 assert!(routes.keys().all(|session_id| session_id == "session-old"));
-                if case_name == "different-session-id" {
+                if case_name.ends_with("different-session-id") {
                     assert!(matches!(
                         routes.get("session-old").map(|route| &route.phase),
                         Some(AcpSessionPhase::ProtocolViolated { .. })

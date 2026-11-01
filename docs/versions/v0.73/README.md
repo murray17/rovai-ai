@@ -130,7 +130,7 @@ pending add；Forget 在清除正式正文前对目标全部尚未清除的 form
 | ADR | 已更新 | [ADR-0178](decisions.md#adr-0178)替代 ADR-0069，[ADR-0179](decisions.md#adr-0179)替代 ADR-0070，[ADR-0180](decisions.md#adr-0180)局部替代 Transport Memory command/output 条款 |
 | Contracts | 已更新 | 新增 [Memory Capture v1](../../contracts/memory-capture-v1.md)与[Built-in Tool Transport v9](../../contracts/builtin-tool-transport-v9.md)，v8 降为 historical current-entry predecessor |
 | Architecture | 已更新 | 新增 [Online Memory Capture](../../architecture/online-memory-capture.md)，并把[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)切换为十二命令与 outcome union |
-| UI | 已更新 | [Memory workspace surface brief v2](../../../apps/desktop/.impeccable/surfaces/memory-workspace.md)改用独立 Review drawer、derived stale、body-free terminal 与 exact-version conflict 语义 |
+| UI | 已更新 | [Memory workspace surface brief v2](../../ui/surfaces/memory-workspace.md)改用独立 Review drawer、derived stale、body-free terminal 与 exact-version conflict 语义 |
 | Runtime Activity | 确认无需更新 | v9 仍使用既有 Core-owned Built-in Tool Activity/Envelope evidence；只改变 canonical Memory operation catalog，不新增 provider event、activity domain 或 classifier mapping |
 | Runtime compatibility | 确认无需更新 | 当前没有新的真实 Runtime 实测证据；兼容性清单保持事实原样，v9 九 Runtime matrix 是本版本待完成发布门槛 |
 | Documentation routing | 已更新 | 文档导航、CURRENT、ADR/Contract/Architecture/UI 索引均路由到 Memory Capture v1、Transport v9 与 v0.73 |

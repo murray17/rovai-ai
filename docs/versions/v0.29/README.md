@@ -53,7 +53,7 @@ Agent Runtime 原生字段、六字段身份、独立保存边界与 Arctic Dawn
 
 - A3 HTML 是必须实际打开并交互核对的设计输入，不是生产字段、组件或静态数据真源。
 - 未被本版本明确替代的 Renderer 规则继续遵守
-  [队员工作区策略](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)。
+  [队员工作区策略](../../ui/surfaces/member-workspace.md)。
 - Runtime、模型与原生权限继续遵守 [ADR-0082](../v0.26/decisions.md#adr-0082)。
 - 六字段身份与独立保存边界继续遵守 [ADR-0085](../v0.27/decisions.md#adr-0085)。
 - Camp 共享摘要模型入口继续遵守 [ADR-0060](../v0.16/decisions.md#adr-0060)，

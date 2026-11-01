@@ -2,7 +2,7 @@ import type { AdapterKind, ModelSelection } from '@contracts'
 import { uiAttribute } from './interface-language'
 
 export const ENVIRONMENT_PLACEHOLDER = '{\n  "VARIABLE_NAME": "value"\n}'
-export type EnvironmentSnapshot = { revision: number; environment: Record<string, string> }
+export type EnvironmentSnapshot = { revision: number; environment: Record<string, string>; error?: string }
 export type MemberEnvironmentSnapshot = EnvironmentSnapshot & { inheritCommon?: boolean; common?: EnvironmentSnapshot }
 export type MemberEnvironmentEdit = { expectedRevision: number; json: string; inheritCommon?: boolean }
 export const environmentText = (values: Record<string, string>): string => Object.keys(values).length ? JSON.stringify(values, null, 2) : ''

@@ -6,7 +6,7 @@ last_updated: 2026-10-22
 
 # 原生 Server 安装与开发验收
 
-Server 0.5.3 已与 Desktop 一起公开发布于 [`v0.5.3`](https://github.com/murray17/rovai-ai/releases/tag/v0.5.3)，两端使用同一源码提交。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
+Server 0.5.4 已与 Desktop 一起公开发布于 [`v0.5.4`](https://github.com/murray17/rovai-ai/releases/tag/v0.5.4)，两端使用同一源码提交。普通用户从[官网安装与启动指南](https://rovai.dev/zh/docs/server-install.html)开始，无需克隆或构建源码；本页保留开发构建与资格验收流程。公开发布不代表所有平台与智能体组合均完成真实执行验收。
 
 2026-09-29 的 macOS arm64 **0.4.0** 发布包实测确认安装、登录与会话可用，但有两个发布包阻碍：快捷命令启动可能找不到 WebUI；直接运行 `current/rovai-server` 后，首次 Agent 执行仍因 `bundled Skill resources are unavailable` 失败，归档缺少内置 Skill 资源。0.4.1 桥接包补齐归档资源与快捷命令路径，包内 Skill 读取和 0.4.0 数据升级已在隔离环境验收；尚不能把旧截图记成端到端执行成功。完整记录见[官网部署素材说明](../../website/deployment-notes.md)。
 
@@ -53,7 +53,7 @@ Server workflow 在四个原生目标与三套 Linux OS 检查通过后创建该
 - Gate A：对同一 release profile/source SHA/归档，在三套目标 OS 的普通用户环境完成安装、Web 登录、认证读写、
   数据与 Session/Token 持久化、同根互斥和 SIGTERM 停止重开。独立入口为
   `python3 scripts/smoke-linux-server.py <已安装程序目录> --expected-source <SHA> --output <报告>`。
-- Gate B：按 Runtime × version × OS 记录原生 Provider/认证、实际 Camp、文件/命令、Built-in CLI、审批、
+- Gate B：按 Runtime × version × OS 记录原生 Provider/认证、实际 Thread、文件/命令、Built-in CLI、审批、
   取消/子进程回收、warm/cold resume 和既有 First-Class 能力轴。API/模型不可用不等于 Linux 不支持；
   安装成功或一次文本回复不等于完整资格通过。任一 Runtime 的探测结果不自动晋升其他准入行。
 - Server 和 Runtime 分别记录 CPU/RAM、峰值、swap、并发与任务规模。2 GB VPS 的低配实验不替代
@@ -80,7 +80,7 @@ Unix 默认配置 `.profile`、`.bashrc`、`.bash_profile`、`.zshrc` 的去重 
 `rovai-server-<版本>-<target>.tar.gz`（Unix）或 `.zip`（Windows），`SHA256SUMS` 每个资产恰好一项。
 安装器先完整下载、校验 SHA-256，检查归档路径/类型和包内版本/目标，再切换入口；下载/校验失败保留旧安装。
 0.4.0 已安装程序继续读 `scripts/server-channel.txt`，该旧指针在桥接版发布后固定为 `0.4.1`。
-0.4.1 起的程序和安装器改读 `scripts/server-release-tag.txt`：当前 `v0.5.3` 指向同版 Desktop/Server 包，历史 `server-v0.4.1` 指向桥接包，`unpublished`
+0.4.1 起的程序和安装器改读 `scripts/server-release-tag.txt`：当前 `v0.5.4` 指向同版 Desktop/Server 包，历史 `server-v0.4.1` 指向桥接包，`unpublished`
 表示新通道尚未晋升。只有实际发布相应资产并晋升指针后，才能把网络安装命令描述为可用。
 没有独立域名或下载服务。
 
@@ -164,7 +164,7 @@ Desktop「设置 → 远程连接」控制当前 Host，Web 默认关闭，端�
 当前 Core 和任务继续；重启 Desktop 后默认关闭。开发 Desktop 开启前运行 `pnpm build:web`，打包时则
 随包携带同一 WebUI 构建产物。
 
-## 首个真实 Camp 复验
+## 首个真实 Thread 复验
 
 使用源码构建产物进行自动验收，不启动日常 App：
 
@@ -176,10 +176,10 @@ pnpm smoke:host-web-runtime
 ```
 
 两条验收命令目前在 macOS 使用独立 Chrome profile；`ROVAI_REVIEW_CHROME` 可指定 Chrome 可执行文件。
-第一条启动隔离 Electron，与实际浏览器对照同一 Camp、日夜主题和三个客户端草稿，不调用模型。
+第一条启动隔离 Electron，与实际浏览器对照同一 Thread、日夜主题和三个客户端草稿，不调用模型。
 `ROVAI_KEEP_HOST_WEB_LIVE_FIXTURE=1` 保留其截图与隔离目录。
 
-第二条会调用本机已认证的 Codex，在空目录初始化的独立 Host 中，通过正式浏览器页面检查 Runtime、配置队员并创建 Camp，
+第二条会调用本机已认证的 Codex，在空目录初始化的独立 Host 中，通过正式浏览器页面检查 Runtime、配置队员并创建 Thread，
 随后从正式浏览器页面上传、发送、选择 Host 提供的一次审批、阅读产物与停止另一个运行。
 只审批脚本中精确限定的夹具发布命令，不修改用户级 Runtime 权限。命令打印隔离路径并保留脱敏报告和截图；
 原始目录可能包含 Runtime 会话材料，不得整体上传。它不证明其他 Runtime、其他平台或同 UID 强隔离。设置 `ROVAI_HOST_ENTRY=desktop` 运行同一真实流程，
@@ -210,7 +210,7 @@ pnpm smoke:host-web-runtime
 测试仅创建本地记录，不调用模型。旧包必须是有独立 manifest 的实际支持来源；不能拿当前包改版本号充当升级。
 原始夹具和报告保留在脚本打印的位置，可能包含私有状态，不整体公开上传。
 
-实际升级前先停止唯一 Host，保留旧包并备份完整 data-dir、Skill Library、MCP 配置及
+实际升级前先停止唯一 Host，保留旧包并备份完整 data-dir、Skill 文件目录、MCP 配置及
 `prepare` 输出的 Runtime 文件根目录；备份时不能有正在写入的 Runtime。用户附件仍是 source reference，
 源文件需要独立保留。旧 Runtime 视图目录可能只有遍历权限，普通递归复制会失败；备份工具必须报告失败，
 不能把不完整目录当成成功。演练脚本只在自身创建的停机夹具里暂补目录读取权限，复制后恢复原权限。

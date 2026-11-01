@@ -5,6 +5,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     process::ExitStatus,
+    time::{Duration, Instant},
 };
 
 #[cfg(unix)]
@@ -69,6 +70,48 @@ pub enum ManagedStdinPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManagedWindowsArgvDialect {
     MicrosoftCrt,
+}
+
+/// One startup maintenance attempt, shared by all historical record directories.
+/// Diagnostics never become Runtime readiness or durable cleanup acknowledgements.
+pub(crate) struct HistoricalProcessCleanup {
+    pub cleaned: usize,
+    pub skipped: usize,
+    pub diagnostics: Vec<String>,
+    pub budget_exhausted: bool,
+    deadline: Instant,
+}
+
+impl HistoricalProcessCleanup {
+    pub(crate) fn new(budget: Duration) -> Self {
+        Self {
+            cleaned: 0,
+            skipped: 0,
+            diagnostics: Vec::new(),
+            budget_exhausted: false,
+            deadline: Instant::now() + budget,
+        }
+    }
+
+    pub(crate) fn expired(&mut self) -> bool {
+        self.budget_exhausted |= Instant::now() >= self.deadline;
+        self.budget_exhausted
+    }
+
+    pub(crate) fn record_deadline(&self) -> Instant {
+        self.deadline
+            .min(Instant::now() + Duration::from_millis(250))
+    }
+
+    pub(crate) fn skip(&mut self, stage: &str, error: impl std::fmt::Display) {
+        self.skipped += 1;
+        if self.diagnostics.len() < 16 {
+            let diagnostic = format!("{stage}: {error}").chars().take(512).collect();
+            if !self.diagnostics.contains(&diagnostic) {
+                self.diagnostics.push(diagnostic);
+            }
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -825,22 +868,40 @@ impl ManagedProcess {
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn recover_descendants(directory: &Path) -> io::Result<()> {
-        process_tree::recover(directory)
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(crate) fn recover_runtime_descendants(runtime_directory: &Path) -> io::Result<()> {
-        if !runtime_directory.exists() {
-            return Ok(());
+    pub(crate) fn recover_runtime_descendants(
+        runtime_directory: &Path,
+        report: &mut HistoricalProcessCleanup,
+    ) {
+        if report.expired() {
+            return;
         }
-        for entry in std::fs::read_dir(runtime_directory)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                process_tree::recover(&entry.path().join("owned-processes"))?;
+        let entries = match std::fs::read_dir(runtime_directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+            Err(error) => {
+                report.skip("runtime_directory", error);
+                return;
+            }
+        };
+        for entry in entries {
+            if report.expired() {
+                break;
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    report.skip("runtime_directory_entry", error);
+                    continue;
+                }
+            };
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => {
+                    process_tree::recover(&entry.path().join("owned-processes"), report);
+                }
+                Ok(_) => {}
+                Err(error) => report.skip("runtime_directory_type", error),
             }
         }
-        Ok(())
     }
 
     /// Preserve descendants before a native cancellation protocol can sever

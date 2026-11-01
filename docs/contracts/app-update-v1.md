@@ -150,5 +150,5 @@ Updater 必须先同步 stage/启动安装器，再触发 native quit。只有 u
 - [Desktop App Updates 架构](../architecture/desktop-app-updates.md)
 - [Planned Shutdown](../architecture/planned-shutdown.md)
 - [Planned Shutdown v3](planned-shutdown-v3.md)
-- [设置工作区 surface brief](../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [设置工作区 surface brief](../ui/surfaces/settings-workspace.md)
 - [V1.28-D13](../versions/v1.28/decisions.md#v1-28-d13)

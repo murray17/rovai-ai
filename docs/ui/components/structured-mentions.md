@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-10-26
+last_updated: 2026-10-30
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -28,7 +28,7 @@ DOM 形态，但 identity、候选来源、激活行为和发送校验保持强�
 `decorate()` 返回 null，不得挂载独立 React Root、Portal 或 Catalog 订阅。Atom 内没有独立可聚焦按钮，光标不能
 进入其中，键盘可以 NodeSelection，Backspace/Delete 一次删除整个 Atom。普通字符落在 Atom 前后的独立 TextNode。
 
-Member 的唯一身份是 `agentId`，显示名称/头像从当前 Camp 成员或可邀请的队员资料解析；改名只刷新显示。
+Member 的唯一身份是 `agentId`，显示名称/头像从当前 Thread 成员或可邀请的队员资料解析；改名只刷新显示。
 不可解析时保留 identity 和 fallback label，不按同名成员重新绑定。已离队但资料仍在的队员可以作为待邀请对象；
 资料离线、已移除或身份缺失时按不可用显示。Skill 的唯一身份是 `skillId`，`nameAtSend` 保留发送时
 语义/显示快照；当前描述、图标和来源不进入 Draft。Catalog 展示刷新不产生 dirty、Draft save 或 undo item。
@@ -45,13 +45,13 @@ critical-priority command 从当前 selection 同步重算 trigger：Catalog loa
 当前候选必须保持在滚动区域内，并通过稳定 option ID 与编辑器的 `aria-activedescendant` 对应；
 Member 与 Skill 菜单共享这项焦点同步，菜单关闭后移除该关联。
 
-`@` 空查询先显示 `@所有队员` 和当前 Camp 可接收的队员，再显示“邀请其他队员”入口；该入口在长名册中仍须
+`@` 空查询先显示 `@所有队员` 和当前 Thread 可接收的队员，再显示“邀请其他队员”入口；该入口在长名册中仍须
 处于可见候选上限内。邀请层和按名称／角色查询的队外候选，与会话内邀请弹窗共用新建对话的可用性规则：
 资料为 `present`、已配置智能体，且 Runtime 为 `ready | light_ready | installed_unverified`；未配置或需要处理的队员不作为邀请候选。
 进入邀请层后显示返回入口和符合此规则的队员。输入查询时按名称或团队角色查找，
-当前 Camp 成员排在可邀请队员之前；队外候选标明邀请状态。普通 Member 候选主行显示当前名称，副行显示
-团队角色；团队角色为空时显示“团队角色未设置”。副行不得使用所有候选共享的“Camp 成员”等占位文案。
-All Members 候选继续显示广播说明，范围仍是发送时 Camp 中的全部可接收队员。
+当前 Thread 成员排在可邀请队员之前；队外候选标明邀请状态。普通 Member 候选主行显示当前名称，副行显示
+团队角色；团队角色为空时显示“团队角色未设置”。副行不得使用所有候选共享的占位文案。
+All Members 候选继续显示广播说明，范围仍是发送时 Thread 中的全部可接收队员。
 
 会话与使命描述候选保持头像与两行紧凑布局：左侧为名称和团队角色，右侧只显示已有智能体产品图标。
 图标为独立详情入口，点击不选择队员；浮层显示智能体名称和当前配置的模型，并提供提及该队员的动作。
@@ -80,7 +80,7 @@ All Members 候选继续显示广播说明，范围仍是发送时 Camp 中的�
 队外 Member Atom 与在队 Member Atom 使用同一正文结构和逐处呈现。重复提及保留每一个 Atom；Composer 从当前
 正文中的 `agentId` 去重派生“待邀请”名单，不维护第二份持久名单。删除最后一个该身份的 Atom 就取消待邀请；
 删除部分重复 Atom 不取消。状态在路由轨提示“发送时邀请”，主按钮提示“邀请并发送”；待邀请身份只参与
-这次本机发送流程，不会因为选中候选就提前改变 Camp 名册。
+这次本机发送流程，不会因为选中候选就提前改变 Thread 名册。
 普通一键 Pending 草稿也提供相同候选、Atom 与提示；首次发送直接交给 Core 原子邀请、激活和发布，
 不先调用单独加入命令。失败保留完整输入；本机恢复后仍按最新资料判定待邀请或不可用。
 已选队外队员的配置或可用性失效时，正文 Atom 保留姓名并标为不可用，发送前使用最新资料重验；
@@ -133,11 +133,11 @@ Member 人物信息卡保持非模态，默认宽 376px，采用单列：紧凑�
 
 ## Reply 与 Continuation
 
-点击当前可寻址 Agent 消息的“回复”仍是明确 Member Atom 来源：Renderer 用已经可见的完整消息建立 Camp-local
+点击当前可寻址 Agent 消息的“回复”仍是明确 Member Atom 来源：Renderer 用已经可见的完整消息建立 Thread-local
 reply intent，并把 canonical Member Atom 插入正文开头；已有相同 Atom 或 All Members 时复用。reply relation 本身
 不参与发送寻址。原作者失效时保留引用并要求用户显式换人，不生成 lookalike、不删除意图、不回退 Default Lead。
 
-“继续发给”仍只投影最近 accepted user message 的唯一非 Lead 显式接收者。Desktop 把 intent 写入同一 Camp-local
+“继续发给”仍只投影最近 accepted user message 的唯一非 Lead 显式接收者。Desktop 把 intent 写入同一 Thread-local
 snapshot，并在发送前物化 canonical Member Atom；对象失效时阻断并要求显式换人。用户手动改址后，即使删除全部 Member
 Atom，也不从同一来源自动生成。
 
@@ -179,13 +179,13 @@ Member、All Members 或 Skill Atom 的内容优先按结构化粘贴。仅含�
 猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。
 
 Draft 自动保存失败时 Composer 保留内容与 dirty 状态，显示可恢复的保存错误；当前 epoch 内可有限退避重试，发送
-和任何会卸载或替换当前 Camp Composer 的普通导航必须通过显式 flush 确认持久化后继续。普通 dirty/saving/saved 不提升到 Workspace，保存状态反馈不进入
+和任何会卸载或替换当前 Thread Composer 的普通导航必须通过显式 flush 确认持久化后继续。普通 dirty/saving/saved 不提升到 Workspace，保存状态反馈不进入
 EditorState 或 undo history。正文 autosave 回执不刷新整个 Workspace；批量附件只在批次开始前 flush 一次正文。
 
 Draft 加载失败显示原位“草稿无法加载”和重新加载入口；此时正文、附件、Reply/Continuation 与发送全部禁用，不能
-用 revision-zero 空 Draft 替代错误。ContentEditable 关闭浏览器 spellcheck。发送和路由 mutation 在第一个异步等待前
-同步锁定 Lexical；Core 路由 mutation 改变 content 时在解锁前 authoritative-replace，发送成功则加载下一 Draft 后
-replace。失败保留现有正文并恢复交互。
+用可编辑的空 Draft 替代错误。ContentEditable 关闭浏览器 spellcheck。发送和本地路由 mutation 在第一个异步等待前
+同步锁定 Lexical；路由变更在解锁前回写编辑器，确认发送成功后才用新本机草稿替换已发送快照。
+失败保留现有正文并恢复交互；未知结果按原 commandId 核对。
 
 <a id="current-user-mention"></a>
 
@@ -194,7 +194,7 @@ replace。失败保留现有正文并恢复交互。
 默认路由的本地用户或 External Principal 历史消息可由 Renderer 根据消息冻结的唯一
 `addressedAgentId`，在可见正文前派生一个 Member Mention。它复用本节的行内色彩、人物卡和不可用降级，
 但使用 `data-quote-exclude` 与用户原文边界隔离：不是 Structured Content，不改变复制、引用定位、搜索、
-`camp.read` 或 Agent 路由。显式 Member Mention 仍只来自权威 Structured Content，不得从正文或显示前缀反推身份。
+`thread.read` 或 Agent 路由。显式 Member Mention 仍只来自权威 Structured Content，不得从正文或显示前缀反推身份。
 
 发送受理后，本机临时展示的结构化 Member Mention 若尚无名册行，可以按同一 `agentId` 的现有、未移除队员资料
 保留姓名；资料为 `present` 或 `away` 都不抹去该身份的姓名。静态提示“正在同步队员名册”，不提前开放人物卡、
@@ -222,15 +222,14 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 
 | 层级 | 权威入口 |
 | --- | --- |
-| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v16](../../contracts/camp-composer-draft-v16.md)与[Pending Camp Activation v5](../../contracts/pending-camp-activation-v5.md) |
+| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v20](../../contracts/camp-composer-draft-v20.md)与[Pending Camp Activation v5](../../contracts/pending-camp-activation-v5.md) |
 | Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
 | Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
 | Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |
 | 自动化与打包 App 回归 | [结构化 Mention 门禁](../../development/ui-acceptance.md#结构化-mention-门禁) |
 
 改为富文本/Markdown编辑、全局角色 Toast、页面跳转、模态 Dialog、每 Atom React Root 或其他信息架构属于产品
-变更，必须同步更新本文、当前 Contracts/Architecture、Renderer 测试和真实 App 验收。历史原型只解释已确认的
-信息卡选型，不是生产真源：[Mention Popover 原型](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/mention-popover/README.md)。
+变更，必须同步更新本文、当前 Contracts/Architecture、Renderer 测试和真实 App 验收。
 
 ## 公开引用候选
 

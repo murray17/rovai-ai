@@ -39,9 +39,9 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
   const loaded = useRef(false)
   const state = useRef({ draft, busy, dirty: false, saved })
   const id = useId()
-  const startupDirty = saved !== null && runtimeStartupKey(draft) !== runtimeStartupKey(saved.configuration)
+  const startupDirty = saved !== null && (runtimeStartupKey(draft) !== runtimeStartupKey(saved.configuration) || Boolean(saved.configuration.configurationError && !draft.configurationError))
   const dirty = startupDirty || common.dirty
-  const canSave = dirty && conflicts.length === 0
+  const canSave = dirty && conflicts.length === 0 && (!saved?.configuration.configurationError || startupDirty)
   state.current = { draft, busy, dirty, saved }
   const item = health?.runtimeAvailability.find((candidate) => candidate.runtimeKind === runtimeKind)
   const initialPath = item?.discovery.executablePath ?? null
@@ -103,12 +103,13 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
   const change = (next: RuntimeStartupConfiguration): void => {
     setSaveCompleted(false)
     sequence.current += 1
-    setDraft(next)
+    setDraft({ ...next, configurationError: undefined })
     setInspection(null)
     setError(null)
   }
 
   const inspect = async (next: RuntimeStartupConfiguration, deep = false): Promise<void> => {
+    if (next.configurationError) return
     const request = ++sequence.current
     setBusy(deep ? 'check' : 'inspect')
     setError(null)
@@ -132,7 +133,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
     try {
       const path = await client.selectRuntimeExecutable?.()
       if (path) {
-        const next = { ...state.current.draft, programPath: path }
+        const next = { ...state.current.draft, programPath: path, configurationError: undefined }
         change(next)
         setBusy(null)
         await inspect(next)
@@ -150,7 +151,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
     try {
       const edits = startupEdits(saved, next)
       const response = await client.request<StartupSettings | { status: 'conflict'; latest: StartupSettings; conflicts: FieldConflict[] }>('runtime.startup.save', {
-        runtimeKind, edits, commonEnvironment: common.dirty ? common.edit() : undefined
+        runtimeKind, edits, expectedRevision: saved.configuration.configurationError ? saved.revision : undefined, commonEnvironment: common.dirty ? common.edit() : undefined
       })
       if ('status' in response) {
         let merged = editableSnapshot(response.latest.configuration)
@@ -209,14 +210,14 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
     setError(null)
   }
 
-  const status = error ? null : inspection?.status ?? (!dirty && !saved?.reconnectRequired
+  const status = error || draft.configurationError ? null : inspection?.status ?? (!dirty && !saved?.reconnectRequired
     ? item?.status === 'authentication_required' ? 'authentication_required'
       : initialPath ? 'recognized' : item?.discovery.discoveryStatus === 'missing' ? 'missing' : null
     : null)
   const statusLabel = busy === 'inspect' ? uiAttribute('正在验证程序…') : busy === 'check' ? uiAttribute('正在检查状态…') : status ? uiAttribute(INSPECTION_LABELS[status]) : null
   const locked = busy !== null || saved === null || loadError !== null
   const displayedPath = draft.programPath ?? (inspection ? inspection.executablePath :
-    !startupDirty && !saved?.reconnectRequired && !error && busy !== 'inspect' && busy !== 'check' ? initialPath : null)
+    !startupDirty && !saved?.configuration.configurationError && !saved?.reconnectRequired && !error && busy !== 'inspect' && busy !== 'check' ? initialPath : null)
   const environmentIncomplete = (inspection?.searchEnvironment?.diagnosticCodes?.length ?? 0) > 0
 
   // Hidden settings categories retain their draft, leave guard and confirmation dialog.
@@ -229,11 +230,12 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
     </header>
     {busy === 'load' && <p role="status"><UiText zh={"正在读取…"} /></p>}
     {loadError && <div className="runtime-startup-read-error" role="alert"><span>{loadError}</span><button className="quiet-button" type="button" onClick={retryRead} disabled={busy !== null}><UiText zh={"重试"} /></button></div>}
+    {saved?.configuration.configurationError && <p className="runtime-startup-read-error" role="alert"><UiText zh="启动设置已损坏，请重新选择程序或恢复自动检测后保存。" /></p>}
     <form className="runtime-startup-form" noValidate onSubmit={(event) => { event.preventDefault(); void save() }}>
       <section className="runtime-startup-section">
         <div className="runtime-startup-section-heading"><label htmlFor={`${id}-path`}><UiText zh={"程序路径"} /></label>
-          <button className="quiet-button" type="button" disabled={locked || draft.programPath === null}
-            onClick={() => { const next = { ...draft, programPath: null }; change(next); void inspect(next) }}><UiText zh={"恢复自动"} /></button></div>
+          <button className="quiet-button" type="button" disabled={locked || (draft.programPath === null && !saved?.configuration.configurationError)}
+            onClick={() => { const next = { ...draft, programPath: null, configurationError: undefined }; change(next); void inspect(next) }}><UiText zh={"恢复自动"} /></button></div>
         <div className="runtime-startup-path">
           <input id={`${id}-path`} value={displayedPath ?? ''} placeholder={client.selectRuntimeExecutable ? uiAttribute("自动检测") : uiAttribute("本机程序的绝对路径")} readOnly={Boolean(client.selectRuntimeExecutable)} disabled={locked} onChange={(event) => change({ ...draft, programPath: event.target.value || null })} title={displayedPath ?? undefined} />
           {client.selectRuntimeExecutable && <button className="quiet-button" type="button" disabled={locked} onClick={() => void choose()}><UiText zh={"选择文件"} /><DialogControlIcon name="folder" /></button>}
@@ -242,7 +244,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
           <span role="status" className={`runtime-startup-result${status === 'authentication_required' || status === 'version_unverified' ? ' is-warning' : status === 'missing' || status === 'check_failed' ? ' is-error' : ''}`}>
             {statusLabel}{statusLabel && inspection?.reportedVersion && <span className="runtime-startup-version">{inspection.reportedVersion}</span>}
           </span>
-          <button className="quiet-button" type="button" disabled={locked} onClick={() => void inspect(draft, true)}><UiText zh={"检查状态"} /><DialogControlIcon name="refresh" /></button>
+          <button className="quiet-button" type="button" disabled={locked || Boolean(draft.configurationError)} onClick={() => void inspect(draft, true)}><UiText zh={"检查状态"} /><DialogControlIcon name="refresh" /></button>
         </div>
         {environmentIncomplete && <p className="runtime-startup-result is-warning" role="status"><UiText zh={"部分查找来源不可用，本次结果使用已读取的可用环境。"} /></p>}
       </section>

@@ -58,6 +58,7 @@ import {
   descendantsOf,
   findCompetingRovaiProcesses,
   frozenMemberRuntimeDifferences,
+  selectFrozenRuntimeInstallations,
   processTable,
   qualificationRuntimePrivateDiagnostic,
   startQualificationCore,
@@ -299,7 +300,7 @@ async function runTrial(options, registerCleanup) {
     })
     await core.request('health.check', {}, 120_000)
     const trialTeam = regression?.team ?? (options.treatment === 'solo' ? [FROZEN_TEAM[0]] : FROZEN_TEAM)
-    const configured = await configureFrozenRuntimes(core.request, trialTeam)
+    const configured = await configureFrozenRuntimes(core.request, trialTeam, { allowUnverified: Boolean(regression) })
     environmentManifest = await collectEnvironmentManifest({
       core,
       options,
@@ -1109,23 +1110,14 @@ async function runTrial(options, registerCleanup) {
   return { resultBundle: finalResultBundle, redactedSummary, evidenceDirectory, ...publication }
 }
 
-async function configureFrozenRuntimes(request, trialTeam = FROZEN_TEAM) {
+async function configureFrozenRuntimes(request, trialTeam = FROZEN_TEAM, { allowUnverified = false } = {}) {
   const kinds = [...new Set(trialTeam.map(member => member.adapterKind))]
   for (const adapterKind of kinds) {
     await request('runtime.product.check', { runtimeKind: adapterKind }, 120_000)
   }
   const installations = await waitFor(async () => {
     const values = await request('runtime.installations.list')
-    const selected = Object.fromEntries(kinds.map((kind) => [
-      kind,
-      values.find((candidate) => candidate.adapterKind === kind
-        && candidate.installationClass === 'managed_default'
-        && candidate.authScope === 'default')
-    ]))
-    return Object.values(selected).every((value) => value?.snapshot?.probeStatus === 'ready')
-      && (!selected['antigravity-app'] || selected['antigravity-app'].snapshot.capabilities.includes('builtin_cli.transport.v24'))
-      ? selected
-      : null
+    return selectFrozenRuntimeInstallations(values, kinds, { allowUnverified })
   }, 'frozen Runtime installations', 180_000)
   for (const member of trialTeam) {
     const before = await request('members.get', { agentId: member.agentId })
@@ -1190,14 +1182,14 @@ async function collectEnvironmentManifest({
       toolchain.push({ name: item.name, outputDigest: sha256(run.stdout), version: run.stdout.trim().split('\n')[0] })
     }
   }
-  const runtimeInstallations = Object.values(configured.installations).map((installation) => ({
+  const runtimeInstallations = await Promise.all(Object.values(configured.installations).map(async (installation) => ({
     adapterKind: installation.adapterKind,
     executablePath: installation.executablePath,
-    reportedVersion: installation.snapshot.reportedVersion,
-    executableFingerprint: installation.snapshot.executableFingerprint,
-    probeStatus: installation.snapshot.probeStatus,
-    capabilitiesDigest: digestJson(installation.snapshot.capabilities)
-  }))
+    reportedVersion: installation.snapshot?.reportedVersion ?? null,
+    executableFingerprint: await digestFile(installation.executablePath),
+    probeStatus: installation.snapshot?.probeStatus ?? 'installed_unverified',
+    capabilitiesDigest: installation.snapshot ? digestJson(installation.snapshot.capabilities) : null
+  })))
   const manifest = {
     schemaVersion: 1,
     runnerVersion: QUALIFICATION_RUNNER_VERSION,

@@ -23,6 +23,7 @@ use crate::{
     collaboration::append_domain_event,
     command::{ActorRef, canonical_json_digest},
     db::Database,
+    git::{persisted_workspace_path_matches_canonical, workspace_paths_overlap},
     message_delivery::settle_attachment_projection_failure,
 };
 
@@ -37,28 +38,15 @@ pub const MAX_CONCURRENT_STAGING_OPERATIONS: i64 = 8;
 const ROOT_MARKER: &str = ".runtime-camp-files-root.json";
 const ROOT_LOCK: &str = ".runtime-camp-files.lock";
 const MANAGED_V2_DIRECTORY: &str = ".managed-v2";
-const LEGACY_ROOT_MARKER_SCHEMA_VERSION: i64 = 1;
-const ROOT_MARKER_SCHEMA_VERSION: i64 = 2;
 const INSTANCE_KEY_DOMAIN: &[u8] = b"rovai-runtime-camp-files-instance-v1\0";
 const LEGACY_VIEW_NOT_REQUIRED_REVISION: i64 = -1;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RuntimeFilesRootMarker {
-    schema_version: i64,
-    instance_key: String,
-    data_dir_identity_digest: String,
-    platform: String,
-    root_identity_digest: String,
-    created_at: String,
-}
 
 #[derive(Debug)]
 pub struct ThreadAttachmentViewStore {
     root: PathBuf,
     root_identity_digest: String,
     instance_key: String,
-    lock_file: File,
+    lock_file: std::sync::Mutex<Option<File>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -355,7 +343,7 @@ impl ThreadAttachmentViewStore {
             root,
             root_identity_digest,
             instance_key: "test-instance".to_string(),
-            lock_file,
+            lock_file: std::sync::Mutex::new(Some(lock_file)),
         })
     }
 
@@ -381,90 +369,82 @@ impl ThreadAttachmentViewStore {
     pub fn admit(root: &Path, data_dir: &Path, other_managed_roots: &[PathBuf]) -> Result<Self> {
         validate_normalized_absolute(root, "runtime_camp_files_root_invalid")?;
         validate_normalized_absolute(data_dir, "runtime_camp_files_root_invalid")?;
-        reject_existing_symlink_components(root)?;
-        reject_existing_symlink_components(data_dir)?;
-
         let canonical_data_dir = fs::canonicalize(data_dir)
             .context("runtime_camp_files_root_invalid: data_dir is unavailable")?;
         let instance_key = instance_key(&canonical_data_dir)?;
-        // Only the exact instance-bound standalone layout may live below the
-        // authority directory. Arbitrary nested roots remain rejected.
         let server_root = crate::storage_layout::server_runtime_root(&canonical_data_dir)?;
-        let standalone =
-            normalize_existing_or_lexical(root)? == normalize_existing_or_lexical(&server_root)?;
+        let standalone = persisted_workspace_path_matches_canonical(root, &server_root);
         #[cfg(target_os = "macos")]
         if !standalone {
-            let home = dirs::home_dir()
-                .context("runtime_camp_files_root_invalid: current user Home is unavailable")?;
-            let canonical_home = fs::canonicalize(home)
-                .context("runtime_camp_files_root_invalid: current user Home is unavailable")?;
-            let expected = canonical_home
+            let home = dirs::home_dir().context("current user Home is unavailable")?;
+            let expected = fs::canonicalize(home)?
                 .join(".rovai")
                 .join("instances")
                 .join(&instance_key)
                 .join("runtime-files");
-            if normalize_existing_or_lexical(root)? != normalize_existing_or_lexical(&expected)? {
-                anyhow::bail!(
-                    "runtime_camp_files_root_invalid: macOS root does not match the current Home and data-dir instance key"
-                );
-            }
-            reject_overlap(root, &canonical_data_dir)?;
+            anyhow::ensure!(
+                persisted_workspace_path_matches_canonical(root, &expected),
+                "runtime_camp_files_root_invalid: wrong instance path"
+            );
         }
         #[cfg(windows)]
         if !standalone {
-            let expected = canonical_data_dir.join("runtime-files");
-            if normalize_existing_or_lexical(root)? != normalize_existing_or_lexical(&expected)? {
-                anyhow::bail!(
-                    "runtime_camp_files_root_invalid: Windows root must be data_dir\\runtime-files"
-                );
-            }
+            anyhow::ensure!(
+                persisted_workspace_path_matches_canonical(
+                    root,
+                    &canonical_data_dir.join("runtime-files"),
+                ),
+                "runtime_camp_files_root_invalid: wrong instance path"
+            );
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         if !standalone {
-            reject_overlap(root, &canonical_data_dir)?;
+            anyhow::ensure!(
+                !workspace_paths_overlap(root, &canonical_data_dir),
+                "runtime_camp_files_root_invalid: managed roots overlap"
+            );
         }
         for managed_root in other_managed_roots {
             validate_normalized_absolute(managed_root, "runtime_camp_files_root_invalid")?;
-            reject_existing_symlink_components(managed_root)?;
-            reject_overlap(root, managed_root)?;
+            anyhow::ensure!(
+                !workspace_paths_overlap(root, managed_root),
+                "runtime_camp_files_root_invalid: managed roots overlap"
+            );
         }
-
-        reject_runtime_root_marker_ancestor(root)?;
-
-        let canonical_root = prepare_runtime_directory(root)
-            .context("runtime_camp_files_root_invalid: cannot create or admit root")?;
-        reject_existing_symlink_components(root)?;
-        set_directory_mode(&canonical_root, 0o700)?;
-        validate_current_user_local_root(&canonical_root)?;
-        reject_nested_runtime_root_markers(&canonical_root)?;
-        #[cfg(not(windows))]
-        if !standalone {
-            reject_overlap(&canonical_root, &canonical_data_dir)?;
-        }
-
-        let lock_path = canonical_root.join(ROOT_LOCK);
-        let mut lock_file = private_open_read_write(&lock_path)?;
-        if !try_lock_exclusive(&lock_file)? {
-            anyhow::bail!("runtime_camp_files_root_locked: another Core owns this root");
-        }
-
-        let data_dir_identity_digest = directory_identity_digest(&canonical_data_dir)?;
-        let root_identity_digest = directory_identity_digest(&canonical_root)?;
-        admit_runtime_root_marker(
-            &canonical_root,
-            &instance_key,
-            &data_dir_identity_digest,
-            &root_identity_digest,
-        )?;
-        write_lock_owner(&mut lock_file)?;
-        ensure_private_directory(&canonical_root.join(".staging"))?;
-        ensure_private_directory(&canonical_root.join("camps"))?;
+        // Historical markers and descendant files are not startup prerequisites.
+        // Do not create, traverse, repair permissions or lock this optional tree.
         Ok(Self {
-            root: canonical_root,
-            root_identity_digest,
+            root: root.to_path_buf(),
+            root_identity_digest: runtime_root_path_digest(root),
             instance_key,
-            lock_file,
+            lock_file: std::sync::Mutex::new(None),
         })
+    }
+
+    fn prepare_storage(&self) -> Result<()> {
+        // Legacy view writes acquire their existing storage lease lazily. The
+        // data-dir instance lock remains Core's startup/concurrency boundary.
+        reject_existing_symlink_components(&self.root)?;
+        prepare_runtime_directory(&self.root)?;
+        validate_current_user_local_root(&self.root)?;
+        let mut lease = self
+            .lock_file
+            .lock()
+            .map_err(|_| anyhow::anyhow!("attachment storage lock unavailable"))?;
+        if lease.is_none() {
+            let mut file = private_open_read_write(&self.root.join(ROOT_LOCK))?;
+            anyhow::ensure!(try_lock_exclusive(&file)?, "runtime_camp_files_root_locked");
+            write_lock_owner(&mut file)?;
+            *lease = Some(file);
+        }
+        ensure_private_directory(&self.root.join(".staging"))?;
+        let camps_root = self.root.join("camps");
+        if camps_root.try_exists()? {
+            validate_managed_directory(&camps_root, None)?;
+        } else {
+            ensure_private_directory(&camps_root)?;
+        }
+        Ok(())
     }
 
     pub fn root(&self) -> &Path {
@@ -484,7 +464,7 @@ impl ThreadAttachmentViewStore {
         database: &mut Database,
         attachment_store: &ThreadAttachmentStore,
     ) -> Result<()> {
-        self.recover_incomplete_operations(database, attachment_store)?;
+        self.recover_incomplete_operations(database)?;
         let camp_ids = {
             let mut statement = database
                 .connection()
@@ -1581,17 +1561,11 @@ impl ThreadAttachmentViewStore {
 
     pub fn camp_root_runtime_authorization(
         &self,
-        database: &Database,
+        _database: &Database,
         camp_id: &str,
         workspace: Option<&Path>,
     ) -> Result<ThreadAttachmentRuntimeAuthorization> {
         ThreadId::parse(camp_id)?;
-        if database.runtime_camp_files_root_identity_digest() != self.root_identity_digest {
-            anyhow::bail!("runtime_camp_files_root_invalid: admitted root identity changed");
-        }
-        if directory_identity_digest(&self.root)? != self.root_identity_digest {
-            anyhow::bail!("runtime_camp_files_root_invalid: current root identity changed");
-        }
         if let Some(workspace) = workspace {
             let canonical_workspace = fs::canonicalize(workspace)
                 .context("AgentRun workspace cannot be canonicalized")?;
@@ -1711,12 +1685,10 @@ impl ThreadAttachmentViewStore {
         let previous_view_state = if let Some((
             state,
             attachment_relative_path,
-            root_identity_digest,
+            _root_identity_digest,
         )) = view
         {
-            if root_identity_digest != self.root_identity_digest
-                || attachment_relative_path != camp_attachment_root_relative(camp_id)
-            {
+            if attachment_relative_path != camp_attachment_root_relative(camp_id) {
                 anyhow::bail!(
                     "camp_attachment_view_integrity_failed: Thread cleanup root identity is invalid"
                 );
@@ -2774,11 +2746,7 @@ impl ThreadAttachmentViewStore {
         }
     }
 
-    fn recover_incomplete_operations(
-        &self,
-        database: &mut Database,
-        _attachment_store: &ThreadAttachmentStore,
-    ) -> Result<()> {
+    fn recover_incomplete_operations(&self, database: &mut Database) -> Result<()> {
         // Builds after Migration 102 could cancel a cleanup without settling
         // its writer intent. Repair only that terminal legacy shape before the
         // unresolved-operation scan so affected Camps can admit new Runs.
@@ -3219,6 +3187,7 @@ impl ThreadAttachmentViewStore {
     }
 
     fn prepare_camp_directories(&self, camp_id: &str) -> Result<PathBuf> {
+        self.prepare_storage()?;
         let camps_root = self.root.join("camps");
         set_directory_mode(&camps_root, 0o700)?;
         let camp_root = self.camp_root(camp_id)?;
@@ -3241,6 +3210,7 @@ impl ThreadAttachmentViewStore {
 
     fn staging_operation_root(&self, operation_id: &str) -> Result<PathBuf> {
         validate_operation_id(operation_id)?;
+        self.prepare_storage()?;
         Ok(self.root.join(".staging").join(operation_id))
     }
 }
@@ -3359,7 +3329,11 @@ fn publication_operation_has_business_commit(
 
 impl Drop for ThreadAttachmentViewStore {
     fn drop(&mut self) {
-        unlock(&self.lock_file);
+        if let Ok(lease) = self.lock_file.get_mut()
+            && let Some(file) = lease.as_ref()
+        {
+            unlock(file);
+        }
     }
 }
 
@@ -3778,7 +3752,7 @@ pub fn resolve_published_attachment_path(
             FROM camp_attachment_view_entry AS entry
             JOIN camp_attachment_view AS view ON view.camp_id = entry.camp_id
             WHERE entry.camp_id = ?1 AND entry.attachment_id = ?2
-              AND view.state = 'ready' AND view.root_identity_digest = rovai_runtime_camp_files_root_identity_digest()
+              AND view.state = 'ready'
               AND EXISTS(
                   SELECT 1 FROM message_attachment AS attachment
                   WHERE attachment.camp_id = entry.camp_id
@@ -4065,14 +4039,19 @@ pub fn instance_key(canonical_user_data_path: &Path) -> Result<String> {
 }
 
 pub(crate) fn runtime_root_identity_digest_for_database(root: &Path) -> Result<String> {
-    if root.exists() {
-        directory_identity_digest(root)
-    } else {
-        let mut hasher = Sha256::new();
-        hasher.update(b"rovai-runtime-camp-files-unmaterialized-root-v1\0");
-        hasher.update(root.to_string_lossy().as_bytes());
-        Ok(format!("sha256:{:x}", hasher.finalize()))
+    // A receipt may use an available directory identity, but an unavailable
+    // optional tree cannot prevent opening the healthy authority database.
+    if let Ok(identity) = directory_identity_digest(root) {
+        return Ok(identity);
     }
+    Ok(runtime_root_path_digest(root))
+}
+
+fn runtime_root_path_digest(root: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"rovai-runtime-camp-files-unmaterialized-root-v1\0");
+    hasher.update(root.to_string_lossy().as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
 }
 
 pub(crate) fn preflight_empty_runtime_root_for_v99(root: &Path) -> Result<()> {
@@ -4589,7 +4568,7 @@ fn prepare_ready_camp_view_verification(
 
 fn load_ready_camp_view_receipt(
     connection: &Connection,
-    root_identity_digest: &str,
+    _root_identity_digest: &str,
     camp_id: &str,
 ) -> Result<ReadyThreadViewReceipt> {
     let view = connection
@@ -4626,7 +4605,6 @@ fn load_ready_camp_view_receipt(
     if view.0 != "ready"
         || view.1 < 1
         || view.2 != camp_attachment_root_relative(camp_id)
-        || view.3 != root_identity_digest
         || view.4 < 0
         || view.5 < 0
         || view.7 < 0
@@ -4818,9 +4796,7 @@ fn verify_resolution_ledger(
 fn inspect_ready_camp_view(verification: &ThreadAttachmentViewVerification) -> Result<()> {
     #[cfg(all(test, feature = "extended-tests"))]
     pause_view_verification_for_test(&verification.camp_id);
-    if directory_identity_digest(&verification.root)? != verification.receipt.root_identity_digest {
-        anyhow::bail!("Runtime Files Root identity changed");
-    }
+    reject_existing_symlink_components(&verification.root)?;
 
     let camps_root = verification.root.join("camps");
     let camp_root = camps_root.join(&verification.camp_id);
@@ -5444,170 +5420,6 @@ pub(crate) fn reject_existing_symlink_components(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn reject_runtime_root_marker_ancestor(root: &Path) -> Result<()> {
-    let mut ancestor = root.parent();
-    while let Some(path) = ancestor {
-        let marker = path.join(ROOT_MARKER);
-        if let Ok(metadata) = fs::symlink_metadata(&marker) {
-            if metadata.file_type().is_symlink() || !metadata.is_file() {
-                anyhow::bail!(
-                    "runtime_camp_files_root_invalid: ancestor Runtime Files marker is unsafe"
-                );
-            }
-            if metadata.len() <= 16 * 1024
-                && serde_json::from_slice::<RuntimeFilesRootMarker>(&fs::read(&marker)?).is_ok()
-            {
-                anyhow::bail!(
-                    "runtime_camp_files_root_invalid: root is nested below another Runtime Files Root"
-                );
-            }
-        }
-        ancestor = path.parent();
-    }
-    Ok(())
-}
-
-fn admit_runtime_root_marker(
-    canonical_root: &Path,
-    instance_key: &str,
-    data_dir_identity_digest: &str,
-    root_identity_digest: &str,
-) -> Result<()> {
-    let marker_path = canonical_root.join(ROOT_MARKER);
-    let expected_platform = std::env::consts::OS.to_string();
-    if marker_path.exists() {
-        let metadata = fs::symlink_metadata(&marker_path)?;
-        if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 16 * 1024 {
-            anyhow::bail!("runtime_camp_files_root_invalid: root marker is unsafe");
-        }
-        let marker: RuntimeFilesRootMarker = serde_json::from_slice(&fs::read(&marker_path)?)
-            .context("runtime_camp_files_root_invalid: root marker is invalid")?;
-        if marker.instance_key != instance_key
-            || marker.platform != expected_platform
-            || !matches!(
-                marker.schema_version,
-                LEGACY_ROOT_MARKER_SCHEMA_VERSION | ROOT_MARKER_SCHEMA_VERSION
-            )
-        {
-            anyhow::bail!("runtime_camp_files_root_invalid: root marker identity mismatch");
-        }
-        if marker.schema_version == ROOT_MARKER_SCHEMA_VERSION {
-            if marker.data_dir_identity_digest != data_dir_identity_digest
-                || marker.root_identity_digest != root_identity_digest
-            {
-                anyhow::bail!("runtime_camp_files_root_invalid: root marker identity mismatch");
-            }
-            return Ok(());
-        }
-
-        // Schema 1 persisted macOS `st_dev`, whose APFS mount assignment may
-        // change across reboot. `ThreadAttachmentViewStore::admit` reaches this
-        // migration only after the deterministic instance path, current-user
-        // ownership, local filesystem, no-symlink tree, and exclusive root
-        // lock have all been admitted. The View is derived and is fully
-        // reconciled against SQLite/Authority after Database open.
-        #[cfg(not(target_os = "macos"))]
-        if marker.data_dir_identity_digest != data_dir_identity_digest
-            || marker.root_identity_digest != root_identity_digest
-        {
-            anyhow::bail!("runtime_camp_files_root_invalid: root marker identity mismatch");
-        }
-        let migrated = RuntimeFilesRootMarker {
-            schema_version: ROOT_MARKER_SCHEMA_VERSION,
-            instance_key: marker.instance_key,
-            data_dir_identity_digest: data_dir_identity_digest.to_string(),
-            platform: marker.platform,
-            root_identity_digest: root_identity_digest.to_string(),
-            created_at: marker.created_at,
-        };
-        #[cfg(windows)]
-        crate::platform::private_storage::atomic_write_bytes(
-            &marker_path,
-            &serde_json::to_vec(&migrated)?,
-        )?;
-        #[cfg(not(windows))]
-        crate::platform::private_storage::atomic_write_private_json(&marker_path, &migrated)?;
-        sync_directory(canonical_root)?;
-        return Ok(());
-    }
-
-    let unknown = fs::read_dir(canonical_root)?
-        .collect::<std::io::Result<Vec<_>>>()?
-        .into_iter()
-        .filter(|entry| entry.file_name() != ROOT_LOCK)
-        .collect::<Vec<_>>();
-    if !unknown.is_empty() {
-        anyhow::bail!("runtime_camp_files_root_invalid: unmarked root is not empty");
-    }
-    let marker = RuntimeFilesRootMarker {
-        schema_version: ROOT_MARKER_SCHEMA_VERSION,
-        instance_key: instance_key.to_string(),
-        data_dir_identity_digest: data_dir_identity_digest.to_string(),
-        platform: expected_platform,
-        root_identity_digest: root_identity_digest.to_string(),
-        created_at: chrono::Utc::now().to_rfc3339(),
-    };
-    write_new_private_json(&marker_path, &marker)
-}
-
-fn reject_nested_runtime_root_markers(root: &Path) -> Result<()> {
-    fn walk(root: &Path, directory: &Path) -> Result<()> {
-        let metadata = fs::symlink_metadata(directory)?;
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            anyhow::bail!("runtime_camp_files_root_invalid: managed root tree is unsafe");
-        }
-        #[cfg(unix)]
-        let original_mode = {
-            use std::os::unix::fs::PermissionsExt;
-            metadata.permissions().mode() & 0o777
-        };
-        #[cfg(unix)]
-        if original_mode & 0o500 != 0o500 {
-            set_directory_mode(directory, original_mode | 0o500)?;
-        }
-        let inspection = (|| -> Result<()> {
-            for entry in fs::read_dir(directory)?.collect::<std::io::Result<Vec<_>>>()? {
-                let path = entry.path();
-                let metadata = fs::symlink_metadata(&path)?;
-                if metadata.file_type().is_symlink() {
-                    anyhow::bail!(
-                        "runtime_camp_files_root_invalid: managed root contains a symlink"
-                    );
-                }
-                if path != root.join(ROOT_MARKER)
-                    && entry.file_name() == ROOT_MARKER
-                    && metadata.is_file()
-                    && metadata.len() <= 16 * 1024
-                    && serde_json::from_slice::<RuntimeFilesRootMarker>(&fs::read(&path)?).is_ok()
-                {
-                    anyhow::bail!(
-                        "runtime_camp_files_root_invalid: nested Runtime Files Root marker"
-                    );
-                }
-                if metadata.is_dir() {
-                    walk(root, &path)?;
-                } else if !metadata.is_file() {
-                    anyhow::bail!(
-                        "runtime_camp_files_root_invalid: managed root contains an unsupported node"
-                    );
-                }
-            }
-            Ok(())
-        })();
-        #[cfg(unix)]
-        {
-            let restore = if original_mode & 0o500 != 0o500 {
-                set_directory_mode(directory, original_mode)
-            } else {
-                Ok(())
-            };
-            restore?;
-        }
-        inspection
-    }
-    walk(root, root)
-}
-
 fn validate_current_user_local_root(_root: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -6078,14 +5890,6 @@ fn private_open_read_write(path: &Path) -> Result<File> {
     {
         crate::platform::private_storage::open_private_read_write_file(path)
     }
-}
-
-fn write_new_private_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    let mut file = crate::platform::private_storage::create_data_new_file(path)?;
-    serde_json::to_writer(&mut file, value)?;
-    file.write_all(b"\n")?;
-    file.sync_all()?;
-    sync_directory(path.parent().context("marker has no parent")?)
 }
 
 fn write_lock_owner(file: &mut File) -> Result<()> {
@@ -6779,37 +6583,6 @@ mod tests {
             persistent_directory_identity_digest("sha256:path", &after).unwrap(),
             persistent_directory_identity_digest("sha256:path", &replaced_volume).unwrap()
         );
-
-        let fixture = std::env::temp_dir().join(format!(
-            "rovai-runtime-root-device-drift-test-{}",
-            Uuid::new_v4()
-        ));
-        fs::create_dir(&fixture).unwrap();
-        let marker = RuntimeFilesRootMarker {
-            schema_version: 1,
-            instance_key: "v1-rebooted-instance".to_string(),
-            data_dir_identity_digest: legacy_before.clone(),
-            platform: std::env::consts::OS.to_string(),
-            root_identity_digest: legacy_before,
-            created_at: "2026-08-24T00:00:00Z".to_string(),
-        };
-        write_new_private_json(&fixture.join(ROOT_MARKER), &marker).unwrap();
-
-        admit_runtime_root_marker(
-            &fixture,
-            "v1-rebooted-instance",
-            "sha256:stable-data-dir",
-            "sha256:stable-root",
-        )
-        .unwrap();
-        let migrated: RuntimeFilesRootMarker =
-            serde_json::from_slice(&fs::read(fixture.join(ROOT_MARKER)).unwrap()).unwrap();
-        assert_eq!(migrated.schema_version, ROOT_MARKER_SCHEMA_VERSION);
-        assert_eq!(migrated.data_dir_identity_digest, "sha256:stable-data-dir");
-        assert_eq!(migrated.root_identity_digest, "sha256:stable-root");
-        assert_eq!(migrated.created_at, marker.created_at);
-
-        fs::remove_dir_all(fixture).unwrap();
     }
 
     #[test]
@@ -6819,11 +6592,8 @@ mod tests {
         assert!(validate_root_relative_path(Path::new("/escape")).is_err());
     }
 
-    #[cfg(unix)]
     #[test]
-    fn runtime_root_admission_rejects_aliases_overlap_and_unowned_markers() {
-        use std::os::unix::fs::symlink;
-
+    fn runtime_root_admission_preserves_historical_entries_and_scopes_target_checks() {
         let fixture = std::env::temp_dir().join(format!(
             "rovai-runtime-root-admission-test-{}",
             Uuid::new_v4()
@@ -6831,68 +6601,66 @@ mod tests {
         fs::create_dir_all(&fixture).unwrap();
 
         let symlink_target = fixture.join("symlink-target");
-        let symlink_root = fixture.join("symlink-root");
         fs::create_dir(&symlink_target).unwrap();
-        symlink(&symlink_target, &symlink_root).unwrap();
-        assert!(reject_existing_symlink_components(&symlink_root).is_err());
+        #[cfg(unix)]
+        {
+            let symlink_root = fixture.join("symlink-root");
+            std::os::unix::fs::symlink(&symlink_target, &symlink_root).unwrap();
+            assert!(reject_existing_symlink_components(&symlink_root).is_err());
+        }
 
         let overlap_root = fixture.join("overlap");
         let overlap_child = overlap_root.join("child");
         fs::create_dir_all(&overlap_child).unwrap();
         assert!(reject_overlap(&overlap_root, &overlap_child).is_err());
 
-        let unmarked_root = fixture.join("unmarked");
-        fs::create_dir(&unmarked_root).unwrap();
-        fs::write(unmarked_root.join("unknown"), b"do not adopt").unwrap();
-        let unmarked_identity = directory_identity_digest(&unmarked_root).unwrap();
-        let error =
-            admit_runtime_root_marker(&unmarked_root, "v1-test", "sha256:data", &unmarked_identity)
-                .unwrap_err();
-        assert!(error.to_string().contains("unmarked root is not empty"));
+        let data_dir = fs::canonicalize(&fixture).unwrap();
+        let root = crate::storage_layout::server_runtime_root(&data_dir).unwrap();
+        fs::create_dir_all(root.join("unreadable")).unwrap();
+        let marker = root.join(ROOT_MARKER);
+        fs::write(&marker, b"old or damaged marker").unwrap();
+        fs::write(root.join("unknown"), b"preserve original").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&symlink_target, root.join("old-link")).unwrap();
+        let store = ThreadAttachmentViewStore::admit(&root, &data_dir, &[]).unwrap();
+        assert_eq!(fs::read(&marker).unwrap(), b"old or damaged marker");
+        assert_eq!(
+            fs::read(root.join("unknown")).unwrap(),
+            b"preserve original"
+        );
+        assert!(!root.join(ROOT_LOCK).exists());
+        assert!(store.lock_file.lock().unwrap().is_none());
+        drop(store);
 
-        let marked_root = fixture.join("marked");
-        fs::create_dir(&marked_root).unwrap();
-        let marked_identity = directory_identity_digest(&marked_root).unwrap();
-        admit_runtime_root_marker(&marked_root, "v1-owner", "sha256:data", &marked_identity)
-            .unwrap();
-        admit_runtime_root_marker(&marked_root, "v1-owner", "sha256:data", &marked_identity)
-            .unwrap();
-        let error = admit_runtime_root_marker(
-            &marked_root,
-            "v1-owner",
-            "sha256:data",
-            "sha256:replacement-root",
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("root marker identity mismatch"));
-        let error = admit_runtime_root_marker(
-            &marked_root,
-            "v1-different-owner",
-            "sha256:data",
-            &marked_identity,
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("root marker identity mismatch"));
+        #[cfg(windows)]
+        {
+            let ordinary = |path: &Path| {
+                let value = path.to_str().unwrap();
+                PathBuf::from(value.strip_prefix(r"\\?\").unwrap_or(value))
+            };
+            ThreadAttachmentViewStore::admit(&ordinary(&root), &data_dir, &[]).unwrap();
+            assert!(
+                ThreadAttachmentViewStore::admit(
+                    &ordinary(&root),
+                    &data_dir,
+                    &[root.join("overlapping-skill-root")],
+                )
+                .is_err()
+            );
+            let desktop_root = data_dir.join("runtime-files");
+            ThreadAttachmentViewStore::admit(&ordinary(&desktop_root), &data_dir, &[]).unwrap();
+            assert!(!desktop_root.exists(), "admission must not create the tree");
 
-        let ancestor_root = fixture.join("ancestor");
-        fs::create_dir(&ancestor_root).unwrap();
-        let ancestor_identity = directory_identity_digest(&ancestor_root).unwrap();
-        admit_runtime_root_marker(
-            &ancestor_root,
-            "v1-ancestor",
-            "sha256:data",
-            &ancestor_identity,
-        )
-        .unwrap();
-        assert!(reject_runtime_root_marker_ancestor(&ancestor_root.join("nested")).is_err());
-
-        let outer_root = fixture.join("outer");
-        let nested_root = outer_root.join("nested");
-        fs::create_dir_all(&nested_root).unwrap();
-        let nested_identity = directory_identity_digest(&nested_root).unwrap();
-        admit_runtime_root_marker(&nested_root, "v1-nested", "sha256:data", &nested_identity)
-            .unwrap();
-        assert!(reject_nested_runtime_root_markers(&outer_root).is_err());
+            let long_data = data_dir
+                .join("long-directory".repeat(10))
+                .join("another-directory".repeat(8));
+            fs::create_dir_all(&long_data).unwrap();
+            let long_data = fs::canonicalize(long_data).unwrap();
+            let long_root = long_data.join("runtime-files");
+            assert!(ordinary(&long_root).as_os_str().len() > 260);
+            ThreadAttachmentViewStore::admit(&ordinary(&long_root), &long_data, &[]).unwrap();
+            assert!(!long_root.exists());
+        }
 
         fs::remove_dir_all(&fixture).unwrap();
     }
@@ -8378,6 +8146,11 @@ mod tests {
             )
             .unwrap();
 
+        // A historical physical identity alone is no reason to rebuild a good
+        // view. An actual failed derived-view state still supports on-demand repair.
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+        view.mark_legacy_view_broken_for_test(&mut database, &camp_id)
+            .unwrap();
         view.reconcile(&mut database, &ThreadAttachmentStore::new(&data_dir))
             .unwrap();
 

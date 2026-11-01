@@ -210,5 +210,5 @@ Shell 内部演进的产品偏好与 Renderer 交互。Pending Camp 激活由 AD
 - [v0.49 实施与验收计划](implementation-plan.md)
 - [ADR-0144：自包含双人追问官方 Skill](decisions.md#adr-0144)
 - [ADR-0145：Core-owned Pending Camp Draft](decisions.md#adr-0145)
-- [Arctic Dawn V3 设置与窗口合同](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Arctic Dawn V3 设置与窗口合同](../../ui/surfaces/settings-workspace.md)
 - [Rovai-ai 领域词汇表](../../../CONTEXT.md)

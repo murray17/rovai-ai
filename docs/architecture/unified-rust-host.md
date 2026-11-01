@@ -12,8 +12,8 @@ last_updated: 2026-10-22
 原生 Server 数据根、初始 CLI 兼容、初始化准入和停止适配由[Host Lifecycle v2](../contracts/host-lifecycle-v2.md)拥有；
 当前受控网络入口由[Host Web v9](../contracts/host-web-v9.md)拥有；未变更的详细边界继续由其继承的 v2 章节定义。
 
-当前已实现父进程匿名管道与进程内请求共用一个 Host/Core、共享生产 Camp 页面、客户端草稿、source 上传及
-逐项准入的 Camp 写入。以下 UDS/Named Pipe 身份握手与完整公共 DTO 生成仍是后续目标，
+当前已实现父进程匿名管道与进程内请求共用一个 Host/Core、共享生产 Thread 页面、客户端草稿、source 上传及
+逐项准入的 Thread 写入。以下 UDS/Named Pipe 身份握手与完整公共 DTO 生成仍是后续目标，
 不由现有管道或一个真实执行闭环推断阶段 1–3 完成。
 
 ## 组件和唯一权威
@@ -91,7 +91,7 @@ HTTPS/VPN。普通地址分享不含凭据；显式扫码登录允许 URL fragme
 
 ## 草稿与用户文件
 
-每个客户端编辑身份有后端验证的归属，作用域含 Host/Owner/client/Camp，私聊再含 Conversation。
+每个客户端编辑身份有后端验证的归属，作用域含 Host/Owner/client/Thread，私聊再含 Conversation。
 Public Composer 内容由 [Draft v16](../contracts/camp-composer-draft-v16.md) 的客户端存储拥有，
 不恢复 Core Draft revision 或消费；私聊保留自己的 revision、原子消费与队列规则。
 客户端提交 ID 不是授权；命令幂等与 Core FIFO 不变，不做跨端同步、实时合并或多人共编。

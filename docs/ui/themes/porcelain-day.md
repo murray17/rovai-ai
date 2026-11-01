@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-10-25
+last_updated: 2026-10-30
 ---
 
 # Porcelain Day
@@ -28,7 +28,7 @@ Light. `color-scheme: light`.
 `canvas → rail/surface → raised/input` 形成主要层级。会话、Inspector 与 Quick Chat 主区使用
 独立语义 surface token，以便结构清楚而不依赖阴影。普通列表与消息保持平面。
 
-控件、品牌、状态、身份和 Memory 的色彩职责继承 [DESIGN.md](../../../DESIGN.md#colors)。
+色彩职责、控件边界与共享交互继承 [DESIGN.md](../../../DESIGN.md)。
 
 ## Complete semantic token assignments
 
@@ -124,8 +124,7 @@ Light. `color-scheme: light`.
 
 ### Conversation controls
 
-These local tokens cover sidebar selection, Composer and the execution/task/member controls.
-Rail and selected surfaces stay unchanged; status, identity and evidence keep their own colors.
+Action tokens serve shared controls across the App; the `conversation-` prefix does not limit their scope.
 
 | Token | Value |
 |---|---:|
@@ -143,6 +142,7 @@ Rail and selected surfaces stay unchanged; status, identity and evidence keep th
 | `--neutral-selected` | `#eeeef0` |
 | `--neutral-hover` | `#f3f3f4` |
 | `--conversation-action` | `#2b2b2c` |
+| `--conversation-action-ink` | `#2b2b2c` |
 | `--conversation-action-hover` | `#1a1a1b` |
 | `--conversation-action-contrast` | `#ffffff` |
 | `--conversation-control-line` | `#949494` |
@@ -241,8 +241,8 @@ Agent 交付文件的图形色只表达格式家族，不表达状态、身份�
 | `--dialog-field-line` | `#e2e4e7` |
 | `--dialog-field-line-hover` | `#bcc3ca` |
 
-Labels use regular weight. Fields retain a 1px border, input surface and visible focus outline;
-higher contrast preferences use the stronger control line and ink. Import MCP source JSON reuses
+Labels use regular weight. Fields retain a 1px border and input surface; focus follows
+[DESIGN.md](../../../DESIGN.md#components). Higher contrast preferences use the stronger control line and ink. Import MCP source JSON reuses
 `--conversation-code-block-canvas`, with no extra left margin.
 
 ### Shared aliases and geometry
@@ -265,9 +265,9 @@ higher contrast preferences use the stronger control line and ink. Import MCP so
 | `--conversation-user-message-max-width` | `690px` |
 | `--conversation-user-message-width-offset` | `36px`; viewport `<= 1080px` 时为 `18.667px`，紧凑会话列为 `16px` |
 
-## Brand, semantic, identity, and evidence color rules
+## Message and evidence rendering
 
-Inherit [DESIGN.md](../../../DESIGN.md#colors). Inline code, Shell results and fenced evidence use their
+Inline code, Shell results and fenced evidence use their
 respective code tokens. Conversation prose, process copy and Markdown files use the dedicated
 `--conversation-inline-code-canvas`, `--conversation-code-block-canvas` and `--conversation-code-line` layer;
 release notes and Tool results keep shared SafeMarkdown defaults.
@@ -280,11 +280,6 @@ Normal text must meet 4.5:1; control boundaries and non-text state indicators mu
 Focus behavior follows the [accessibility baseline](../qa/accessibility.md).
 State cannot rely on color alone. Identity colors are tested on the production surfaces where they appear.
 
-## Prohibited substitutions
-
-Do not replace Steel with status colors, collapse eight identities to one Steel mark, use `--line` as the
-sole control boundary, or add theme-specific component behavior.
-
 ## Implementation source
 
 The `:root` block in [`theme.css`](../../../packages/ui/src/theme.css) is the production
@@ -292,5 +287,4 @@ source. This document is a reviewable contract, not a second CSS source.
 
 ## Visual verification
 
-Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
-`1040×700`, `1440×920`, `2560×1440`, keyboard focus, 200% zoom and reduced motion.
+Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md).

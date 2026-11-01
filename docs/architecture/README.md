@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-10-16
+last_updated: 2026-10-31
 ---
 
 # 长期系统架构
@@ -29,9 +29,9 @@ last_updated: 2026-10-16
 | [Availability-first Runtime](availability-first-runtime.md) | Desktop bootstrap/full-core 分层、data-dir lease、SQLite 单次打开、原位事务迁移与历史切换恢复、Supervisor generation/revision 与请求 fencing |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Input Delivery、Native Turn 与 execution isolation 分离，未接受运输恢复、accepted/unknown 自动失败、cleanup 门禁与精确 Run Stop |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | 无 Gather 的当前 operation catalog、Mission 全局 read seam、完整结果运输、Core Router、Runtime Fleet、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
-| [Single Chat](single-chat.md) | 复用 Conversation/CampTurn/AgentRun 的私有会话模式、专用 Context、封闭 Built-in policy、公共 Source Refs、Conversation-local FIFO、exact-ID 结束、串行面板刷新与迟到隔离 |
+| [Single Chat](single-chat.md) | 复用 Conversation/ThreadTurn/AgentRun 的私有会话模式、专用 Context、封闭 Built-in policy、公共 Source Refs、Conversation-local FIFO、exact-ID 结束、串行面板刷新与迟到隔离 |
 | [Scheduled Automation](scheduled-automation.md) | Desktop/Core 本机计划、started/skipped(overlap) admission、普通 Delivery claim、occurrence 收口与独立渠道通知 |
-| [Thread Identity](camp-identity.md) | 唯一 `rvcamp_` CampId 的生成、持久化、Context/Tool/path 流转、clean break 与 Native Session identity seam |
+| [Thread Identity](camp-identity.md) | 唯一 ThreadId 的生成、持久化与恢复、Context/Tool/path 流转及 Native Session identity seam |
 | [动态 Thread 队员关系](dynamic-camp-membership.md) | 添加/移除、membership generation/lifetime、原子 cutover、持久 reconciliation、外部来源绑定与 Renderer 权威预览边界 |
 | [飞书渠道](feishu-channel.md) | Developer Session/队员 Provisioner、Owner-only 入站、Quick Chat/PendingCampBinding、ExternalPrincipal、多 Bot 聚合、统一 Thread admission、群 roster、响应式状态执行卡、LAN 只读执行台、永久输出/附件及 Main secret/Core Outbox 边界 |
 | [Lark 渠道](lark-channel.md) | 与飞书并列的独立 provider：参数化飞书 Host 与 Core 领域逻辑、结构等价的 `lark_*` 表族、按请求名推导 Host actor、可信域与 SDK 域分离、渠道文件交付提示及真实租户验收 gate |

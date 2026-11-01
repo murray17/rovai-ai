@@ -16,34 +16,34 @@ Navigation Preferences 拥有客户端目录清单、移除记录、项目顺序
 | Component | Responsibility |
 | --- | --- |
 | Core Navigation Read Model | 从 camp 摘要与现有业务表读取；目标行按 ID、分组按索引前缀；同一事务取得窗口与总数 |
-| Core mutation boundary | 事件序号确定后，同事务维护所属 Camp 的活动/完成摘要；提交后发带 scope 的失效提示 |
+| Core mutation boundary | 事件序号确定后，同事务维护所属 Thread 的活动/完成摘要；提交后发带 scope 的失效提示 |
 | Electron Main | 原样转发，不组装业务状态；schema 6 私有原子 JSON 保存目录、一次性完成标记与其他导航偏好 |
 | Renderer window reader + refresh coordinator | 一处合并行/组/完整范围，串行执行、trailing、退避与窗口旧响应保护 |
 | Foreground safety refresh | 保留前台约 20 秒与聚焦完整性兜底，从摘要取完整快照；隐藏时停止 |
-| Overview loader | 首次建立完整导航与其他页面基础；普通 Camp 切换不调用 Overview |
+| Overview loader | 首次建立完整导航与其他页面基础；普通 Thread 切换不调用 Overview |
 
-`navigation.snapshot`、`navigation.camps`、`navigation.groupCamps` 和 `navigation.findCamp` 是纯读取，
+`navigation.snapshot`、`navigation.threads`、`navigation.groupThreads` 和 `navigation.findThread` 是纯读取，
 进入 Core 已有的有界独立读取队列，避免被无关的顺序命令阻塞。实际 SQLite 操作仍通过同一数据库锁串行化。
-`navigation.campViewed` 会更新已读水位，继续走顺序命令队列；`camps.enter` 需要修复 Lead 时也回到该队列。
+`navigation.campViewed` 会更新已读水位，继续走顺序命令队列；`threads.enter` 需要修复 Lead 时也回到该队列。
 
 ## Post-commit invalidation flow
 
 ```text
 业务事务提交（业务事实 + camp 摘要）
-  -> navigation.invalidated { scope, campId?, groupKeys? }
+  -> navigation.invalidated { scope, threadId?, groupKeys? }
   -> 唯一协调器合并范围
   -> Core 返回目标行 / 相关组完整窗口 / 摘要完整快照
   -> Renderer 应用权威读取结果
 ```
 
 通知不携带可直接拼装的标题、marker 或排序。状态变化读行；人类消息发布、创建、删除、激活等成员/排序
-变化读组。删除在物理移除前取得原组，通知带回该组；不新增删除补齐表。普通 `camps.enter` 只读时不失效，
+变化读组。删除在物理移除前取得原组，通知带回该组；不新增删除补齐表。普通 `threads.enter` 只读时不失效，
 确需 Lead reconciliation 时才更新对应行。已读确认返回同事务权威行；无变化不写、不通知。
 
 事件与摘要依赖同一个 SQLite 事务。先提交后通知，不因提交后的文件清理失败丢掉失效提示。
 未知范围、漏通知或失去可信基础时允许恢复完整快照，但所有正常读取都禁止聚合历史事件。
-使命自己的变化使用 `missions.invalidated`，已知使命 Camp 的 Run 变化更新使命列表；普通 Camp 事件不带起
-使命读取。技能目录在用户首次使用选择器时加载，不随 Camp 切换预扫描。
+使命自己的变化使用 `missions.invalidated`，已知使命 Thread 的 Run 变化更新使命列表；普通 Thread 事件不带起
+使命读取。技能目录在用户首次使用选择器时加载，不随 Thread 切换预扫描。
 
 ## Coordinator semantics
 
@@ -55,15 +55,15 @@ Navigation Preferences 拥有客户端目录清单、移除记录、项目顺序
 普通 A → B：正式提交 B 内容，绘制后验证 B 行；有新完成内容且不越过已展示水位时确认已读并应用权威行。
 不重新读取 A/其他分组、不重排侧栏、不读使命或技能目录。后台 C 完成仍独立更新 C。
 
-## Visible Camp windows
+## Visible Thread windows
 
-### Camp ordering
+### Thread ordering
 
-Navigation 的 `lastActivityAt` / `lastActivityGlobalSequence` 只由已发布的用户 CampMessage 推进：
+Navigation 的 `lastActivityAt` / `lastActivityGlobalSequence` 只由已发布的用户 ThreadMessage 推进：
 `author_type = user` 或 `external_principal`（包括飞书、钉钉等渠道用户），通过统一公共消息 publication seam
-读取。队员消息（含 A2A）、系统消息、工具活动以及 AgentRun/CampTurn 状态均不推进排序。
-没有已发布用户消息时使用 Camp 的 `created_at` 和 sequence 0；Renderer-local 输入、未发送附件、查看和重命名
-不改变这个初始排序时间。时间降序、global sequence 降序、Camp ID 升序的确定性比较规则保持不变。
+读取。队员消息（含 A2A）、系统消息、工具活动以及 AgentRun/ThreadTurn 状态均不推进排序。
+没有已发布用户消息时使用 Thread 的 `created_at` 和 sequence 0；Renderer-local 输入、未发送附件、查看和重命名
+不改变这个初始排序时间。时间降序、global sequence 降序、Thread ID 升序的确定性比较规则保持不变。
 
 `latestCompletionGlobalSequence` 沿用 wire 名称但读取非撤回 Agent 消息的首次发布水位，`unread_completed` 表示新回复；
 loading 继续独立读取 Run 事实。Run 终态本身不产生新回复小点，查看水位保持单调；
@@ -73,7 +73,7 @@ Sidecar 已保存的 Project 顺序仍按下文的本机偏好规则保持稳定
 ### Snapshot prefixes
 
 默认每组 5 条，查看更多增加 10；Core 在 SQL 中限定目标组和 LIMIT，返回该组完整前 N 条与准确总数。
-不先加载所有 NavigationCampItem 再在内存分组截断。完整快照跨组的查询只取得目录/计数元数据。
+不先加载所有 NavigationThreadItem 再在内存分组截断。完整快照跨组的查询只取得目录/计数元数据。
 置顶会话按 ID 批量取得，不遍历分页。完整恢复同时核对窗口外的置顶项；普通切换只读目标 ID。
 
 展示窗口按未置顶会话计数。Renderer 以“展示数量 + 本机置顶会话 ID 数量”读取有界原始前缀，
@@ -96,11 +96,11 @@ Migration 177 接受经核验的 v1.72/schema 126，升级到 schema 127，新�
 | camp.navigation_activity_at | TEXT NULL，无活动回退 camp.created_at |
 | camp.navigation_completion_sequence | INTEGER NOT NULL DEFAULT 0，非负 |
 | camp_view_state | 复用，不新增已读存储 |
-| camp_navigation_window_idx | 分组表达式、活动时间 DESC、序号 DESC、ID，排除删除中的 Camp |
+| camp_navigation_window_idx | 分组表达式、活动时间 DESC、序号 DESC、ID，排除删除中的 Thread |
 | agent_run_navigation_active_idx | queued/running/waiting 的 camp_id |
 | agent_run_navigation_legacy_active_idx | camp_id 为空的活跃 Run 的 camp_turn_id |
-| camp_navigation_event_insert / sequence | 处理消息首次发布的显式序号插入和自动序号分配，只维护目标 Camp；和事件一起回滚 |
-| camp_navigation_reply_tombstone | Agent 消息撤回状态变化时重算该 Camp 的最新可见回复水位 |
+| camp_navigation_event_insert / sequence | 处理消息首次发布的显式序号插入和自动序号分配，只维护目标 Thread；和事件一起回滚 |
+| camp_navigation_reply_tombstone | Agent 消息撤回状态变化时重算该 Thread 的最新可见回复水位 |
 
 迁移事务内按消息首次 publication 规则进行一次回填；既有 camp_view_state、消息/事件字节和排序规则保留。
 新数据在写入时更新三项摘要；正常一行、一组及完整快照不访问 event_log。不引入持久化组状态、删除记录、
@@ -131,11 +131,11 @@ Desktop 在实际修改时复用 Main 串行队列、最新偏好读取和原子
 
 Main-owned `navigationPreferences.setProjectName(targetKey, name)` 接受字符串或 `null`；字符串去除首尾空白、
 合并连续空白，非空且最多 80 个 Unicode scalar；`null` 删除覆盖、恢复目录名。名称可重复，同名不同路径独立保存。
-移除项目、会话刷新或无 Camp 的空目录均不删除名称；重新选择相同目录后恢复该名称。
+移除项目、会话刷新或无 Thread 的空目录均不删除名称；重新选择相同目录后恢复该名称。
 
 Renderer 在 Core 原始 Navigation Snapshot 之外建立名称展示投影，并在加入已登记空目录后应用覆盖。
 侧栏/置顶、顶部、搜索、新建对话和定时任务项目选择共用该投影；Workspace inspection 返回的目录名称不会覆盖
-已保存的显示名称。重命名不调用 Core mutation、Workspace inspection 或 Runtime；不修改项目路径、Camp ID、
+已保存的显示名称。重命名不调用 Core mutation、Workspace inspection 或 Runtime；不修改项目路径、Thread ID、
 消息、队员、记忆、Native Session、执行状态、活动时间或排序。渠道项目目录仍由既有 Core 投影拥有，本机别名不进入
 模型上下文或渠道配置。所有导航偏好写入保持其他字段，并发布成功后的完整快照。
 
@@ -177,27 +177,27 @@ preference 失败可以报告自己的错误，但不能停止 Navigation retry�
 
 ## Acceptance
 
-- 多个 Camp 同时终态只形成一个在途刷新批次与必要的 trailing read；
+- 多个 Thread 同时终态只形成一个在途刷新批次与必要的 trailing read；
 - Migration 前后 table 名称集合完全相同；正常导航读取在禁止访问 event_log 时仍成功；
 - 普通切换的请求记录中没有全侧栏、其他组、使命列表或技能扫描；
-- 后台 Camp 终态无需打开该 Camp 或重载 Renderer 即可清除侧栏 spinner；
+- 后台 Thread 终态无需打开该 Thread 或重载 Renderer 即可清除侧栏 spinner；
 - trailing 失败 reject 当前调用者且自动按上限退避恢复，不形成热循环或 unhandled rejection；
 - App 隐藏时不做周期 Navigation Snapshot，focus 后立即收敛；
 - 即使失效事件丢失，前台 20 秒安全刷新仍能纠正；
-- 用户消息导致 Camp 移出前五条后不会恢复旧 spinner；第六条在未展示时变化，展开后立即显示最新状态；
-- 桌面和渠道用户消息推进 Camp 顺序；队员消息、A2A、终态和草稿编辑不重排，完成未读仍正常出现与清除；
+- 用户消息导致 Thread 移出前五条后不会恢复旧 spinner；第六条在未展示时变化，展开后立即显示最新状态；
+- 桌面和渠道用户消息推进 Thread 顺序；队员消息、A2A、终态和草稿编辑不重排，完成未读仍正常出现与清除；
 - 已展开窗口的状态/已读/标题按行更新；删除和排序按组整体替换；收起再展开不复用旧业务对象；
 - 多组并发展开、旧范围响应晚到、收起与展开交错、展开失败重试都保持最后确认的展示范围；
 - Overview 附属模块失败不禁用侧栏刷新；
 - Core 通知只在权威 mutation 已提交后发生。
 - schema 2 第一次进入时冻结旧显示顺序，合法升级不产生偏好损坏提示；
 - 老 Project 的消息活动不改顺序，新 Project 追加，只有本机主动移除的 Project 清理；
-- Sidecar Project 稳定顺序不改变 Project 内 Camp 最近活动、时间、marker 或未读更新。
-- 改名后刷新与重启保留，独立路径互不覆盖，保存失败可重试；目录和 Camp/Runtime 身份不变。
+- Sidecar Project 稳定顺序不改变 Project 内 Thread 最近活动、时间、marker 或未读更新。
+- 改名后刷新与重启保留，独立路径互不覆盖，保存失败可重试；目录和 Thread/Runtime 身份不变。
 
 ## References
 
 - [Core Snapshot 与 API 边界](foundational-invariants.md#core-read-side)
 - [产品与导航不变量](foundational-invariants.md#product-navigation)
-- [Camp Open Read Path](camp-open-read-path.md)
+- [Thread Open Read Path](camp-open-read-path.md)
 - [App Shell 与统一侧栏](../ui/components/app-shell-navigation.md)

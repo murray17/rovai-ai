@@ -3,7 +3,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { digestJson, sha256, writePrivateJsonExclusive, validateRelativeLocator } from './qualification-common.mjs'
-import { captureNativeCommandWitnesses } from './qualification-native-witness.mjs'
+import { captureNativeCommandWitnesses, CURRENT_WITNESS_POLICY } from './qualification-native-witness.mjs'
 import { supplementEvaluationContext } from './qualification-evaluation-context.mjs'
 import { attachRecoveredEvidenceIndex } from './qualification-recovery.mjs'
 
@@ -38,7 +38,8 @@ export async function prepareJudgeSourceSupplement({ evidenceDirectory, result, 
   }
   const capture = installation ? await captureNativeCommandWitnesses({ snapshot, workspace,
     executable: installation.executablePath, executableDigest: installation.executableFingerprint,
-    startedAt: result.startedAt, completedAt: result.completedAt, ...(deliveryProfile ? { policy: 'bound-native-command-witness-v2' } : {}) })
+    startedAt: result.startedAt, completedAt: result.completedAt,
+    ...(caseEvaluation.judgeProfile === 'generic-task-v12' ? { policy: CURRENT_WITNESS_POLICY } : deliveryProfile ? { policy: 'bound-native-command-witness-v2' } : {}) })
     : { state: 'unavailable', reason: 'native_read.adapter_not_supported', records: [], sources: [] }
   const initialFiles = []; let size = 0
   for (const path of caseEvaluation.evidenceFiles) {

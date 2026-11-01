@@ -372,8 +372,19 @@ impl DomainCommand for LinkMissionPrCommand {
 #[derive(Default)]
 pub struct MissionService {
     gateway: DomainCommandGateway,
+    active_executions: Vec<crate::planned_shutdown::ActiveExecutionKey>,
 }
 impl MissionService {
+    /// Request-local ownership snapshot, captured under the database lock.
+    pub fn with_active_executions(
+        active_executions: Vec<crate::planned_shutdown::ActiveExecutionKey>,
+    ) -> Self {
+        Self {
+            active_executions,
+            ..Self::default()
+        }
+    }
+
     pub fn link_pr(
         &self,
         database: &mut Database,
@@ -392,7 +403,7 @@ impl MissionService {
         );
         self.gateway.execute(database,envelope,|tx|{
             if !matches!(envelope.actor,ActorRef::User{..}) {return Ok(reject("mission.user_required"));}
-            if load_record(tx,&input.mission_id)?.is_none() {return Ok(reject("mission.not_found"));}
+            if load_record(tx,&input.mission_id,&self.active_executions)?.is_none() {return Ok(reject("mission.not_found"));}
             let changed=if input.remove {tx.execute("DELETE FROM mission_pr WHERE mission_id=?1 AND url=?2",params![input.mission_id,url.as_str()])?} else {
                 tx.execute("INSERT INTO mission_pr(id,mission_id,url,title,created_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(mission_id,url) DO UPDATE SET title=excluded.title WHERE title<>excluded.title",params![Uuid::new_v4().to_string(),input.mission_id,url.as_str(),input.title.trim(),chrono::Utc::now().to_rfc3339()])?
             };
@@ -407,7 +418,7 @@ impl MissionService {
     ) -> Result<CommandExecution> {
         self.gateway.execute(database,envelope,|tx| {
             if !matches!(envelope.actor,ActorRef::User{..}) { return Ok(reject("mission.user_required")); }
-            let Some(mission)=load_record(tx,&envelope.payload.mission_id)? else { return Ok(reject("mission.not_found")); };
+            let Some(mission)=load_record(tx,&envelope.payload.mission_id,&self.active_executions)? else { return Ok(reject("mission.not_found")); };
             let start_available=mission_start_available(
                 tx,
                 &mission.info.mission_id,
@@ -504,7 +515,7 @@ impl MissionService {
             .transpose()?;
         let tags = input.tags.as_deref().map(normalize_tags).transpose()?;
         self.gateway.execute(database, envelope, |tx| {
-            let Some(current) = load_record(tx, &input.mission_id)? else { return Ok(reject("mission.not_found")); };
+            let Some(current) = load_record(tx, &input.mission_id, &self.active_executions)? else { return Ok(reject("mission.not_found")); };
             if !can_edit(tx, envelope, &current)? || ((tags.is_some() || input.source_attachment_update.is_some() || content.is_some()) && !matches!(envelope.actor, ActorRef::User { .. })) {
                 return Ok(reject("mission.forbidden"));
             }
@@ -585,7 +596,7 @@ impl MissionService {
     ) -> Result<CommandExecution> {
         self.gateway.execute(database, envelope, |tx| {
             let input = &envelope.payload;
-            let Some(current) = load_record(tx, &input.mission_id)? else { return Ok(reject("mission.not_found")); };
+            let Some(current) = load_record(tx, &input.mission_id, &self.active_executions)? else { return Ok(reject("mission.not_found")); };
             if !can_edit(tx, envelope, &current)? { return Ok(reject("mission.forbidden")); }
             if let Some(source) = &input.source_message_id {
                 let sql = format!("WITH {} SELECT EXISTS(SELECT 1 FROM camp_message m JOIN public_camp_message_publication p ON p.message_id=m.id WHERE m.id=?1 AND m.camp_id=?2 AND m.tombstoned_at IS NULL)", crate::camp_message_publication::public_camp_message_publication_cte());
@@ -607,7 +618,7 @@ impl MissionService {
     }
 
     pub fn get(&self, database: &Database, mission_id: &str) -> Result<Option<MissionRecord>> {
-        load_record(database.connection(), mission_id)
+        load_record(database.connection(), mission_id, &self.active_executions)
     }
 
     pub fn list_for_agent(
@@ -723,7 +734,7 @@ impl MissionService {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         ids.iter()
             .map(|id| {
-                load_record(database.connection(), id)?
+                load_record(database.connection(), id, &self.active_executions)?
                     .context("Mission disappeared during locked read")
             })
             .collect()
@@ -934,11 +945,15 @@ pub(crate) fn mission_for_camp(
             r.get::<_, String>(0)
         })
         .optional()?;
-    id.map(|id| load_record(connection, &id)?.context("Mission association missing"))
+    id.map(|id| load_record(connection, &id, &[])?.context("Mission association missing"))
         .transpose()
 }
 
-fn load_record(connection: &Connection, id: &str) -> Result<Option<MissionRecord>> {
+fn load_record(
+    connection: &Connection,
+    id: &str,
+    active_executions: &[crate::planned_shutdown::ActiveExecutionKey],
+) -> Result<Option<MissionRecord>> {
     let row = connection.query_row("SELECT m.id,m.number,m.camp_id,m.title,m.description,m.status,m.source_message_id,m.tags_json,m.source_attachments_json,m.details_version,m.created_at,m.updated_at,c.project_path,c.project_binding_kind,c.default_lead_agent_id FROM mission m JOIN camp c ON c.id=m.camp_id WHERE m.id=?1 AND c.deletion_operation_id IS NULL", [id], |r| Ok((
         r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,String>(7)?,r.get::<_,String>(8)?,r.get::<_,i64>(9)?,r.get::<_,String>(10)?,r.get::<_,String>(11)?,r.get::<_,String>(12)?,r.get::<_,String>(13)?,r.get::<_,Option<String>>(14)?))).optional()?;
     let Some((
@@ -981,7 +996,12 @@ fn load_record(connection: &Connection, id: &str) -> Result<Option<MissionRecord
     let has_unread = connection.query_row(&unread_sql, [&camp_id], |r| r.get(0))?;
     let start_available = mission_start_available(connection, &mission_id, &camp_id)?;
     let (workspace_ever_created, workspace_resources_present, cleanup_available, workspace_cleanup) =
-        crate::mission_workspace::cleanup_projection(connection, &mission_id, &camp_id)?;
+        crate::mission_workspace::cleanup_projection(
+            connection,
+            &mission_id,
+            &camp_id,
+            active_executions,
+        )?;
     Ok(Some(MissionRecord {
         description_content,
         has_unread,
@@ -2279,6 +2299,52 @@ mod tests {
                 .cleanup_available
         );
 
+        // A completed prior-generation Run may retain its missing ACK. The
+        // same exact Run/epoch still blocks cleanup when this Core owns it.
+        db.connection().execute(
+            "UPDATE agent_run SET cancel_requested_at='old-stop',cancel_reason_code='user_requested',cancel_acknowledged_at=NULL WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)",
+            [&camp_id],
+        ).unwrap();
+        let current = db.connection().query_row(
+            "SELECT r.id,r.execution_epoch FROM agent_run r JOIN conversation c ON c.id=r.conversation_id WHERE c.camp_id=?1",
+            [&camp_id], |row| Ok(crate::planned_shutdown::ActiveExecutionKey::new(row.get::<_, String>(0)?, row.get(1)?)),
+        ).unwrap();
+        assert!(
+            service
+                .get(&db, &mission_id)
+                .unwrap()
+                .unwrap()
+                .cleanup_available
+        );
+        assert!(
+            !MissionService::with_active_executions(vec![current.clone()])
+                .get(&db, &mission_id)
+                .unwrap()
+                .unwrap()
+                .cleanup_available
+        );
+        assert!(
+            MissionService::with_active_executions(vec![
+                crate::planned_shutdown::ActiveExecutionKey::new(
+                    &current.agent_run_id,
+                    current.execution_epoch + 1
+                )
+            ])
+            .get(&db, &mission_id)
+            .unwrap()
+            .unwrap()
+            .cleanup_available
+        );
+        assert!(
+            db.connection()
+                .query_row(
+                    "SELECT cancel_acknowledged_at IS NULL FROM agent_run WHERE id=?1",
+                    [&current.agent_run_id],
+                    |row| row.get::<_, bool>(0)
+                )
+                .unwrap()
+        );
+
         let other = service
             .create(
                 &mut db,
@@ -2333,6 +2399,30 @@ mod tests {
                 [other_camp_id],
             )
             .unwrap();
+        db.connection().execute(
+            "UPDATE agent_run SET cancel_requested_at='old-stop',cancel_reason_code='user_requested',cancel_acknowledged_at=NULL WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id=?1)",
+            [other_camp_id],
+        ).unwrap();
+        let other_current = db.connection().query_row(
+            "SELECT r.id,r.execution_epoch FROM agent_run r JOIN conversation c ON c.id=r.conversation_id WHERE c.camp_id=?1",
+            [other_camp_id], |row| Ok(crate::planned_shutdown::ActiveExecutionKey::new(row.get::<_, String>(0)?, row.get(1)?)),
+        ).unwrap();
+        assert!(
+            service
+                .get(&db, &mission_id)
+                .unwrap()
+                .unwrap()
+                .cleanup_available
+        );
+        assert!(
+            !MissionService::with_active_executions(vec![other_current])
+                .get(&db, &mission_id)
+                .unwrap()
+                .unwrap()
+                .cleanup_available,
+            "current cleanup in a shared execution directory remains an occupancy"
+        );
+
         db.connection().execute(
             "UPDATE mission_workspace SET state='ready',cleanup_worktree_removed=0,cleanup_branch_removed=0,diagnostic='mission.workspace_dirty' WHERE mission_id=?1",
             [&mission_id],

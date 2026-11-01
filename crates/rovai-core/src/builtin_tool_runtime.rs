@@ -721,7 +721,16 @@ fn remove_retired_run_tmp(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+tokio::task_local! {
+    pub(crate) static TEST_BUNDLED_CLI_EXECUTABLE: PathBuf;
+}
+
 pub(crate) fn bundled_cli_executable() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Ok(path) = TEST_BUNDLED_CLI_EXECUTABLE.try_with(Clone::clone) {
+        return Ok(path);
+    }
     let current = std::env::current_exe().context("failed to locate rovai-core executable")?;
     let directory = current
         .parent()

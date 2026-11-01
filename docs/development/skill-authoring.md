@@ -7,7 +7,7 @@ last_updated: 2026-08-16
 # Skill 编写与 description 路由规范
 
 本文定义仓库 `skills/*` 的常青编写约定，重点约束 `SKILL.md` frontmatter 中的
-`description`。它拥有写作和验证约定，不拥有 Skill Library、Runtime projection、bootstrap
+`description`。它拥有写作和验证约定，不拥有 Skill 来源与 Runtime 投递、bootstrap
 或执行完整性语义；这些边界继续以
 [Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)和相关 ADR 为准。
 

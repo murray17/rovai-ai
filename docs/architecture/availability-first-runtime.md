@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-availability-and-authority-startup-boundary
 status: accepted
-last_updated: 2026-10-29
+last_updated: 2026-10-30
 ---
 
 # Availability-first Runtime
@@ -46,13 +46,16 @@ Electron ready
        -> exact legacy cancellation settlement
        -> remaining mandatory execution/input/delivery recovery (failure => typed refusal)
        -> ready(authority origin, initializing subsystems)
+       -> independently start Runtime discovery and optional services
+       -> bounded one-shot historical maintenance (independent of discovery and feature retries)
   -> Supervisor enables authoritativeWorkspace/coreRequests
   -> Renderer mounts authority-backed hooks inside the restored route
        -> initialize optional services -> ready or feature-scoped degraded
 ```
 
-Runtime attachment storage admission发生在数据库已经分类且 lease 仍持有之后；任何失败都不能反向创建另一个 SQLite
-authority。Full Core ready 之前，Renderer 不调用 `navigation.snapshot`、Camp、Member、Memory 或 Onboarding 的
+Runtime 附件根只在数据库分类且 lease 仍持有后核对实例路径派生；旧标记、物理身份变化、坏条目与不可读子目录不参加启动准入。
+具体文件在读写或删除时检查本次目标，任何失败都不能反向创建另一个 SQLite authority。Full Core ready 之前，
+Renderer 不调用 `navigation.snapshot`、Thread、Member、Memory 或 Onboarding 的
 Core-backed read path。
 
 页面框架不是权威查询树。Root 从首次挂载起就用不透明整窗品牌画布遮住框架；正常检查、迁移和自动重启都保留既有
@@ -68,15 +71,42 @@ snapshot IPC 等待本机 preference/restorable-location 加载，不等待 Core
 
 ## Optional startup boundary
 
-Skill/MCP/adapter 对象先无 I/O 构造。ready 后独立初始化其存储与迁移、Builtin IPC、附件协调及非关键 cleanup；一个失败
+Skill/MCP/adapter 对象先无 I/O 构造。ready 后独立初始化当前所需存储与迁移、Builtin IPC；历史维护另行调度，一个失败
 不会从 `run_core()` 传播到进程退出。Core 持有功能门禁，拒绝依赖功能的请求并暂缓相关执行；数据库记录查询不依赖这些
 初始化结果。状态由 startup frame + generation-fenced event 合并到 Supervisor 完整快照，Renderer 显示原因与原进程重试，
 不卸载健康的权威工作区。重试跳过已健康服务，不能清理或替换已活动的 Runtime/IPC。
+
+Runtime discovery 与可选服务、历史维护分别启动，不等待目录扫描或批量回收。附件树不做启动 reconcile；旧视图在确需访问时按目标重建。Adapter 初始化不遍历旧 MCP 配置、Grok plugin 或 Claude 输入文件；当前任务仍精确释放自己创建的文件。目录年龄、名称前缀或缺少 Run 本身不构成旧文件可删除证据。
+
+Antigravity 初始化不访问或删除旧 `runtime-private/agy`；该目录不可清理不影响新任务或后继任务。当前 `runtime-private/antigravity` 的初始化、遗留日志处理及当前 Run 日志释放保持原有行为。
+
+普通任务只等待内置工具、当前 Skill 准备和对应 Adapter；外部 MCP 读取、迁移、初始化错误进入现有 Exposure 的 `invalid/warnings`，不成为共享执行门槛。原文件保留，既有冻结 Run 的快照与失败语义不改变。管理操作仍显示本功能错误，不能把加载失败标成正常空配置。
+
+外部 MCP 临时投递复用 `runtime-private/external-mcp` 时不修改已有目录权限。Unix 新目录在创建时请求 `0700`，新配置文件继续以 `0600`、不可覆盖方式创建；Grok 本次 UUID 子目录保持独占创建。真实创建、写入和 flush 错误仍中止本次投递，不能丢弃已选 MCP 后继续启动；失败与句柄释放只清理本次拥有的资源。
+
+`mcp.config.get` 管理读取不经过 MCP 健康门槛，返回现有文件路径与 `fileIssue`，使设置页能够展示并定位坏配置；写操作的门槛不变。
+
+设置读取、直接导入和提交共用同一按需初始化规则；配置尚不存在时，导入读取的版本与提交检查的版本一致，不因自己创建空配置产生冲突。只读诊断 `inspect` 继续不创建文件，损坏现有文件不被空配置替换。
+
+历史文件维护只在 ready 后启动一次，功能重试不重复启动它。实际枚举、递归、逐条处理均消耗条数和时间预算，诊断有数量及长度上限；遇到单条错误继续，耗尽后保留剩余项。目录枚举、批量删除和等待在全局数据库锁外；单条引用复核、状态提交和唯一临时路径的原子交接可持短锁。周期 GC 同样有界，不重新全盘恢复。Blob 已重新挂接则取消回收；无提交元数据、坏 JSON、未知归属或无法确认安全删除的内容原样保留。删除失败不反向影响会话读取或其他任务。
+
+终态文件变化补投影按进程内游标分批前进，每个实际尝试（包括失败）推进位置，到末尾再轮转。预算或锁竞争中断不能跳过未处理项；失败项保留后续重试资格，不建立持久游标或新恢复队列。
+
+Runtime 程序设置逐项加载，缺失与损坏明确区分；损坏项保留错误和原始值，不落入默认程序或账号。设置页可读取错误及版本，通过既有 CAS 显式替换，再复用现有刷新恢复该项，无需重启 Core。具体接口见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#本机配置的局部故障)。
 
 `runtime.<AdapterKind>` 只表示 Adapter 自有私有存储与进程内初始化是否可用，不表示第三方 executable 已安装。
 安装缺失、路径失效、版本、认证、capability 和平台资格继续由 Runtime discovery、Availability、Readiness 与 dispatch
 preflight 分层拥有；其中任何结果都不反向污染 optional subsystem health。Adapter 私有存储真实初始化失败仍可只降级
 对应 Runtime，并由原进程内重试修复。
+
+历史进程清理属于一次后台维护，不属于可选功能健康状态或启动准入。Core ready 后唯一启动调用在阻塞工作线程
+遍历 macOS ownership ledger、退役 Cline ledger 和 Fleet 历史记录，共享有限总预算与有限诊断；每条失败继续，
+预算耗尽保留余项。它不持有会话读取的数据库锁，不进入可重试 maintenance、Adapter 初始化或任务停止路径。
+当前 Core 的生命周期身份或 Fleet generation 排除本次启动的新进程。历史异常、缺 ACK、身份未知均不阻断新任务，
+也不伪造已退出或批量补写 ACK。工作区准备、消息领取、共享执行目录检查与任务 dispatch 共用当前精确执行所有权判断；
+仅当前 Core 持有的 Run/epoch 且清理未确认时保留对应任务的冲突门禁。业务恢复与旧输入不可自动重投规则保持。
+规范与取舍见 [Managed Process](../contracts/managed-runtime-process-v2.md#macos-acp-descendants) 和
+[V1.72-D69](../versions/v1.72/decisions.md#v1-72-d69)。
 
 退役两阶段取消协议的持久中间态在数据库 open/migration 后先按精确 cancel intent 与未完成关联状态查询，并复用统一
 settlement；它先于通用 execution/input/delivery recovery，避免旧取消工作被重新准入。重复启动不再次结算，失败与其他

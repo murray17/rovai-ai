@@ -7,6 +7,7 @@ import { navigationThreadHasUnread } from './navigation-unread'
 import { useInterruptionAttention } from './thread-interruption-attention'
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -55,6 +56,22 @@ import {
 import { UiText, uiAttribute } from './interface-language'
 
 export type NavigationSettingsSection = SettingsSection
+
+function NavigationTitle({ children, selected = false }: { children: string; selected?: boolean }): JSX.Element {
+  const text = useRef<HTMLSpanElement>(null)
+  const [overflow, setOverflow] = useState(false)
+  useLayoutEffect(() => {
+    const element = text.current
+    if (!element) return
+    const measure = () => setOverflow(element.scrollWidth > element.clientWidth + 1)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [children, selected])
+  return <span ref={text} className="truncate navigation-title" title={children} data-overflow={overflow || undefined}>{children}</span>
+}
 
 type NavigationAction = {
   kind: 'rename' | 'delete'
@@ -916,8 +933,8 @@ function CommandPalette({
                 onClick={() => onThread(thread)}
                 onMouseEnter={() => setActiveIndex(index)}
               >
-                <span className="truncate" title={formatThreadTitle(thread, firstRunThreadId)}>{formatThreadTitle(thread, firstRunThreadId)}</span>
-                <small>{thread.projectBindingKind === 'directory' ? projectNameByPath.get(thread.projectPath) ?? uiAttribute('项目') : uiAttribute("快速对话")}</small>
+                <NavigationTitle>{formatThreadTitle(thread, firstRunThreadId)}</NavigationTitle>
+                <small className="command-palette-project"><NavigationTitle>{thread.projectBindingKind === 'directory' ? projectNameByPath.get(thread.projectPath) ?? uiAttribute('项目') : uiAttribute("快速对话")}</NavigationTitle></small>
               </button>
             ))}
             {visible.length === 0 && (
@@ -1056,7 +1073,7 @@ function ThreadGroup({
               <path className="folder-fill" d="M6.55 9.8h13.7l-1.65 6.85a2 2 0 0 1-1.95 1.55H5.6a1.9 1.9 0 0 1-1.85-2.35l1.05-4.5A1.8 1.8 0 0 1 6.55 9.8Z" />
             </g>
           </svg>
-          <span className="truncate">{label}</span>
+          <NavigationTitle>{label}</NavigationTitle>
         </button>
         {pinTargetKey && projectMenuItems.length > 0 && (
           <SidebarActionMenu
@@ -1186,7 +1203,7 @@ function ThreadRow({
         onClick={() => onThread(thread)}
       >
         {pinned && <span className="pinned-camp-icon" aria-hidden="true"><NavigationIcon name="messages" /></span>}
-        <span className="truncate">{title}</span>
+        <NavigationTitle selected={active}>{title}</NavigationTitle>
         {thread.activationState === 'pending' && <span className="camp-draft-badge"><UiText zh={"草稿"} /></span>}
         <span className="camp-status-cluster" data-status={status} aria-hidden="true">
           {showDot && <span className="camp-status-slot"><i className="camp-unread-dot" /></span>}

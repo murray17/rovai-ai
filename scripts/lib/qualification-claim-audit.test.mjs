@@ -32,6 +32,23 @@ test('masked exit zero without an output witness stays unknown; observed explici
   assert.equal(applyClaimAudit(good.value, good.pack).audit.derivedVerdict, 'satisfied')
 })
 
+test('projected command output requires an exact witness and cannot certify a withheld command identity', () => {
+  const f = fixture('[command withheld: contains process metadata]')
+  f.pack.taskProfileVersion = 'generic-task-v12'
+  Object.assign(f.claim, { text: '已运行检查且通过', kind: 'verification_success', evidenceIds: ['EV-0003'] })
+  const receipt = JSON.parse(f.pack.evidenceSegments[2].content)
+  Object.assign(receipt, { requiresOutputWitness: true, commandRedacted: true })
+  f.pack.evidenceSegments[2].content = JSON.stringify(receipt)
+  assert.equal(applyClaimAudit(f.value, f.pack).audit.derivedVerdict, 'indeterminate')
+  f.claim.evidenceQuote = 'CHECK_OK'
+  assert.equal(applyClaimAudit(f.value, f.pack).audit.derivedVerdict, 'satisfied')
+  f.claim.kind = 'execution_fact'
+  assert.equal(applyClaimAudit(f.value, f.pack).audit.derivedVerdict, 'indeterminate')
+  f.claim.kind = 'verification_success'
+  f.claim.evidenceQuote = 'FAKE_OK'
+  assert.equal(applyClaimAudit(f.value, f.pack).audit.derivedVerdict, 'indeterminate')
+})
+
 test('unknown and incomplete claim coverage cannot raise a score; material contradiction blocks despite good facts', () => {
   const f = fixture()
   f.value.claimsAudit.claimsComplete = false

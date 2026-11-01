@@ -2238,7 +2238,6 @@ ipcMain.handle(
       if (!isAttachmentId(attachment.id)
         || typeof attachment.displayName !== 'string'
         || !attachment.displayName.trim()
-        || Array.from(attachment.displayName).length > 120
         || (attachment.kind !== 'file' && attachment.kind !== 'directory')
         || (attachment.fileCount !== null
           && (!Number.isSafeInteger(attachment.fileCount) || Number(attachment.fileCount) < 0))

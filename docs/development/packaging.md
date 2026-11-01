@@ -284,7 +284,7 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
 Ready。
 
 用户工作区可以是普通目录或无 Commit 的空 Git 仓库。Git 相关功能会按当前目录动态
-探测，不是 App 启动或 Camp 创建的全局硬门。
+探测，不是 App 启动或 Thread 创建的全局硬门。
 
 ## 产物检查
 

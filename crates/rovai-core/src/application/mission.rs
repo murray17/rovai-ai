@@ -202,11 +202,13 @@ impl Core {
     pub(super) async fn prepare_mission_workspace(
         &self,
         candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+        validated_project_path: &Path,
     ) -> Result<Option<rovai_core::runtime::AgentRunWorkspace>> {
         self.prepare_mission_execution_workspace(
             &candidate.camp_id,
             candidate.execution_workspace(),
             Some(candidate),
+            Some(validated_project_path),
         )
         .await
     }
@@ -218,7 +220,29 @@ impl Core {
         camp_id: &str,
         mut execution: rovai_core::runtime::AgentRunWorkspace,
         candidate: Option<&rovai_core::runtime::QueuedAgentRunCandidate>,
+        validated_project_path: Option<&Path>,
     ) -> Result<Option<rovai_core::runtime::AgentRunWorkspace>> {
+        // Dispatch already validated/canonicalized the selected project. Only
+        // that exact execution root can bypass the lifecycle gate. The database
+        // guard ends before waiting for the gate on shared or uncertain paths.
+        if let Some(root) = validated_project_path.filter(|root| {
+            crate::git::persisted_workspace_path_matches_canonical(
+                Path::new(&execution.execution_root),
+                root,
+            )
+        }) {
+            let database = self.database.lock().await;
+            let has_mission: bool = database.connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM mission WHERE camp_id=?1)",
+                [camp_id],
+                |row| row.get(0),
+            )?;
+            if !has_mission
+                && mission_workspace::execution_root_is_disjoint(database.connection(), root)?
+            {
+                return Ok(Some(execution));
+            }
+        }
         let _preparation = self.mission_workspace_gate.lock().await;
         let (mission, existing, host) = {
             let mut database = self.database.lock().await;
@@ -286,6 +310,8 @@ impl Core {
             mission_workspace::persist_plan(database.connection(), &workspace)?;
             workspace
         };
+        let ready_on_entry = workspace.state == "ready";
+        let mut validated_ready_reuse = false;
         if workspace.state == "cleanup_failed"
             && !workspace.cleanup_finished()
             && cleanup_diagnostic_is_recoverable(&workspace)
@@ -376,6 +402,7 @@ impl Core {
                 workspace.cleanup_expected_branch_oid = None;
                 workspace.cleanup_worktree_removed = false;
                 workspace.cleanup_branch_removed = false;
+                validated_ready_reuse = ready_on_entry;
             } else {
                 let branch_oid = git.branch_oid(&workspace).await?;
                 // Remove only a stale registration carrying this workspace's owner marker.
@@ -560,7 +587,11 @@ impl Core {
             }
             workspace.state = "ready".into();
         }
-        git.validate_execution_workspace(&workspace).await?;
+        // Only an intact workspace that entered ready has already completed
+        // this validation. Creation and recovery retain their final audit.
+        if !validated_ready_reuse {
+            git.validate_execution_workspace(&workspace).await?;
+        }
         let actual = git::validate_workspace_directory(
             Path::new(&workspace.working_directory),
             &self.data_dir,
@@ -929,6 +960,7 @@ impl Core {
                 }
                 let _guard = self.mission_workspace_gate.lock().await;
                 let mut database = self.database.lock().await;
+                let active_executions = self.current_runtime_execution_keys().await;
                 let execution = DomainCommandGateway.execute(&mut database, &envelope, |tx| {
                     let camp_id = tx
                         .query_row(
@@ -969,7 +1001,7 @@ impl Core {
                         ));
                     }
                     if workspace.state == "preparing"
-                        || mission_workspace::workspace_in_use(tx, &workspace)?
+                        || mission_workspace::workspace_in_use(tx, &workspace, &active_executions)?
                     {
                         return Ok(CommandHandlerResult::rejected(
                             "mission.workspace_in_use",
@@ -1087,7 +1119,10 @@ impl Core {
             "missions.list" => {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    MissionService::default().list(&database)?,
+                    MissionService::with_active_executions(
+                        self.current_runtime_execution_keys().await,
+                    )
+                    .list(&database)?,
                 )?)
             }
             "missions.get"
@@ -1108,9 +1143,11 @@ impl Core {
                 if request.method == "missions.diffSession.release" {
                     {
                         let database = self.database.lock().await;
-                        MissionService::default()
-                            .get(&database, &query.mission_id)?
-                            .context("mission.not_found")?;
+                        MissionService::with_active_executions(
+                            self.current_runtime_execution_keys().await,
+                        )
+                        .get(&database, &query.mission_id)?
+                        .context("mission.not_found")?;
                     }
                     let released = self
                         .mission_diff_snapshots
@@ -1124,9 +1161,11 @@ impl Core {
                     let database = self.database.lock().await;
                     let workspace_lock_ms = workspace_lock_started_at.elapsed().as_millis();
                     let workspace_read_started_at = Instant::now();
-                    let mission = MissionService::default()
-                        .get(&database, &query.mission_id)?
-                        .context("mission.not_found")?;
+                    let mission = MissionService::with_active_executions(
+                        self.current_runtime_execution_keys().await,
+                    )
+                    .get(&database, &query.mission_id)?
+                    .context("mission.not_found")?;
                     if request.method == "missions.get" {
                         return Ok(serde_json::to_value(mission)?);
                     }
@@ -1317,12 +1356,6 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, params.command),
                 )?;
-                if execution.result.status == CommandResultStatus::Applied
-                    && let Some(camp_id) = execution.result.payload["threadId"].as_str()
-                {
-                    self.attachment_views
-                        .ensure_empty_camp_ready(&mut database, camp_id)?;
-                }
                 emit_missions_invalidated(
                     &self.output,
                     "missions.create",

@@ -32,7 +32,8 @@ describe('Desktop Attachment target boundary', () => {
     expect(parseDesktopAttachmentTarget({ ...target, kind: 'symlink' }, ATTACHMENT_ID)).toBeNull()
     expect(parseDesktopAttachmentTarget({ ...target, authorityRoot: '/private/secret' }, ATTACHMENT_ID)).toBeNull()
     expect(parseDesktopAttachmentTarget({ ...target, displayName: '😀'.repeat(120) }, ATTACHMENT_ID)).not.toBeNull()
-    expect(parseDesktopAttachmentTarget({ ...target, displayName: '😀'.repeat(121) }, ATTACHMENT_ID)).toBeNull()
+    expect(parseDesktopAttachmentTarget({ ...target, displayName: '😀'.repeat(121) }, ATTACHMENT_ID))
+      .toMatchObject({ displayName: '😀'.repeat(121) })
   })
 
   it('rejects malformed Attachment IPC identities', () => {

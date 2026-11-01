@@ -303,7 +303,7 @@ Assignment 权威。
 - [ADR-0158: Default-All Runtime Delivery for Managed Skills](../v0.58/decisions.md#adr-0158)
 - [ADR-0159: Pinned Third-Party Tasteful UI Bundled Skill (historical)](../v0.58/decisions.md#adr-0159)
 - [ADR-0166: Progressive Built-In CLI Teaching](decisions.md#adr-0166)
-- [Skill settings UI strategy](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Skill settings UI strategy](../../ui/surfaces/settings-workspace.md)
 - [Domain terminology](../../../CONTEXT.md)
 <!-- legacy-adr-body:end id=ADR-0167 -->
 <!-- legacy-adr:end id=ADR-0167 -->

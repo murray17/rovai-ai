@@ -9,6 +9,9 @@ export function normalizedStartupConfiguration(draft: RuntimeStartupConfiguratio
 }
 
 export function startupEdits(saved: RuntimeStartupSettings, draft: RuntimeStartupConfiguration): FieldEdit[] {
+  if (saved.configuration.configurationError && !draft.configurationError) {
+    return [{ path: ['programPath'], before: null, after: normalizedStartupConfiguration(draft).programPath, label: '程序路径' }]
+  }
   return editedFields(editableSnapshot(normalizedStartupConfiguration(saved.configuration)), editableSnapshot(normalizedStartupConfiguration(draft)))
 }
 

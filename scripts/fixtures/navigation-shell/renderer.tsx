@@ -53,6 +53,7 @@ function Content(): React.JSX.Element { renders++; return <div style={{ paddingT
 function Fixture(): React.JSX.Element {
   const [threadReadStates, setReadStates] = useState<Record<string, NavigationThreadReadState>>({})
   const [running, setRunning] = useState(true)
+  const [longLabels, setLongLabels] = useState(false)
   useEffect(() => {
     void preferences.get().then(snapshot => setReadStates(snapshot.threadReadStates))
     return preferences.onChanged(snapshot => setReadStates(snapshot.threadReadStates))
@@ -72,7 +73,7 @@ function Fixture(): React.JSX.Element {
   document.documentElement.dataset.rovaiPlatform = browser ? 'browser' : platform
   document.documentElement.dataset.rovaiSurface = browser ? 'web' : 'desktop'
   Object.assign(window, { navigationTest: {
-    renders: () => renders, setSettings, setPlatform, setDisabled, setBrowser, navigation, target, actions, setRunning,
+    renders: () => renders, setSettings, setPlatform, setDisabled, setBrowser, navigation, target, actions, setRunning, setLongLabels,
     threadReadStates, preferences,
     projectPreferences: browserPreferences('project-concurrency-fixture', { request: async () => undefined } as unknown as ConsoleClient).preferences.navigationPreferences,
     hostNavigation: (direction: 'back' | 'forward') => navigationListeners.forEach(listener => listener(direction)),
@@ -82,7 +83,9 @@ function Fixture(): React.JSX.Element {
   return <><WindowsApplicationMenu /><NavigationShell platform={platform} browser={browser} disabled={disabled} settings={settings} navigation={navigation} nativeWindowControls={browser ? undefined : window.rovai.windowControls}>
     <ThreadNavigation platform={platform} view={settings ? 'settings' : 'compose'} state="ready"
       navigation={{ ...navigationSnapshot, projects: navigationSnapshot.projects.map(project => ({ ...project,
-        recentThreads: [{ ...runningCamp, marker: running ? 'loading' : 'none' }] })) }}
+        name: longLabels ? 'Rovai AI 长期协作工作区与菜单栏交互完整项目名称' : project.name,
+        recentThreads: [{ ...runningCamp, title: longLabels ? '会话长标题在侧栏和搜索结果中只做末尾透明度淡出，切换宽度与短名称后重新判断是否需要截断' : runningCamp.title,
+          marker: running ? 'loading' : 'none' }] })) }}
       pins={navigationPins} activeThreadId={pinnedCamp.id} pendingMemoryCount={0} threadReadStates={threadReadStates}
       onNewConversation={() => { actions.push('new-chat') }} onMembers={noop} onMemory={noop} onSettings={() => setSettings(true)} onSettingsBack={() => setSettings(false)}
       onCreateInProject={() => { actions.push('new-chat') }} onRenameProject={async () => undefined}

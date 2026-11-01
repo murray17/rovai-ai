@@ -78,13 +78,13 @@ pending cycle，但不撤销已提交业务终态。
 待确认。原有更具体取消原因保留，否则使用 app_shutdown_cancel_all；历史 protocol 2 cycle 保留其身份和
 planned_shutdown_cancelled 原因，不冒充新 protocol 3 request。业务事务不写 cancel_acknowledged_at。
 
-不为新执行写 CampTurn Stop intent；历史 CampTurn 仅保留原审计与渠道收口事实。
+不为新执行写 ThreadTurn Stop intent；历史 ThreadTurn 仅保留原审计与渠道收口事实。
 未知 Action/Input、历史输出和外部效果证据不删除，terminal_resolution_source 不伪造为 Runtime terminal。
 
 普通 batch Scheduler 保留原生命周期。事件／deadline 等待任务与既有低频 housekeeping 由 `run_core` 的
 JoinSet 直接持有，共用退出信号；任一任务意外结束会让 Core 进入退出清理。关闭监督器先停止协调入口，
 launch handoff 超时时 abort，并在 writer fence 前等待整个集合。non-batch preparation、Runtime cleanup
-及其后续投影、Mission/Camp 清理均进入 Core 既有 tracked task set，强制取消协调任务也不会丢失它们的句柄。
+及其后续投影、Mission/Thread 清理均进入 Core 既有 tracked task set，强制取消协调任务也不会丢失它们的句柄。
 退出报告同时要求协调入口和这些后台工作 quiesced；legacy 500ms maintenance 的独立注册与退出通知已经删除。
 
 ## 5. Startup compensation
@@ -132,8 +132,8 @@ persist durable cancel-all intent and settle business obligations
 
 Electron Main 是唯一 shutdown caller。第一次可控 quit 在 Renderer 仍存活时由既有 `AppQuitCoordinator` 阻止并冻结
 reason；Windows/Linux 主窗口关闭同样在窗口销毁前进入该入口。Main 先通过私有一次性响应通道请求 Renderer 准备退出，
-Renderer 只复用匹配 active Camp 的本地 preparation，等待已经开始的附件、引用、发送和 Lexical flush 操作完成。
-它不把 public Composer 写入 Core；已完成的本机 Camp-local snapshot 由 Composer 自己拥有。成功后 Main 才停止应用服务、禁止 Core 自动重启、
+Renderer 只复用匹配 active Thread 的本地 preparation，等待已经开始的附件、引用、发送和 Lexical flush 操作完成。
+它不把 public Composer 写入 Core；已完成的本机 Thread-local snapshot 由 Composer 自己拥有。成功后 Main 才停止应用服务、禁止 Core 自动重启、
 发送一次 v3 request，并等待 report 与 child 真实 exit；重复 quit 不创建第二轮准备或 drain。
 
 macOS 独立关闭主窗口（红色关闭 / Cmd+W）也在 Renderer 销毁前等待同一 preparation，成功后只恢复该窗口的原生
@@ -142,8 +142,8 @@ close，不进入服务 drain、Core shutdown 或 App exit；关闭窗口不取�
 [Camp Composer Draft v16](../contracts/camp-composer-draft-v16.md)。
 
 Renderer 准备失败或响应通道失败时，本次退出终止：不停止服务、不调用 `core.shutdown()`、不执行 `app.exit()`；当前
-Camp、Lexical 内容和交互仍留在本窗口，下一次 quit 可重新尝试。没有存活且已加载的 Renderer 时 preparation 为
-no-op；已持久的 Camp-local snapshot 不依赖该响应继续存在。外层 watchdog
+Thread、Lexical 内容和交互仍留在本窗口，下一次 quit 可重新尝试。没有存活且已加载的 Renderer 时 preparation 为
+no-op；已持久的 Thread-local snapshot 不依赖该响应继续存在。外层 watchdog
 仍只负责 Core 已开始关闭后完全失去响应的最终强制结束，不能伪造领域 terminal。
 
 Renderer 只在准备成功、Core shutdown 已开始后消费 `runtime.state = shutting_down`。它立即建立覆盖当前页面的交互 guard；若关闭在 400ms 内

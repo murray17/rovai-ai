@@ -8,7 +8,7 @@ last_updated: 2026-10-27
 # Scheduled Automation Architecture
 
 Scheduled Automation 是共享 Rust Host/Core 内的持久计划控制面。它拥有定义、schedule、occurrence、时间上限、结果与
-Owner 通知；消息、Delivery、AgentRun 和 Runtime 执行复用公开 Camp 的统一主链。字段合同见
+Owner 通知；消息、Delivery、AgentRun 和 Runtime 执行复用公开 Thread 的统一主链。字段合同见
 [Scheduled Automation v5](../contracts/scheduled-automation-v5.md)。
 
 ## 组件和流程
@@ -18,13 +18,13 @@ Scheduler due/manual trigger
   ├─ previous active → skipped(overlap)
   └─ previous inactive → one transaction
        ├─ started occurrence + frozen definition snapshot
-       ├─ new Camp + membership
-       ├─ first system-authored CampMessage
+       ├─ new Thread + membership
+       ├─ first system-authored ThreadMessage
        └─ waiting Delivery
             └─ unified Scheduler claim → multi-input AgentRun
 ```
 
-- Renderer/Web 只编辑定义、读取历史、请求立即运行并打开 Camp，不计算权威时间。
+- Renderer/Web 只编辑定义、读取历史、请求立即运行并打开 Thread，不计算权威时间。
 - AutomationService 原子领取 occurrence、推进 `nextRunAt`、冻结定义、维护时间上限和业务终态。
 - Collaboration/Delivery service 创建普通消息与 waiting Delivery；它不为 Automation 创建特殊 Run。
 - Runtime Scheduler 使用与用户、A2A 和 Channel 相同的 claim、Context、isolation 和 terminal seam。
@@ -51,11 +51,11 @@ Agent automation 工具保留原输出形状。
 ## 恢复和结算
 
 重启、等待、交互或超时都不重新派发 prompt。已经 accepted/outcome-unknown 的输入永不作为未执行重入队；后继处理遵循
-普通 execution-isolation fence。Automation occurrence 通过自己记录的消息、Delivery、Run 与结果关系结算，不能用 Camp
+普通 execution-isolation fence。Automation occurrence 通过自己记录的消息、Delivery、Run 与结果关系结算，不能用 Thread
 空闲或某个 Run 终态自动推导业务完成。
 
 通知与执行分离：settlement 冻结 provider-scoped delivery，实际发送重验当前 Bot/Owner；通知失败只更新 outbox，不改变
-occurrence、消息、Run 或重跑模型。定义删除保留已有 Camp、occurrence 和投递证据。
+occurrence、消息、Run 或重跑模型。定义删除保留已有 Thread、occurrence 和投递证据。
 
 ## Thread 永久删除与历史
 
@@ -92,6 +92,6 @@ Core 启动、定义创建／修改／关闭／删除、执行事实提交及宿
 ## References
 
 - [Scheduled Automation v5](../contracts/scheduled-automation-v5.md)
-- [Public Camp Message、Delivery 与 AgentRun](public-a2a-message-delivery.md)
+- [Public Thread Message、Delivery 与 AgentRun](public-a2a-message-delivery.md)
 - [Runtime recovery and shutdown](foundational-invariants.md#runtime-recovery-shutdown)
 - [V1.60-D05](../versions/v1.60/decisions.md#v1-60-d05)

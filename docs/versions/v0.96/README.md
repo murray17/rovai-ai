@@ -143,7 +143,7 @@ Runtime Probe/认证/活跃 Host 尚未进入本版快照，不能从 enrolled R
 | ADR | 已更新 | [ADR-0201](decisions.md#adr-0201)冻结稀疏 Usage、Evidence 分离、collection enrollment、成本粒度和无历史回填边界。 |
 | Contracts | 已更新 | [Runtime Monitoring v1](../../contracts/runtime-monitoring-v1.md)定义观察、Session fact、查询、Coverage、NULL、Tool duration 和 Cost wire。 |
 | Architecture | 已更新 | [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)定义 Transport parser、raw observation、projection、rollup、read side 和 Provider bucket 组件职责。 |
-| UI | 已更新 | 新增 [Runtime monitoring surface brief](../../../apps/desktop/.impeccable/surfaces/runtime-monitoring.md)，冻结 clean-break、稀疏 Coverage、成本分层、freshness、Tab 与状态矩阵；仍复用现有视觉系统。 |
+| UI | 已更新 | 新增 [Runtime monitoring surface brief](../../ui/surfaces/runtime-monitoring.md)，冻结 clean-break、稀疏 Coverage、成本分层、freshness、Tab 与状态矩阵；仍复用现有视觉系统。 |
 | Runtime Activity | 确认无需更新 | Usage 与成本明确不进入 Execution Evidence/Canonical Activity；Tool duration 只消费既有稳定 operation identity。若实施新增映射，必须另按 Registry 门禁更新。 |
 | Runtime compatibility | 确认无需更新 | 当前仅建立采集计划；Runtime 能力表必须等各版本真实 Fixture/smoke 后按实测更新，不能用协议可能性提前晋升。 |
 | Documentation routing | 已更新 | 文档导航、Architecture/Contract 索引、CURRENT/HISTORY 和领域词汇加入运行监控入口。 |
@@ -157,4 +157,4 @@ Runtime Probe/认证/活跃 Host 尚未进入本版快照，不能从 enrolled R
 - [Runtime Monitoring v1](../../contracts/runtime-monitoring-v1.md)
 - [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)
 - [Runtime Activity Mapping 维护指南](../../runtime-activity/README.md)
-- [Settings workspace surface brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Settings workspace surface brief](../../ui/surfaces/settings-workspace.md)

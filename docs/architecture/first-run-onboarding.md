@@ -14,11 +14,11 @@ last_updated: 2026-10-05
 | Electron Main | Owns the private state machine, validates closed snapshots and serializes atomic writes; it initializes only from an admitted Full Core authority origin. |
 | Preload bridge | Exposes typed reads and transitions; it does not expose initialization or direct file access. |
 | Renderer onboarding gate | Replaces the normal App shell while a page is unfinished, performs real Runtime discovery/health checks, projects either configured selection or the zero-usable empty page, and persists user choices through Main. |
-| Provisioning saga | Converts the saved selection into idempotent existing Core commands, freezes and copies the configuration to other unconfigured built-in members, records per-target checkpoints and commits the Camp restore target before completion. |
+| Provisioning saga | Converts the saved selection into idempotent existing Core commands, freezes and copies the configuration to other unconfigured built-in members, records per-target checkpoints and commits the Thread restore target before completion. |
 | Core member/runtime services | Retain or create the selected profile and apply the selected model plus Adapter-owned default permissions with normal command/version rules. |
-| Core Camp service | Creates the durable Active Quick Chat Camp and remains the sole authority for membership, Default Lead and messages. |
-| Desktop-local Composer | Owns the Active Camp starter snapshot after page 3; starter selection only replaces that local input and never bypasses the user-send boundary. |
-| Restorable location store | Makes the real fourth-page Camp reopenable; it does not own onboarding completion. |
+| Core Thread service | Creates the durable Active Quick Chat Thread and remains the sole authority for membership, Default Lead and messages. |
+| Desktop-local Composer | Owns the Active Thread starter snapshot after page 3; starter selection only replaces that local input and never bypasses the user-send boundary. |
+| Restorable location store | Makes the real fourth-page Thread reopenable; it does not own onboarding completion. |
 
 ## Startup and state flow
 
@@ -36,10 +36,10 @@ Electron ready
            -> retain/create member
            -> configure selected member Runtime/model/default permissions
            -> freeze eligible built-in targets and copy the same configuration
-           -> create Active Quick Chat Camp "初次集结"
-           -> commit Camp restorable location
+           -> create Active Quick Chat Thread "初次集结"
+           -> commit Thread restorable location
            -> completed(onboarding)
-           -> render the real Camp with local-input starter rows
+           -> render the real Thread with local-input starter rows
         -> usable Runtime count = 0 or scan produced no reliable result:
            -> rescan, or completed(runtime_deferred)
            -> render the normal App shell without onboarding product mutations
@@ -56,7 +56,7 @@ configuration and all six identity fields still exactly match the Chinese factor
 `members.update` commands: the selected member retains the provisioning member command ID; other seeds use IDs
 derived from that command ID and their member ID. The selected member receives Runtime configuration using its
 returned version. Afterward, the saga reads the latest profiles and copies the same frozen Runtime/model/options/permissions to the other present, unconfigured
-built-in members. Only the selected member joins the first Camp. Customized, configured or removed profiles retain
+built-in members. Only the selected member joins the first Thread. Customized, configured or removed profiles retain
 their saved identity;
 a language switch after onboarding never translates saved member data. If initialization stops partway before the
 member checkpoint, recovery recognizes already initialized English profiles and writes only the remaining seeds.
@@ -74,12 +74,12 @@ by the existing command replay contract without payload drift. Recovery uses the
 on the selected Installation still being discoverable. A crash after a checkpoint skips that stage. The restorable
 location is ordered before `complete`, preventing a completed state that has no durable fourth-page destination.
 
-The fourth page is optional in lifecycle terms but durable in product terms. It uses the normal Active Camp and normal
-Navigation. Its Composer input is Desktop-local and restorable by Camp; the only onboarding-specific projection is the empty-Camp greeting
-and starter row presentation. After the user sends a message, the Camp behaves like any other Quick Chat.
+The fourth page is optional in lifecycle terms but durable in product terms. It uses the normal Active Thread and normal
+Navigation. Its Composer input is Desktop-local and restorable by Thread; the only onboarding-specific projection is the empty-Thread greeting
+and starter row presentation. After the user sends a message, the Thread behaves like any other Quick Chat.
 
 `runtime_deferred` is a second completed lifecycle outcome, not a fourth page and not a paused onboarding state. It is
-available only before provisioning begins. Its three product identities are null, it commits no Camp restore target,
+available only before provisioning begins. Its three product identities are null, it commits no Thread restore target,
 and normal startup never routes it back into training. A later Runtime install or login is handled by normal Settings
 and member configuration surfaces.
 
@@ -93,20 +93,20 @@ and member configuration surfaces.
   or subsequently reinterpreted by onboarding UI.
 - The empty Runtime page is shown only after scanning settles without a directly continuable Runtime; a scan error is
   an honest no-result input to that page, not a fabricated Runtime failure category.
-- Deferring Runtime setup is terminal, requires `provisioning = null`, and cannot issue member, Runtime, Camp or
+- Deferring Runtime setup is terminal, requires `provisioning = null`, and cannot issue member, Runtime, Thread or
   restorable-location mutations.
 - `初次集结` contains exactly the selected member and makes that member Default Lead.
-- Completion happens after the real Camp and its restore target exist, not after starter interaction.
-- A starter choice updates only the Desktop-local Active Camp Composer snapshot; it cannot create Core Draft, public-message or execution side effects.
-- Upgrades never receive a synthetic onboarding Camp.
+- Completion happens after the real Thread and its restore target exist, not after starter interaction.
+- A starter choice updates only the Desktop-local Active Thread Composer snapshot; it cannot create Core Draft, public-message or execution side effects.
+- Upgrades never receive a synthetic onboarding Thread.
 
 ## References
 
-- [Camp 资源不变量](foundational-invariants.md#camp-resources)
+- [Thread 资源不变量](foundational-invariants.md#camp-resources)
 - [First-run Onboarding v7](../contracts/first-run-onboarding-v7.md)
 - [Availability-first Runtime](availability-first-runtime.md)
-- [Camp Activation Lifecycle](camp-activation-lifecycle.md)
-- [Camp Composer Draft](camp-composer-draft.md)
+- [Thread Activation Lifecycle](camp-activation-lifecycle.md)
+- [Thread Composer Draft](camp-composer-draft.md)
 - [Runtime Catalog Boundaries](runtime-catalog-boundaries.md)
 
 ## 跟随系统语言

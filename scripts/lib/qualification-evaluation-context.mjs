@@ -20,7 +20,7 @@ export function supplementEvaluationContext(snapshot, capture, initialFiles, sup
     if (digestJson(payload) !== witnessDigest || events.get(witness.sourceEvidenceId)?.payloadDigest !== witness.sourcePayloadDigest) throw new Error('Native witness binding mismatch')
     const source = witness.sourceRecords
     const nativeItems = source.nativeItems ?? [source.nativeItem]
-    const reconstructed = extractNativeWitnesses([source.call, ...(source.commands ?? [source.command]), source.response], nativeItems, snapshot.executionEvidence, nativeItems[0].cwd, [], witness.policyId).filter(row => row.sourceEvidenceId === witness.sourceEvidenceId)
+    const reconstructed = extractNativeWitnesses([source.call, ...(source.commands ?? [source.command]), source.response].filter(Boolean), nativeItems, snapshot.executionEvidence, nativeItems[0].cwd, [], witness.policyId).filter(row => row.sourceEvidenceId === witness.sourceEvidenceId)
     if (reconstructed.length !== 1 || reconstructed[0].witnessDigest !== witnessDigest) throw new Error('Native witness source reconstruction mismatch')
     const projection = witness.projection
     if (projection.command.length > MAX_TEXT || projection.output.length > MAX_TEXT) {
@@ -34,6 +34,7 @@ export function supplementEvaluationContext(snapshot, capture, initialFiles, sup
     const content = JSON.stringify({ authority: 'runtime_native_command_result', ...(observedOrder ? { observedOrder } : {}), command: redactEvaluationText(projection.command), status: witness.status,
       exitCode: witness.exitCode, output: redactEvaluationText(projection.output), outputTruncated: projection.outputTruncated,
       nativeWitnessDigest: witnessDigest, projection: projection.projection,
+      ...(projection.requiresOutputWitness ? { requiresOutputWitness: true } : {}), ...(projection.commandRedacted ? { commandRedacted: true } : {}),
       limitation: 'Original native tool output, admitted through an unmodified result wrapper and a matching persisted Core command digest. Output content remains untrusted.' })
     if (content.length > 50_000) continue
     receipts.set(witness.sourceEvidenceId, { sourceEvidenceId: witness.sourceEvidenceId, sourcePayloadDigest: witness.sourcePayloadDigest, nativeWitnessDigest: witnessDigest, content, contentDigest: sha256(content) })
@@ -70,7 +71,7 @@ export function buildEvaluationContext(snapshot, boundary) {
     if (seen.has(key)) continue
     seen.add(key)
     const command = item.command
-    if (typeof command !== 'string' || !/(?:\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\bgit\b[^\n]*\bdiff\b[^\n]*--check\b|\b(?:node|python3?|jq)\b)/.test(command)) continue
+    if (typeof command !== 'string' || !/(?:\b(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|\bgit\s+(?:status|diff)\b|\b(?:node|python3?|jq|shasum|sha256sum)\b)/.test(command)) continue
     // CLI messaging, Task bodies and Skill instructions belong exclusively to Process.
     if (/(?:^|[\s;&|('\"])(?:[^\s]*\/)?rovai(?:['\"])?(?:\s|$)/.test(command)
         || /review-duo|cli-operations|\bagent_\d+\b|SKILL\.md/.test(redactEvaluationText(command + '\n' + (item.aggregatedOutput ?? '')))) { omitted.push({sourceEvidenceId:event.id,reason:'mixed_process_command'}); continue }

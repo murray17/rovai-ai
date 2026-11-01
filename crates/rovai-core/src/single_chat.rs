@@ -3858,10 +3858,11 @@ mod tests {
             &camp_id,
             "single-chat-open-attachment",
         );
-        let source = database.directory().join("private-input.md");
+        let display_name = format!("{}.md", "a".repeat(121));
+        let source = database.directory().join(&display_name);
         std::fs::write(&source, b"private single chat attachment").unwrap();
         let source_ref =
-            observe_source_attachment(&source, "private-input.md", Some("text/markdown")).unwrap();
+            observe_source_attachment(&source, &display_name, Some("text/markdown")).unwrap();
         service
             .add_source_attachment(&mut database, &conversation_id, 0, source_ref)
             .unwrap();
@@ -3870,6 +3871,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(staged.draft.attachments.len(), 1);
+        assert_eq!(staged.draft.attachments[0].display_name, display_name);
         let attachment_id = staged.draft.attachments[0].id.clone();
 
         let sent = service
@@ -3913,6 +3915,7 @@ mod tests {
         let refs = load_agent_run_source_attachments(&database, run_id, 0).unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].source_path, source.to_string_lossy());
+        assert_eq!(refs[0].display_name, display_name);
         let resolved = resolve_source_attachments_for_run(&refs).unwrap();
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0], source.to_string_lossy());

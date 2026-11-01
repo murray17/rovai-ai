@@ -48,11 +48,9 @@ use claude::{
 };
 use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
-    CodexLiveModelValidationError, CodexRuntime,
+    CodexRuntime,
 };
-use core_subsystems::{
-    CoreSubsystems, SubsystemInitialization, SubsystemUnavailable, runtime_subsystem_id,
-};
+use core_subsystems::{CoreSubsystems, SubsystemUnavailable, runtime_subsystem_id};
 use pi::{
     PiAgentRunRuntimeRequest, PiIncoming, PiPromptImage, PiRpcRuntimeAdapter, PiRuntime,
     PreparedPiPromptImage, prepare_prompt_images,
@@ -112,7 +110,6 @@ use rovai_core::{
         ThreadAttachmentStore, desktop_target_for_source_attachment,
         legacy_attachment_belongs_to_owner, preview_source_attachment,
     },
-    camp_attachment_publication::unresolved_publication_camp_ids,
     camp_attachment_view::{PreparedThreadAttachmentCleanup, ThreadAttachmentViewStore},
     camp_content::ComposerDocument,
     camp_deletion::{
@@ -191,7 +188,6 @@ use rovai_core::{
         LocalAttachmentFailure, LocalAttachmentOwnerLocator, load_agent_run_source_attachments,
         observe_source_attachment, resolve_source_attachments_for_run,
     },
-    managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
@@ -2436,9 +2432,8 @@ struct Core {
     pasted_text_operations: Mutex<()>,
     notification_interruption_reader: Mutex<NotificationInterruptionReader>,
     subsystems: CoreSubsystems,
-    subsystem_initialization: Mutex<SubsystemInitialization>,
+    subsystem_initialization: Mutex<()>,
     removed_skill_project_roots: RemovedSkillProjectRoots,
-    startup_pending_camp_ids: Vec<String>,
     builtin_tool_listener: Mutex<Option<LocalIpcListener>>,
     builtin_tool_listener_notify: Notify,
     runtime_usage: Mutex<RuntimeUsageBuffer>,
@@ -2968,7 +2963,7 @@ impl Core {
     }
 
     async fn verified_camp_attachment_admission(
-        &self,
+        self: &Arc<Self>,
         camp_id: &str,
         workspace: &Path,
     ) -> Result<(ThreadAttachmentReadAdmission, ThreadOutputDirectory)> {
@@ -3140,10 +3135,14 @@ impl Core {
     }
 
     async fn cleanup_mcp_projections_best_effort(&self) {
-        let database = self.database.lock().await;
-        if let Err(error) = self.mcp_projection.cleanup_terminal_and_orphaned(&database) {
-            eprintln!("failed to clean MCP Runtime projections: {error:#}");
-        }
+        let database = self.database.clone();
+        let service = McpProjectionService::new(&self.data_dir);
+        let _ = tokio::task::spawn_blocking(move || {
+            let mut budget =
+                rovai_core::maintenance_budget::MaintenanceBudget::new(128, Duration::from_secs(2));
+            service.cleanup_terminal(&database, &mut budget);
+        })
+        .await;
     }
 
     async fn forget_deleted_camp_runtimes(&self, camp_id: &str) {
@@ -3225,8 +3224,12 @@ impl Core {
             let runtime_result = async {
                 let targets = {
                     let database = self.database.lock().await;
-                    ExecutionRuntimeService::default()
-                        .list_camp_runtime_cleanup_targets(&database, &candidate.camp_id)
+                    let active_executions = self.current_runtime_execution_keys().await;
+                    ExecutionRuntimeService::default().list_camp_runtime_cleanup_targets(
+                        &database,
+                        &candidate.camp_id,
+                        &active_executions,
+                    )
                 }?;
                 self.stop_deleted_camp_runtimes(&targets).await?;
                 self.runtime_fleet
@@ -3263,12 +3266,14 @@ impl Core {
                 };
                 let group_key = {
                     let mut database = self.database.lock().await;
+                    let active_executions = self.current_runtime_execution_keys().await;
                     let group_key = navigation_group_key(&database, &candidate.camp_id)?;
                     service.commit_business_delete(
                         &mut database,
                         &self.attachment_views,
                         &candidate,
                         &cleanup,
+                        &active_executions,
                     )?;
                     self.mark_skill_projections_dirty_best_effort(&mut database, true);
                     group_key
@@ -5210,6 +5215,7 @@ impl Core {
                     rovai_core::runtime_startup::RuntimeStartupConfiguration {
                         custom_api_snapshot: None,
                         common_environment_unavailable: false,
+                        configuration_error: None,
                         program_path: Some(
                             existing_entrypoint_locator
                                 .as_ref()
@@ -5755,6 +5761,10 @@ impl Core {
                 if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
                     return Ok(RuntimeCheckOutcome::Superseded);
                 }
+                let catalog_unverified = catalog_requested
+                    && !rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
+                        &snapshot.models,
+                    );
                 AgentProfileService::default().commit_verified_managed_installation(
                     &mut database,
                     VerifiedManagedInstallation {
@@ -5771,6 +5781,21 @@ impl Core {
                         entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                     },
                 )?;
+                if catalog_unverified {
+                    AgentProfileService::default().record_managed_probe_failure(
+                        &mut database,
+                        ManagedProbeFailure {
+                            adapter_kind: kind,
+                            auth_scope: "default",
+                            candidate_path: &executable_path,
+                            fingerprint: Some(&candidate_fingerprint),
+                            source: Some(source),
+                            failure_class: "transient",
+                            diagnostic_code: "runtime_model_catalog_refresh_failed",
+                            failure: None,
+                        },
+                    )?;
+                }
                 drop(database);
                 self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
                     runtime_kind: kind,
@@ -5796,7 +5821,11 @@ impl Core {
                     kind.as_str(),
                     commit_started.elapsed().as_secs_f64() * 1000.0,
                 );
-                return Ok(RuntimeCheckOutcome::Ready);
+                return Ok(if catalog_unverified {
+                    RuntimeCheckOutcome::StableFailure
+                } else {
+                    RuntimeCheckOutcome::Ready
+                });
             }
             let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
                 _ if !targets_current_installation => {
@@ -7965,7 +7994,12 @@ impl Core {
         if request.method.starts_with("skills.") {
             self.subsystems.require("skills")?;
         }
-        if request.method.starts_with("mcp.") && request.method != "mcp.config.repairPermissions" {
+        if request.method.starts_with("mcp.")
+            && !matches!(
+                request.method.as_str(),
+                "mcp.config.get" | "mcp.config.repairPermissions"
+            )
+        {
             self.subsystems.require("mcp")?;
         }
         let _ = &request.params;
@@ -13342,12 +13376,55 @@ impl Core {
         }
     }
 
+    async fn release_active_execution(&self, key: &ActiveExecutionKey) {
+        // A terminal result releases the route, but not a current execution's
+        // outstanding cleanup responsibility. Serialize with Stop and claim so
+        // an unbound launch cannot disappear between cancellation and cleanup.
+        let database = self.database.lock().await;
+        let pending = database.connection().query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_run WHERE id = ?1 AND execution_epoch = ?2
+             AND cancel_requested_at IS NOT NULL AND cancel_acknowledged_at IS NULL)",
+            rusqlite::params![key.agent_run_id, key.execution_epoch],
+            |row| row.get::<_, bool>(0),
+        );
+        match pending {
+            Ok(true) => {
+                self.planned_shutdown.cancel_active(key).await;
+                self.agent_run_cancellation_notify.notify_one();
+            }
+            Ok(false) => {
+                self.planned_shutdown.remove_active(key).await;
+            }
+            Err(error) => eprintln!("failed to inspect current execution cleanup: {error:#}"),
+        }
+    }
+
+    /// Snapshot existing ownership only. Hold the database lock so a launch
+    /// cannot be committed between this snapshot and the admission query.
+    async fn current_runtime_execution_keys(&self) -> Vec<ActiveExecutionKey> {
+        let mut keys = self
+            .planned_shutdown
+            .active_snapshots()
+            .await
+            .into_iter()
+            .map(|entry| entry.key)
+            .collect::<HashSet<_>>();
+        keys.extend(self.runtime_fleet.active_execution_keys().await);
+        keys.extend(self.claude_code_cli.active_execution_keys());
+        keys.extend(self.antigravity_app.active_execution_keys().await);
+        keys.into_iter().collect()
+    }
+
     async fn collect_delivery_batch_dispatch_candidates(
         self: &Arc<Self>,
     ) -> Result<Vec<rovai_core::runtime::QueuedAgentRunCandidate>> {
         let missions = {
             let database = self.database.lock().await;
-            rovai_core::delivery_queue::waiting_mission_batch_workspaces(&database)?
+            let active_executions = self.current_runtime_execution_keys().await;
+            rovai_core::delivery_queue::waiting_mission_batch_workspaces(
+                &database,
+                &active_executions,
+            )?
         };
         // Preparing a Mission can take time. Each Camp owns one short-lived job;
         // ordinary lanes continue through selection and dispatch immediately.
@@ -13363,6 +13440,7 @@ impl Core {
                     .prepare_mission_execution_workspace(
                         &camp_id,
                         rovai_core::runtime::AgentRunWorkspace::runtime_managed_path(project_path),
+                        None,
                         None,
                     )
                     .await;
@@ -13427,11 +13505,13 @@ impl Core {
                         [],
                         |row| row.get(0),
                     )?;
+                    let active_executions = self.current_runtime_execution_keys().await;
                     let runs =
                         rovai_core::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
                             &mut database,
                             DELIVERY_BATCH_SCHEDULER_PAGE_LIMIT,
                             &ready,
+                            &active_executions,
                         )?;
                     let mut statement = database.connection().prepare(
                         "SELECT DISTINCT camp_id FROM agent_run WHERE id IN (SELECT value FROM json_each(?1)) AND camp_id IS NOT NULL
@@ -13625,10 +13705,12 @@ impl Core {
         }
         let pending_cleanup = {
             let database = self.database.lock().await;
+            let active_executions = self.current_runtime_execution_keys().await;
             ExecutionRuntimeService::default().runtime_cleanup_blocked_since(
                 &database,
                 &candidate.conversation_id,
                 &candidate.agent_run_id,
+                &active_executions,
             )
         };
         match pending_cleanup {
@@ -13696,7 +13778,7 @@ impl Core {
             return;
         }
         let workspace = candidate.execution_workspace();
-        let _project_path = match self.validate_dispatch_workspace(&candidate).await {
+        let validated_project_path = match self.validate_dispatch_workspace(&candidate).await {
             Ok(path) => path,
             Err(error) => {
                 self.reject_agent_run_dispatch(
@@ -13722,6 +13804,7 @@ impl Core {
                 return;
             }
         };
+        let adapter_kind = runtime.adapter_kind;
         match self
             .prepare_runtime_for_dispatch(&candidate, runtime, &workspace)
             .await
@@ -13741,7 +13824,10 @@ impl Core {
                 return;
             }
         }
-        let workspace = match self.prepare_mission_workspace(&candidate).await {
+        let workspace = match self
+            .prepare_mission_workspace(&candidate, &validated_project_path)
+            .await
+        {
             Ok(Some(workspace)) => workspace,
             Ok(None) => return,
             Err(error) => {
@@ -13773,9 +13859,9 @@ impl Core {
                 return;
             }
         };
-        let claim = {
+        let (claim, registered) = {
             let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default().claim_agent_run(
+            let claim = ExecutionRuntimeService::default().claim_agent_run(
                 &mut database,
                 &CommandEnvelope {
                     command_id: uuid::Uuid::new_v4().to_string(),
@@ -13798,7 +13884,25 @@ impl Core {
                         starting_git_observation,
                     },
                 },
-            )
+            );
+            // Stop and cleanup admission use this same database lock. Publish
+            // ownership with the claim, before input materialization can yield
+            // or a stop can make the Run terminal.
+            let registered = if let Ok(claim) = &claim
+                && claim.result.status == CommandResultStatus::Accepted
+                && let Some(epoch) = claim.result.payload["executionEpoch"].as_i64()
+            {
+                self.planned_shutdown
+                    .register_active(
+                        &launch_permit,
+                        ActiveExecutionKey::new(&candidate.agent_run_id, epoch),
+                        adapter_kind,
+                    )
+                    .await
+            } else {
+                false
+            };
+            (claim, registered)
         };
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
@@ -13881,15 +13985,7 @@ impl Core {
         ) {
             return;
         }
-        if !self
-            .planned_shutdown
-            .register_active(
-                &launch_permit,
-                active_key.clone(),
-                execution.runtime.adapter_kind,
-            )
-            .await
-        {
+        if !registered {
             drop(database);
             let error = anyhow::anyhow!(
                 "AgentRun execution could not enter the generation-local active registry"
@@ -13935,9 +14031,13 @@ impl Core {
             }
             if launch_cancelled { return; }
             if launch_result.is_ok() {
-                core.planned_shutdown
-                    .remove_active_if_unbound(&active_key)
-                    .await;
+                if core
+                    .planned_shutdown
+                    .launch_finished_without_route(&active_key)
+                    .await
+                {
+                    core.release_active_execution(&active_key).await;
+                }
                 return;
             }
             if let Err(error) = launch_result {
@@ -13978,10 +14078,6 @@ impl Core {
                     "context_payload_too_large".to_string()
                 } else if let Some(model_error) =
                     error.downcast_ref::<AcpLiveModelValidationError>()
-                {
-                    model_error.code.to_string()
-                } else if let Some(model_error) =
-                    error.downcast_ref::<CodexLiveModelValidationError>()
                 {
                     model_error.code.to_string()
                 } else {
@@ -14079,7 +14175,7 @@ impl Core {
                                 .await
                             {
                                 Ok(settlement) => {
-                                    core.planned_shutdown.remove_active(&active_key).await;
+                                    core.release_active_execution(&active_key).await;
                                     terminal_admission.complete_settlement();
                                     runtime_route_permit.complete_callback();
                                     emit_agent_run_terminal(
@@ -14127,7 +14223,7 @@ impl Core {
                                         "reasonCode": delivered_error_code,
                                     }),
                                 );
-                                core.planned_shutdown.remove_active(&active_key).await;
+                                core.release_active_execution(&active_key).await;
                             }
                             terminal_admission.complete_settlement();
                             runtime_route_permit.complete_callback();
@@ -14167,7 +14263,7 @@ impl Core {
                     public_failure,
                 )
                 .await;
-                core.planned_shutdown.remove_active(&active_key).await;
+                core.release_active_execution(&active_key).await;
             }
         });
     }
@@ -14259,11 +14355,17 @@ impl Core {
     ) -> Result<Option<tokio::time::Instant>> {
         let candidates = {
             let database = self.database.lock().await;
+            let active_executions = self.current_runtime_execution_keys().await;
             let mut candidates = Vec::new();
             let mut offset = 0;
             loop {
                 let mut page = ExecutionRuntimeService::default()
-                    .list_cancellation_candidates_page(&database, 32, offset)?;
+                    .list_cancellation_candidates_page(
+                        &database,
+                        32,
+                        offset,
+                        Some(&active_executions),
+                    )?;
                 let count = page.len();
                 candidates.append(&mut page);
                 if count < 32 {
@@ -14434,6 +14536,9 @@ impl Core {
             }
             self.runtime_fleet
                 .acknowledge_cleanup(agent_run_id, execution_epoch)
+                .await;
+            self.planned_shutdown
+                .cleanup_completed(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
                 .await;
         } else {
             self.agent_run_cancellation_notify.notify_one();
@@ -15044,22 +15149,34 @@ impl Core {
         let source_attachment_paths = self
             .resolve_agent_run_source_attachment_paths(execution)
             .await?;
-        let materialization = {
-            let mut database = self.database.lock().await;
-            ContextService.materialize_with_exposures_and_source_attachments(
-                &mut database,
-                &ManagedBlobStore::new(&self.data_dir),
-                skill_exposure,
-                mcp_projection,
-                &source_attachment_paths,
-                &MaterializeContextRequest {
-                    agent_run_id: &execution.agent_run_id,
-                    execution_epoch: execution.execution_epoch,
-                    charter_delivery_mode: request.charter_delivery_mode,
-                    max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
-                },
-            )
-        }?;
+        let mut reads = rovai_core::context::LegacyAttachmentReads::new();
+        let materialization = loop {
+            let result = {
+                let mut database = self.database.lock().await;
+                ContextService.materialize_with_attachment_reads(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    Some(skill_exposure),
+                    Some(mcp_projection),
+                    &source_attachment_paths,
+                    &MaterializeContextRequest {
+                        agent_run_id: &execution.agent_run_id,
+                        execution_epoch: execution.execution_epoch,
+                        charter_delivery_mode: request.charter_delivery_mode,
+                        max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
+                    },
+                    None,
+                    &reads,
+                )
+            };
+            match result {
+                Ok(materialization) => break materialization,
+                Err(error) => {
+                    self.resolve_pending_legacy_attachment_reads(error, &mut reads)
+                        .await?
+                }
+            }
+        };
         match materialization {
             ContextMaterialization::Ready(prepared) => Ok(Some(prepared)),
             ContextMaterialization::Waiting(wait) => {
@@ -15092,56 +15209,59 @@ impl Core {
         let source_attachment_paths = self
             .resolve_agent_run_source_attachment_paths(execution)
             .await?;
-        let preparation = {
-            // The Core database mutex is the logical Runtime Input preparation
-            // boundary. A Compaction Observer cannot commit between selecting
-            // the pending revision and persisting RuntimeInputDelivery.prepared.
-            let mut database = self.database.lock().await;
-            let materialize_request = MaterializeContextRequest {
-                agent_run_id: &execution.agent_run_id,
-                execution_epoch: execution.execution_epoch,
-                charter_delivery_mode: request.charter_delivery_mode,
-                max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
-            };
-            let materialization = match mcp_projection {
-                Some(mcp_projection) => ContextService
-                    .materialize_with_exposures_and_source_attachments(
-                        &mut database,
-                        &ManagedBlobStore::new(&self.data_dir),
-                        skill_exposure,
-                        mcp_projection,
-                        &source_attachment_paths,
-                        &materialize_request,
-                    )?,
-                None => ContextService.materialize_with_skill_exposure_and_source_attachments(
+        let mut reads = rovai_core::context::LegacyAttachmentReads::new();
+        let preparation = loop {
+            let attempt: Result<_> = async {
+                // The Core database mutex is the logical Runtime Input preparation
+                // boundary. A Compaction Observer cannot commit between selecting
+                // the pending revision and persisting RuntimeInputDelivery.prepared.
+                let mut database = self.database.lock().await;
+                let materialize_request = MaterializeContextRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    charter_delivery_mode: request.charter_delivery_mode,
+                    max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
+                };
+                let materialization = ContextService.materialize_with_attachment_reads(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
-                    skill_exposure,
+                    Some(skill_exposure),
+                    mcp_projection,
                     &source_attachment_paths,
                     &materialize_request,
-                )?,
-            };
-            match materialization {
-                ContextMaterialization::Ready(context) => {
-                    let delivery = match request.proposed_delivery_id {
-                        Some(identity) => ContextService
-                            .prepare_input_delivery_for_context_with_identity(
+                    None,
+                    &reads,
+                )?;
+                Ok(match materialization {
+                    ContextMaterialization::Ready(context) => {
+                        let delivery = match request.proposed_delivery_id {
+                            Some(identity) => ContextService
+                                .prepare_input_delivery_for_context_with_identity(
+                                    &mut database,
+                                    &execution.agent_run_id,
+                                    execution.execution_epoch,
+                                    &context,
+                                    identity,
+                                )?,
+                            None => ContextService.prepare_input_delivery_for_context(
                                 &mut database,
                                 &execution.agent_run_id,
                                 execution.execution_epoch,
                                 &context,
-                                identity,
                             )?,
-                        None => ContextService.prepare_input_delivery_for_context(
-                            &mut database,
-                            &execution.agent_run_id,
-                            execution.execution_epoch,
-                            &context,
-                        )?,
-                    };
-                    Some(Ok((context, delivery)))
+                        };
+                        Some(Ok((context, delivery)))
+                    }
+                    ContextMaterialization::Waiting(wait) => Some(Err(wait)),
+                })
+            }
+            .await;
+            match attempt {
+                Ok(preparation) => break preparation,
+                Err(error) => {
+                    self.resolve_pending_legacy_attachment_reads(error, &mut reads)
+                        .await?
                 }
-                ContextMaterialization::Waiting(wait) => Some(Err(wait)),
             }
         };
         match preparation {
@@ -15162,6 +15282,38 @@ impl Core {
             }
             None => Ok(None),
         }
+    }
+
+    async fn resolve_pending_legacy_attachment_reads(
+        &self,
+        error: anyhow::Error,
+        reads: &mut rovai_core::context::LegacyAttachmentReads,
+    ) -> Result<()> {
+        let pending = error.downcast::<rovai_core::context::PendingLegacyAttachmentReads>()?;
+        let store = ThreadAttachmentStore::new(&self.data_dir);
+        let resolved = tokio::task::spawn_blocking(move || {
+            pending
+                .0
+                .into_iter()
+                .map(|candidate| {
+                    let id = candidate.attachment_id().to_owned();
+                    let path = match store.verify_runtime_read_candidate(&candidate) {
+                        Ok(path) => Some(path),
+                        Err(error) => {
+                            eprintln!(
+                                "legacy_attachment_read_unavailable attachment_id={id}: {error:#}"
+                            );
+                            None
+                        }
+                    };
+                    (id, (candidate, path))
+                })
+                .collect::<rovai_core::context::LegacyAttachmentReads>()
+        })
+        .await
+        .context("legacy Attachment read task failed")?;
+        reads.extend(resolved);
+        Ok(())
     }
 
     async fn resolve_agent_run_source_attachment_paths(
@@ -15224,13 +15376,12 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
     ) -> Result<PreparedMcpProjection> {
-        self.subsystems.require("mcp")?;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         let mut projection = {
             let database = self.database.lock().await;
             self.mcp_projection.prepare(
                 &database,
-                self.mcp_config()?,
+                self.mcp_config(),
                 &McpProjectionRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -16335,7 +16486,7 @@ impl Core {
     }
 
     async fn verified_camp_runtime_authorization(
-        &self,
+        self: &Arc<Self>,
         camp_id: &str,
         _workspace: &Path,
     ) -> Result<ThreadOutputDirectory> {
@@ -16564,21 +16715,7 @@ impl Core {
             )));
         }
         let explicit_model = match execution.runtime.model.source.as_str() {
-            "explicit" => {
-                runtime
-                    .validate_explicit_model(model, &{
-                        let mut options = execution.runtime.model.options.clone();
-                        // Core's per-turn service tier annotation is not a native model option.
-                        if execution.runtime.camp_fast.is_some()
-                            && let Some(options) = options.as_object_mut()
-                        {
-                            options.remove("serviceTier");
-                        }
-                        options
-                    })
-                    .await?;
-                Some(model)
-            }
+            "explicit" => Some(model),
             "runtime_default" => None,
             _ => anyhow::bail!("Codex model source is invalid"),
         };
@@ -16707,6 +16844,9 @@ impl Core {
                 .await;
             return Ok(());
         };
+        let reasoning_effort = execution.runtime.model.options["reasoning_effort"].as_str();
+        // Frozen model.options.serviceTier is pricing audit data. The native
+        // Turn override comes only from the separately frozen Camp preference.
         let service_tier_for_turn = execution
             .runtime
             .camp_fast
@@ -16721,7 +16861,6 @@ impl Core {
                 false,
             )?;
         }
-        let reasoning_effort = execution.runtime.model.options["reasoning_effort"].as_str();
         let delivery = {
             let mut database = self.database.lock().await;
             ContextService.prepare_input_delivery_for_context(
@@ -17822,12 +17961,11 @@ impl Core {
                 )
             }?;
             let Some(current) = current else {
-                self.planned_shutdown
-                    .remove_active(&ActiveExecutionKey::new(
-                        &execution.agent_run_id,
-                        execution.execution_epoch,
-                    ))
-                    .await;
+                self.release_active_execution(&ActiveExecutionKey::new(
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                ))
+                .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
                 return Ok(());
@@ -17877,12 +18015,11 @@ impl Core {
                 }
             }?;
             if terminal.result.status != CommandResultStatus::Rejected {
-                self.planned_shutdown
-                    .remove_active(&ActiveExecutionKey::new(
-                        &execution.agent_run_id,
-                        execution.execution_epoch,
-                    ))
-                    .await;
+                self.release_active_execution(&ActiveExecutionKey::new(
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                ))
+                .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
                 emit_agent_run_terminal(
@@ -19250,6 +19387,7 @@ impl Core {
             }
         }
         if failure_persisted {
+            self.agent_run_cancellation_notify.notify_one();
             self.delivery_batch_scheduler_notify.notify_one();
             self.execution_wake.runs.notify_one();
         }
@@ -19979,24 +20117,16 @@ async fn run_core(
             .with_startup_configurations(rovai_core::runtime_startup::load_all(&database)?),
     );
     runtime_search_environment.activate_for_runtime_commands();
+    let search_summary = runtime_search_environment.summary();
+    database.record_runtime_search_environment_generation(
+        search_summary.generation,
+        &search_summary.created_at,
+    )?;
     // These recoveries fence durable execution/input state. Unlike optional
     // filesystem maintenance, their failure cannot expose normal execution.
     let compaction_detector_policies =
         DesiredCompactionDetectorPolicies::from_process_environment();
     let recovery = (|| -> Result<_> {
-        // An old native tool can outlive Core. Reclaim persisted ownership before
-        // readiness, so another Runtime sharing its execution root cannot race it.
-        #[cfg(target_os = "macos")]
-        rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
-            &data_dir.join("runtime"),
-        )?;
-        // Retired backend: recover only processes proven owned by the generic
-        // kernel-identity ledger. Never launch it or touch persistent history/credentials.
-        #[cfg(target_os = "macos")]
-        rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
-            &data_dir.join("runtime/cline-hub/hosts"),
-        )?;
-        ManagedBlobStore::new(&data_dir).recover_gc_state(&mut database)?;
         recover_legacy_pending_cancellations(&mut database)?;
         rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
         AutomationService::default().recover_interrupted(&mut database)?;
@@ -20043,15 +20173,6 @@ async fn run_core(
         )?;
         return Ok(());
     }
-    // Freeze candidate IDs before exposing RPC, then recheck eligibility at
-    // deletion time. A failed optional snapshot skips cleanup for this boot;
-    // neither fail authority readiness nor rescan newly created Camps on retry.
-    let startup_pending_camp_ids = CollaborationService::default()
-        .snapshot_pending_camps_for_startup_cleanup(&database)
-        .unwrap_or_else(|error| {
-            eprintln!("Startup pending Thread cleanup skipped: {error:#}");
-            Vec::new()
-        });
     let skill_library = SkillLibraryService::deferred(skill_library_root);
     let mcp_config = mcp_config_path
         .map_or_else(McpConfigStore::default_path, Ok)
@@ -20091,9 +20212,8 @@ async fn run_core(
         database: Arc::new(Mutex::new(database)),
         pasted_text_operations: Mutex::new(()),
         subsystems: CoreSubsystems::new(),
-        subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
+        subsystem_initialization: Mutex::new(()),
         removed_skill_project_roots,
-        startup_pending_camp_ids,
         builtin_tool_listener: Mutex::new(None),
         builtin_tool_listener_notify: Notify::new(),
         runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
@@ -20386,11 +20506,100 @@ async fn run_core(
         source_contract.as_deref(),
     );
     eprintln!("rovai-core {} ready", env!("CARGO_PKG_VERSION"));
+    // Exactly one historical cleanup attempt per Core, outside retryable
+    // subsystem initialization, the database lock and the RPC request loop.
+    // The worker shares one budget across both ledger formats and never
+    // publishes a feature failure or manufactures a task cleanup ACK.
+    let historical_cleanup_core = core.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut report =
+            rovai_core::managed_process::HistoricalProcessCleanup::new(Duration::from_secs(3));
+        #[cfg(target_os = "macos")]
+        for root in ["runtime", "runtime/cline-hub/hosts"] {
+            if historical_cleanup_core.planned_shutdown.shutdown_started() {
+                break;
+            }
+            rovai_core::managed_process::ManagedProcess::recover_runtime_descendants(
+                &historical_cleanup_core.data_dir.join(root),
+                &mut report,
+            );
+        }
+        if !historical_cleanup_core.planned_shutdown.shutdown_started() {
+            historical_cleanup_core
+                .runtime_fleet
+                .recover_previous_processes(&mut report);
+        }
+        report.expired();
+        eprintln!(
+            "[startup] stage=historical_process_cleanup cleaned={} skipped={} budget_exhausted={} diagnostics={:?}",
+            report.cleaned, report.skipped, report.budget_exhausted, report.diagnostics
+        );
+    });
+    let optional_core = core.clone();
+    tokio::spawn(async move {
+        optional_core.initialize_optional_subsystems().await;
+    });
+    let maintenance_core = core.clone();
+    let maintenance_cutoff = chrono::Utc::now().to_rfc3339();
+    tokio::spawn(async move {
+        let mut budget =
+            rovai_core::maintenance_budget::MaintenanceBudget::new(256, Duration::from_secs(3));
+        let candidates = {
+            let database =
+                tokio::time::timeout(Duration::from_millis(50), maintenance_core.database.lock())
+                    .await;
+            match database {
+                Ok(database) => CollaborationService::default()
+                    .snapshot_pending_camps_for_startup_cleanup(&database, &maintenance_cutoff),
+                Err(_) => Ok(Vec::new()),
+            }
+        };
+        match candidates {
+            Ok(candidates) => {
+                for camp in candidates {
+                    if !budget.take() {
+                        break;
+                    }
+                    let result = {
+                        let Ok(mut database) = tokio::time::timeout(
+                            Duration::from_millis(50),
+                            maintenance_core.database.lock(),
+                        )
+                        .await
+                        else {
+                            break;
+                        };
+                        CollaborationService::default()
+                            .discard_empty_pending_camps_on_startup(&mut database, &[camp])
+                    };
+                    match result {
+                        Ok(camps) => {
+                            for camp in camps {
+                                emit_navigation_invalidated(
+                                    &maintenance_core.output,
+                                    "camps.discardPending",
+                                    Some(&camp),
+                                );
+                                // Unreferenced output trees may contain newly written or
+                                // original files. Retain them instead of a historical sweep.
+                            }
+                        }
+                        Err(error) => budget.report("pending Thread retirement", error),
+                    }
+                }
+            }
+            Err(error) => budget.report("pending Thread candidates", error),
+        }
+        let cleanup_core = maintenance_core.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            ManagedBlobStore::new(&cleanup_core.data_dir)
+                .recover_gc_state(&cleanup_core.database, &mut budget);
+        })
+        .await;
+        maintenance_core.finish_subsystem("maintenance", Ok(()));
+    });
     let runtime_discovery_core = core.clone();
     let mut runtime_discovery_handle = tokio::spawn(async move {
-        runtime_discovery_core
-            .initialize_optional_subsystems()
-            .await;
         runtime_discovery_core.run_runtime_discovery().await;
         runtime_discovery_core
             .recover_pending_execution_intents()
@@ -21807,8 +22016,7 @@ async fn persist_pi_prompt_completion(
                 },
             )
             .await?;
-        core.planned_shutdown
-            .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        core.release_active_execution(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
             .await;
         terminal_admission.complete_settlement();
         runtime_route_permit.complete_callback();
@@ -21920,9 +22128,11 @@ async fn persist_pi_prompt_completion(
         };
         match terminal {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
-                core.planned_shutdown
-                    .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-                    .await;
+                core.release_active_execution(&ActiveExecutionKey::new(
+                    agent_run_id,
+                    execution_epoch,
+                ))
+                .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
                 emit_agent_run_terminal(
@@ -22017,9 +22227,6 @@ async fn process_pi_agent_run_exit(
     core.pi
         .forget_agent_run(agent_run_id, execution_epoch)
         .await;
-    core.planned_shutdown
-        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-        .await;
     core.stop_network_recovery(
         agent_run_id,
         execution_epoch,
@@ -22045,6 +22252,8 @@ async fn process_pi_agent_run_exit(
         public_failure,
     )
     .await;
+    core.release_active_execution(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        .await;
 }
 
 async fn process_acp_events(
@@ -24667,9 +24876,11 @@ async fn persist_acp_prompt_completion(
         if let Some((execution, command)) = recovery {
             match command {
                 Ok(command) if command.result.status != CommandResultStatus::Rejected => {
-                    core.planned_shutdown
-                        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-                        .await;
+                    core.release_active_execution(&ActiveExecutionKey::new(
+                        agent_run_id,
+                        execution_epoch,
+                    ))
+                    .await;
                     runtime_route_permit.complete_callback();
                     if core.planned_shutdown.shutdown_started() {
                         eprintln!(
@@ -24738,8 +24949,7 @@ async fn persist_acp_prompt_completion(
                 },
             )
             .await?;
-        core.planned_shutdown
-            .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        core.release_active_execution(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
             .await;
         terminal_admission.complete_settlement();
         runtime_route_permit.complete_callback();
@@ -24839,9 +25049,11 @@ async fn persist_acp_prompt_completion(
         };
         match terminal {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
-                core.planned_shutdown
-                    .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-                    .await;
+                core.release_active_execution(&ActiveExecutionKey::new(
+                    agent_run_id,
+                    execution_epoch,
+                ))
+                .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
                 emit_agent_run_terminal(
@@ -24978,9 +25190,6 @@ async fn process_acp_agent_run_exit(
             .forget_agent_run(agent_run_id, execution_epoch)
             .await;
     }
-    core.planned_shutdown
-        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-        .await;
     core.stop_network_recovery(
         agent_run_id,
         execution_epoch,
@@ -24995,6 +25204,8 @@ async fn process_acp_agent_run_exit(
         None,
     )
     .await;
+    core.release_active_execution(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        .await;
 }
 
 async fn buffer_runtime_usage(
@@ -25845,9 +26056,11 @@ async fn process_agent_run_codex_message(
             .await
         {
             Ok(settlement) => {
-                core.planned_shutdown
-                    .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-                    .await;
+                core.release_active_execution(&ActiveExecutionKey::new(
+                    agent_run_id,
+                    execution_epoch,
+                ))
+                .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
                 emit_agent_run_terminal(
@@ -25992,9 +26205,11 @@ async fn process_agent_run_codex_message(
         };
         match terminal {
             Ok(terminal) if terminal.result.status != CommandResultStatus::Rejected => {
-                core.planned_shutdown
-                    .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-                    .await;
+                core.release_active_execution(&ActiveExecutionKey::new(
+                    agent_run_id,
+                    execution_epoch,
+                ))
+                .await;
                 terminal_admission.complete_settlement();
                 runtime_route_permit.complete_callback();
                 emit_agent_run_terminal(
@@ -26348,9 +26563,6 @@ async fn process_agent_run_exit(
     core.codex_cli
         .forget_agent_run(agent_run_id, execution_epoch)
         .await;
-    core.planned_shutdown
-        .remove_active(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
-        .await;
     core.stop_network_recovery(
         agent_run_id,
         execution_epoch,
@@ -26365,6 +26577,8 @@ async fn process_agent_run_exit(
         None,
     )
     .await;
+    core.release_active_execution(&ActiveExecutionKey::new(agent_run_id, execution_epoch))
+        .await;
 }
 
 async fn dispatch_pending_single_chat_inputs(core: &Core) -> Result<()> {
@@ -28546,9 +28760,8 @@ mod tests {
             pasted_text_operations: Mutex::new(()),
             automation_scheduler_control: RwLock::new(None),
             subsystems: CoreSubsystems::ready_for_test(),
-            subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
+            subsystem_initialization: Mutex::new(()),
             removed_skill_project_roots: RemovedSkillProjectRoots::default(),
-            startup_pending_camp_ids: Vec::new(),
             builtin_tool_listener: Mutex::new(None),
             builtin_tool_listener_notify: Notify::new(),
             runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
@@ -30225,6 +30438,7 @@ done
                 rovai_core::runtime_startup::RuntimeStartupConfiguration {
                     custom_api_snapshot: None,
                     common_environment_unavailable: false,
+                    configuration_error: None,
                     program_path: Some(executable.to_string_lossy().into_owned()),
                     environment: vec![rovai_core::runtime_startup::RuntimeEnvironmentVariable {
                         name: "ROVAI_CATALOG_FIXTURE".into(),
@@ -30542,6 +30756,7 @@ done
                         rovai_core::runtime_startup::RuntimeStartupConfiguration {
                             custom_api_snapshot: None,
                         common_environment_unavailable: false,
+                    configuration_error: None,
                             program_path: Some(executable.to_string_lossy().into_owned()),
                             environment: Vec::new(),
                         },
@@ -31146,7 +31361,7 @@ done
         let root = root.canonicalize().unwrap();
         let workspace = root.join("data/quick-chat");
         fs::create_dir_all(&workspace).unwrap();
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
 
         let (camp_id, execution) = {
             let mut database = core.database.lock().await;
@@ -31227,7 +31442,7 @@ done
         let root = root.canonicalize().unwrap();
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
 
         let camp_id = {
             let mut database = core.database.lock().await;
@@ -31413,7 +31628,7 @@ done
         let root = root.canonicalize().unwrap();
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
         let source = root.join("published.txt");
         fs::write(&source, b"published source reference").unwrap();
 
@@ -31503,28 +31718,112 @@ done
             );
         }
 
-        let view_attachment_root = core
-            .attachment_views
-            .root()
-            .join("camps")
-            .join(&camp_id)
-            .join("attachments");
+        // Dispatch does not inspect historical attachments. Selected input reads
+        // use the original file verifier outside the shared database mutex.
+        fs::write(&source, b"historical attachment").unwrap();
+        let attachment_id = {
+            let mut database = core.database.lock().await;
+            let store = ThreadAttachmentStore::new(&core.data_dir);
+            core.attachment_views
+                .ensure_empty_camp_ready(&mut database, &camp_id)
+                .unwrap();
+            let draft = store
+                .save_body(&mut database, &camp_id, "Legacy message")
+                .unwrap();
+            let draft = store
+                .prepare_from_path(
+                    &mut database,
+                    &camp_id,
+                    draft.revision,
+                    &source,
+                    "published.txt",
+                )
+                .unwrap();
+            let command_id = uuid::Uuid::new_v4().to_string();
+            let publication = core
+                .attachment_views
+                .stage_publication(&mut database, &store, &camp_id, &command_id, draft.revision)
+                .unwrap()
+                .unwrap();
+            core.attachment_views
+                .gate_publication(&mut database, &publication)
+                .unwrap();
+            core.attachment_views
+                .promote_publication(&mut database, &publication)
+                .unwrap();
+            let execution = CollaborationService::default()
+                .send_user_camp_draft_with_publication(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id,
+                        actor: ActorRef::User {
+                            user_id: "test-user".into(),
+                        },
+                        camp_id: Some(camp_id.clone()),
+                        expected_versions: vec![],
+                        execution_epoch: None,
+                        payload: rovai_core::collaboration::SendUserThreadDraftCommand {
+                            draft_client: Default::default(),
+                            camp_id: camp_id.clone(),
+                            draft_revision: draft.revision,
+                            execution: None,
+                        },
+                    },
+                    Some(&publication.operation_id),
+                )
+                .unwrap();
+            assert_eq!(execution.result.status, CommandResultStatus::Applied);
+            core.attachment_views
+                .complete_publication(&mut database, &publication.operation_id)
+                .unwrap();
+            core.attachment_views
+                .mark_legacy_view_broken_for_test(&mut database, &camp_id)
+                .unwrap();
+            publication.attachment_ids[0].clone()
+        };
+        core.verified_camp_attachment_admission(&camp_id, &workspace)
+            .await
+            .unwrap();
+        let database = core.database.lock().await;
+        assert!(
+            rovai_core::camp_attachment_view::resolve_published_attachment_path(
+                database.connection(),
+                &camp_id,
+                &attachment_id
+            )
+            .is_err()
+        );
+        let candidate = ThreadAttachmentStore::new(&core.data_dir)
+            .desktop_open_candidate(&database, &camp_id, &attachment_id)
+            .unwrap()
+            .unwrap();
+        let mut reads = rovai_core::context::LegacyAttachmentReads::new();
+        // Holding the DB mutex here deterministically catches a regression that
+        // reacquires it for file verification (a timeout reports that deadlock).
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            core.resolve_pending_legacy_attachment_reads(
+                rovai_core::context::PendingLegacyAttachmentReads(vec![candidate]).into(),
+                &mut reads,
+            ),
+        )
+        .await
+        .expect("file reads must not acquire the global database mutex")
+        .unwrap();
+        let path = reads[&attachment_id].1.as_ref().unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"historical attachment");
+        drop(database);
+
+        let camps_root = core.attachment_views.root().join("camps");
         drop(admission);
+        core.attachment_views
+            .remove_camp_view(&mut *core.database.lock().await, &camp_id)
+            .unwrap();
         ThreadAttachmentStore::new(&core.data_dir)
             .remove_camp(&camp_id)
             .unwrap();
         drop(core);
-        fs::set_permissions(&view_attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
-        fs::set_permissions(
-            view_attachment_root.parent().unwrap(),
-            fs::Permissions::from_mode(0o700),
-        )
-        .unwrap();
-        fs::set_permissions(
-            view_attachment_root.parent().unwrap().parent().unwrap(),
-            fs::Permissions::from_mode(0o700),
-        )
-        .unwrap();
+        fs::set_permissions(&camps_root, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -33795,36 +34094,7 @@ done
                 },
             )
             .unwrap();
-        let agent_run_id = sent.result.payload["agentRunIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
-                [&agent_run_id],
-            )
-            .unwrap();
-        // Tool output is bounded before persistence. A plan explanation uses
-        // the ordinary managed-Blob path that this concurrency test reads.
-        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
-        let evidence = ExecutionEvidenceService
-            .record_runtime_event(
-                &mut database,
-                &ManagedBlobStore::new(&data_dir),
-                &agent_run_id,
-                1,
-                "runtime.plan",
-                &json!({
-                    "explanation": secret,
-                    "plan": [],
-                }),
-            )
-            .unwrap()
-            .unwrap();
-        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
-        let evidence_id = evidence.id.clone();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
 
         let mission_git = crate::mission_workspace::MissionGit::new(git_path.clone()).unwrap();
         let repository = mission_git.inspect(&source).await.unwrap().unwrap();
@@ -33857,7 +34127,7 @@ done
         mission_git.materialize(&workspace).await.unwrap();
         workspace.state = "ready".into();
         fs::write(worktree.join("tracked.txt"), "changed\n").unwrap();
-        let database = Database::open_with_runtime_camp_files_root(
+        let mut database = Database::open_with_runtime_camp_files_root(
             &data_dir,
             attachment_views.root(),
             attachment_views.root_identity_digest(),
@@ -33870,6 +34140,57 @@ done
                 [&workspace.id],
             )
             .unwrap();
+        // Current sends enqueue Deliveries. Claim only after the real Mission
+        // workspace is ready instead of expecting the retired immediate Run IDs.
+        let prepared = crate::delivery_queue::capture_prepared_batch_workspace(
+            &database,
+            &camp_id,
+            AgentRunWorkspace {
+                execution_root: workspace.working_directory.clone(),
+                access: "write".into(),
+                isolation: "git_worktree".into(),
+            },
+            json!({"workingDirectory": workspace.working_directory, "branch": workspace.branch}),
+        )
+        .unwrap();
+        let workspaces =
+            crate::delivery_queue::BatchWorkspaces::from([(camp_id.clone(), Ok(prepared))]);
+        let agent_run_id = crate::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+            &mut database,
+            1,
+            &workspaces,
+            &[],
+        )
+        .unwrap()
+        .pop()
+        .expect("ready Mission Delivery should be claimed");
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+        // Tool output is bounded before persistence. A plan explanation uses
+        // the ordinary managed-Blob path that this concurrency test reads.
+        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
+        let evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                &agent_run_id,
+                1,
+                "runtime.plan",
+                &json!({
+                    "explanation": secret,
+                    "plan": [],
+                }),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
+        let evidence_id = evidence.id.clone();
+
         let database_path = database.path().to_path_buf();
         drop(database);
         drop(attachment_views);
@@ -34410,6 +34731,171 @@ done
         assert!(worktree.exists());
         assert_ne!(worktree, source);
 
+        // A held lifecycle gate gives a deterministic admission boundary. The
+        // ordinary Thread must bypass it only for roots proven unrelated; no slow
+        // Git process is needed for these assertions.
+        let independent = root.join("independent");
+        let sibling_prefix = root.join(format!(
+            "{}-independent",
+            worktree.file_name().unwrap().to_str().unwrap()
+        ));
+        fs::create_dir(&independent).unwrap();
+        fs::create_dir(&sibling_prefix).unwrap();
+        let ordinary_camp = {
+            let mut database = core.database.lock().await;
+            let created = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".into(),
+                        },
+                        camp_id: None,
+                        expected_versions: vec![],
+                        execution_epoch: None,
+                        payload: CreateThreadCommand {
+                            team: None,
+                            name: Some("Independent workspace".into()),
+                            project_binding_kind: ProjectBindingKind::Directory,
+                            project_path: independent.to_string_lossy().into_owned(),
+                            member_agent_ids: vec![candidate.agent_id.clone()],
+                            default_lead_agent_id: candidate.agent_id.clone(),
+                            collaboration_mode: ThreadCollaborationMode::Peer,
+                            activation_state: ThreadActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            created.result.payload["threadId"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let (workspace_id, preparation_token): (String, String) = core
+            .database
+            .lock()
+            .await
+            .connection()
+            .query_row(
+                "SELECT id,preparation_token FROM mission_workspace WHERE camp_id=?1",
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let staging = root.join(format!(".rovai-mission-prepare-{preparation_token}"));
+        fs::create_dir(&staging).unwrap();
+        let nested = worktree.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let lifecycle = core.mission_workspace_gate.lock().await;
+        for state in ["ready", "preparing", "cleanup_pending"] {
+            core.database
+                .lock()
+                .await
+                .connection()
+                .execute(
+                    "UPDATE mission_workspace SET state=?2 WHERE id=?1",
+                    rusqlite::params![workspace_id, state],
+                )
+                .unwrap();
+            for (thread, directory, immediate) in [
+                (ordinary_camp.as_str(), independent.as_path(), true),
+                (ordinary_camp.as_str(), sibling_prefix.as_path(), true),
+                (ordinary_camp.as_str(), worktree.as_path(), false),
+                (ordinary_camp.as_str(), nested.as_path(), false),
+                (ordinary_camp.as_str(), root.as_path(), false),
+                (ordinary_camp.as_str(), staging.as_path(), false),
+                (camp_id.as_str(), independent.as_path(), false),
+            ] {
+                let execution = AgentRunWorkspace::runtime_managed_path(
+                    directory.to_string_lossy().into_owned(),
+                );
+                let mut preparation = std::pin::pin!(core.prepare_mission_execution_workspace(
+                    thread,
+                    execution.clone(),
+                    None,
+                    Some(directory)
+                ));
+                let polled = std::future::poll_fn(|cx| {
+                    std::task::Poll::Ready(std::future::Future::poll(preparation.as_mut(), cx))
+                })
+                .await;
+                assert_eq!(
+                    polled.is_ready(),
+                    immediate,
+                    "{state}, {directory:?}: {polled:?}"
+                );
+                if let std::task::Poll::Ready(result) = polled {
+                    assert_eq!(result.unwrap(), Some(execution));
+                }
+            }
+        }
+        // Missing canonical validation and malformed historical ownership retain
+        // the serialized path, rather than adding a new refusal to ordinary runs.
+        for malformed in [false, true] {
+            if malformed {
+                core.database
+                    .lock()
+                    .await
+                    .connection()
+                    .execute(
+                        "UPDATE mission_workspace SET worktree_path='relative/unknown' WHERE id=?1",
+                        [&workspace_id],
+                    )
+                    .unwrap();
+            }
+            let execution =
+                AgentRunWorkspace::runtime_managed_path(independent.to_string_lossy().into_owned());
+            let mut preparation = std::pin::pin!(core.prepare_mission_execution_workspace(
+                &ordinary_camp,
+                execution,
+                None,
+                malformed.then_some(independent.as_path())
+            ));
+            let polled = std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(preparation.as_mut(), cx))
+            })
+            .await;
+            assert!(polled.is_pending());
+        }
+        core.database
+            .lock()
+            .await
+            .connection()
+            .execute(
+                "UPDATE mission_workspace SET state='ready',worktree_path=?2 WHERE id=?1",
+                rusqlite::params![workspace_id, worktree.to_str().unwrap()],
+            )
+            .unwrap();
+        // Before the first plan is persisted, Git inspection can still choose a
+        // managed path. Missing association data is not evidence of independence.
+        {
+            let database = core.database.lock().await;
+            let connection = database.connection();
+            connection
+                .execute_batch("SAVEPOINT missing_workspace_proof")
+                .unwrap();
+            connection
+                .execute("DELETE FROM mission_workspace WHERE id=?1", [&workspace_id])
+                .unwrap();
+            let disjoint =
+                crate::mission_workspace::execution_root_is_disjoint(connection, &independent)
+                    .unwrap();
+            connection
+                .execute_batch(
+                    "ROLLBACK TO missing_workspace_proof; RELEASE missing_workspace_proof",
+                )
+                .unwrap();
+            assert!(
+                !disjoint,
+                "an unplanned Mission must retain lifecycle serialization"
+            );
+        }
+        drop(lifecycle);
+        fs::remove_dir(staging).unwrap();
+        fs::remove_dir(nested).unwrap();
+        assert!(worktree.join("tracked.txt").is_file());
+
         let wrapper_root = root.join("blocking-git");
         fs::create_dir_all(&wrapper_root).unwrap();
         let entered = wrapper_root.join("entered");
@@ -34430,10 +34916,84 @@ done
             RuntimeSearchEnvironment::for_test_paths(3, vec![wrapper_root.clone()]),
         );
 
+        // Normal ready reuse performs one complete identity validation. Count
+        // this chain only, not every Git operation involved in dispatch.
+        fs::write(&release, "ready reuse").unwrap();
+        let reused = core
+            .prepare_mission_workspace(&candidate, &source)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reused, prepared);
+        let calls = fs::read_to_string(&invocations).unwrap();
+        for query in ["--show-toplevel", "--git-common-dir", "--git-dir"] {
+            assert_eq!(
+                calls
+                    .lines()
+                    .filter(|line| line.split_whitespace().any(|arg| arg == query))
+                    .count(),
+                1,
+                "normal ready reuse must validate identity once: {query}\n{calls}"
+            );
+        }
+        let admin = std::process::Command::new(&git_path)
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--path-format=absolute", "--git-dir"])
+            .output()
+            .unwrap();
+        assert!(admin.status.success());
+        let admin = PathBuf::from(String::from_utf8(admin.stdout).unwrap().trim());
+        for marker in ["rovai-mission-owner", "gitdir"] {
+            let path = admin.join(marker);
+            let original = fs::read(&path).unwrap();
+            fs::write(&path, "wrong-owner-or-registration").unwrap();
+            assert!(
+                core.prepare_mission_workspace(&candidate, &source)
+                    .await
+                    .is_err(),
+                "ready reuse must still reject an invalid {marker}"
+            );
+            fs::write(&path, original).unwrap();
+        }
+
+        // A non-destructive cleanup failure can become ready inside this call,
+        // but it is still a recovery path and keeps the final validation.
+        {
+            let database = core.database.lock().await;
+            database.connection().execute(
+                "UPDATE mission_workspace SET state='cleanup_failed',diagnostic='mission.workspace_dirty' WHERE camp_id=?1",
+                [&camp_id],
+            ).unwrap();
+        }
+        fs::write(&invocations, "").unwrap();
+        assert!(
+            core.prepare_mission_workspace(&candidate, &source)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let recovery_calls = fs::read_to_string(&invocations).unwrap();
+        assert!(
+            recovery_calls
+                .lines()
+                .filter(|line| line.split_whitespace().any(|arg| arg == "--show-toplevel"))
+                .count()
+                >= 2,
+            "cleanup failure recovery must not take the normal-reuse shortcut: {recovery_calls}"
+        );
+        fs::remove_file(&release).unwrap();
+        fs::remove_file(&entered).unwrap();
+        fs::write(&invocations, "").unwrap();
+
         let prepare_task = tokio::spawn({
             let core = core.clone();
             let candidate = candidate.clone();
-            async move { core.prepare_mission_workspace(&candidate).await }
+            let validated_source = source.clone();
+            async move {
+                core.prepare_mission_workspace(&candidate, &validated_source)
+                    .await
+            }
         });
         tokio::time::timeout(Duration::from_secs(10), async {
             while !entered.exists() {
@@ -34488,7 +35048,13 @@ done
                 .next()
                 .expect("accepted Camp deletion should be due");
             ThreadDeletionService::default()
-                .commit_business_delete(&mut database, &core.attachment_views, &deletion, &cleanup)
+                .commit_business_delete(
+                    &mut database,
+                    &core.attachment_views,
+                    &deletion,
+                    &cleanup,
+                    &[],
+                )
                 .unwrap();
             cleanup
         };
@@ -34678,11 +35244,17 @@ done
         );
         let agent_run_id = {
             let mut database = core.database.lock().await;
-            claim_waiting_delivery_batches(&mut database, 1)
-                .unwrap()
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| panic!("waiting Delivery did not create an AgentRun: {sent:#}"))
+            let current = core.current_runtime_execution_keys().await;
+            rovai_core::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+                &mut database,
+                1,
+                &Default::default(),
+                &current,
+            )
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("waiting Delivery did not create an AgentRun: {sent:#}"))
         };
         let (version, execution_epoch) = {
             let mut database = core.database.lock().await;
@@ -35026,8 +35598,11 @@ done
                         .await
                 );
             }
+            core.release_active_execution(&key).await;
+            assert!(core.current_runtime_execution_keys().await.contains(&key));
             let cleanup = {
                 let mut database = core.database.lock().await;
+                let current = core.current_runtime_execution_keys().await;
                 if delivered_failure {
                     let action: (String, String) = database.connection().query_row(
                     "SELECT status, effect_disposition FROM action_execution WHERE id = 'approved-action'",
@@ -35054,13 +35629,18 @@ done
                     )
                 );
                 assert!(
-                    claim_waiting_delivery_batches(&mut database, 100)
-                        .unwrap()
-                        .is_empty(),
+                    rovai_core::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+                        &mut database,
+                        100,
+                        &Default::default(),
+                        &current,
+                    )
+                    .unwrap()
+                    .is_empty(),
                     "a failed Run alone must not release the old execution's lane"
                 );
                 ExecutionRuntimeService::default()
-                    .list_cancellation_candidates(&database, 100)
+                    .list_cancellation_candidates_page(&database, 100, 0, Some(&current))
                     .unwrap()
                     .pop()
                     .unwrap()
@@ -35069,6 +35649,7 @@ done
                 core.finish_agent_run_runtime_cleanup(&core.output, cleanup)
                     .await
             );
+            assert!(!core.current_runtime_execution_keys().await.contains(&key));
             let next_run_id = {
                 let mut database = core.database.lock().await;
                 let next = claim_waiting_delivery_batches(&mut database, 100).unwrap();
@@ -35424,6 +36005,206 @@ done
         fs::remove_dir_all(root).unwrap();
     }
 
+    // Owns the frozen configuration -> Core launch -> native request seam. The
+    // adapter's direct RPC fixtures do not exercise Core's pre-launch mapping.
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn codex_frozen_fast_and_model_selection_reach_native_requests() {
+        use std::os::unix::fs::PermissionsExt;
+        for explicit in [false, true] {
+            for (fast, tier) in [
+                (Some(true), Some("priority")),
+                (Some(false), Some("default")),
+                (None, None),
+            ] {
+                let root = std::env::temp_dir().join(format!(
+                    "rovai-codex-frozen-launch-{}",
+                    uuid::Uuid::new_v4()
+                ));
+                let workspace = root.join("workspace");
+                fs::create_dir_all(&workspace).unwrap();
+                let executable = root.join("codex-fixture");
+                write_runtime_resolution_executable(
+                    &executable,
+                    r#"#!/usr/bin/python3
+import json, os, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    with open(os.path.join(os.path.dirname(__file__), 'requests.jsonl'), 'a') as output:
+        output.write(json.dumps(request) + '\n')
+    if 'id' not in request: continue
+    method = request['method']
+    result = {'thread': {'id': 'native-fixture'}} if method.startswith('thread/') else {'turn': {'id':'native-turn'}} if method == 'turn/start' else {}
+    if method == 'account/read': result = {'requiresOpenaiAuth': False}
+    print(json.dumps({'id':request['id'], 'result':result}), flush=True)
+"#,
+                );
+                let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
+                let (camp_id, run_id, _, epoch) =
+                    claimed_runtime_cleanup_test_run(&core, &workspace).await;
+                let execution = {
+                    let mut database = core.database.lock().await;
+                    let service = ExecutionRuntimeService::default();
+                    let mut execution = service
+                        .load_agent_run_execution(&database, &run_id, epoch)
+                        .unwrap()
+                        .unwrap();
+                    execution.runtime.executable_path = executable.to_string_lossy().into_owned();
+                    execution.runtime.model.source = if explicit {
+                        "explicit"
+                    } else {
+                        "runtime_default"
+                    }
+                    .into();
+                    execution.runtime.model.model_id = if explicit {
+                        "unlisted-model"
+                    } else {
+                        "default"
+                    }
+                    .into();
+                    execution.runtime.model.options = if explicit {
+                        json!({"reasoning_effort":"future-native-value", "unadvertised":"kept"})
+                    } else {
+                        json!({})
+                    };
+                    if fast.is_some() {
+                        let target =
+                            rovai_core::camp_fast::target(&database, &camp_id, &execution.agent_id)
+                                .unwrap()
+                                .unwrap();
+                        let mut command = user_command_envelope(
+                            uuid::Uuid::new_v4().to_string(),
+                            rovai_core::camp_fast::SetThreadMemberFastCommand {
+                                camp_id: camp_id.clone(),
+                                agent_id: execution.agent_id.clone(),
+                                expected_runtime_binding_revision: target.runtime_binding_revision,
+                                fast_override: fast,
+                            },
+                        );
+                        command.camp_id = Some(camp_id.clone());
+                        assert_eq!(
+                            rovai_core::camp_fast::set_preference(&mut database, &command)
+                                .unwrap()
+                                .result
+                                .status,
+                            CommandResultStatus::Applied
+                        );
+                    }
+                    rovai_core::camp_fast::freeze(
+                        database.connection(),
+                        &execution.conversation_id,
+                        &execution.agent_id,
+                        &mut execution.runtime,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        execution
+                            .runtime
+                            .model
+                            .options
+                            .get("serviceTier")
+                            .and_then(Value::as_str),
+                        tier
+                    );
+                    execution.runtime.refresh_config_digest().unwrap();
+                    database.connection().execute(
+                        "UPDATE agent_run SET effective_config_json = json_set(effective_config_json, '$.runtime', json(?2)),
+                            runtime_executable_path = ?3, runtime_model_selection_json = ?4 WHERE id = ?1",
+                        rusqlite::params![run_id, serde_json::to_string(&execution.runtime).unwrap(),
+                            execution.runtime.executable_path, serde_json::to_string(&execution.runtime.model).unwrap()],
+                    ).unwrap();
+                    service
+                        .load_agent_run_execution(&database, &run_id, epoch)
+                        .unwrap()
+                        .unwrap()
+                };
+                let (admission, authorization) = core
+                    .verified_camp_attachment_admission(&camp_id, &workspace)
+                    .await
+                    .unwrap();
+                let mut permit = core.planned_shutdown.enter_launch().await.unwrap();
+                assert!(
+                    core.planned_shutdown
+                        .register_active(
+                            &permit,
+                            ActiveExecutionKey::new(&run_id, epoch),
+                            AdapterKind::CodexCli
+                        )
+                        .await
+                );
+                let cli = root.join("rovai");
+                write_runtime_resolution_executable(&cli, "#!/bin/sh\nexit 1\n");
+                let launched = crate::builtin_tool_runtime::TEST_BUNDLED_CLI_EXECUTABLE
+                    .scope(
+                        cli,
+                        core.launch_agent_run(
+                            &execution,
+                            &admission,
+                            &authorization,
+                            &core.output,
+                            &mut permit,
+                        ),
+                    )
+                    .await;
+                drop(permit);
+                drop(admission);
+                let requests: Vec<Value> = fs::read_to_string(root.join("requests.jsonl"))
+                    .unwrap_or_default()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                core.codex_cli.forget_agent_run(&run_id, epoch).await;
+                core.runtime_fleet.shutdown_all().await;
+                ThreadAttachmentStore::new(&core.data_dir)
+                    .remove_camp(&camp_id)
+                    .unwrap();
+                let view = core.attachment_views.root().join("camps").join(&camp_id);
+                for path in [
+                    &view,
+                    view.parent().unwrap(),
+                    view.parent().unwrap().parent().unwrap(),
+                ] {
+                    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+                }
+                drop(core);
+                fs::remove_dir_all(root).unwrap();
+                launched.unwrap_or_else(|error| {
+                    panic!("explicit={explicit}, fast={fast:?}: {error:#}")
+                });
+                for method in ["thread/start", "turn/start"] {
+                    let matches: Vec<_> = requests
+                        .iter()
+                        .filter(|request| request["method"] == method)
+                        .collect();
+                    assert_eq!(matches.len(), 1, "{method}: {requests:?}");
+                    let params = &matches[0]["params"];
+                    assert_eq!(
+                        params.get("model").and_then(Value::as_str),
+                        explicit.then_some("unlisted-model")
+                    );
+                    assert!(params.get("serviceTier").is_none());
+                    if method == "turn/start" {
+                        assert_eq!(
+                            params.get("serviceTierForTurn"),
+                            tier.map(|tier| json!(tier)).as_ref()
+                        );
+                        assert_eq!(
+                            params.get("effort").and_then(Value::as_str),
+                            explicit.then_some("future-native-value")
+                        );
+                    } else {
+                        assert!(params.get("serviceTierForTurn").is_none());
+                    }
+                }
+                assert!(
+                    !requests
+                        .iter()
+                        .any(|request| request["method"] == "model/list")
+                );
+            }
+        }
+    }
+
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     #[tokio::test]
     async fn codex_native_terminal_controls_host_independently_of_business_delivery() {
@@ -35724,10 +36505,16 @@ for line in sys.stdin:
             .unwrap();
         {
             let mut database = core.database.lock().await;
+            let current = core.current_runtime_execution_keys().await;
             assert!(
-                claim_waiting_delivery_batches(&mut database, 100)
-                    .unwrap()
-                    .is_empty()
+                rovai_core::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+                    &mut database,
+                    100,
+                    &Default::default(),
+                    &current,
+                )
+                .unwrap()
+                .is_empty()
             );
             let state: (i64, i64, String) = database.connection().query_row(
                 "SELECT (SELECT COUNT(*) FROM agent_run WHERE camp_id = ?1),
@@ -35835,6 +36622,14 @@ for line in sys.stdin:
             assert_eq!(cancelled.result.code, "agent_run.cancelled");
         }
 
+        // Stop can commit before the launch finishes or the cleanup worker
+        // sets its cancellation flag. A terminal/launch callback must retain
+        // this exact current execution even when no Adapter handle exists.
+        assert!(permit.check_cancelled().is_ok());
+        core.release_active_execution(&key).await;
+        assert!(permit.check_cancelled().is_err());
+        assert!(core.current_runtime_execution_keys().await.contains(&key));
+
         tokio::time::timeout(
             Duration::from_secs(1),
             core.dispatch_agent_run_cancellations(&core.output),
@@ -35905,6 +36700,22 @@ for line in sys.stdin:
         })
         .await
         .expect("background cleanup should acknowledge and release its de-duplication key");
+        assert!(!core.current_runtime_execution_keys().await.contains(&key));
+        let acknowledged = core
+            .database
+            .lock()
+            .await
+            .connection()
+            .query_row(
+                "SELECT cancel_acknowledged_at IS NOT NULL FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap();
+        assert!(
+            acknowledged,
+            "release requires the actual current cleanup ACK"
+        );
         stop_tx.send(true).unwrap();
         cleanup_driver.await.unwrap();
         core.abort_agent_run_tasks().await;

@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: classic-red
 mode: light
-last_updated: 2026-10-25
+last_updated: 2026-10-30
 ---
 
 # 朝霞
@@ -17,8 +17,9 @@ last_updated: 2026-10-25
 
 ## Design intent
 
-纯白阅读区、浅灰气泡与轻红侧栏。通过区域底色表达红色主题；樱桃红用于实心主操作和选中勾。
-导航与操作文字保持中性深灰，Logo 使用既有 Steel 与 Ember 色。
+纯白阅读区、浅灰气泡与轻红侧栏。通过区域底色表达红色主题；樱桃红用于实心主操作与选中控件的 action 色。
+普通表面上的操作文字和选中勾使用中性深灰的 `--conversation-action-ink`；实心操作内的文字与图标使用
+`--conversation-action-contrast`。导航文字保持中性深灰，Logo 使用既有 Steel 与 Ember 色。
 
 ## Surface hierarchy and color responsibilities
 
