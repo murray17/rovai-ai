@@ -454,6 +454,8 @@ impl ProjectFiles {
 fn browse(scope: &Scope, request: &Request, cancel: &AtomicBool) -> Result<Value> {
     let searching = request.action == "search";
     let query = request.query.as_deref().unwrap_or("").trim().to_lowercase();
+    #[cfg(windows)]
+    let query = query.replace('\\', "/");
     ensure!(
         query.len() <= 512 && (!searching || !query.is_empty()),
         "read_failed"
@@ -506,6 +508,8 @@ fn browse(scope: &Scope, request: &Request, cancel: &AtomicBool) -> Result<Value
                 .strip_prefix(&scope.root)?
                 .to_string_lossy()
                 .to_lowercase();
+            #[cfg(windows)]
+            let relative = relative.replace('\\', "/");
             if !relative.contains(&query) {
                 continue;
             }
@@ -599,18 +603,26 @@ mod tests {
                 && !names.contains(&".git")
                 && !names.contains(&"unexpanded.rs")
         );
-        let found = call(
-            &service,
-            &fixture,
-            "search",
-            Some(scope),
-            json!({"query":"unexpanded"}),
-        )
-        .await;
-        assert_eq!(
-            found["value"]["entries"][0]["relativePath"],
-            "src/unexpanded.rs"
-        );
+        let queries = if cfg!(windows) {
+            vec!["unexpanded", "src/unexpanded.rs", r"src\unexpanded.rs"]
+        } else {
+            vec!["unexpanded", "src/unexpanded.rs"]
+        };
+        for query in queries {
+            let found = call(
+                &service,
+                &fixture,
+                "search",
+                Some(scope),
+                json!({"query":query}),
+            )
+            .await;
+            assert_eq!(found["value"]["entries"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                found["value"]["entries"][0]["relativePath"],
+                "src/unexpanded.rs"
+            );
+        }
         for index in 0..210 {
             fs::write(fixture.0.join(format!("page-{index:03}.txt")), "").unwrap();
         }
