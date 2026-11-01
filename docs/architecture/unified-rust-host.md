@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: unified-rust-host
-last_updated: 2026-10-22
+last_updated: 2026-11-02
 ---
 
 # 统一 Rust Host
@@ -173,6 +173,8 @@ Mobile 最后复用同一 Web：宽屏 >=1040px，紧凑 768–1039px，手机 <
 Runtime 文件使用根内 `instances/<instance-key>/runtime-files`；Desktop 保留其原平台根。
 路径校验只增加精确的 Server 布局，不放开任意目录或取消既有身份与唯一 owner 检查。
 旧预览数据必须明确提示兼容入口，不能悄悄创建空实例；本轮不迁移 Desktop 数据。
+Runtime root 按使用准备，不能再把旧 root marker 当作唯一的既有实例证据。Server 读取到 Core 准入后才会持久化的
+Web 认证文档时，必须要求已有数据库；主库丢失明确拒绝，不用空库替换，也不引入另一套初始化记录。
 项目与 source 附件、第三方 Agent CLI 安装/认证/会话不被搬进 Server 根，附件语义不变。
 
 正式原生分发目标为 GitHub Releases 预编译包，包含匹配 Host、协议与共享 WebUI。用户无需 clone、Rust
