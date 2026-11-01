@@ -258,7 +258,10 @@ Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core �
 
 ## 项目目录浏览
 
-`ProjectFilesStore` 按 Thread 保留展开项、搜索、选中和滚动位置，独立于预览 session 的显隐和标签。
+`ProjectFilesStore` 按 Thread 保留展开项、搜索、选中和滚动位置，不随目录隐藏丢失。目录入口同时展开 sidecar，
+由现有预览 session 持有不占文件句柄的 `file_picker` 空标签；第一次目录文件打开后替换为普通文件标签。
+文件标签的 `openedFromDirectory` 标记随 session 保留、去重时合并；最后一个目录来源标签关闭后收起目录，
+不连带关闭仅从会话链接打开的标签。目录可单独折叠，sidecar 隐藏时暂停目录显示和监听，保留浏览状态。
 `ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v26.md) 请求。
 Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；该命令不进入普通写命令队列或数据库事务。
 

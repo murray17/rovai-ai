@@ -99,6 +99,7 @@ beforeEach(() => {
     resolvedTheme: 'day',
     open: vi.fn(),
     openExecution: vi.fn(),
+    openProjectFiles: vi.fn(),
     openMissionActivity: vi.fn(),
     openFileChanges: vi.fn(),
     syncFileChanges: vi.fn(),

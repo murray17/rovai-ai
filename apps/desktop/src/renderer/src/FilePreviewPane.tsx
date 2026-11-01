@@ -593,7 +593,7 @@ export function FilePreviewPaneContent({ visible, missionActivity, executionHost
         aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab, language)}
         aria-labelledby={`file-preview-tab-${tab.id}`}
       >
-        {tab.kind === 'execution'
+        {tab.kind === 'file_picker' ? null : tab.kind === 'execution'
           ? <div ref={executionHostRef} className="execution-preview-host" />
           : <ReadingPanel tab={tab}>{tab.kind === 'mission_activity' ? missionActivity : <FileFindScope id={tab.id}>{tab.kind === 'file_change' ? <FileChangesPreview tab={tab} visible={visible && tab.id === activeTabId} /> : <FilePreviewDocument tab={tab} />}</FileFindScope>}</ReadingPanel>}
       </section>)}

@@ -189,6 +189,44 @@ describe('window-owned preview resources', () => {
     expect(session.getSnapshot().tabs.some(tab => tab.id === a)).toBe(false)
   })
 
+  it('replaces the empty directory tab with a reused file and retains directory ownership across Thread restoration', async () => {
+    const { owner, api } = fixture()
+    owner.activate('directory')
+    const session = owner.session('directory')
+    session.actions.openProjectFiles()
+    const pickerId = session.getSnapshot().activeTabId!
+    session.actions.openProjectFiles()
+    expect(session.getSnapshot()).toMatchObject({ paneVisible: true, tabs: [{ kind: 'file_picker', id: pickerId }] })
+    expect(session.getSnapshot().tabs).toHaveLength(1)
+    expect(api.open).not.toHaveBeenCalled()
+    expect(api.readText).not.toHaveBeenCalled()
+    session.actions.close(pickerId)
+    expect(session.getSnapshot()).toMatchObject({ paneVisible: false, tabs: [] })
+
+    // A file first opened from the conversation must keep its original tab and reading state.
+    await open(owner, 'directory', 'file.txt')
+    const existing = active(session)
+    session.actions.saveReading(existing.id, { codeScrollTop: 160 })
+    session.actions.openProjectFiles()
+    expect(session.getSnapshot().tabs).toHaveLength(2)
+    const outcome = await session.actions.open({ kind: 'project_file', threadId: 'directory', rawReference: 'file.txt' })
+    expect(outcome).toEqual({ kind: 'preview', tabId: existing.id })
+    expect(session.getSnapshot().tabs).toHaveLength(1)
+    expect(active(session)).toMatchObject({ id: existing.id, openedFromDirectory: true, reading: { codeScrollTop: 160 } })
+    session.actions.hidePane()
+    session.actions.openProjectFiles()
+    expect(session.getSnapshot()).toMatchObject({ paneVisible: true, activeTabId: existing.id })
+    expect(session.getSnapshot().tabs).toHaveLength(1)
+
+    await open(owner, 'another-thread')
+    session.cool()
+    owner.dispose()
+    const restored = new FilePreviewResources(api)
+    resources.push(restored)
+    restored.activate('directory')
+    expect(restored.session('directory').getSnapshot().tabs).toMatchObject([{ id: existing.id, openedFromDirectory: true }])
+  })
+
   it('keeps mission activity in the shared tab lifecycle without acquiring a file handle', async () => {
     const { owner, api } = fixture()
     owner.activate('mission-camp')

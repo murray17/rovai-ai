@@ -221,10 +221,10 @@ export function FilePreviewLayoutProvider({
   const width = dragWidth ?? filePreviewWidthForRatio(availableWidth, ratio)
   // The outer split owns the entire sidecar. Its directory resizes only the inner reading area.
   const sidecarWidth = compact || expanded ? availableWidth : width
-  const directorySpace = visible ? sidecarWidth - MIN_DIRECTORY_READING_WIDTH : availableWidth - MIN_CONVERSATION_WIDTH
+  const directorySpace = sidecarWidth - MIN_DIRECTORY_READING_WIDTH
   const directoryDrawer = compact || directorySpace < MIN_DIRECTORY_WIDTH
   const directoryMaximum = Math.max(MIN_DIRECTORY_WIDTH, Math.min(MAX_DIRECTORY_WIDTH,
-    directoryDrawer ? (visible ? sidecarWidth : availableWidth) - 24 : directorySpace))
+    directoryDrawer ? sidecarWidth - 24 : directorySpace))
   const directoryWidth = Math.min(directoryMaximum, Math.max(MIN_DIRECTORY_WIDTH, browser?.width ?? DEFAULT_DIRECTORY_WIDTH))
   const directoryReservedWidth = browser?.visible && !directoryDrawer ? directoryWidth : 0
   const value = useMemo<FilePreviewLayoutValue>(() => ({

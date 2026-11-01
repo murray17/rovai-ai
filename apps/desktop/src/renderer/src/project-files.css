@@ -41,7 +41,7 @@
 .project-files-project > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-files-project.context-project:hover { color: var(--ink); }
 .project-files-toggle { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
-.project-files-toggle:hover { color: var(--ink); }
+.project-files-toggle:hover, .project-files-toggle[data-active="true"] { color: var(--ink); }
 .project-files-toggle[aria-expanded="true"] { color: var(--ink); background: var(--surface-muted); }
 .project-files-toggle svg { width: 16px; height: 16px; }
 .project-folder-icon { width: 14px; height: 14px; flex: 0 0 16px; color: var(--muted); }

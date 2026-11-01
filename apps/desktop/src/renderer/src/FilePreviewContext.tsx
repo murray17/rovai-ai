@@ -129,7 +129,7 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
     return () => { window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('online', online); unsubscribeConnection?.(); release() }
   }, [resources])
   return <FileEditContext.Provider value={resources.edits}><FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
-    <ProjectFilesProvider api={api.projectFiles} threadId={threadId} onConnectionRestored={api.onConnectionRestored}>
+    <ProjectFilesProvider api={api.projectFiles} threadId={threadId} preview={value} onConnectionRestored={api.onConnectionRestored}>
     <FilePreviewLayoutProvider threadId={threadId} visible={!!threadId && value.paneVisible} activityMode={value.activeTab?.kind === 'mission_activity'}>
       <FileFindProvider activeTabId={value.activeTabId} visible={!!threadId && value.paneVisible}>
         <ExecutionPreviewHostContext.Provider value={executionHosts}>

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import type { ProjectFileEntry } from '@contracts'
-import { ProjectFileIcon } from './ProjectFileIcon'
+import { ProjectFileIcon, DirectoryTreeIcon } from './ProjectFileIcon'
 import { useProjectFiles } from './ProjectFilesContext'
 import { ProjectFilesStore } from './project-files-store'
 import { useOptionalFilePreview } from './FilePreviewContext'
@@ -11,9 +11,6 @@ import { uiAttribute } from './interface-language'
 import { useShortcutLabel } from './ShortcutProvider'
 import './project-files.css'
 
-export function DirectoryTreeIcon(): React.JSX.Element {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d="M4 7v10M4 7h5M4 17h5"/><rect x="9" y="4" width="11" height="6" rx="1.5"/><rect x="9" y="14" width="11" height="6" rx="1.5"/></svg>
-}
 export function ProjectFolderIcon(): React.JSX.Element {
   return <svg className="project-folder-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 5.5h6l1.5 2h7.5v9h-15z"/></svg>
 }
@@ -21,7 +18,7 @@ export function ProjectFilesButton(): React.JSX.Element | null {
   const browser = useProjectFiles(), shortcut = useShortcutLabel('project-files')
   if (!browser?.store) return null
   const label = `${uiAttribute(browser.visible ? '隐藏文件目录' : '显示文件目录')} (${shortcut})`
-  return <button type="button" className="project-files-toggle" aria-label={label} title={label} aria-controls="project-files-pane" aria-expanded={browser.visible} onClick={event => browser.toggle(event.currentTarget)}><DirectoryTreeIcon /></button>
+  return <button type="button" className="project-files-toggle" data-active={browser.active} aria-label={label} title={label} aria-controls="project-files-pane" aria-expanded={browser.visible} onClick={event => browser.toggle(event.currentTarget)}><DirectoryTreeIcon /></button>
 }
 
 interface Row { entry: ProjectFileEntry; depth: number; parent: string }

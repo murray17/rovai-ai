@@ -3,6 +3,7 @@ import type { FilePreviewApi, ProjectFilesApi } from '@contracts'
 import { ProjectFilesStore } from './project-files-store'
 import { DEFAULT_DIRECTORY_WIDTH, MIN_DIRECTORY_WIDTH, MAX_DIRECTORY_WIDTH } from './file-preview-layout'
 import { useShortcutAction } from './ShortcutProvider'
+import { isDirectoryPreviewTab, type FilePreviewContextValue } from './file-preview-controller'
 
 const visibleKey = 'rovai.project-files.visible'
 const widthKey = 'rovai.project-files.width'
@@ -11,13 +12,14 @@ function remember(key: string, value: string): void { try { localStorage.setItem
 interface ProjectFilesContextValue {
   store: ProjectFilesStore | null
   visible: boolean
+  active: boolean
   width: number
   setWidth(width: number, commit?: boolean): void
   toggle(trigger?: HTMLElement): void
   hide(restoreFocus?: boolean): void
 }
 const Context = createContext<ProjectFilesContextValue | null>(null)
-export function ProjectFilesProvider({ api, threadId, onConnectionRestored, children }: { api?: ProjectFilesApi; threadId: string | null; onConnectionRestored?: FilePreviewApi['onConnectionRestored']; children: ReactNode }): React.JSX.Element {
+export function ProjectFilesProvider({ api, threadId, preview, onConnectionRestored, children }: { api?: ProjectFilesApi; threadId: string | null; preview: FilePreviewContextValue; onConnectionRestored?: FilePreviewApi['onConnectionRestored']; children: ReactNode }): React.JSX.Element {
   const stores = useMemo(() => new Map<string, ProjectFilesStore>(), [api])
   const store = useMemo(() => {
     if (!api || !threadId) return null
@@ -27,15 +29,25 @@ export function ProjectFilesProvider({ api, threadId, onConnectionRestored, chil
     if (stores.size > 24) for (const [id, stale] of stores) if (id !== threadId) { stale.deactivate(); stores.delete(id); break }
     return value
   }, [api, stores, threadId])
-  const [visible, setVisible] = useState(() => stored(visibleKey) === 'true')
+  const [expanded, setVisible] = useState(() => stored(visibleKey) === 'true')
+  const active = preview.tabs.some(isDirectoryPreviewTab)
+  const visible = !!store && expanded && preview.paneVisible && active
   const [width, updateWidth] = useState(() => Math.max(MIN_DIRECTORY_WIDTH, Math.min(MAX_DIRECTORY_WIDTH, Number(stored(widthKey)) || DEFAULT_DIRECTORY_WIDTH)))
   const trigger = useRef<HTMLElement | null>(null)
   const restoreFocus = useCallback(() => { requestAnimationFrame(() => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }) }) }, [])
   const hide = useCallback((restore = false) => { setVisible(false); remember(visibleKey, 'false'); if (restore) restoreFocus() }, [restoreFocus])
   const toggle = useCallback((element?: HTMLElement) => {
     if (element) trigger.current = element
-    setVisible(current => { remember(visibleKey, String(!current)); if (current) restoreFocus(); return !current })
-  }, [restoreFocus])
+    if (visible) { hide(true); return }
+    preview.openProjectFiles()
+    setVisible(true)
+    remember(visibleKey, 'true')
+  }, [visible, hide, preview.openProjectFiles])
+  const previous = useRef({ threadId, active })
+  useEffect(() => {
+    if (previous.current.threadId === threadId && previous.current.active && !active) hide()
+    previous.current = { threadId, active }
+  }, [threadId, active, hide])
   const setWidth = useCallback((next: number, commit = false) => {
     updateWidth(Math.max(0, Math.min(MAX_DIRECTORY_WIDTH, next)))
     if (commit) remember(widthKey, String(Math.max(MIN_DIRECTORY_WIDTH, Math.min(MAX_DIRECTORY_WIDTH, next))))
@@ -53,7 +65,7 @@ export function ProjectFilesProvider({ api, threadId, onConnectionRestored, chil
     return () => { window.removeEventListener('pagehide', close); window.removeEventListener('pageshow', resume); window.removeEventListener('online', resume) }
   }, [store, visible])
   useShortcutAction('project-files', target => { toggle(target instanceof HTMLElement ? target : undefined) }, !!store)
-  const value = useMemo(() => ({ store, visible: !!store && visible, width, setWidth, toggle, hide }), [store, visible, width, setWidth, toggle, hide])
+  const value = useMemo(() => ({ store, visible, active, width, setWidth, toggle, hide }), [store, visible, active, width, setWidth, toggle, hide])
   return <Context.Provider value={value}>{children}</Context.Provider>
 }
 export function useProjectFiles(): ProjectFilesContextValue | null { return useContext(Context) }

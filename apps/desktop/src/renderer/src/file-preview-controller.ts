@@ -17,6 +17,7 @@ export type FilePreviewContent =
 export interface FilePreviewTabModel {
   kind: 'file'
   id: string
+  openedFromDirectory?: boolean
   sourceKey: string
   sourceAliases?: string[]
   cachedVersion?: ResolvedFilePreview['contentVersion']
@@ -58,7 +59,12 @@ export interface FileChangesPreviewTabModel {
 
 export type MissionActivityTabModel = import('./file-preview-session').MissionActivityTabSnapshot
 export type ExecutionTabModel = import('./file-preview-session').ExecutionTabSnapshot
-export type PreviewTabModel = FilePreviewTabModel | FileChangesPreviewTabModel | MissionActivityTabModel | ExecutionTabModel
+export type FilePickerTabModel = import('./file-preview-session').FilePickerTabSnapshot
+export type PreviewTabModel = FilePreviewTabModel | FileChangesPreviewTabModel | MissionActivityTabModel | ExecutionTabModel | FilePickerTabModel
+
+export function isDirectoryPreviewTab(tab: PreviewTabModel): boolean {
+  return tab.kind === 'file_picker' || tab.kind === 'file' && tab.openedFromDirectory === true
+}
 
 export function canDownloadFile(tab: PreviewTabModel, api: FilePreviewApi): boolean {
   if (tab.kind !== 'file') return false
@@ -109,6 +115,7 @@ export interface FilePreviewContextValue {
   syncFileChanges(threadId: string, changes: readonly AgentRunFileChangesView[]): void
   openMissionActivity(missionId: string): void
   openExecution(): void
+  openProjectFiles(): void
   loadChanges(tabId: string, read: () => Promise<AgentRunFileChangesDetailView>, retry?: boolean): Promise<void>
   selectChangedFile(tabId: string, evidenceFileId: string): void
   showPane(): void
@@ -197,6 +204,7 @@ function restoredTab(snapshot: FilePreviewTabSnapshot): PreviewTabModel {
   return {
     kind: 'file',
     id: snapshot.id,
+    openedFromDirectory: snapshot.openedFromDirectory,
     sourceKey: snapshot.sourceRequest
       ? stableFilePreviewSourceKey(snapshot.sourceRequest, snapshot.presentation)
       : `unavailable:${snapshot.id}`,
@@ -277,11 +285,12 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
 
   const saveSession = (targetThreadId: string) => {
     const snapshot: FilePreviewSessionSnapshot = {
-      tabs: tabsRef.current.map((tab) => tab.kind === 'mission_activity' || tab.kind === 'execution' ? { ...tab } : tab.kind === 'file_change'
+      tabs: tabsRef.current.map((tab) => tab.kind === 'mission_activity' || tab.kind === 'execution' || tab.kind === 'file_picker' ? { ...tab } : tab.kind === 'file_change'
         ? { kind: 'file_change', id: tab.id, threadId: tab.threadId, changes: tab.changes, selectedEvidenceFileId: tab.selectedEvidenceFileId, reading: tab.reading }
         : {
           kind: 'file',
           id: tab.id,
+          openedFromDirectory: tab.openedFromDirectory,
           sourceRequest: tab.sourceRequest
             ? restorableFilePreviewRequest(tab.sourceRequest)
             : null,
@@ -576,6 +585,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       setTabs(tabs => tabs.filter(tab => tab.id !== requestedTabId).map(tab => tab.id === duplicate.id
         ? {
           ...duplicate, sourceAliases: [...new Set([...(duplicate.sourceAliases ?? []), filePreviewSourceKey(request)])],
+          openedFromDirectory: duplicate.openedFromDirectory || requestedTab.openedFromDirectory,
           ...(file.target ? { file: duplicate.file ? { ...duplicate.file, target: file.target } : null, reading: undefined } : {})
         } : tab))
       if (activeTabIdRef.current === requestedTabId) showOpenedTab(duplicate.id, false, focusTab)
@@ -606,6 +616,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
         ? {
           ...tab,
           sourceKey: installedSource.sourceKey,
+          openedFromDirectory: tab.openedFromDirectory || requestedTab.openedFromDirectory,
           sourceAliases: [...new Set([...(tab.sourceAliases ?? []), filePreviewSourceKey(request)])],
           sourceRequest: installedSource.sourceRequest,
           previewKey: file.previewKey,
@@ -843,7 +854,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   }
 
   const committedRequests = new Map<string, Promise<FilePreviewOpenOutcome>>()
-  const open = async (
+  const openFile = async (
     request: OpenFilePreviewRequest,
     target?: FileLocationTarget,
     presentationHint?: FilePreviewPresentationHint,
@@ -916,6 +927,16 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     const focusTab = Boolean(document.activeElement?.closest('.file-preview-pane'))
     showOpenedTab(tabId, isNew, focusTab)
     return performOpen(tabId, request, target, 'interactive', isNew, focusTab, true, rollback)
+  }
+
+  const open = async (...args: Parameters<typeof openFile>): Promise<FilePreviewOpenOutcome> => {
+    const result = await openFile(...args)
+    if (args[0].kind === 'project_file' && result.kind === 'preview'
+      && tabsRef.current.some(tab => tab.kind === 'file' && tab.id === result.tabId)) {
+      setTabs(tabs => tabs.filter(tab => tab.kind !== 'file_picker').map(tab =>
+        tab.kind === 'file' && tab.id === result.tabId ? { ...tab, openedFromDirectory: true } : tab))
+    }
+    return result
   }
 
   const restoreTab = (tabId: string, automatic: boolean): void => {
@@ -1020,6 +1041,17 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     if (!existing) setTabs(tabs => [{ kind: 'execution', id: tabId }, ...tabs])
     activate(tabId)
     setOpenFeedback(previous => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew: !existing }))
+  }
+
+  const openProjectFiles = (): void => {
+    if (disposed || !threadId || !owner.isCurrent(threadId)) return
+    const picker = tabsRef.current.find(tab => tab.kind === 'file_picker')
+    if (picker) { activate(picker.id); return }
+    if (tabsRef.current.some(isDirectoryPreviewTab)) { showPane(); return }
+    const tabId = newCommandId()
+    setTabs(tabs => [...tabs, { kind: 'file_picker', id: tabId }])
+    activate(tabId)
+    setOpenFeedback(previous => ({ tabId, sequence: (previous?.sequence ?? 0) + 1, isNew: true }))
   }
 
   const move = (tabId: string, direction: -1 | 1) => {
@@ -1424,7 +1456,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
     retired,
     cool: () => { scopeGenerationRef.current += 1; committedLoads.clear(); for (const tab of tabsRef.current) session.evict(tab.id); session.id = newCommandId(); bindingPromiseRef.current = owner.sync() },
     setBinding: (binding: Promise<void>) => { bindingPromiseRef.current = binding },
-    actions: { open, openFileChanges, syncFileChanges, openMissionActivity, openExecution, loadChanges, selectChangedFile, showPane, hidePane, activate, move, close, closeMany, download, clearDownloadFeedback, openInSystem, revealInFolder, copyPath, toggleHtmlSource, reload, reopen, retry, changePage, saveReading, loadHtmlSource, saveHtmlSource, completeHtmlRefresh, displayed },
+    actions: { open, openFileChanges, syncFileChanges, openMissionActivity, openExecution, openProjectFiles, loadChanges, selectChangedFile, showPane, hidePane, activate, move, close, closeMany, download, clearDownloadFeedback, openInSystem, revealInFolder, copyPath, toggleHtmlSource, reload, reopen, retry, changePage, saveReading, loadHtmlSource, saveHtmlSource, completeHtmlRefresh, displayed },
     suspendRefresh,
     ensureActive: () => { if (activeTabIdRef.current) ensureVisibleTab(activeTabIdRef.current) },
     externalUpdate: (previewKeys: string[]) => {
@@ -1460,7 +1492,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
       pendingSavedRefreshes.delete(tabId)
       const tab = tabsRef.current.find(tab => tab.id === tabId)
       if (!tab) return
-      if (tab.kind === 'mission_activity' || tab.kind === 'execution') return
+      if (tab.kind === 'mission_activity' || tab.kind === 'execution' || tab.kind === 'file_picker') return
       if (tab.kind === 'file_change') {
         changeRequests.delete(tabId)
         setTabs(tabs => tabs.map(entry => entry.id === tabId ? { ...tab, detail: undefined, detailBytes: undefined, detailStatus: undefined } : entry))
