@@ -14,8 +14,13 @@ last_updated: 2026-11-01
 ## 项目目录浏览（2026-11-01）
 
 补齐原交互稿尚未接入生产的目录树、Host 搜索与普通变化刷新。双入口共用独立目录开关，文件沿用现有阅读与编辑。
-当前规范为 [File Preview v25](../../contracts/file-preview-v25.md)，取舍见 [D73](decisions.md#v1-72-d73)。
+当前规范为 [File Preview v26](../../contracts/file-preview-v26.md)，取舍见 [D73](decisions.md#v1-72-d73)。
 目录与 sidecar 独立收起，窄窗使用临时抽屉；不增加文件管理、索引或工作副本选择。
+
+可用性收尾采用一次有界列目录、前端本地分批显示、可逆路径定位；移除逐文件登记和只读事件导致的刷新。
+界面对齐 V15 的固定双入口、中性表面、紧凑行号和快速搜索；普通只读 Markdown 链接保留源码/预览切换。
+验证扩展既有 3 项 Rust 目录 owner、Store、主题与真实 Electron 布局/目录 owner；Desktop/Web Host 保存联调沿用原测试。
+本轮原生 UI 与打包验收范围为 macOS arm64；Linux 的事件种类回归不等同 Linux/Windows 整机验收。
 
 ## 原生子代理平铺执行记录（2026-11-01）
 

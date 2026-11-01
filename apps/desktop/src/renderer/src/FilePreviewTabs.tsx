@@ -115,8 +115,10 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
 
   useEffect(() => {
     if (compact && paneVisible) {
+      const back = listRef.current?.closest('.file-preview-tabs')?.querySelector<HTMLButtonElement>('.file-preview-return')
       const target = listRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
-        ?? listRef.current?.closest('.file-preview-tabs')?.querySelector<HTMLButtonElement>('.file-preview-return')
+        ?? (back?.offsetWidth ? back : listRef.current?.closest('.app-shell-camp, .mission-workspace-host')
+          ?.querySelector<HTMLButtonElement>('.file-preview-toggle[aria-controls="file-preview-pane"]'))
       target?.focus({ preventScroll: true })
     }
   }, [compact, paneVisible])

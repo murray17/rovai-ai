@@ -71,16 +71,16 @@ const sourceReaderInterface = {
     caretColor: 'var(--focus)'
   },
   '.cm-line': {
-    padding: '0 18px 0 12px'
+    padding: '0 18px 0 8px'
   },
   '.cm-gutters': {
-    borderRight: '1px solid var(--line)',
+    borderRight: '0',
     color: 'var(--faint)',
     backgroundColor: 'var(--conversation-surface)'
   },
   '.cm-lineNumbers .cm-gutterElement': {
-    minWidth: '52px',
-    padding: '0 10px 0 8px'
+    minWidth: '0',
+    padding: '0 8px'
   },
   '.cm-content ::selection': {
     color: 'inherit',

@@ -311,6 +311,7 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   if (!tab.content) return <div className="file-preview-empty-content" />
   if (tab.content.kind === 'unsupported') return <UnsupportedFile tab={tab}/>
   if (tab.content.kind === 'markdown' && file) {
+    if (tab.htmlSourceMode) return <SourceViewer tab={tab} />
     return (
       <div className="file-preview-markdown" ref={root} tabIndex={0}
         onKeyDown={(event) => selectPreviewContents(event, event.currentTarget.querySelector('.file-preview-markdown-document'))}>
@@ -393,7 +394,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   const { reload, retry, changePage, revealInFolder, displayed, toggleHtmlSource, resolvedTheme, activeTabId, paneVisible, isCurrentThread } = useFilePreview()
   const edits = useFileEdits()
   const doc = edits?.get(tab.id)
-  const sourceSwitch = tab.content?.kind === 'html' || (!!doc && tab.content?.kind === 'markdown')
+  const sourceSwitch = tab.content?.kind === 'html' || tab.content?.kind === 'markdown'
   const showEditor = !!doc && (!sourceSwitch || !!tab.htmlSourceMode)
   const active = paneVisible && isCurrentThread !== false && activeTabId === tab.id
   const saveShortcut = useShortcutLabel('save-file')
@@ -466,7 +467,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   }
   return (
     <>
-      {(showPath || updateAction || !!doc || (tab.content && downloadAvailable)) && <div className={showPath || downloadAvailable ? "file-preview-path-row" : "file-preview-update-row"}>
+      {(showPath || sourceSwitch || updateAction || !!doc || (tab.content && downloadAvailable)) && <div className={showPath || sourceSwitch || downloadAvailable ? "file-preview-path-row" : "file-preview-update-row"}>
         {pathControl}
         {updateAction}
         {editActions}
@@ -580,13 +581,12 @@ export function FilePreviewPaneContent({ visible, missionActivity, executionHost
     <section id={visible ? "file-preview-pane" : undefined} className="file-preview-pane" hidden={!paneVisible} aria-label={uiAttribute("文件预览")}>
       {tabs.length === 0 && <div className="file-preview-empty">
         <FilePreviewTabIcon kind="text" />
-        <h2><UiText zh={"选择一个文件预览"} /></h2>
-        <p><UiText zh={"点击会话中的文件链接或 File Change 卡片，在这里查看文件和变更。"} /></p>
+        <h2><UiText zh={"选择文件"} /></h2>
       </div>}
       {tabs.map((tab) => <section
         key={tab.id}
         id={`file-preview-panel-${tab.id}`}
-        className="file-preview-tab-panel"
+        className={`file-preview-tab-panel${tab.kind === 'file' ? ' file-preview-document-panel' : ''}`}
         hidden={!visible || tab.id !== activeTabId}
         role="tabpanel"
         tabIndex={0}

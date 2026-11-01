@@ -6,6 +6,7 @@ const css = [
   './styles.css'
 ].map((path) => readFileSync(new URL(path, import.meta.url), 'utf8')).join('\n').replace(/\r\n/g, '\n')
 const requiredTokens = [
+  '--file-canvas', '--file-hover', '--file-selected', '--file-line', '--file-ink', '--file-muted',
   '--canvas',
   '--surface',
   '--surface-raised',
@@ -141,6 +142,9 @@ function mixHex(foreground: string, background: string, foregroundWeight: number
 
 function expectTextContrast(tokens: Record<string, string>): void {
   const pairs = [
+    ['--file-ink', '--file-canvas'],
+    ['--file-muted', '--file-canvas'],
+    ['--file-ink', '--file-selected'],
     ['--ink', '--surface'],
     ['--muted', '--surface'],
     ['--faint', '--surface'],

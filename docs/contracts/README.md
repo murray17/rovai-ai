@@ -309,7 +309,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Skill Content Preview v1（历史）](skill-content-preview-v1.md) | 旧 Library Revision 或导入候选的只读内容合同；当前原生 Skill 原址预览见 Skills Rebuild v1 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [File Preview v24](file-preview-v24.md) | 当前项目 UTF-8 文本编辑、共享 Host 手动保存、摘要冲突及窗口草稿保留 |
-| [File Preview v25（当前）](file-preview-v25.md) | 按需项目目录、文件搜索、变化失效与绑定工作目录的预览来源 |
+| [File Preview v25（历史）](file-preview-v25.md) | 项目浏览首版；offset 分页与逐文件登记由 v26 替代 |
+| [File Preview v26（当前）](file-preview-v26.md) | 按需项目目录、文件搜索、变化失效与绑定工作目录的预览来源 |
 | [File Preview v23（历史）](file-preview-v23.md) | Desktop 最近定位复用、同版本自动刷新跳过内容与 HTML 准备；候选与更新水位保持 |
 | [File Preview v22（历史）](file-preview-v22.md) | 当前可见文件自动刷新、后台按需更新、失败阻断与分页行号恢复；复用候选刷新和既有通知 |
 | [File Preview v21（历史）](file-preview-v21.md) | 精确归因内部诊断 CSP 拒绝，中性降级并停止当前文档无效重试；保留作者策略与真实错误 |

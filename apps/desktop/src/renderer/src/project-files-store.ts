@@ -1,6 +1,6 @@
 import type { OpenFilePreviewRequest, ProjectFileEntry, ProjectFilesApi, ProjectFilesPage, ProjectFilesRequest, ProjectFilesScope } from '@contracts'
 
-export interface DirectoryPage extends ProjectFilesPage { loading?: boolean; error?: string }
+export interface DirectoryPage extends ProjectFilesPage { visibleCount: number; loading?: boolean; error?: string }
 export interface ProjectFilesSnapshot {
   scope: ProjectFilesScope | null
   rootId: string | null
@@ -15,7 +15,7 @@ export interface ProjectFilesSnapshot {
   error: string | null
   watchFailed: boolean
 }
-const emptyPage = (): DirectoryPage => ({ entries: [], nextOffset: null, partial: false })
+const emptyPage = (): DirectoryPage => ({ entries: [], visibleCount: 200, partial: false })
 
 /** One Thread's reading state. Closing the view releases transport resources, not navigation. */
 export class ProjectFilesStore {
@@ -72,7 +72,11 @@ export class ProjectFilesStore {
     this.update({ scope: null, loading: false, searching: false })
   }
   retry = (): void => { this.deactivate(); void this.activate() }
-  async load(id: string, more = false): Promise<void> {
+  showMore(id: string): void {
+    const page = this.state.pages.get(id)
+    if (page) this.update({ pages: new Map(this.state.pages).set(id, { ...page, visibleCount: page.visibleCount + 200 }) })
+  }
+  async load(id: string): Promise<void> {
     const scope = this.state.scope, epoch = this.epoch
     if (!scope) return
     const sequence = ++this.loadSequence
@@ -80,18 +84,9 @@ export class ProjectFilesStore {
     const old = this.state.pages.get(id) ?? emptyPage()
     this.update({ pages: new Map(this.state.pages).set(id, { ...old, error: undefined, loading: true }) })
     try {
-      let page = await this.request<ProjectFilesPage>('list', scope, { entryId: id, offset: more ? old.nextOffset ?? 0 : 0 })
-      // Reopening/refreshing retains the pages the user already reached, so a
-      // fresh snapshot does not silently collapse their scrollable range.
-      while (!more && page.nextOffset !== null && page.entries.length < old.entries.length) {
-        if (epoch !== this.epoch || this.loads.get(id) !== sequence) return
-        const next = await this.request<ProjectFilesPage>('list', scope, { entryId: id, offset: page.nextOffset })
-        const entries = [...page.entries, ...next.entries.filter(entry => !page.entries.some(previous => previous.id === entry.id))]
-        if (next.nextOffset !== null && next.nextOffset <= page.nextOffset) break
-        page = { ...next, entries, partial: page.partial || next.partial }
-      }
+      const page = await this.request<ProjectFilesPage>('list', scope, { entryId: id })
       if (epoch !== this.epoch || this.loads.get(id) !== sequence) return
-      this.update({ pages: new Map(this.state.pages).set(id, { ...page, entries: more ? [...old.entries, ...page.entries.filter(entry => !old.entries.some(previous => previous.id === entry.id))] : page.entries }) })
+      this.update({ pages: new Map(this.state.pages).set(id, { ...page, visibleCount: this.state.pages.get(id)?.visibleCount ?? old.visibleCount }) })
     } catch (error) {
       if (epoch === this.epoch && this.loads.get(id) === sequence) this.update({ pages: new Map(this.state.pages).set(id, { ...old, loading: false, error: error instanceof Error ? error.message : 'read_failed' }) })
     }

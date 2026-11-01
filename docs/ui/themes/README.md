@@ -101,3 +101,7 @@ Memory 与 Automation 的滚动块局部使用 `--neutral-selected`；这不把 
 容器不超过 900px 时三列，不超过 420px 时两列。键盘与焦点遵循共享控件规则。
 `--settings-choice-selected-surface` 拥有外观选项的选中底色；朝霞使用淡灰红区域色，
 其余配色使用各自 `--home-surface` 色值。选中边线继续由 `--settings-choice-selected-line` 拥有。
+
+文件工作区使用 `--file-canvas / hover / selected / line / ink / muted`，包括目录、文件正文和关联会话顶栏/正文。
+三套浅色主题采用白底与浅灰选中，两套深色主题采用同一中性深灰；完整色值在 canonical Token block。
+主导航、执行台及语法高亮保留各自 Token；文件区样式不重新定义全局配色或等宽字体。

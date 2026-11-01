@@ -259,10 +259,12 @@ Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core �
 ## 项目目录浏览
 
 `ProjectFilesStore` 按 Thread 保留展开项、搜索、选中和滚动位置，独立于预览 session 的显隐和标签。
-`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v25](../contracts/file-preview-v25.md) 请求。
+`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v26.md) 请求。
 Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；该命令不进入普通写命令队列或数据库事务。
 
 每个正在浏览的作用域共享一组非递归目录监听；变更通知只使可见目录缓存失效，与现有文件预览监听各负其责。
 关闭目录释放作用域，但已打开的 `project_file` 仍由原预览资源 owner 持有。根变化时旧来源失败，不换到另一根。
+单层只做一次有界读取，前端本地分批显示，刷新不逐页重复扫描。条目用可逆相对路径定位，不维护逐文件登记表；
+普通条目直接使用目录遍历返回的类型，链接及实际访问时再解析目标。监听忽略打开、读取等非变更事件。
 目录条目不读取正文；树、搜索、标签共用现有 `ProjectFileIcon`，导航使用界面字体，代码正文沿用 CodeMirror 等宽字体。
 没有文件管理、工作副本选择器、后台索引、搜索续传或新的编辑框架。目录中的不支持格式只显示信息与现有主动打开/下载操作。
