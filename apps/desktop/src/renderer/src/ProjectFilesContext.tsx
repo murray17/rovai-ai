@@ -11,12 +11,9 @@ interface ProjectFilesContextValue {
   store: ProjectFilesStore | null
   visible: boolean
   width: number
-  quickOpen: boolean
   setWidth(width: number, commit?: boolean): void
   toggle(trigger?: HTMLElement): void
   hide(restoreFocus?: boolean): void
-  setQuickOpen(open: boolean): void
-  restoreFocus(): void
 }
 const Context = createContext<ProjectFilesContextValue | null>(null)
 export function ProjectFilesProvider({ api, threadId, onConnectionRestored, children }: { api?: ProjectFilesApi; threadId: string | null; onConnectionRestored?: FilePreviewApi['onConnectionRestored']; children: ReactNode }): React.JSX.Element {
@@ -30,8 +27,6 @@ export function ProjectFilesProvider({ api, threadId, onConnectionRestored, chil
     return value
   }, [api, stores, threadId])
   const [visible, setVisible] = useState(() => stored(visibleKey) === 'true')
-  const [quickOpen, setQuickOpen] = useState(false)
-  const active = visible || quickOpen
   const [width, updateWidth] = useState(() => Math.max(180, Math.min(520, Number(stored(widthKey)) || 228)))
   const trigger = useRef<HTMLElement | null>(null)
   const restoreFocus = useCallback(() => { requestAnimationFrame(() => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }) }) }, [])
@@ -45,21 +40,19 @@ export function ProjectFilesProvider({ api, threadId, onConnectionRestored, chil
     if (commit) remember(widthKey, String(Math.max(180, Math.min(520, next))))
   }, [])
   useEffect(() => {
-    if (active) void store?.activate()
+    if (visible) void store?.activate()
     return () => store?.deactivate()
-  }, [store, active])
+  }, [store, visible])
   useEffect(() => () => { stores.forEach(value => value.deactivate()) }, [stores])
-  useEffect(() => onConnectionRestored?.(() => { if (visible || quickOpen) store?.retry() }), [onConnectionRestored, store, visible, quickOpen])
-  useEffect(() => { setQuickOpen(false) }, [threadId])
+  useEffect(() => onConnectionRestored?.(() => { if (visible) store?.retry() }), [onConnectionRestored, store, visible])
   useEffect(() => {
     const close = (): void => store?.deactivate()
-    const resume = (): void => { if (visible || quickOpen) store?.retry() }
+    const resume = (): void => { if (visible) store?.retry() }
     window.addEventListener('pagehide', close); window.addEventListener('pageshow', resume); window.addEventListener('online', resume)
     return () => { window.removeEventListener('pagehide', close); window.removeEventListener('pageshow', resume); window.removeEventListener('online', resume) }
-  }, [store, visible, quickOpen])
+  }, [store, visible])
   useShortcutAction('project-files', target => { toggle(target instanceof HTMLElement ? target : undefined) }, !!store)
-  useShortcutAction('quick-open', target => { if (target instanceof HTMLElement) trigger.current = target; setQuickOpen(true) }, !!store)
-  const value = useMemo(() => ({ store, visible: !!store && visible, width, quickOpen, setWidth, toggle, hide, setQuickOpen, restoreFocus }), [store, visible, width, quickOpen, setWidth, toggle, hide, restoreFocus])
+  const value = useMemo(() => ({ store, visible: !!store && visible, width, setWidth, toggle, hide }), [store, visible, width, setWidth, toggle, hide])
   return <Context.Provider value={value}>{children}</Context.Provider>
 }
 export function useProjectFiles(): ProjectFilesContextValue | null { return useContext(Context) }
