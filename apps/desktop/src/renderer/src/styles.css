@@ -2029,45 +2029,18 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 .file-preview-html { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; border: 0; background: var(--conversation-surface); }
 /* Keep the hidden document viewport intact so source switching preserves its scroll position. */
 .file-preview-html[hidden] { display: block; visibility: hidden; pointer-events: none; }
-.file-preview-image-stage {
-  position: relative;
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-  place-items: center;
-  padding: 30px;
-  background: var(--conversation-surface);
-}
-.file-preview-image-stage img {
-  display: block;
-  max-width: 100%;
-  max-height: 100%;
-  grid-area: 1 / 1;
-  place-self: center;
-  object-fit: contain;
-  box-shadow: var(--shadow-menu);
-  background-color: var(--conversation-surface);
-  background-image: linear-gradient(45deg, color-mix(in srgb, var(--line) 36%, transparent) 25%, transparent 25%), linear-gradient(-45deg, color-mix(in srgb, var(--line) 36%, transparent) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--line) 36%, transparent) 75%), linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--line) 36%, transparent) 75%);
-  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
-  background-size: 16px 16px;
-}
-.file-preview-image-info,
-.file-preview-image-controls {
-  z-index: 2;
-  grid-area: 1 / 1;
-  border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  color: var(--muted);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-menu);
-  font-size: 9.5px;
-}
-.file-preview-image-info { position: sticky; top: 10px; left: 10px; align-self: start; justify-self: start; padding: 5px 7px; pointer-events: none; }
-.file-preview-image-controls { position: sticky; bottom: 10px; display: flex; align-self: end; justify-self: center; padding: 3px; }
-.file-preview-image-controls button { min-width: 28px; min-height: 25px; padding: 0 6px; border: 0; border-radius: 5px; color: inherit; background: transparent; cursor: pointer; }
-.file-preview-image-controls button:hover { color: var(--ink); background: var(--surface-hover); }
+.file-preview-image-stage { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--conversation-surface); }
+.file-preview-image-scroll { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.file-preview-image-content { display: grid; place-items: center; width: max-content; min-width: 100%; min-height: 100%; padding: 24px; }
+.file-preview-image-content img { display: block; max-width: none; max-height: none; object-fit: contain; background: var(--file-canvas); }
+.file-preview-image-stage img { background-image: linear-gradient(45deg, color-mix(in srgb, var(--file-line) 36%, transparent) 25%, transparent 25%), linear-gradient(-45deg, color-mix(in srgb, var(--file-line) 36%, transparent) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--file-line) 36%, transparent) 75%), linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--file-line) 36%, transparent) 75%); background-position: 0 0, 0 8px, 8px -8px, -8px 0; background-size: 16px 16px; }
+.file-preview-image-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--file-line); color: var(--file-muted); background: var(--file-canvas); }
+.file-preview-image-info { font-size: 11px; }
+.file-preview-image-controls { display: flex; align-items: center; gap: 2px; border: 1px solid var(--file-line); border-radius: 6px; padding: 2px; font-size: 12px; }
+.file-preview-image-controls button { min-width: 28px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 4px; color: var(--file-ink); background: transparent; cursor: pointer; }
+.file-preview-image-controls button:hover, .file-preview-image-controls button[aria-pressed="true"] { background: var(--file-selected); }
+.file-preview-image-controls button:disabled { opacity: .5; cursor: default; }
+@media (pointer: coarse) { .file-preview-image-controls button { min-width: 36px; min-height: 36px; } }
 .file-preview-patch {
   display: grid;
   width: 100%;
@@ -9580,3 +9553,15 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .file-preview-tab-dirty { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; opacity: .75; }
 .file-preview-saved-preview { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .file-preview-saved-preview[hidden] { display: none; }
+
+/* Mermaid shares the code frame's source and copy affordance. */
+.markdown-mermaid { min-width: 0; overflow: hidden; }
+.markdown-mermaid-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-height: 40px; padding: 6px 10px; color: var(--file-muted); font-size: 12px; }
+.markdown-mermaid-toolbar button { min-height: 28px; border: 0; border-radius: 5px; padding: 2px 7px; color: var(--file-ink); background: transparent; cursor: pointer; }
+.markdown-mermaid-toolbar button:hover, .markdown-mermaid-toolbar button[aria-pressed="true"] { background: var(--file-selected); }
+.safe-markdown .markdown-mermaid > pre { margin: 0; border: 0; background: transparent; }
+.safe-markdown .markdown-mermaid-image { display: block; width: auto; height: auto; max-width: 100%; max-height: none; margin: 0 auto; padding: 12px; background: var(--file-canvas); }
+.dialog-content.app-dialog.markdown-mermaid-dialog { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(1200px, calc(100vw - 32px)); height: min(860px, calc(100dvh - 32px)); max-height: none; padding: 0; overflow: hidden; }
+.markdown-mermaid-dialog .app-dialog-header { padding: 16px 20px; }
+.markdown-mermaid-dialog .file-preview-image-stage { height: 100%; }
+@media (pointer: coarse) { .markdown-mermaid-toolbar button { min-height: 36px; } }

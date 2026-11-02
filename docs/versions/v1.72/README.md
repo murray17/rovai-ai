@@ -11,6 +11,14 @@ last_updated: 2026-11-02
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Markdown Mermaid 审阅（2026-11-02）
+
+Issue #979 在 document 模式交付自动绘图、源码/图形切换与完整复制、大图缩放和滚动、局部失败及手动重试。
+复用现有图片展示与代码复制，在专用受限 iframe 内离线渲染和清洗，不新增后端协议或消息模式行为。
+当前边界见[文件预览架构](../../architecture/file-preview.md#markdown-图表渲染)与
+[图表阅读 UI](../../ui/components/file-preview.md#markdown-图表阅读)；实现、生产验收及资源体积见
+[交付记录](markdown-mermaid.md)。
+
 ## 取消执行条统一保留（2026-11-02）
 
 公开取消 Run 的会话执行条与继续入口改为按 `cancelled` 状态判断，覆盖 App 退出与其他取消原因。

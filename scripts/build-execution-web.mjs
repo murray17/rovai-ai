@@ -26,6 +26,9 @@ await build({
         entryFileNames: 'assets/execution.js',
         assetFileNames: (asset) => {
           if (asset.name?.endsWith('.css')) return 'assets/execution.css'
+          // Shared Markdown can emit lazy document-only script assets. This
+          // message-only entry never requests them or executes their engines.
+          if (asset.name?.endsWith('.js')) return 'assets/[name]-[hash][extname]'
           throw new Error(`Unexpected execution web asset: ${asset.name}`)
         }
       }

@@ -12,6 +12,7 @@ import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import { parseFileReference } from '../../file-preview-reference'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MarkdownCodeFrame } from './MarkdownCodeFrame'
+import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
 import { MarkdownTableFrame } from './MarkdownTableFrame'
 import {
   visitRenderedFileReferences,
@@ -24,6 +25,22 @@ type MarkdownTreeNode = MarkdownNode
 
 const LeadingMarkdownContentContext = createContext<ReactNode>(null)
 const InlineMarkdownContentContext = createContext<Readonly<Record<string, ReactNode>>>({})
+const MarkdownCodeContext = createContext<{ mode: 'message' | 'document'; theme: ResolvedTheme; literalCopy: boolean }>({
+  mode: 'message', theme: 'day', literalCopy: true
+})
+
+// Module identity is stable across body and theme changes, preserving block state.
+function MarkdownPre({ children }: { children?: ReactNode }): JSX.Element {
+  const { mode, theme, literalCopy } = useContext(MarkdownCodeContext)
+  const block = markdownCodeBlock(children)
+  if (!block) return <pre>{children}</pre>
+  return <MarkdownCodeFrame code={literalCopy ? block.code : undefined}>
+    {mode === 'document' && block.languageName?.toLowerCase() === 'mermaid'
+      ? <MarkdownMermaidBlock source={block.code} theme={theme} />
+      : mode === 'document' ? <MarkdownCodeBlock code={block.code} languageName={block.languageName} theme={theme} />
+        : <pre>{children}</pre>}
+  </MarkdownCodeFrame>
+}
 
 function InlineMarkdownContent({ token }: { token: string }): JSX.Element {
   return <>{useContext(InlineMarkdownContentContext)[token]}</>
@@ -247,17 +264,7 @@ export function SafeMarkdown({
               </p>
             )
           },
-          pre({ children: preChildren }) {
-            const block = markdownCodeBlock(preChildren)
-            if (!block) return <pre>{preChildren}</pre>
-            return (
-              <MarkdownCodeFrame code={inlineContentKeys === '[]' ? block.code : undefined}>
-                {mode === 'document'
-                  ? <MarkdownCodeBlock code={block.code} languageName={block.languageName} theme={theme} />
-                  : <pre>{preChildren}</pre>}
-              </MarkdownCodeFrame>
-            )
-          },
+          pre: MarkdownPre,
           table({ children: tableChildren }) {
             return <MarkdownTableFrame>{tableChildren}</MarkdownTableFrame>
           },
@@ -337,7 +344,9 @@ export function SafeMarkdown({
             className ?? ''
           ].filter(Boolean).join(' ')}
         >
-          {markdown}
+          <MarkdownCodeContext.Provider value={{ mode, theme, literalCopy: inlineContentKeys === '[]' }}>
+            {markdown}
+          </MarkdownCodeContext.Provider>
         </div>
       </InlineMarkdownContentContext.Provider>
     </LeadingMarkdownContentContext.Provider>

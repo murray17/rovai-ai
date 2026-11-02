@@ -8,6 +8,7 @@ import { FilePreviewTabs } from './FilePreviewTabs'
 import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react'
 import { MarkdownFilePreview } from './MarkdownFilePreview'
+import { PreviewImage } from './PreviewImage'
 import { FileFindScope } from './FilePreviewFind'
 import { FileFindDomAdapter } from './FileFindDomAdapter'
 import { HtmlViewer } from './HtmlFileViewer'
@@ -133,64 +134,12 @@ function fileSizeLabel(size: number): string {
 
 function ImageViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const content = tab.content?.kind === 'image' ? tab.content : null
-  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null)
   const { saveReading } = useFilePreview()
-  const [scale, setScale] = useState<number | null>(tab.reading?.imageScale ?? null)
-  const [imageError, setImageError] = useState(false)
-
-  useEffect(() => {
-    setDimensions(null)
-    setScale(tab.reading?.imageScale ?? null)
-    setImageError(false)
-  }, [content?.url])
-
   if (!content) return <div className="file-preview-empty-content" />
-  if (imageError) {
-    return (
-      <div className="file-preview-error" role="alert">
-        <strong><UiText zh={"无法显示图片"} /></strong>
-        <span><UiText zh={"可以从文件标签页菜单使用系统默认应用打开。"} /></span>
-      </div>
-    )
-  }
-  const effectiveScale = scale ?? 1
-  const scaledStyle = scale !== null && dimensions
-    ? {
-        width: dimensions.width * effectiveScale,
-        height: dimensions.height * effectiveScale,
-        maxWidth: 'none',
-        maxHeight: 'none'
-      }
-    : undefined
-  const changeScale = (factor: number): void => {
-    const next = Math.min(8, Math.max(.1, (scale ?? 1) * factor))
-    setScale(next); saveReading(tab.id, { imageScale: next })
-  }
-  return (
-    <div className="file-preview-image-stage">
-      <img
-        src={content.url}
-        alt={tab.presentation.fileName}
-        draggable={false}
-        style={scaledStyle}
-        onLoad={(event) => setDimensions({
-          width: event.currentTarget.naturalWidth,
-          height: event.currentTarget.naturalHeight
-        })}
-        onError={() => setImageError(true)}
-      />
-      <div className="file-preview-image-info" aria-live="polite">
-        {dimensions ? `${dimensions.width} × ${dimensions.height} · ` : ''}{tab.file ? fileSizeLabel(tab.file.size) : ''}
-        {scale === null ? '' : ` · ${Math.round(effectiveScale * 100)}%`}
-      </div>
-      <div className="file-preview-image-controls" aria-label={uiAttribute("图片缩放")}>
-        <button type="button" aria-label={uiAttribute("缩小")} onClick={() => changeScale(.8)}>−</button>
-        <button type="button" onClick={() => { setScale(null); saveReading(tab.id, { imageScale: null }) }}><UiText zh={"适应"} /></button>
-        <button type="button" onClick={() => setScale(1)}>100%</button>
-        <button type="button" aria-label={uiAttribute("放大")} onClick={() => changeScale(1.25)}>＋</button>
-      </div>
-    </div>
-  )
+  return <PreviewImage src={content.url} alt={tab.presentation.fileName}
+    errorHint={uiAttribute('可以从文件标签页菜单使用系统默认应用打开。')}
+    info={tab.file ? fileSizeLabel(tab.file.size) : ''} initialScale={tab.reading?.imageScale ?? null}
+    onScale={imageScale => saveReading(tab.id, { imageScale })} />
 }
 
 function OpeningIndicator(): React.JSX.Element | null {
