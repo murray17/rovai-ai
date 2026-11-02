@@ -412,7 +412,7 @@ Agent 公共消息继续左对齐，仅正文使用与用户消息相同的雾�
 截断投影；当前会话查找命中这类消息时临时挂载全文，使首尾 occurrence 都能被定位。关闭或切换查找后
 恢复用户此前的展开状态，未主动展开时回到折叠态。
 
-会话消息正文、底部与浮层执行台中的 Runtime 过程正文，以及 Markdown 文件预览共享 Mist Gray 分层：行内 code 以
+会话消息正文（含单聊最终回复）、底部与浮层执行台及单聊中的 Runtime 过程正文（含计划说明），以及 Markdown 文件预览共享 Mist Gray 分层：行内 code 以
 `--conversation-inline-code-canvas` 为底色，保留 `1px 4px` 留白、`6px` 圆角和跨行连续底色；围栏代码块使用
 `--conversation-code-block-canvas`、`--conversation-code-line`、`11px 12px` 留白与 `8px` 圆角。块内
 `pre code` 必须继续透明且不保留行内留白或圆角。该覆盖不改变更新说明、附件卡片、Tool 结果、其他 Evidence
