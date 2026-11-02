@@ -81,6 +81,8 @@ pub(crate) struct ClaimedBatchContext {
     #[serde(flatten)]
     pub(super) dynamic: input::DynamicInputContext,
     pub(super) run_input: Value,
+    #[serde(default)]
+    pub(super) chat_reply_context: Option<Value>,
     bootstrap_reserve: usize,
 }
 
@@ -152,6 +154,7 @@ impl ClaimedBatchContext {
             member_identity,
             dynamic: input::DynamicInputContext::prepare(transaction, &snapshot, workspace_fact)?,
             run_input: json!({"messages": []}),
+            chat_reply_context: None,
             bootstrap_reserve,
         })
     }
@@ -179,6 +182,8 @@ impl ClaimedBatchContext {
             .context("Core data directory is unavailable")?,
             &snapshot,
         )?;
+        selected.chat_reply_context =
+            chat_reply::project(transaction, &snapshot.camp_id, &run_input, None)?;
         selected.run_input = run_input;
         let mut facts: Value = serde_json::from_str(&selected.run_facts.payload_json)?;
         facts["historyHint"] = json!(public_history_hint(previous_boundary, additional_messages));
@@ -210,6 +215,7 @@ impl ClaimedBatchContext {
             additional_skills: Some(&self.additional_skills.section),
             a2a_guidance: None,
             single_chat_guidance: None,
+            chat_reply_context: self.chat_reply_context.as_ref(),
             current_input: None,
             run_input: Some(&self.run_input),
         })?;

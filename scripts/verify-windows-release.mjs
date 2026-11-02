@@ -414,7 +414,13 @@ try {
       || health.core.builtinToolIpcProtocolVersion !== builtinToolIpcProtocolVersion) {
     throw new Error(`packaged Core health is incompatible: ${JSON.stringify(health?.core)}`)
   }
-  report.push('Packaged Core: isolated Windows data-root preparation and health.check passed')
+  const members = await core.request('members.list')
+  if (!Array.isArray(members) || members.length === 0) {
+    throw new Error('packaged Core cannot read its initialized member profiles')
+  }
+  await core.request('navigation.snapshot')
+  await core.request('diagnostics.export')
+  report.push('Packaged Core: isolated Windows data-root preparation, health, member/navigation reads and diagnostics export passed')
 
   let installerFile = null
   if (!unpackedOnly) {

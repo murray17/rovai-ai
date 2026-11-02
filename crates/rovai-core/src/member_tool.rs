@@ -230,6 +230,50 @@ pub fn update_member(
     run: &AuthenticatedTeamToolRun,
     input: MemberUpdateInput,
 ) -> Result<CommandExecution> {
+    update_member_with_avatar_bytes(database, data_dir, run, input, None)
+}
+pub fn replay_member_update(
+    database: &mut Database,
+    run: &AuthenticatedTeamToolRun,
+    input: MemberUpdateInput,
+) -> Result<Option<CommandExecution>> {
+    input.validate()?;
+    authorize_member_target(database.connection(), run, &input.agent_id, true)?;
+    let prepared_avatar_ref = input
+        .avatar_file
+        .as_ref()
+        .map(|_| format!("rovai://member-avatar/managed/{}", input.request_id));
+    let avatar_input_digest = input
+        .avatar_file
+        .as_ref()
+        .map(|path| canonical_json_digest(&json!(path)))
+        .transpose()?;
+    let envelope = CommandEnvelope {
+        command_id: format!("member-update:{}", input.request_id),
+        actor: ActorRef::User {
+            user_id: CURRENT_USER_ID.to_string(),
+        },
+        camp_id: Some(run.camp_id.clone()),
+        expected_versions: vec![],
+        execution_epoch: None,
+        payload: PatchMemberCommand {
+            caller_agent_id: run.agent_id.clone(),
+            input,
+            prepared_avatar_ref,
+            avatar_input_digest,
+        },
+    };
+    let gateway = DomainCommandGateway::default();
+    gateway.replay_if_recorded(database, &envelope)
+}
+
+pub fn update_member_with_avatar_bytes(
+    database: &mut Database,
+    data_dir: &Path,
+    run: &AuthenticatedTeamToolRun,
+    input: MemberUpdateInput,
+    avatar_bytes: Option<&[u8]>,
+) -> Result<CommandExecution> {
     input.validate()?;
     authorize_member_target(database.connection(), run, &input.agent_id, true)?;
     // Bind an upload to the existing immutable asset format using this same
@@ -263,19 +307,28 @@ pub fn update_member(
     let recorded = gateway.replay_if_recorded(database, &envelope)?;
     if let Some(path) = envelope.payload.input.avatar_file.as_deref() {
         let path = Path::new(path);
-        if !path.try_exists().map_err(|_| invalid_image())? {
+        if avatar_bytes.is_none() && !path.try_exists().map_err(|_| invalid_image())? {
             if let Some(recorded) = recorded {
                 return Ok(recorded);
             }
             return Err(invalid_image().into());
         }
-        prepare_member_avatar(
-            data_dir,
-            Uuid::parse_str(&envelope.payload.input.request_id)?,
-            path,
-            envelope.payload.input.crop(),
-            recorded.is_some(),
-        )
+        match avatar_bytes {
+            Some(bytes) => crate::member_avatar::prepare_member_avatar_bytes(
+                data_dir,
+                Uuid::parse_str(&envelope.payload.input.request_id)?,
+                bytes,
+                envelope.payload.input.crop(),
+                recorded.is_some(),
+            ),
+            None => prepare_member_avatar(
+                data_dir,
+                Uuid::parse_str(&envelope.payload.input.request_id)?,
+                path,
+                envelope.payload.input.crop(),
+                recorded.is_some(),
+            ),
+        }
         .map_err(|error| {
             if error
                 .downcast_ref::<MemberAvatarImportError>()

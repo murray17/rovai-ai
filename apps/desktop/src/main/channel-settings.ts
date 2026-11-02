@@ -20,6 +20,8 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import type { CoreClient } from './core-client'
+import { ChannelChatService, type ChatSendReceipt } from './channel-chat-service'
+import { ContactSearchError, searchContacts } from './feishu-contact-search'
 import {
   FEISHU_PROVIDER_PROFILE,
   presentProviderError,
@@ -98,6 +100,11 @@ type CoreChannelSnapshot = {
     failureCode: string | null
     version: number
     ownerIdentityStatus: 'verified' | 'unverified'
+    chat?: {
+      agentId: string | null
+      ownerOnly: boolean
+      mode: 'work' | 'chat'
+      materialsPath: string | null    } | null
   }>
   publicationIntents: Array<{
     publicationIntentId: string
@@ -299,6 +306,9 @@ export class ChannelSettingsService {
   readonly #now: () => number
   readonly #listeners = new Set<(snapshot: ChannelSettingsSnapshot) => void>()
   readonly #managedChannels = new Map<string, ManagedChannel>()
+  readonly #deletingApps = new Set<string>()
+  readonly #chatServices = new Map<string, ChannelChatService>()
+  #chatFlushTimer: ReturnType<typeof setInterval> | null = null
   readonly #publicationFailures = new Map<string, string>()
   readonly #chatModeCache = new Map<string, 'p2p' | 'group' | 'topic'>()
   readonly #chatNameCache = new Map<string, string>()
@@ -397,6 +407,11 @@ export class ChannelSettingsService {
       await this.#emit()
       this.#nextRosterSweepAt = this.#now() + ROSTER_SWEEP_MS
       this.#hostPump?.start()
+      this.#chatFlushTimer ??= setInterval(() => {
+        for (const service of this.#chatServices.values()) {
+          void service.flush().catch(() => undefined)
+        }
+      }, 3_000)
       if (snapshot.account?.status === 'connected') {
         void this.#checkDeveloperSession(snapshot.account, sessionCheckGeneration)
       }
@@ -419,6 +434,10 @@ export class ChannelSettingsService {
     this.#activeProvisioningAbort?.abort()
     this.#activeProvisioningAbort = null
     this.#hostPump?.stop()
+    if (this.#chatFlushTimer) clearInterval(this.#chatFlushTimer)
+    this.#chatFlushTimer = null
+    for (const service of this.#chatServices.values()) service.stop()
+    this.#chatServices.clear()
     const channels = [...this.#managedChannels.values()]
     this.#managedChannels.clear()
     this.#rosterReconciledAt.clear()
@@ -600,6 +619,51 @@ export class ChannelSettingsService {
 
   async #publishMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
     return this.#publishNewMemberBot(agentId, 'publish')
+  }
+
+  async deleteMemberBot(agentId: string, expectedAppId: string): Promise<ChannelSettingsSnapshot> {
+    this.#requireHost()
+    if (this.#profile.kind !== 'feishu') throw new Error('channel_local_delete_not_supported')
+    if (this.#activeProvisioning && !['completed', 'failed', 'unknown_remote_state'].includes(this.#activeProvisioning.stage)) {
+      throw new Error('已有一名队员正在发布。')
+    }
+    const snapshot = await this.#coreSnapshot()
+    const bot = snapshot.memberBots.find(candidate => candidate.agentId === agentId)
+    if (!bot || bot.appId !== expectedAppId) throw new Error('Bot 绑定已变化，请重新读取后再试。')
+    if (this.#deletingApps.has(bot.appId)) throw new Error('channel_publication_busy')
+    this.#deletingApps.add(bot.appId)
+    try {
+      const managed = this.#managedChannels.get(bot.appId)
+      if (managed) {
+        this.#managedChannels.delete(bot.appId)
+        await this.#disconnectManaged(managed)
+      }
+      const chat = this.#chatServices.get(bot.appId)
+      chat?.stop()
+      this.#chatServices.delete(bot.appId)
+      const result = await this.#commandWithId('channels.feishu.memberBot.delete', randomUUID(), {
+        agentId, expectedAppId: bot.appId, expectedVersion: bot.version
+      }, false)
+      if (result.status === 'rejected') {
+        switch (result.code) {
+          case 'feishu_member_bot.binding_conflict':
+            throw new Error('Bot 绑定已变化，请重新读取后再试。')
+          case 'feishu_publication_intent.active_conflict':
+            throw new Error('已有渠道发布正在进行，请查看原发布进度。')
+          case 'channel_credential.identity_conflict':
+          case 'channel_credential.still_referenced':
+            throw new Error('本地 Bot 凭据存在冲突，未删除发布记录。')
+          default:
+            throw new Error('未能删除本地发布记录，请重新读取后再试。')
+        }
+      }
+      this.#dependencies!.credentialStore.invalidatePublished?.()
+      this.#publicationFailures.delete(agentId)
+      if (this.#activeProvisioning?.agentId === agentId) this.#activeProvisioning = null
+      return await this.#emit()
+    } finally {
+      this.#deletingApps.delete(bot.appId)
+    }
   }
 
   async retryMemberBot(agentId: string): Promise<ChannelSettingsSnapshot> {
@@ -878,6 +942,7 @@ export class ChannelSettingsService {
         publicationIntentId,
         agentId,
         appName: agent.displayName,
+        chatBotEnabled: this.#profile.kind === 'feishu' && agent.chatBotEnabled === true,
         appDescription,
         avatarSource,
         expectedDeveloperIdentity: {
@@ -1079,6 +1144,7 @@ export class ChannelSettingsService {
         agentId: agent.agentId,
         remoteAppId,
         appName: agent.displayName,
+        chatBotEnabled: this.#profile.kind === 'feishu' && agent.chatBotEnabled === true,
         appDescription,
         avatarSource,
         expectedDeveloperIdentity: {
@@ -1468,6 +1534,7 @@ export class ChannelSettingsService {
     if (!credential || credential.appId !== bot.appId) throw new Error('published_bot_credential_missing')
     const managed = await this.#connectBot(bot.agentId, bot.credentialRef, credential)
     this.#managedChannels.set(bot.appId, managed)
+    this.#ensureChatService(bot.appId)
     // Opt-in synthetic previews reuse this exact connection, never a competing WebSocket.
     void this.#dependencies?.executionPreview?.connected(bot.agentId, bot.appId, managed.channel).catch(() => {
       logFeishuBotDiagnostic('execution_preview.failed', { agentId: bot.agentId })
@@ -1575,9 +1642,139 @@ export class ChannelSettingsService {
   }
 
   async #disconnectManaged(managed: ManagedChannel): Promise<void> {
+    const chat = this.#chatServices.get(managed.appId)
+    if (chat) {
+      chat.stop()
+      this.#chatServices.delete(managed.appId)
+    }
     managed.connectionStatus = 'offline'
     for (const unsubscribe of managed.unsubscribers.splice(0)) unsubscribe()
     await managed.channel.disconnect().catch(() => undefined)
+  }
+
+  #ensureChatService(appId: string): ChannelChatService | null {
+    const existing = this.#chatServices.get(appId)
+    if (existing) return existing
+    if (!this.#dependencies) return null
+    const provider = this.#profile.kind === 'lark' ? 'lark' : 'feishu'
+    const service = new ChannelChatService({
+      provider,
+      appId,
+      core: {
+        request: (method, params) => this.#dependencies!.core.request(method, params)
+      },
+      isReady: async () => {
+        const managed = this.#managedChannels.get(appId)
+        if (!managed || managed.connectionStatus !== 'online') return false
+        const credential = await this.#dependencies!.credentialStore.read(managed.credentialRef)
+        return credential?.appId === appId && !!credential.appSecret
+          && managed.connectionStatus === 'online' && this.#managedChannels.get(appId) === managed
+      },
+      searchContacts: async (query, signal) => {
+        const managed = this.#managedChannels.get(appId)
+        if (!managed || managed.connectionStatus !== 'online') throw new ContactSearchError('unavailable')
+        const credential = await this.#dependencies!.credentialStore.read(managed.credentialRef)
+        if (!credential || credential.appId !== appId || managed.connectionStatus !== 'online'
+          || this.#managedChannels.get(appId) !== managed || signal.aborted) throw new ContactSearchError('unavailable')
+        return searchContacts({ ...credential, domain: provider, query, signal })
+      },
+      sendText: async (target, text, targetKind, outboundId) => {
+        const managed = this.#managedChannels.get(appId)
+        if (!managed || managed.connectionStatus !== 'online') return { status: 'failed', messageId: null }
+        let timer: ReturnType<typeof setTimeout> | undefined
+        try {
+          return await Promise.race([
+            managed.channel.rawClient.im.v1.message.create({
+              params: { receive_id_type: targetKind === 'open_id' ? 'open_id' : 'chat_id' },
+              data: {
+                receive_id: target, msg_type: 'text', content: JSON.stringify({ text }),
+                uuid: createHash('sha256').update(provider + '\0' + appId + '\0' + outboundId).digest('hex').slice(0, 50)
+              }
+            }).then((result): ChatSendReceipt => {
+              if (result.code !== 0) return { status: 'failed', messageId: null }
+              return result.data?.message_id
+                ? { status: 'sent', messageId: result.data.message_id }
+                : { status: 'unknown', messageId: null }
+            }),
+            new Promise<ChatSendReceipt>((resolve) => {
+              timer = setTimeout(() => resolve({ status: 'unknown', messageId: null }), 20_000)
+            })
+          ])
+        } catch {
+          // A transport exception cannot establish whether the mutation happened.
+          return { status: 'unknown', messageId: null }
+        } finally {
+          if (timer) clearTimeout(timer)
+        }
+      },
+      log: (event, detail) => logFeishuBotDiagnostic('chat.' + event, {
+        appIdDigest: digest(appId),
+        ...detail
+      })
+    })
+    this.#chatServices.set(appId, service)
+    void service.flush().catch(() => undefined)
+    return service
+  }
+  async #handleChatMessage(
+    managed: ManagedChannel,
+    message: NormalizedMessage,
+    owner: boolean
+  ): Promise<void> {
+    const service = this.#ensureChatService(managed.appId)
+    if (!service) {
+      logFeishuBotDiagnostic('chat.rejected', {
+        ...messageDiagnostic(managed, message),
+        reason: 'chat_runtime_missing'
+      })
+      return
+    }
+    const conversationKind = await this.#conversationKind(managed.channel, message)
+    if (conversationKind !== 'p2p' && !message.mentionedBot) {
+      logFeishuBotDiagnostic('chat.rejected', {
+        ...messageDiagnostic(managed, message),
+        conversationKind,
+        reason: 'bot_not_mentioned'
+      })
+      return
+    }
+    const chatName = await this.#conversationDisplayName(
+      managed.channel,
+      message,
+      conversationKind
+    ).catch(() => null)
+    const raw = (message.raw ?? {}) as RawInboundEvent
+    const senderExternalId = raw.sender?.sender_id?.open_id
+      || raw.sender?.sender_id?.union_id
+      || raw.sender?.sender_id?.user_id
+      || message.senderId
+    logFeishuBotDiagnostic('chat.accepted', {
+      ...messageDiagnostic(managed, message),
+      conversationKind
+    })
+    try {
+      await service.handleInbound({
+        chatId: message.chatId,
+        chatName,
+        conversationKind,
+        authorExternalId: senderExternalId,
+        authorName: message.senderName || '飞书成员',
+        isOwner: owner,
+        body: message.content.trim(),
+        externalMessageId: message.messageId,
+        quoteMessageId: message.replyToMessageId ?? null,
+        mentions: message.mentions.map((mention) => ({
+          openId: mention.openId ?? null,
+          name: mention.name || (mention.isBot ? 'Bot' : '成员')
+        }))
+      })
+    } catch (error) {
+      logFeishuBotDiagnostic('chat.failed', {
+        ...messageDiagnostic(managed, message),
+        reason: 'unavailable'
+      })
+    }
+    await this.#emit()
   }
 
   async #handleMessage(managed: ManagedChannel, message: NormalizedMessage): Promise<void> {
@@ -1588,13 +1785,14 @@ export class ChannelSettingsService {
         reason
       })
     }
-    if (this.#stopped) {
+    if (this.#stopped || this.#deletingApps.has(managed.appId)) {
       reject('host_stopped')
       return
     }
     this.#hostPump?.wake()
     const raw = (message.raw ?? {}) as RawInboundEvent
     const coreSnapshot = await this.#coreSnapshot()
+    if (this.#deletingApps.has(managed.appId) || !coreSnapshot.memberBots.some(bot => bot.appId === managed.appId && bot.status === 'published')) return
     const tenantKey = raw.sender?.tenant_key || raw.tenant_key
     if (!tenantKey) {
       reject('tenant_key_missing')
@@ -1621,6 +1819,17 @@ export class ChannelSettingsService {
       },
       false
     )
+    const chatMode = coreSnapshot.memberBots.find(
+      (candidate) => candidate.appId === managed.appId
+    )?.chat?.mode === 'chat'
+    if (chatMode) {
+      await this.#handleChatMessage(
+        managed,
+        message,
+        owner.payload.classification === 'owner'
+      )
+      return
+    }
     if (owner.payload.classification !== 'owner') {
       reject(
         owner.payload.classification === 'unverified'
@@ -2600,7 +2809,8 @@ export class ChannelSettingsService {
         botDisplayName: bot.botDisplayName,
         appId: bot.appId,
         managementUrl: memberBotManagementUrl(this.#profile, bot.appId),
-        failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode
+        failureCode: this.#publicationFailures.get(bot.agentId) ?? bot.failureCode,
+        chat: bot.chat ?? null
       })
     }
     for (const intent of snapshot.publicationIntents) {

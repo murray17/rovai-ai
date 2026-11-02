@@ -36,7 +36,7 @@ export type ThreadClient = Pick<RovaiApi,
   selectRuntimeExecutable: RovaiApi['selectRuntimeExecutable'] | null
   revealMcpConfig: RovaiApi['revealMcpConfig'] | null
   channels: (Pick<RovaiApi['channels'], 'get' | 'onChanged' | 'publishMemberBot' | 'retryMemberBot' | 'selectPublicationApprover'> & {
-    native: Pick<RovaiApi['channels'], 'connect' | 'disconnect' | 'cancelQrAttempt' | 'refreshLoginQr'> | null
+    native: Pick<RovaiApi['channels'], 'connect' | 'disconnect' | 'cancelQrAttempt' | 'refreshLoginQr' | 'deleteMemberBot'> | null
   }) | null
   onEvent?: RovaiApi['onEvent']
   /** Authorized invalidation signal; it is deliberately not a CoreEvent. */

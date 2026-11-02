@@ -271,11 +271,37 @@ async function runTrial(options, registerCleanup) {
       temporaryRoot = await makeTemporaryDirectory(`rovai-qualification-${caseRecord.contract.manifest.id}-`)
     }
     temporaryRoot = await realpath(temporaryRoot)
-    dataDirectory = join(temporaryRoot, 'data')
-    runtimeCacheDirectory = join(temporaryRoot, 'runtime-cache')
-    workspacePath = join(temporaryRoot, 'workspace')
-    await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
+    let isolatedRoot = temporaryRoot
+    if (regression && process.platform === 'win32') {
+      const prepared = await runCaptured(options.coreExecutable, ['--prepare-windows-data-root', join(temporaryRoot, 'private')], { timeoutMs: 30_000 })
+      if (prepared.code !== 0) throw new Error('Windows regression private root preparation failed')
+      const layout = JSON.parse(prepared.stdout)
+      isolatedRoot = layout.root
+      dataDirectory = layout.core
+    } else {
+      dataDirectory = join(temporaryRoot, 'data')
+      await mkdir(dataDirectory, { recursive: true, mode: 0o700 })
+    }
+    runtimeCacheDirectory = join(isolatedRoot, 'runtime-cache')
+    workspacePath = join(isolatedRoot, 'workspace')
     await mkdir(runtimeCacheDirectory, { recursive: true, mode: 0o700 })
+    const runtimeEnvironment = {}
+    if (regression?.team.some(member => member.adapterKind === 'codebuddy-cli')) {
+      const source = process.env.CODEBUDDY_CONFIG_DIR
+      if (!source) throw new Error('CodeBuddy regression requires an explicit credential-free native template')
+      const configuration = JSON.parse(await readFile(join(source, 'models.json'), 'utf8'))
+      const ids = new Set(regression.team.filter(m => m.adapterKind === 'codebuddy-cli').map(m => m.model.modelId.replace(/^custom-local:/, '')))
+      const models = configuration.models.filter(m => ids.has(m.id)).map(m => {
+        if (!/^\$\{[A-Z_][A-Z0-9_]*\}$/.test(m.apiKey ?? '') || !/^\$\{[A-Z_][A-Z0-9_]*\}$/.test(m.url ?? '')) throw new Error('CodeBuddy regression template must use environment references, not credential values')
+        return Object.fromEntries(['id','name','vendor','api','maxInputTokens','maxOutputTokens','supportsToolCall','supportsImages','supportsReasoning','reasoning','temperature','apiKey','url'].filter(k=>Object.hasOwn(m,k)).map(k=>[k,m[k]]))
+      })
+      if (models.length !== ids.size) throw new Error('CodeBuddy regression model template is incomplete')
+      const native = join(isolatedRoot, 'native-codebuddy')
+      await mkdir(native, { mode: 0o700 })
+      await writeFile(join(native, 'models.json'), JSON.stringify({ models }), { mode: 0o600 })
+      await writeFile(join(native, 'settings.json'), JSON.stringify({ enabledPlugins: {}, hooks: {}, memory: { enabled: false } }), { mode: 0o600 })
+      Object.assign(runtimeEnvironment, { CODEBUDDY_CONFIG_DIR: native, CODEBUDDY_DISABLE_FILE_LOGS: '1', XDG_CACHE_HOME: runtimeCacheDirectory, XDG_CONFIG_HOME: join(isolatedRoot,'xdg-config'), XDG_DATA_HOME: join(isolatedRoot,'xdg-data'), XDG_STATE_HOME: join(isolatedRoot,'xdg-state') })
+    }
     await copyFixture(caseRecord.contract.fixturePath, workspacePath)
     baselineManifest = await treeManifest(workspacePath)
     if (baselineManifest.digest !== caseRecord.contract.fixture.digest) {
@@ -291,6 +317,7 @@ async function runTrial(options, registerCleanup) {
       workingDirectory: root,
       runtimeCacheDirectory,
       mcpConfigPath: regression ? join(dataDirectory, 'mcp.json') : null,
+      environmentOverrides: runtimeEnvironment,
       onNotification(message) {
         const diagnostic = qualificationRuntimePrivateDiagnostic(message)
         if (!diagnostic) return

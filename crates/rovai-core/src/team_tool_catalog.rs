@@ -65,6 +65,8 @@ pub fn validate_builtin_tool_input(canonical_name: &str, input: &Value) -> Resul
         return serde_json::from_value::<MemberUpdateInput>(input.clone())?.validate();
     }
     let valid = match canonical_name {
+        "feishu.status" | "feishu.search" | "feishu.result" | "feishu.forward" | "feishu.ask"
+        | "feishu.items" | "feishu.report" | "feishu.close" => Ok(()),
         MEMBER_LIST_TOOL_NAME => Ok(()),
         MEMBER_GET_TOOL_NAME => serde_json::from_value::<MemberGetInput>(input.clone()).map(|_| ()),
         CAMP_MESSAGE_SEND_TOOL_NAME => {
@@ -1018,7 +1020,7 @@ pub fn builtin_tool_definitions() -> &'static [Value] {
 }
 
 fn build_builtin_tool_definitions() -> Vec<Value> {
-    vec![
+    let mut definitions = vec![
         json!({
             "name": "mission.list",
             "title": "List Missions",
@@ -1345,7 +1347,9 @@ fn build_builtin_tool_definitions() -> Vec<Value> {
                 ]
             }
         }),
-    ]
+    ];
+    definitions.extend(crate::channel_chat_tools::definitions());
+    definitions
 }
 
 #[cfg(test)]

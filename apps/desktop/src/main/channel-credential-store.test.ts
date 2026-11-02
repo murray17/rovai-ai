@@ -26,6 +26,9 @@ describe('SQLite channel stores', () => {
 
     expect(request).toHaveBeenCalledTimes(1)
     expect(first).toEqual(second)
+    store.forProvider('feishu').invalidatePublished?.()
+    await store.listPublished()
+    expect(request).toHaveBeenCalledTimes(2)
     expect(first).toEqual([
       expect.objectContaining({
         agentId: 'agent-feishu', credential: {

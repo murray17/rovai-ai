@@ -49,6 +49,12 @@ describe('navigation search routing', () => {
     expect(navigationThreadSearch('  ', threads, projects)).toEqual({ kind: 'text', threads: threads.slice(0, 12) })
   })
 
+  it('searches Chat Bots by their group label rather than their worker directory', () => {
+    const bot = { ...target, navigationGroupKey: 'chat-bot' }
+    expect(navigationThreadSearch('聊天 Bot', [bot, target], projects)).toEqual({ kind: 'text', threads: [bot] })
+    expect(navigationThreadSearch('Rovai', [bot, target], projects)).toEqual({ kind: 'text', threads: [target] })
+  })
+
   it('finds the first-run Thread by its displayed or saved title and returns original data', async () => {
     const languageApi = languageTestApi
     const firstRunThread = { ...target, title: '初次集结' }
@@ -75,7 +81,8 @@ describe('navigation search routing', () => {
 describe('navigation exact lookup', () => {
   it('makes one debounced request and returns a Thread absent from the loaded list', async () => {
     vi.useFakeTimers()
-    const find = vi.fn().mockResolvedValue(target)
+    const bot = { ...target, navigationGroupKey: 'chat-bot' }
+    const find = vi.fn().mockResolvedValue(bot)
     const publish = vi.fn()
     const search = navigationThreadSearch(threadId, [], projects)
     if (search.kind !== 'id') throw new Error('Expected ID lookup')
@@ -83,7 +90,7 @@ describe('navigation exact lookup', () => {
     expect(find).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(150)
     expect(find).toHaveBeenCalledExactlyOnceWith(threadId)
-    expect(publish).toHaveBeenCalledExactlyOnceWith({ threadId, thread: target, error: null })
+    expect(publish).toHaveBeenCalledExactlyOnceWith({ threadId, thread: bot, error: null })
     cancel()
   })
 

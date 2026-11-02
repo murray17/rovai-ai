@@ -17,6 +17,7 @@ export const desktopThreadClient: ThreadClient = {
     retryMemberBot: (agentId, kind) => window.rovai.channels.retryMemberBot(agentId, kind),
     selectPublicationApprover: (agentId, userId, kind) => window.rovai.channels.selectPublicationApprover(agentId, userId, kind),
     native: {
+      deleteMemberBot: (agentId, expectedAppId, kind) => window.rovai.channels.deleteMemberBot(agentId, expectedAppId, kind),
       connect: kind => window.rovai.channels.connect(kind), disconnect: kind => window.rovai.channels.disconnect(kind),
       cancelQrAttempt: id => window.rovai.channels.cancelQrAttempt(id), refreshLoginQr: id => window.rovai.channels.refreshLoginQr(id)
     }

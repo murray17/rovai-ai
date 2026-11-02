@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import type { AdapterKind } from '@contracts'
+import type { AdapterKind, HostPlatformKey } from '@contracts'
 import {
   PRODUCT_RUNTIME_LOGOS,
   visibleProductRuntimes,
@@ -56,7 +56,8 @@ export function MemberRuntimePicker({
   disabled,
   isDisabled,
   runtimeKinds = visibleProductRuntimes(null, []),
-  onChange
+  onChange,
+  hostPlatform
 }: {
   id: string
   value: AdapterKind | ''
@@ -64,6 +65,7 @@ export function MemberRuntimePicker({
   runtimeKinds?: readonly AdapterKind[]
   isDisabled(kind: AdapterKind): boolean
   onChange(kind: AdapterKind | ''): void
+  hostPlatform?: HostPlatformKey | null
 }): React.JSX.Element {
   const label = value ? adapterLabel(value) : uiAttribute('暂不配置')
   return (
@@ -125,6 +127,11 @@ export function MemberRuntimePicker({
           </Menu.Content>
         </Menu.Portal>
       </Menu.Root>
+      {hostPlatform === 'windows-x64' && (
+        <p className="member-runtime-picker-note">
+          {uiAttribute("Windows 专用账户隔离目前仅支持 Codex、Claude Code、CodeBuddy、OpenCode；其余智能体以普通权限运行")}
+        </p>
+      )}
     </div>
   )
 }

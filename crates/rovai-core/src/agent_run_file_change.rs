@@ -1674,6 +1674,23 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
+    const TEST_REPOSITORY: &str = if cfg!(windows) { "C:/repo" } else { "/repo" };
+    const OUTSIDE_PATH: &str = if cfg!(windows) {
+        "C:/tmp/rovai-outside/outside-alpha.txt"
+    } else {
+        "/tmp/rovai-outside/outside-alpha.txt"
+    };
+    const ALIASED_OUTSIDE_PATH: &str = if cfg!(windows) {
+        "C:/private/tmp/rovai-outside/outside-alpha.txt"
+    } else {
+        "/private/tmp/rovai-outside/outside-alpha.txt"
+    };
+    const SHARED_OUTSIDE_PATH: &str = if cfg!(windows) {
+        "C:/shared/outside.ts"
+    } else {
+        "/shared/outside.ts"
+    };
+
     fn evidence(sequence: i64, payload: Value) -> SequencedEvidence {
         SequencedEvidence {
             id: format!("evidence-{sequence}"),
@@ -1752,7 +1769,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 full(2, Some("B\n"), Some("C\n")),
@@ -1776,7 +1793,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-27T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[
                     full(1, Some("A\n"), Some("B\n")),
                     full(2, Some("B\n"), Some("A\n"))
@@ -1792,7 +1809,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 full(2, Some("X\n"), Some("C\n")),
@@ -1810,7 +1827,7 @@ mod tests {
 
     #[test]
     fn exact_mutations_remain_chronological_fragments_with_known_totals() {
-        let reported = aggregate_evidence("run-reported", 1, "2026-10-05T00:00:00Z", Path::new("/repo"), &[
+        let reported = aggregate_evidence("run-reported", 1, "2026-10-05T00:00:00Z", Path::new(TEST_REPOSITORY), &[
             evidence(1, json!({"runtimeDiff":{"status":"available","semanticKind":"reported_mutation","entries":[{
                 "semantics":"reported_mutation","path":"src/a.ts","fragments":[{"oldText":"A","newText":"B"},{"oldText":"second","newText":"changed"}]
             }]}})),
@@ -1832,7 +1849,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 evidence(1, json!({"runtimeDiff": {"status": "available", "semanticKind": "exact_mutation", "entries": [{"semantics": "exact_mutation", "path": "src/app.ts", "oldText": "A", "newText": "B"}]}})),
                 evidence(2, json!({"runtimeDiff": {"status": "available", "semanticKind": "exact_mutation", "entries": [{"semantics": "exact_mutation", "path": "src/app.ts", "oldText": "B", "newText": "C"}]}})),
@@ -1856,7 +1873,7 @@ mod tests {
             "run-qoder",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 evidence(
                     1,
@@ -1914,7 +1931,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/app.ts", "changeKind": "add"}}))],
         )
         .unwrap();
@@ -1932,7 +1949,7 @@ mod tests {
                 "run-read",
                 1,
                 "2026-09-06T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -1993,7 +2010,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-28T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -2121,7 +2138,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 evidence(
@@ -2151,7 +2168,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-28T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -2178,7 +2195,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 evidence(
@@ -2208,17 +2225,14 @@ mod tests {
     #[test]
     fn single_terminal_diff_uses_the_matching_file_operation_path_identity() {
         for (diff_path, operation_path) in [
-            (
-                "/private/tmp/rovai-outside/outside-alpha.txt",
-                "/tmp/rovai-outside/outside-alpha.txt",
-            ),
-            ("outside-alpha.txt", "/tmp/rovai-outside/outside-alpha.txt"),
+            (ALIASED_OUTSIDE_PATH, OUTSIDE_PATH),
+            ("outside-alpha.txt", OUTSIDE_PATH),
         ] {
             let projection = aggregate_evidence(
                 "run-1",
                 1,
                 "2026-08-28T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -2264,7 +2278,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[evidence(
                 1,
                 json!({
@@ -2288,7 +2302,7 @@ mod tests {
                     },
                     "runtimeFileOperation": {
                         "status": "available",
-                        "path": "/tmp/rovai-outside/outside-alpha.txt",
+                        "path": OUTSIDE_PATH,
                         "changeKind": "update"
                     }
                 }),
@@ -2305,7 +2319,7 @@ mod tests {
         assert_eq!(paths.len(), 3);
         assert!(paths.contains("src/a.ts"));
         assert!(paths.contains("src/b.ts"));
-        assert!(paths.contains("/tmp/rovai-outside/outside-alpha.txt"));
+        assert!(paths.contains(OUTSIDE_PATH));
     }
 
     #[test]
@@ -2314,7 +2328,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 evidence(2, json!({"runtimeRunDiff": {"status": "available", "diff": "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-A\n+C\n"}})),
@@ -2336,7 +2350,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-27T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[
                     full(1, Some("A\n"), Some("B\n")),
                     evidence(
@@ -2355,7 +2369,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("inside-before\n"), Some("inside-after\n")),
                 evidence(
@@ -2383,7 +2397,7 @@ mod tests {
         .expect("cross-root terminal evidence should remain visible");
 
         assert_eq!(projection.details.card.file_count, 1);
-        assert_eq!(projection.details.files[0].path, "/shared/outside.ts");
+        assert_eq!(projection.details.files[0].path, SHARED_OUTSIDE_PATH);
         assert_eq!(
             projection.details.files[0].presentation_kind,
             "full_net_diff"
@@ -2392,7 +2406,7 @@ mod tests {
             projection.details.files[0].blocks[0]
                 .diff
                 .as_deref()
-                .is_some_and(|diff| diff.contains("--- /shared/outside.ts"))
+                .is_some_and(|diff| diff.contains(&format!("--- {SHARED_OUTSIDE_PATH}")))
         );
     }
 
@@ -2402,10 +2416,10 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/roundtrip.ts", "changeKind": "update"}})),
-                evidence(2, json!({"runtimeFileOperation": {"status": "available", "path": "/shared/outside.ts", "changeKind": "update"}})),
+                evidence(2, json!({"runtimeFileOperation": {"status": "available", "path": SHARED_OUTSIDE_PATH, "changeKind": "update"}})),
                 evidence(3, json!({"runtimeRunDiff": {"status": "available", "diff": "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-A\n+B\n"}})),
             ],
         )
@@ -2418,7 +2432,7 @@ mod tests {
                 .iter()
                 .map(|file| file.path.as_str())
                 .collect::<Vec<_>>(),
-            vec!["src/app.ts", "/shared/outside.ts"]
+            vec!["src/app.ts", SHARED_OUTSIDE_PATH]
         );
         assert_eq!(projection.details.card.additions, None);
         assert_eq!(projection.details.card.operation_count, 2);

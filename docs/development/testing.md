@@ -9,6 +9,22 @@ last_updated: 2026-10-26
 [`package.json#scripts`](../../package.json)是 JavaScript 命令名和组合的真源。Rust 测试
 目标由 Cargo workspace 和测试代码决定。
 
+## Windows 本地全量回归
+
+内存受限的日常开发机按顺序运行完整 Vitest 与 Rust 回归，不同时编译 Release、运行多个测试套件。
+先切换到仓库真实绝对路径（盘符大小写与 `realpath` 一致）；Windows 小写 cwd 与大写模块路径混用会导致
+Vitest forks 重复加载测试运行器并在收集阶段报 `failed to find the current suite`。
+
+```bash
+cd "C:/path/to/rovai-ai" # 示例；替换为当前仓库的真实绝对路径
+node node_modules/vitest/vitest.mjs run --pool=forks --maxWorkers=1
+CARGO_BUILD_JOBS=1 cargo test --workspace -- --test-threads=1
+```
+
+全量 Vitest 使用标准 forks，不以 vmThreads 代替：原生 Error 的跨 VM 原型和运行期 TZ 变更会影响
+错误类型与夏令时断言。保持原有断言及超时；失败先串行复现，不据文件未修改认定无关。
+每轮完成后核对本轮子进程和临时目录，含 detached 测试子进程；只清理来源已确认的资源，保留日常 App。
+
 ## 用户 Steer 的 Runtime 验收
 
 普通队列与运行中插话共用 `scripts/smoke-steer.mjs`。真实模型调用先满足

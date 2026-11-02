@@ -50,6 +50,7 @@ import { RuntimeInstallationGuide } from './RuntimeInstallationGuide'
 import { runtimeInstallGuide } from './runtime-install-guide'
 import { invalidateManagedAvatarObjectUrl } from './managed-avatar-cache'
 import {
+  MemberChatBotSettings,
   MemberRuntimeParameters,
   runtimeDraftForMember,
   runtimeEditorInstallation,
@@ -559,6 +560,7 @@ const MemberEditor = forwardRef<
       | 'members.runtime.set'
       | 'members.runtime.clear'
       | 'members.presence.set'
+      | 'members.chat.set'
       | 'members.remove'
       | 'members.reorder',
     command: unknown,
@@ -633,6 +635,19 @@ const MemberEditor = forwardRef<
       },
       uiAttribute('运行配置已保存，但页面未能重新载入最新值')
     )
+  }
+
+  const saveChatBot = async (
+    enabled: boolean,
+    materialsPath: string | null
+  ): Promise<void> => {
+    if (!selectedAgent) return
+    await runCommand('chat-bot', 'members.chat.set', {
+      agentId: selectedAgent.agentId,
+      expectedVersion: selectedAgent.version,
+      enabled,
+      materialsPath
+    })
   }
 
   const clearRuntime = async (): Promise<void> => {
@@ -847,6 +862,13 @@ const MemberEditor = forwardRef<
               />
             ) : (
               <p className="member-editor-new-runtime"><UiText zh={"创建队员后，可在这里选择智能体、模型与权限。"} /></p>
+            )}
+            {selectedAgent && (
+              <MemberChatBotSettings
+                agent={selectedAgent}
+                busy={busy !== null}
+                onSet={saveChatBot}
+              />
             )}
           </section>
         </div>
@@ -1299,6 +1321,7 @@ export const MemberRuntimeForm = forwardRef<
             runtimeKinds={visibleProductRuntimes(hostPlatform, runtimePlatformAdmission)}
             value={selectedKind}
             disabled={(busy !== null || submitting) || persistedRuntimeLocked}
+            hostPlatform={hostPlatform}
             isDisabled={(kind) =>
               hostPlatform !== null &&
               !runtimePlatformAdmissionAllowsUse(

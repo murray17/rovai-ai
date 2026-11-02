@@ -117,6 +117,7 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
   const [publishAgentId, setPublishAgentId] = useState<string | null>(null)
   const [publishKind, setPublishKind] = useState<ChannelKind>('feishu')
   const [publishBoundAppId, setPublishBoundAppId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{ agentId: string; displayName: string; expectedAppId: string } | null>(null)
 
   const mounted = useRef(false)
   const reading = useRef(false)
@@ -221,6 +222,11 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
           provider.kind,
           () => channels.native!.disconnect(provider.kind)
         ) : undefined}
+        onDelete={channels.native ? (provider, agent, expectedAppId) => {
+          if (provider.kind !== 'feishu') return
+          setError(null)
+          setDeleteTarget({ agentId: agent.agentId, displayName: agent.displayName, expectedAppId })
+        } : undefined}
         onPublish={(provider, agent) => {
           setError(null)
           setPublishBoundAppId(
@@ -242,6 +248,38 @@ function ManagedChannelSettings({ agents, channels }: { agents: AgentProfile[]; 
         )
         }}
       />
+
+      {channels.native && deleteTarget && <Dialog.Root open onOpenChange={(open) => {
+        if (!open && !busy) setDeleteTarget(null)
+      }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent tone="danger">
+            <AppDialogHeader
+              title={uiAttribute("删除发布记录？")}
+              description={uiAttribute("仅清除本地发布记录和凭据，不删除飞书 Bot、队员或聊天记录。")}
+              closeDisabled={busy !== null}
+            />
+            <AppDialogBody>
+              <div className="channel-dialog-fact"><span><UiText zh={"队员"} /></span><strong>{deleteTarget.displayName}</strong></div>
+              <div className="channel-dialog-fact"><span><UiText zh={"绑定应用"} /></span><code>{deleteTarget.expectedAppId}</code></div>
+              {channelActionErrorFor(error, 'feishu') && <div className="channel-dialog-error" role="alert">{channelActionErrorFor(error, 'feishu')}</div>}
+            </AppDialogBody>
+            <AppDialogFooter>
+              <button className="quiet-button" type="button" disabled={busy !== null} onClick={() => setDeleteTarget(null)}><UiText zh={"取消"} /></button>
+              <button className="danger-button" type="button" disabled={busy !== null} onClick={() => {
+                void run(
+                  `delete:feishu:${deleteTarget.agentId}`,
+                  'feishu',
+                  () => channels.native!.deleteMemberBot(deleteTarget.agentId, deleteTarget.expectedAppId, 'feishu')
+                ).then((next) => {
+                  if (next) setDeleteTarget(null)
+                })
+              }}><UiText zh={"删除"} /></button>
+            </AppDialogFooter>
+          </AppDialogContent>
+        </Dialog.Portal>
+      </Dialog.Root>}
 
       {channels.native && <QrDialog
         snapshot={snapshot}
@@ -316,7 +354,8 @@ export function ChannelSettingsView({
   onConnect,
   onDisconnect,
   onPublish,
-  onRetryPublish
+  onRetryPublish,
+  onDelete
 }: {
   agents: AgentProfile[]
   snapshot: ChannelSettingsSnapshot | null
@@ -331,6 +370,7 @@ export function ChannelSettingsView({
   onDisconnect?(channel: ChannelProviderView): void
   onPublish?(channel: ChannelProviderView, agent: AgentProfile): void
   onRetryPublish?(channel: ChannelProviderView, agent: AgentProfile): void
+  onDelete?(channel: ChannelProviderView, agent: AgentProfile, expectedAppId: string): void
 }): React.JSX.Element {
   const members = useMemo(() => visibleChannelMembers(agents), [agents])
   const channels = snapshot?.channels ?? []
@@ -436,6 +476,7 @@ export function ChannelSettingsView({
                 busy={busy}
                 onPublish={onPublish}
                 onRetryPublish={onRetryPublish}
+                onDelete={desktopManagedWeb ? undefined : onDelete}
               />
             </section>
           </>}
@@ -753,13 +794,15 @@ function ChannelMemberBotTable({
   members,
   busy,
   onPublish,
-  onRetryPublish
+  onRetryPublish,
+  onDelete
 }: {
   channel: ChannelProviderView
   members: AgentProfile[]
   busy: string | null
   onPublish?: (channel: ChannelProviderView, agent: AgentProfile) => void
   onRetryPublish?: (channel: ChannelProviderView, agent: AgentProfile) => void
+  onDelete?: (channel: ChannelProviderView, agent: AgentProfile, expectedAppId: string) => void
 }): React.JSX.Element {
   const providerName = uiAttribute(channel.displayName)
   const bots = new Map(channel.memberBots.map((bot) => [bot.agentId, bot]))
@@ -800,7 +843,7 @@ function ChannelMemberBotTable({
                 <span>{bot?.published && status !== 'published' ? uiAttribute("已发布 · {0}", String(publicationLabel(status))) : publicationLabel(status)}</span>
                 {bot?.appId && <small className="channel-live-status">{bot.connectionStatus === 'online' ? uiAttribute("连接在线") : bot.connectionStatus === 'offline' ? uiAttribute("连接离线") : uiAttribute("连接状态未知")}</small>}
               </span>
-              <div className="channel-member-action" role="cell">
+                <div className="channel-member-action" role="cell">
                 {published && bot?.managementUrl ? (
                   <a
                     className="channel-row-action"
@@ -828,6 +871,14 @@ function ChannelMemberBotTable({
                             ? disabled ? uiAttribute("重新发布") : uiAttribute("发布")
                             : uiAttribute("等待连接")}
                   </button>
+                )}
+                {channel.kind === 'feishu' && onDelete && bot?.appId && (published || bot.published) && (
+                  <button
+                    className="channel-row-action is-danger"
+                    type="button"
+                    disabled={busy !== null || provisioning || channel.hostStatus !== 'ready'}
+                    onClick={() => onDelete(channel, agent, bot.appId!)}
+                  ><UiText zh={"删除"} /></button>
                 )}
               </div>
             </div>

@@ -54,6 +54,7 @@ export interface ReconcileMemberBotInput {
   publicationIntentId: string
   agentId: string
   remoteAppId: string
+  chatBotEnabled?: boolean
   appName: string
   appDescription: string
   avatarSource?: MemberBotAvatarSource
@@ -70,6 +71,7 @@ export interface FeishuMemberBotProvisioner {
   create(input: {
     publicationIntentId: string
     agentId: string
+    chatBotEnabled?: boolean
     appName: string
     appDescription: string
     avatarSource?: MemberBotAvatarSource
@@ -277,6 +279,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
         const activationVersionId = await client.createVersion({
           appId,
           ownerUserId: identity.userId,
+          chatBotEnabled: input.chatBotEnabled,
           appVersion: '1.0.0',
           remark: '启用飞书队员 Bot',
           changeLog: '启用 Bot 并请求长连接事件模式。',
@@ -312,6 +315,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
           const finalVersionId = await client.createVersion({
             appId,
             ownerUserId: identity.userId,
+            chatBotEnabled: input.chatBotEnabled,
             appVersion: finalAppVersion,
             remark: '发布飞书 Bot 最终配置',
             changeLog: '发布已生效的消息权限、事件订阅与长连接配置。',
@@ -417,6 +421,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
           const activationVersionId = await client.createVersion({
             appId: input.remoteAppId,
             ownerUserId: identity.userId,
+            chatBotEnabled: input.chatBotEnabled,
             appVersion: '1.0.0',
             remark: '启用飞书队员 Bot',
             changeLog: '启用 Bot 并请求长连接事件模式。',
@@ -494,6 +499,7 @@ export class FeishuWebSessionMemberBotProvisioner implements FeishuMemberBotProv
             const repairVersionId = await client.createVersion({
               appId: input.remoteAppId,
               ownerUserId: identity.userId,
+              chatBotEnabled: input.chatBotEnabled,
               appVersion: repairVersion,
               remark: needsReadinessRepair ? '修复飞书 Bot 接收配置' : '同步 Rovai 队员头像',
               changeLog: needsReadinessRepair

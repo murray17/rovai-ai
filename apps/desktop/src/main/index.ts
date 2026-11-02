@@ -212,6 +212,7 @@ const allowedMethods = new Set<CoreMethod>([
   'members.avatar.set',
   'members.runtime.set',
   'members.runtime.clear',
+  'members.chat.set',
   'members.presence.set',
   'members.removalPreview',
   'members.remove',
@@ -1576,6 +1577,18 @@ ipcMain.handle('rovai:execution-web-settings-set', (event, value: unknown) => {
   } as Pick<ExecutionWebSettingsSnapshot, 'enabled' | 'port'>)
 })
 
+ipcMain.handle('rovai:channels-chat-select-materials', async (event) => {
+  requireMainWindow(event.sender)
+  const window = mainWindow
+  if (!window) return null
+  const result = await dialog.showOpenDialog(window, {
+    title: '选择资料文件夹',
+    buttonLabel: '选择文件夹',
+    properties: ['openDirectory', 'createDirectory']
+  })
+  return result.canceled ? null : result.filePaths[0] ?? null
+})
+
 ipcMain.handle('rovai:channels-connect', (event, kind: unknown) => {
   requireMainWindow(event.sender)
   return channelSettings.connect(optionalChannelKind(kind))
@@ -1594,6 +1607,13 @@ ipcMain.handle('rovai:channels-publish-member-bot', (
   requireMainWindow(event.sender)
   if (typeof agentId !== 'string' || !agentId) throw new Error('Invalid Agent ID')
   return channelSettings.publishMemberBot(agentId, optionalChannelKind(kind))
+})
+
+ipcMain.handle('rovai:channels-delete-member-bot', (event, agentId: unknown, expectedAppId: unknown, kind: unknown) => {
+  requireMainWindow(event.sender)
+  if (typeof agentId !== 'string' || !agentId || agentId.length > 256) throw new Error('Invalid Agent ID')
+  if (typeof expectedAppId !== 'string' || !expectedAppId || expectedAppId.length > 256) throw new Error('Invalid App ID')
+  return channelSettings.deleteMemberBot(agentId, expectedAppId, optionalChannelKind(kind))
 })
 
 ipcMain.handle('rovai:channels-retry-member-bot', (event, agentId: unknown, kind: unknown) => {

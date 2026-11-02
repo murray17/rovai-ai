@@ -776,7 +776,24 @@ impl ClaudeCodeCliRuntimeAdapter {
                 ManagedWindowsArgvDialect::MicrosoftCrt,
                 format!("agent-run:{}:claude-code-cli", request.agent_run_id),
             )?;
-            ManagedProcess::spawn(spec)
+            let files = bootstrap_file
+                .as_ref()
+                .map(|file| file.0.clone())
+                .into_iter()
+                .chain(settings_file.as_ref().map(|file| file.0.clone()))
+                .chain(
+                    _external_mcp_config
+                        .as_ref()
+                        .map(|config| config.path().to_path_buf()),
+                );
+            ManagedProcess::spawn(
+                spec.with_windows_account(
+                    rovai_core::managed_process::WindowsAccountLaunch::for_isolation(
+                        &request.workspace.isolation,
+                    )?,
+                )?
+                .with_account_launch_files(files)?,
+            )
         })();
         let child = launch_result.map_err(|error| {
             let raw_detail = error.to_string();

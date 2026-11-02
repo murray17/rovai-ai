@@ -72,7 +72,7 @@ mod tests {
         let mut database = crate::test_support::seeded_runtime_database_owned();
         let created = crate::mission::MissionService::default().create(&mut database, &crate::command::CommandEnvelope {
             command_id: "description-migration".into(), actor: crate::command::ActorRef::User{user_id:"local_user".into()}, camp_id:None, expected_versions:vec![],execution_epoch:None,
-            payload: serde_json::from_value(serde_json::json!({"title":"Legacy", "description":"literal @名字\nline", "projectPath":"/tmp", "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1"})).unwrap(),
+            payload: serde_json::from_value(serde_json::json!({"title":"Legacy", "description":"literal @名字\nline", "projectPath":crate::test_support::absolute_test_path("/tmp"), "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1"})).unwrap(),
         }).unwrap();
         let id = created.result.payload["missionId"].as_str().unwrap();
         downgrade_for_test(database.connection());

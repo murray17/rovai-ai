@@ -3013,6 +3013,161 @@ impl CollaborationService {
         }))
     }
 
+    /// Atomically materializes one Feishu chat turn as an ordinary Camp execution.
+    ///
+    /// The caller owns chat identity, the materials folder and the non-bypass
+    /// permission ceiling; this seam reuses the authoritative address resolution,
+    /// Conversation routing, CampMessage publication and per-target Delivery that
+    /// every other channel ingress uses. Runtime configuration stays a claim-time
+    /// fact, so the member's own Runtime and model answer the chat.
+    pub(crate) fn admit_chat_bot_turn(
+        &self,
+        transaction: &Transaction<'_>,
+        input: ChatBotTurnAdmissionInput,
+    ) -> Result<std::result::Result<ChatBotTurnAdmissionResult, CommandHandlerResult>> {
+        validate_project_path(&input.project_path)?;
+        let member_status = transaction
+            .query_row(
+                "SELECT profile_status FROM agent_profile WHERE id = ?1",
+                [&input.agent_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if member_status.as_deref() != Some("present") {
+            return Ok(Err(rejected(
+                "chat_bot.member_unavailable",
+                "The chat Bot member is not present",
+            )));
+        }
+        let system_actor = ActorRef::System {
+            component_id: "channel-chat".to_string(),
+        };
+        let created_camp = input.camp_id.is_none();
+        let camp_id = match input.camp_id {
+            Some(camp_id) => camp_id,
+            None => {
+                let camp_id = ThreadId::new().to_string();
+                transaction.execute(
+                    r#"
+                    INSERT INTO camp(
+                        id, title, name_origin, collaboration_mode,
+                        project_binding_kind, project_path,
+                        default_lead_agent_id, activation_state, last_message_sequence,
+                        version, created_at, updated_at
+                    ) VALUES (?1, ?2, 'user', 'peer', ?3, ?4, ?5, 'active', 0, 1, ?6, ?6)
+                    "#,
+                    params![
+                        camp_id,
+                        input.camp_title,
+                        ProjectBindingKind::Directory.as_str(),
+                        input.project_path,
+                        input.agent_id,
+                        input.now,
+                    ],
+                )?;
+                transaction.execute(
+                    r#"
+                    INSERT INTO camp_member(
+                        camp_id, agent_id, status, capability_overrides_json,
+                        leave_requested_at, leave_request_command_id,
+                        pending_default_lead_successor_agent_id,
+                        version, joined_at, left_at
+                    ) VALUES (?1, ?2, 'active', '{}', NULL, NULL, NULL, 1, ?3, NULL)
+                    "#,
+                    params![camp_id, input.agent_id, input.now],
+                )?;
+                append_domain_event(
+                    transaction,
+                    "camp.created",
+                    Some(&camp_id),
+                    Some(("camp", &camp_id)),
+                    &system_actor,
+                    None,
+                    &json!({
+                        "title": input.camp_title,
+                        "nameOrigin": "user",
+                        "projectBindingKind": ProjectBindingKind::Directory.as_str(),
+                        "projectPath": input.project_path,
+                        "collaborationMode": "peer",
+                        "defaultLeadAgentId": input.agent_id,
+                        "memberCount": 1,
+                    }),
+                )?;
+                camp_id
+            }
+        };
+        let address = ThreadMessageAddress::Explicit {
+            agent_ids: vec![input.agent_id.clone()],
+        };
+        let mut resolution = match resolve_address(transaction, &camp_id, &address, &system_actor)?
+        {
+            AddressingOutcome::Resolved(resolution) => resolution,
+            AddressingOutcome::Rejected(result) => return Ok(Err(result)),
+        };
+        ensure_resolution_conversations(transaction, &camp_id, &mut resolution, &input.now)?;
+        let conversation_id = resolution
+            .targets
+            .first()
+            .and_then(|target| target.conversation_id.clone())
+            .context("chat Bot admission created no Conversation")?;
+        transaction.execute(
+            "UPDATE conversation SET permission_override_json = NULL WHERE id = ?1 AND permission_override_json IS NOT NULL",
+            [&conversation_id],
+        )?;
+        let content = normalize_content(vec![StructuredThreadMessageSegment::Text {
+            text: input.body.clone(),
+        }]);
+        let execution = ExecutionRequest {
+            task_id: None,
+            purpose: "Answer one Feishu chat message as the member's chat Bot.".to_string(),
+            completion_role: required_completion_role(),
+            budget: None,
+        };
+        let camp_message_id = Uuid::new_v4().to_string();
+        let queued = queue_camp_message_and_runs(
+            transaction,
+            QueueThreadMessageInput {
+                camp_message_id: &camp_message_id,
+                camp_id: &camp_id,
+                body: &input.body,
+                structured_content: &content,
+                source_attachments: &[],
+                prepared_attachment_ids: &[],
+                legacy_attachment_publication_operation_id: None,
+                managed_attachment_ingest_intent_id: None,
+                consume_composer_draft: false,
+                draft_client: &DraftClient::default(),
+                draft_revision: 1,
+                address_mode: address.mode(),
+                reply_to_camp_message_id: None,
+                resolution: &resolution,
+                execution: Some(&execution),
+                actor: &system_actor,
+                message_author: Some(ThreadMessageAuthor {
+                    author_type: "system",
+                    author_id: &input.command_id,
+                    source_agent_run_id: None,
+                }),
+                origin_kind: Some("channel"),
+                execution_epoch: None,
+                command_id: &input.command_id,
+                now: &input.now,
+                generated_camp_name: None,
+            },
+        )?;
+        let delivery_id = queued
+            .delivery_ids
+            .into_iter()
+            .next()
+            .context("chat Bot admission created no Delivery")?;
+        Ok(Ok(ChatBotTurnAdmissionResult {
+            camp_id,
+            camp_message_id,
+            delivery_id,
+            created_camp,
+        }))
+    }
+
     fn execute_user_camp_message<C, Prepare>(
         &self,
         database: &mut Database,
@@ -3834,6 +3989,28 @@ pub(crate) struct ScheduledAutomationAdmissionInput {
     pub project_binding_kind: ProjectBindingKind,
     pub project_path: String,
     pub now: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChatBotTurnAdmissionInput {
+    pub agent_id: String,
+    /// An existing Thread bound to the same chat and materials folder.
+    pub camp_id: Option<String>,
+    pub camp_title: String,
+    pub project_path: String,
+    pub body: String,
+    pub command_id: String,
+    pub now: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChatBotTurnAdmissionResult {
+    pub camp_id: String,
+    pub camp_message_id: String,
+    #[allow(dead_code)]
+    pub delivery_id: String,
+    #[allow(dead_code)]
+    pub created_camp: bool,
 }
 
 #[derive(Debug, Clone)]

@@ -178,7 +178,7 @@ pub struct BuiltinToolCliIdentity {
     pub action: &'static str,
 }
 
-pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 30] = [
+pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 38] = [
     BuiltinToolCliIdentity {
         operation: "thread.message.send",
         group: "send",
@@ -328,6 +328,46 @@ pub const BUILTIN_TOOL_CLI_IDENTITIES: [BuiltinToolCliIdentity; 30] = [
         operation: "automation.delete",
         group: "automation",
         action: "delete",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.status",
+        group: "feishu",
+        action: "status",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.search",
+        group: "feishu",
+        action: "search",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.result",
+        group: "feishu",
+        action: "result",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.forward",
+        group: "feishu",
+        action: "forward",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.ask",
+        group: "feishu",
+        action: "ask",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.items",
+        group: "feishu",
+        action: "items",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.report",
+        group: "feishu",
+        action: "report",
+    },
+    BuiltinToolCliIdentity {
+        operation: "feishu.close",
+        group: "feishu",
+        action: "close",
     },
 ];
 
@@ -1035,7 +1075,15 @@ pub fn projection_identity(operation: &str) -> Result<&'static str> {
         | "automation.run"
         | "automation.close"
         | "automation.update"
-        | "automation.delete" => Ok("canonical-result-v1"),
+        | "automation.delete"
+        | "feishu.status"
+        | "feishu.search"
+        | "feishu.result"
+        | "feishu.forward"
+        | "feishu.ask"
+        | "feishu.items"
+        | "feishu.report"
+        | "feishu.close" => Ok("canonical-result-v1"),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -1167,8 +1215,8 @@ mod tests {
             .iter()
             .map(|identity| (identity.group, identity.action))
             .collect::<BTreeSet<_>>();
-        assert_eq!(operations.len(), 30);
-        assert_eq!(commands.len(), 30);
+        assert_eq!(operations.len(), 38);
+        assert_eq!(commands.len(), 38);
     }
 
     #[test]

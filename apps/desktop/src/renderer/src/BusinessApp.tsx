@@ -185,7 +185,7 @@ import {
   type CurrentProject
 } from './new-conversation-preferences'
 import { type NavigationRefreshTrigger } from './navigation-refresh-coordinator'
-import { createNavigationWindowReader, type NavigationGroupLimits } from './navigation-window-reader'
+import { createNavigationWindowReader, navigationGroupKey, type NavigationGroupLimits } from './navigation-window-reader'
 import { createMemberRosterReader } from './member-roster-reader'
 import { appendLiveRuntimeEventBatch, createLiveRuntimeEventBuffer } from './live-runtime-event-buffer'
 
@@ -994,6 +994,7 @@ export function navigationWithoutDeletedThreads(
   return {
     ...snapshot,
     quickChat: filterGroup(snapshot.quickChat),
+    ...(snapshot.chatBot ? { chatBot: filterGroup(snapshot.chatBot) } : {}),
     projects: snapshot.projects
       .map(filterGroup)
       .filter((project) => project.totalCount > 0)
@@ -2707,16 +2708,20 @@ export function BusinessApp({
     currentProject,
     currentWorkspaceHint
   ), projectNames)
-  const activeThread = navigation
-    ? allNavigationThreads(navigation).find((thread) => thread.id === activeThreadId) ?? null
-    : null
+  const activeThread = (navigation
+    ? allNavigationThreads(navigation).find((thread) => thread.id === activeThreadId)
+    : null) ?? pinnedThreadItems.find(thread => thread.id === activeThreadId)
+    ?? (openedNavigationRow?.id === activeThreadId ? openedNavigationRow : null)
+  const activeNavigationGroupKey = activeThread ? navigationGroupKey(activeThread)
+    : campSnapshot?.thread.id === activeThreadId ? navigationGroupKey(campSnapshot.thread) : null
   const selectedCurrentProject = currentProjectGroup(displayNavigation, currentProject)
   const shellOnlyCurrentProjectPath = selectedCurrentProject
     && !navigationPreferences?.registeredProjects.includes(selectedCurrentProject.projectPath)
     && !currentProjectGroup(navigation, currentProject)
     ? selectedCurrentProject.projectPath
     : null
-  const currentProjectKey = selectedCurrentProject?.projectKey ?? 'quick-chat'
+  const currentProjectKey = view === 'camp' && activeNavigationGroupKey === 'chat-bot'
+    ? 'chat-bot' : selectedCurrentProject?.projectKey ?? 'quick-chat'
   const currentProjectLabel = selectedCurrentProject?.name ?? uiAttribute('快速对话')
   const activeProjectPath = activeThread?.projectBindingKind === 'directory'
     ? activeThread.projectPath
@@ -2734,8 +2739,9 @@ export function BusinessApp({
   const activeThreadTitle = activeThread
     ? formatThreadTitle(activeThread, firstRunThreadId)
     : campSnapshot?.thread.id === activeThreadId ? formatThreadTitle(campSnapshot.thread, firstRunThreadId) : ''
-  const activeThreadContextLabel = activeThreadProject?.name
-    ?? (activeProjectPath === currentProjectPath ? currentProjectLabel : uiAttribute('快速对话'))
+  const activeThreadContextLabel = activeNavigationGroupKey === 'chat-bot' ? uiAttribute('聊天 Bot')
+    : activeThreadProject?.name
+      ?? (activeProjectPath === currentProjectPath ? currentProjectLabel : uiAttribute('快速对话'))
   const activeCancellingTurnIds = useMemo(
     () => campSnapshot?.thread.id === activeThreadId
       ? effectiveCancellingTurnIds(cancellingTurnIds, campSnapshot)
@@ -3397,16 +3403,14 @@ export function BusinessApp({
   ): Promise<void> => {
     const activeSnapshot = campSnapshotRef.current
     const removingActiveThread = activeSnapshot?.thread.id === activeThreadIdRef.current
-      && activeSnapshot.thread.projectBindingKind === 'directory'
-      && activeSnapshot.thread.projectPath === project.projectPath
+      && navigationGroupKey(activeSnapshot.thread) === project.projectKey
     const remove = async (): Promise<void> => {
       setBusy(`remove-project-${project.projectKey}`)
       setError(null)
       try {
         const relatedPinnedThreadIds = pinnedThreadItems
           .filter((thread) => (
-            thread.projectBindingKind === 'directory'
-            && thread.projectPath === project.projectPath
+            navigationGroupKey(thread) === project.projectKey
           ))
           .map((thread) => thread.id)
         const snapshot = await uiPreferences.navigationPreferences.removeProject(
@@ -3415,8 +3419,7 @@ export function BusinessApp({
         )
         applyNavigationPreferences(snapshot)
         setPinnedThreadItems((current) => current.filter((thread) => !(
-          thread.projectBindingKind === 'directory'
-          && thread.projectPath === project.projectPath
+          navigationGroupKey(thread) === project.projectKey
         )))
 
         const removingCurrent = currentProject.kind === 'directory'
@@ -3479,7 +3482,7 @@ export function BusinessApp({
     setBusy(`delete-camp-${thread.id}`)
     setError(null)
     try {
-      if (thread.projectBindingKind === 'directory' && !navigationPreferencesRef.current?.legacyProjectsSynced) {
+      if (navigationGroupKey(thread).startsWith('directory:') && !navigationPreferencesRef.current?.legacyProjectsSynced) {
         await registerProject(thread.projectPath)
       }
       const result = await client.request<StoredCommandResult>('threads.delete', {
@@ -3488,7 +3491,7 @@ export function BusinessApp({
       })
       if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       hideAcceptedThreadDeletion(thread.id)
-      void navigationRefreshCoordinator.refreshGroups([thread.projectBindingKind === 'directory' ? `directory:${thread.projectPath}` : 'quick-chat']).catch(() => undefined)
+      void navigationRefreshCoordinator.refreshGroups([navigationGroupKey(thread)]).catch(() => undefined)
     } finally {
       setBusy(null)
     }

@@ -387,7 +387,7 @@ last_updated: 2026-10-29
 
 ### ContextManifest 与结构化 Run Facts
 
-- 普通消息和 Steer 使用共同动态上下文；本次来源决定全部消息资源。启动与后续输入分别冻结，ACK 精确关联输入，迟到证据不覆盖新标记。当前规则见 [Manifest v42](../contracts/context-manifest-evidence-v42.md) 与 [Profile 15/16](../contracts/context-delivery-profile-v15.md)。
+- 普通消息和 Steer 使用共同动态上下文；本次来源决定全部消息资源。启动与后续输入分别冻结，ACK 精确关联输入，迟到证据不覆盖新标记。当前规则见 [Manifest v43](../contracts/context-manifest-evidence-v43.md) 与 [Profile 15/16](../contracts/context-delivery-profile-v15.md)。
 
 - ContextManifest 保存实际输入及必要来源、遗漏与水位；Runtime Input Delivery 记录真实接收，Native Session/Run 保存执行状态。新快照不再重复保存生成材料或其独立摘要，旧输入直接复用最终 Blob；不把历史版本组合用于再次证明已冻结输入。规则见[输入快照存储](../contracts/input-snapshot-storage-v1.md)。
 - Manifest 对新 public Run 冻结完整有序 AgentRunInput、最后一条 anchor、执行配置、Skill Selection/Resolution v2、最终输入中的 `ROVAI_ADDITIONAL_SKILLS` 文本、visibility fence、claim 时前次有效接受边界及额外可见消息判断对应的 RUN_FACTS/historyHint 与 实际输入字节；历史专属 refs/evidence 为空。输入附件只使用各消息 `RUN_INPUT.messages[].attachments`。旧 Manifest 原字节留作审计；v30/10/7、v29/9/7 和非 batch v26/6/5 保留已有序列化入口；已物化输入不因生成版本组合失配而拒绝。
@@ -632,7 +632,7 @@ last_updated: 2026-10-29
 ### 产品与导航
 
 - 正式产品名是 **Rovai AI**，仓库/package slug 为 `rovai-ai`，普通内部命名使用 `rovai`，Rust package/crate/executable 使用 `rovai-core` / `rovai_core`。旧 namespace 只在受控迁移或外部兼容边界保留。
-- 普通导航使用“置顶 / 项目”投影：directory-backed Project 入口来自客户端导航偏好的登记目录，未完成旧补齐时兼容 Thread 分组；会话窗口与 Quick Chat 仍来自 Thread workspace read model。设置在同一侧栏槽位以显式模式覆盖，不创造第二导航真源。
+- 普通导航使用“置顶 / 项目”投影：directory-backed Project 入口来自客户端导航偏好的登记目录，未完成旧补齐时兼容 Thread 分组；会话窗口、Quick Chat 与聊天 Bot 分组仍来自 Thread workspace read model；聊天 Bot 按持久来源分类，不以资料目录或成员当前开关推断。设置在同一侧栏槽位以显式模式覆盖，不创造第二导航真源。
 - Core 拥有 Project 聚合、Project 内 Thread 最近用户消息顺序和活动字段；只有已发布的 `user` / `external_principal` 消息（含飞书、钉钉等渠道用户）推进 Thread 排序，队员消息和运行状态不推进；无用户消息时固定使用创建时间，草稿编辑不推进。运行中和完成未读标记独立刷新。当前设备的 Sidecar Project 行顺序由 Main-owned `navigation.json` nullable `projectOrder` 拥有。schema 2 用户第一次进入时按当时 Core Project 数组冻结，之后保持既有项相对顺序，明确添加／恢复时追加、主动移除时清理；会话归零与消息活动不得删除或移动 Project。
 - Navigation 新鲜度采用事件驱动为主、前台约 20 秒安全刷新兜底；隐藏时暂停周期与后台 retry，focus 后立即重读。并发、trailing generation 与失败退避由 [Desktop Navigation Refresh](desktop-navigation-refresh.md) 统一拥有。
 - Sidebar wordmark 是展示资产，不定义产品领域身份；Core 健康和诊断只从诊断入口读取，不常驻普通导航制造伪状态。

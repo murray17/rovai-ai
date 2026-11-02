@@ -32,6 +32,8 @@ pub struct LocalIpcListener {
     listener: NamedPipeServer,
     #[cfg(windows)]
     pipe_name: String,
+    #[cfg(windows)]
+    account_logon_sid: Option<String>,
 }
 
 impl LocalIpcListener {
@@ -45,6 +47,19 @@ impl LocalIpcListener {
     /// On Windows the next protected pipe instance is created before the
     /// connected instance is returned. Any replenishment failure therefore
     /// closes admission without dispatching the accepted request.
+    #[cfg(windows)]
+    pub(crate) fn bind_account(endpoint: &LocalIpcEndpoint, logon_sid: String) -> Result<Self> {
+        endpoint.validate()?;
+        let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
+            bail!("account bridge requires named pipe");
+        };
+        Ok(Self {
+            listener: create_protected_named_pipe_for(name, true, Some(&logon_sid))?,
+            pipe_name: name.clone(),
+            account_logon_sid: Some(logon_sid),
+        })
+    }
+
     pub async fn accept(&mut self) -> std::result::Result<LocalIpcStream, LocalIpcAcceptError> {
         accept_platform_stream(self).await
     }
@@ -111,6 +126,7 @@ fn bind_platform_listener(endpoint: &LocalIpcEndpoint) -> Result<LocalIpcListene
     Ok(LocalIpcListener {
         listener: create_protected_named_pipe(name, true)?,
         pipe_name: name.clone(),
+        account_logon_sid: None,
     })
 }
 
@@ -142,9 +158,13 @@ async fn accept_platform_stream(
         .await
         .context("failed to accept Built-in Tool named-pipe connection")
         .map_err(LocalIpcAcceptError::admission_closed)?;
-    let replacement = create_protected_named_pipe(&listener.pipe_name, false)
-        .context("failed to replenish Built-in Tool named-pipe listener")
-        .map_err(LocalIpcAcceptError::admission_closed)?;
+    let replacement = create_protected_named_pipe_for(
+        &listener.pipe_name,
+        false,
+        listener.account_logon_sid.as_deref(),
+    )
+    .context("failed to replenish Built-in Tool named-pipe listener")
+    .map_err(LocalIpcAcceptError::admission_closed)?;
     let stream = std::mem::replace(&mut listener.listener, replacement);
     Ok(LocalIpcStream { stream })
 }
@@ -173,6 +193,25 @@ pub struct LocalIpcStream {
     stream: UnixStream,
     #[cfg(windows)]
     stream: NamedPipeServer,
+}
+
+#[cfg(windows)]
+impl LocalIpcStream {
+    pub(crate) fn client_pid(&self) -> Result<u32> {
+        use std::os::windows::io::AsRawHandle;
+        let mut pid = 0;
+        if unsafe {
+            windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId(
+                self.stream.as_raw_handle() as _,
+                &mut pid,
+            )
+        } == 0
+        {
+            return Err(std::io::Error::last_os_error())
+                .context("account pipe client identity unavailable");
+        }
+        Ok(pid)
+    }
 }
 
 /// Platform-neutral client stream for the bundled `rovai` CLI.
@@ -350,6 +389,14 @@ fn restrict_private_file(path: &Path) -> Result<()> {
 
 #[cfg(windows)]
 fn create_protected_named_pipe(name: &str, first_instance: bool) -> Result<NamedPipeServer> {
+    create_protected_named_pipe_for(name, first_instance, None)
+}
+#[cfg(windows)]
+fn create_protected_named_pipe_for(
+    name: &str,
+    first_instance: bool,
+    logon_sid: Option<&str>,
+) -> Result<NamedPipeServer> {
     use std::{ffi::c_void, os::windows::io::AsRawHandle};
     use windows_sys::Win32::{
         Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation},
@@ -358,8 +405,11 @@ fn create_protected_named_pipe(name: &str, first_instance: bool) -> Result<Named
 
     use super::windows_security::{PrivateObjectKind, PrivateSecurityDescriptor};
 
-    let descriptor = PrivateSecurityDescriptor::new(PrivateObjectKind::NamedPipe)
-        .context("failed to build the Built-in Tool named-pipe DACL")?;
+    let descriptor = match logon_sid {
+        Some(sid) => PrivateSecurityDescriptor::for_account_pipe(sid.to_owned()),
+        None => PrivateSecurityDescriptor::new(PrivateObjectKind::NamedPipe),
+    }
+    .context("failed to build the Built-in Tool named-pipe DACL")?;
     let mut attributes = descriptor.attributes();
     let mut options = ServerOptions::new();
     options

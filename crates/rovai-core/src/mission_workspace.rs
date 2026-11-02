@@ -2220,8 +2220,8 @@ mod tests {
         .unwrap();
         let root = std::env::temp_dir().join(format!("rovai-mission-git-test-{}", Uuid::new_v4()));
         fs::create_dir(&root).unwrap();
-        let root = fs::canonicalize(root).unwrap();
-        let repo = root.join("app");
+        let root = Fixture(fs::canonicalize(root).unwrap());
+        let repo = root.0.join("app");
         fs::create_dir(&repo).unwrap();
         git.bytes(&repo, &["init", "-b", "main"]).await.unwrap();
         git.bytes(&repo, &["config", "user.name", "Mission Test"])
@@ -2247,7 +2247,7 @@ mod tests {
         git.bytes(&repo, &["add", "."]).await.unwrap();
         git.bytes(&repo, &["commit", "-m", "base"]).await.unwrap();
         let repository = git.inspect(&repo.join("src")).await.unwrap().unwrap();
-        let path = root.join("app-mission-rvm_test");
+        let path = root.0.join("app-mission-rvm_test");
         let workspace = MissionWorkspace {
             id: "ws".into(),
             mission_id: "rvm_test".into(),
@@ -2271,13 +2271,20 @@ mod tests {
             cleanup_branch_removed: false,
             diagnostic: None,
         };
-        (Fixture(root), git, repository, workspace)
+        (root, git, repository, workspace)
     }
 
     #[cfg(windows)]
     #[tokio::test]
     async fn windows_materialize_accepts_a_verbatim_canonical_repository_path() {
-        let (_fixture, git, _repo, mut workspace) = fixture().await;
+        let (_fixture, git, repo, mut workspace) = fixture().await;
+        assert_eq!(git.executable, fs::canonicalize(&git.executable).unwrap());
+        assert!(
+            !git.bytes(&repo.root, &["config", "--list"])
+                .await
+                .unwrap()
+                .is_empty()
+        );
         assert!(workspace.repository_root.starts_with(r"\\?\"));
 
         git.materialize(&workspace).await.unwrap();
@@ -3058,6 +3065,8 @@ mod tests {
                 &[
                     "-c",
                     "protocol.file.allow=always",
+                    "-c",
+                    "core.autocrlf=false",
                     "submodule",
                     "add",
                     "--",

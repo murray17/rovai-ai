@@ -735,8 +735,11 @@ mod tests {
             panic!("file target")
         };
         assert_eq!(
-            crate::file_reference_path::reference_path(&raw_reference, Path::new(&base_path))
-                .unwrap(),
+            fs::canonicalize(
+                crate::file_reference_path::reference_path(&raw_reference, Path::new(&base_path))
+                    .unwrap(),
+            )
+            .unwrap(),
             fs::canonicalize(fixture.0.join("same #1.txt")).unwrap()
         );
         assert!(resolve_source(other.binding(), "thread".into(), reference).is_err());

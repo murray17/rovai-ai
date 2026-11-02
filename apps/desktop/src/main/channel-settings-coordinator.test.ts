@@ -27,6 +27,8 @@ describe('ChannelSettingsCoordinator', () => {
     const first = coordinator.publishMemberBot('member', 'feishu')
     const failure = expect(first).rejects.toThrow('network timeout')
     await expect(coordinator.retryMemberBot('member', 'feishu')).rejects.toThrow('channel_publication_busy')
+    await expect(coordinator.deleteMemberBot('member', 'cli_old', 'feishu')).rejects.toThrow('channel_publication_busy')
+    await expect(coordinator.deleteMemberBot('member', 'cli_old', 'lark')).rejects.toThrow('channel_local_delete_not_supported')
     expect(publish).toHaveBeenCalledOnce()
     release(); await failure
     const retry = coordinator.retryMemberBot('member', 'feishu')

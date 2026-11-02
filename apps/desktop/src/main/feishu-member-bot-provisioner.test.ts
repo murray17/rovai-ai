@@ -31,7 +31,11 @@ function provisioner(
 }
 
 describe('Feishu Web Session member Bot provisioner', () => {
-  it.each([Domain.Feishu, Domain.Lark])('publishes through the console and resolves Owner from the App creator on SDK domain %s', async (sdkDomain) => {
+  it.each([
+    { sdkDomain: Domain.Feishu, chatBotEnabled: false },
+    { sdkDomain: Domain.Feishu, chatBotEnabled: true },
+    { sdkDomain: Domain.Lark, chatBotEnabled: false }
+  ])('publishes through the console and resolves Owner with $sdkDomain / chat=$chatBotEnabled', async ({ sdkDomain, chatBotEnabled }) => {
     const progress: string[] = []
     const operations: string[] = []
     const portal = fakePortal()
@@ -74,6 +78,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
       agentId: 'agent-a',
       appName: '叮叮',
       appDescription: 'Rovai AI Teammate · 游学者',
+      chatBotEnabled,
       avatarSource: { pngBytes: memberAvatar, width: 192, height: 192 },
       expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
       onRemoteAppCreated: async ({ appId, creationMode }) => {
@@ -131,6 +136,10 @@ describe('Feishu Web Session member Bot provisioner', () => {
       width: 192,
       height: 192
     }))
+    expect(client.createVersion).toHaveBeenCalledTimes(2)
+    for (const [versionInput] of client.createVersion.mock.calls) {
+      expect(versionInput).toMatchObject({ chatBotEnabled })
+    }
     expect(client.createVersion).toHaveBeenNthCalledWith(1, expect.objectContaining({
       appVersion: '1.0.0',
       remark: '启用飞书队员 Bot',
@@ -333,6 +342,58 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(progress).not.toContain('online_verified')
   })
 
+  it('passes chat availability through both recovery versions when no published version exists', async () => {
+    const client = fakeOpenPlatformClient([])
+    client.findPublishedVersion.mockRejectedValue(new FeishuOpenPlatformApiError(
+      'feishu_console_published_version_not_found', false
+    ))
+    const result = await provisioner(fakePortal(), { createClient: () => client }).reconcile({
+      publicationIntentId: 'intent-chat-recover', agentId: 'agent-a',
+      remoteAppId: 'cli_dingding', appName: '叮叮', appDescription: 'Chat Bot',
+      chatBotEnabled: true,
+      avatarSource: { pngBytes: new Uint8Array([1]), width: 1, height: 1 },
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
+    })
+    expect(result.publishedVersionId).toBe('version_2')
+    expect(client.createVersion).toHaveBeenCalledTimes(2)
+    for (const [input] of client.createVersion.mock.calls) {
+      expect(input).toMatchObject({ chatBotEnabled: true })
+    }
+    expect(client.createApp).not.toHaveBeenCalled()
+  })
+
+  it.each(['feishu_console_version_rejected', 'feishu_console_publish_timeout'])('preserves the frozen chat app on publication failure: %s', async (code) => {
+    const client = fakeOpenPlatformClient([])
+    client.publishVersion.mockRejectedValue(new FeishuOpenPlatformApiError(code, false))
+    const progress: string[] = []
+    await expect(provisioner(fakePortal(), { createClient: () => client }).create({
+      publicationIntentId: 'intent-chat-failure', agentId: 'agent-a',
+      appName: '叮叮', appDescription: 'Chat Bot', chatBotEnabled: true,
+      avatarSource: { pngBytes: new Uint8Array([1]), width: 1, height: 1 },
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' },
+      onRemoteAppCreated: async () => undefined,
+      onProgress: (step) => progress.push(step)
+    })).rejects.toMatchObject({ code, remoteState: 'known_frozen' })
+    expect(client.createVersion).toHaveBeenCalledTimes(1)
+    expect(client.verifyMemberBot).not.toHaveBeenCalled()
+    expect(progress).not.toContain('online_verified')
+  })
+
+  it('recovers an existing chat Bot without requiring or changing its availability', async () => {
+    const client = fakeOpenPlatformClient([])
+    await expect(provisioner(fakePortal(), { createClient: () => client }).reconcile({
+      publicationIntentId: 'intent-chat-existing', agentId: 'agent-a',
+      remoteAppId: 'cli_dingding', appName: '叮叮', appDescription: 'Chat Bot',
+      chatBotEnabled: true,
+      expectedDeveloperIdentity: { userId: 'owner-user', tenantId: 'tenant-1' }
+    })).resolves.toMatchObject({ appId: 'cli_dingding', publishedVersionId: 'version_1' })
+    expect(client.findPublishedVersion).toHaveBeenCalledOnce()
+    expect(client.createVersion).not.toHaveBeenCalled()
+    expect(client.publishVersion).not.toHaveBeenCalled()
+    expect(client.configureMemberBot).not.toHaveBeenCalled()
+    expect(client.verifyMemberBot).toHaveBeenCalledOnce()
+  })
+
   it('repairs the member avatar on the frozen published app without creating another app', async () => {
     const progress: string[] = []
     const operations: string[] = []
@@ -429,7 +490,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     expect(client.publishVersion).not.toHaveBeenCalled()
   })
 
-  it('reuses and publishes a pending configuration patch left by an interrupted attempt', async () => {
+  it.each([false, true])('reuses and publishes an interrupted configuration patch with chat=%s', async (chatBotEnabled) => {
     const operations: string[] = []
     const client = fakeOpenPlatformClient(operations)
     client.findPublishedVersion.mockImplementation(async () => {
@@ -446,6 +507,7 @@ describe('Feishu Web Session member Bot provisioner', () => {
     }).reconcile({
       publicationIntentId: 'intent-interrupted',
       agentId: 'agent-a',
+      chatBotEnabled,
       remoteAppId: 'cli_dingding',
       appName: '叮叮',
       appDescription: 'Rovai AI Teammate · 游学者',

@@ -1,6 +1,18 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { desktopThreadClient } from './desktop-camp-client'
 
+it('keeps local Bot deletion native-only and forwards the frozen App ID', async () => {
+  const snapshot = { schemaVersion: 4 }
+  const deleteMemberBot = vi.fn().mockResolvedValue(snapshot)
+  vi.stubGlobal('window', { rovai: { channels: { deleteMemberBot } } })
+
+  expect(desktopThreadClient.channels).not.toHaveProperty('deleteMemberBot')
+  await expect(desktopThreadClient.channels!.native!.deleteMemberBot('agent-a', 'cli_frozen', 'feishu')).resolves.toBe(snapshot)
+  expect(deleteMemberBot).toHaveBeenCalledExactlyOnceWith('agent-a', 'cli_frozen', 'feishu')
+  deleteMemberBot.mockRejectedValueOnce(new Error('local_reset_failed'))
+  await expect(desktopThreadClient.channels!.native!.deleteMemberBot('agent-a', 'cli_frozen', 'feishu')).rejects.toThrow('local_reset_failed')
+})
+
 // Owns the Renderer → preload channel seam: the provider kind chosen on a tab
 // must reach preload unchanged, never defaulted or rewritten to another provider.
 afterEach(() => vi.unstubAllGlobals())

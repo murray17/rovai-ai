@@ -304,6 +304,10 @@ pub(crate) struct PiHost {
     builtin_tools: Option<BuiltinToolProcessConfig>,
     config_root: PathBuf,
     binding_path: PathBuf,
+    #[cfg(windows)]
+    account_filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
+    #[cfg(windows)]
+    account_bridge: std::sync::Mutex<Option<crate::builtin_tool_runtime::AccountBuiltinBridge>>,
     binding_generation: AtomicU64,
     binding_document: RwLock<Option<PiHostBindingDocument>>,
     managed_session_state: RwLock<Option<PiManagedSessionState>>,
@@ -315,6 +319,7 @@ pub(crate) struct PiHost {
 
 struct PiHostLaunch<'a> {
     environment: Option<&'a rovai_core::member_environment::LaunchEnvironment>,
+    account: Option<rovai_core::managed_process::WindowsAccountLaunch>,
     executable: &'a Path,
     cwd: &'a Path,
     private_runtime_dir: &'a Path,
@@ -536,6 +541,12 @@ impl PiHost {
         if let Some(config) = &launch.builtin_tools {
             config.configure_command(&mut command)?;
         }
+        #[cfg(windows)]
+        if launch.account.is_some()
+            && let Some(config) = &launch.builtin_tools
+        {
+            config.configure_account_command(&mut command)?;
+        }
         append_host_arguments(&mut command, &extension_path);
         append_session_directory_argument(&mut command, launch.session_dir);
         append_initial_session_argument(&mut command, launch.initial_session_file);
@@ -549,8 +560,27 @@ impl PiHost {
             ManagedStdinPolicy::Piped,
             ManagedWindowsArgvDialect::MicrosoftCrt,
             "runtime-host:pi",
-        )?;
+        )?
+        .with_windows_account(launch.account.clone())?
+        .with_account_launch_files(vec![extension_path.clone(), binding_path.clone()])?;
         let mut child = ManagedProcess::spawn(spec).context("failed to start Pi RPC Host")?;
+        #[cfg(windows)]
+        let account_filesystem = child.account_filesystem();
+        #[cfg(windows)]
+        let binding_path = if let Some(filesystem) = &account_filesystem {
+            filesystem
+                .projected_path(&binding_path)
+                .context("Pi account binding projection missing")?
+        } else {
+            binding_path
+        };
+        #[cfg(windows)]
+        let account_bridge = match (child.account_authority(), launch.builtin_tools.as_ref()) {
+            (Some(authority), Some(config)) => {
+                Some(config.start_account_bridge(authority, account_filesystem.clone())?)
+            }
+            _ => None,
+        };
         let stdin = child.take_stdin().context("Pi RPC stdin was unavailable")?;
         let stdout = child
             .take_stdout()
@@ -576,6 +606,10 @@ impl PiHost {
             builtin_tools: launch.builtin_tools.clone(),
             config_root,
             binding_path,
+            #[cfg(windows)]
+            account_filesystem,
+            #[cfg(windows)]
+            account_bridge: std::sync::Mutex::new(account_bridge),
             binding_generation: AtomicU64::new(1),
             binding_document: RwLock::new(Some(initial_document)),
             managed_session_state: RwLock::new(None),
@@ -979,6 +1013,75 @@ impl PiHost {
         Ok(())
     }
 
+    async fn read_locator_for_account(&self, root: &Path, id: &str) -> Result<PiSessionLocator> {
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            let locator = read_session_locator_metadata(root, id)?;
+            let file = PathBuf::from(&locator.session_file);
+            let id = id.to_string();
+            let cwd = self.cwd.clone();
+            filesystem
+                .run_operation(move || validate_native_session_file(&file, &id, &cwd, true))
+                .await?;
+            return Ok(locator);
+        }
+        read_session_locator(root, id, &self.cwd)
+    }
+    async fn validate_state_for_account(
+        &self,
+        state: &Value,
+        id: Option<&str>,
+        root: &Path,
+    ) -> Result<(String, PathBuf)> {
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            let locator = id
+                .map(|id| read_session_locator_metadata(root, id))
+                .transpose()?;
+            let state = state.clone();
+            let id = id.map(ToOwned::to_owned);
+            let root = root.to_path_buf();
+            let cwd = self.cwd.clone();
+            return filesystem
+                .run_operation(move || {
+                    let result =
+                        validate_host_session_state_without_locator(&state, id.as_deref(), &cwd)?;
+                    if let Some(locator) = locator {
+                        anyhow::ensure!(
+                            PathBuf::from(locator.session_file).canonicalize()?
+                                == result.1.canonicalize()?,
+                            "Pi resumed a different canonical Session file"
+                        );
+                    }
+                    let _ = root;
+                    Ok(result)
+                })
+                .await;
+        }
+        validate_host_session_state(state, id, root, &self.cwd)
+    }
+    async fn write_locator_for_account(
+        &self,
+        root: &Path,
+        id: &str,
+        file: &Path,
+        must_exist: bool,
+    ) -> Result<()> {
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            let native = file.to_path_buf();
+            let expected = id.to_string();
+            let cwd = self.cwd.clone();
+            filesystem
+                .run_operation(move || {
+                    validate_native_session_file(&native, &expected, &cwd, must_exist)
+                })
+                .await?;
+            return write_session_locator_metadata(root, id, file);
+        }
+        write_session_locator(root, id, file, &self.cwd, must_exist)
+    }
+
     async fn activate(
         &self,
         seed: &PiBindingSeed,
@@ -993,14 +1096,26 @@ impl PiHost {
         }
         let generation = self.binding_generation.fetch_add(1, Ordering::AcqRel) + 1;
         let document = seed.document(&self.host_instance_id, generation);
-        write_private_json(&self.binding_path, &document).map_err(|error| {
+        let binding_write = async {
+            #[cfg(windows)]
+            if let Some(filesystem) = &self.account_filesystem {
+                return filesystem
+                    .write_text(self.binding_path.clone(), serde_json::to_string(&document)?)
+                    .await;
+            }
+            write_private_json(&self.binding_path, &document)
+        }
+        .await;
+        binding_write.map_err(|error| {
             activation_failure(PiActivationFailureKind::ActivationFailed, error)
         })?;
         *self.binding_document.write().await = Some(document.clone());
         *self.managed_session_state.write().await = None;
 
         if let Some(expected_session_id) = seed.expected_native_session_id.as_deref() {
-            let locator = read_session_locator(locator_root, expected_session_id, &self.cwd)
+            let locator = self
+                .read_locator_for_account(locator_root, expected_session_id)
+                .await
                 .map_err(|error| {
                     activation_failure(
                         if switch_target_is_explicitly_unavailable(&error) {
@@ -1056,22 +1171,23 @@ impl PiHost {
                 activation_failure(PiActivationFailureKind::ActivationFailed, error)
             })?;
         let exact_resume = seed.expected_native_session_id.is_some();
-        let (activated_session_id, activated_session_file) = validate_host_session_state(
-            &activated_state,
-            seed.expected_native_session_id.as_deref(),
-            locator_root,
-            &self.cwd,
-        )
-        .map_err(|error| {
-            activation_failure(
-                if exact_resume && switch_target_is_explicitly_unavailable(&error) {
-                    PiActivationFailureKind::ResumeContinuityLost
-                } else {
-                    PiActivationFailureKind::ActivationFailed
-                },
-                error,
+        let (activated_session_id, activated_session_file) = self
+            .validate_state_for_account(
+                &activated_state,
+                seed.expected_native_session_id.as_deref(),
+                locator_root,
             )
-        })?;
+            .await
+            .map_err(|error| {
+                activation_failure(
+                    if exact_resume && switch_target_is_explicitly_unavailable(&error) {
+                        PiActivationFailureKind::ResumeContinuityLost
+                    } else {
+                        PiActivationFailureKind::ActivationFailed
+                    },
+                    error,
+                )
+            })?;
         let managed_session_state = self
             .managed_session_state
             .read()
@@ -1151,13 +1267,16 @@ impl PiHost {
             .map_err(|error| {
                 activation_failure(PiActivationFailureKind::ActivationFailed, error)
             })?;
-        let (session_id, session_file) = validate_host_session_state(
-            &state,
-            seed.expected_native_session_id.as_deref(),
-            locator_root,
-            &self.cwd,
-        )
-        .map_err(|error| activation_failure(PiActivationFailureKind::ActivationFailed, error))?;
+        let (session_id, session_file) = self
+            .validate_state_for_account(
+                &state,
+                seed.expected_native_session_id.as_deref(),
+                locator_root,
+            )
+            .await
+            .map_err(|error| {
+                activation_failure(PiActivationFailureKind::ActivationFailed, error)
+            })?;
         if session_id != activated_session_id || session_file != activated_session_file {
             return Err(activation_failure(
                 PiActivationFailureKind::ActivationFailed,
@@ -1197,13 +1316,13 @@ impl PiHost {
             &self.cwd,
         )
         .map_err(|error| activation_failure(PiActivationFailureKind::ActivationFailed, error))?;
-        write_session_locator(
+        self.write_locator_for_account(
             locator_root,
             &session_id,
             &session_file,
-            &self.cwd,
             seed.expected_native_session_id.is_some(),
         )
+        .await
         .map_err(|error| activation_failure(PiActivationFailureKind::ActivationFailed, error))?;
         let model_fingerprint =
             short_digest(format!("{provider}\0{model_id}\0{thinking_level}").as_bytes());
@@ -1243,6 +1362,20 @@ impl PiHost {
         {
             bail!("Pi Host binding changed before cleanup");
         }
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            let path = self.binding_path.clone();
+            filesystem
+                .run_operation(move || {
+                    std::fs::remove_file(path)
+                        .context("failed to clear the account Pi Host binding")
+                })
+                .await?;
+        } else {
+            std::fs::remove_file(&self.binding_path)
+                .context("failed to clear the private Pi Host binding")?;
+        }
+        #[cfg(not(windows))]
         std::fs::remove_file(&self.binding_path)
             .context("failed to clear the private Pi Host binding")?;
         *self.binding_document.write().await = None;
@@ -1297,6 +1430,14 @@ impl PiHost {
 
     pub(crate) async fn force_reap_until(&self, deadline: tokio::time::Instant) -> bool {
         self.alive.store(false, Ordering::Release);
+        #[cfg(windows)]
+        if let Ok(mut bridge) = self.account_bridge.lock() {
+            bridge.take();
+        }
+        #[cfg(windows)]
+        let closing = self.account_filesystem.clone().map(|filesystem| {
+            tokio::spawn(async move { tokio::time::timeout_at(deadline, filesystem.close()).await })
+        });
         let Ok(mut child) = tokio::time::timeout_at(deadline, self.child.lock()).await else {
             return false;
         };
@@ -1305,12 +1446,27 @@ impl PiHost {
             tokio::time::timeout_at(deadline, child.wait()).await,
             Ok(Ok(_))
         );
+        #[cfg(windows)]
+        let files_closed = match closing {
+            Some(close) => matches!(close.await, Ok(Ok(Ok(())))),
+            None => true,
+        };
+        #[cfg(not(windows))]
+        let files_closed = true;
         let _ = std::fs::remove_dir_all(&self.config_root);
-        reaped
+        reaped && files_closed
     }
 
     async fn shutdown_and_reap_with_status(&self) -> bool {
         self.alive.store(false, Ordering::Release);
+        #[cfg(windows)]
+        if let Ok(mut bridge) = self.account_bridge.lock() {
+            bridge.take();
+        }
+        #[cfg(windows)]
+        let closing = self.account_filesystem.clone().map(|filesystem| {
+            tokio::spawn(async move { timeout(Duration::from_secs(4), filesystem.close()).await })
+        });
         let mut child = self.child.lock().await;
         let _ = child.request_graceful_termination();
         let reaped_gracefully = matches!(
@@ -1322,8 +1478,15 @@ impl PiHost {
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
         let _ = child.force_terminate_tree();
+        #[cfg(windows)]
+        let files_closed = match closing {
+            Some(close) => matches!(close.await, Ok(Ok(Ok(())))),
+            None => true,
+        };
+        #[cfg(not(windows))]
+        let files_closed = true;
         let _ = std::fs::remove_dir_all(&self.config_root);
-        reaped_gracefully
+        reaped_gracefully && files_closed
     }
 
     pub(crate) async fn shutdown_and_reap(&self) {
@@ -1344,6 +1507,8 @@ pub struct PiRuntime {
     model_fingerprint: String,
     text_state: Mutex<super::PiTextState>,
     input_submission: Mutex<()>,
+    #[cfg(windows)]
+    account_filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
     stopping: AtomicBool,
 }
 
@@ -1364,6 +1529,11 @@ impl PiRuntime {
         Arc::new(Self {
             owner,
             camp_id,
+            #[cfg(windows)]
+            account_filesystem: host
+                .account_filesystem
+                .as_ref()
+                .map(|filesystem| filesystem.for_run()),
             host,
             model_supports_images: activation.model_supports_images,
             final_message: RwLock::new(None),
@@ -1414,6 +1584,19 @@ impl PiRuntime {
         // The matching command ID and queued disposition prove Runtime receipt.
         // A user message_start is later consumption, not an admission gate.
         Ok(self.prompt_id().to_string())
+    }
+
+    pub(crate) async fn prepare_input_images(
+        &self,
+        attachments: Vec<(PathBuf, Option<String>)>,
+    ) -> Result<Vec<PreparedPiPromptImage>> {
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            return filesystem
+                .run_operation(move || prepare_prompt_images(&attachments))
+                .await;
+        }
+        prepare_prompt_images(&attachments)
     }
 
     pub(crate) fn validate_images(&self, images: &[PiPromptImage]) -> Result<()> {
@@ -1680,17 +1863,32 @@ impl PiRuntime {
     }
 
     async fn cleanup_for_release(&self) -> Result<()> {
-        let session_result = validate_native_session_file(
-            &self.session_file,
-            &self.session_id,
-            &self.host.cwd,
-            true,
-        );
+        #[cfg(windows)]
+        let image_scope_result = if let Some(filesystem) = &self.account_filesystem {
+            filesystem.close_run().await
+        } else {
+            Ok(())
+        };
+        let session_result = async {
+            #[cfg(windows)]
+            if let Some(filesystem) = &self.host.account_filesystem {
+                let file = self.session_file.clone();
+                let id = self.session_id.clone();
+                let cwd = self.host.cwd.clone();
+                return filesystem
+                    .run_operation(move || validate_native_session_file(&file, &id, &cwd, true))
+                    .await;
+            }
+            validate_native_session_file(&self.session_file, &self.session_id, &self.host.cwd, true)
+        }
+        .await;
         if session_result.is_err() {
             self.mark_failed_closed();
         }
         let binding_result = self.host.unbind_and_clear(&self.owner).await;
         session_result?;
+        #[cfg(windows)]
+        image_scope_result?;
         binding_result
     }
 }
@@ -1712,6 +1910,7 @@ pub struct PiAgentRunRuntimeRequest<'a> {
     pub camp_id: &'a str,
     pub agent_id: &'a str,
     pub cwd: &'a Path,
+    pub workspace_isolation: &'a str,
     pub frozen_runtime: &'a FrozenAgentRuntimeConfig,
     pub runtime_compatibility_digest: &'a str,
     pub native_session_id: Option<&'a str>,
@@ -1812,6 +2011,9 @@ impl PiRpcRuntimeAdapter {
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
         let spawn_executable = PathBuf::from(&request.frozen_runtime.executable_path);
         let spawn_cwd = request.cwd.to_path_buf();
+        let spawn_account = rovai_core::managed_process::WindowsAccountLaunch::for_isolation(
+            request.workspace_isolation,
+        )?;
         let spawn_private_runtime_dir = self.private_runtime_dir.clone();
         let spawn_seed = seed.clone();
         let spawn_incoming = self.incoming.clone();
@@ -1840,6 +2042,7 @@ impl PiRpcRuntimeAdapter {
                     .await?;
                     let host = PiHost::spawn(PiHostLaunch {
                         environment: spawn_environment.as_ref(),
+                        account: spawn_account,
                         executable: &spawn_executable,
                         cwd: &spawn_cwd,
                         private_runtime_dir: &spawn_private_runtime_dir,
@@ -2089,6 +2292,7 @@ async fn spawn_probe_host(executable: &Path) -> Result<(Arc<PiHost>, PiProbeRoot
     let (incoming, _receiver) = mpsc::unbounded_channel();
     let host = PiHost::spawn(PiHostLaunch {
         environment: None,
+        account: None,
         executable,
         cwd: &probe_root,
         private_runtime_dir: &private_runtime_dir,
@@ -2304,6 +2508,25 @@ fn validate_host_session_state(
     locator_root: &Path,
     cwd: &Path,
 ) -> Result<(String, PathBuf)> {
+    let (session_id, session_file) =
+        validate_host_session_state_without_locator(state, expected_session_id, cwd)?;
+    if expected_session_id.is_some() {
+        let locator = read_session_locator(locator_root, &session_id, cwd)?;
+        if locator.session_file != session_file.to_string_lossy() {
+            let expected = PathBuf::from(locator.session_file).canonicalize()?;
+            let observed = session_file.canonicalize()?;
+            if expected != observed {
+                bail!("Pi resumed a different canonical Session file");
+            }
+        }
+    }
+    Ok((session_id, session_file))
+}
+fn validate_host_session_state_without_locator(
+    state: &Value,
+    expected_session_id: Option<&str>,
+    cwd: &Path,
+) -> Result<(String, PathBuf)> {
     let data = state.get("data").context("Pi get_state omitted data")?;
     let session_id = data
         .get("sessionId")
@@ -2332,19 +2555,8 @@ fn validate_host_session_state(
         cwd,
         expected_session_id.is_some(),
     )?;
-    if expected_session_id.is_some() {
-        let locator = read_session_locator(locator_root, &session_id, cwd)?;
-        if locator.session_file != session_file.to_string_lossy() {
-            let expected = PathBuf::from(locator.session_file).canonicalize()?;
-            let observed = session_file.canonicalize()?;
-            if expected != observed {
-                bail!("Pi resumed a different canonical Session file");
-            }
-        }
-    }
     Ok((session_id, session_file))
 }
-
 fn validate_host_model_state(
     state: &Value,
     frozen_model_id: &str,
@@ -2433,6 +2645,11 @@ fn locator_path(root: &Path, session_id: &str) -> Result<PathBuf> {
 }
 
 fn read_session_locator(root: &Path, expected_id: &str, cwd: &Path) -> Result<PiSessionLocator> {
+    let locator = read_session_locator_metadata(root, expected_id)?;
+    validate_native_session_file(Path::new(&locator.session_file), expected_id, cwd, true)?;
+    Ok(locator)
+}
+fn read_session_locator_metadata(root: &Path, expected_id: &str) -> Result<PiSessionLocator> {
     let mut path = locator_path(root, expected_id)?;
     let metadata = match std::fs::symlink_metadata(&path) {
         // Older versions kept one locator per member. Only a matching exact ID
@@ -2459,7 +2676,6 @@ fn read_session_locator(root: &Path, expected_id: &str, cwd: &Path) -> Result<Pi
     if locator.schema_version != 2 || locator.session_id != expected_id {
         bail!("Pi exact-resume locator failed Native Session identity validation");
     }
-    validate_native_session_file(Path::new(&locator.session_file), expected_id, cwd, true)?;
     Ok(locator)
 }
 
@@ -2471,6 +2687,9 @@ fn write_session_locator(
     must_exist: bool,
 ) -> Result<()> {
     validate_native_session_file(file, id, cwd, must_exist)?;
+    write_session_locator_metadata(root, id, file)
+}
+fn write_session_locator_metadata(root: &Path, id: &str, file: &Path) -> Result<()> {
     write_private_json(
         &locator_path(root, id)?,
         &PiSessionLocator {
@@ -3267,6 +3486,7 @@ done
         let (incoming, _receiver) = mpsc::unbounded_channel();
         let host = PiHost::spawn(PiHostLaunch {
             environment: None,
+            account: None,
             executable: &executable,
             cwd: &root,
             private_runtime_dir: &root.join("private"),
@@ -3453,6 +3673,7 @@ done
             let (incoming, mut receiver) = mpsc::unbounded_channel();
             let host = PiHost::spawn(PiHostLaunch {
                 environment: None,
+                account: None,
                 executable: &executable,
                 cwd: &root,
                 private_runtime_dir: &root.join("private"),
@@ -3663,6 +3884,52 @@ done
         }
     }
 
+    #[cfg(windows)]
+    async fn await_pi_account_prompt(
+        runtime: &PiRuntime,
+        receiver: &mut mpsc::UnboundedReceiver<PiIncoming>,
+        expected: &str,
+    ) -> Result<bool> {
+        timeout(Duration::from_secs(75), async {
+            while let Some(event) = receiver.recv().await {
+                if let PiIncoming::Diagnostic { message, .. } = event {
+                    println!(
+                        "pi_diagnostic_safe={:?}",
+                        rovai_core::runtime_failure::sanitize_public_runtime_error(
+                            &message,
+                            &[(std::path::Path::new("C:/Users"), "<home>")]
+                        )
+                    );
+                    continue;
+                }
+                if let PiIncoming::Message { message, .. } = event {
+                    let ended = message["type"] == "agent_end";
+                    let terminal_detail =
+                        ended.then(|| serde_json::to_string(&message).unwrap_or_default());
+                    runtime.observe(message).await?;
+                    if let Some(detail) = terminal_detail {
+                        let sanitized = rovai_core::runtime_failure::sanitize_public_runtime_error(
+                            &detail,
+                            &[(std::path::Path::new("C:/Users"), "<home>")],
+                        );
+                        println!(
+                            "pi_terminal_event_safe={:?}",
+                            sanitized.map(|value| value.chars().take(700).collect::<String>())
+                        );
+                    }
+                    if ended {
+                        let (text, reason) = runtime.terminal().await;
+                        return Ok(text.is_some_and(|text| text.trim() == expected)
+                            && reason.as_deref() != Some("error"));
+                    }
+                }
+            }
+            Ok(false)
+        })
+        .await
+        .context("Pi account prompt deadline")?
+    }
+
     // This explicit smoke owns native EXE + ManagedProcess + Pi's default
     // Session-directory creation. The deterministic command test above cannot
     // prove how an upstream binary interprets the captured Windows cwd.
@@ -3674,12 +3941,30 @@ done
         let root = PathBuf::from(std::env::var("ROVAI_PI_STARTUP_SMOKE_ROOT")?);
         let agent_dir = PathBuf::from(std::env::var("PI_CODING_AGENT_DIR")?);
         anyhow::ensure!(root.is_absolute() && agent_dir == root.join("agent"));
-        anyhow::ensure!(executable.extension().is_some_and(|ext| ext == "exe"));
+        let account = if std::env::var_os("ROVAI_PI_ACCOUNT_SMOKE").is_some() {
+            rovai_core::managed_process::WindowsAccountLaunch::for_isolation("windows_account")?
+        } else {
+            None
+        };
         std::fs::create_dir_all(&agent_dir)?;
         for workspace_name in ["quick-chat", "中文项目 空格"] {
             let workspace = root.join(workspace_name);
             std::fs::create_dir_all(&workspace)?;
             let canonical = workspace.canonicalize()?;
+            let skill_marker = format!("PI_SKILL_{}", uuid::Uuid::new_v4().simple());
+            let skill = workspace.join(".pi/skills/synthetic-account-check");
+            std::fs::create_dir_all(&skill)?;
+            std::fs::write(
+                skill.join("SKILL.md"),
+                format!(
+                    "---
+name: synthetic-account-check
+description: Synthetic account validation only.
+---
+When asked to validate this account, reply exactly {skill_marker}.
+"
+                ),
+            )?;
             let bootstrap = "Pi cwd no-Prompt smoke".to_string();
             let seed = PiBindingSeed {
                 agent_run_id: uuid::Uuid::new_v4().to_string(),
@@ -3690,9 +3975,10 @@ done
                 bootstrap_payload_digest: format!("{:x}", Sha256::digest(bootstrap.as_bytes())),
                 bootstrap,
             };
-            let (incoming, _receiver) = mpsc::unbounded_channel();
-            let host = PiHost::spawn(PiHostLaunch {
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let result = PiHost::spawn(PiHostLaunch {
                 environment: None,
+                account: account.clone(),
                 executable: &executable,
                 cwd: &canonical,
                 private_runtime_dir: &private_runtime_directory(&root),
@@ -3702,14 +3988,232 @@ done
                 incoming,
                 builtin_tools: None,
             })
-            .await?;
+            .await;
+            let host = match result {
+                Ok(host) => host,
+                Err(error) => {
+                    while let Ok(event) = receiver.try_recv() {
+                        if let PiIncoming::Diagnostic { message, .. } = event {
+                            println!(
+                                "pi_native_error_safe={:?}",
+                                rovai_core::runtime_failure::sanitize_public_runtime_error(
+                                    &message,
+                                    &[(root.as_path(), "<fixture>")]
+                                )
+                            );
+                        }
+                    }
+                    return Err(error);
+                }
+            };
+            if std::env::var_os("ROVAI_PI_ACCOUNT_REAL_MODEL").is_some() {
+                let model = std::env::var("ROVAI_PI_ACCOUNT_REAL_MODEL")?;
+                let frozen: FrozenAgentRuntimeConfig = serde_json::from_value(
+                    json!({"adapterKind":"pi","installationId":"synthetic","installationGeneration":1,"searchEnvironmentGeneration":1,"executablePath":executable,"authScope":"dedicated-account","reportedVersion":"1.4.0","executableFingerprint":"synthetic","capabilities":[],"protocolVersion":"pi-rpc","model":{"source":"explicit","modelId":model,"options":{}},"permissions":{"adapterKind":"pi","schemaVersion":1,"values":{}},"nativeSessionCompatibilityKey":null,"bindingCompatibilityDigest":"synthetic","hostConfigDigest":"synthetic","configDigest":"synthetic"}),
+                )?;
+                let locator_root = root.join("locators");
+                create_private_directory(&locator_root)?;
+                let activation = host.activate(&seed, &locator_root, &frozen).await?;
+                let id = activation.session_id.clone();
+                let owner = PiRuntimeOwner {
+                    agent_run_id: seed.agent_run_id.clone(),
+                    execution_epoch: 1,
+                    native_prompt_id: "synthetic-pi-first".into(),
+                    delivery_id: "synthetic-pi-delivery".into(),
+                };
+                host.bind(owner.clone()).await?;
+                let runtime = PiRuntime::from_host(
+                    owner.clone(),
+                    "synthetic".into(),
+                    host.clone(),
+                    activation,
+                );
+                let marker = format!("PI_HISTORY_{}", uuid::Uuid::new_v4().simple());
+                runtime.start_prompt(&format!("Remember this synthetic marker {marker} for later. Reply exactly PI_ACCOUNT_OK. Do not use tools."),&[]).await?;
+                let first =
+                    await_pi_account_prompt(&runtime, &mut receiver, "PI_ACCOUNT_OK").await?;
+                if !first {
+                    let (text, reason) = runtime.terminal().await;
+                    println!(
+                        "pi_first_failure stop_reason={:?} text_safe={:?}",
+                        reason,
+                        text.map(
+                            |text| rovai_core::runtime_failure::sanitize_public_runtime_error(
+                                &text,
+                                &[(root.as_path(), "<fixture>")]
+                            )
+                        )
+                    );
+                }
+                anyhow::ensure!(first, "Pi first message must match exact marker");
+                runtime.cleanup_for_release().await?;
+                let mut hot_seed = seed.clone();
+                hot_seed.agent_run_id = uuid::Uuid::new_v4().to_string();
+                hot_seed.execution_epoch = 2;
+                hot_seed.expected_native_session_id = Some(id.clone());
+                let activation = host.activate(&hot_seed, &locator_root, &frozen).await?;
+                anyhow::ensure!(
+                    activation.session_id == id,
+                    "Pi hot Session must remain exact"
+                );
+                let owner = PiRuntimeOwner {
+                    agent_run_id: hot_seed.agent_run_id.clone(),
+                    execution_epoch: 2,
+                    native_prompt_id: "synthetic-pi-hot".into(),
+                    delivery_id: "synthetic-pi-hot-delivery".into(),
+                };
+                host.bind(owner.clone()).await?;
+                let runtime =
+                    PiRuntime::from_host(owner, "synthetic".into(), host.clone(), activation);
+                runtime.start_prompt("What synthetic marker did I tell you to remember? Reply only it without tools.",&[]).await?;
+                let hot = await_pi_account_prompt(&runtime, &mut receiver, &marker).await?;
+                runtime.cleanup_for_release().await?;
+                let reaped = host.shutdown_and_reap_with_status().await;
+                println!(
+                    "pi_real_first={} pi_hot_history={} exact_session=true account_host_reaped={}",
+                    first, hot, reaped
+                );
+                anyhow::ensure!(hot && reaped, "Pi hot continuity and cleanup must pass");
+                let (incoming, mut cold_receiver) = mpsc::unbounded_channel();
+                let mut cold_seed = hot_seed.clone();
+                cold_seed.execution_epoch = 3;
+                cold_seed.agent_run_id = uuid::Uuid::new_v4().to_string();
+                let cold = PiHost::spawn(PiHostLaunch {
+                    environment: None,
+                    account: account.clone(),
+                    executable: &executable,
+                    cwd: &canonical,
+                    private_runtime_dir: &private_runtime_directory(&root),
+                    session_dir: None,
+                    initial_session_file: None,
+                    initial_binding: &cold_seed,
+                    incoming,
+                    builtin_tools: None,
+                })
+                .await?;
+                let activation = cold.activate(&cold_seed, &locator_root, &frozen).await?;
+                anyhow::ensure!(
+                    activation.session_id == id,
+                    "Pi cold Session must remain exact"
+                );
+                let owner = PiRuntimeOwner {
+                    agent_run_id: cold_seed.agent_run_id.clone(),
+                    execution_epoch: 3,
+                    native_prompt_id: "synthetic-pi-cold".into(),
+                    delivery_id: "synthetic-pi-cold-delivery".into(),
+                };
+                cold.bind(owner.clone()).await?;
+                let runtime =
+                    PiRuntime::from_host(owner, "synthetic".into(), cold.clone(), activation);
+                runtime.start_prompt("What synthetic marker did I tell you to remember in the first turn? Reply only it without tools.",&[]).await?;
+                let history =
+                    await_pi_account_prompt(&runtime, &mut cold_receiver, &marker).await?;
+                runtime.start_prompt("Use your native bash tool to write exactly SYNTHETIC_PI_TOOL_OK into pi-native-tool.txt in cwd, then reply exactly PI_TOOL_OK. Do not access other files or services.",&[]).await?;
+                let tool =
+                    await_pi_account_prompt(&runtime, &mut cold_receiver, "PI_TOOL_OK").await?;
+                let effect = std::fs::read_to_string(canonical.join("pi-native-tool.txt"))
+                    .is_ok_and(|text| text.trim() == "SYNTHETIC_PI_TOOL_OK");
+                runtime.start_prompt("Load the synthetic-account-check skill and follow its unique instruction. Reply only its marker.",&[]).await?;
+                let skill_ok =
+                    await_pi_account_prompt(&runtime, &mut cold_receiver, &skill_marker).await?;
+                let public_image = canonical.join("synthetic-image.png");
+                let signature = [0x89u8, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+                let mut public_bytes = signature.to_vec();
+                public_bytes.extend_from_slice(b"synthetic");
+                std::fs::write(&public_image, &public_bytes)?;
+                let allowed = runtime
+                    .prepare_input_images(vec![(public_image.clone(), None)])
+                    .await?;
+                anyhow::ensure!(
+                    allowed.len() == 1,
+                    "account must read an allowed synthetic image"
+                );
+                let protected = root.join(format!("protected-pi-image-{}", uuid::Uuid::new_v4()));
+                create_private_directory(&protected)?;
+                let denied_image = protected.join("synthetic.png");
+                let mut private_bytes = signature.to_vec();
+                private_bytes.extend_from_slice(b"private-synthetic");
+                crate::platform::private_storage::create_private_bytes(
+                    &denied_image,
+                    &private_bytes,
+                )?;
+                let denied = runtime
+                    .prepare_input_images(vec![(denied_image.clone(), None)])
+                    .await?;
+                anyhow::ensure!(
+                    denied.is_empty(),
+                    "optional image may not borrow host read access"
+                );
+                let expected = format!("sha256:{}", sha256_bytes(&std::fs::read(&denied_image)?));
+                anyhow::ensure!(
+                    runtime
+                        .prepare_input_images(vec![(denied_image.clone(), Some(expected))])
+                        .await
+                        .is_err(),
+                    "required image must fail under the account"
+                );
+                let script = canonical.join("synthetic-delayed-write.cjs");
+                std::fs::write(
+                    &script,
+                    r#"const fs=require('fs'),cp=require('child_process'),path=require('path');const who=path.join(process.env.SystemRoot,'System32','whoami.exe');const groups=cp.execFileSync(who,['/groups'],{encoding:'utf8'});fs.writeFileSync(path.join(__dirname,'pi-tool-ready.json'),JSON.stringify({nonAdmin:!groups.includes('S-1-5-32-544'),matches:cp.execFileSync(who,[],{encoding:'utf8'}).trim().toLowerCase()===String(process.env.ROVAI_ACCEPTANCE_EXPECTED_ACCOUNT).toLowerCase()}));setTimeout(()=>fs.writeFileSync(path.join(__dirname,'pi-late-write.txt'),'must-not-appear'),10000);"#,
+                )?;
+                runtime.start_prompt("Execute exactly node synthetic-delayed-write.cjs using your native bash tool in cwd. Do not inspect the script, do not detach/background it; wait for completion. This is an authorized synthetic cancellation test.",&[]).await?;
+                let ready = canonical.join("pi-tool-ready.json");
+                let active=timeout(Duration::from_secs(60),async{loop{if ready.is_file(){return true;}tokio::select!{event=cold_receiver.recv()=>{if let Some(PiIncoming::Message{message,..})=event{let ended=message["type"]=="agent_end";let _=runtime.observe(message).await;if ended{return false;}}},_=tokio::time::sleep(Duration::from_millis(50))=>{}}}}).await.unwrap_or(false);
+                let identity = std::fs::read(&ready)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+                let cancelled = runtime.cancel().await.is_ok();
+                runtime.cleanup_for_release().await?;
+                anyhow::ensure!(
+                    runtime
+                        .prepare_input_images(vec![(public_image, None)])
+                        .await
+                        .is_err(),
+                    "closed Pi Run image scope must reject"
+                );
+                let reaped = cold.shutdown_and_reap_with_status().await;
+                tokio::time::sleep(Duration::from_secs(11)).await;
+                let no_late = !canonical.join("pi-late-write.txt").exists();
+                println!(
+                    "pi_native_skill={} pi_private_image_refused=true pi_active_tool={} pi_cancel={} pi_no_late={} pi_non_admin_identity={}",
+                    skill_ok,
+                    active,
+                    cancelled,
+                    no_late,
+                    identity
+                        .as_ref()
+                        .is_some_and(|v| v["nonAdmin"] == true && v["matches"] == true)
+                );
+                anyhow::ensure!(
+                    skill_ok
+                        && active
+                        && cancelled
+                        && no_late
+                        && identity.is_some_and(|v| v["nonAdmin"] == true && v["matches"] == true),
+                    "Pi skill/active cancellation/identity must pass"
+                );
+                println!(
+                    "pi_cold_history={} pi_native_tool={} pi_tool_effect={} cold_reaped={}",
+                    history, tool, effect, reaped
+                );
+                anyhow::ensure!(
+                    history && tool && effect && reaped,
+                    "Pi cold history/native tool/cleanup must pass"
+                );
+                return Ok(());
+            }
             let state = host.command("get_state", json!({})).await;
             let reaped = host.shutdown_and_reap_with_status().await;
             let state = state?;
             anyhow::ensure!(reaped, "Pi Host was not reaped");
             assert_eq!(host.cwd, canonical);
             let session_file = PathBuf::from(state["data"]["sessionFile"].as_str().unwrap());
-            assert!(session_file.starts_with(agent_dir.join("sessions")));
+            if let Some(account) = &account {
+                assert!(session_file.starts_with(account.profile_root.join(".pi/agent/sessions")));
+            } else {
+                assert!(session_file.starts_with(agent_dir.join("sessions")));
+            }
             assert!(!session_file.to_string_lossy().contains('?'));
         }
         Ok(())
@@ -3769,7 +4273,9 @@ done
         .unwrap();
         validate_native_session_file(&session, id, &root, true).unwrap();
         let locator_root = root.join("locator");
-        std::fs::create_dir_all(&locator_root).unwrap();
+        // Private JSON admission requires a directory created through the private
+        // storage helper; a plain create_dir_all inherits the developer's DACL.
+        rovai_core::platform::prepare_private_directory(&locator_root).unwrap();
         write_private_json(
             &locator_root.join("locator.json"),
             &PiSessionLocator {

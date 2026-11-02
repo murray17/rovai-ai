@@ -16,6 +16,29 @@ use tokio::sync::{mpsc, oneshot};
 
 const KIND: AdapterKind = AdapterKind::CodexCli;
 
+fn read_environment_marker(program: &Path) -> String {
+    let bytes = std::fs::read(program.parent().unwrap().join("environment.txt")).unwrap();
+    #[cfg(windows)]
+    if bytes.starts_with(&[0xff, 0xfe]) || bytes.get(1) == Some(&0) {
+        let start = if bytes.starts_with(&[0xff, 0xfe]) {
+            2
+        } else {
+            0
+        };
+        assert_eq!(
+            (bytes.len() - start) % 2,
+            0,
+            "UTF-16 marker must be complete"
+        );
+        let units = bytes[start..]
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect::<Vec<_>>();
+        return String::from_utf16(&units).unwrap();
+    }
+    String::from_utf8(bytes).unwrap()
+}
+
 struct Fixture {
     root: PathBuf,
     core: Arc<Core>,
@@ -97,7 +120,7 @@ impl Fixture {
         let released = self.root.join("probe-release");
         #[cfg(windows)]
         let body = format!(
-            "@echo off\r\necho %CHECK_REFRESH_VALUE%>\"{}\"\r\nif \"%~1\"==\"--version\" (\r\necho codex-cli {}\r\nexit /b 0\r\n)\r\n{}exit /b 1\r\n",
+            "@echo off\r\necho(%CHECK_REFRESH_VALUE%>\"{}\"\r\nif \"%~1\"==\"--version\" (\r\necho codex-cli {}\r\nexit /b 0\r\n)\r\n{}exit /b 1\r\n",
             marker.display(),
             version,
             if gate {
@@ -315,12 +338,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
         "codex-cli 1.0.0",
         "process PATH does not select the main executable"
     );
-    assert_ne!(
-        std::fs::read_to_string(old.parent().unwrap().join("environment.txt"))
-            .unwrap()
-            .trim(),
-        "saved-private"
-    );
+    assert_ne!(read_environment_marker(&old).trim(), "saved-private");
     let public_before = fixture.public_state().await;
     let settings_before = fixture.settings().await;
     let draft = configuration(Some(&new));
@@ -335,12 +353,7 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
         .await
         .unwrap();
     assert_eq!(preview["reportedVersion"], "codex-cli 3.0.0");
-    assert_ne!(
-        std::fs::read_to_string(new.parent().unwrap().join("environment.txt"))
-            .unwrap()
-            .trim(),
-        "draft-private"
-    );
+    assert_ne!(read_environment_marker(&new).trim(), "draft-private");
     assert_eq!(fixture.settings().await, settings_before);
     assert_eq!(fixture.public_state().await, public_before);
     // Replace the program between its version and authentication probes. A
@@ -538,22 +551,12 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     );
     assert_ne!(fixture.health().await["status"], "ready");
     assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
-    assert_eq!(
-        std::fs::read_to_string(latest.parent().unwrap().join("environment.txt"))
-            .unwrap()
-            .trim(),
-        "shared-private"
-    );
+    assert_eq!(read_environment_marker(&latest).trim(), "shared-private");
     let before = fixture.public_state().await;
     let preview = fixture.core.handle_runtime_startup("runtime.startup.check", json!({"runtimeKind":KIND,"configuration":automatic,
         "commonEnvironment":{"expectedRevision":1,"json":r#"{"CHECK_REFRESH_VALUE":"draft-private","API_KEY":"fixture-common-key"}"#}})).await.unwrap();
     assert!(!preview.to_string().contains("fixture-common-key"));
-    assert_eq!(
-        std::fs::read_to_string(latest.parent().unwrap().join("environment.txt"))
-            .unwrap()
-            .trim(),
-        "draft-private"
-    );
+    assert_eq!(read_environment_marker(&latest).trim(), "draft-private");
     assert_eq!(fixture.public_state().await, before);
     assert_eq!(
         fixture.settings().await["commonEnvironment"]["environment"]["CHECK_REFRESH_VALUE"],

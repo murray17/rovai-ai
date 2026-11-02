@@ -31,7 +31,15 @@ export const BUILTIN_CLI_NAMES: Readonly<Record<string, string>> = Object.freeze
   'mission.list': 'rovai mission list',
   'mission.get': 'rovai mission get',
   'mission.update': 'rovai mission update',
-  'mission.status': 'rovai mission status'
+  'mission.status': 'rovai mission status',
+  'feishu.status': 'rovai feishu status',
+  'feishu.search': 'rovai feishu search',
+  'feishu.result': 'rovai feishu result',
+  'feishu.forward': 'rovai feishu forward',
+  'feishu.ask': 'rovai feishu ask',
+  'feishu.items': 'rovai feishu items',
+  'feishu.report': 'rovai feishu report',
+  'feishu.close': 'rovai feishu close'
 })
 
 function currentOperation(operation: unknown): unknown {

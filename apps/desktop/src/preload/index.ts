@@ -256,6 +256,9 @@ const api: RovaiApi = {
     publishMemberBot(agentId, kind) {
       return ipcRenderer.invoke('rovai:channels-publish-member-bot', agentId, kind)
     },
+    deleteMemberBot(agentId, expectedAppId, kind) {
+      return ipcRenderer.invoke('rovai:channels-delete-member-bot', agentId, expectedAppId, kind)
+    },
     retryMemberBot(agentId, kind) {
       return ipcRenderer.invoke('rovai:channels-retry-member-bot', agentId, kind)
     },
@@ -266,6 +269,9 @@ const api: RovaiApi = {
         userId,
         kind
       )
+    },
+    selectChatMaterialsDirectory() {
+      return ipcRenderer.invoke('rovai:channels-chat-select-materials') as Promise<string | null>
     },
     cancelQrAttempt(attemptId) {
       return ipcRenderer.invoke('rovai:channels-cancel-qr', attemptId)

@@ -844,6 +844,7 @@ export class OpenPlatformApiClient {
   async createVersion(input: {
     appId: string
     ownerUserId: string
+    chatBotEnabled?: boolean
     appVersion?: string
     remark?: string
     changeLog?: string
@@ -872,9 +873,9 @@ export class OpenPlatformApiClient {
           appVersion,
           visibleSuggest: {
             departments: [],
-            members: [ownerUserId],
+            members: input.chatBotEnabled ? [] : [ownerUserId],
             groups: [],
-            isAll: 0
+            isAll: input.chatBotEnabled ? 1 : 0
           },
           blackVisibleSuggest: {
             departments: [],

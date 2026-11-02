@@ -81,8 +81,8 @@ export function persistCurrentProject(currentProject: CurrentProject): void {
   }
 }
 
-export function currentProjectForThread(thread: Pick<NavigationThreadItem, 'projectBindingKind' | 'projectPath'>): CurrentProject {
-  return thread.projectBindingKind === 'directory'
+export function currentProjectForThread(thread: Pick<NavigationThreadItem, 'projectBindingKind' | 'projectPath' | 'navigationGroupKey'>): CurrentProject {
+  return thread.navigationGroupKey !== 'chat-bot' && thread.projectBindingKind === 'directory'
     ? { kind: 'directory', projectPath: thread.projectPath }
     : { kind: 'quick_chat' }
 }

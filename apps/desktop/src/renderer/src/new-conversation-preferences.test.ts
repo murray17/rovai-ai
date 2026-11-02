@@ -36,6 +36,8 @@ describe('new conversation preferences', () => {
       .toEqual({ kind: 'directory', projectPath: '/repo' })
     expect(currentProjectForThread(thread('quick_chat', '/quick-chat')))
       .toEqual({ kind: 'quick_chat' })
+    expect(currentProjectForThread({ ...thread('directory', '/repo'), navigationGroupKey: 'chat-bot' }))
+      .toEqual({ kind: 'quick_chat' })
   })
 
   it('keeps a validated current workspace visible when it has no navigable Threads', () => {
@@ -76,6 +78,11 @@ describe('new conversation preferences', () => {
       schemaVersion: 3,
       throughGlobalSequence: 7,
       quickChat: { totalCount: 1, recentThreads: [] },
+      chatBot: { totalCount: 1, recentThreads: [{
+        ...thread('directory', '/repo/a'), navigationGroupKey: 'chat-bot', id: 'bot', title: 'Bot',
+        activationState: 'active', defaultLead: null, marker: 'none', lastActivityAt: '',
+        lastActivityGlobalSequence: 0, latestCompletionGlobalSequence: 0, version: 1
+      }] },
       projects: [
         project('/repo/a'),
         project('/repo/b')
@@ -88,6 +95,7 @@ describe('new conversation preferences', () => {
     )
 
     expect(displayed?.quickChat).toBe(navigation.quickChat)
+    expect(displayed?.chatBot).toBe(navigation.chatBot)
     expect(displayed?.projects.map((candidate) => candidate.projectPath)).toEqual(['/repo/b'])
     expect(navigation.projects).toHaveLength(2)
   })

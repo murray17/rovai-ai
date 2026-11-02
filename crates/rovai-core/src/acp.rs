@@ -33,7 +33,7 @@ use rovai_core::{
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
     managed_process::{
         ManagedChildStderr, ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose,
-        ManagedStdinPolicy, ManagedWindowsArgvDialect,
+        ManagedStdinPolicy, ManagedWindowsArgvDialect, WindowsAccountLaunch,
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
@@ -1438,6 +1438,19 @@ struct QueuedSteeringInput {
     receipt: oneshot::Sender<Result<String>>,
 }
 
+#[cfg(windows)]
+async fn filesystem_close_owned(
+    filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
+    deadline: tokio::time::Instant,
+) -> bool {
+    match filesystem {
+        Some(filesystem) => matches!(
+            tokio::time::timeout_at(deadline, filesystem.close()).await,
+            Ok(Ok(()))
+        ),
+        None => true,
+    }
+}
 pub(crate) struct AcpHost {
     credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     adapter_kind: AdapterKind,
@@ -1447,6 +1460,11 @@ pub(crate) struct AcpHost {
     client_terminal_bridge: Option<AcpClientTerminalBridge>,
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
+    #[cfg(windows)]
+    account_filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
+    #[cfg(windows)]
+    account_builtin_bridge:
+        std::sync::Mutex<Option<crate::builtin_tool_runtime::AccountBuiltinBridge>>,
     stdin: Mutex<Box<dyn AsyncWrite + Unpin + Send>>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
@@ -1818,6 +1836,15 @@ impl AcpHost {
         ) {
             bail!("Runtime launch policy rejected Agent execution");
         }
+        let selected_account = WindowsAccountLaunch::for_isolation(&workspace.isolation)?;
+        if selected_account.is_some()
+            && matches!(
+                frozen_runtime.adapter_kind,
+                AdapterKind::CodebuddyCli | AdapterKind::GrokBuild
+            )
+        {
+            validate_account_native_mcp_projection(external_mcp_servers)?;
+        }
         let mut private_config =
             prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
         let private_config_root = private_config.as_ref().map(|config| config.root.as_path());
@@ -1834,8 +1861,19 @@ impl AcpHost {
         }
 
         let host_instance_id = uuid::Uuid::new_v4().to_string();
-        let grok_configuration = if frozen_runtime.adapter_kind == AdapterKind::GrokBuild {
-            Some(load_grok_native_configuration()?)
+        let mut grok_configuration = if frozen_runtime.adapter_kind == AdapterKind::GrokBuild {
+            Some(if let Some(account) = &selected_account {
+                let home = account.profile_root.join(".grok");
+                load_grok_native_configuration_mode(
+                    &home,
+                    &home.join("config.toml"),
+                    &home.join(".env"),
+                    &rovai_core::runtime_discovery::runtime_environment(AdapterKind::GrokBuild),
+                    true,
+                )?
+            } else {
+                load_grok_native_configuration()?
+            })
         } else {
             None
         };
@@ -1866,6 +1904,11 @@ impl AcpHost {
         if frozen_runtime.adapter_kind == AdapterKind::HermesCli {
             crate::hermes::configure_command(&mut command)?;
         }
+        if let Some(account) = &selected_account
+            && frozen_runtime.adapter_kind == AdapterKind::GrokBuild
+        {
+            command.env("GROK_HOME", account.profile_root.join(".grok"));
+        }
         let ephemeral_config = configure_runtime_command(
             &mut command,
             workspace,
@@ -1881,6 +1924,11 @@ impl AcpHost {
                 .map(BuiltinToolProcessConfig::run_tmp),
         )
         .context("failed to configure ACP Runtime command")?;
+        if selected_account.is_some()
+            && let Some(configuration) = grok_configuration.take()
+        {
+            apply_grok_native_configuration(&mut command, configuration);
+        }
         let mut command_bootstrap_nonce =
             if frozen_runtime.adapter_kind == AdapterKind::CommandCodeCli {
                 Some(crate::command_code_acp::configure_host(
@@ -1927,6 +1975,12 @@ impl AcpHost {
         };
         let process_working_directory = PathBuf::from(acp_protocol_path(process_working_directory));
         command.current_dir(&process_working_directory);
+        #[cfg(windows)]
+        if workspace.isolation == "windows_account"
+            && let Some(config) = &builtin_tools
+        {
+            config.configure_account_command(&mut command)?;
+        }
         let spec = ManagedProcessLaunchSpec::capture(
             &command,
             if frozen_runtime.adapter_kind == AdapterKind::HermesCli {
@@ -1937,6 +1991,24 @@ impl AcpHost {
             ManagedStdinPolicy::Piped,
             ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("runtime-host:{}", frozen_runtime.adapter_kind.as_str()),
+        )?
+        .with_windows_account(WindowsAccountLaunch::for_isolation(&workspace.isolation)?)?
+        .with_account_launch_files(
+            if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
+                detector_config_root
+                    .as_ref()
+                    .map(|root| root.join("opencode-compaction-observer.ts"))
+                    .into_iter()
+                    .collect::<Vec<_>>()
+            } else if frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli {
+                ephemeral_config
+                    .as_ref()
+                    .map(|config| config.path().to_path_buf())
+                    .into_iter()
+                    .collect()
+            } else {
+                Vec::new()
+            },
         )?;
         let minimax_data_dir = (frozen_runtime.adapter_kind == AdapterKind::MinimaxCodeCli)
             .then(|| minimax_data_dir(&spec))
@@ -1981,6 +2053,20 @@ impl AcpHost {
         }
         startup.child = Some(child);
         let child = startup.child.as_mut().expect("startup owns child");
+        #[cfg(windows)]
+        let account_builtin_bridge = match (child.account_authority(), builtin_tools.as_ref()) {
+            (Some(authority), Some(config)) => {
+                match config.start_account_bridge(authority, child.account_filesystem()) {
+                    Ok(bridge) => Some(bridge),
+                    Err(error) => {
+                        let _ = child.force_terminate_tree();
+                        let _ = child.wait().await;
+                        return Err(error);
+                    }
+                }
+            }
+            _ => None,
+        };
         #[cfg(target_os = "macos")]
         child.track_descendants(&private_runtime_dir.join("owned-processes"))?;
         let stdin = child.take_stdin().context("ACP stdin was unavailable")?;
@@ -2036,6 +2122,10 @@ impl AcpHost {
             minimax_data_dir,
             client_terminal_bridge,
             host_instance_id,
+            #[cfg(windows)]
+            account_filesystem: child.account_filesystem(),
+            #[cfg(windows)]
+            account_builtin_bridge: std::sync::Mutex::new(account_builtin_bridge),
             child: Mutex::new(startup.child.take().expect("Host takes startup child")),
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
@@ -4143,6 +4233,15 @@ impl AcpHost {
 
     pub(crate) async fn force_reap_until(&self, deadline: tokio::time::Instant) -> bool {
         self.alive.store(false, Ordering::Release);
+        #[cfg(windows)]
+        if let Ok(mut bridge) = self.account_builtin_bridge.lock() {
+            bridge.take();
+        }
+        #[cfg(windows)]
+        let filesystem_close = tokio::spawn(filesystem_close_owned(
+            self.account_filesystem.clone(),
+            deadline,
+        ));
         let (host_reaped, terminals_reaped) = tokio::join!(
             async {
                 let Ok(mut child) = tokio::time::timeout_at(deadline, self.child.lock()).await
@@ -4177,7 +4276,11 @@ impl AcpHost {
             Ok(child) => self.confirm_native_cleanup(&child, deadline).await,
             Err(_) => false,
         };
-        host_reaped && terminals_reaped && native_groups_reaped
+        #[cfg(windows)]
+        let filesystem_closed = matches!(filesystem_close.await, Ok(true));
+        #[cfg(not(windows))]
+        let filesystem_closed = true;
+        host_reaped && terminals_reaped && native_groups_reaped && filesystem_closed
     }
 
     async fn confirm_native_cleanup(
@@ -4291,6 +4394,15 @@ impl AcpHost {
 
     pub(crate) async fn shutdown_and_reap(&self) {
         self.alive.store(false, Ordering::Release);
+        #[cfg(windows)]
+        if let Ok(mut bridge) = self.account_builtin_bridge.lock() {
+            bridge.take();
+        }
+        #[cfg(windows)]
+        let filesystem_close = tokio::spawn(filesystem_close_owned(
+            self.account_filesystem.clone(),
+            tokio::time::Instant::now() + Duration::from_secs(4),
+        ));
         self.release_all_client_terminals().await;
         let mut child = self.child.lock().await;
         let ownership_captured = self.capture_native_descendants(&mut child).is_ok();
@@ -4307,6 +4419,10 @@ impl AcpHost {
                     tokio::time::Instant::now() + Duration::from_millis(2500),
                 )
                 .await;
+        #[cfg(windows)]
+        if !matches!(filesystem_close.await, Ok(true)) {
+            self.send_host_diagnostic("Account filesystem cleanup remains unconfirmed".into());
+        }
         if groups_reaped && let Some(root) = self.private_config_root.as_ref() {
             let _ = std::fs::remove_dir_all(root);
         }
@@ -4880,6 +4996,8 @@ pub struct AcpRuntime {
     dsh_model_source: Option<rovai_core::agent_profile::DshModelSource>,
     active_observation: Mutex<Option<AcpPromptObservation>>,
     native_usage: Arc<Mutex<Option<Arc<std::sync::Mutex<NativeUsageReader>>>>>,
+    #[cfg(windows)]
+    account_filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
 }
 
 pub(crate) use rovai_core::agent_runtime_adapter::LiveModelValidationError as AcpLiveModelValidationError;
@@ -5038,6 +5156,11 @@ impl AcpRuntime {
     ) -> Arc<Self> {
         Arc::new(Self {
             owner,
+            #[cfg(windows)]
+            account_filesystem: host
+                .account_filesystem
+                .as_ref()
+                .map(|filesystem| filesystem.for_run()),
             host,
             compatibility,
             mcp_projection_digest,
@@ -5244,6 +5367,25 @@ impl AcpRuntime {
                 let existing_session_id =
                     existing_session_id.context("cross-Host ACP continuation has no Session ID")?;
                 if let Some(root) = &self.host.codebuddy_config_dir {
+                    #[cfg(windows)]
+                    if let Some(filesystem) = &self.account_filesystem {
+                        ensure!(
+                            uuid::Uuid::parse_str(existing_session_id).is_ok(),
+                            "CodeBuddy restore target is not a UUID"
+                        );
+                        let path = crate::native_usage::codebuddy_session_path(
+                            root,
+                            &cwd,
+                            existing_session_id,
+                        );
+                        ensure!(
+                            filesystem.is_file(path).await?,
+                            "CodeBuddy native Session history is missing"
+                        );
+                    } else {
+                        verify_codebuddy_restore_target(root, existing_session_id, &cwd).await?;
+                    }
+                    #[cfg(not(windows))]
                     verify_codebuddy_restore_target(root, existing_session_id, &cwd).await?;
                 }
                 self.host
@@ -6152,6 +6294,11 @@ impl AcpRuntime {
     }
 
     pub async fn cancel(&self) -> Result<()> {
+        #[cfg(windows)]
+        let filesystem_close = self
+            .account_filesystem
+            .clone()
+            .map(|filesystem| tokio::spawn(async move { filesystem.close_run().await }));
         let session_id = self
             .session_id()
             .await
@@ -6170,6 +6317,10 @@ impl AcpRuntime {
         self.host
             .release_client_terminals_for_session(&session_id, &self.owner)
             .await;
+        #[cfg(windows)]
+        if let Some(close) = filesystem_close {
+            close.await??;
+        }
         cancellation
     }
 
@@ -6571,6 +6722,10 @@ impl AcpRuntime {
     }
 
     pub(crate) async fn native_usage_selected(&self) -> bool {
+        #[cfg(windows)]
+        if self.account_filesystem.is_some() {
+            return false;
+        }
         match self.adapter_kind() {
             AdapterKind::CodebuddyCli
             | AdapterKind::KimiCodeCli
@@ -6650,6 +6805,10 @@ impl AcpRuntime {
             .and_then(Value::as_str)
             .context("fs/read_text_file has no path")?;
         let path = client_filesystem_path(&self.execution_root, path);
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            return Ok(json!({"content": filesystem.read_text(path).await?}));
+        }
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         Ok(json!({"content": content}))
@@ -6665,6 +6824,11 @@ impl AcpRuntime {
             .and_then(Value::as_str)
             .context("fs/write_text_file has no content")?;
         let path = client_filesystem_path(&self.execution_root, path);
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            filesystem.write_text(path, content.to_owned()).await?;
+            return Ok(json!({}));
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -6674,6 +6838,10 @@ impl AcpRuntime {
     }
 
     pub(crate) async fn detach(&self) {
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            let _ = filesystem.close_run().await;
+        }
         *self.active_observation.lock().await = None;
         if let Some(session_id) = self.session_id().await {
             self.host.unbind_session(&session_id, &self.owner).await;
@@ -6681,6 +6849,12 @@ impl AcpRuntime {
     }
 
     pub(crate) async fn detach_and_flush_ingress(&self) -> bool {
+        #[cfg(windows)]
+        if let Some(filesystem) = &self.account_filesystem {
+            if filesystem.close_run().await.is_err() {
+                return false;
+            }
+        }
         *self.active_observation.lock().await = None;
         let session_id = self.session_id().await;
         self.host
@@ -7152,6 +7326,7 @@ pub(crate) fn runtime_compatibility_digest(
         "codebuddyLaunchModel": codebuddy_launch_model,
         "executionRoot": execution_root,
         "workspace": workspace,
+        "windowsAccount": WindowsAccountLaunch::for_isolation(&workspace.isolation)?.map(|account| account.compatibility_digest()).transpose()?,
         "permissionSemantics": permission_semantics,
         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
         "externalMcpServers": external_mcp_servers,
@@ -7182,7 +7357,21 @@ pub(crate) fn runtime_compatibility_digest(
             .context("Runtime compatibility payload must be an object")?;
         compatibility.insert(
             "grokNativeConfigurationDigest".to_string(),
-            json!(grok_native_configuration_compatibility_digest()?),
+            json!(
+                if let Some(account) = WindowsAccountLaunch::for_isolation(&workspace.isolation)? {
+                    let home = account.profile_root.join(".grok");
+                    load_grok_native_configuration_mode(
+                        &home,
+                        &home.join("config.toml"),
+                        &home.join(".env"),
+                        &rovai_core::runtime_discovery::runtime_environment(AdapterKind::GrokBuild),
+                        true,
+                    )?
+                    .compatibility_digest
+                } else {
+                    grok_native_configuration_compatibility_digest()?
+                }
+            ),
         );
         compatibility.insert(
             "grokNativeRulesRevision".to_string(),
@@ -7412,6 +7601,31 @@ fn prepare_private_host_config(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn validate_account_native_mcp_projection(
+    servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<()> {
+    // File projection has no secret classification metadata. Admit the narrow
+    // local program + file-arguments form instead of copying arbitrary values.
+    for definition in servers.values() {
+        let McpServerDefinition::Stdio {
+            command, args, env, ..
+        } = definition
+        else {
+            bail!("account MCP file projection does not support authenticated HTTP configuration");
+        };
+        anyhow::ensure!(
+            env.is_empty()
+                && Path::new(command).is_absolute()
+                && Path::new(command).is_file()
+                && args
+                    .iter()
+                    .all(|arg| Path::new(arg).is_absolute() && Path::new(arg).is_file()),
+            "account MCP file projection requires a local program, file arguments and no explicit environment; literal credentials are not copied"
+        );
+    }
+    Ok(())
+}
+
 fn configure_runtime_command(
     command: &mut Command,
     workspace: &AgentRunWorkspace,
@@ -7745,7 +7959,9 @@ fn configure_runtime_command(
             // Formal AgentRun hosts inherit the user's official Grok Home and
             // config.toml. Only environment names referenced by that native
             // configuration are resolved from $GROK_HOME/.env for this child.
-            configure_grok_native_environment(command)?;
+            if workspace.isolation != "windows_account" {
+                configure_grok_native_environment(command)?;
+            }
             return Ok(plugin);
         }
         AdapterKind::CodexCli
@@ -7920,34 +8136,72 @@ fn grok_environment_value(raw: &str, path: &Path, line: usize) -> Result<String>
     Ok(value.to_string())
 }
 
+fn read_grok_config_text(path: &Path, account_mode: bool) -> Result<Option<String>> {
+    #[cfg(not(windows))]
+    anyhow::ensure!(
+        !account_mode,
+        "Windows account configuration requires Windows"
+    );
+    #[cfg(windows)]
+    if account_mode {
+        use std::io::Read;
+        let file =
+            match crate::local_attachment_snapshot::open_resolved_file_without_following(path) {
+                Ok(file) => file,
+                Err(error)
+                    if error.chain().any(|cause| {
+                        cause
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                    }) =>
+                {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
+            };
+        let meta = crate::platform::windows_file_tree::inspect_node(&file)?;
+        anyhow::ensure!(
+            meta.number_of_links == 1 && meta.fingerprint.size <= 1024 * 1024,
+            "account Grok config must be bounded single-link file"
+        );
+        let mut bytes = Vec::new();
+        file.take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        anyhow::ensure!(bytes.len() <= 1024 * 1024, "account Grok config too large");
+        return Ok(Some(String::from_utf8(bytes)?));
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn read_grok_environment_file(
     path: &Path,
     allowed_keys: &BTreeSet<String>,
+    account_mode: bool,
 ) -> Result<(BTreeMap<String, String>, Option<String>)> {
-    if !path.exists() {
-        return Ok((BTreeMap::new(), None));
-    }
-    let metadata =
-        std::fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
-    if !metadata.is_file() {
-        bail!(
-            "Grok Build environment source {} is not a file",
-            path.display()
-        );
-    }
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-
-        if metadata.permissions().mode() & 0o077 != 0 {
-            bail!(
-                "Grok Build environment source {} must not be accessible by group or others",
-                path.display()
+    match std::fs::metadata(path) {
+        Ok(metadata) => {
+            use std::os::unix::fs::PermissionsExt;
+            anyhow::ensure!(
+                metadata.is_file(),
+                "Grok Build environment source is not a file"
+            );
+            anyhow::ensure!(
+                metadata.permissions().mode() & 0o077 == 0,
+                "Grok Build environment source must not be accessible by group or others"
             );
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((BTreeMap::new(), None));
+        }
+        Err(error) => return Err(error.into()),
     }
-    let contents = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
+    let Some(contents) = read_grok_config_text(path, account_mode)? else {
+        return Ok((BTreeMap::new(), None));
+    };
     let mut values = BTreeMap::new();
     let mut observed_keys = BTreeSet::new();
     for (index, raw_line) in contents.lines().enumerate() {
@@ -7994,14 +8248,22 @@ fn load_grok_native_configuration_from_paths(
     environment_path: &Path,
     inherited_environment: &BTreeMap<String, String>,
 ) -> Result<GrokNativeConfiguration> {
-    let config_contents = if config_path.exists() {
-        Some(
-            std::fs::read_to_string(config_path)
-                .with_context(|| format!("failed to read {}", config_path.display()))?,
-        )
-    } else {
-        None
-    };
+    load_grok_native_configuration_mode(
+        home,
+        config_path,
+        environment_path,
+        inherited_environment,
+        false,
+    )
+}
+fn load_grok_native_configuration_mode(
+    home: &Path,
+    config_path: &Path,
+    environment_path: &Path,
+    inherited_environment: &BTreeMap<String, String>,
+    account_mode: bool,
+) -> Result<GrokNativeConfiguration> {
+    let config_contents = read_grok_config_text(config_path, account_mode)?;
     let config = match config_contents.as_deref() {
         Some(contents) => toml::from_str::<toml::Value>(contents).with_context(|| {
             format!(
@@ -8026,7 +8288,7 @@ fn load_grok_native_configuration_from_paths(
         .collect();
     let (credential_keys, injected_keys) = collect_grok_model_environment_keys(&config)?;
     let (file_environment, environment_contents) =
-        read_grok_environment_file(environment_path, &injected_keys)?;
+        read_grok_environment_file(environment_path, &injected_keys, account_mode)?;
     let environment = injected_keys
         .iter()
         .filter_map(|key| {
@@ -8500,8 +8762,83 @@ fn acp_protocol_path(path: &Path) -> String {
 
 #[cfg(all(test, windows, feature = "extended-tests"))]
 mod windows_path_tests {
-    use super::acp_protocol_path;
-    use std::path::Path;
+    use super::*;
+
+    // Owns Windows account configuration reads, not ACP path rendering.
+    // Synthetic links and bounds cannot be established by the Unix config owner.
+    #[test]
+    fn account_grok_config_reads_reject_links_and_preserve_missing_semantics() {
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!(
+                "account-grok-config-links-{}",
+                uuid::Uuid::new_v4()
+            ));
+        std::fs::create_dir_all(&root).unwrap();
+        let config_path = root.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[model.synthetic]
+api_key = "synthetic-only"
+"#,
+        )
+        .unwrap();
+        #[cfg(windows)]
+        {
+            assert!(
+                read_grok_config_text(&root.join("absent/child/config.toml"), true)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                load_grok_native_configuration_mode(
+                    &root,
+                    &config_path,
+                    &root.join(".env"),
+                    &BTreeMap::new(),
+                    true
+                )
+                .unwrap()
+                .byok_configured
+            );
+            let linked_file = root.join("linked-config.toml");
+            std::fs::hard_link(&config_path, &linked_file).unwrap();
+            assert!(read_grok_config_text(&linked_file, true).is_err());
+            std::fs::remove_file(&linked_file).unwrap();
+            let protected_bytes = std::fs::read(&config_path).unwrap();
+            let junction = root.join("redirected-config");
+            let status = std::process::Command::new("powershell.exe")
+                .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $env:ROVAI_TEST_JUNCTION -Target $env:ROVAI_TEST_TARGET | Out-Null"])
+                .env("ROVAI_TEST_JUNCTION", &junction).env("ROVAI_TEST_TARGET", &root).output().unwrap();
+            assert!(
+                status.status.success(),
+                "synthetic junction fixture creation failed"
+            );
+            for leaf in ["config.toml", "missing-config.toml"] {
+                assert!(
+                    read_grok_config_text(&junction.join(leaf), true).is_err(),
+                    "junction must be rejected before leaf lookup"
+                );
+            }
+            assert!(
+                load_grok_native_configuration_mode(
+                    &root,
+                    &config_path,
+                    &junction.join("config.toml"),
+                    &BTreeMap::new(),
+                    true
+                )
+                .is_err()
+            );
+            assert_eq!(std::fs::read(&config_path).unwrap(), protected_bytes);
+            std::fs::remove_dir(&junction).unwrap();
+            let oversized = root.join("oversized.toml");
+            std::fs::write(&oversized, vec![b'x'; 1024 * 1024 + 1]).unwrap();
+            assert!(read_grok_config_text(&oversized, true).is_err());
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn acp_protocol_paths_do_not_expose_windows_verbatim_prefixes() {
@@ -12052,7 +12389,6 @@ done
         .unwrap();
         assert!(configuration.byok_configured);
         assert!(configuration.environment.is_empty());
-
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -18378,5 +18714,838 @@ while IFS= read -r ignored; do :; done
 
         assert!(reconciled.public_file_operation_path.is_none());
         assert!(reconciled.public_file_changes.is_none());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_account_live_tests {
+    use super::*;
+    use rovai_core::agent_profile::{AdapterPermissionConfig, ResolvedModelSelection};
+
+    async fn await_account_prompt(
+        runtime: &AcpRuntime,
+        receiver: &mut mpsc::UnboundedReceiver<AcpIncoming>,
+        prompt: &str,
+        expected: &str,
+    ) -> bool {
+        timeout(Duration::from_secs(75), async {
+            while let Some(event) = receiver.recv().await {
+                if let AcpIncoming::Message {
+                    native_prompt_id,
+                    message,
+                    ..
+                } = event
+                {
+                    if native_prompt_id != prompt {
+                        continue;
+                    }
+                    let method = message["method"].as_str().unwrap_or("");
+                    if method == "rovai/acp_prompt_completed" {
+                        return message["params"]["result"]["stopReason"] == "end_turn"
+                            && runtime
+                                .final_agent_message(prompt)
+                                .await
+                                .is_some_and(|reply| reply.contains(expected));
+                    }
+                    if runtime
+                        .observe_message(prompt, method, &message["params"])
+                        .await
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    #[tokio::test]
+    #[ignore = "requires existing Windows account deployment and installed real Runtime; isolated fixtures only"]
+    async fn account_product_acp_start_and_session() {
+        let fixture = PathBuf::from(
+            std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_ROOT")
+                .expect("explicit isolated acceptance root"),
+        );
+        assert!(fixture.is_absolute(), "fixture must be absolute");
+        for relative in [
+            "user-data",
+            "skill-library",
+            "runtime",
+            "workspace",
+            "attachments",
+        ] {
+            std::fs::create_dir_all(fixture.join(relative)).unwrap();
+        }
+        let mcp_fixture = fixture.join("mcp.json");
+        if !mcp_fixture.exists() {
+            std::fs::write(&mcp_fixture, "{\"mcpServers\":{}}").unwrap();
+        }
+        println!(
+            "channel=automatic-acceptance isolated_user_data=true isolated_skill_library=true isolated_mcp=true"
+        );
+        let search = rovai_core::runtime_discovery::RuntimeSearchEnvironment::capture_initial();
+        let registry = AgentRuntimeAdapterRegistry::default();
+        for kind in AdapterKind::ALL {
+            let admission = registry
+                .platform_admission(kind, rovai_core::platform::HostPlatformKey::WindowsX64);
+            let found = rovai_core::runtime_discovery::discover_runtime_path(kind, &search);
+            println!(
+                "matrix runtime={} admission={:?} found={} entry={:?} version={:?} account_wired={}",
+                kind.as_str(),
+                admission.status(),
+                found.executable_path.is_some(),
+                found.entrypoint_kind,
+                found.reported_version,
+                matches!(
+                    kind,
+                    AdapterKind::CodebuddyCli
+                        | AdapterKind::OpencodeCli
+                        | AdapterKind::CodexCli
+                        | AdapterKind::ClaudeCodeCli
+                )
+            );
+        }
+        let kind: AdapterKind = std::env::var("ROVAI_ACCOUNT_ACCEPTANCE_ADAPTER")
+            .expect("explicit adapter")
+            .parse()
+            .unwrap();
+        assert!(matches!(
+            kind,
+            AdapterKind::CodebuddyCli | AdapterKind::OpencodeCli | AdapterKind::GrokBuild
+        ));
+        let mut found = rovai_core::runtime_discovery::discover_runtime_path(kind, &search);
+        let executable = found
+            .executable_path
+            .clone()
+            .expect("installed Runtime required");
+        if kind == AdapterKind::GrokBuild {
+            let requested = PathBuf::from(
+                std::env::var_os("ROVAI_GROK_BIN").expect("explicit Grok acceptance program"),
+            );
+            assert_eq!(
+                std::fs::canonicalize(&executable).unwrap(),
+                std::fs::canonicalize(requested).unwrap()
+            );
+            println!("grok_selected_task_program=true");
+        }
+        rovai_core::runtime_discovery::discover_runtime_version(&mut found, &search).await;
+        let version = found.reported_version.clone();
+        println!("runtime={} actual_version={:?}", kind.as_str(), version);
+        let runtime = FrozenAgentRuntimeConfig {
+            environment: Some(rovai_core::member_environment::LaunchEnvironment {
+                values: Some(std::env::vars().collect()),
+                overlay: Some(BTreeMap::new()),
+            }),
+            custom_api: None,
+            camp_fast: None,
+            adapter_kind: kind,
+            installation_id: "synthetic-account-acceptance".into(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable,
+            auth_scope: "dedicated-account".into(),
+            reported_version: version,
+            executable_fingerprint: found.executable_fingerprint.unwrap_or_default(),
+            capabilities: vec![],
+            protocol_version: "acp-v1".into(),
+            model: ResolvedModelSelection {
+                dsh_source: None,
+                source: if kind == AdapterKind::CodebuddyCli {
+                    "explicit"
+                } else {
+                    "runtime_default"
+                }
+                .into(),
+                model_id: if kind == AdapterKind::CodebuddyCli {
+                    "custom-local:gpt-6.1-sol"
+                } else {
+                    "opencode-cli://runtime-default"
+                }
+                .into(),
+                options: json!({}),
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: kind,
+                schema_version: 1,
+                values: if kind == AdapterKind::CodebuddyCli {
+                    json!({"permission_mode":"bypassPermissions"})
+                } else if kind == AdapterKind::GrokBuild {
+                    json!({"permission_mode":"bypassPermissions"})
+                } else {
+                    json!({"permission":"allow"})
+                },
+            },
+            native_session_compatibility_key: None,
+            binding_compatibility_digest: Some("synthetic".into()),
+            host_config_digest: Some("synthetic".into()),
+            config_digest: "synthetic".into(),
+        };
+        let workspace = AgentRunWorkspace {
+            execution_root: fixture.join("workspace").to_string_lossy().into(),
+            access: "write".into(),
+            isolation: "windows_account".into(),
+        };
+        let cli = std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_CLI")
+            .map(PathBuf::from)
+            .expect("built product CLI");
+        let builtin = BuiltinToolProcessConfig::create(
+            &cli,
+            &crate::builtin_tool_runtime::builtin_tool_endpoint(),
+            &fixture.join("runtime"),
+        )
+        .unwrap();
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let projection_test = std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_PROJECTIONS").is_some();
+        let external_mcp_servers: BTreeMap<String, McpServerDefinition> =
+            if projection_test && kind == AdapterKind::CodebuddyCli {
+                serde_json::from_slice(&std::fs::read(fixture.join("mcp-servers.json")).unwrap())
+                    .unwrap()
+            } else {
+                BTreeMap::new()
+            };
+        let host = AcpHost::spawn(
+            workspace.path(),
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &runtime,
+            incoming,
+            Some(builtin),
+            if projection_test {
+                CompactionDetectorPolicy::BestEffort
+            } else {
+                CompactionDetectorPolicy::Disabled
+            },
+            true,
+            &external_mcp_servers,
+            &fixture.join("runtime"),
+            Some(&fixture.join("attachments")),
+            None,
+        )
+        .await;
+        let host = match host {
+            Ok(host) => {
+                println!("product_initialize=true non_admin_verified=true");
+                host
+            }
+            Err(error) => {
+                let detail = format!("{error:#}");
+                println!(
+                    "product_start_failed=true stage=initialize os_eperm={} host_exited={}",
+                    detail.contains("EPERM"),
+                    detail.contains("Host exited")
+                );
+                println!(
+                    "product_start_error_safe={:?}",
+                    sanitize_public_runtime_error(&detail, &[(fixture.as_path(), "<fixture>")])
+                );
+                panic!("real product start did not qualify; no host fallback");
+            }
+        };
+        let session = host
+            .rpc_with_timeout(
+                "session/new",
+                json!({"cwd":acp_protocol_path(workspace.path()), "mcpServers":[]}),
+                Duration::from_secs(45),
+            )
+            .await;
+        println!("product_session_new_succeeded={}", session.is_ok());
+        if let Err(error) = &session {
+            let detail = format!("{error:#}");
+            println!(
+                "product_session_failed=true authentication_required={} model_unavailable={}",
+                detail.to_lowercase().contains("auth"),
+                detail.to_lowercase().contains("model")
+            );
+        }
+        if projection_test && let Ok(session) = &session {
+            let owner = AcpRuntimeOwner {
+                agent_run_id: "synthetic-skill-mcp".into(),
+                execution_epoch: 1,
+            };
+            let logical = AcpRuntime::from_host(
+                owner.clone(),
+                host.clone(),
+                crate::runtime_fleet::RuntimeCompatibilityKey::member(
+                    "synthetic-camp",
+                    "synthetic-member",
+                    "synthetic",
+                ),
+                Some("synthetic".into()),
+                workspace.path().to_path_buf(),
+                Some(fixture.join("attachments")),
+                "write".into(),
+                AcpSessionPermissions::from_frozen(&runtime).unwrap(),
+                None,
+            );
+            let id = session["sessionId"].as_str().unwrap().to_owned();
+            *logical.session_id.write().await = Some(id.clone());
+            *logical.session_result.write().await = Some(session.clone());
+            if let Ok(model) = std::env::var("ROVAI_ACCOUNT_ACCEPTANCE_MODEL") {
+                logical.set_model(&id, &model).await.unwrap();
+            }
+            host.bind_session(&id, &owner, AcpSessionPhase::Ready)
+                .await
+                .unwrap();
+            let prompt = "Load the synthetic-account-check skill and follow its unique instruction. Call the local synthetic_account MCP tool ping once. Reply with the skill marker and MCP returned marker only. Do not read other files or services.";
+            let prompt = logical
+                .start_prompt("synthetic-projection-delivery", prompt)
+                .await
+                .unwrap();
+            let completed = timeout(Duration::from_secs(75), async {
+                while let Some(event) = receiver.recv().await {
+                    if let AcpIncoming::Message {
+                        native_prompt_id,
+                        message,
+                        ..
+                    } = event
+                    {
+                        if native_prompt_id != prompt {
+                            continue;
+                        }
+                        let method = message["method"].as_str().unwrap_or("");
+                        if method == "rovai/acp_prompt_completed" {
+                            let reply = logical
+                                .final_agent_message(&prompt)
+                                .await
+                                .unwrap_or_default();
+                            let skill = std::fs::read_to_string(fixture.join("skill-expected.txt"))
+                                .is_ok_and(|marker| reply.contains(marker.trim()));
+                            let mcp = std::fs::read_to_string(fixture.join("mcp-expected.txt"))
+                                .is_ok_and(|marker| reply.contains(marker.trim()));
+                            let calls = std::fs::read_to_string(fixture.join("mcp-calls.jsonl"))
+                                .map(|text| {
+                                    text.lines()
+                                        .filter(|line| line.contains("tools/call"))
+                                        .count()
+                                })
+                                .unwrap_or(0);
+                            let plugin = host
+                                .detector_config_root
+                                .as_ref()
+                                .map(|root| root.join("opencode-compaction-observer.ts"));
+                            let plugin_readable = if kind == AdapterKind::CodebuddyCli {
+                                let ephemeral = host.ephemeral_config.lock().await;
+                                match (host.account_filesystem.as_ref(), ephemeral.as_ref()) {
+                                    (Some(filesystem), Some(config)) => {
+                                        match filesystem.projected_path(config.path()) {
+                                            Some(path) => filesystem.read_text(path).await.is_ok(),
+                                            None => false,
+                                        }
+                                    }
+                                    _ => false,
+                                }
+                            } else {
+                                match (host.account_filesystem.as_ref(), plugin) {
+                                    (Some(filesystem), Some(path)) => {
+                                        match filesystem.projected_path(&path) {
+                                            Some(projected) => {
+                                                filesystem.read_text(projected).await.is_ok()
+                                            }
+                                            None => false,
+                                        }
+                                    }
+                                    _ => false,
+                                }
+                            };
+                            println!(
+                                "mcp_actual_tool_calls={} account_plugin_readable={}",
+                                calls, plugin_readable
+                            );
+                            println!(
+                                "default_best_effort=true skill_marker={} mcp_marker={}",
+                                skill, mcp
+                            );
+                            return message["params"]["result"]["stopReason"] == "end_turn"
+                                && skill
+                                && mcp
+                                && calls > 0
+                                && plugin_readable;
+                        }
+                        let _ = logical
+                            .observe_message(&prompt, method, &message["params"])
+                            .await;
+                        if let Some(request_id) = message.get("id") {
+                            match method {
+                                "session/request_permission" => logical
+                                    .respond(
+                                        request_id.clone(),
+                                        legacy_approval_result(kind, &message["params"], true)
+                                            .unwrap(),
+                                    )
+                                    .await
+                                    .unwrap(),
+                                "fs/read_text_file" => match logical
+                                    .read_text_file(&message["params"])
+                                    .await
+                                {
+                                    Ok(v) => logical.respond(request_id.clone(), v).await.unwrap(),
+                                    Err(_) => logical
+                                        .respond_error(request_id.clone(), -32603, "OS denied")
+                                        .await
+                                        .unwrap(),
+                                },
+                                _ => logical
+                                    .respond_error(
+                                        request_id.clone(),
+                                        -32601,
+                                        "acceptance method unavailable",
+                                    )
+                                    .await
+                                    .unwrap(),
+                            }
+                        }
+                    }
+                }
+                false
+            })
+            .await
+            .unwrap_or(false);
+            logical.detach().await;
+            host.shutdown_and_reap().await;
+            assert!(
+                completed,
+                "default plugin/Skill/MCP projections must actually work"
+            );
+            return;
+        }
+        if std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_ACTIVE_STOP").is_some()
+            && let Ok(session) = &session
+        {
+            let session_id = session["sessionId"].as_str().unwrap().to_string();
+            let owner = AcpRuntimeOwner {
+                agent_run_id: "synthetic-active-tool-stop".into(),
+                execution_epoch: 1,
+            };
+            let logical = AcpRuntime::from_host(
+                owner.clone(),
+                host.clone(),
+                crate::runtime_fleet::RuntimeCompatibilityKey::member(
+                    "synthetic-camp",
+                    "synthetic-member",
+                    "synthetic",
+                ),
+                Some("synthetic".into()),
+                workspace.path().to_path_buf(),
+                Some(fixture.join("attachments")),
+                "write".into(),
+                AcpSessionPermissions::from_frozen(&runtime).unwrap(),
+                None,
+            );
+            *logical.session_id.write().await = Some(session_id.clone());
+            *logical.session_result.write().await = Some(session.clone());
+            if let Ok(model) = std::env::var("ROVAI_ACCOUNT_ACCEPTANCE_MODEL") {
+                logical.set_model(&session_id, &model).await.unwrap();
+            }
+            host.bind_session(&session_id, &owner, AcpSessionPhase::Ready)
+                .await
+                .unwrap();
+            let script = workspace.path().join("synthetic-delayed-write.cjs");
+            std::fs::write(&script,r#"const fs=require('fs');const cp=require('child_process');const path=require('path');const who=path.join(process.env.SystemRoot,'System32','whoami.exe');const groups=cp.execFileSync(who,['/groups'],{encoding:'utf8'});fs.writeFileSync(path.join(__dirname,'synthetic-tool-ready.json'),JSON.stringify({ready:true,nonAdmin:!groups.includes('S-1-5-32-544'),accountMatches:cp.execFileSync(who,[],{encoding:'utf8'}).trim().toLowerCase()===String(process.env.ROVAI_ACCEPTANCE_EXPECTED_ACCOUNT).toLowerCase()}));setTimeout(()=>fs.writeFileSync(path.join(__dirname,'synthetic-late-write.txt'),'must-not-appear'),10000);"#).unwrap();
+            let prompt = "Execute exactly node synthetic-delayed-write.cjs using your native shell tool in the current directory. Do not inspect the script, do not detach or background it, and wait for its completion. This is an authorized synthetic cancellation test.";
+            let prompt_id = logical
+                .start_prompt("synthetic-active-stop-delivery", prompt)
+                .await
+                .unwrap();
+            let ready = workspace.path().join("synthetic-tool-ready.json");
+            let mut tool_seen = false;
+            let active=timeout(Duration::from_secs(60),async {
+                loop {
+                    if ready.is_file() && tool_seen {return true;}
+                    tokio::select! {
+                        event=receiver.recv()=>{
+                            let Some(AcpIncoming::Message {native_prompt_id,message,..})=event else {continue;};
+                            if native_prompt_id!=prompt_id {continue;}
+                            let method=message["method"].as_str().unwrap_or("");
+                            tool_seen|=matches!(message["params"]["update"]["sessionUpdate"].as_str(),Some("tool_call"|"tool_call_update"));
+                            let _=logical.observe_message(&prompt_id,method,&message["params"]).await;
+                            if let Some(id)=message.get("id") {
+                                match method {
+                                    "session/request_permission"=>logical.respond(id.clone(),legacy_approval_result(kind, &message["params"],true).unwrap()).await.unwrap(),
+                                    "fs/read_text_file"=>match logical.read_text_file(&message["params"]).await {Ok(value)=>logical.respond(id.clone(),value).await.unwrap(),Err(_)=>logical.respond_error(id.clone(),-32603,"OS access denied").await.unwrap()},
+                                    "fs/write_text_file"=>match logical.write_text_file(&message["params"]).await {Ok(value)=>logical.respond(id.clone(),value).await.unwrap(),Err(_)=>logical.respond_error(id.clone(),-32603,"OS access denied").await.unwrap()},
+                                    _=>logical.respond_error(id.clone(),-32601,"acceptance method unavailable").await.unwrap(),
+                                }
+                            }
+                            if message["params"]["update"]["status"]=="failed" {
+                                let detail=serde_json::to_string(&message["params"]["update"]["content"]).unwrap();
+                                println!("synthetic_tool_error_safe={:?}",sanitize_public_runtime_error(&detail,&[(fixture.as_path(),"<fixture>")]));
+                            }
+                            if method=="rovai/acp_prompt_completed" {return false;}
+                        },
+                        _=tokio::time::sleep(Duration::from_millis(50))=>{},
+                    }
+                }
+            }).await.unwrap_or(false);
+            let identity = std::fs::read(&ready)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            let cancel = logical.cancel().await.is_ok();
+            logical.detach().await;
+            let reaped = host
+                .force_reap_until(tokio::time::Instant::now() + Duration::from_secs(5))
+                .await;
+            // The controlled child writes after ten seconds if cancellation leaked it.
+            tokio::time::sleep(Duration::from_secs(11)).await;
+            let late = workspace.path().join("synthetic-late-write.txt").exists();
+            println!(
+                "active_native_tool_seen={} ready={} non_admin={} cancel={} job_reaped={} late_write_present={}",
+                tool_seen,
+                active,
+                identity.as_ref().is_some_and(|v| v["nonAdmin"] == true),
+                cancel,
+                reaped,
+                late
+            );
+            assert!(
+                active
+                    && identity
+                        .is_some_and(|v| v["nonAdmin"] == true && v["accountMatches"] == true)
+                    && cancel
+                    && reaped
+                    && !late,
+                "active native tool must stop without delayed writes"
+            );
+            return;
+        }
+        if std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_PROMPT").is_some()
+            && let Ok(session) = &session
+        {
+            let session_id = session["sessionId"].as_str().unwrap().to_string();
+            let owner = AcpRuntimeOwner {
+                agent_run_id: "synthetic-live-product-run".into(),
+                execution_epoch: 1,
+            };
+            let logical = AcpRuntime::from_host(
+                owner.clone(),
+                host.clone(),
+                crate::runtime_fleet::RuntimeCompatibilityKey::member(
+                    "synthetic-camp",
+                    "synthetic-member",
+                    "synthetic",
+                ),
+                Some("synthetic".into()),
+                workspace.path().to_path_buf(),
+                Some(fixture.join("attachments")),
+                "write".into(),
+                AcpSessionPermissions::from_frozen(&runtime).unwrap(),
+                None,
+            );
+            *logical.session_id.write().await = Some(session_id.clone());
+            *logical.session_result.write().await = Some(session.clone());
+            if kind == AdapterKind::OpencodeCli
+                && let Ok(model) = std::env::var("ROVAI_ACCOUNT_ACCEPTANCE_MODEL")
+            {
+                let catalog = serde_json::to_string(session).unwrap();
+                println!(
+                    "requested_native_model_catalog_contains={}",
+                    catalog.contains(&model)
+                );
+                let configured = logical.set_model(&session_id, &model).await;
+                println!("requested_native_model_selected={}", configured.is_ok());
+                assert!(
+                    configured.is_ok(),
+                    "native configured model must be selectable"
+                );
+            }
+            host.bind_session(&session_id, &owner, AcpSessionPhase::Ready)
+                .await
+                .unwrap();
+            if std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_MODEL_CATALOG").is_some() {
+                let catalog = serde_json::to_string(session).unwrap();
+                println!(
+                    "selected_sol_in_native_catalog={} model_count={} selected_model={:?}",
+                    catalog.contains("gpt-6.1-sol"),
+                    session["models"]["availableModels"]
+                        .as_array()
+                        .map(Vec::len)
+                        .unwrap_or(0),
+                    session["models"]["currentModelId"].as_str()
+                );
+            }
+            let marker = format!("SYNTHETIC_{}", uuid::Uuid::new_v4().simple());
+            let prompt = if matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CodebuddyCli)
+                && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_LIFECYCLE").is_some()
+            {
+                format!(
+                    "Remember this synthetic marker for later: {marker}. Reply exactly {}. Do not use tools.",
+                    if kind == AdapterKind::CodebuddyCli {
+                        "CODEBUDDY_ACCOUNT_OK"
+                    } else {
+                        "OPENCODE_ACCOUNT_OK"
+                    }
+                )
+            } else if kind == AdapterKind::OpencodeCli {
+                format!(
+                    "Remember this synthetic marker for later: {marker}. Reply exactly OPENCODE_ACCOUNT_OK. Do not use tools."
+                )
+            } else {
+                std::env::var("ROVAI_ACCOUNT_ACCEPTANCE_PROMPT").unwrap()
+            };
+            let prompt_id = logical
+                .start_prompt("synthetic-delivery-one", &prompt)
+                .await
+                .unwrap();
+            let completed=tokio::time::timeout(Duration::from_secs(75),async {
+                let mut tool_events=0;
+                while let Some(event)=receiver.recv().await {
+                    if let AcpIncoming::Message { native_prompt_id,message,.. }=event {
+                        if native_prompt_id!=prompt_id {continue;}
+                        let method=message["method"].as_str().unwrap_or("");
+                        if method=="rovai/acp_prompt_completed" {
+                            let ok=message["params"]["error"].is_null() && message["params"]["result"]["stopReason"]=="end_turn";
+                            let native=message["params"]["result"]["_meta"]["codebuddy.ai/errorMessage"].as_str().unwrap_or("");
+                            let native=serde_json::from_str::<Value>(native).unwrap_or(Value::Null);
+                            let detail=native["message"].as_str().or_else(||native["error"]["message"].as_str()).or_else(||message["params"]["error"].as_str()).unwrap_or("");
+                            println!("native_message_safe={:?}",sanitize_public_runtime_error(detail,&[(fixture.as_path(),"<fixture>")]));
+                            println!("native_failure_code={:?} native_failure_category={:?} has_native_error={}",native["code"].as_i64().or_else(||native["error"]["code"].as_i64()),native["data"]["category"].as_str().or_else(||native["error"]["data"]["category"].as_str()),!native.is_null());
+                            println!("product_prompt_completed={} tool_event_count={} response_present={} stop_reason={:?} native_error_present={}",ok,tool_events,logical.final_agent_message(&prompt_id).await.is_some(),message["params"]["result"]["stopReason"].as_str(),!message["params"]["error"].is_null());
+                            return ok;
+                        }
+                        if matches!(message["params"]["update"]["sessionUpdate"].as_str(),Some("tool_call"|"tool_call_update")){tool_events+=1;}
+                        let _=logical.observe_message(&prompt_id,method,&message["params"]).await;
+                        if let Some(id)=message.get("id") {
+                            match method {
+                                "fs/read_text_file" => match logical.read_text_file(&message["params"]).await {Ok(result)=>logical.respond(id.clone(),result).await.unwrap(),Err(_)=>logical.respond_error(id.clone(),-32603,"OS access denied or unavailable").await.unwrap()},
+                                "fs/write_text_file" => match logical.write_text_file(&message["params"]).await {Ok(result)=>logical.respond(id.clone(),result).await.unwrap(),Err(_)=>logical.respond_error(id.clone(),-32603,"OS access denied or unavailable").await.unwrap()},
+                                "session/request_permission" => logical.respond(id.clone(),legacy_approval_result(kind, &message["params"],true).unwrap()).await.unwrap(),
+                                _=>logical.respond_error(id.clone(),-32601,"acceptance method not available").await.unwrap(),
+                            }
+                        }
+                    }
+                }
+                false
+            }).await;
+            println!("product_prompt_deadline_completed={}", completed.is_ok());
+            if kind == AdapterKind::CodebuddyCli
+                && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_DEBUG_FLUSH").is_some()
+            {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+            let observed_reply = logical.final_agent_message(&prompt_id).await;
+            logical.detach().await;
+            if matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CodebuddyCli)
+                && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_LIFECYCLE").is_some()
+                && observed_reply.as_ref().is_some_and(|reply| {
+                    reply.contains(if kind == AdapterKind::CodebuddyCli {
+                        "CODEBUDDY_ACCOUNT_OK"
+                    } else {
+                        "OPENCODE_ACCOUNT_OK"
+                    })
+                })
+            {
+                let hot_owner = AcpRuntimeOwner {
+                    agent_run_id: "synthetic-live-hot-run".into(),
+                    execution_epoch: 2,
+                };
+                let hot = AcpRuntime::from_host(
+                    hot_owner.clone(),
+                    host.clone(),
+                    crate::runtime_fleet::RuntimeCompatibilityKey::member(
+                        "synthetic-camp",
+                        "synthetic-member",
+                        "synthetic",
+                    ),
+                    Some("synthetic".into()),
+                    workspace.path().to_path_buf(),
+                    Some(fixture.join("attachments")),
+                    "write".into(),
+                    AcpSessionPermissions::from_frozen(&runtime).unwrap(),
+                    None,
+                );
+                *hot.session_id.write().await = Some(session_id.clone());
+                *hot.session_result.write().await = Some(session.clone());
+                host.bind_session(&session_id, &hot_owner, AcpSessionPhase::Ready)
+                    .await
+                    .unwrap();
+                let hot_id=hot.start_prompt("synthetic-delivery-hot","What synthetic marker did I ask you to remember? Reply only that marker, without tools.").await.unwrap();
+                let hot_ok = await_account_prompt(&hot, &mut receiver, &hot_id, &marker).await;
+                hot.detach().await;
+                println!("product_hot_continuation={}", hot_ok);
+                assert!(hot_ok, "hot continuation must return expected answer");
+                host.shutdown_and_reap().await;
+                let (cold_incoming, mut cold_receiver) = mpsc::unbounded_channel();
+                let cold_host = AcpHost::spawn(
+                    workspace.path(),
+                    &workspace,
+                    PermissionSemantics::RuntimeManagedV2,
+                    &runtime,
+                    cold_incoming,
+                    host.builtin_tools.clone(),
+                    CompactionDetectorPolicy::Disabled,
+                    true,
+                    &BTreeMap::new(),
+                    &fixture.join("runtime"),
+                    Some(&fixture.join("attachments")),
+                    None,
+                )
+                .await
+                .unwrap();
+                let cold = AcpRuntime::from_host(
+                    AcpRuntimeOwner {
+                        agent_run_id: "synthetic-live-cold-run".into(),
+                        execution_epoch: 3,
+                    },
+                    cold_host.clone(),
+                    crate::runtime_fleet::RuntimeCompatibilityKey::member(
+                        "synthetic-camp",
+                        "synthetic-member",
+                        "synthetic",
+                    ),
+                    Some("synthetic".into()),
+                    workspace.path().to_path_buf(),
+                    Some(fixture.join("attachments")),
+                    "write".into(),
+                    AcpSessionPermissions::from_frozen(&runtime).unwrap(),
+                    None,
+                );
+                let capabilities = cold.session_capabilities().await;
+                println!(
+                    "native_resume_capability={} native_load_capability={}",
+                    capabilities.can_resume, capabilities.can_load_history
+                );
+                let restore = cold
+                    .start_or_resume_session_with_native_rules(
+                        Some(&session_id),
+                        capabilities,
+                        if kind == AdapterKind::CodebuddyCli {
+                            "explicit"
+                        } else {
+                            "runtime_default"
+                        },
+                        if kind == AdapterKind::CodebuddyCli {
+                            "custom-local:gpt-6.1-sol"
+                        } else {
+                            "opencode-cli://runtime-default"
+                        },
+                        &json!({}),
+                        &BTreeMap::new(),
+                        None,
+                    )
+                    .await;
+                println!("product_cold_restore={}", restore.is_ok());
+                if let Ok(restored_id) = restore {
+                    assert_eq!(
+                        restored_id, session_id,
+                        "cold restore must retain exact Native Session ID"
+                    );
+                    if let Ok(model) = std::env::var("ROVAI_ACCOUNT_ACCEPTANCE_MODEL") {
+                        cold.set_model(&session_id, &model).await.unwrap();
+                    }
+                    let cold_id=cold.start_prompt("synthetic-delivery-cold","What synthetic marker did I ask you to remember in the first turn? Reply only the marker, without tools.").await.unwrap();
+                    let cold_ok =
+                        await_account_prompt(&cold, &mut cold_receiver, &cold_id, &marker).await;
+                    println!("product_cold_prompt={}", cold_ok);
+                    cold.detach().await;
+                    let tool_owner = AcpRuntimeOwner {
+                        agent_run_id: "synthetic-live-tool-run".into(),
+                        execution_epoch: 4,
+                    };
+                    let tool = AcpRuntime::from_host(
+                        tool_owner.clone(),
+                        cold_host.clone(),
+                        crate::runtime_fleet::RuntimeCompatibilityKey::member(
+                            "synthetic-camp",
+                            "synthetic-member",
+                            "synthetic",
+                        ),
+                        Some("synthetic".into()),
+                        workspace.path().to_path_buf(),
+                        Some(fixture.join("attachments")),
+                        "write".into(),
+                        AcpSessionPermissions::from_frozen(&runtime).unwrap(),
+                        None,
+                    );
+                    *tool.session_id.write().await = Some(session_id.clone());
+                    cold_host
+                        .bind_session(&session_id, &tool_owner, AcpSessionPhase::Ready)
+                        .await
+                        .unwrap();
+                    let tool_text = "Use your native shell tool to run node -e code that writes exactly SYNTHETIC_NATIVE_TOOL_OK to account-native-tool.txt in cwd; do not read credentials or any other file. Then reply exactly OPENCODE_TOOL_OK.";
+                    let tool_id = tool
+                        .start_prompt("synthetic-tool-delivery", tool_text)
+                        .await
+                        .unwrap();
+                    let tool_ok = await_account_prompt(
+                        &tool,
+                        &mut cold_receiver,
+                        &tool_id,
+                        "OPENCODE_TOOL_OK",
+                    )
+                    .await;
+                    let effect =
+                        std::fs::read_to_string(workspace.path().join("account-native-tool.txt"))
+                            .is_ok_and(|text| text == "SYNTHETIC_NATIVE_TOOL_OK");
+                    println!(
+                        "product_native_tool_completed={} effect_verified={}",
+                        tool_ok, effect
+                    );
+                    tool.detach().await;
+                    let stop_owner = AcpRuntimeOwner {
+                        agent_run_id: "synthetic-live-stop-run".into(),
+                        execution_epoch: 5,
+                    };
+                    let stop = AcpRuntime::from_host(
+                        stop_owner.clone(),
+                        cold_host.clone(),
+                        crate::runtime_fleet::RuntimeCompatibilityKey::member(
+                            "synthetic-camp",
+                            "synthetic-member",
+                            "synthetic",
+                        ),
+                        Some("synthetic".into()),
+                        workspace.path().to_path_buf(),
+                        Some(fixture.join("attachments")),
+                        "write".into(),
+                        AcpSessionPermissions::from_frozen(&runtime).unwrap(),
+                        None,
+                    );
+                    *stop.session_id.write().await = Some(session_id.clone());
+                    cold_host
+                        .bind_session(&session_id, &stop_owner, AcpSessionPhase::Ready)
+                        .await
+                        .unwrap();
+                    let _=stop.start_prompt("synthetic-stop-delivery","Explain counting in a long detailed answer; do not write files or run tools.").await.unwrap();
+                    let cancel = stop.cancel().await;
+                    stop.detach().await;
+                    println!("product_cancel_request_succeeded={}", cancel.is_ok());
+                    assert!(
+                        tool_ok && effect,
+                        "native tool must complete and produce exact synthetic file"
+                    );
+                    cold_host.shutdown_and_reap().await;
+                    assert!(cold_ok, "cold restored session must answer");
+                } else {
+                    cold_host.shutdown_and_reap().await;
+                    panic!("cold restore failed");
+                }
+            }
+            if std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_REQUIRE_REPLY").is_some() {
+                host.shutdown_and_reap().await;
+                assert!(
+                    matches!(completed, Ok(true)),
+                    "real chat must complete end_turn"
+                );
+                assert!(
+                    observed_reply.as_ref().is_some_and(|reply| reply.contains(
+                        if kind == AdapterKind::CodebuddyCli {
+                            "CODEBUDDY_ACCOUNT_OK"
+                        } else {
+                            "OPENCODE_ACCOUNT_OK"
+                        }
+                    )),
+                    "real chat requires the exact expected observed reply"
+                );
+            }
+        }
+        host.shutdown_and_reap().await;
+        println!(
+            "product_reap_confirmed={}",
+            host.force_reap_until(tokio::time::Instant::now() + Duration::from_secs(5))
+                .await
+        );
+        assert!(session.is_ok(), "dedicated account session did not qualify");
     }
 }

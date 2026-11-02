@@ -1398,3 +1398,6 @@ Windows 实测与残余边界见[Windows Preview 开放](command-code-native-sim
 
 原路径附件显示名、ACP 恢复等待、原生 Skill 正文预览与普通任务的 Mission 等待按独立提交收窄。
 工作边界、回归证据与未验证项见[实施记录](usability-check-simplification.md)。
+## 飞书回复来源与普通自动回复（2026-10-28）
+
+按已确认 [revision3](model-context-change-feishu-reply-routing.md) 实施逐输入 CHAT_REPLY_CONTEXT、六段 guidance 及 Manifest 冻结；public43/Facts11/Profile15、当时迁移 213/schema159 保留旧 40 输入与 Blob，non-batch42/13/16、Bootstrap、Transport44、Host 出站及 Runtime 权限不变。真实模型专项与固定 Judge 通用 Gate 尚未完整通过，不宣称误拒答已修复。取舍见 [V1.72-D75](decisions.md#v1-72-d75)（原分支 D53／前次合流 D70，编号更正见决定末尾勘误），合同见 [Manifest43](../../contracts/context-manifest-evidence-v43.md) 与 [聊天Bot v3](../../contracts/feishu-chat-bot-v3.md)。

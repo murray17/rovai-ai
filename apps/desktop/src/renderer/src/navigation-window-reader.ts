@@ -23,8 +23,8 @@ export interface NavigationWindowReader extends NavigationRefreshCoordinator {
   acceptRows(rows: NavigationThreadRows): void
 }
 
-export function navigationGroupKey(thread: Pick<NavigationThreadItem, 'projectBindingKind' | 'projectPath'>): string {
-  return thread.projectBindingKind === 'directory' ? `directory:${thread.projectPath}` : 'quick-chat'
+export function navigationGroupKey(thread: Pick<NavigationThreadItem, 'projectBindingKind' | 'projectPath' | 'navigationGroupKey'>): string {
+  return thread.navigationGroupKey ?? (thread.projectBindingKind === 'directory' ? `directory:${thread.projectPath}` : 'quick-chat')
 }
 
 interface PendingRead { all: boolean; threads: Set<string>; groups: Set<string>; groupThreads: Set<string> }
@@ -57,7 +57,7 @@ export function createNavigationWindowReader(
     for (const id of scope.groupThreads) pending.groupThreads.add(id)
   }
   const allRows = (): NavigationThreadItem[] => snapshot
-    ? [...snapshot.quickChat.recentThreads, ...snapshot.projects.flatMap(group => group.recentThreads)] : []
+    ? [...snapshot.quickChat.recentThreads, ...(snapshot.chatBot?.recentThreads ?? []), ...snapshot.projects.flatMap(group => group.recentThreads)] : []
   const readWindow = async (windows: NavigationGroupLimits, keys?: string[]): Promise<NavigationSnapshot> => {
     const limits = { ...windows }
     // Pins are a local presentation preference. Keep Core's raw counts/prefixes,
@@ -67,7 +67,7 @@ export function createNavigationWindowReader(
       limits[key] = (windows[key] ?? NAVIGATION_INITIAL_VISIBLE_CAMPS) + padding
     }
     if (padding > 0) {
-      for (const key of keys ?? ['quick-chat', ...(snapshot?.projects.map(group => group.projectKey) ?? [])]) pad(key)
+      for (const key of keys ?? ['quick-chat', 'chat-bot', ...(snapshot?.projects.map(group => group.projectKey) ?? [])]) pad(key)
     }
     const next = await read({ groupLimits: limits, ...(keys ? { groupKeys: keys } : {}) })
     if (next.schemaVersion !== 3) throw new Error('会话列表数据版本不兼容。')
@@ -118,6 +118,7 @@ export function createNavigationWindowReader(
     const replace = (threads: NavigationThreadItem[]) => threads.map(thread => byId.get(thread.id) ?? thread)
     snapshot = { ...snapshot, throughGlobalSequence: Math.max(snapshot.throughGlobalSequence, rows.throughGlobalSequence),
       quickChat: { ...snapshot.quickChat, recentThreads: replace(snapshot.quickChat.recentThreads) },
+      ...(snapshot.chatBot ? { chatBot: { ...snapshot.chatBot, recentThreads: replace(snapshot.chatBot.recentThreads) } } : {}),
       projects: snapshot.projects.map(group => ({ ...group, recentThreads: replace(group.recentThreads) })) }
     commit(snapshot, displayed)
     return true
@@ -159,8 +160,9 @@ export function createNavigationWindowReader(
           appliedRows.clear()
         } else snapshot = { ...snapshot, throughGlobalSequence: Math.max(snapshot.throughGlobalSequence, next.throughGlobalSequence),
           quickChat: scope.groups.has('quick-chat') ? next.quickChat : snapshot.quickChat,
+          chatBot: scope.groups.has('chat-bot') ? next.chatBot : snapshot.chatBot,
           projects: [...snapshot.projects.filter(group => !scope.groups.has(group.projectKey)), ...next.projects] }
-        rememberRows([next.quickChat.recentThreads, ...next.projects.map(group => group.recentThreads)].flat(), next.throughGlobalSequence)
+        rememberRows([next.quickChat.recentThreads, next.chatBot?.recentThreads ?? [], ...next.projects.map(group => group.recentThreads)].flat(), next.throughGlobalSequence)
         displayed = windows
         commit(snapshot, displayed)
       }

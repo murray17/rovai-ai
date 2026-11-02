@@ -21,7 +21,7 @@ const WINDOWS_RESOLVED_COMMAND_SHIM_FINGERPRINT_DOMAIN: &[u8] =
 pub(crate) const WINDOWS_COMMAND_SHIM_PATH_ENVIRONMENT_KEY: &str =
     "ROVAI_INTERNAL_WINDOWS_COMMAND_SHIM";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum WindowsCommandShimExtension {
     Cmd,
     Bat,
@@ -36,7 +36,7 @@ impl WindowsCommandShimExtension {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct WindowsCommandShimIdentity {
     pub(crate) shim: PathBuf,
     pub(crate) extension: WindowsCommandShimExtension,

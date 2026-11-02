@@ -222,6 +222,9 @@ mod slow_tests {
                 ),
             )
             .unwrap();
+        // Tasks are an instance-owned preference that defaults to off; the index
+        // fixture must opt in before it can author a Task.
+        crate::task_capability::set(database.connection(), true).unwrap();
         let task = collaboration
             .create_task(
                 &mut database,

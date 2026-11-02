@@ -268,17 +268,20 @@ mod tests {
     use serde_json::json;
     #[test]
     fn codex_dedup_requires_matching_admitted_path_kind_and_body() {
-        let workspace = json!({"executionRoot":"/fixture/repo"}).to_string();
+        use crate::test_support::absolute_test_path;
+
+        let root = absolute_test_path("/fixture/repo");
+        let workspace = json!({"executionRoot":root}).to_string();
         for (kind, path, moved) in [
-            ("update", "src/file.rs", None),
-            ("update", "/fixture/repo/src/file.rs", None),
+            ("update", "src/file.rs".to_owned(), None),
+            ("update", format!("{root}/src/file.rs"), None),
             (
                 "update",
-                "/fixture/repo/src/old.rs",
-                Some("/fixture/repo/src/new.rs"),
+                format!("{root}/src/old.rs"),
+                Some(format!("{root}/src/new.rs")),
             ),
-            ("add", "/fixture/repo/src/界.rs", None),
-            ("delete", "/outside/removed.rs", None),
+            ("add", format!("{root}/src/界.rs"), None),
+            ("delete", absolute_test_path("/outside/removed.rs"), None),
         ] {
             let (_, mut payload) = crate::codex::normalize_event(
                 "item/completed",

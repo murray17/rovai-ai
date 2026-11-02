@@ -15,9 +15,11 @@ export function navigationThreadSearch(
   return {
     kind: 'text',
     threads: (text ? threads.filter((thread) => {
-      const projectName = thread.projectBindingKind === 'directory'
-        ? projectNameByPath.get(thread.projectPath) ?? ''
-        : uiAttribute('快速对话')
+      const projectName = thread.navigationGroupKey === 'chat-bot'
+        ? uiAttribute('聊天 Bot')
+        : thread.projectBindingKind === 'directory'
+          ? projectNameByPath.get(thread.projectPath) ?? ''
+          : uiAttribute('快速对话')
       return formatThreadTitle(thread, firstRunThreadId).toLowerCase().includes(text)
         || thread.title.toLowerCase().includes(text)
         || projectName.toLowerCase().includes(text)

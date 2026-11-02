@@ -22,6 +22,53 @@ const configuration: FeishuMemberBotConsoleConfiguration = {
 }
 
 describe('OpenPlatformApiClient', () => {
+  it.each([undefined, false, true])('creates the requested availability without changing the exclusion range: chat=%s', async (chatBotEnabled) => {
+    const bodies: Record<string, unknown>[] = []
+    const session = fakeSession(async (_url, init) => {
+      bodies.push(jsonBody(init))
+      return apiResponse({ versionId: 'version_1' })
+    })
+    await new OpenPlatformApiClient(session).createVersion({
+      appId: 'cli_dingding', ownerUserId: 'owner-user', chatBotEnabled
+    })
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toMatchObject({
+      autoPublish: false,
+      visibleSuggest: {
+        departments: [], members: chatBotEnabled ? [] : ['owner-user'],
+        groups: [], isAll: chatBotEnabled ? 1 : 0
+      },
+      blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 }
+    })
+  })
+
+  it.each([
+    { status: 3, code: 'feishu_console_version_rejected', outcomeUnknown: false },
+    { status: 1, code: 'feishu_console_publish_timeout', outcomeUnknown: true }
+  ])('does not report a chat version published while rejected or awaiting approval: $status', async ({ status, code, outcomeUnknown }) => {
+    let now = 0
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const paths: string[] = []
+    try {
+      const client = new OpenPlatformApiClient(fakeSession(async (rawUrl) => {
+        const path = new URL(rawUrl).pathname
+        paths.push(path)
+        if (path.includes('/app_version/create/')) return apiResponse({ versionId: 'version_chat' })
+        if (path.includes('/app_version/detail/')) return apiResponse({ status })
+        return apiResponse({})
+      }), { publishTimeoutMs: 10, publishPollIntervalMs: 1, delay: async () => { now += 10 } })
+      const versionId = await client.createVersion({
+        appId: 'cli_dingding', ownerUserId: 'owner-user', chatBotEnabled: true
+      })
+      await expect(client.publishVersion('cli_dingding', versionId))
+        .rejects.toMatchObject({ code, outcomeUnknown })
+      expect(paths.filter((path) => path.includes('/app_version/create/'))).toHaveLength(1)
+      expect(paths.some((path) => path.includes('/publish/release/'))).toBe(false)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
   it('uses the signed-in Session console APIs to create, configure, publish and verify a Bot', async () => {
     const calls: Array<{ url: URL; init?: RequestInit }> = []
     let manifest = '{}'
@@ -849,6 +896,24 @@ describe('OpenPlatformApiClient', () => {
       '/developers/v1/app_version/list/cli_dingding',
       '/developers/v1/app_version/detail/cli_dingding/version_2'
     ])
+  })
+
+  it.each([false, true])('preserves existing chat version lookup without republishing its availability (reuse=%s)', async (reuseExisting) => {
+    const paths: string[] = []
+    const client = new OpenPlatformApiClient(fakeSession(async (rawUrl) => {
+      const path = new URL(rawUrl).pathname
+      paths.push(path)
+      if (path.includes('/app_version/list/')) {
+        return apiResponse({ versions: [{ versionId: 'version_owner', appVersion: '1.0.0' }] })
+      }
+      if (path.includes('/app_version/create/')) return apiResponse({})
+      throw new Error('unexpected request')
+    }))
+    await expect(client.createVersion({
+      appId: 'cli_dingding', ownerUserId: 'owner-user', chatBotEnabled: true, reuseExisting
+    })).resolves.toBe('version_owner')
+    expect(paths.filter((path) => path.includes('/app_version/create/'))).toHaveLength(reuseExisting ? 0 : 1)
+    expect(paths.some((path) => path.includes('/publish/'))).toBe(false)
   })
 
   it('reuses an existing avatar repair version instead of creating a duplicate', async () => {

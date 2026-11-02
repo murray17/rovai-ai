@@ -1227,7 +1227,7 @@ mod tests {
                     title: "References".into(),
                     description: "literal @Alice".into(),
                     description_content: None,
-                    project_path: "/tmp".into(),
+                    project_path: crate::test_support::absolute_test_path("/tmp"),
                     project_binding_kind: ProjectBindingKind::Directory,
                     member_agent_ids: vec!["agent_1".into()],
                     default_lead_agent_id: "agent_1".into(),
@@ -1351,7 +1351,7 @@ mod tests {
             }]
         );
         let mut create: CreateMissionCommand = serde_json::from_value(json!({
-            "title":"New", "projectPath":"/tmp", "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1",
+            "title":"New", "projectPath":crate::test_support::absolute_test_path("/tmp"), "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1",
             "descriptionContent":[{"kind":"member_mention","agentId":"agent_2"},{"kind":"member_mention","agentId":"agent_2"}]
         })).unwrap();
         let created = service.create(&mut db, &command(create.clone())).unwrap();
@@ -1410,7 +1410,7 @@ mod tests {
                     agent_id: "agent_3".into(),
                 },
             ]),
-            project_path: "/tmp".into(),
+            project_path: crate::test_support::absolute_test_path("/tmp"),
             project_binding_kind: ProjectBindingKind::Directory,
             // A Team is authoritative even if a client sends a stale projection.
             member_agent_ids: vec!["missing".into()],

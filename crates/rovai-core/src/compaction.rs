@@ -522,10 +522,28 @@ pub fn reconcile_compaction_observation_outbox(
     const MAX_RECORD_BYTES: u64 = 64 * 1024;
 
     let builtin_root = runtime_root.join("builtin-tools");
-    if !builtin_root.is_dir() {
-        return Ok(CompactionOutboxReconciliation::default());
-    }
     let mut reconciliation = CompactionOutboxReconciliation::default();
+    #[cfg(windows)]
+    if std::env::var_os("ROVAI_WINDOWS_ACCOUNT_CONFIG").is_some() {
+        let account =
+            crate::managed_process::WindowsAccountLaunch::for_isolation("windows_account")?
+                .context("account outbox configuration missing")?;
+        let instance = crate::command::canonical_json_digest(&serde_json::json!(
+            runtime_root
+                .parent()
+                .context("runtime root has no Core instance")?
+                .canonicalize()?
+        ))?;
+        let root = account
+            .profile_root
+            .join("rovai-runtime-outbox")
+            .join(instance.trim_start_matches("sha256:"))
+            .join("builtin-tools");
+        reconcile_account_outbox(database, &root, host_filter, &mut reconciliation)?;
+    }
+    if !builtin_root.is_dir() {
+        return Ok(reconciliation);
+    }
     for process_entry in fs::read_dir(&builtin_root)? {
         let process_entry = process_entry?;
         let process_root = process_entry.path();
@@ -643,6 +661,160 @@ pub fn reconcile_compaction_observation_outbox(
         }
     }
     Ok(reconciliation)
+}
+
+#[cfg(windows)]
+fn reconcile_account_outbox(
+    database: &mut Database,
+    root: &Path,
+    host_filter: Option<(AdapterKind, &str)>,
+    result: &mut CompactionOutboxReconciliation,
+) -> Result<()> {
+    use crate::platform::windows_file_tree as tree;
+    use std::io::Read;
+    let mut volume = std::path::PathBuf::new();
+    let mut names = Vec::new();
+    for component in root.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => volume.push(prefix.as_os_str()),
+            std::path::Component::RootDir => volume.push(component.as_os_str()),
+            std::path::Component::Normal(name) => names.push(name.to_os_string()),
+            _ => anyhow::bail!("account outbox must use resolved components"),
+        }
+    }
+    let mut root = tree::open_volume_root_for_traversal(&volume)?;
+    for name in names {
+        root = match tree::open_child_without_following(&root, &name) {
+            Ok(file) => file,
+            Err(error)
+                if error.chain().any(|cause| {
+                    cause
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                }) =>
+            {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        anyhow::ensure!(
+            tree::inspect_node(&root)?.kind == tree::NodeKind::Directory,
+            "account outbox ancestry must be plain directories"
+        );
+    }
+    for process_name in tree::read_directory_names(&root, 1024)? {
+        let Some(process_id) = process_name
+            .to_str()
+            .filter(|id| Uuid::parse_str(id).is_ok())
+        else {
+            continue;
+        };
+        let process = match tree::open_child_without_following(&root, &process_name) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+        if !tree::inspect_node(&process)
+            .is_ok_and(|metadata| metadata.kind == tree::NodeKind::Directory)
+        {
+            continue;
+        }
+        let outbox = match tree::open_child_without_following(
+            &process,
+            "compaction-observation-outbox".as_ref(),
+        ) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+        if !tree::inspect_node(&outbox)
+            .is_ok_and(|metadata| metadata.kind == tree::NodeKind::Directory)
+        {
+            continue;
+        }
+        for name in tree::read_directory_names(&outbox, 1024)? {
+            let Some(name_text) = name.to_str().filter(|name| name.ends_with(".json")) else {
+                continue;
+            };
+            let file = match tree::open_child_for_removal(&outbox, &name) {
+                Ok(file) => file,
+                Err(_) => continue,
+            };
+            let metadata = match tree::inspect_node(&file) {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            if metadata.kind != tree::NodeKind::RegularFile
+                || metadata.fingerprint.size > 64 * 1024
+                || metadata.number_of_links != 1
+            {
+                continue;
+            }
+            let mut bytes = Vec::new();
+            std::io::Read::by_ref(&mut &file)
+                .take(64 * 1024 + 1)
+                .read_to_end(&mut bytes)?;
+            if bytes.len() > 64 * 1024 {
+                continue;
+            }
+            let record: CompactionObservationOutboxRecord = match serde_json::from_slice(&bytes) {
+                Ok(record) => record,
+                Err(_) => continue,
+            };
+            if record.relay_process_id != process_id
+                || format!("{}.json", record.request_id) != name_text
+                || record.schema_version != COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION
+            {
+                continue;
+            }
+            let Ok(kind) = record.adapter_kind.parse::<AdapterKind>() else {
+                continue;
+            };
+            if host_filter
+                .is_some_and(|(expected, host)| expected != kind || host != record.host_instance_id)
+            {
+                continue;
+            }
+            let Some((signal, point)) =
+                admitted_hook_compaction_signal(kind, &record.hook_event_name, &record.trigger)
+            else {
+                continue;
+            };
+            let lease = active_observer_lease_for_relay(
+                database,
+                kind,
+                &record.host_instance_id,
+                &record.relay_process_id,
+                &record.native_session_id,
+            )?;
+            let outcome = match lease {
+                Some(lease) => submit_compaction_observation(
+                    database,
+                    &SubmitCompactionObservation {
+                        observer_lease_id: &lease,
+                        source_observation_id: &format!("{signal}:{}", record.source_event_digest),
+                        source_signal: signal,
+                        admission_point: point,
+                        source_event_digest: &record.source_event_digest,
+                        observed_at: &record.observed_at,
+                    },
+                )?,
+                None => {
+                    let fenced:bool=database.connection().query_row("SELECT EXISTS(SELECT 1 FROM native_session_compaction_observer_lease WHERE adapter_kind=?1 AND host_instance_id=?2 AND relay_process_id=?3 AND native_session_id=?4 AND status='fenced')",params![kind.as_str(),record.host_instance_id,record.relay_process_id,record.native_session_id],|row|row.get(0))?;
+                    if !fenced {
+                        result.retained += 1;
+                        continue;
+                    }
+                    CompactionObservationResult::Fenced
+                }
+            };
+            match outcome {
+                CompactionObservationResult::Applied { .. } => result.applied += 1,
+                CompactionObservationResult::Duplicate { .. } => result.duplicates += 1,
+                CompactionObservationResult::Fenced => result.discarded += 1,
+            }
+            tree::delete_on_close(&file)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn submit_compaction_observation(

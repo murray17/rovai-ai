@@ -1333,3 +1333,17 @@
 .mission-member-profile { width: min(376px, calc(100vw - 24px)); padding: 0; max-height: calc(100dvh - 24px); overflow-y: auto; }
 .first-run-camp-intro { grid-template-columns: 50px minmax(0, 1fr); }
 .first-run-camp-intro > .first-run-camp-avatar { --member-avatar-size: 50px; }
+.member-chat-bot { display: flex; align-items: center; gap: 12px; min-width: 0; margin-top: 16px; flex-wrap: wrap; }
+.member-chat-bot > .runtime-parameter-switch { flex: 0 0 auto; height: 36px; font-size: 12.5px; white-space: nowrap; }
+.member-chat-bot > button { flex: 0 0 auto; white-space: nowrap; }
+.member-chat-bot-hint { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.member-chat-bot-path { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+@container member-editor (min-width: 780px) {
+  .member-editor-runtime > .member-chat-bot { grid-column: 2; }
+}
+.member-runtime-picker-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}

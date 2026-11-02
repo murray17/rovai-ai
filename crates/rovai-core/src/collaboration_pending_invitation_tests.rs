@@ -125,7 +125,9 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
                 &envelope(
                     &format!("source-{broadcast}"),
                     None,
-                    CreateThreadCommand::for_test("/reference-project".into()),
+                    CreateThreadCommand::for_test(crate::test_support::absolute_test_path(
+                        "/reference-project",
+                    )),
                 ),
             )
             .unwrap();

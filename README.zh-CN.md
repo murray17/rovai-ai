@@ -78,6 +78,8 @@ https://github.com/user-attachments/assets/5922b023-a956-416e-b9c5-4df7e209ec1b
 
 Rovai Desktop 也能接入**飞书与钉钉**，让你从常用渠道发起请求、接收结果。配置方法与可用范围见渠道教程。
 
+已发布的飞书 Bot 还可以切换到**聊天模式**：同事可以基于共享资料文件夹提问、转发消息或让 Bot 代为询问，而 Bot 不会获得本地工作能力。
+
 <p align="center"><a href="docs/assets/readme/remote-access.png"><img src="docs/assets/readme/remote-access.png" alt="Rovai 移动端会话与桌面渠道设置的界面参考组合" width="100%"></a></p>
 
 [部署与远程访问](https://rovai.dev/zh/docs/remote.html) · [渠道接入](https://rovai.dev/zh/docs/channels.html)

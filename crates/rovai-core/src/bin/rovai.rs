@@ -35,7 +35,7 @@ use rovai_core::member_avatar::{
 use rovai_core::platform::local_ipc::LocalIpcClientStream;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
 #[path = "rovai/app_cli.rs"]
@@ -115,13 +115,13 @@ async fn run() -> Result<u8> {
         );
         return Ok(0);
     }
-    let tasks_enabled = discover_tasks_enabled();
+    let tasks_enabled = discover_tasks_enabled().await;
     if args.first().is_some_and(|value| value == "task") && !tasks_enabled {
         println!("{}", rovai_core::task_capability::unavailable_result());
         return Ok(2);
     }
     if args.as_slice() == ["--help"] || args.is_empty() {
-        print_root_help();
+        print_root_help(tasks_enabled);
         return Ok(0);
     }
     if args.as_slice() == ["task", "--help"] {
@@ -200,7 +200,7 @@ async fn run() -> Result<u8> {
         };
         send_native_session(&endpoint, &request).await
     } else {
-        let context = load_context()?;
+        let context = load_context().await?;
         let request = BuiltinToolIpcRequest {
             ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
             auth: context.auth()?,
@@ -272,9 +272,20 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
     let context_path = env::var_os(ROVAI_CLI_CONTEXT_ENV)
         .map(PathBuf::from)
         .context("ROVAI_CLI_CONTEXT is not set")?;
-    let context = load_context()?;
-    let (process_id, process_token) = context.process_auth()?;
-    let display_auth = context.auth().ok();
+    let early_context = if env::var_os("ROVAI_ACCOUNT_BUILTIN").is_some() {
+        None
+    } else {
+        Some(load_context().await?)
+    };
+    let relay_process_id = if let Some(locator) = env::var_os("ROVAI_ACCOUNT_BUILTIN") {
+        let locator: Value = serde_json::from_str(&locator.to_string_lossy())?;
+        locator["processId"]
+            .as_str()
+            .context("account Hook process locator unavailable")?
+            .to_string()
+    } else {
+        early_context.as_ref().unwrap().process_auth()?.0
+    };
     let mut hook_input = String::new();
     std::io::stdin()
         .read_to_string(&mut hook_input)
@@ -339,12 +350,31 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
     }))?;
     let request_id = Uuid::new_v4().to_string();
     let observed_at = chrono::Utc::now().to_rfc3339();
+    let outbox_record = CompactionObservationOutboxRecord {
+        schema_version: COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
+        request_id: request_id.clone(),
+        adapter_kind: adapter_kind.clone(),
+        host_instance_id: host_instance_id.clone(),
+        relay_process_id,
+        native_session_id: native_session_id.clone(),
+        hook_event_name: hook_event_name.clone(),
+        trigger: trigger.clone(),
+        source_event_digest: source_event_digest.clone(),
+        observed_at,
+    };
+    let staged_observation = stage_compaction_observation(&context_path, &outbox_record)?;
+    let context = match early_context {
+        Some(context) => context,
+        None => load_context().await?,
+    };
+    let (process_id, process_token) = context.process_auth()?;
+    let display_auth = context.auth().ok();
     let request = CompactionHookIpcRequest {
-        kind: COMPACTION_OBSERVATION_IPC_KIND.to_string(),
+        kind: COMPACTION_OBSERVATION_IPC_KIND.into(),
         ipc_protocol_version: COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
         process_id,
         process_token,
-        request_id: request_id.clone(),
+        request_id,
         adapter_kind: adapter_kind.clone(),
         host_instance_id: host_instance_id.clone(),
         native_session_id,
@@ -354,26 +384,14 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
         display_auth,
         summary_text,
     };
-    let outbox_record = CompactionObservationOutboxRecord {
-        schema_version: COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
-        request_id,
-        adapter_kind: request.adapter_kind.clone(),
-        host_instance_id: request.host_instance_id.clone(),
-        relay_process_id: request.process_id.clone(),
-        native_session_id: request.native_session_id.clone(),
-        hook_event_name: request.hook_event_name.clone(),
-        trigger: request.trigger.clone(),
-        source_event_digest: request.source_event_digest.clone(),
-        observed_at,
-    };
-    let staged_observation = stage_compaction_observation(&context_path, &outbox_record)?;
     let mut last_error = None;
     for attempt in 0..COMPACTION_HOOK_ATTEMPTS {
         match send_compaction_hook(&context.core_endpoint, &request).await {
-            Ok(_response) => {
+            Ok(response) if response.accepted => {
                 let _ = fs::remove_file(&staged_observation);
                 return Ok(());
             }
+            Ok(_) => return Ok(()),
             Err(error) => last_error = Some(error),
         }
         if attempt + 1 < COMPACTION_HOOK_ATTEMPTS {
@@ -391,7 +409,18 @@ fn stage_compaction_observation(
     let process_root = context_path
         .parent()
         .context("Built-in Tool context has no process root")?;
-    let outbox = process_root.join("compaction-observation-outbox");
+    let outbox = if env::var_os("ROVAI_ACCOUNT_BUILTIN").is_some() {
+        let path = env::var_os("ROVAI_ACCOUNT_COMPACTION_OUTBOX")
+            .map(PathBuf::from)
+            .context("account compaction outbox is not configured")?;
+        anyhow::ensure!(
+            path.is_absolute(),
+            "account compaction outbox must be absolute"
+        );
+        path
+    } else {
+        process_root.join("compaction-observation-outbox")
+    };
     fs::create_dir_all(&outbox).with_context(|| {
         format!(
             "failed to create compaction observation outbox {}",
@@ -442,7 +471,29 @@ fn envelope_exit_code(
     envelope: &rovai_core::builtin_tool_transport::BuiltinToolInvocationEnvelope,
 ) -> u8 {
     if envelope.ok {
-        0
+        if matches!(
+            envelope.operation.as_str(),
+            "feishu.status"
+                | "feishu.search"
+                | "feishu.result"
+                | "feishu.forward"
+                | "feishu.ask"
+                | "feishu.items"
+                | "feishu.report"
+                | "feishu.close"
+        ) {
+            match envelope
+                .result
+                .as_ref()
+                .and_then(|result| result["status"].as_str())
+            {
+                Some("failed") => 2,
+                Some("unknown") => 3,
+                _ => 0,
+            }
+        } else {
+            0
+        }
     } else if envelope
         .error
         .as_ref()
@@ -482,7 +533,7 @@ fn invocation_identity(args: &[String]) -> Option<BuiltinToolCliIdentity> {
 }
 
 fn is_family_help(args: &[String]) -> bool {
-    matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "member" | "thread" | "camp" | "history" | "memory" | "single-chat" | "automation" | "mission"))
+    matches!(args, [family, help] if help == "--help" && matches!(family.as_str(), "member" | "thread" | "camp" | "history" | "memory" | "single-chat" | "automation" | "mission" | "feishu"))
 }
 
 fn hermes_session_source() -> Option<String> {
@@ -496,13 +547,13 @@ fn hermes_session_source() -> Option<String> {
     )
 }
 
-fn discover_tasks_enabled() -> bool {
+async fn discover_tasks_enabled() -> bool {
     // Hermes has no per-Run context projection. Core owns capability decisions;
     // local help remains available without an extra context-fetch request.
     if hermes_session_source().is_some() {
         return true;
     }
-    load_context().is_ok_and(|context| {
+    load_context().await.is_ok_and(|context| {
         context.contract_version == BUILTIN_TOOL_CONTRACT_VERSION
             && context.ipc_protocol_version == BUILTIN_TOOL_IPC_PROTOCOL_VERSION
             && context.lease.is_some()
@@ -510,7 +561,36 @@ fn discover_tasks_enabled() -> bool {
     })
 }
 
-fn load_context() -> Result<BuiltinToolCliContext> {
+async fn load_context() -> Result<BuiltinToolCliContext> {
+    #[cfg(windows)]
+    if let Some(locator) = env::var_os("ROVAI_ACCOUNT_BUILTIN") {
+        let locator: Value = serde_json::from_str(&locator.to_string_lossy())?;
+        let endpoint: LocalIpcEndpoint = serde_json::from_value(locator["endpoint"].clone())?;
+        return tokio::time::timeout(CORE_TIMEOUT, async {
+            let mut stream = LocalIpcClientStream::connect(&endpoint).await?;
+            let request = json!({"kind":"account_context", "processId":locator["processId"]});
+            stream
+                .write_all(serde_json::to_string(&request)?.as_bytes())
+                .await?;
+            stream.write_all(b"\n").await?;
+            let mut frame = Vec::new();
+            BufReader::new(stream.take(1024 * 1024 + 1))
+                .read_until(b'\n', &mut frame)
+                .await?;
+            anyhow::ensure!(
+                frame.len() <= 1024 * 1024 && frame.last() == Some(&b'\n'),
+                "account context invalid"
+            );
+            let context: BuiltinToolCliContext = serde_json::from_slice(&frame)?;
+            anyhow::ensure!(
+                context.process_id == locator["processId"].as_str().unwrap_or(""),
+                "account context identity mismatch"
+            );
+            Ok(context)
+        })
+        .await
+        .context("account context unavailable")?;
+    }
     let path = env::var_os(ROVAI_CLI_CONTEXT_ENV)
         .map(std::path::PathBuf::from)
         .context("ROVAI_CLI_CONTEXT is not set")?;
@@ -1578,18 +1658,18 @@ enum BuiltinToolIpcFailure {
     OutcomeIndeterminate,
 }
 
-fn print_root_help() {
+fn print_root_help(tasks_enabled: bool) {
     print!(
         "{}",
         root_help_text(
             !user_automation_available_in_current_process(),
-            discover_tasks_enabled()
+            tasks_enabled
         )
     );
 }
 
 fn root_help_text(managed_runtime: bool, tasks_enabled: bool) -> String {
-    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n\nRun an Agent operation's exact `--help` for its closed inputs.\n".to_string();
+    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai member list|get|create|update\n  rovai task create|get|list|update\n  rovai thread list|search|read|runs\n  rovai history search\n  rovai memory view|search|read|write\n  rovai automation list|get|create|run|close|update|delete\n  rovai mission list|get|update|status\n  rovai feishu status|search|result|forward|ask|items|report|close\n\nRun an Agent operation's exact `--help` for its closed inputs.\n".to_string();
     if !tasks_enabled {
         text = text.replace("  rovai task create|get|list|update\n", "");
     }
@@ -1742,6 +1822,19 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
         description.summary
     )
     .expect("writing help to a String cannot fail");
+    if matches!(
+        description.name.as_str(),
+        "feishu.status"
+            | "feishu.search"
+            | "feishu.result"
+            | "feishu.forward"
+            | "feishu.ask"
+            | "feishu.items"
+            | "feishu.report"
+            | "feishu.close"
+    ) {
+        writeln!(output, "Feishu scope: current authorized Bot and claimed Run inputs only; global Thread members are not a Feishu directory.\nThe native Runtime may require approval to run this CLI; these tools do not bypass its approval policy.\nSearch is asynchronous: search returns queued/requestId; use feishu result --request-id <requestId> to read contacts or delivery status. queued and unknown do not mean sent; never blindly resend an unknown outcome.\nUse forward or ask only when the user explicitly delegates sending or asking. Copy targetRef from authorized results/current-input mentions; never supply an arbitrary openId or guess between same-name contacts. ask accepts targetRef=owner, resolved by Core.\nFor an ambiguous multi-input Run, choose an inputRef from feishu status and pass --input-ref; do not guess the latest input.\nreport sends an authorized reply to the item's frozen conversation and keeps it waiting; only the Bot Owner may close it.\n").expect("writing help to a String cannot fail");
+    }
     let rendered_discriminated = discriminated_input_variants(description).is_some_and(|input| {
         render_discriminated_input_help(&mut output, description, &input);
         true
@@ -2147,6 +2240,20 @@ fn write_indented_help(output: &mut String, help: &str) {
 
 fn operation_help_examples(operation: &str) -> &'static [&'static str] {
     match operation {
+        "feishu.status" => &["rovai feishu status"],
+        "feishu.search" => &["rovai feishu search --query 'Alex' --input-ref '<inputRef>'"],
+        "feishu.result" => &["rovai feishu result --request-id '<requestId>'"],
+        "feishu.forward" => &[
+            "rovai feishu forward --target-ref '<targetRef>' --text 'Requested update' --input-ref '<inputRef>'",
+        ],
+        "feishu.ask" => &[
+            "rovai feishu ask --target-ref '<targetRef>' --question 'What is the current progress?' --input-ref '<inputRef>'",
+        ],
+        "feishu.items" => &["rovai feishu items --input-ref '<inputRef>'"],
+        "feishu.report" => &[
+            "rovai feishu report --item-id '<itemId>' --text 'Current progress' --input-ref '<inputRef>'",
+        ],
+        "feishu.close" => &["rovai feishu close --item-id '<itemId>' --input-ref '<inputRef>'"],
         "mission.list" => &[
             "rovai mission list",
             "rovai mission list --query \"attachments\"",
@@ -2528,6 +2635,7 @@ mod tests {
             "memory",
             "single-chat",
             "automation",
+            "feishu",
         ] {
             let args = [family.to_string(), "--help".to_string()];
             assert!(operation_help(&args, true).unwrap().is_none());
@@ -2557,6 +2665,7 @@ mod tests {
             &["camp", "list", "--help"],
             &["camp", "search", "--help"],
             &["camp", "read", "--help"],
+            &["thread", "runs", "--help"],
             &["history", "search", "--help"],
             &["single-chat", "history", "--help"],
             &["memory", "view", "--help"],
@@ -2574,8 +2683,124 @@ mod tests {
             &["mission", "get", "--help"],
             &["mission", "update", "--help"],
             &["mission", "status", "--help"],
+            &["feishu", "status", "--help"],
+            &["feishu", "search", "--help"],
+            &["feishu", "result", "--help"],
+            &["feishu", "forward", "--help"],
+            &["feishu", "ask", "--help"],
+            &["feishu", "items", "--help"],
+            &["feishu", "report", "--help"],
+            &["feishu", "close", "--help"],
         ];
-        assert_eq!(exact_paths.len(), 29);
+        assert_eq!(exact_paths.len(), 38);
+        for managed_runtime in [true, false] {
+            assert!(
+                root_help_text(managed_runtime, false)
+                    .contains("rovai feishu status|search|result|forward|ask|items|report|close")
+            );
+        }
+        let feishu_cases = [
+            ("status", vec![], json!({})),
+            (
+                "search",
+                vec!["--query", "Alex", "--input-ref", "input_123"],
+                json!({"query":"Alex","inputRef":"input_123"}),
+            ),
+            (
+                "result",
+                vec!["--request-id", "request_123"],
+                json!({"requestId":"request_123"}),
+            ),
+            (
+                "forward",
+                vec![
+                    "--target-ref",
+                    "target_123",
+                    "--text",
+                    "Requested update",
+                    "--input-ref",
+                    "input_123",
+                ],
+                json!({"targetRef":"target_123","text":"Requested update","inputRef":"input_123"}),
+            ),
+            (
+                "ask",
+                vec!["--target-ref", "owner", "--question", "Current progress?"],
+                json!({"targetRef":"owner","question":"Current progress?"}),
+            ),
+            (
+                "items",
+                vec!["--input-ref", "input_123"],
+                json!({"inputRef":"input_123"}),
+            ),
+            (
+                "report",
+                vec!["--item-id", "item_123", "--text", "Current progress"],
+                json!({"itemId":"item_123","text":"Current progress"}),
+            ),
+            (
+                "close",
+                vec!["--item-id", "item_123"],
+                json!({"itemId":"item_123"}),
+            ),
+        ];
+        for (action, flags, input) in feishu_cases {
+            let operation = format!("feishu.{action}");
+            let description = builtin_tool_description(&operation, false).unwrap();
+            let help = operation_help_text(&description);
+            for boundary in [
+                "Search is asynchronous",
+                "queued and unknown do not mean sent",
+                "explicitly delegates",
+                "targetRef",
+                "arbitrary openId",
+                "multi-input Run",
+                "not a Feishu directory",
+                "native Runtime may require approval",
+                "do not bypass its approval policy",
+            ] {
+                assert!(help.contains(boundary), "{operation}: {boundary}");
+            }
+            rovai_core::team_tool_catalog::validate_builtin_tool_input(&operation, &input).unwrap();
+            if !flags.is_empty() {
+                let args = flags
+                    .iter()
+                    .map(|flag| flag.to_string())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    parse_and_validate_operation_input(&description, &args).unwrap(),
+                    input
+                );
+            }
+            for flag in ["--open-id", "--provider", "--app-id", "--unknown"] {
+                assert!(
+                    parse_operation_input(&description, &[flag.into(), "forged".into()]).is_err()
+                );
+            }
+            let mut invalid = input.clone();
+            invalid["openId"] = json!("forged");
+            assert!(
+                rovai_core::team_tool_catalog::validate_builtin_tool_input(&operation, &invalid)
+                    .is_err()
+            );
+            if matches!(
+                action,
+                "search" | "result" | "forward" | "ask" | "report" | "close"
+            ) {
+                assert!(
+                    rovai_core::team_tool_catalog::validate_builtin_tool_input(
+                        &operation,
+                        &json!({})
+                    )
+                    .is_err()
+                );
+            }
+        }
+        assert!(builtin_tool_identity_by_command("feishu", "delete").is_none());
+        assert!(
+            rovai_core::team_tool_catalog::validate_builtin_tool_input("feishu.delete", &json!({}))
+                .is_err()
+        );
         for path in exact_paths {
             let args = path
                 .iter()
@@ -2598,6 +2823,7 @@ mod tests {
             "memory",
             "single-chat",
             "automation",
+            "feishu",
         ] {
             let args = vec![family.to_string(), "--help".to_string()];
             assert!(operation_help(&args, true).unwrap().is_none());
@@ -3406,6 +3632,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(envelope_exit_code(&envelope), 3);
+        for operation in [
+            "feishu.status",
+            "feishu.search",
+            "feishu.result",
+            "feishu.forward",
+            "feishu.ask",
+            "feishu.items",
+            "feishu.report",
+            "feishu.close",
+        ] {
+            for (status, expected) in [
+                ("ready", 0),
+                ("queued", 0),
+                ("sent", 0),
+                ("failed", 2),
+                ("unknown", 3),
+                ("closed", 0),
+            ] {
+                let result = json!({"status":status,"requestId":null,"contacts":[],"items":[],"inputs":[],"errorCode":null});
+                let envelope =
+                    rovai_core::builtin_tool_transport::BuiltinToolInvocationEnvelope::success(
+                        operation,
+                        "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                        result.clone(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    envelope_exit_code(&envelope),
+                    expected,
+                    "{operation}: {status}"
+                );
+                assert_eq!(project_envelope(envelope).unwrap(), result);
+            }
+        }
+        let unrelated = rovai_core::builtin_tool_transport::BuiltinToolInvocationEnvelope::success(
+            "mission.status",
+            "7b5db24c-4a43-4cab-9217-d982b08f7691",
+            json!({"status":"unknown"}),
+        )
+        .unwrap();
+        assert_eq!(envelope_exit_code(&unrelated), 0);
     }
 
     #[test]

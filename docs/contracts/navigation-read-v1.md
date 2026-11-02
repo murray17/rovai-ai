@@ -3,7 +3,7 @@ document_type: contract
 contract: navigation-read
 version: v1
 status: accepted
-last_updated: 2026-10-12
+last_updated: 2026-10-21
 ---
 
 # Navigation Read v1
@@ -17,12 +17,23 @@ external_principal 消息推进。查看、重命名、队员消息和 Run 终�
 | --- | --- | --- |
 | `navigation.camps` | `{ campIds: string[] }` | `{ throughGlobalSequence, groupKeys, camps }`，按 ID 读取；不在调用者导航范围内的行不返回，不读取其他 Camp；groupKeys 从仍存在的目标 Camp 取得，包含删除受理后尚未物理删除的所属组 |
 | `navigation.snapshot` | `{ groupLimits?, groupKeys? }` | schema 3；省略 groupKeys 表示完整快照，提供时只返回指定组；quickChat 未被请求时为空；缺失/空项目不创建项目项 |
-| `navigation.groupCamps` | `{ projectPath?, offset?, limit? }` | schema 3；单组 SQL COUNT + LIMIT/OFFSET，limit 限制为 1–200；保留现有 page shape |
+| `navigation.groupCamps` | `{ projectPath?, groupKey?, offset?, limit? }` | schema 3；单组 SQL COUNT + LIMIT/OFFSET，limit 限制为 1–200；保留现有 page shape |
 
-`groupKeys` 为 `quick-chat` 或 `directory:<projectPath>`。`groupLimits` 为完整前缀大小，默认/最少 5；
+`groupKeys` 为 `quick-chat`、`chat-bot` 或 `directory:<projectPath>`。`groupLimits` 为完整前缀大小，默认/最少 5；
 未知 key 不创建组。分组响应在同一个事务里获得总数与排序后的前 N 条，不能用部分本地数据推导补位或名次。
 完整快照只跨组读取目录/计数元数据，各组详细行按索引限定窗口；正常路径不访问 event_log。
 置顶 Camp 用已知 ID 批量读取，不遍历其他组寻找；完整恢复同时按 ID 核对窗口外的置顶项，普通切换不带起其他置顶项读取。
+
+完整快照增加 `chatBot: NavigationThreadGroup`，与 `quickChat` 使用相同窗口结构；局部快照未请求
+该组时返回空窗口。`navigation.groupThreads`（及 `groupCamps` 别名）可显式传入 `groupKey: "chat-bot"`；
+省略 `groupKey` 时沿用 `projectPath` 或快速对话的既有选择方式。
+聊天 Bot 分组依据线程创建时同事务保存的 `camp.navigation_is_chat_bot` 来源标记；Migration 212 由既有 `channel_chat_conversation` 的线程绑定
+回填，不按资料目录或正文推断已丢失绑定的历史。该分类不依赖成员当前聊天开关或资料目录的
+客户端登记状态，更换资料目录后旧聊天线程仍保留分类。相同资料目录内普通会话仍属于目录项目，
+聊天线程不会重复进入其他组。
+
+NavigationCampItem、精确 ID 查询目标与 Thread snapshot/open header 提供 `navigationGroupKey`，供客户端一致处理分组、置顶、
+刷新与打开；聊天线程的 `projectBindingKind` 和 `projectPath` 仍描述实际资料工作区，不因导航改变。
 
 NavigationCampItem 延续 schema 3 字段，并提供 `lastSeenGlobalSequence`（读取旧 fixture 时可缺省为 0）。
 `lastActivityAt`、`lastActivityGlobalSequence`、`latestCompletionGlobalSequence` 来自 camp 摘要；

@@ -1,7 +1,7 @@
 //! Navigation reads saved Camp facts. Historical events are used only by migration v175.
 use super::*;
 
-const GROUP_KEY: &str = "CASE WHEN camp.project_binding_kind = 'directory' THEN 'directory:' || camp.project_path ELSE 'quick-chat' END";
+pub(super) const GROUP_KEY: &str = "CASE WHEN camp.navigation_is_chat_bot = 1 THEN 'chat-bot' WHEN camp.project_binding_kind = 'directory' THEN 'directory:' || camp.project_path ELSE 'quick-chat' END";
 const VISIBLE: &str = r#"
     camp.deletion_operation_id IS NULL
     AND NOT EXISTS(SELECT 1 FROM mission WHERE mission.camp_id = camp.id)
@@ -30,7 +30,8 @@ fn load_rows(
             (EXISTS(SELECT 1 FROM agent_run r WHERE r.camp_id = camp.id AND r.status IN ('queued', 'running', 'waiting'))
              OR EXISTS(SELECT 1 FROM camp_turn t JOIN agent_run r ON r.camp_turn_id = t.id
                        WHERE t.camp_id = camp.id AND r.camp_id IS NULL AND r.status IN ('queued', 'running', 'waiting'))),
-            camp.version, camp.activation_state, channel.provider, channel.conversation_kind
+            camp.version, camp.activation_state, channel.provider, channel.conversation_kind,
+            {GROUP_KEY}
         FROM camp
         LEFT JOIN agent_profile lead ON lead.id = camp.default_lead_agent_id
         LEFT JOIN camp_view_state v ON v.camp_id = camp.id
@@ -60,6 +61,7 @@ fn load_rows(
                 activation_state: row.get(12)?,
                 project_binding_kind: row.get(2)?,
                 project_path: row.get(3)?,
+                navigation_group_key: row.get(15)?,
                 default_lead: lead_id.map(|agent_id| NavigationLeadSummary {
                     agent_id,
                     display_name: row
@@ -129,7 +131,11 @@ pub(super) fn load_navigation_groups(
     client: &crate::draft_client::DraftClient,
     limits: &BTreeMap<String, usize>,
     keys: Option<&[String]>,
-) -> Result<(NavigationThreadGroup, Vec<ProjectNavigationGroup>)> {
+) -> Result<(
+    NavigationThreadGroup,
+    NavigationThreadGroup,
+    Vec<ProjectNavigationGroup>,
+)> {
     // Only directory/count metadata spans the requested groups. Full Camp rows, run
     // markers and channel/lead details are read for each indexed prefix, never all rows.
     let filter = if keys.is_some() {
@@ -150,6 +156,10 @@ pub(super) fn load_navigation_groups(
         total_count: 0,
         recent_camps: vec![],
     };
+    let mut chat_bot = NavigationThreadGroup {
+        total_count: 0,
+        recent_camps: vec![],
+    };
     let mut projects = vec![];
     for (key, total_count) in groups {
         let limit = limits
@@ -160,6 +170,11 @@ pub(super) fn load_navigation_groups(
         let camps = load_navigation_group(tx, client, &key, 0, limit)?;
         if key == "quick-chat" {
             quick_chat = NavigationThreadGroup {
+                total_count,
+                recent_camps: camps,
+            };
+        } else if key == "chat-bot" {
+            chat_bot = NavigationThreadGroup {
                 total_count,
                 recent_camps: camps,
             };
@@ -184,7 +199,7 @@ pub(super) fn load_navigation_groups(
             })
             .then_with(|| a.project_key.cmp(&b.project_key))
     });
-    Ok((quick_chat, projects))
+    Ok((quick_chat, chat_bot, projects))
 }
 
 pub(super) fn navigation_camp_group_keys(
@@ -208,7 +223,7 @@ mod tests {
         atomic::{AtomicUsize, Ordering},
     };
 
-    fn metered(database: &mut Database, row_only: bool) -> usize {
+    fn metered(database: &mut Database, group_key: Option<&str>) -> usize {
         database
             .connection()
             .authorizer(Some(|context: AuthContext<'_>| match context.action {
@@ -231,7 +246,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        if row_only {
+        if group_key.is_none() {
             let rows = ReadModelService
                 .navigation_camps(
                     database,
@@ -245,13 +260,19 @@ mod tests {
                 .navigation_snapshot_for_groups(
                     database,
                     &BTreeMap::new(),
-                    Some(&["directory:/local".into()]),
+                    Some(&[group_key.unwrap().into()]),
                     &crate::draft_client::DraftClient::default(),
                 )
                 .unwrap();
-            assert_eq!(window.projects.len(), 1);
-            assert_eq!(window.projects[0].total_count, 20);
-            assert_eq!(window.projects[0].recent_camps.len(), 5);
+            if group_key == Some("chat-bot") {
+                assert!(window.projects.is_empty());
+                assert_eq!(window.chat_bot.total_count, 20);
+                assert_eq!(window.chat_bot.recent_camps.len(), 5);
+            } else {
+                assert_eq!(window.projects.len(), 1);
+                assert_eq!(window.projects[0].total_count, 20);
+                assert_eq!(window.projects[0].recent_camps.len(), 5);
+            }
             assert_eq!(window.quick_chat.total_count, 0);
         }
         database
@@ -277,10 +298,17 @@ mod tests {
             .execute_batch(
                 "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20)
             INSERT INTO camp(id,title,project_binding_kind,project_path,created_at,updated_at)
-            SELECT 'local-'||i,'local','directory','/local','2026-01-01','2026-01-01' FROM n;",
+            SELECT 'local-'||i,'local','directory','/local','2026-01-01','2026-01-01' FROM n;
+            WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<20)
+            INSERT INTO camp(id,title,project_binding_kind,project_path,navigation_is_chat_bot,created_at,updated_at)
+            SELECT 'bot-'||i,'bot','directory','/local',1,'2026-01-01','2026-01-01' FROM n;",
             )
             .unwrap();
-        let baseline = [metered(&mut database, true), metered(&mut database, false)];
+        let baseline = [
+            metered(&mut database, None),
+            metered(&mut database, Some("directory:/local")),
+            metered(&mut database, Some("chat-bot")),
+        ];
         database
             .connection()
             .execute_batch(
@@ -292,7 +320,11 @@ mod tests {
             SELECT 'agent_run.succeeded','other-1','{}','2026-02-01' FROM n;",
             )
             .unwrap();
-        let scaled = [metered(&mut database, true), metered(&mut database, false)];
+        let scaled = [
+            metered(&mut database, None),
+            metered(&mut database, Some("directory:/local")),
+            metered(&mut database, Some("chat-bot")),
+        ];
         assert_eq!(baseline[0], scaled[0]);
         // With a following index group, terminating the range needs one extra
         // comparison; work must remain constant rather than visit its 2,000 rows.
@@ -300,9 +332,13 @@ mod tests {
             scaled[1] <= baseline[1] + 1,
             "scoped work grew: {baseline:?} -> {scaled:?}"
         );
+        assert!(
+            scaled[2] <= baseline[2] + 1,
+            "Bot scoped work grew: {baseline:?} -> {scaled:?}"
+        );
         eprintln!(
-            "navigation_scope_scale rows=2020 events=50000 row_vm_steps={} group_vm_steps={}",
-            scaled[0], scaled[1]
+            "navigation_scope_scale rows=2040 events=50000 row_vm_steps={} group_vm_steps={} bot_vm_steps={}",
+            scaled[0], scaled[1], scaled[2]
         );
         database
             .connection()
@@ -316,6 +352,7 @@ mod tests {
             .unwrap();
         let snapshot = ReadModelService.navigation_snapshot(&mut database).unwrap();
         assert_eq!(snapshot.projects.len(), 2);
+        assert_eq!(snapshot.chat_bot.total_count, 20);
         let page = ReadModelService
             .navigation_group_camps(&mut database, Some("/local"), 5, 10)
             .unwrap();

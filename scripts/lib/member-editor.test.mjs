@@ -50,9 +50,11 @@ test(
       let output = ''
       child.stdout.on('data', (chunk) => {
         output += chunk
+        process.stdout.write(chunk)
       })
       child.stderr.on('data', (chunk) => {
         output += chunk
+        process.stderr.write(chunk)
       })
       const timer = setTimeout(() => child.kill('SIGKILL'), 150_000)
       let code
@@ -62,12 +64,6 @@ test(
         clearTimeout(timer)
       }
       assert.equal(code, 0, output)
-      console.log(
-        output
-          .split('\n')
-          .filter((line) => line.startsWith('{'))
-          .join('\n')
-      )
       passed = true
     } finally {
       if (child && child.exitCode === null && child.signalCode === null) {

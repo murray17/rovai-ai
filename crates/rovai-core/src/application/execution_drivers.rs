@@ -753,7 +753,7 @@ mod tests {
         };
         // Both gates start blocked. Later one becomes ready while the other
         // stays blocked, so the required recheck must not turn into busy retry.
-        for subsystem in ["skills", "mcp"] {
+        for subsystem in ["skills", "builtin-tools"] {
             core.subsystems
                 .finish(subsystem, Err(anyhow::anyhow!("initializing")));
         }

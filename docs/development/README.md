@@ -46,6 +46,8 @@ pnpm core:build:debug
 
 独立 Host/Web 的运行与当前能力边界见 [Server 开发预览](server-preview.md)。
 
+Windows 专用账户实验接线、配置与原生无模型验收见[Windows 账户启动](windows-account-runtime.md)。
+
 ## 执行评测
 
 修改上下文或内置 Skill、运行每周回归、配置每日 Trace 分析时，读取[Gate 与双轨评测](evaluation.md)。规则、实际执行、Judge 与统计覆盖分别保留证据。

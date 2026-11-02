@@ -60,7 +60,10 @@ const CAMP_OPEN_APPROVAL_LIMIT: i64 = 32;
 
 const FIND_NAVIGATION_CAMP_SQL: &str = r#"
     SELECT camp.id, camp.title, camp.activation_state, camp.project_binding_kind, camp.project_path,
-           channel_conversation.provider, channel_conversation.conversation_kind
+           channel_conversation.provider, channel_conversation.conversation_kind,
+           CASE WHEN camp.navigation_is_chat_bot = 1 THEN 'chat-bot'
+                WHEN camp.project_binding_kind = 'directory' THEN 'directory:' || camp.project_path
+                ELSE 'quick-chat' END
     FROM camp
     LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
     LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
@@ -83,6 +86,7 @@ pub struct NavigationThreadTarget {
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
+    pub navigation_group_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -102,6 +106,7 @@ pub struct NavigationThreadItem {
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
+    pub navigation_group_key: String,
     pub default_lead: Option<NavigationLeadSummary>,
     pub marker: String,
     pub last_activity_at: String,
@@ -138,6 +143,7 @@ pub struct NavigationSnapshot {
     pub schema_version: i64,
     pub through_global_sequence: i64,
     pub quick_chat: NavigationThreadGroup,
+    pub chat_bot: NavigationThreadGroup,
     pub projects: Vec<ProjectNavigationGroup>,
 }
 
@@ -198,6 +204,7 @@ pub struct ThreadView {
     pub activation_state: String,
     pub project_binding_kind: String,
     pub project_path: String,
+    pub navigation_group_key: String,
     pub default_lead_agent_id: Option<String>,
     pub membership_generation: i64,
     pub version: i64,
@@ -1064,13 +1071,14 @@ impl ReadModelService {
     ) -> Result<NavigationSnapshot> {
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let (quick_chat, projects) =
+        let (quick_chat, chat_bot, projects) =
             load_navigation_groups(&transaction, client, group_limits, group_keys)?;
         transaction.commit()?;
         Ok(NavigationSnapshot {
             schema_version: NAVIGATION_SCHEMA_VERSION,
             through_global_sequence,
             quick_chat,
+            chat_bot,
             projects,
         })
     }
@@ -1085,6 +1093,7 @@ impl ReadModelService {
         self.navigation_group_camps_for_client(
             database,
             project_path,
+            None,
             offset,
             limit,
             &crate::draft_client::DraftClient::default(),
@@ -1095,6 +1104,7 @@ impl ReadModelService {
         &self,
         database: &mut Database,
         project_path: Option<&str>,
+        group_key: Option<&str>,
         offset: usize,
         limit: usize,
         client: &crate::draft_client::DraftClient,
@@ -1102,9 +1112,11 @@ impl ReadModelService {
         let limit = limit.clamp(1, 200);
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
-        let key = project_path
-            .map(|path| format!("directory:{path}"))
-            .unwrap_or_else(|| "quick-chat".into());
+        let key = group_key.map(str::to_owned).unwrap_or_else(|| {
+            project_path
+                .map(|path| format!("directory:{path}"))
+                .unwrap_or_else(|| "quick-chat".into())
+        });
         let total_count = navigation_group_count(&transaction, client, &key)?;
         let start = offset.min(total_count);
         let end = start.saturating_add(limit).min(total_count);
@@ -1114,7 +1126,7 @@ impl ReadModelService {
         Ok(NavigationThreadPage {
             schema_version: NAVIGATION_SCHEMA_VERSION,
             through_global_sequence,
-            project_path: project_path.map(str::to_string),
+            project_path: key.strip_prefix("directory:").map(str::to_string),
             total_count,
             next_offset,
             camps,
@@ -1152,6 +1164,7 @@ impl ReadModelService {
                     activation_state: row.get(2)?,
                     project_binding_kind: row.get(3)?,
                     project_path: row.get(4)?,
+                    navigation_group_key: row.get(7)?,
                 })
             })
             .optional()
@@ -2005,7 +2018,10 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Thre
                    camp.default_lead_agent_id, camp.membership_generation,
                    camp.version, camp.created_at, camp.updated_at,
                    channel_conversation.provider, channel_conversation.conversation_kind,
-                   (SELECT id FROM mission WHERE mission.camp_id=camp.id)
+                   (SELECT id FROM mission WHERE mission.camp_id=camp.id),
+                   CASE WHEN camp.navigation_is_chat_bot = 1 THEN 'chat-bot'
+                        WHEN camp.project_binding_kind = 'directory' THEN 'directory:' || camp.project_path
+                        ELSE 'quick-chat' END
             FROM camp
             LEFT JOIN channel_conversation_binding AS channel_binding ON channel_binding.camp_id = camp.id
             LEFT JOIN channel_conversation ON channel_conversation.id = channel_binding.channel_conversation_id
@@ -2022,6 +2038,7 @@ fn load_camp(transaction: &Transaction<'_>, camp_id: &str) -> Result<Option<Thre
                     activation_state: row.get(2)?,
                     project_binding_kind: row.get(3)?,
                     project_path: row.get(4)?,
+                    navigation_group_key: row.get(13)?,
                     default_lead_agent_id: row.get(5)?,
                     membership_generation: row.get(6)?,
                     version: row.get(7)?,
@@ -4829,6 +4846,25 @@ mod slow_tests {
         let camp_id = created.result.payload["threadId"].as_str().unwrap();
         let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
         let now = chrono::Utc::now().to_rfc3339();
+        // This fixture reproduces an accepted native input before shutdown fencing
+        // existed, so it has no Manifest row by construction. Suspend the source
+        // trigger for the insert and restore it afterwards, exactly as the shared
+        // recovery fixture does.
+        let source_guard: Option<String> = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='runtime_input_source_insert'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap();
+        if source_guard.is_some() {
+            database
+                .connection()
+                .execute_batch("DROP TRIGGER runtime_input_source_insert;")
+                .unwrap();
+        }
         database
             .connection()
             .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -4861,6 +4897,9 @@ mod slow_tests {
             .connection()
             .execute_batch("PRAGMA foreign_keys = ON;")
             .unwrap();
+        if let Some(guard) = source_guard {
+            database.connection().execute_batch(&guard).unwrap();
+        }
         database
             .connection()
             .execute(
@@ -5680,6 +5719,113 @@ mod slow_tests {
                 assert_eq!(actual.marker, expected.marker);
             }
         }
+
+        // Bot origin is independent of the member switch and the execution directory.
+        for index in 0..6 {
+            let id = create_navigation_camp(
+                &mut database,
+                &collaboration,
+                &format!("bot-{index}"),
+                &project_root,
+                ProjectBindingKind::Directory,
+                &format!("Bot {index}"),
+            );
+            database
+                .connection()
+                .execute(
+                    "UPDATE camp SET navigation_is_chat_bot = 1 WHERE id = ?1",
+                    [&id],
+                )
+                .unwrap();
+        }
+        for enabled in [1, 0] {
+            database.connection().execute(
+                "UPDATE agent_profile SET chat_bot_enabled = ?1, chat_materials_path = ?2 WHERE id = 'agent_1'",
+                params![enabled, project_root.to_string_lossy()],
+            ).unwrap();
+            let grouped = read_model.navigation_snapshot(&mut database).unwrap();
+            assert_eq!(grouped.chat_bot.total_count, 6);
+            assert_eq!(grouped.chat_bot.recent_camps.len(), 5);
+            assert_eq!(grouped.quick_chat.total_count, 6);
+            assert_eq!(grouped.projects.len(), 1);
+            assert_eq!(grouped.projects[0].total_count, 6);
+            assert!(
+                grouped
+                    .chat_bot
+                    .recent_camps
+                    .iter()
+                    .all(|camp| camp.navigation_group_key == "chat-bot"
+                        && camp.project_binding_kind == "directory")
+            );
+        }
+        let client = crate::draft_client::DraftClient::default();
+        let bots = read_model
+            .navigation_snapshot_for_groups(
+                &mut database,
+                &BTreeMap::from([("chat-bot".into(), 15)]),
+                Some(&["chat-bot".into()]),
+                &client,
+            )
+            .unwrap();
+        assert_eq!(bots.chat_bot.recent_camps.len(), 6);
+        assert_eq!(bots.quick_chat.total_count, 0);
+        assert!(bots.projects.is_empty());
+        let ordinary = read_model
+            .navigation_snapshot_for_groups(
+                &mut database,
+                &BTreeMap::new(),
+                Some(&[snapshot.projects[0].project_key.clone()]),
+                &client,
+            )
+            .unwrap();
+        assert_eq!(ordinary.chat_bot.total_count, 0);
+        assert_eq!(ordinary.projects[0].total_count, 6);
+        let bot_page = read_model
+            .navigation_group_camps_for_client(&mut database, None, Some("chat-bot"), 5, 3, &client)
+            .unwrap();
+        assert_eq!(bot_page.total_count, 6);
+        assert_eq!(bot_page.camps.len(), 1);
+        assert_eq!(bot_page.next_offset, None);
+        assert!(bot_page.project_path.is_none());
+        let bot = &bot_page.camps[0];
+        let found = read_model
+            .find_navigation_camp(&database, &ThreadId::parse(&bot.id).unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.navigation_group_key, "chat-bot");
+        let opened = read_model.camp_snapshot(&mut database, &bot.id).unwrap();
+        assert_eq!(opened.camp.navigation_group_key, "chat-bot");
+        let rows = read_model
+            .navigation_camps(&mut database, &[bot.id.clone()], &client)
+            .unwrap();
+        assert_eq!(rows.group_keys, ["chat-bot"]);
+        assert_eq!(rows.camps[0].navigation_group_key, "chat-bot");
+        let seen = read_model
+            .acknowledge_camp_viewed(&mut database, &bot.id, bots.through_global_sequence)
+            .unwrap();
+        assert_eq!(seen.navigation.group_keys, ["chat-bot"]);
+        assert_eq!(seen.navigation.camps[0].navigation_group_key, "chat-bot");
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET deletion_operation_id = 'bot-delete' WHERE id = ?1",
+                [&bot.id],
+            )
+            .unwrap();
+        let deleted = read_model
+            .navigation_camps(&mut database, &[bot.id.clone()], &client)
+            .unwrap();
+        assert_eq!(deleted.group_keys, ["chat-bot"]);
+        assert!(deleted.camps.is_empty());
+        assert!(
+            read_model
+                .find_navigation_camp(&database, &ThreadId::parse(&bot.id).unwrap())
+                .unwrap()
+                .is_none()
+        );
+        let after_delete = read_model.navigation_snapshot(&mut database).unwrap();
+        assert_eq!(after_delete.chat_bot.total_count, 5);
+        assert_eq!(after_delete.chat_bot.recent_camps.len(), 5);
 
         // Empty pending Camps remain outside navigation; a saved draft makes one discoverable.
         let mut pending_command =
@@ -7296,6 +7442,9 @@ mod slow_tests {
     #[test]
     fn event_reader_hydrates_mixed_command_result_storage_without_changing_pagination() {
         let (mut database, directory) = crate::test_support::fresh_schema_database_fast();
+        // The third fixture event belongs to a Task entity, which the reader hides
+        // while the instance-owned Task preference is off (its default).
+        crate::task_capability::set(database.connection(), true).unwrap();
         let after: i64 = database
             .connection()
             .query_row(

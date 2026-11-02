@@ -42,6 +42,16 @@ describe('Runtime Renderer Core method allowlist', () => {
     )
   })
 
+  it('allows member chat settings without exposing host-only chat submission', () => {
+    const start = mainSource.indexOf('const allowedMethods = new Set<CoreMethod>([')
+    const end = mainSource.indexOf(String.fromCharCode(10) + '])', start)
+    expect(start).toBeGreaterThan(-1)
+    expect(end).toBeGreaterThan(start)
+    const allowlist = mainSource.slice(start, end)
+    expect(allowlist).toContain("'members.chat.set'")
+    expect(allowlist).not.toContain("'channels.chat.submit'")
+  })
+
   it('allows the Single Chat pending-input mutation implemented by Core', () => {
     const allowlistStart = mainSource.indexOf('const allowedMethods = new Set<CoreMethod>([')
     const allowlistEnd = mainSource.indexOf('\n])', allowlistStart)

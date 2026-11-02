@@ -525,30 +525,49 @@ pub(crate) fn assert_legacy_upgrade(database: &mut Database) {
     // Recreate the deployed branch 203 layout with populated input/receipt rows.
     // Only the fixture removes the compact columns; production converges forward.
     super::minimax::downgrade_for_test(database.connection());
-    let branch_rows = |c: &Connection| -> Vec<Vec<Vec<rusqlite::types::Value>>> {
-        [
-            "context_manifest",
-            "agent_run_input",
-            "runtime_input_delivery",
-            "camp_message_delivery",
-            "agent_run_claim_context",
-        ]
+    // Later additive migrations (for example the Hermes rules columns) append
+    // nullable columns. The branch-203 contract is that every column of the
+    // branch layout keeps its value, so compare exactly those columns.
+    let branch_tables = [
+        "context_manifest",
+        "agent_run_input",
+        "runtime_input_delivery",
+        "camp_message_delivery",
+        "agent_run_claim_context",
+    ];
+    let branch_columns = branch_tables
         .iter()
         .map(|table| {
-            let mut q = c
-                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
-                .unwrap();
-            let count = q.column_count();
-            q.query_map([], |r| {
-                (0..count)
-                    .map(|i| r.get(i))
-                    .collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .unwrap()
+            database
+                .connection()
+                .prepare(&format!("SELECT * FROM {table} LIMIT 0"))
+                .unwrap()
+                .column_names()
+                .iter()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(",")
         })
-        .collect()
+        .collect::<Vec<_>>();
+    let branch_rows = |c: &Connection| -> Vec<Vec<Vec<rusqlite::types::Value>>> {
+        branch_tables
+            .iter()
+            .zip(&branch_columns)
+            .map(|(table, select)| {
+                let mut q = c
+                    .prepare(&format!("SELECT {select} FROM {table} ORDER BY 1"))
+                    .unwrap();
+                let count = q.column_count();
+                q.query_map([], |r| {
+                    (0..count)
+                        .map(|i| r.get(i))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+            })
+            .collect()
     };
     compact_execution::remove_compact_for_test(database.connection());
     database

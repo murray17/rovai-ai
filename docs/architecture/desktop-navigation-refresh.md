@@ -3,7 +3,7 @@ document_type: architecture
 architecture: desktop-navigation-refresh
 authority: desktop-navigation-invalidation-and-refresh-boundaries
 status: accepted
-last_updated: 2026-10-19
+last_updated: 2026-10-21
 ---
 
 # Desktop Navigation Refresh 架构
@@ -69,6 +69,16 @@ Navigation 的 `lastActivityAt` / `lastActivityGlobalSequence` 只由已发布�
 loading 继续独立读取 Run 事实。Run 终态本身不产生新回复小点，查看水位保持单调；
 状态刷新不能借用用户消息排序水位，否则后台完成提示会丢失。Core Project 聚合使用组内最近用户消息字段，
 Sidecar 已保存的 Project 顺序仍按下文的本机偏好规则保持稳定。
+
+### Chat Bot grouping
+
+聊天 Bot 线程按创建时保存的来源标记归入 `chat-bot`；已有 `channel_chat_conversation` 的 Camp 绑定用于迁移回填，
+与 `quick-chat`、`directory:<projectPath>` 并列。Core 返回独立 `chatBot` 窗口与每行的
+`navigationGroupKey`；按 ID 查找、局部刷新、删除前失效和完整快照使用同一归组事实。
+Migration 212 增加 `camp.navigation_is_chat_bot` 并更新导航表达式索引；后续聊天提交在同一事务标记，
+既有绑定替换后旧线程仍保持分类。迁移不按路径、标题或消息正文猜测此前已丢失绑定的历史。
+资料文件夹仍是线程的执行工作区，不因此登记为客户端项目，也不以成员当前开关推断历史分类。
+Renderer 将此窗口接入已有导航、置顶、分页与会话打开路径，不复制记录或创建第二套会话工作区。
 
 ### Snapshot prefixes
 

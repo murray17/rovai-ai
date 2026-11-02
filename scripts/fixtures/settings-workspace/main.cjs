@@ -13,8 +13,23 @@ app.whenReady().then(async () => {
   console.error('settings fixture: Electron ready')
   const window = new BrowserWindow({ show: process.platform === 'linux', width: 1440, height: 920, useContentSize: true,
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
+  // Hidden Windows windows throttle animation frames despite backgroundThrottling:false.
+  if (process.platform === 'win32') window.showInactive()
   window.webContents.on('console-message', event => console.error(event.message))
-  const run = code => window.webContents.executeJavaScript(code, true)
+  const run = async code => {
+    const started = Date.now()
+    if (process.env.ROVAI_UI_FIXTURE_TRACE === '1') console.error('settings run: ' + code)
+    let timer
+    try {
+      return await Promise.race([
+        window.webContents.executeJavaScript(code, true),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(Error('Renderer did not settle: ' + code)), 12_000) })
+      ])
+    } finally {
+      clearTimeout(timer)
+      if (process.env.ROVAI_UI_FIXTURE_TRACE === '1') console.error(`settings done (${Date.now() - started}ms)`)
+    }
+  }
   const settle = () => run('window.settingsTest.settle()')
   const waitFor = async expression => {
     for(let attempt=0;attempt<40;attempt++){
@@ -49,7 +64,16 @@ app.whenReady().then(async () => {
     window.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
     await settle()
   }
-  const capture = async name => writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
+  const capture = async name => {
+    if (process.env.ROVAI_SETTINGS_SCENARIO === 'channel-delete') {
+      await run(`Promise.race([
+        Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity).map(animation => animation.finished.catch(() => {}))),
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ])`)
+      await settle()
+    }
+    writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
+  }
   const noOverflow = async label => {
     assert.equal(await run(`(() => {
       const panel=document.querySelector('.settings-panel')
@@ -85,6 +109,111 @@ app.whenReady().then(async () => {
     // Keep native DOM focus events available without depending on the active desktop window.
     window.webContents.debugger.attach('1.3')
     await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+    if (process.env.ROVAI_SETTINGS_SCENARIO === 'channel-delete') {
+      // Only the narrow renderer API is mocked. Every action below uses Chromium input events.
+      // Reject accidental external navigation; this fixture must never contact a real Bot.
+      window.webContents.setWindowOpenHandler(() => { throw Error('Unexpected external navigation') })
+      window.webContents.session.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*'] }, (_details, callback) => callback({ cancel: true }))
+      await navigate('channels')
+      const original = await run('structuredClone(window.settingsTest.state.channels.channels[0])')
+      const bot = original.memberBots[0]
+      const row = '.channel-member-bot-row:first-child'
+      const deleteButton = row + ' .channel-row-action.is-danger'
+      const dialog = '[role=dialog]'
+      const confirm = dialog + ' .danger-button'
+      const cancel = dialog + ' .app-dialog-footer .quiet-button'
+      const deleteRequests = () => run("window.settingsTest.requests.filter(r=>r.method==='channels.deleteMemberBot')")
+      const assertPublished = async () => assert.equal(await run("document.querySelector('.channel-member-bot-row:first-child .channel-publication-status > span').textContent"), '已发布')
+      const assertDialog = async () => {
+        await waitFor("document.querySelector('[role=dialog] .channel-dialog-fact code')")
+        assert.equal(await run("document.querySelector('[role=dialog] .channel-dialog-fact code').textContent"), bot.appId)
+        assert.equal(await run("document.querySelector('[role=dialog] .channel-dialog-fact strong').textContent"), bot.botDisplayName)
+        assert.ok(await run("document.querySelector('[role=dialog]').textContent.includes('不删除飞书 Bot、队员或聊天记录')"))
+      }
+      const assertActionsFit = async () => {
+        const layout = await run(`(() => {
+          const row = document.querySelector('.channel-member-bot-row')
+          const actions = [...row.querySelectorAll('.channel-row-action')]
+          return actions.map(node => {
+            const r = node.getBoundingClientRect(), range = document.createRange()
+            range.selectNodeContents(node)
+            return { text: node.textContent, x:r.x, y:r.y, right:r.right, width:r.width, height:r.height,
+              textLines:new Set([...range.getClientRects()].map(rect => Math.round(rect.top))).size,
+              inside:r.right <= innerWidth && r.left >= 0, unclipped:r.right <= row.getBoundingClientRect().right + 1 }
+          })
+        })()`)
+        assert.equal(layout.length, 2)
+        for (const action of layout) {
+          assert.ok(action.inside && action.unclipped, 'action must remain visible: ' + JSON.stringify(layout))
+          assert.equal(action.textLines, 1, 'button text must not wrap vertically: ' + JSON.stringify(layout))
+        }
+        assert.ok(Math.abs(layout[0].y - layout[1].y) <= 2, 'management and delete remain beside each other')
+        return layout
+      }
+      const evidence = [], layoutFailures = []
+      for (const theme of ['day', 'night']) for (const width of [1040, 600]) {
+        window.webContents.setZoomFactor(1); window.setContentSize(width, 760)
+        await run(`document.documentElement.dataset.theme=` + JSON.stringify(theme))
+        await run(`window.settingsTest.updateChannel('feishu', ` + JSON.stringify(original) + ')')
+        await navigate('channels')
+        const name = 'channel-delete-' + theme + '-' + width
+        const before = (await deleteRequests()).length
+        assert.equal(await run("document.querySelector('.channel-member-bot-row:first-child a.channel-row-action').textContent"), '飞书管理')
+        assert.equal(await run(`document.querySelector(` + JSON.stringify(deleteButton) + ').disabled'), false)
+        await capture(name + '-published')
+        let layout
+        try { await noOverflow(name); layout = await assertActionsFit() }
+        catch (error) { layoutFailures.push({ name, error: error.message }) }
+        await click(deleteButton); await assertDialog()
+        await capture(name + '-confirm')
+        await click(cancel)
+        await waitFor("!document.querySelector('[role=dialog]')")
+        assert.equal((await deleteRequests()).length, before, 'Cancel makes zero delete calls')
+        await assertPublished()
+        await click(deleteButton); await key('Escape')
+        await waitFor("!document.querySelector('[role=dialog]')")
+        assert.equal((await deleteRequests()).length, before, 'Escape makes zero delete calls')
+        await click(deleteButton); await assertDialog()
+        await run("window.settingsTest.fail('channels.deleteMemberBot')")
+        await click(confirm)
+        await waitFor("document.querySelector('[role=dialog] [role=alert]')")
+        await assertDialog(); await assertPublished()
+        assert.equal(await run(`document.querySelector(` + JSON.stringify(confirm) + ').disabled'), false)
+        assert.equal((await deleteRequests()).length, before + 1)
+        await capture(name + '-failed')
+        // Disabling the pending action can move focus; use real Tab/Space input to retry.
+        for (let tab = 0; tab < 5 && !await run("document.activeElement.matches('[role=dialog] .danger-button')"); tab++) await key('Tab')
+        assert.ok(await run("document.activeElement.matches('[role=dialog] .danger-button')"))
+        await key('Space')
+        await waitFor("!document.querySelector('[role=dialog]')")
+        assert.equal(await run("document.querySelector('.channel-member-bot-row:first-child .channel-publication-status > span').textContent"), '未发布')
+        assert.equal(await run("document.querySelector('.channel-member-bot-row:first-child .channel-row-action').textContent"), '发布')
+        assert.equal(await run("document.querySelector('.channel-member-bot-row:first-child .channel-row-action').disabled"), false)
+        assert.equal(await run(`document.querySelector(` + JSON.stringify(deleteButton) + ')'), null)
+        assert.equal((await deleteRequests()).length, before + 2)
+        assert.deepEqual((await deleteRequests()).at(-1).params, { agentId: bot.agentId, expectedAppId: bot.appId, kind: 'feishu' })
+        try { await noOverflow(name + '/unpublished') }
+        catch (error) { layoutFailures.push({ name: name + '/unpublished', error: error.message }) }
+        await capture(name + '-unpublished')
+        // Simulate a snapshot arriving while confirmation is open. Main's CAS rejection
+        // is modeled here; the production Renderer must still submit the frozen old ID.
+        await run(`window.settingsTest.updateChannel('feishu', ` + JSON.stringify(original) + ')')
+        await settle(); await click(deleteButton); await assertDialog()
+        const replacement = { ...bot, appId: 'sample-replacement-app' }
+        await run(`window.settingsTest.updateChannel('feishu', ` + JSON.stringify({ memberBots: [replacement] }) + ')')
+        await settle(); await assertDialog(); await click(confirm)
+        await waitFor("document.querySelector('[role=dialog] [role=alert]')?.textContent.includes('绑定已变化')")
+        assert.equal((await deleteRequests()).length, before + 3)
+        assert.equal((await deleteRequests()).at(-1).params.expectedAppId, bot.appId)
+        assert.equal(await run('window.settingsTest.state.channels.channels[0].memberBots[0].appId'), replacement.appId)
+        await assertPublished(); await capture(name + '-conflict')
+        await key('Escape'); await waitFor("!document.querySelector('[role=dialog]')")
+        evidence.push({ theme, width, layout, cases: ['visible-adjacent', 'cancel-no-delete', 'escape-no-delete', 'failure-retained', 'keyboard-retry-success', 'frozen-app-conflict'] })
+      }
+      console.log(JSON.stringify({ ok:layoutFailures.length === 0, matrices:evidence.length, interactionCases:evidence.length * 6, screenshots:evidence.length * 5, evidence, layoutFailures }))
+      assert.deepEqual(layoutFailures, [], 'channel delete layouts must pass at every tested width')
+      app.exit(0); return
+    }
     // Runtime editor regression: a selected program path saves directly, failure
     // preserves the draft, and clean/dirty transitions keep both actions visible.
     window.webContents.setZoomFactor(1); window.setContentSize(1280, 850)

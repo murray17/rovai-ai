@@ -18,7 +18,7 @@ use crate::acp::CompletedAcpAction;
 
 pub(crate) use host::{
     PiActivationFailureKind, PiHost, PiPromptImage, PreparedPiPromptImage, activation_failure_kind,
-    machine_ready_probe, model_catalog_probe, prepare_prompt_images,
+    machine_ready_probe, model_catalog_probe,
 };
 pub use host::{PiAgentRunRuntimeRequest, PiRpcRuntimeAdapter, PiRuntime};
 
@@ -351,6 +351,7 @@ impl PiTextState {
 pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
+    workspace_isolation: &str,
     _attachment_authorization: &ThreadOutputDirectory,
 ) -> Result<String> {
     let cwd = cwd
@@ -364,6 +365,8 @@ pub(crate) fn runtime_compatibility_digest(
         "adapterKind": AdapterKind::Pi,
         "protocolVersion": PI_PROTOCOL_VERSION,
         "executionRoot": cwd,
+        "workspaceIsolation":workspace_isolation,
+        "windowsAccount":rovai_core::managed_process::WindowsAccountLaunch::for_isolation(workspace_isolation)?.map(|account|account.compatibility_digest()).transpose()?,
         "executablePath": executable,
         "reportedVersion": frozen_runtime.reported_version,
         "executableFingerprint": frozen_runtime.executable_fingerprint,

@@ -23,6 +23,14 @@ use crate::windows_runtime_entrypoint::{
 #[cfg(unix)]
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 
+#[path = "managed_process/account.rs"]
+mod account;
+pub use account::WindowsAccountLaunch;
+#[cfg(windows)]
+pub use windows::account::AccountFilesystem;
+#[cfg(windows)]
+pub(crate) use windows::account::AccountProcessAuthority;
+
 #[cfg(windows)]
 #[path = "managed_process/windows.rs"]
 mod windows;
@@ -115,7 +123,7 @@ impl HistoricalProcessCleanup {
 }
 
 #[cfg(windows)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum WindowsRuntimeEntrypoint {
     NativeExecutable {
         executable: PathBuf,
@@ -138,6 +146,8 @@ pub struct ManagedProcessLaunchSpec {
     arguments: Vec<OsString>,
     working_directory: PathBuf,
     environment: BTreeMap<OsString, OsString>,
+    windows_account: Option<WindowsAccountLaunch>,
+    account_launch_files: Vec<(PathBuf, Vec<u8>)>,
     stdin_policy: ManagedStdinPolicy,
     windows_argv_dialect: ManagedWindowsArgvDialect,
     #[cfg(windows)]
@@ -233,6 +243,8 @@ impl ManagedProcessLaunchSpec {
             arguments,
             working_directory,
             environment,
+            windows_account: None,
+            account_launch_files: Vec::new(),
             stdin_policy,
             windows_argv_dialect,
             #[cfg(windows)]
@@ -313,6 +325,8 @@ impl ManagedProcessLaunchSpec {
             arguments,
             working_directory,
             environment,
+            windows_account: self.windows_account.clone(),
+            account_launch_files: Vec::new(),
             stdin_policy: ManagedStdinPolicy::Null,
             windows_argv_dialect: self.windows_argv_dialect,
             #[cfg(windows)]
@@ -321,6 +335,33 @@ impl ManagedProcessLaunchSpec {
             windows_entrypoint,
             ownership,
         })
+    }
+
+    pub fn with_windows_account(mut self, account: Option<WindowsAccountLaunch>) -> Result<Self> {
+        if account.is_some() && !cfg!(windows) {
+            bail!("managed_process.account_unsupported: windows_account requires Windows");
+        }
+        if let Some(account) = &account {
+            self.environment = account.environment(&self)?;
+        }
+        self.windows_account = account;
+        Ok(self)
+    }
+
+    /// Host-private Adapter input files cross the bootstrap pipe in memory.
+    /// They are rematerialized by the account itself, never granted host ACLs.
+    pub fn with_account_launch_files(
+        mut self,
+        paths: impl IntoIterator<Item = PathBuf>,
+    ) -> Result<Self> {
+        if self.windows_account.is_some() {
+            for path in paths {
+                let bytes =
+                    std::fs::read(&path).context("managed_process.account_input_unavailable")?;
+                self.account_launch_files.push((path, bytes));
+            }
+        }
+        Ok(self)
     }
 
     pub fn application(&self) -> &Path {
@@ -736,6 +777,16 @@ impl ManagedProcess {
         windows::process_start_identity(pid)
     }
 
+    #[cfg(windows)]
+    pub(crate) fn account_authority(&self) -> Option<AccountProcessAuthority> {
+        self.child.account_authority.clone()
+    }
+
+    #[cfg(windows)]
+    pub fn account_filesystem(&self) -> Option<AccountFilesystem> {
+        self.child.account_filesystem.clone()
+    }
+
     pub fn take_stdin(&mut self) -> Option<ManagedChildStdin> {
         #[cfg(unix)]
         {
@@ -1097,6 +1148,56 @@ mod tests {
         );
 
         let absolute = Command::new(std::env::current_exe().unwrap());
+        for isolation in ["shared", "git_worktree"] {
+            let account = WindowsAccountLaunch::for_isolation(isolation).unwrap();
+            assert!(account.is_none());
+            let original = ManagedProcessLaunchSpec::capture(
+                &absolute,
+                ManagedProcessPurpose::RuntimeHost,
+                ManagedStdinPolicy::Piped,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "policy-regression",
+            )
+            .unwrap();
+            let before = original.environment().clone();
+            let selected = original.with_windows_account(account).unwrap();
+            assert_eq!(selected.environment(), &before);
+            assert!(selected.windows_account.is_none());
+            let cwd = std::env::current_dir().unwrap();
+            crate::runtime::AgentRunWorkspace {
+                execution_root: cwd.to_string_lossy().into_owned(),
+                access: "write".into(),
+                isolation: isolation.into(),
+            }
+            .validate()
+            .unwrap();
+        }
+        let mut workspace = crate::runtime::AgentRunWorkspace::runtime_managed_path(
+            std::env::current_dir().unwrap().to_string_lossy().into(),
+        );
+        for adapter in [
+            "codebuddy-cli",
+            "opencode-cli",
+            "claude-code-cli",
+            "codex-cli",
+        ] {
+            workspace.apply_chat_isolation(adapter, Some("windows_account"));
+            assert_eq!(workspace.isolation, "windows_account");
+            workspace.isolation = "shared".into();
+        }
+        for adapter in ["qwen-code", "pi", "grok-build"] {
+            workspace.apply_chat_isolation(adapter, Some("windows_account"));
+            assert_eq!(workspace.isolation, "shared");
+        }
+        assert!(WindowsAccountLaunch::for_isolation("invalid").is_err());
+        let cwd = std::env::current_dir().unwrap();
+        crate::runtime::AgentRunWorkspace {
+            execution_root: cwd.to_string_lossy().into_owned(),
+            access: "write".into(),
+            isolation: "windows_account".into(),
+        }
+        .validate()
+        .unwrap();
         assert!(
             ManagedProcessLaunchSpec::capture(
                 &absolute,
@@ -2304,4 +2405,9 @@ mod tests {
             .expect("failed to observe Main stdin EOF");
         drop(watchdog);
     }
+}
+
+#[cfg(windows)]
+pub fn run_account_helper_if_requested() -> Result<bool> {
+    windows::account::run_if_requested()
 }

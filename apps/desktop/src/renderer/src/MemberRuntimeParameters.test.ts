@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -9,6 +9,7 @@ import type {
   RuntimeModelCatalogView
 } from '@contracts'
 import {
+  MemberChatBotSettings,
   MemberModelParameters,
   MemberRuntimeParameters,
   draftFromDefaults,
@@ -22,6 +23,67 @@ import {
 } from './MemberRuntimeParameters'
 
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+
+describe('member chat controls', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function controls(enabled: boolean, path: string | null, busy = false) {
+    const onSet = vi.fn().mockResolvedValue(undefined)
+    const selectFolder = vi.fn().mockResolvedValue('C:/materials/new')
+    vi.stubGlobal('window', { rovai: { channels: { selectChatMaterialsDirectory: selectFolder } } })
+    const element = MemberChatBotSettings({ agent: { chatBotEnabled: enabled, chatMaterialsPath: path }, busy, onSet })
+    const [label, button] = element.props.children
+    return { element, input: label.props.children[1], button, onSet, selectFolder }
+  }
+
+  it('keeps folder selection visible while off and does not implicitly enable chat', async () => {
+    const { button, onSet, selectFolder } = controls(false, null)
+    await button.props.onClick()
+    await vi.waitFor(() => expect(onSet).toHaveBeenCalledWith(false, 'C:/materials/new'))
+    expect(selectFolder).toHaveBeenCalledOnce()
+  })
+
+  it('never opens the folder picker from the switch, including when no folder is set', async () => {
+    const missing = controls(false, null)
+    expect(missing.input.props.disabled).toBe(true)
+    expect(renderToStaticMarkup(missing.element)).toContain("请先选择资料文件夹，再开启聊天 Bot。")
+    expect(renderToStaticMarkup(missing.element)).toContain("资料文件夹")
+    expect(renderToStaticMarkup(missing.element)).not.toContain("知识库文件夹")
+    missing.input.props.onChange({ target: { checked: true } })
+    expect(missing.selectFolder).not.toHaveBeenCalled()
+    expect(missing.onSet).not.toHaveBeenCalled()
+    const configured = controls(false, 'C:/materials')
+    expect(renderToStaticMarkup(configured.element)).not.toContain('member-chat-bot-hint')
+    configured.input.props.onChange({ target: { checked: true } })
+    await vi.waitFor(() => expect(configured.onSet).toHaveBeenCalledWith(true, 'C:/materials'))
+    expect(configured.selectFolder).not.toHaveBeenCalled()
+  })
+
+  it('keeps the enabled state when changing folders and ignores cancellation', async () => {
+    const current = controls(true, 'C:/materials')
+    current.button.props.onClick()
+    await vi.waitFor(() => expect(current.onSet).toHaveBeenCalledWith(true, 'C:/materials/new'))
+    current.onSet.mockClear()
+    current.selectFolder.mockResolvedValue(null)
+    current.button.props.onClick()
+    await vi.waitFor(() => expect(current.selectFolder).toHaveBeenCalledTimes(2))
+    expect(current.onSet).not.toHaveBeenCalled()
+  })
+
+  it('uses shared controls, short copy and the runtime content column', () => {
+    const { element, input, button } = controls(true, 'C:/materials', true)
+    const markup = renderToStaticMarkup(element)
+    expect(input.props.disabled).toBe(true)
+    expect(button.props.disabled).toBe(true)
+    expect(markup).toContain('runtime-parameter-switch')
+    expect(markup).toContain('quiet-button compact')
+    expect(markup).not.toContain('<p')
+    expect(markup).not.toContain('readOnly')
+    const memberStyles = readFileSync(new URL('./member-editor.css', import.meta.url), 'utf8')
+    expect(memberStyles).toContain('.member-editor-runtime > .member-chat-bot { grid-column: 2; }')
+    expect(memberStyles).toContain('.member-chat-bot > button { flex: 0 0 auto; white-space: nowrap; }')
+  })
+})
 
 describe('runtime model catalog source', () => {
   it('keeps expired same-environment history displayable without accepting invalidated history', () => {

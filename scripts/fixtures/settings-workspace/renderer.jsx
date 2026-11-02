@@ -102,6 +102,16 @@ Object.assign(window, { rovai: {
     get: async () => clone(state.channels), onChanged: fn => { channelListeners.add(fn); return () => channelListeners.delete(fn) },
     connect: kind => channelAction('connect', kind),
     disconnect: kind => channelAction('disconnect', kind),
+    // Renderer acceptance only: no Main, Core, credentials or remote Bot mutations.
+    deleteMemberBot: async (agentId, expectedAppId, kind) => {
+      await request('channels.deleteMemberBot', { agentId, expectedAppId, kind })
+      const channel = state.channels.channels.find(channel => channel.kind === kind)
+      const bot = channel.memberBots.find(bot => bot.agentId === agentId)
+      if (bot?.appId !== expectedAppId) throw new Error('Bot 绑定已变化，请重新读取后再试。')
+      channel.memberBots = channel.memberBots.filter(bot => bot.agentId !== agentId)
+      emitChannels()
+      return clone(state.channels)
+    },
     cancelQrAttempt: async attemptId => {
       await request('channels.cancelQrAttempt', { attemptId })
       state.channels.activeQrAttempt = null

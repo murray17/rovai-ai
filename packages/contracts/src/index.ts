@@ -260,6 +260,10 @@ export interface AgentProfile {
   growthTopic: string
   defaultCapabilities: string[]
   presence: MemberPresence
+  /** The Feishu chat Bot answers with this member's own Runtime and model. */
+  chatBotEnabled?: boolean
+  /** Execution root of chat Threads; null until a folder is chosen. */
+  chatMaterialsPath?: string | null
   runtimeConfiguration: MemberRuntimeConfiguration | null
   runtimeReadiness: {
     status: RuntimeReadinessStatus
@@ -1038,6 +1042,7 @@ export type ThreadChannelSource =
 
 export interface NavigationThreadItem {
   id: string
+  navigationGroupKey?: string
   title: string
   channelSource?: ThreadChannelSource | null
   activationState: ThreadActivationState
@@ -1054,7 +1059,7 @@ export interface NavigationThreadItem {
 }
 
 export type NavigationThreadTarget = Pick<NavigationThreadItem,
-  'id' | 'title' | 'channelSource' | 'activationState' | 'projectBindingKind' | 'projectPath'>
+  'id' | 'title' | 'channelSource' | 'activationState' | 'projectBindingKind' | 'projectPath' | 'navigationGroupKey'>
 
 export interface NavigationThreadGroup {
   totalCount: number
@@ -1082,6 +1087,7 @@ export interface NavigationSnapshot {
   schemaVersion: 3
   throughGlobalSequence: number
   quickChat: NavigationThreadGroup
+  chatBot?: NavigationThreadGroup
   projects: ProjectNavigationGroup[]
 }
 
@@ -2568,6 +2574,7 @@ export interface ThreadSnapshot {
   throughGlobalSequence: number
   thread: {
     id: string
+    navigationGroupKey?: string
     title: string
     missionId?: string | null
     channelSource?: ThreadChannelSource | null
@@ -3291,6 +3298,45 @@ export interface ChannelConnectionView {
   account: ChannelAccountView | null
 }
 
+export interface ChatBotView {
+  /** The member answering this Bot; absent while the Bot is unpublished. */
+  agentId: string | null
+  /** Inverse of the member's chat switch. */
+  ownerOnly: boolean
+  mode: 'work' | 'chat'
+  /** The member's materials folder, also the chat Thread execution root. */
+  materialsPath: string | null
+}
+
+export interface ChatTurnView {
+  role: 'user' | 'assistant'
+  body: string
+}
+
+export interface ChatItemView {
+  id: string
+  provider: string
+  appId: string
+  requesterExternalId: string
+  requesterName: string
+  destinationChatId: string
+  destinationKind: string
+  targetExternalId: string
+  targetName: string
+  targetIsOwner: boolean
+  question: string
+  askMessageId: string | null
+  askChatId: string | null
+  status: 'waiting' | 'reported' | 'closed' | 'paused'
+  lastReportAt: number | null
+  createdAt: number
+}
+
+export interface MemberChatBotInput {
+  enabled: boolean
+  materialsPath: string | null
+}
+
 export interface ChannelMemberBotView {
   /** Durable Bot publication fact, even if a later connection/retry failed. */
   published?: boolean
@@ -3302,6 +3348,7 @@ export interface ChannelMemberBotView {
   appId: string | null
   managementUrl: string | null
   failureCode: string | null
+  chat?: ChatBotView | null
 }
 
 export interface MemberBotProvisioningView {
@@ -3377,12 +3424,14 @@ export interface ChannelsApi {
   disconnect(kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   publishMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   retryMemberBot(agentId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
+  deleteMemberBot(agentId: string, expectedAppId: string, kind?: ChannelKind): Promise<ChannelSettingsSnapshot>
   selectPublicationApprover(
     agentId: string,
     userId: string,
     kind?: ChannelKind
   ): Promise<ChannelSettingsSnapshot>
   cancelQrAttempt(attemptId: string): Promise<ChannelSettingsSnapshot>
+  selectChatMaterialsDirectory(): Promise<string | null>
   setLoginViewBounds(attemptId: string, bounds: ChannelLoginViewBounds | null): Promise<void>
   refreshLoginQr(attemptId: string): Promise<void>
   onChanged(listener: (snapshot: ChannelSettingsSnapshot) => void): () => void
@@ -4332,6 +4381,7 @@ export type CoreMethod =
   | 'members.runtime.set'
   | 'members.runtime.clear'
   | 'members.presence.set'
+  | 'members.chat.set'
   | 'members.removalPreview'
   | 'members.remove'
   | 'members.reorder'
@@ -4417,6 +4467,24 @@ export type CoreMethod =
   | 'channels.credentials.get'
   | 'channels.credentials.listPublished'
   | 'channels.credentials.delete'
+  | 'channels.chat.snapshot'
+  | 'channels.chat.submit'
+  | 'channels.chat.result'
+  | 'channels.chat.pending'
+  | 'channels.chat.tools.claim'
+  | 'channels.chat.tools.settle'
+  | 'channels.chat.inbound'
+  | 'channels.chat.turn.append'
+  | 'channels.chat.context'
+  | 'channels.chat.item.create'
+  | 'channels.chat.item.update'
+  | 'channels.chat.items.waiting'
+  | 'channels.chat.items.active'
+  | 'channels.chat.ownerTarget'
+  | 'channels.chat.outbound.enqueue'
+  | 'channels.chat.outbound.claim'
+  | 'channels.chat.outbound.settle'
+  | 'channels.chat.outbound.cancel'
   | 'channels.developerSession.get'
   | 'channels.developerSession.replace'
   | 'channels.developerSession.delete'
@@ -4429,6 +4497,7 @@ export type CoreMethod =
   | 'channels.feishu.publicationIntent.advance'
   | 'channels.feishu.publicationIntent.storeCredential'
   | 'channels.feishu.memberBot.upsert'
+  | 'channels.feishu.memberBot.delete'
   | 'channels.feishu.owner.verify'
   | 'channels.feishu.dm.startNew'
   | 'channels.feishu.pendingBinding.resolve'

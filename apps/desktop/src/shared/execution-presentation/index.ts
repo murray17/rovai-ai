@@ -28,6 +28,7 @@ export function railExpandedFromWidth(width: number): boolean {
 export function allNavigationThreads(navigation: NavigationSnapshot): NavigationThreadItem[] {
   return [
     ...navigation.quickChat.recentThreads,
+    ...(navigation.chatBot?.recentThreads ?? []),
     ...navigation.projects.flatMap((project) => project.recentThreads)
   ].sort((left, right) => {
     if (left.lastActivityGlobalSequence !== right.lastActivityGlobalSequence) {

@@ -136,7 +136,11 @@ DingTalk-only Snapshot 直接把
 | failed，无 App ID | 需处理 / 远端创建结果待核对 | 安全失败可重试；true unknown 不提供重建入口 |
 | disabled（历史数据状态） | 已停用 | 重新发布同一 App |
 
-已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。“飞书管理”或“钉钉管理”是带可访问名称的外部链接，使用 Main
+已发布行不打开 Rovai 管理 Dialog，也不提供停用命令。Desktop 原生飞书页在“飞书管理”旁提供“删除”，
+仅清除本地发布绑定和凭据；已发布但连接失败或账号断开仍可删除，发布中或 Host 不可用时禁用。
+确认框标题为“删除发布记录？”，说明“仅清除本地发布记录和凭据，不删除飞书 Bot、队员或聊天记录。”，
+展示队员与冻结 App ID。失败保留弹窗及原发布事实；成功恢复“未发布”，下次发布创建新应用而非恢复旧 App。
+此入口不扩展到 Web、Lark 或钉钉；远端 Bot 不受影响。“飞书管理”或“钉钉管理”是带可访问名称的外部链接，使用 Main
 从该 Bot 绑定账号与冻结 App ID 生成的精确 `managementUrl`，以 `_blank + noreferrer noopener` 交给 Electron 在系统
 浏览器打开。链接不依赖当前 Developer Session 的连接状态；Renderer 不拼接或接受任意 URL。关闭、停用、删除等
 远端应用治理只在官方开放平台完成。

@@ -78,6 +78,8 @@ Enable Web access in Rovai Desktop, or run an independent Rovai Server on your o
 
 Rovai Desktop also connects to **Feishu and DingTalk**, so you can send requests and receive results in those channels. See the channel guide for setup and availability.
 
+A published Feishu Bot can also run in **chat mode**: colleagues can ask about a shared materials folder, forward messages, or ask the Bot to contact someone, while the Bot never gains local work access.
+
 <p align="center"><a href="docs/assets/readme/remote-access.png"><img src="docs/assets/readme/remote-access.png" alt="Reference layout of Rovai's mobile conversation and Desktop Channels settings" width="100%"></a></p>
 
 [Deployment and remote access](https://rovai.dev/docs/remote.html) · [Channels](https://rovai.dev/docs/channels.html)

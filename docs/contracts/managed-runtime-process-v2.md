@@ -37,8 +37,9 @@ Runtime 上报 PID 的归属核验也由此边界拥有。Windows 整树所有�
 兼容 command shim 与原生子进程的不同 PID；未知、无权查询、已退出或其他 Job 的进程均不通过。
 其他平台继续核对受管根 PID。调用方不通过全局进程枚举、名称或仅有父 PID 关系替代这一证据。
 
-Managed Process 直接启动捕获的 application 与结构化 argv，不配置 User Automation protected tree，
-不增加 Rovai 自有文件访问沙箱。Runtime 原生权限与沙箱由对应 Runtime 控制。
+默认 `shared` / `git_worktree` 的 Managed Process 直接启动捕获的 application 与结构化 argv，不配置 User Automation protected tree，
+不增加 Rovai 自有文件访问沙箱。显式 `windows_account` 使用下述账户 bootstrap；它是 Windows 账户身份边界，不是文件白名单或零落盘承诺。
+Runtime 原生权限与沙箱仍由对应 Runtime 控制。
 
 capture 先验证 application 是已存在的绝对文件，再冻结工作目录与显式环境。普通 capture 不按 PATH 或 cwd 解析 bare/
 relative application；调用方必须先完成自身已有的 Runtime discovery 与 entrypoint qualification。argv 始终保持结构化
@@ -89,9 +90,13 @@ Windows 执行测试。由于 `cmd.exe` 无法为所有 `%1`/`%*` consumer 无�
 `%` 或末尾 `\` 时必须在 CreateProcess 前 fail closed，不能静默改变 argv 或尝试猜测脚本的二次解析方式。路径中的
 `%!&^` 仍通过冻结的内部环境变量安全传递；已验证 Codex npm/pnpm shim 则绕过 batch，直接启动 native executable。
 
+Windows 原生 EXE 的文件身份仍按 canonical 路径冻结并在启动前复核；传给 `CreateProcessW` 的
+`lpApplicationName` 使用安全可简化的等价普通路径，避免 Git 等工具把 `\\?\` 模块路径错误用于安装配置定位。
+必须保留扩展形式的路径不强行去前缀；不改变结构化 argv、文件锁、identity 比较或 Job 归属。
+
 ## 2. Windows atomic launch
 
-顺序固定：
+默认 `shared` / `git_worktree` 顺序固定：
 
 ```text
 Create Job Object
@@ -108,6 +113,44 @@ Create Job Object
 Handle list 只包含本次显式创建为 inheritable 的 stdin/stdout/stderr handles。Job、token、Context、journal、
 SQLite、日志和 Core 内部 handles 必须不可继承且不在列表中。不得设置任一 breakaway flag。创建失败、Job
 attribute 不可用、嵌套 Job 不兼容或 handle policy 不能证明时，输入投递前 fail closed。
+
+### 显式 Windows account bootstrap
+
+`AgentRunWorkspace.isolation = windows_account` 为 Windows Claude/Codex/CodeBuddy/OpenCode 提供显式、实验性账户启动接线；账户档不等于逐 Runtime 完整资格通过。
+未选择该值时不读取账户配置、不解密凭据、不改变环境，也不经过 helper。部署配置与当前验收限制见
+[Windows 账户启动](../development/windows-account-runtime.md)。不支持的平台、缺失配置、登录或归属失败不能回退到宿主账户。
+
+该档由宿主 `rovai-core` / `rovai-host` 的同一 EXE 作为可信 bootstrap：普通 `CreateProcessWithLogonW` 启动后，
+helper 在 stdin 等待请求，尚不创建 Runtime 或输入文件。宿主确认 token 非提升且不属于 Administrators，
+将 helper 加入本代 kill-on-close Job，成功后才向私有 pipe 发送结构化启动帧。未收到完整帧或 EOF 的 helper 退出；
+赋 Job、写入或 READY 失败由原始进程句柄终止并等待回收，关闭 Job 收口已创建后代。此 bootstrap **不声称原子入 Job**，
+等待帧的窗口没有 Runtime 执行；目标 Runtime 仍由 helper 内既有 `STARTUPINFOEX + JOB_LIST + HANDLE_LIST` 路径创建。
+
+账号密码仅在宿主从 owner-bound DPAPI 文件解密，不进入命令行、环境、启动帧或日志。目标 Runtime 的完整 argv、
+显式环境及输入文件内容经内存 pipe 交付，避免 WithLogonW 的 1024 字符命令行限制；文件以 base64 传输，总帧上限 16 MiB，超限拒绝而非截断。捕获的目标 EXE 与完整 NativeExecutable/CommandShim identity 在两端核对；shim 继续由原受控 batch serializer 和冻结 System32 interpreter 启动，不猜测 npm 为 EXE。
+宿主可观察 PID 是目标 Runtime PID，根退出等待的是转发相同退出码的 helper；资源回收仍以宿主持有的外层 Job 归零为准。
+派生 one-shot 保留账户配置，Codex Fleet 的兼容键包含账户配置摘要，不把账户 Host 当作 shared Host 复用。
+
+HOME、USERPROFILE、APPDATA、LOCALAPPDATA、TEMP/TMP、Claude/Codex、CodeBuddy、Qwen 与 XDG 目录定向到显式 profileRoot；OpenCode 的宿主绝对 config/DB 覆盖与 Node 注入覆盖不继承。
+原冻结 Runtime/provider 环境继续保留（可能含宿主认证变量），只去除部署控制键；这不是 provider 账号隔离，
+也不赋予账户对 cwd、CLI、附件或 Built-in IPC 的访问权。
+Claude 原有私有 bootstrap/settings/MCP 文件仍由宿主原 Builder 创建并持有，内容随后经 pipe 在目标账户临时目录重建；
+helper 在 Runtime Job 归零后删除目标副本，宿主副本仍按原 Adapter 生命周期删除。强制终止 helper 时目标临时副本可能保留。
+因此本档不声明“全生命周期从未落盘”，也不靠改 HOME 推断宿主读权限。
+
+### ACP account 文件和 Built-in 边界
+
+账户启动不得自动 grant、repair 或修改 cwd/程序/资料目录 ACL。部署缺少访问权限由目标账户的真实 OS 打开/创建操作拒绝；不回退宿主身份，不撤销或推断历史已有 ACE。
+
+ACP Host 和派生 Terminal launch snapshot 保留账户配置；Host compatibility 包含隔离档和部署摘要。CodeBuddy 的确切冷恢复文件使用账户实际配置目录与同账户文件操作，不读宿主旧历史。账户 native journal tail 尚未资格化时明确不可用，保留结构化 ACP Usage，不能按宿主默认目录补齐。
+
+OpenCode 的非秘密 compaction observer 程序复用 bootstrap 内存输入传输到本次账户 TEMP，仅替换声明的 plugin URL；宿主原私有文件权限保持。账户 PowerShell 模块路径只选系统/ProgramFiles已有模块，不继承宿主 Home 模块路径。Hook outbox 的完整事件资格仍需独立验收，不能以文件可读推断。
+
+ACP Client FS 在新建专用 OS 线程中以已验证非管理员 bootstrap token 执行实际读写。线程不回 Tokio 池；Run scope 结束拒绝新操作并等待已进入的操作，Host 关闭同样等待文件操作；文件关闭错误不能跳过受管进程/Terminal 的有界终止和 Job 回收。异常或取消不能在结算后由宿主身份补写。
+
+账户 Built-in 使用独立随机 named pipe，DACL 限本次账户登录 SID 和 SYSTEM，主宿主 pipe 不改变。每个请求还核对客户进程属于本次 Managed Job、精确 process identity；当前租约从内存读取，业务仍交原 Core lease/epoch 鉴权。该通道不是账户 SID 白名单或 Everyone 放行，不复制宿主 context/history/login 文件。退出关闭专用通道。
+
+模型指定本地附件或 avatar source 由当前账户以同一 token 实际打开并观察；规范化与完整 schema 校验后进入原业务，私有源由 OS 拒绝。头像只把读取到的 bytes 交原格式/大小/取景与受管写入逻辑，不先账户检查再宿主 reopen。真实模型、Skill/MCP、附件与终止资格分别记录；CodeBuddy/OpenCode 接线没有批量晋升其他 Runtime。首批两者的 ACP Client Terminal capability 仍为 disabled；未来启用的派生新登录/Job 不能借宿主桥权限。
 
 ## 3. Application and argv
 

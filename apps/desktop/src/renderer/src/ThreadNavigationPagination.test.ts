@@ -23,6 +23,12 @@ function snapshot(rows: NavigationThreadItem[], limits: NavigationGroupLimits = 
         ...row, id: `quick-${row.id}`, projectBindingKind: 'quick_chat', projectPath: ''
       }))
     },
+    chatBot: {
+      totalCount: rows.length,
+      recentThreads: rows.slice(0, limits['chat-bot'] ?? 5).map(row => ({
+        ...row, id: `bot-${row.id}`, navigationGroupKey: 'chat-bot'
+      }))
+    },
     projects: [{
       projectKey: 'directory:/repo', projectPath: '/repo', name: 'repo',
       lastActivityAt: '', lastActivityGlobalSequence: 1, totalCount: rows.length,
@@ -47,11 +53,13 @@ function harness(pinnedThreadIds: string[] = []) {
     if (request.groupKeys) {
       next.projects = next.projects.filter(group => request.groupKeys?.includes(group.projectKey))
       if (!request.groupKeys.includes('quick-chat')) next.quickChat = { totalCount: 0, recentThreads: [] }
+      if (!request.groupKeys.includes('chat-bot')) next.chatBot = { totalCount: 0, recentThreads: [] }
     }
     return next
   })
   const readThreads = vi.fn(async (ids: string[]) => {
-    const threads = [...rows, ...snapshot(rows, { 'quick-chat': rows.length }).quickChat.recentThreads]
+    const full = snapshot(rows, { 'quick-chat': rows.length, 'chat-bot': rows.length })
+    const threads = [...rows, ...full.quickChat.recentThreads, ...full.chatBot!.recentThreads]
       .filter(row => ids.includes(row.id))
     return { throughGlobalSequence: 1, groupKeys: [...new Set(threads.map(navigationGroupKey))], threads }
   })
@@ -66,7 +74,7 @@ function harness(pinnedThreadIds: string[] = []) {
     visibleRows: () => current ? navigationGroupWindow(current.projects[0], limits['directory:/repo'] ?? 5, new Set(pinnedThreadIds)).threads : [],
     groupWindow: (key = 'directory:/repo') => {
       if (!current) throw new Error('No navigation snapshot')
-      const group = key === 'quick-chat' ? current.quickChat : current.projects.find(project => project.projectKey === key)!
+      const group = key === 'chat-bot' ? current.chatBot! : key === 'quick-chat' ? current.quickChat : current.projects.find(project => project.projectKey === key)!
       return navigationGroupWindow(group, limits[key] ?? 5, new Set(pinnedThreadIds))
     },
     setPins: (ids: string[]) => { pinnedThreadIds = ids; return reader.refreshPins() },
@@ -96,12 +104,12 @@ describe('authoritative Thread navigation windows', () => {
   }
 
   it('fills five unpinned rows in ordinary projects, pinned projects and Quick Chat', async () => {
-    const h = harness(['camp-3', 'camp-5', 'quick-camp-3', 'quick-camp-5'])
+    const h = harness(['camp-3', 'camp-5', 'quick-camp-3', 'quick-camp-5', 'bot-camp-3', 'bot-camp-5'])
     await h.reader.refresh('explicit')
     expect(h.visibleRows().map(row => row.id)).toEqual(['camp-1', 'camp-2', 'camp-4', 'camp-6', 'camp-7'])
     for (const pinnedProject of [false, true]) {
       const markup = h.markup(pinnedProject)
-      for (const key of ['directory:/repo', 'quick-chat']) {
+      for (const key of ['directory:/repo', 'quick-chat', 'chat-bot']) {
         const group = groupMarkup(markup, key)
         expect(group.match(/data-thread-id=/g)).toHaveLength(5)
         expect(group).toContain('查看更多')
@@ -117,18 +125,46 @@ describe('authoritative Thread navigation windows', () => {
   it.each([0, 3, 5, 6])('only shows more when unpinned rows remain (%i unpinned)', async (count) => {
     const rows = Array.from({ length: count + 4 }, (_, index) => thread(index + 1))
     const pinIds = [rows[0], rows[1], ...rows.slice(-2)].map(row => row.id)
-    const h = harness([...pinIds, ...pinIds.map(id => `quick-${id}`)])
+    const h = harness([...pinIds, ...pinIds.map(id => `quick-${id}`), ...pinIds.map(id => `bot-${id}`)])
     h.setRows(rows)
     await h.reader.refresh('explicit')
     for (const pinnedProject of [false, true]) {
       const markup = h.markup(pinnedProject)
-      for (const key of ['directory:/repo', 'quick-chat']) {
+      for (const key of ['directory:/repo', 'quick-chat', 'chat-bot']) {
         const group = groupMarkup(markup, key)
         expect(group.match(/data-thread-id=/g) ?? []).toHaveLength(Math.min(count, 5))
         expect(group.includes('查看更多')).toBe(count > 5)
         expect(group).not.toContain('收起')
       }
     }
+    h.reader.dispose()
+  })
+
+  it('keeps Chat Bots in their authoritative group through pinning, paging, row updates and deletion', async () => {
+    const h = harness()
+    await h.reader.refresh('explicit')
+    const botGroup = groupMarkup(h.markup(), 'chat-bot')
+    expect(botGroup).toContain('聊天 Bot')
+    expect(botGroup).not.toContain('group-create-button')
+    expect(botGroup).not.toContain('group-menu-trigger')
+    expect(navigationGroupKey({ ...thread(1), navigationGroupKey: 'chat-bot' })).toBe('chat-bot')
+    h.read.mockClear()
+    await h.setPins(['bot-camp-3'])
+    expect(h.read).toHaveBeenLastCalledWith({ groupKeys: ['chat-bot'], groupLimits: { 'chat-bot': 6 } })
+    expect(h.groupWindow('chat-bot').threads.map(row => row.id)).toEqual(['bot-camp-1', 'bot-camp-2', 'bot-camp-4', 'bot-camp-5', 'bot-camp-6'])
+    await h.reader.resizeGroup('chat-bot', 15)
+    expect(h.groupWindow('chat-bot').threads).toHaveLength(15)
+    h.read.mockClear()
+    h.setRows(h.rows().map(row => row.id === 'camp-2' ? { ...row, title: 'Bot renamed', marker: 'loading' } : row))
+    await h.reader.refreshThreads(['bot-camp-2'], 'explicit')
+    expect(h.read).not.toHaveBeenCalled()
+    expect(h.groupWindow('chat-bot').threads[1]).toMatchObject({ title: 'Bot renamed', marker: 'loading' })
+    expect(h.visibleRows()[1].title).toBe('对话 2')
+    await h.reader.resizeGroup('chat-bot', 5)
+    h.setRows(h.rows().filter(row => row.id !== 'camp-1'))
+    await h.reader.refreshGroups(['chat-bot'], 'explicit')
+    expect(h.groupWindow('chat-bot').threads.map(row => row.id)).toEqual(['bot-camp-2', 'bot-camp-4', 'bot-camp-5', 'bot-camp-6', 'bot-camp-7'])
+    expect(h.visibleRows()[0].id).toBe('camp-1')
     h.reader.dispose()
   })
 

@@ -38,7 +38,7 @@ export function hasMemberCreationInput(draft: ThreadComposerDraftView | null): b
 /** Window-local drafts augment display only. Core navigation and startup remain unchanged. */
 export function navigationWithMemberCreationDrafts(navigation: NavigationSnapshot | null, drafts: ReadonlyMap<string, MemberCreationDraft>): NavigationSnapshot | null {
   if (!navigation) return null
-  const existing = new Set([ ...navigation.quickChat.recentThreads, ...navigation.projects.flatMap((project) => project.recentThreads) ].map((thread) => thread.id))
+  const existing = new Set([ ...navigation.quickChat.recentThreads, ...(navigation.chatBot?.recentThreads ?? []), ...navigation.projects.flatMap((project) => project.recentThreads) ].map((thread) => thread.id))
   const rows = [...drafts.values()].filter((entry) => hasMemberCreationInput(entry.draft) && !existing.has(entry.navigation.id))
     .map(({ navigation: thread, draft }) => ({ ...thread, title: draft?.body.trim().split('\n')[0]?.slice(0, 60) || uiAttribute('新建队员') }))
   if (rows.length === 0) return navigation

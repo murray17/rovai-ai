@@ -25,12 +25,20 @@ app
         backgroundThrottling: false
       }
     })
+    // Hidden Windows windows run animation frames at 1 Hz even without background throttling.
+    // Show without activating so native input and real animation frames remain exercised.
+    if (process.platform === 'win32') window.showInactive()
     const errors = []
     window.webContents.on('console-message', (event) => {
       if (event.level === 'error') { errors.push(event.message); console.error(event.message) }
     })
     await window.loadFile(renderer)
+    // Keep focus stable without stealing the active desktop window.
+    window.webContents.debugger.attach('1.3')
+    await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     const run = async (expression) => {
+      const started = Date.now()
+      if (process.env.ROVAI_UI_FIXTURE_TRACE === '1') console.error('member run: ' + expression)
       let timer
       try {
         return await Promise.race([
@@ -46,6 +54,7 @@ app
         throw new Error(`Renderer expression failed: ${expression}`, { cause: error })
       } finally {
         clearTimeout(timer)
+        if (process.env.ROVAI_UI_FIXTURE_TRACE === '1') console.error(`member done (${Date.now() - started}ms)`)
       }
     }
     const wait = async (expression) => {
@@ -71,6 +80,7 @@ app
       const point = await run(
         `(() => { const node = ${expression}; if (!node) throw new Error('Missing ' + ${JSON.stringify(selector + ':' + (text ?? ''))}); node.scrollIntoView({ block: 'nearest' }); const box = node.getBoundingClientRect(); return { x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) } })()`
       )
+      window.webContents.sendInputEvent({ type: 'mouseMove', ...point })
       window.webContents.sendInputEvent({
         type: 'mouseDown',
         ...point,
@@ -105,6 +115,7 @@ app
     const openParameter = async index => {
       const label = await run(`document.querySelectorAll(${JSON.stringify(parameterButtons)})[${index}].getAttribute('aria-label')`)
       await click(`button[aria-label=${JSON.stringify(label)}]`)
+      await wait("document.querySelector('[role=menuitemradio] .runtime-model-picker-copy strong')")
     }
     const selectPermission = async (index, value) => {
       await openParameter(index)
@@ -122,9 +133,18 @@ app
       const loaded = require('node:events').once(window.webContents, 'did-finish-load')
       // A fixture reset deliberately discards its own draft; normal UI guard
       // behavior is exercised separately above and below these reset points.
-      window.webContents.once('will-prevent-unload', (event) => event.preventDefault())
-      window.webContents.reload()
-      await loaded
+      const discardDraft = event => event.preventDefault()
+      window.webContents.once('will-prevent-unload', discardDraft)
+      let timer
+      try {
+        window.webContents.reload()
+        await Promise.race([loaded, new Promise((_, reject) => {
+          timer = setTimeout(() => reject(Error('Reload did not finish')), 12_000)
+        })])
+      } finally {
+        clearTimeout(timer)
+        window.webContents.removeListener('will-prevent-unload', discardDraft)
+      }
       await wait(`document.querySelector(${JSON.stringify(textInput)})`)
       await settle()
     }
@@ -145,6 +165,8 @@ app
       window.webContents.sendInputEvent({ type: 'mouseUp', x: start.x + (Array.isArray(widths.at(-1)) ? widths.at(-1)[0] : widths.at(-1)) - start.width, y: start.y, button: 'left', clickCount: 1 })
       await wait('!document.querySelector(".member-editor-roster-shell").classList.contains("is-resizing")')
       await settle()
+      // A released pointer may still be finishing the accepted collapse animation.
+      await wait('!document.querySelector(".member-editor-roster-shell").classList.contains("is-resizing")')
       assert.equal(await run('document.querySelector(".member-editor-roster-shell").classList.contains("is-resizing")'), false)
       return observed
     }
@@ -152,10 +174,47 @@ app
     await settle()
     const cases = []
     const check = async (name, action) => {
+      if (process.env.ROVAI_MEMBER_EDITOR_CASE && !name.includes(process.env.ROVAI_MEMBER_EDITOR_CASE)) return
       console.log(`Checking: ${name}`)
+      const started = Date.now()
       await action()
+      console.log(`Passed (${Date.now() - started}ms): ${name}`)
       cases.push(name)
     }
+    await check('chat materials hint and independent folder/switch interaction', async () => {
+      const chat = `${active}.member-chat-bot`
+      const input = `${chat} input`
+      await wait(`document.querySelector(${JSON.stringify(input)})`)
+      assert.equal(await run(`document.querySelector(${JSON.stringify(input)}).disabled`), true)
+      assert.equal(await run(`document.querySelector(${JSON.stringify(chat)}).textContent.includes('请先选择资料文件夹，再开启聊天 Bot。')`), true)
+      for (const theme of ['day', 'night']) {
+        await run(`window.memberFixture.theme('${theme}')`)
+        for (const width of [1440, 1040]) {
+          window.setContentSize(width, 920)
+          await run(`document.querySelector(${JSON.stringify(chat)}).scrollIntoView({ block: 'center' })`)
+          await settle()
+          const rect = await run(`(() => { const n = document.querySelector(${JSON.stringify(chat)}); const b = n.getBoundingClientRect(); const button = n.querySelector('button').getBoundingClientRect(); const hint = n.querySelector('.member-chat-bot-hint'); return { x: Math.floor(b.x), y: Math.floor(b.y), width: Math.ceil(b.width), height: Math.ceil(b.height), buttonHeight: button.height, overflow: n.scrollWidth > n.clientWidth, hintVisible: !!hint && hint.getBoundingClientRect().height > 0 } })()`)
+          assert.equal(rect.overflow, false)
+          assert.equal(rect.hintVisible, true)
+          assert.ok(rect.buttonHeight < 45)
+          const { buttonHeight, overflow, hintVisible, ...clip } = rect
+          writeFileSync(join(dirname(userData), `chat-materials-${theme}-${width}.png`), (await window.webContents.capturePage(clip)).toPNG())
+        }
+      }
+      window.setContentSize(1440, 920)
+      await run("window.memberFixture.theme('day')")
+      await click(input)
+      assert.equal(await run('window.memberFixture.calls.filter(call => call.method === \"channels.selectChatMaterialsDirectory\").length'), 0)
+      await click(`${chat} button`, '资料文件夹')
+      await wait(`!document.querySelector(${JSON.stringify(input)}).disabled`)
+      assert.equal(await run(`document.querySelector(${JSON.stringify(input)}).checked`), false)
+      assert.equal(await run(`!!document.querySelector(${JSON.stringify(chat + ' .member-chat-bot-hint')})`), false)
+      await click(input)
+      await wait('window.memberFixture.profiles()[0].chatBotEnabled === true')
+      assert.equal(await run('window.memberFixture.calls.filter(call => call.method === \"channels.selectChatMaterialsDirectory\").length'), 1)
+      assert.equal(await run('window.memberFixture.profiles()[0].chatMaterialsPath'), 'C:/验收资料/团队备忘录')
+      await reloadPage()
+    })
     await check('approved day geometry and native fields', async () => {
       assert.deepEqual(await geometry(), {
         appRail: 270,
@@ -1125,6 +1184,7 @@ app
       assert.equal((await geometry()).overflow, false)
     })
     assert.deepEqual(errors, [])
+    assert.ok(cases.length > 0, 'At least one member editor case must run')
     console.log(JSON.stringify({ ok: true, cases }))
     window.destroy()
     app.exit(0)

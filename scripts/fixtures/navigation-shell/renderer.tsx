@@ -39,6 +39,10 @@ const runningCamp = {
   ...pinnedCamp, id: 'rvcamp_01h47kvsy5fk1shh6w1g60eec2', title: '会话 sidecar 交互优化与实现',
   projectBindingKind: 'directory', projectPath: '/fixture/rovai-ai', marker: 'loading', lastSeenGlobalSequence: 0
 } satisfies NavigationThreadItem
+const botThreads: NavigationThreadItem[] = Array.from({ length: 7 }, (_, index) => ({
+  ...runningCamp, id: `rvcamp_01h47kvsy5fk1shh6w1g60eeb${index}`, title: `聊天 Bot 对话 ${index + 1}`,
+  navigationGroupKey: 'chat-bot', marker: 'none', latestCompletionGlobalSequence: 0
+}))
 const navigationSnapshot = {
   schemaVersion: 3,
   throughGlobalSequence: 2,
@@ -54,6 +58,10 @@ function Fixture(): React.JSX.Element {
   const [threadReadStates, setReadStates] = useState<Record<string, NavigationThreadReadState>>({})
   const [running, setRunning] = useState(true)
   const [longLabels, setLongLabels] = useState(false)
+  const [bots, setBots] = useState(botThreads)
+  const [pins, setPins] = useState<NavigationPin[]>(navigationPins)
+  const [groupLimits, setGroupLimits] = useState<Record<string, number>>({})
+  const [activeThreadId, setActiveThreadId] = useState(pinnedCamp.id)
   useEffect(() => {
     void preferences.get().then(snapshot => setReadStates(snapshot.threadReadStates))
     return preferences.onChanged(snapshot => setReadStates(snapshot.threadReadStates))
@@ -74,7 +82,7 @@ function Fixture(): React.JSX.Element {
   document.documentElement.dataset.rovaiSurface = browser ? 'web' : 'desktop'
   Object.assign(window, { navigationTest: {
     renders: () => renders, setSettings, setPlatform, setDisabled, setBrowser, navigation, target, actions, setRunning, setLongLabels,
-    threadReadStates, preferences,
+    threadReadStates, preferences, bots, groupLimits, pins, activeThreadId,
     projectPreferences: browserPreferences('project-concurrency-fixture', { request: async () => undefined } as unknown as ConsoleClient).preferences.navigationPreferences,
     hostNavigation: (direction: 'back' | 'forward') => navigationListeners.forEach(listener => listener(direction)),
     hostListenerCount: () => navigationListeners.size,
@@ -82,14 +90,25 @@ function Fixture(): React.JSX.Element {
   } })
   return <><WindowsApplicationMenu /><NavigationShell platform={platform} browser={browser} disabled={disabled} settings={settings} navigation={navigation} nativeWindowControls={browser ? undefined : window.rovai.windowControls}>
     <ThreadNavigation platform={platform} view={settings ? 'settings' : 'compose'} state="ready"
-      navigation={{ ...navigationSnapshot, projects: navigationSnapshot.projects.map(project => ({ ...project,
+      navigation={{ ...navigationSnapshot, chatBot: { totalCount: bots.length, recentThreads: bots }, projects: navigationSnapshot.projects.map(project => ({ ...project,
         name: longLabels ? 'Rovai AI 长期协作工作区与菜单栏交互完整项目名称' : project.name,
         recentThreads: [{ ...runningCamp, title: longLabels ? '会话长标题在侧栏和搜索结果中只做末尾透明度淡出，切换宽度与短名称后重新判断是否需要截断' : runningCamp.title,
           marker: running ? 'loading' : 'none' }] })) }}
-      pins={navigationPins} activeThreadId={pinnedCamp.id} pendingMemoryCount={0} threadReadStates={threadReadStates}
+      pins={pins} activeThreadId={activeThreadId} pendingMemoryCount={0} threadReadStates={threadReadStates}
+      groupLimits={groupLimits} onGroupLimitChange={async (key, limit) => setGroupLimits(current => ({ ...current, [key]: limit }))}
+      onTogglePin={async (kind, targetKey) => setPins(current => current.some(pin => pin.kind === kind && pin.targetKey === targetKey)
+        ? current.filter(pin => pin.kind !== kind || pin.targetKey !== targetKey)
+        : [...current, { kind, targetKey, pinnedAt: new Date().toISOString() }])}
       onNewConversation={() => { actions.push('new-chat') }} onMembers={noop} onMemory={noop} onSettings={() => setSettings(true)} onSettingsBack={() => setSettings(false)}
       onCreateInProject={() => { actions.push('new-chat') }} onRenameProject={async () => undefined}
-      onOpenProject={noop} onThread={() => { actions.push('open-thread') }} onRemoveProject={async () => undefined} onRename={async () => undefined} onDelete={async () => undefined} onError={error => { throw error }}
+      onOpenProject={noop} onThread={thread => {
+        actions.push('open-thread')
+        setActiveThreadId(thread.id)
+        if (thread.navigationGroupKey === 'chat-bot' && threadReadStates[thread.id]?.manualUnread) void preferences.setThreadReadState(thread.id, { ...threadReadStates[thread.id], manualUnread: false })
+      }} onRemoveProject={async () => undefined}
+      onRename={async (thread, title) => { setBots(current => current.map(item => item.id === thread.id ? { ...item, title } : item)) }}
+      onDelete={async thread => { setBots(current => current.filter(item => item.id !== thread.id)) }}
+      onError={error => { throw error }}
       onRevealProject={browser ? undefined : async project => { actions.push('reveal:' + project.projectPath) }}
       onProjectPathCopied={() => { actions.push('copied-path') }}
       onSetThreadUnread={async (thread, unread) => { await preferences.setThreadReadState(thread.id, navigationThreadReadState(thread, unread, threadReadStates[thread.id])) }} />

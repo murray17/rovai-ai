@@ -93,6 +93,19 @@ pub fn project_builtin_tool_invocation(
 fn project_input(operation: &str, input: &Value) -> Result<Value> {
     let mut projected = Map::new();
     match operation {
+        "feishu.status" | "feishu.search" | "feishu.result" | "feishu.forward" | "feishu.ask"
+        | "feishu.items" | "feishu.report" | "feishu.close" => {
+            for field in ["inputRef", "targetRef", "itemId", "requestId"] {
+                insert_identifier(&mut projected, field, input.get(field));
+            }
+            insert_content_facts(
+                &mut projected,
+                input
+                    .get("text")
+                    .or_else(|| input.get("question"))
+                    .or_else(|| input.get("query")),
+            );
+        }
         "thread.runs" => {
             for field in ["threadId", "agentId"] {
                 insert_identifier(&mut projected, field, input.get(field));
@@ -354,6 +367,27 @@ fn project_memory_mutation_input(projected: &mut Map<String, Value>, input: &Val
 fn project_result(operation: &str, result: &Value) -> Result<Value> {
     let mut projected = Map::new();
     match operation {
+        "feishu.status" | "feishu.search" | "feishu.result" | "feishu.forward" | "feishu.ask"
+        | "feishu.items" | "feishu.report" | "feishu.close" => {
+            if result
+                .get("status")
+                .and_then(Value::as_str)
+                .is_some_and(|s| {
+                    matches!(
+                        s,
+                        "ready" | "queued" | "sent" | "failed" | "unknown" | "closed"
+                    )
+                })
+            {
+                insert_enum(&mut projected, "status", result.get("status"));
+            }
+            insert_identifier(&mut projected, "requestId", result.get("requestId"));
+            for field in ["contacts", "items", "inputs"] {
+                if let Some(items) = result.get(field).and_then(Value::as_array) {
+                    projected.insert(format!("{field}Count"), json!(items.len()));
+                }
+            }
+        }
         "thread.runs" => {
             insert_identifier(&mut projected, "threadId", result.get("threadId"));
             insert_bounded_string(&mut projected, "observedAt", result.get("observedAt"), 64);
@@ -1114,6 +1148,15 @@ mod tests {
 
     #[test]
     fn every_current_builtin_catalog_operation_has_start_and_terminal_projections() {
+        let safe = projection(
+            "feishu.ask",
+            json!({"targetRef":"target-1","question":"private question"}),
+            json!({"status":"queued","requestId":"request-1","contacts":[{"name":"private contact","appSecret":"secret"}],"items":[],"inputs":[],"errorCode":"raw provider secret"}),
+        );
+        assert!(!safe.to_string().contains("private question"));
+        assert!(!safe.to_string().contains("private contact"));
+        assert!(!safe.to_string().contains("secret"));
+        assert_eq!(safe["canonicalResult"]["contactsCount"], 1);
         for operation in TEAM_TOOL_NAMES {
             let input = json!({});
             let result = json!({});

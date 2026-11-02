@@ -246,7 +246,13 @@ impl Core {
             search.with_generation(self.runtime_search_environment.read().await.generation())
         }
         .with_startup_configuration(kind, check_configuration);
-        search.activate_for_runtime_commands();
+        #[cfg(test)]
+        let activate_host_environment = self.runtime_search_capture.is_none();
+        #[cfg(not(test))]
+        let activate_host_environment = true;
+        if activate_host_environment {
+            search.activate_for_runtime_commands();
+        }
         *self.runtime_search_environment.write().await = Arc::new(search);
         if settings.reconnect_required {
             self.native_skill_discovery.invalidate_cache();

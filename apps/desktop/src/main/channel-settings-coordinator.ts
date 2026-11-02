@@ -136,6 +136,11 @@ export class ChannelSettingsCoordinator {
     })
   }
 
+  async deleteMemberBot(agentId: string, expectedAppId: string, kind: ChannelKind = 'feishu'): Promise<ChannelSettingsSnapshot> {
+    if (kind !== 'feishu') throw new Error('channel_local_delete_not_supported')
+    return this.#publication(kind, () => this.#service(kind).deleteMemberBot(agentId, expectedAppId))
+  }
+
   async selectPublicationApprover(
     agentId: string,
     userId: string,

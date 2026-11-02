@@ -67,6 +67,22 @@ impl PrivateSecurityDescriptor {
             }
             PrivateObjectKind::NamedPipe => current_windows_logon_sid()?,
         };
+        Self::for_principal(kind, principal_sid)
+    }
+
+    pub(crate) fn for_account_pipe(principal_sid: String) -> Result<Self> {
+        anyhow::ensure!(
+            principal_sid.starts_with("S-1-5-5-")
+                && principal_sid
+                    .split('-')
+                    .skip(1)
+                    .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())),
+            "account pipe requires a logon SID"
+        );
+        Self::for_principal(PrivateObjectKind::NamedPipe, principal_sid)
+    }
+
+    fn for_principal(kind: PrivateObjectKind, principal_sid: String) -> Result<Self> {
         let sddl = match kind {
             PrivateObjectKind::Directory => {
                 format!("O:{principal_sid}D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;{principal_sid})")
@@ -405,7 +421,13 @@ fn current_windows_user_sid() -> Result<String> {
 
 fn current_windows_logon_sid() -> Result<String> {
     let token = current_process_token()?;
-    let buffer = token_information(&token, TokenLogonSid)?;
+    logon_sid_for_token(token.0)
+}
+pub(crate) fn logon_sid_for_token(token: HANDLE) -> Result<String> {
+    let token = TokenHandle(token);
+    let buffer = token_information(&token, TokenLogonSid);
+    std::mem::forget(token);
+    let buffer = buffer?;
     let token_groups = unsafe {
         // SAFETY: GetTokenInformation populated buffer with TOKEN_GROUPS.
         &*buffer.as_ptr().cast::<TOKEN_GROUPS>()

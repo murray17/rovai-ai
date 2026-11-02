@@ -437,6 +437,19 @@ pub struct UpsertChannelMemberBotCommand<const LARK: bool> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeleteFeishuMemberBotCommand {
+    pub agent_id: String,
+    pub expected_app_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for DeleteFeishuMemberBotCommand {}
+impl DomainCommand for DeleteFeishuMemberBotCommand {
+    const TYPE: &'static str = "feishu_member_bot.delete";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertDingTalkMemberBotCommand {
     pub account_id: String,
@@ -800,6 +813,8 @@ pub struct FeishuMemberBotView {
     pub failure_code: Option<String>,
     pub version: i64,
     pub owner_identity_status: String,
+    /// Chat mode configuration; absent means the Bot never left work mode.
+    pub chat: Option<crate::channel_chat::ChatBotConfigView>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1849,9 +1864,14 @@ impl ChannelService {
                     } else {
                         "unverified".to_string()
                     },
+                    chat: None,
                 })
             },
         )?;
+        let mut member_bots = member_bots;
+        for bot in &mut member_bots {
+            bot.chat = crate::channel_chat::config_for_app(connection, spec.provider, &bot.app_id);
+        }
         let publication_intents = query_rows(
             connection,
             &format!(
@@ -4204,6 +4224,119 @@ impl ChannelService {
                     entity_type: spec.code("member_bot").to_string(),
                     entity_id: envelope.payload.agent_id.clone(),
                 }),
+            ))
+        })
+    }
+
+    pub fn delete_feishu_member_bot(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<DeleteFeishuMemberBotCommand>,
+    ) -> Result<CommandExecution> {
+        anyhow::ensure!(
+            self.spec.provider == FEISHU_PROVIDER,
+            "channel command provider does not match service"
+        );
+        validate_nonempty(&envelope.payload.agent_id, "agentId")?;
+        validate_nonempty(&envelope.payload.expected_app_id, "expectedAppId")?;
+        anyhow::ensure!(
+            envelope.payload.expected_version >= 1,
+            "expectedVersion must be positive"
+        );
+        self.gateway.execute(database, envelope, |transaction| {
+            if !is_channel_host_for_provider(&envelope.actor, FEISHU_PROVIDER) {
+                return Ok(rejected("channel.host_required", "Only the trusted Feishu Channel Host can delete local Bot bindings"));
+            }
+            let command = &envelope.payload;
+            let binding = transaction.query_row(
+                "SELECT app_id, version, credential_ref FROM feishu_member_bot WHERE agent_id = ?1",
+                [&command.agent_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)),
+            ).optional()?;
+            let Some((app_id, version, credential_ref)) = binding else {
+                return Ok(rejected("feishu_member_bot.binding_conflict", "The local Bot binding no longer exists"));
+            };
+            if app_id != command.expected_app_id || version != command.expected_version {
+                return Ok(rejected("feishu_member_bot.binding_conflict", "The local Bot binding has changed"));
+            }
+            let active: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM feishu_member_bot_publication_intent WHERE agent_id = ?1 AND state NOT IN ('completed', 'failed_recoverable'))",
+                [&command.agent_id], |row| row.get(0),
+            )?;
+            if active {
+                return Ok(rejected("feishu_publication_intent.active_conflict", "An active publication must finish before deleting its local binding"));
+            }
+            if load_credential_identity(transaction, &credential_ref)?.is_some_and(
+                |(provider, remote_app_id, _)| provider != FEISHU_PROVIDER || remote_app_id != app_id,
+            ) {
+                return Ok(rejected("channel_credential.identity_conflict", "The stored credential belongs to another App"));
+            }
+            let referenced: bool = transaction.query_row(
+                r#"SELECT EXISTS(
+                    SELECT 1 FROM channel_member_bot_directory
+                    WHERE credential_ref = ?1 AND NOT (provider = 'feishu' AND agent_id = ?2)
+                    UNION ALL
+                    SELECT 1 FROM feishu_member_bot_publication_intent
+                    WHERE credential_ref = ?1 AND agent_id <> ?2
+                    UNION ALL
+                    SELECT 1 FROM lark_member_bot_publication_intent WHERE credential_ref = ?1
+                    UNION ALL
+                    SELECT 1 FROM dingtalk_member_bot_publication_intent WHERE credential_ref = ?1
+                )"#,
+                params![credential_ref, command.agent_id], |row| row.get(0),
+            )?;
+            if referenced {
+                return Ok(rejected("channel_credential.still_referenced", "Another Bot binding or publication still references this credential"));
+            }
+            let now = Utc::now();
+            let now_text = now.to_rfc3339();
+            transaction.execute(
+                "UPDATE channel_chat_outbound SET status = CASE WHEN lease_owner IS NULL THEN 'failed' ELSE 'unknown' END, failure_code = 'feishu_member_bot_deleted', updated_at = ?2 WHERE provider = 'feishu' AND app_id = ?1 AND status = 'pending'",
+                params![app_id, now.timestamp_millis()],
+            )?;
+            transaction.execute(
+                "UPDATE channel_chat_item SET status = 'paused', updated_at = ?2 WHERE provider = 'feishu' AND app_id = ?1 AND status = 'waiting'",
+                params![app_id, now.timestamp_millis()],
+            )?;
+            // Fence only this App's outbound work; Runs and historical bindings remain intact.
+            transaction.execute(
+                r#"UPDATE channel_delivery AS delivery
+                SET retry_suppression_json = json_object(
+                        'reasonCode', 'feishu_member_bot_deleted', 'workerId', lease_owner,
+                        'attemptCount', attempt_count,
+                        'outcomeUnknown', json(CASE WHEN status = 'attempting' THEN 'true' ELSE 'false' END)),
+                    failure_code = CASE WHEN status = 'attempting' THEN 'channel_delivery_outcome_unknown' ELSE 'feishu_member_bot_deleted' END,
+                    status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+                    ended_at = ?2, updated_at = ?2
+                WHERE target_app_id = ?1 AND status IN ('pending', 'attempting')
+                  AND COALESCE(
+                    (SELECT conversation.provider FROM channel_turn_request AS request
+                     JOIN channel_conversation_binding AS binding ON binding.id = request.binding_id
+                     JOIN channel_conversation AS conversation ON conversation.id = binding.channel_conversation_id
+                     WHERE request.id = delivery.request_id),
+                    (SELECT conversation.provider FROM pending_camp_binding AS pending
+                     JOIN channel_conversation AS conversation ON conversation.id = pending.channel_conversation_id
+                     WHERE pending.id = delivery.pending_binding_id),
+                    (SELECT conversation.provider FROM channel_conversation_binding AS binding
+                     JOIN channel_conversation AS conversation ON conversation.id = binding.channel_conversation_id
+                     WHERE binding.id = delivery.channel_binding_id)
+                  ) = 'feishu'"#,
+                params![app_id, now_text],
+            )?;
+            transaction.execute("DELETE FROM feishu_member_bot_publication_intent WHERE agent_id = ?1", [&command.agent_id])?;
+            let deleted = transaction.execute(
+                "DELETE FROM feishu_member_bot WHERE agent_id = ?1 AND app_id = ?2 AND version = ?3",
+                params![command.agent_id, app_id, version],
+            )?;
+            anyhow::ensure!(deleted == 1, "Bot binding changed during local deletion");
+            transaction.execute(
+                "DELETE FROM channel_credentials WHERE provider = 'feishu' AND credential_ref = ?1 AND remote_app_id = ?2",
+                params![credential_ref, app_id],
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "feishu_member_bot.deleted",
+                json!({"agentId": command.agent_id, "appId": app_id, "version": version}),
+                Some(EntityReference { entity_type: "feishu_member_bot".to_string(), entity_id: command.agent_id.clone() }),
             ))
         })
     }
@@ -11378,6 +11511,10 @@ fn claim_deliveries(
         FROM channel_delivery AS delivery
         WHERE delivery.status = 'pending' AND delivery.available_at <= ?1
           AND delivery.retry_suppression_json IS NULL
+          AND (?2 <> 'feishu' OR EXISTS (
+              SELECT 1 FROM feishu_member_bot AS bot
+              WHERE bot.app_id = delivery.target_app_id AND bot.status = 'published'
+          ))
           AND COALESCE(
               (
                   SELECT conversation.provider
@@ -20127,6 +20264,477 @@ mod tests {
         let snapshot = service.snapshot(&mut database).unwrap();
         assert_eq!(snapshot.member_bots[0].brand, "feishu");
         assert_eq!(snapshot.publication_intents[0].state, "completed");
+        assert_local_bot_delete_is_atomic_and_republication_is_fresh(&service, &mut database);
+    }
+
+    fn assert_local_bot_delete_is_atomic_and_republication_is_fresh(
+        service: &ChannelService,
+        database: &mut Database,
+    ) {
+        publish_bot(service, database, "agent_2", "cli_app_2");
+        let mut picker = pending_workspace_picker(service, database, "group", "delete-history");
+        picker.action = "quick_chat".into();
+        let quick_chat = quick_chat_path(database);
+        assert_eq!(
+            service
+                .resolve_pending_camp_binding(
+                    database,
+                    &quick_chat,
+                    &host_envelope("delete-history-bind", picker),
+                )
+                .unwrap()
+                .result
+                .status,
+            CommandResultStatus::Accepted
+        );
+        assert!(!claim_waiting_runs(database).is_empty());
+        let mut lark_account = host_envelope(
+            "delete-lark-account",
+            UpsertLarkAccountCommand {
+                account_id: "account_1".into(),
+                user_id_digest: opaque_digest("lark-user", "user_1"),
+                tenant_id: "tenant_1".into(),
+                user_name: "Lark Owner".into(),
+                email: None,
+                tenant_name: "Tenant".into(),
+                brand: "lark".into(),
+            },
+        );
+        lark_account.actor = ActorRef::System {
+            component_id: LARK_SPEC.host_component.into(),
+        };
+        ChannelService::for_spec(&LARK_SPEC)
+            .upsert_feishu_account(database, &lark_account)
+            .unwrap();
+        database.connection().execute(
+            "INSERT INTO lark_member_bot SELECT agent_id, account_id, app_id, bot_open_id, bot_display_name, 'lark/member/agent_1', status, failure_code, version, created_at, updated_at, published_at FROM feishu_member_bot WHERE agent_id = 'agent_1'", [],
+        ).unwrap();
+        database.connection().execute_batch(r#"
+            INSERT INTO channel_credentials(credential_ref, provider, credential_kind, remote_app_id, payload_json, schema_version, revision, created_at, updated_at)
+            VALUES ('feishu/member/agent_1', 'feishu', 'member_bot', 'cli_app_1', '{}', 1, 1, 0, 0),
+                   ('lark/member/agent_1', 'lark', 'member_bot', 'cli_app_1', '{}', 1, 1, 0, 0);
+            INSERT INTO channel_chat_message(id,provider,app_id,chat_id,conversation_kind,author_external_id,author_name,body,external_message_id,dedupe_key,received_at)
+            VALUES ('delete-history','feishu','cli_app_1','chat','p2p','owner','Owner','Keep history','history','delete-history',0);
+            INSERT INTO channel_chat_item(id,provider,app_id,requester_external_id,requester_name,destination_chat_id,destination_kind,target_external_id,target_name,question,status,created_at,updated_at)
+            VALUES ('delete-item','feishu','cli_app_1','owner','Owner','chat','p2p','target','Target','Question','waiting',0,0);
+            INSERT INTO channel_chat_outbound(id,provider,app_id,chat_id,body,source,idempotency_key,status,lease_owner,lease_expires_at,created_at,updated_at)
+            VALUES ('delete-pending','feishu','cli_app_1','chat','Pending','test','delete-pending','pending',NULL,NULL,0,0),
+                   ('delete-leased','feishu','cli_app_1','chat','Leased','test','delete-leased','pending','worker',9999999999999,0,0),
+                   ('delete-sent','feishu','cli_app_1','chat','Sent','test','delete-sent','sent',NULL,NULL,0,0),
+                   ('delete-other','feishu','cli_app_2','chat','Other','test','delete-other','pending',NULL,NULL,0,0),
+                   ('delete-lark','lark','cli_app_1','chat','Lark','test','delete-lark','pending',NULL,NULL,0,0);
+            INSERT INTO channel_delivery(id,pending_binding_id,dedupe_key,delivery_kind,priority,target_app_id,payload_json,status,available_at,created_at,updated_at)
+            SELECT 'delete-work-pending',pending_binding_id,'delete-work-pending',delivery_kind,priority,target_app_id,payload_json,'pending',available_at,created_at,updated_at
+            FROM channel_delivery WHERE status='sent' AND pending_binding_id IS NOT NULL LIMIT 1;
+            INSERT INTO channel_delivery(id,pending_binding_id,dedupe_key,delivery_kind,priority,target_app_id,payload_json,status,available_at,lease_owner,lease_expires_at,created_at,updated_at)
+            SELECT 'delete-work-leased',pending_binding_id,'delete-work-leased',delivery_kind,priority,target_app_id,payload_json,'attempting',available_at,'worker','2999-01-01T00:00:00Z',created_at,updated_at
+            FROM channel_delivery WHERE id='delete-work-pending';
+        "#).unwrap();
+        let rows = |database: &Database, sql: &str| {
+            let mut statement = database.connection().prepare(sql).unwrap();
+            statement
+                .query_map([], |row| {
+                    (0..row.as_ref().column_count())
+                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap()
+        };
+        let preserved = |database: &Database| {
+            [
+                "agent_profile",
+                "camp",
+                "camp_member",
+                "agent_run",
+                "camp_message",
+                "feishu_account",
+                "feishu_owner_identity",
+                "feishu_owner_app_identity",
+                "external_principal",
+                "external_principal_app_identity",
+                "channel_conversation",
+                "channel_conversation_binding",
+                "pending_camp_binding",
+                "channel_chat_message",
+                "channel_chat_turn",
+                "channel_developer_sessions",
+                "lark_account",
+                "lark_member_bot",
+            ]
+            .map(|table| rows(database, &format!("SELECT * FROM {table} ORDER BY 1")))
+        };
+        let mutable = |database: &Database| {
+            [
+                "feishu_member_bot",
+                "feishu_member_bot_publication_intent",
+                "channel_credentials",
+                "channel_delivery",
+                "channel_chat_outbound",
+                "channel_chat_item",
+            ]
+            .map(|table| rows(database, &format!("SELECT * FROM {table} ORDER BY 1")))
+        };
+        let before = preserved(database);
+        let mutable_before = mutable(database);
+        let version = database
+            .connection()
+            .query_row(
+                "SELECT version FROM feishu_member_bot WHERE agent_id='agent_1'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        let command = DeleteFeishuMemberBotCommand {
+            agent_id: "agent_1".into(),
+            expected_app_id: "cli_app_1".into(),
+            expected_version: version,
+        };
+        for (index, actor) in [
+            ActorRef::User {
+                user_id: CURRENT_USER_ID.into(),
+            },
+            ActorRef::Agent {
+                agent_id: "agent_1".into(),
+                source_agent_run_id: "run-1".into(),
+            },
+            ActorRef::System {
+                component_id: LARK_SPEC.host_component.into(),
+            },
+            ActorRef::System {
+                component_id: DINGTALK_CHANNEL_HOST_COMPONENT.into(),
+            },
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut envelope = host_envelope(&format!("delete-untrusted-{index}"), command.clone());
+            envelope.execution_epoch = matches!(&actor, ActorRef::Agent { .. }).then_some(1);
+            envelope.actor = actor;
+            assert_eq!(
+                service
+                    .delete_feishu_member_bot(database, &envelope)
+                    .unwrap()
+                    .result
+                    .code,
+                "channel.host_required"
+            );
+        }
+        for (label, app_id, expected_version) in [
+            ("app", "stale-app", version),
+            ("version", "cli_app_1", version + 1),
+        ] {
+            let mut stale = command.clone();
+            stale.expected_app_id = app_id.into();
+            stale.expected_version = expected_version;
+            assert_eq!(
+                service
+                    .delete_feishu_member_bot(
+                        database,
+                        &host_envelope(&format!("delete-stale-{label}"), stale)
+                    )
+                    .unwrap()
+                    .result
+                    .code,
+                "feishu_member_bot.binding_conflict"
+            );
+        }
+        assert_eq!(mutable(database), mutable_before);
+        for state in [
+            "session_verified",
+            "failed_unknown_remote_state",
+            "version_published",
+        ] {
+            database.connection().execute("UPDATE feishu_member_bot_publication_intent SET state=?1, failure_code='fixture' WHERE agent_id='agent_1'", [state]).unwrap();
+            assert_eq!(
+                service
+                    .delete_feishu_member_bot(
+                        database,
+                        &host_envelope(&format!("delete-active-{state}"), command.clone())
+                    )
+                    .unwrap()
+                    .result
+                    .code,
+                "feishu_publication_intent.active_conflict"
+            );
+        }
+        database.connection().execute("UPDATE feishu_member_bot_publication_intent SET state='completed', failure_code=NULL WHERE agent_id='agent_1'", []).unwrap();
+        database.connection().execute("UPDATE lark_member_bot SET credential_ref='feishu/member/agent_1' WHERE agent_id='agent_1'", []).unwrap();
+        assert_eq!(
+            service
+                .delete_feishu_member_bot(
+                    database,
+                    &host_envelope("delete-referenced", command.clone())
+                )
+                .unwrap()
+                .result
+                .code,
+            "channel_credential.still_referenced"
+        );
+        database.connection().execute("UPDATE lark_member_bot SET credential_ref='lark/member/agent_1' WHERE agent_id='agent_1'", []).unwrap();
+        database.connection().execute("UPDATE channel_credentials SET remote_app_id='wrong-app' WHERE credential_ref='feishu/member/agent_1'", []).unwrap();
+        assert_eq!(
+            service
+                .delete_feishu_member_bot(
+                    database,
+                    &host_envelope("delete-wrong-credential", command.clone())
+                )
+                .unwrap()
+                .result
+                .code,
+            "channel_credential.identity_conflict"
+        );
+        database.connection().execute("UPDATE channel_credentials SET remote_app_id='cli_app_1' WHERE credential_ref='feishu/member/agent_1'", []).unwrap();
+        assert_eq!(mutable(database), mutable_before);
+        // A storage failure after all earlier mutations must roll back both data and receipt.
+        database.connection().execute_batch("CREATE TEMP TRIGGER reject_local_delete BEFORE DELETE ON channel_credentials WHEN OLD.credential_ref='feishu/member/agent_1' BEGIN SELECT RAISE(ABORT, 'delete rollback fixture'); END;").unwrap();
+        let envelope = host_envelope("delete-local", command.clone());
+        assert!(
+            service
+                .delete_feishu_member_bot(database, &envelope)
+                .is_err()
+        );
+        assert_eq!(mutable(database), mutable_before);
+        assert_eq!(preserved(database), before);
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM event_log WHERE command_id='delete-local'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_local_delete;")
+            .unwrap();
+        let deleted = service
+            .delete_feishu_member_bot(database, &envelope)
+            .unwrap();
+        assert_eq!(deleted.result.code, "feishu_member_bot.deleted");
+        assert_eq!(preserved(database), before);
+        for table in ["feishu_member_bot", "feishu_member_bot_publication_intent"] {
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        &format!("SELECT count(*) FROM {table} WHERE agent_id='agent_1'"),
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(database.connection().query_row("SELECT count(*) FROM channel_credentials WHERE credential_ref='feishu/member/agent_1'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(database.connection().query_row("SELECT count(*) FROM channel_credentials WHERE credential_ref='lark/member/agent_1'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        for (id, expected) in [
+            ("delete-pending", "failed"),
+            ("delete-leased", "unknown"),
+            ("delete-sent", "sent"),
+            ("delete-other", "pending"),
+            ("delete-lark", "pending"),
+        ] {
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT status FROM channel_chat_outbound WHERE id=?1",
+                        [id],
+                        |row| row.get::<_, String>(0)
+                    )
+                    .unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status FROM channel_chat_item WHERE id='delete-item'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "paused"
+        );
+        for (id, unknown) in [("delete-work-pending", false), ("delete-work-leased", true)] {
+            let (status, suppression): (String, String) = database
+                .connection()
+                .query_row(
+                    "SELECT status, retry_suppression_json FROM channel_delivery WHERE id=?1",
+                    [id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(status, "failed");
+            assert_eq!(
+                serde_json::from_str::<Value>(&suppression).unwrap()["outcomeUnknown"],
+                unknown
+            );
+        }
+        // Late output can still be projected by a live Run, but cannot be claimed for the missing Bot.
+        database.connection().execute_batch("INSERT INTO channel_delivery(id,pending_binding_id,dedupe_key,delivery_kind,priority,target_app_id,payload_json,status,available_at,created_at,updated_at) SELECT 'delete-late-work',pending_binding_id,'delete-late-work',delivery_kind,priority,target_app_id,payload_json,'pending',available_at,created_at,updated_at FROM channel_delivery WHERE id='delete-work-pending';").unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        let claims = claim_deliveries(
+            &transaction,
+            FEISHU_PROVIDER,
+            "delete-worker",
+            100,
+            &Utc::now(),
+        )
+        .unwrap();
+        assert!(
+            claims
+                .iter()
+                .all(|claim| claim.target_app_id != "cli_app_1")
+        );
+        transaction.rollback().unwrap();
+        let created = service
+            .create_member_bot_publication_intent(
+                database,
+                &host_envelope(
+                    "delete-fresh-intent",
+                    CreateMemberBotPublicationIntentCommand {
+                        publication_intent_id: "intent-new-agent_1".into(),
+                        account_id: "account_1".into(),
+                        agent_id: "agent_1".into(),
+                        expected_user_id_digest: owner_user_digest(),
+                        expected_tenant_id: "tenant_1".into(),
+                        requested_app_name: "New Bot".into(),
+                        provisioning_mode: "developer_session".into(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(created.result.status, CommandResultStatus::Applied);
+        for (expected_version, state) in [
+            (1, "session_verified"),
+            (2, "app_created"),
+            (3, "credentials_read"),
+            (4, "bot_configured"),
+            (5, "version_published"),
+        ] {
+            assert_eq!(
+                service
+                    .advance_member_bot_publication_intent(
+                        database,
+                        &host_envelope(
+                            &format!("delete-fresh-{state}"),
+                            AdvanceMemberBotPublicationIntentCommand {
+                                publication_intent_id: "intent-new-agent_1".into(),
+                                expected_version,
+                                state: state.into(),
+                                remote_app_id: (state != "session_verified")
+                                    .then(|| "cli_new_app".into()),
+                                credential_ref: (expected_version >= 3)
+                                    .then(|| "feishu/member/agent_1".into()),
+                                last_completed_step: Some(state.into()),
+                                failure_code: None,
+                            }
+                        )
+                    )
+                    .unwrap()
+                    .result
+                    .status,
+                CommandResultStatus::Applied
+            );
+        }
+        assert_eq!(
+            service
+                .upsert_feishu_member_bot(
+                    database,
+                    &host_envelope(
+                        "delete-fresh-publish",
+                        UpsertFeishuMemberBotCommand {
+                            account_id: "account_1".into(),
+                            agent_id: "agent_1".into(),
+                            app_id: "cli_new_app".into(),
+                            owner_open_id: "ou_new_owner".into(),
+                            bot_open_id: Some("ou_new_bot".into()),
+                            bot_display_name: "New Bot".into(),
+                            credential_ref: "feishu/member/agent_1".into(),
+                        }
+                    )
+                )
+                .unwrap()
+                .result
+                .status,
+            CommandResultStatus::Applied
+        );
+        let transaction = database.connection_mut().transaction().unwrap();
+        upsert_credential_row(
+            &transaction,
+            FEISHU_PROVIDER,
+            "feishu/member/agent_1",
+            "cli_new_app",
+            &json!({"appId":"cli_new_app","appSecret":"new-secret"}),
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        let after_republish = mutable(database);
+        let replay = service
+            .delete_feishu_member_bot(database, &envelope)
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(replay.result).unwrap(),
+            serde_json::to_value(deleted.result).unwrap()
+        );
+        assert_eq!(mutable(database), after_republish);
+        assert_eq!(
+            service
+                .delete_feishu_member_bot(
+                    database,
+                    &host_envelope("delete-stale-after-republish", command)
+                )
+                .unwrap()
+                .result
+                .code,
+            "feishu_member_bot.binding_conflict"
+        );
+        assert_eq!(mutable(database), after_republish);
+        // Missing local credentials do not prevent an explicit local reset.
+        database
+            .connection()
+            .execute(
+                "DELETE FROM channel_credentials WHERE credential_ref='feishu/member/agent_1'",
+                [],
+            )
+            .unwrap();
+        database.connection().execute("UPDATE feishu_member_bot_publication_intent SET state='failed_recoverable' WHERE agent_id='agent_1'", []).unwrap();
+        assert_eq!(
+            service
+                .delete_feishu_member_bot(
+                    database,
+                    &host_envelope(
+                        "delete-no-credential",
+                        DeleteFeishuMemberBotCommand {
+                            agent_id: "agent_1".into(),
+                            expected_app_id: "cli_new_app".into(),
+                            expected_version: 1,
+                        }
+                    )
+                )
+                .unwrap()
+                .result
+                .status,
+            CommandResultStatus::Applied
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT app_id FROM feishu_member_bot WHERE agent_id='agent_2'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "cli_app_2"
+        );
     }
 
     #[test]

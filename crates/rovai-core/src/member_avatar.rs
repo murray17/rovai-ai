@@ -242,6 +242,17 @@ pub fn import_managed_member_avatar(
     })
 }
 
+pub fn import_managed_member_avatar_bytes(
+    data_dir: &Path,
+    asset_id: Uuid,
+    bytes: &[u8],
+) -> std::result::Result<ManagedMemberAvatarSummary, MemberAvatarImportError> {
+    prepare_member_avatar_bytes(data_dir, asset_id, bytes, None, false).map_err(|error| {
+        error
+            .downcast::<MemberAvatarImportError>()
+            .unwrap_or_else(|_| MemberAvatarImportError::invalid("Avatar could not be imported"))
+    })
+}
 /// Strips non-rendering metadata without changing pixels when the canvas fits;
 /// otherwise resizes every composited frame and re-encodes.
 fn normalize_gif_source_bytes(
@@ -270,7 +281,12 @@ fn normalize_selected_avatar(
     selected_file: &Path,
 ) -> Result<DynamicImage, MemberAvatarImportError> {
     let selected_bytes = read_selected_avatar(selected_file)?;
-    let format = image::guess_format(&selected_bytes)
+    normalize_selected_avatar_bytes(&selected_bytes)
+}
+fn normalize_selected_avatar_bytes(
+    selected_bytes: &[u8],
+) -> Result<DynamicImage, MemberAvatarImportError> {
+    let format = image::guess_format(selected_bytes)
         .map_err(|_| MemberAvatarImportError::invalid("Avatar must be a PNG or JPEG image"))?;
     if !matches!(format, ImageFormat::Png | ImageFormat::Jpeg) {
         return Err(MemberAvatarImportError::invalid(
@@ -329,6 +345,21 @@ pub fn prepare_member_avatar(
     verify_existing_only: bool,
 ) -> Result<ManagedMemberAvatarSummary> {
     let selected_bytes = read_selected_avatar(selected_file)?;
+    prepare_member_avatar_bytes(
+        data_dir,
+        asset_id,
+        &selected_bytes,
+        crop,
+        verify_existing_only,
+    )
+}
+pub fn prepare_member_avatar_bytes(
+    data_dir: &Path,
+    asset_id: Uuid,
+    selected_bytes: &[u8],
+    crop: Option<MemberAvatarCrop>,
+    verify_existing_only: bool,
+) -> Result<ManagedMemberAvatarSummary> {
     let format = image::guess_format(&selected_bytes)
         .map_err(|_| MemberAvatarImportError::invalid("Avatar must be a PNG, JPEG or GIF image"))?;
     // A pre-upgrade request can be retried with its old immutable asset ID.
@@ -356,7 +387,7 @@ pub fn prepare_member_avatar(
                 )
             } else {
                 (
-                    encode_png(&normalize_selected_avatar(selected_file)?)?,
+                    encode_png(&normalize_selected_avatar_bytes(selected_bytes)?)?,
                     crop.unwrap_or_else(|| stored.crop.clone()),
                 )
             };
@@ -382,7 +413,7 @@ pub fn prepare_member_avatar(
             verify_existing_only,
         );
     }
-    let source = normalize_selected_avatar(selected_file)?;
+    let source = normalize_selected_avatar_bytes(selected_bytes)?;
     let source_png = encode_png(&source)?;
     save_cropped_source(
         data_dir,
@@ -1939,7 +1970,9 @@ fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn read_selected_avatar(path: &Path) -> std::result::Result<Vec<u8>, MemberAvatarImportError> {
+pub(crate) fn read_selected_avatar(
+    path: &Path,
+) -> std::result::Result<Vec<u8>, MemberAvatarImportError> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|_| MemberAvatarImportError::invalid("Avatar file is not readable"))?;
     if metadata.file_type().is_symlink()

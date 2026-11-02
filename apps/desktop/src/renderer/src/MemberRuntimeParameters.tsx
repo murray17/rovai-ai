@@ -37,6 +37,47 @@ type ModelFieldsProps = RuntimeParameterProps & {
   optionLabel?: string
 }
 
+export function MemberChatBotSettings({
+  agent,
+  busy,
+  onSet
+}: {
+  agent: Pick<AgentProfile, 'chatBotEnabled' | 'chatMaterialsPath'>
+  busy: boolean
+  onSet(enabled: boolean, materialsPath: string | null): Promise<void>
+}): React.JSX.Element {
+  const enabled = agent.chatBotEnabled ?? false
+  const materialsPath = agent.chatMaterialsPath ?? null
+  const chooseFolder = async (): Promise<void> => {
+    const path = await window.rovai.channels.selectChatMaterialsDirectory()
+    if (path) await onSet(enabled, path).catch(() => undefined)
+  }
+  const toggle = async (checked: boolean): Promise<void> => {
+    if (busy || (checked && !materialsPath)) return
+    await onSet(checked, materialsPath).catch(() => undefined)
+  }
+  return (
+    <div className="member-chat-bot">
+      <label className="runtime-parameter-switch" title={!materialsPath ? uiAttribute("请先选择资料文件夹，再开启聊天 Bot。") : undefined}>
+        <span><UiText zh={"聊天 Bot"} /></span>
+        <input
+          type="checkbox"
+          aria-label={uiAttribute("聊天 Bot")}
+          checked={enabled}
+          disabled={busy || (!enabled && !materialsPath)}
+          onChange={(event) => void toggle(event.target.checked)}
+        />
+      </label>
+      <button className="quiet-button compact" type="button" disabled={busy} onClick={() => void chooseFolder()}>
+        <UiText zh={"资料文件夹"} />
+      </button>
+      {materialsPath
+        ? <span className="member-chat-bot-path" title={materialsPath}>{materialsPath}</span>
+        : <span className="member-chat-bot-hint"><UiText zh={"请先选择资料文件夹，再开启聊天 Bot。"} /></span>}
+    </div>
+  )
+}
+
 export function runtimeEditorInstallation(
   installations: AdapterInstallation[],
   adapterKind: AdapterKind

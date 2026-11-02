@@ -58,6 +58,8 @@ fn rewrite(tx: &Transaction<'_>, reverse: bool) -> Result<()> {
         let next = base.replace(&format!("= {old}"), &format!("= {new}"));
         manifest = if reverse {
             manifest.replace(&format!("{next}\n OR\n "), "")
+        } else if manifest.contains(&format!("(context_manifest_version = {new} AND")) {
+            manifest
         } else {
             manifest.replace(&base, &format!("{next}\n OR\n {base}"))
         };
@@ -67,7 +69,14 @@ fn rewrite(tx: &Transaction<'_>, reverse: bool) -> Result<()> {
     } else {
         (OLD_VERSIONS, VERSIONS)
     };
-    manifest = manifest.replace(from, to);
+    manifest = manifest.replace(from, to).replace(
+        if reverse {
+            VERSIONS
+        } else {
+            "38, 39, 40, 41, 42, 43)"
+        },
+        to,
+    );
     let mut guard = schema(tx, "trigger", "context_manifest_v40_only_insert")?;
     let added = additions(&guard)?;
     guard = if reverse {
@@ -115,7 +124,15 @@ fn rewrite(tx: &Transaction<'_>, reverse: bool) -> Result<()> {
         "trigger",
         "runtime_input_delivery_attachment_auth_insert",
     )?
-    .replace(from, to);
+    .replace(from, to)
+    .replace(
+        if reverse {
+            VERSIONS
+        } else {
+            "38, 39, 40, 41, 42, 43)"
+        },
+        to,
+    );
     rebuild_table_v171(
         tx,
         "context_manifest",
@@ -153,7 +170,27 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             matches!(classify_database_contract(&tx)?, DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version==167),
             "Quote text format requires schema 167"
         );
+        let legacy_guard: Option<String> = tx.query_row(
+            "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='agent_run_input_v43_only_insert'",
+            [], |row| row.get(0),
+        ).optional()?;
+        if let Some(guard) = legacy_guard {
+            let original_guard = guard.replace(
+                "agent_run_input_v43_only_insert",
+                "agent_run_input_v40_only_insert",
+            );
+            tx.execute_batch(&original_guard)?;
+            tx.execute_batch("DROP TRIGGER agent_run_input_v43_only_insert;")?;
+        }
         rewrite(&tx, false)?;
+        let retained_reply: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=224)",
+            [],
+            |row| row.get(0),
+        )?;
+        if retained_reply {
+            tx.execute_batch("CREATE TRIGGER agent_run_input_v43_only_insert BEFORE INSERT ON agent_run_input WHEN NEW.context_manifest_version IS NOT 43 AND NEW.context_manifest_version IS NOT 44 BEGIN SELECT RAISE(ABORT,'new public Thread AgentRunInput must use ContextManifest v43/v44'); END;")?;
+        }
         tx.execute_batch("INSERT INTO schema_migration VALUES(218,datetime('now'));
             UPDATE rovai_data_contract SET projection_schema_version=168,updated_at=datetime('now') WHERE singleton=1;")?;
         validate_migration_foreign_keys(
@@ -184,6 +221,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 // Existing migration owners use synthetic data; product rows never downgrade.
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    downgrade_chat_extensions_for_test(c);
     super::subagent::downgrade_for_test(c);
     if !c
         .query_row(

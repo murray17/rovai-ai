@@ -20,7 +20,9 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
     anyhow::ensure!(
         matches!(
             classify_database_contract(&tx)?,
-            DatabaseContractClassification::Current(_)
+            DatabaseContractClassification::SupportedMigrationSource(ref marker)
+                if marker.projection_schema_version == 169
+                    && marker.classifier_version == crate::canonical_activity::CLASSIFIER_VERSION
         ),
         "Subagent display classifier admission failed"
     );
@@ -30,6 +32,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(connection: &Connection) {
+    super::downgrade_chat_extensions_for_test(connection);
     if !connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=219)",
@@ -78,6 +81,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .execute_batch("DROP TRIGGER reject_subagent_classifier_marker;")
         .unwrap();
     migrate(database).unwrap();
+    database.migrate(false).unwrap();
     assert_eq!(snapshot(database.connection()), before);
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),

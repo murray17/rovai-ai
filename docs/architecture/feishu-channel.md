@@ -391,3 +391,10 @@ identity 都先摘要，消息正文与外部用户 ID 不进入日志。当前 
 一次 `channels.credentials.listPublished` 批量加载所有 Provider 的 published Bot credential，并把运行期对象分发给各 Host；
 普通收发与重连不逐 Bot 查询。旧 `.bin` 不读取、不解密，只允许 Main 按严格已知文件名 best-effort 删除。断开账号只删除
 Developer Session；已发布 Bot credential 与 WebSocket 生命周期保持独立。
+
+
+## 聊天 Bot 普通回复与逐输入来源
+
+聊天Bot与工作Bot保持不同准入；本地Composer不借用历史飞书身份。Core在public43 claim与Steer组包中生成CHAT_REPLY_CONTEXT，并将精确对象、摘要和内部来源引用冻结到Manifest；Host仍只按持久输入映射自动发送最终正文，模型不选择自动回复目标。
+
+普通非Owner问题与内部信息保护独立判断；明确第三方委托才进入既有feishu工具。服务端仍绑定初始Run输入，不提供逐调用新委托来源硬保证，不因本地Steer冻结原工具。整轮渠道受众不因桌面补充变为私聊，最终正文不得带本地保护内容。字段、兼容与已知限制见 [聊天Bot v3](../contracts/feishu-chat-bot-v3.md) 和 [Manifest43](../contracts/context-manifest-evidence-v43.md)。

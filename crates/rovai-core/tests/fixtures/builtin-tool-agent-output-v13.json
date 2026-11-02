@@ -942,5 +942,221 @@
       "version": 3,
       "changed": true
     }
+  },
+  "feishu.status": {
+    "canonicalResult": {
+      "status": "ready",
+      "requestId": null,
+      "contacts": [],
+      "items": [],
+      "inputs": [
+        {
+          "inputRef": "input_123",
+          "authorName": "Alex",
+          "isOwner": true
+        }
+      ],
+      "errorCode": null
+    },
+    "agentOutput": {
+      "status": "ready",
+      "requestId": null,
+      "contacts": [],
+      "items": [],
+      "inputs": [
+        {
+          "inputRef": "input_123",
+          "authorName": "Alex",
+          "isOwner": true
+        }
+      ],
+      "errorCode": null
+    }
+  },
+  "feishu.search": {
+    "canonicalResult": {
+      "status": "queued",
+      "requestId": "request_123",
+      "contacts": [],
+      "items": [],
+      "inputs": [],
+      "errorCode": null
+    },
+    "agentOutput": {
+      "status": "queued",
+      "requestId": "request_123",
+      "contacts": [],
+      "items": [],
+      "inputs": [],
+      "errorCode": null
+    }
+  },
+  "feishu.result": {
+    "canonicalResult": {
+      "status": "ready",
+      "requestId": "request_123",
+      "contacts": [
+        {
+          "targetRef": "target_123",
+          "name": "Sam",
+          "department": null
+        }
+      ],
+      "items": [],
+      "inputs": [],
+      "errorCode": null
+    },
+    "agentOutput": {
+      "status": "ready",
+      "requestId": "request_123",
+      "contacts": [
+        {
+          "targetRef": "target_123",
+          "name": "Sam",
+          "department": null
+        }
+      ],
+      "items": [],
+      "inputs": [],
+      "errorCode": null
+    }
+  },
+  "feishu.forward": {
+    "canonicalResult": {
+      "status": "unknown",
+      "requestId": "request_124",
+      "contacts": [],
+      "items": [],
+      "inputs": [],
+      "errorCode": null
+    },
+    "agentOutput": {
+      "status": "unknown",
+      "requestId": "request_124",
+      "contacts": [],
+      "items": [],
+      "inputs": [],
+      "errorCode": null
+    }
+  },
+  "feishu.ask": {
+    "canonicalResult": {
+      "status": "sent",
+      "requestId": "request_125",
+      "contacts": [],
+      "items": [
+        {
+          "itemId": "item_123",
+          "question": "What is the current progress?",
+          "status": "waiting",
+          "requesterName": "Alex",
+          "targetName": "Sam"
+        }
+      ],
+      "inputs": [],
+      "errorCode": null
+    },
+    "agentOutput": {
+      "status": "sent",
+      "requestId": "request_125",
+      "contacts": [],
+      "items": [
+        {
+          "itemId": "item_123",
+          "question": "What is the current progress?",
+          "status": "waiting",
+          "requesterName": "Alex",
+          "targetName": "Sam"
+        }
+      ],
+      "inputs": [],
+      "errorCode": null
+    }
+  },
+  "feishu.items": {
+    "canonicalResult": {
+      "status": "ready",
+      "requestId": null,
+      "contacts": [],
+      "items": [
+        {
+          "itemId": "item_123",
+          "question": "What is the current progress?",
+          "status": "waiting",
+          "requesterName": "Alex",
+          "targetName": "Sam"
+        }
+      ],
+      "inputs": [],
+      "errorCode": null
+    },
+    "agentOutput": {
+      "status": "ready",
+      "requestId": null,
+      "contacts": [],
+      "items": [
+        {
+          "itemId": "item_123",
+          "question": "What is the current progress?",
+          "status": "waiting",
+          "requesterName": "Alex",
+          "targetName": "Sam"
+        }
+      ],
+      "inputs": [],
+      "errorCode": null
+    }
+  },
+  "feishu.report": {
+    "canonicalResult": {
+      "status": "failed",
+      "requestId": null,
+      "contacts": [],
+      "items": [],
+      "inputs": [],
+      "errorCode": "input_ambiguous"
+    },
+    "agentOutput": {
+      "status": "failed",
+      "requestId": null,
+      "contacts": [],
+      "items": [],
+      "inputs": [],
+      "errorCode": "input_ambiguous"
+    }
+  },
+  "feishu.close": {
+    "canonicalResult": {
+      "status": "closed",
+      "requestId": null,
+      "contacts": [],
+      "items": [
+        {
+          "itemId": "item_123",
+          "question": "What is the current progress?",
+          "status": "closed",
+          "requesterName": "Alex",
+          "targetName": "Sam"
+        }
+      ],
+      "inputs": [],
+      "errorCode": null
+    },
+    "agentOutput": {
+      "status": "closed",
+      "requestId": null,
+      "contacts": [],
+      "items": [
+        {
+          "itemId": "item_123",
+          "question": "What is the current progress?",
+          "status": "closed",
+          "requesterName": "Alex",
+          "targetName": "Sam"
+        }
+      ],
+      "inputs": [],
+      "errorCode": null
+    }
   }
 }

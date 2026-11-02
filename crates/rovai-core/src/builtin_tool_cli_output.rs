@@ -128,7 +128,15 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
         | "automation.run"
         | "automation.close"
         | "automation.update"
-        | "automation.delete" => builtin_tool_definitions()
+        | "automation.delete"
+        | "feishu.status"
+        | "feishu.search"
+        | "feishu.result"
+        | "feishu.forward"
+        | "feishu.ask"
+        | "feishu.items"
+        | "feishu.report"
+        | "feishu.close" => builtin_tool_definitions()
             .iter()
             .find(|definition| definition["name"].as_str() == Some(operation))
             .map(|definition| definition["outputSchema"].clone())
@@ -261,7 +269,15 @@ fn project_success(operation: &str, result: Value) -> Result<Value> {
         | "automation.run"
         | "automation.close"
         | "automation.update"
-        | "automation.delete" => Ok(result),
+        | "automation.delete"
+        | "feishu.status"
+        | "feishu.search"
+        | "feishu.result"
+        | "feishu.forward"
+        | "feishu.ask"
+        | "feishu.items"
+        | "feishu.report"
+        | "feishu.close" => Ok(result),
         _ => bail!("unknown built-in operation for Agent output projection"),
     }
 }
@@ -776,6 +792,80 @@ mod tests {
 
     #[test]
     fn closed_agent_output_schemas_reject_extra_and_invalid_fields() {
+        for operation in [
+            "feishu.status",
+            "feishu.search",
+            "feishu.result",
+            "feishu.forward",
+            "feishu.ask",
+            "feishu.items",
+            "feishu.report",
+            "feishu.close",
+        ] {
+            let schema = agent_output_schema(operation).unwrap();
+            let result = json!({"status":"ready","requestId":null,"contacts":[],"items":[],"inputs":[],"errorCode":null});
+            validate_schema(&result, &schema).unwrap();
+            for status in ["ready", "queued", "sent", "failed", "unknown", "closed"] {
+                let mut current = result.clone();
+                current["status"] = json!(status);
+                let envelope = BuiltinToolInvocationEnvelope::success(
+                    operation,
+                    "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                    current.clone(),
+                )
+                .unwrap();
+                assert_eq!(project_envelope(envelope).unwrap(), current);
+            }
+            for (field, value) in [
+                ("credential", json!("private token")),
+                ("status", json!("success")),
+                (
+                    "errorCode",
+                    json!("provider response containing private token"),
+                ),
+                (
+                    "contacts",
+                    json!([{"targetRef":"target_123","name":"Sam","department":null,"openId":"private"}]),
+                ),
+                (
+                    "items",
+                    json!([{"itemId":"item_123","question":"Progress?","status":"waiting","requesterName":"Alex","targetName":"Sam","appSecret":"private"}]),
+                ),
+                (
+                    "inputs",
+                    json!([{"inputRef":"input_123","authorName":"Alex","isOwner":false,"text":"private"}]),
+                ),
+            ] {
+                let mut invalid = result.clone();
+                invalid[field] = value;
+                let envelope = BuiltinToolInvocationEnvelope::success(
+                    operation,
+                    "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                    invalid,
+                )
+                .unwrap();
+                assert!(project_envelope(envelope).is_err(), "{operation}: {field}");
+            }
+            for field in ["contacts", "items", "inputs"] {
+                let maximum = schema["properties"][field]["maxItems"]
+                    .as_u64()
+                    .expect("Feishu collections must be bounded");
+                assert!(maximum > 0);
+                let item = match field {
+                    "contacts" => json!({"targetRef":"target_123","name":"Sam","department":null}),
+                    "items" => {
+                        json!({"itemId":"item_123","question":"Progress?","status":"waiting","requesterName":"Alex","targetName":"Sam"})
+                    }
+                    _ => json!({"inputRef":"input_123","authorName":"Alex","isOwner":false}),
+                };
+                let mut bounded = result.clone();
+                bounded[field] = json!(vec![item.clone(); maximum as usize]);
+                validate_schema(&bounded, &schema).unwrap();
+                bounded[field].as_array_mut().unwrap().push(item);
+                assert!(validate_schema(&bounded, &schema).is_err());
+            }
+            assert_eq!(schema["properties"]["contacts"]["maxItems"], 20);
+        }
         let profile = json!({"agentId":"agent_2","displayName":"Nova","teamRole":"","professionalResponsibilities":"","personalityTraits":[],"workingPrinciples":"","growthTopic":"","version":1,"avatar":{"path":null,"status":"absent","displayCrop":null}});
         let profile_schema = agent_output_schema("member.get").unwrap();
         validate_schema(&profile, &profile_schema).unwrap();

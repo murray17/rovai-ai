@@ -34,6 +34,7 @@ export interface ChannelCredentialStore {
   read(credentialRef: string): Promise<FeishuAppCredential | null>
   delete(credentialRef: string): Promise<void>
   listPublished(): Promise<readonly PublishedChannelCredential[]>
+  invalidatePublished?(): void
 }
 
 export type StoredChannelDeveloperSession<TIdentity, TSession> = {
@@ -62,7 +63,8 @@ implements ChannelCredentialStore, DingTalkCredentialStore {
     return {
       read: (credentialRef) => this.#read(credentialRef, provider),
       delete: (credentialRef) => this.#delete(credentialRef, provider),
-      listPublished: () => this.listPublished()
+      listPublished: () => this.listPublished(),
+      invalidatePublished: () => this.invalidatePublished()
     }
   }
 
@@ -76,6 +78,10 @@ implements ChannelCredentialStore, DingTalkCredentialStore {
 
   deleteDingTalk(credentialRef: string): Promise<void> {
     return this.#delete(credentialRef, 'dingtalk')
+  }
+
+  invalidatePublished(): void {
+    this.#publishedLoad = null
   }
 
   listPublished(): Promise<readonly PublishedChannelCredential[]> {
