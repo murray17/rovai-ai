@@ -90,8 +90,8 @@ function PreviewDeck({ resources, anchor, resolvedTheme, missionActivity, regist
 
 }
 
-export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi, children, missionActivity }: {
-  threadId: string | null; resolvedTheme: ResolvedTheme; api?: FilePreviewApi; children: ReactNode; missionActivity?: ReactNode
+export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi, children, missionActivity, projectFilesEnabled = true }: {
+  threadId: string | null; resolvedTheme: ResolvedTheme; api?: FilePreviewApi; children: ReactNode; missionActivity?: ReactNode; projectFilesEnabled?: boolean
 }): React.JSX.Element {
   const api = providedApi ?? (typeof window === 'undefined' || window.rovai ? desktopFilePreviewApi : null)
   if (!api) throw new Error(uiAttribute('共享文件页面缺少显式资源适配。'))
@@ -129,7 +129,7 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
     return () => { window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('online', online); unsubscribeConnection?.(); release() }
   }, [resources])
   return <FileEditContext.Provider value={resources.edits}><FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
-    <ProjectFilesProvider api={api.projectFiles} threadId={threadId} preview={value} onConnectionRestored={api.onConnectionRestored}>
+    <ProjectFilesProvider api={api.projectFiles} threadId={projectFilesEnabled ? threadId : null} preview={value} onConnectionRestored={api.onConnectionRestored}>
     <FilePreviewLayoutProvider threadId={threadId} visible={!!threadId && value.paneVisible} activityMode={value.activeTab?.kind === 'mission_activity'}>
       <FileFindProvider activeTabId={value.activeTabId} visible={!!threadId && value.paneVisible}>
         <ExecutionPreviewHostContext.Provider value={executionHosts}>

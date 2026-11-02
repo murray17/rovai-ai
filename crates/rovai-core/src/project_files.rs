@@ -70,7 +70,7 @@ pub fn binding(database: &Database, thread: &str) -> Result<Binding> {
         "root_unavailable"
     );
     let project: String = database.connection().query_row(
-        "SELECT project_path FROM camp WHERE id=?1 AND activation_state='active' AND deletion_operation_id IS NULL AND project_binding_kind='directory'",
+        "SELECT project_path FROM camp WHERE id=?1 AND activation_state IN ('pending','active') AND deletion_operation_id IS NULL AND project_binding_kind='directory'",
         [thread], |row| row.get(0),
     ).context("root_unavailable")?;
     let workspace: Option<(String, String, i64)> = database.connection().query_row(

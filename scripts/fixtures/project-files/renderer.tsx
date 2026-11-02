@@ -29,10 +29,11 @@ function Workspace(): React.JSX.Element {
 let thread = ''
 function Fixture(): React.JSX.Element {
   const [theme, setTheme] = useState<ResolvedTheme>('day')
+  const [context, setContext] = useState({ threadId: thread, directory: true, name: 'project' })
   useInterfaceLanguage()
-  Object.assign(window, { fixtureTheme: (value: ResolvedTheme, id = value) => { document.documentElement.dataset.themeId = id; document.documentElement.dataset.theme = value; setTheme(value) }, fixtureEnglish: () => initializeInterfaceLanguage({ interfaceLanguage: 'en', interfaceLanguagePreference: 'en', systemLanguage: 'en', languageRevision: 1, readError: false }) })
-  return <ThreadClientProvider client={chromeClient}><ShortcutProvider api={shortcutApi} platform={bridge.platform}><FilePreviewProvider api={bridge.files} threadId={thread} resolvedTheme={theme}>
-    <div className="app-shell app-shell-camp"><aside style={{ gridRow: '1 / -1', padding: 24, background: 'var(--rail)' }}>Rovai AI</aside><AppHeader thread={null} threadTitle="本地开发入口" contextLabel="project" onFocusApprovals={() => {}}/><main className="content task-content"><Workspace/></main></div>
+  Object.assign(window, { fixtureContext: (threadId: string, directory: boolean, name = directory ? 'project' : '快速对话') => { thread = threadId; setContext({ threadId, directory, name }) }, fixtureTheme: (value: ResolvedTheme, id = value) => { document.documentElement.dataset.themeId = id; document.documentElement.dataset.theme = value; setTheme(value) }, fixtureEnglish: () => initializeInterfaceLanguage({ interfaceLanguage: 'en', interfaceLanguagePreference: 'en', systemLanguage: 'en', languageRevision: 1, readError: false }) })
+  return <ThreadClientProvider client={chromeClient}><ShortcutProvider api={shortcutApi} platform={bridge.platform}><FilePreviewProvider api={bridge.files} threadId={context.threadId} resolvedTheme={theme} projectFilesEnabled={context.directory}>
+    <div className="app-shell app-shell-camp"><aside style={{ gridRow: '1 / -1', padding: 24, background: 'var(--rail)' }}>Rovai AI</aside><AppHeader thread={null} threadTitle="本地开发入口" contextLabel={context.name} onFocusApprovals={() => {}}/><main className="content task-content"><Workspace/></main></div>
   </FilePreviewProvider></ShortcutProvider></ThreadClientProvider>
 }
 bridge.thread().then(id => { thread = id; createRoot(document.getElementById('root')!).render(<Fixture/>) })
