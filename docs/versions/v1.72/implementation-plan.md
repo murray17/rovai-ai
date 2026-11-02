@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-01
+last_updated: 2026-11-02
 ---
 
 # v1.72 实施与验收
@@ -87,6 +87,22 @@ Fast 可用性补修按 User 最新取舍执行：移除 Codex 新增的键／�
 实现与验收归 [数据库启动实施记录](database-startup-simplification.md)；替代本页旧 macOS 来源标记重新准入方案。
 当前合同为 [Desktop Runtime Availability v3](../../contracts/desktop-runtime-availability-v3.md#数据库启动与有界重试)，
 不新增 Migration、不改业务格式。日常宿主保护与原有会话保留是交付边界。
+
+## 取消执行条统一保留（2026-11-02）
+
+- 复用 `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai` 干净 checkout，
+  分支 `rovai/retain-cancelled-runs`，基线 `8b8a486996b5131e672e9460b8b78c3120085a71`；Governance：none。
+- 会话执行条保留和继续入口均改为按取消状态判断，沿用最新 Run、续做受理与缓存首屏规则。
+  手动停止历史标记保留原因判断，避免将 App 退出误标为“你已中断”。TypeScript 原因类型补齐
+  Core 已有的当前与历史退出原因；不改变 wire、Core、调度或模型上下文。
+- 类型检查通过；全部 Vitest 为 3052 passed / 2 skipped，相关投影与产物 Renderer 为 55 passed。
+  默认 Rust workspace 为 484 passed / 1 ignored。presence 浏览器 owner 通过 38 个状态、6 个视口，
+  覆盖手动与 App 退出取消的静态状态、最终耗时、切群／刷新、未知回执与受理后收起；日夜截图已核对。
+- 聚合 `test:run-presence-ui` 的 reply-details 在 `regroup-middle` 断言失败，同一未修改基线独立复现。
+  根 checkout 的 `pnpm test`／文档门禁被 Git 忽略的旧 `docs/prototypes/` 失效链接阻断；
+  原型原样保留。仅含受管文件的验证快照中，完整 `pnpm test` 通过（Vitest 3052 passed / 2 skipped，
+  Node 层 365 passed / 2 skipped），通用文档单测、检查与上述 base 的差分门禁均通过。
+- Status：ready；改动仅提交与推送任务分支，未合入主线。
 
 ## 手动停止保留执行条（2026-10-29）
 

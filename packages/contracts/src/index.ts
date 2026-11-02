@@ -1964,6 +1964,8 @@ export interface ThreadTurnExecutionBudgetView {
 }
 
 export type AgentRunCancelReasonCode =
+  | 'app_shutdown_cancel_all'
+  | 'planned_shutdown_cancelled'
   | 'camp_turn_cancelled'
   | 'execution_budget_exhausted'
   | 'user_requested_agent_run_stop'

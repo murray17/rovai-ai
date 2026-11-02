@@ -252,12 +252,19 @@ describe('Manual Run interruption in the conversation', () => {
   })
 
   it.each([
-    ['failed', null], ['cancelled', 'camp_turn_cancelled'], ['cancelled', 'single_chat_ended'],
+    ['failed', null], ['cancelled', 'app_shutdown_cancel_all'], ['cancelled', 'planned_shutdown_cancelled'],
+    ['cancelled', 'camp_turn_cancelled'], ['cancelled', 'single_chat_ended'],
     ['cancelled', 'execution_budget_exhausted'], ['cancelled', null], ['running', 'user_requested_agent_run_stop'],
     ['waiting', 'user_requested_agent_run_stop'], ['succeeded', 'user_requested_agent_run_stop']
   ] as const)('does not call %s / %s a user interruption', (status, cancelReasonCode) => {
     const candidate = snapshot([run({ status, cancelReasonCode, cancelRequestedAt: endedAt })])
-    expect(markers(renderTimeline(candidate))).toEqual([])
+    const markup = renderTimeline(candidate)
+    expect(markers(markup)).toEqual([])
+    if (status === 'cancelled') {
+      expect(markup).toContain('data-presence-run="run-1" data-presence-state="cancelled"')
+      expect(markup).toContain('已停止')
+      expect(markup).not.toContain('你已中断')
+    }
     expect(timeline({ ...candidate, agentRunFileChanges: [], agentRunImages: [] })).toEqual([])
   })
 })

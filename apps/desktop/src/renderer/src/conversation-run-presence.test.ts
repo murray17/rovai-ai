@@ -115,7 +115,7 @@ describe('conversation Run presence', () => {
     ])
   })
 
-  it('shows admitted startup Runs, omits private and terminal Runs, and preserves approval waits', () => {
+  it('shows startup Runs, omits private and superseded terminal Runs, and preserves approval waits', () => {
     const runs = [run('queued','',{status:'queued'}),run('unstarted','',{status:'waiting',startedAt:null}),
       run('private','',{invocationKind:'single_chat'}),run('done','',{status:'succeeded'}),
       run('stopped','',{status:'cancelled'}),run('approval','alice',{status:'waiting',waitReason:'approval'})]
@@ -123,8 +123,10 @@ describe('conversation Run presence', () => {
     expect(runPresencePreview(runs[5]).text).toBe('等待审批')
   })
 
-  it('retains only the latest public manual stop until acceptance or a newer Run', () => {
-    const stopped = run('stopped', 'alice', { status: 'cancelled', cancelReasonCode: 'user_requested_agent_run_stop' })
+  it.each([null, 'user_requested_agent_run_stop', 'app_shutdown_cancel_all', 'planned_shutdown_cancelled',
+    'camp_turn_cancelled', 'single_chat_ended', 'execution_budget_exhausted'] as const)
+  ('retains only the latest public cancellation until acceptance or a newer Run, with reason %s', cancelReasonCode => {
+    const stopped = run('stopped', 'alice', { status: 'cancelled', cancelReasonCode })
     const next = run('next', 'alice', { createdAt: '2026-10-10T12:01:00Z' })
     expect(slots([stopped])).toEqual([['stopped', false]])
     expect(slots([structuredClone(stopped)], [], false)).toEqual([])
@@ -141,9 +143,6 @@ describe('conversation Run presence', () => {
     expect(slots([stopped, { ...next, invocationKind: 'single_chat' }])).toEqual([['stopped', false]])
     expect(slots([{ ...stopped, invocationKind: 'single_chat' }])).toEqual([])
     expect(slots([{ ...stopped, invocationKind: 'direct' }])).toEqual([['stopped', false]])
-    for (const cancelReasonCode of [null, 'camp_turn_cancelled', 'single_chat_ended', 'execution_budget_exhausted'] as const) {
-      expect(slots([{ ...stopped, cancelReasonCode }])).toEqual([])
-    }
     expect(slots([{ ...stopped, status: 'succeeded' }])).toEqual([])
   })
 
