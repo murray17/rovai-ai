@@ -87,7 +87,7 @@ export function MarkdownMermaidBlock({ source, theme }: { source: string; theme:
           onCloseAutoFocus={event => { event.preventDefault(); expandButton.current?.focus({ preventScroll: true }) }}>
           <AppDialogHeader title={t('Mermaid 图表')} description={t('使用缩放按钮查看细节，方向键滚动图形。')}
             hideDescription closeLabel={t('关闭')} />
-          {image && <PreviewImage src={image.url} alt={t('Mermaid 图表')} onError={failImage} />}
+          {image && <PreviewImage src={image.url} contentKey={source} alt={t('Mermaid 图表')} onError={failImage} />}
         </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>

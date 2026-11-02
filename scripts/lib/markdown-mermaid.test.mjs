@@ -67,6 +67,18 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       await b.wait('!!document.querySelector("pre")')
       assert.equal(await b.evaluate('!!document.querySelector(".markdown-mermaid, [data-mermaid-renderer]")'), false)
       assert.equal(await b.evaluate('performance.getEntriesByType("resource").some(e=>e.name.includes("mermaid-sandbox"))'), false)
+      if (host === 'desktop') {
+        // The first local read never settles. A new generation must read again.
+        await b.evaluate(`window.originalFetch=window.fetch; window.originalTimeout=window.setTimeout; window.scriptReads=0;
+          window.fetch=(url,...args)=>{if(String(url).includes('mermaid.min')){scriptReads++;if(scriptReads===1)return new Promise(()=>{})}return originalFetch(url,...args)};
+          window.setTimeout=(fn,ms,...args)=>originalTimeout(fn,ms===15000?300:ms,...args);
+          mermaidFixture.setMessage(false);mermaidFixture.setSource(mermaidFixture.fence(mermaidFixture.samples.flow))`)
+        await error()
+        await b.evaluate('window.setTimeout=originalTimeout')
+        await button('重试'); await ready()
+        assert.equal(await b.evaluate('scriptReads'), 2)
+        await b.evaluate('window.fetch=originalFetch;mermaidFixture.setSource("普通文档");svgSources=[]')
+      }
       await b.evaluate('mermaidFixture.setMessage(false);mermaidFixture.setSource(mermaidFixture.document)')
       await b.wait('document.querySelectorAll("[data-mermaid-state=ready]").length===8 && document.querySelectorAll("[data-mermaid-state=error]").length===1', 30_000)
       assert.equal(await b.evaluate('document.querySelectorAll("[data-mermaid-renderer]").length'), 1)
@@ -111,6 +123,15 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
         assert.equal(await b.evaluate(`(() => {const e=document.querySelector('.file-preview-image-scroll');return ${name === 'wide' ? 'e.scrollWidth>e.clientWidth' : 'e.scrollHeight>e.clientHeight'}})()`), true)
         await b.evaluate(`document.querySelector('.file-preview-image-scroll').${name === 'wide' ? 'scrollLeft' : 'scrollTop'}=100000`)
         assert.ok(await b.evaluate(`document.querySelector('.file-preview-image-scroll').${name === 'wide' ? 'scrollLeft' : 'scrollTop'}`) > 0)
+        const reading = () => b.evaluate(`(() => {const e=document.querySelector('.file-preview-image-scroll');return {
+          left:e.scrollLeft,top:e.scrollTop,scale:document.querySelector('.file-preview-image-info').textContent.split(' · ').at(-1)}})()`)
+        const before = await reading()
+        const previousUrl = await b.evaluate('document.querySelector(".markdown-mermaid-dialog img").src')
+        await b.evaluate(`mermaidFixture.setTheme(${JSON.stringify(name === 'wide' ? 'day' : 'night')})`)
+        await ready()
+        await b.wait(`document.querySelector('.markdown-mermaid-dialog img')?.src !== ${JSON.stringify(previousUrl)}`)
+        await pause(100)
+        assert.deepEqual(await reading(), before, 'Theme replacement retains the enlarged image reading position')
         await b.capture(join(evidence, `${host}-${name}.png`))
         await b.key('Escape'); await b.wait('!document.querySelector(".markdown-mermaid-dialog")')
         await b.wait('document.activeElement?.textContent === "查看大图"')
@@ -121,6 +142,7 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid-dialog").getBoundingClientRect().width<=innerWidth'), true)
       await b.capture(join(evidence, `${host}-narrow.png`)); await b.key('Escape')
       await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
+      await writeFile(join(evidence, `${host}-svg-samples.json`), JSON.stringify(await b.evaluate('Promise.all(svgSources)')))
 
       // Actual SVG decode failure has a manual recovery path.
       await b.evaluate('window.originalDecode=HTMLImageElement.prototype.decode;HTMLImageElement.prototype.decode=()=>Promise.reject(Error("decode"))')

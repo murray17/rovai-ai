@@ -941,7 +941,9 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
   } else {
-    void window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+    void window.loadFile(app.isPackaged
+      ? join(process.resourcesPath, 'web-ui/desktop.html')
+      : join(import.meta.dirname, '../web/desktop.html'))
   }
 }
 

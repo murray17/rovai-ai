@@ -1,4 +1,4 @@
-import { createContext, isValidElement, useContext, useEffect, useState, useLayoutEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
+import { createContext, isValidElement, useContext, useEffect, useState, useLayoutEffect, useMemo, useRef, type ComponentType, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -10,9 +10,7 @@ import { WebLink } from './WebLink'
 import { isWebUrl } from '../../web-url'
 import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import { parseFileReference } from '../../file-preview-reference'
-import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MarkdownCodeFrame } from './MarkdownCodeFrame'
-import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
 import { MarkdownTableFrame } from './MarkdownTableFrame'
 import {
   visitRenderedFileReferences,
@@ -25,20 +23,23 @@ type MarkdownTreeNode = MarkdownNode
 
 const LeadingMarkdownContentContext = createContext<ReactNode>(null)
 const InlineMarkdownContentContext = createContext<Readonly<Record<string, ReactNode>>>({})
-const MarkdownCodeContext = createContext<{ mode: 'message' | 'document'; theme: ResolvedTheme; literalCopy: boolean }>({
+export type MarkdownDocumentCodeProps = { code: string; languageName?: string; theme: ResolvedTheme }
+const MarkdownCodeContext = createContext<{
+  mode: 'message' | 'document'; theme: ResolvedTheme; literalCopy: boolean
+  DocumentCode?: ComponentType<MarkdownDocumentCodeProps>
+}>({
   mode: 'message', theme: 'day', literalCopy: true
 })
 
 // Module identity is stable across body and theme changes, preserving block state.
 function MarkdownPre({ children }: { children?: ReactNode }): JSX.Element {
-  const { mode, theme, literalCopy } = useContext(MarkdownCodeContext)
+  const { mode, theme, literalCopy, DocumentCode } = useContext(MarkdownCodeContext)
   const block = markdownCodeBlock(children)
   if (!block) return <pre>{children}</pre>
   return <MarkdownCodeFrame code={literalCopy ? block.code : undefined}>
-    {mode === 'document' && block.languageName?.toLowerCase() === 'mermaid'
-      ? <MarkdownMermaidBlock source={block.code} theme={theme} />
-      : mode === 'document' ? <MarkdownCodeBlock code={block.code} languageName={block.languageName} theme={theme} />
-        : <pre>{children}</pre>}
+    {mode === 'document' && DocumentCode
+      ? <DocumentCode code={block.code} languageName={block.languageName} theme={theme} />
+      : <pre>{children}</pre>}
   </MarkdownCodeFrame>
 }
 
@@ -167,6 +168,7 @@ export function SafeMarkdown({
   inlineContent,
   inlineLeadingContent = true,
   mode = 'message',
+  DocumentCode,
   theme = 'day'
 }: {
   children: string
@@ -182,6 +184,8 @@ export function SafeMarkdown({
   inlineContent?: Readonly<Record<string, ReactNode>>
   inlineLeadingContent?: boolean
   mode?: 'message' | 'document'
+  /** Supplied only by the document entry, keeping message bundles independent. */
+  DocumentCode?: ComponentType<MarkdownDocumentCodeProps>
   theme?: ResolvedTheme
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -344,7 +348,7 @@ export function SafeMarkdown({
             className ?? ''
           ].filter(Boolean).join(' ')}
         >
-          <MarkdownCodeContext.Provider value={{ mode, theme, literalCopy: inlineContentKeys === '[]' }}>
+          <MarkdownCodeContext.Provider value={{ mode, theme, literalCopy: inlineContentKeys === '[]', DocumentCode }}>
             {markdown}
           </MarkdownCodeContext.Provider>
         </div>

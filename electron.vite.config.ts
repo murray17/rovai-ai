@@ -4,7 +4,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
 const root = resolve(import.meta.dirname)
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
@@ -35,7 +35,9 @@ export default defineConfig({
       }
     }
   },
-  renderer: {
+  // Production renderers share the existing Web multi-page build. Keep the
+  // electron-vite renderer here only for the pnpm dev/HMR entry.
+  ...(command === 'serve' ? { renderer: {
     root: resolve(root, 'apps/desktop/src/renderer'),
     plugins: [react()],
     build: {
@@ -48,5 +50,5 @@ export default defineConfig({
         '@contracts': resolve(root, 'packages/contracts/src/index.ts')
       }
     }
-  }
-})
+  } } : {})
+}))

@@ -489,7 +489,7 @@ function ReadingPanel({ tab, children }: { tab: import('./FilePreviewContext').P
       }
       const body = node.querySelector<HTMLElement>('.file-preview-markdown, .file-preview-content, .agent-run-file-review-scroll, .mission-activity-document')
       if (body) { body.scrollTop = reading.scrollTop ?? 0; body.scrollLeft = reading.scrollLeft ?? 0 }
-      const image = node.querySelector<HTMLElement>('.file-preview-image-stage')
+      const image = node.querySelector<HTMLElement>('.file-preview-image-scroll')
       if (image) { image.scrollTop = reading.imageScrollTop ?? 0; image.scrollLeft = reading.imageScrollLeft ?? 0 }
       restoring.current = false
       observer.disconnect()
@@ -502,7 +502,7 @@ function ReadingPanel({ tab, children }: { tab: import('./FilePreviewContext').P
     if (restoring.current || !root.current?.clientHeight || !(event.target instanceof HTMLElement)) return
     const node = event.target
     if (node.classList.contains('cm-scroller')) saveReading(tab.id, { codeScrollTop: node.scrollTop, codeScrollLeft: node.scrollLeft })
-    else if (node.classList.contains('file-preview-image-stage')) saveReading(tab.id, { imageScrollTop: node.scrollTop, imageScrollLeft: node.scrollLeft })
+    else if (node.classList.contains('file-preview-image-scroll')) saveReading(tab.id, { imageScrollTop: node.scrollTop, imageScrollLeft: node.scrollLeft })
     else if ((node.classList.contains('file-preview-markdown') || node.classList.contains('file-preview-content') || node.classList.contains('agent-run-file-review-scroll') || node.classList.contains('mission-activity-document'))) saveReading(tab.id, { scrollTop: node.scrollTop, scrollLeft: node.scrollLeft })
   }}>{children}</div>
 }

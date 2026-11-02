@@ -39,7 +39,30 @@ async function openDocument(page) {
 async function inspect(page, name) {
   assert.equal(await page.evaluate(`window.mermaid===undefined && window.DOMPurify===undefined`), true)
   assert.equal(await page.evaluate(`document.querySelector('iframe[title="Mermaid renderer"]').contentDocument===null`), true)
+  const resources = await page.evaluate(`(() => {
+    const frame=document.querySelector('iframe[title="Mermaid renderer"]');
+    return location.protocol==='file:'
+      ? window.acceptanceAssetReads
+      : [...new DOMParser().parseFromString(frame.srcdoc,'text/html').scripts].map(e=>e.src)
+  })()`)
+  assert.equal(resources.length, 3)
+  if (name === 'packaged-desktop') assert.ok(resources.every(url => url.includes('/Resources/web-ui/assets/')))
+  else assert.ok(resources.every(url => new URL(url).pathname.startsWith('/assets/')))
+  await writeFile(join(output, `${name}-resources.json`), JSON.stringify(resources, null, 2))
   await page.capture(join(output, `${name}-document.png`))
+  if (name === 'packaged-desktop') {
+    const snapshot = await page.evaluate(`(async () => {
+      const clone=document.body.cloneNode(true);
+      for(const node of clone.querySelectorAll('script,iframe,.page-zoom-feedback')) node.remove();
+      for(const img of clone.querySelectorAll('img')) {
+        const response=await fetch(img.src);const blob=await response.blob();
+        img.src=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(blob)});
+      }
+      const css=await Promise.all([...document.querySelectorAll('link[rel=stylesheet]')].map(link=>fetch(link.href).then(r=>r.text())));
+      return {html:clone.innerHTML,css:css.join('\\n')+'\\n'+[...document.querySelectorAll('style')].map(s=>s.textContent).join('\\n')};
+    })()`)
+    await writeFile(join(output, 'production-ui-snapshot.json'), JSON.stringify(snapshot))
+  }
   await page.click(button('查看源码', first))
   await page.wait(`${first}.dataset.mermaidView==='source'`)
   await page.click(button('查看图形', first))
@@ -75,6 +98,10 @@ try {
   const beforeReload = await desktop.evaluate('performance.timeOrigin')
   await desktop.send('Page.reload')
   await desktop.wait(`performance.timeOrigin!==${beforeReload} && Boolean(window.rovai && document.querySelector('.authoritative-workspace'))`, 45_000)
+  // Observe local file reads; Chromium does not expose them as ResourceTiming.
+  // This forwards every read unchanged and cannot supply or intercept an asset.
+  await desktop.evaluate(`window.acceptanceAssetReads=[];const originalAssetFetch=window.fetch;
+    window.fetch=(url,...args)=>{if(/mermaid.min-|purify.min-|mermaid-sandbox-entry-/u.test(String(url)))acceptanceAssetReads.push(String(url));return originalAssetFetch(url,...args)}`)
   await desktop.evaluate(`window.rovai.appearance.setPreference('day')`)
   await openDocument(desktop)
   await inspect(desktop, 'packaged-desktop')
@@ -96,7 +123,7 @@ try {
   await openDocument(web)
   await inspect(web, 'packaged-web')
   await writeFile(join(output, 'packaged-result.json'), JSON.stringify({ passed: true, executable, root,
-    desktop: 'packaged ASAR file entry', web: 'packaged Host web-ui HTTP entry',
+    desktop: 'installed web-ui/desktop.html file entry with Electron preload', web: 'same installed web-ui/index.html via Host HTTP',
     validDiagrams: 8, invalidDiagrams: 1, largeDiagram: true, themeAndFileWatch: true, sourcePreferencePreserved: true, runtime: false }, null, 2) + '\n')
   console.log('Packaged Desktop and bundled Web Markdown Mermaid acceptance passed')
 } catch (error) {

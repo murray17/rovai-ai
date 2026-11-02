@@ -1,9 +1,9 @@
 import { useId, useMemo, type ComponentProps } from 'react'
-import { SafeMarkdown } from './SafeMarkdown'
+import { DocumentMarkdown } from './DocumentMarkdown'
 import { parseMarkdownFrontMatter, type MarkdownFrontMatter } from './markdown-front-matter'
 import { UiText } from './interface-language'
 
-type MarkdownFilePreviewProps = Omit<ComponentProps<typeof SafeMarkdown>, 'children' | 'mode'> & {
+type MarkdownFilePreviewProps = Omit<ComponentProps<typeof DocumentMarkdown>, 'children'> & {
   source: string
 }
 
@@ -40,7 +40,7 @@ export function MarkdownFilePreview({ source, ...markdownProps }: MarkdownFilePr
   return (
     <div className="file-preview-markdown-document">
       {document.frontMatter && <MarkdownMetadata frontMatter={document.frontMatter} />}
-      <SafeMarkdown {...markdownProps} mode="document">{document.body}</SafeMarkdown>
+      <DocumentMarkdown {...markdownProps}>{document.body}</DocumentMarkdown>
     </div>
   )
 }

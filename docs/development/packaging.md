@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-10-28
+last_updated: 2026-11-02
 ---
 
 # macOS 构建、签名与打包
@@ -15,8 +15,12 @@ macOS 与 Windows Desktop 只分发 `rovai-host` 和 `rovai` 两个 Rust sidecar
 运行层，独立 `rovai-core` 可执行文件只保留在开发构建与兼容测试中，不进入 Desktop 安装包、
 签名列表或发布验证清单。
 
-ASAR 只包含 `out/main`、`out/preload`、`out/renderer`、`out/execution-web` 和包元数据。
-`out/web` 通过 `extraResources` 单独复制到 `web-ui`，供 Rust Host 读取；不再同时放入 ASAR。
+ASAR 只包含 `out/main`、`out/preload`、`out/execution-web` 和包元数据。
+`build:web` 使用现有 Vite 多入口构建生成 `desktop.html`、`index.html` 和共享的 `assets`，产物仍为 `out/web`。
+整个目录通过 `extraResources` 复制到 `web-ui`；Electron 从其 `desktop.html` 加载原生 Renderer 并绑定既有 Preload，
+Rust Host 继续提供 `index.html` 的 Web 入口。两端公共模块、样式及可信离线 Mermaid 资源只保存一份，
+不再把另一个 Renderer 产物放入 ASAR。`electron-vite build` 只构建 Main/Preload；`pnpm dev` 仍使用原 Renderer HMR 配置。
+执行控制台沿用独立 message 入口，不能依赖文档 Provider、语法查看器或 Mermaid 资源。
 验收截图和其他 `out` 子目录不属于发行内容。
 
 根 `dependencies` 只声明 Main 运行时仍需从 npm 包加载的依赖。已编译进 Renderer/Web 的前端库

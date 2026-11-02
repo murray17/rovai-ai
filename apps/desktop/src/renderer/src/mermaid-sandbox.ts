@@ -6,18 +6,21 @@ import bootstrapUrl from './mermaid-sandbox-entry.js?url&no-inline'
 import { MERMAID_CHANNEL, MERMAID_MAX_EDGES, MERMAID_MAX_TEXT_SIZE } from './mermaid-renderer-policy'
 
 const assets = [mermaidUrl, purifierUrl, bootstrapUrl]
-let fileScripts: Promise<string[]> | null = null
+let fileScripts: string[] | null = null
 
 export async function sandboxDocument(generation: number): Promise<string> {
   const nonce = Array.from(crypto.getRandomValues(new Uint8Array(24)), byte => byte.toString(16).padStart(2, '0')).join('')
   const csp = `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`
   // Opaque file frames cannot read local scripts. Their trusted parent reads the
   // same packaged assets. HTTP hosts use external classic scripts to honor CSP.
-  const inline = location.protocol === 'file:' ? await (fileScripts ??= Promise.all(assets.map(async url => {
+  // Cache only completed text. A read that outlives its renderer generation must
+  // not hold a later manual retry behind the same unresolved Promise.
+  const inline = location.protocol === 'file:' ? fileScripts ?? await Promise.all(assets.map(async url => {
     const response = await fetch(url)
     if (!response.ok) throw new Error('mermaid-asset-load')
     return response.text()
-  })).catch(error => { fileScripts = null; throw error })) : null
+  })) : null
+  if (inline) fileScripts = inline
   const script = (index: number, data = '') => inline
     ? `<script nonce="${nonce}" ${data}>${inline[index].replace(/<\/script/giu, '<\\/script')}</script>`
     : `<script nonce="${nonce}" src="${new URL(assets[index], location.href).href.replace(/&/gu, '&amp;').replace(/"/gu, '&quot;')}" ${data}></script>`

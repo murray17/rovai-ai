@@ -265,7 +265,6 @@
     "files": [
       "out/main/**/*",
       "out/preload/**/*",
-      "out/renderer/**/*",
       "out/execution-web/**/*",
       "package.json"
     ],

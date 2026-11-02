@@ -155,7 +155,7 @@ async function resolvePreview(request: OpenFilePreviewRequest) {
   } else if (request.kind === 'camp_workspace' && [toolPreviewReference, ...readReferences].includes(request.rawReference)) {
     target = { ...file, previewKey: request.rawReference, displayPath: request.rawReference,
       fileName: request.rawReference.split('/').at(-1)! }
-  } else if (request.kind === 'message_reference' && ['refresh.txt', 'refresh.log', 'refresh.png'].includes(request.rawReference)) {
+  } else if (request.kind === 'message_reference' && ['refresh.txt', 'refresh.log', 'refresh.png', 'reading.png'].includes(request.rawReference)) {
     target = { ...file, previewKey: request.rawReference, fileName: request.rawReference, displayPath: request.rawReference, target: undefined,
       kind: request.rawReference.endsWith('.png') ? 'image' : request.rawReference.endsWith('.log') ? 'paged_text' : 'text' }
   } else if (request.kind !== 'message_reference' || request.rawReference !== file.displayPath) return unsupported()
@@ -220,9 +220,10 @@ const api: FilePreviewApi = {
     startLine: offset === 0 ? 1 : 101, hasPrevious: offset > 0, hasNext: offset === 0,
     contentGeneration: file.contentGeneration, contentVersion: file.contentVersion
   } } },
-  readBinary: async () => {
+  readBinary: async ({ handleId }) => {
     const canvas = document.createElement('canvas')
-    canvas.width = refreshRevision * 10; canvas.height = 20
+    canvas.width = resolvedFiles.get(handleId)?.fileName === 'reading.png' ? 2600 : refreshRevision * 10
+    canvas.height = resolvedFiles.get(handleId)?.fileName === 'reading.png' ? 1800 : 20
     canvas.getContext('2d')!.fillRect(0, 0, canvas.width, canvas.height)
     const blob = await new Promise<Blob>(resolve => canvas.toBlob(value => resolve(value!), 'image/png'))
     return { ok: true, value: { bytes: new Uint8Array(await blob.arrayBuffer()), mime: 'image/png',
@@ -448,6 +449,7 @@ function Workspace(): React.JSX.Element {
   </section>
 }
 
+let rebuildPreview: () => void
 let switchCamp: () => void
 let prepareColdDownload: () => void
 let setFixtureTheme: (theme: ResolvedTheme) => void
@@ -512,6 +514,8 @@ function InitialExecutionWorkspace({ camp }: { camp: string }): React.JSX.Elemen
 }
 
 function Fixture(): React.JSX.Element {
+  const [revision, setRevision] = useState(0)
+  rebuildPreview = () => setRevision(value => value + 1)
   const [camp, setCamp] = useState('camp-1')
   const [resolvedTheme, setResolvedTheme] = useState<ResolvedTheme>('day')
   const [toolRowsVisible, setToolRowsVisible] = useState(false)
@@ -535,7 +539,7 @@ function Fixture(): React.JSX.Element {
     document.documentElement.style.colorScheme = theme === 'night' ? 'dark' : 'light'
     setResolvedTheme(theme)
   }
-  return <FilePreviewProvider threadId={camp} resolvedTheme={resolvedTheme} api={camp === 'cold-download' ? api : undefined}>
+  return <FilePreviewProvider key={revision} threadId={camp} resolvedTheme={resolvedTheme} api={camp === 'cold-download' ? api : undefined}>
     <div className="app-shell app-shell-camp">
       <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)' }}>Rovai AI</aside>
       <AppHeader threadTitle="文件预览验收" contextLabel="Rovai AI" thread={null} onFocusApprovals={() => {}} />
@@ -574,6 +578,8 @@ async function settle(): Promise<void> {
 
 Object.assign(window, { previewTest: {
   settle,
+  rebuildPreview: () => rebuildPreview(),
+  imageReading: () => previewController.activeTab?.reading,
   async refreshActive(shorten = false) {
     const tab = previewController.activeTab
     if (tab?.kind !== 'file' || !tab.file) throw new Error('Expected an active file')

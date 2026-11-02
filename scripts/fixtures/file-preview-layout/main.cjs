@@ -158,6 +158,33 @@ app.whenReady().then(async () => {
     return snapshot()
   }
 
+  await check('ordinary image restores zoom and both scroll axes after preview reconstruction', async () => {
+    await run('window.previewTest.openFindFixture("reading.png")')
+    await waitForExecution('document.querySelector(".file-preview-image-content img")?.naturalWidth === 2600')
+    await click('.file-preview-image-controls button:nth-child(3)')
+    await click('.file-preview-image-controls button:nth-child(4)')
+    await run(`window.previousImage=document.querySelector('.file-preview-image-content img');
+      document.querySelector('.file-preview-image-scroll').scrollTo(420, 310)`)
+    await snapshot()
+    const before = await run('window.previewTest.imageReading()')
+    assert.equal(before.imageScale, 1.25)
+    assert.equal(before.imageScrollLeft, 420)
+    assert.equal(before.imageScrollTop, 310)
+    await run('window.previewTest.rebuildPreview()')
+    await waitForExecution(`document.querySelector('.file-preview-image-content img')?.naturalWidth === 2600
+      && document.querySelector('.file-preview-image-content img') !== previousImage`)
+    await snapshot()
+    const position = await run(`(() => {const e=document.querySelector('.file-preview-image-scroll');
+      return {left:e.scrollLeft,top:e.scrollTop,width:e.querySelector('img').getBoundingClientRect().width}})()`)
+    assert.deepEqual(position, { left: 420, top: 310, width: 3250 })
+    await capture('image-reading-restored')
+  })
+  if (process.env.ROVAI_FILE_PREVIEW_CASE === 'image-reading') {
+    console.log(JSON.stringify({ ok: true, cases }))
+    app.exit(0)
+    return
+  }
+
   await check('first submitted Run uses 420px without persisting or changing width when files join the pane', async () => {
     for (const theme of ['day', 'night']) {
       await initialExecutionFixture()

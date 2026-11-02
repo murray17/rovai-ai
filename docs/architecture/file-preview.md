@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-11-01
+last_updated: 2026-11-02
 ---
 
 # File Preview Architecture
@@ -249,12 +249,16 @@ Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.r
 
 ## Markdown 图表渲染
 
-`SafeMarkdown` 的模块级 `pre` renderer 仅在 document 模式、语言名忽略大小写精确为 `mermaid` 时
-分发到 `MarkdownMermaidBlock`；其他代码块和 message 模式保持原链路。`MarkdownCodeFrame` 继续拥有
+`DocumentMarkdown` 作为文档入口向 `SafeMarkdown` 注入模块级代码块组件；稳定的 `pre` renderer 通过
+context 消费它，仅在 document 模式分发。语言名忽略大小写精确为 `mermaid` 时使用 `MarkdownMermaidBlock`，
+其他文档代码继续高亮。message 入口不依赖文档查看器、语法引擎或 Mermaid；执行控制台消费轻量预览 context，
+不间接引入 Provider 和文件查看器。`MarkdownCodeFrame` 继续拥有
 原始代码复制与手动复制回退。图表的局部状态、候选图片解码与 Blob URL 生命周期归展示组件。
 
 `mermaid-renderer` 仅提供 `renderMermaid(source, theme)`，按窗口懒建一个专用 iframe，以 Promise 链串行
 初始化和渲染。Mermaid、DOMPurify 与专用启动脚本作为本地静态资源打包，首次需要时才加载。
+正式 Desktop 与 Web 由同一 Vite 多入口构建共享模块和资源，安装包仅保留 `web-ui/assets` 中的一份；
+Desktop 从 `web-ui/desktop.html` 加载，Host Web 继续使用 `web-ui/index.html`。开发时沿用原 Electron Vite HMR 入口。
 HTTP 入口通过 nonce 标记的经典脚本满足宿主继承的 `script-src 'self'`；Desktop file 入口由宿主读取同一份
 资源，再放入 nonce 页面壳，避免 opaque iframe 直接读取文件。两种宿主共用同一启动入口和消息协议，
 不放宽宿主 CSP。iframe 使用 `sandbox="allow-scripts"`，不开放同源权限、Preload、
@@ -269,8 +273,11 @@ Host API 或文件能力；CSP 禁止图片、字体、连接、子 frame、work
 
 加载和单次渲染分别有 15 秒等待期限。超时统一使实例失效，结算旧代当前及排队请求并断开旧队列；新请求
 重新创建实例，不迁移或自动重试旧任务。期限不承诺中断同步计算。语法错误只结算当前块，后续任务继续。
+Desktop 仅缓存已经读取成功的脚本文本；未完成读取不跨代复用，故下一次手动重试可重新读取。
 组件用请求序号拒绝过期结果：旧请求只释放自己未提交的候选 URL，不能修改当前视图或释放当前图片。
 已提交 URL 在替换或卸载后释放。大图与正文共用已解码结果，打开大图不重渲染。
+图片查看器按内容身份重置：同一图源的主题换图保留尺寸、缩放及原生滚动位置；图源变化仍关闭大图。
+普通图片的阅读位置通过实际 `.file-preview-image-scroll` 容器保存与恢复。
 
 用户交互和查找边界见[文件预览图表阅读](../ui/components/file-preview.md#markdown-图表阅读)。
 

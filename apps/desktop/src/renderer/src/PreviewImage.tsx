@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useUiText } from './interface-language'
 
 /** Shared image reading controls; file ownership and image URL lifetime stay with the caller. */
-export function PreviewImage({ src, alt, info = '', errorHint, initialScale = null, onScale, onError }: {
+export function PreviewImage({ src, contentKey = src, alt, info = '', errorHint, initialScale = null, onScale, onError }: {
   src: string; alt: string; info?: string; errorHint?: string; initialScale?: number | null
+  /** Stable across presentation-only replacements, such as a diagram theme change. */
+  contentKey?: string
   onScale?(scale: number | null): void
   onError?(): void
 }): React.JSX.Element {
@@ -15,7 +17,7 @@ export function PreviewImage({ src, alt, info = '', errorHint, initialScale = nu
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     setDimensions(null); setFailed(false); setScale(initialScale)
-  }, [src])
+  }, [contentKey])
   useEffect(() => {
     const element = viewport.current
     if (!element) return
