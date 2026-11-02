@@ -1,4 +1,5 @@
 import { Activity, useState } from 'react'
+import type { NativeSkillDiagnostic } from '../../../packages/contracts/src/index'
 import { createRoot } from 'react-dom/client'
 import { NativeSkillsSettings, ToolboxSettings } from '../../../apps/desktop/src/renderer/src/RebuiltSkillsSettings'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
@@ -43,6 +44,13 @@ let releaseDelete: (() => void) | undefined
 let failDelete = false
 let contentHold: { path: string; wait: Promise<void>; release: () => void } | null = null
 let contentFailure: string | null = null
+let nativeDiagnostics: NativeSkillDiagnostic[] = []
+let nativeContent: string | null = null
+let nativeListHold: { wait: Promise<void>; release: () => void } | null = null
+let releaseNativeList: (() => void) | undefined
+let copiedDiagnostic = ''
+Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (value: string) => { copiedDiagnostic = value } } })
+
 const longPreviewPath = 'references/project-specific-workflows/acceptance-and-review/long-file-name-long-file-name-long-file-name-checklist.md'
 const previewPaths = [
   'SKILL.md', 'LICENSE', 'agents/openai.yaml', 'assets/icon.png', 'references/guide.md',
@@ -86,7 +94,13 @@ Object.assign(window, {
           throw new Error('删除失败，请重试。')
         }
       }
-      if (method === 'nativeSkills.list') return { skills: structuredClone(nativeSkills), errors: [] }
+      if (method === 'nativeSkills.list') {
+        const result = { skills: structuredClone(nativeSkills), diagnostics: structuredClone(nativeDiagnostics) }
+        const hold = nativeListHold
+        nativeListHold = null
+        if (hold) await hold.wait
+        return result
+      }
       if (method === 'nativeSkills.read') {
         const paths = params.skillId === 'native-2' ? ['SKILL.md'] : previewPaths
         const status = params.path === 'assets/icon.png' ? 'binary'
@@ -94,7 +108,7 @@ Object.assign(window, {
         const result = {
           path: params.path,
           status,
-          content: status !== 'text' ? null : params.skillId === 'native-2' ? '# 单文件 Skill\n\n独立的说明内容。' :
+          content: status !== 'text' ? null : nativeContent ?? (params.skillId === 'native-2' ? '# 单文件 Skill\n\n独立的说明内容。' :
             params.path === 'SKILL.md'
               ? text +
                 '\n\n' +
@@ -102,7 +116,7 @@ Object.assign(window, {
                   { length: 24 },
                   (_, i) => '## 参考段落 ' + (i + 1) + '\n\n内容与操作位于同一工作区。'
                 ).join('\n\n')
-              : params.path === 'agents/openai.yaml' ? 'interface:\n  display_name: "Fixture Skill"\n' : '参考内容。',
+              : params.path === 'agents/openai.yaml' ? 'interface:\n  display_name: "Fixture Skill"\n' : '参考内容。'),
           files: paths.map(path => ({ path, bytes: 500 }))
         }
         if (contentHold?.path === params.path) await contentHold.wait
@@ -298,6 +312,16 @@ function Fixture() {
 }
 Object.assign(window, {
   capabilityTest: {
+    setNativeDiagnostics: (value: NativeSkillDiagnostic[]) => { nativeDiagnostics = value },
+    setNativeContent: (value: string | null) => { nativeContent = value },
+    copiedDiagnostic: () => copiedDiagnostic,
+    holdNativeList: () => {
+      let release = () => {}
+      const wait = new Promise<void>((resolve) => { release = resolve })
+      nativeListHold = { wait, release }
+      releaseNativeList = release
+    },
+    releaseNativeList: () => { releaseNativeList?.() },
     settle: () =>
       new Promise((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)))

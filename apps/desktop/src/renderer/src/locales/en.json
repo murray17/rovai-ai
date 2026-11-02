@@ -4241,5 +4241,12 @@
   "内容又有修改，请重新处理冲突": "New edits were made. Resolve the conflict again.",
   "启动设置已损坏，请重新选择程序或恢复自动检测后保存。": "Startup settings are damaged. Select a program or restore automatic detection, then save.",
   "通用环境变量无法读取。原记录已保留，请重新填写后保存。": "Shared environment variables could not be read. The original record is preserved. Enter replacement values and save.",
-  "配置异常": "Configuration error"
+  "配置异常": "Configuration error",
+  "元数据异常": "Metadata issue",
+  "文件读取失败": "File read failed",
+  "目录读取失败": "Directory read failed",
+  "扫描结果不完整": "Scan results are incomplete",
+  "来源诊断": "Source diagnostics",
+  "复制诊断": "Copy diagnostics",
+  "相关 Skill 仍可使用。修改文件后刷新可更新诊断。": "These Skills remain usable. Edit the file, then refresh to update diagnostics."
 }

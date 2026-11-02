@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as Dialog from '@radix-ui/react-dialog'
-import type { AdapterKind, AgentProfile, NativeSkillScan, NativeSkillView, RuntimeStatus, SkillContentView, StoredCommandResult, ToolboxSkillView } from '@contracts'
+import type { AdapterKind, AgentProfile, NativeSkillDiagnostic, NativeSkillScan, NativeSkillView, RuntimeStatus, SkillContentView, StoredCommandResult, ToolboxSkillView } from '@contracts'
 import { useThreadClient } from './camp-client'
 import { useCapabilitySplitter } from './useCapabilitySplitter'
 import { MemberAvatar } from './MemberAvatar'
@@ -9,6 +9,7 @@ import { RuntimeGlyph } from './MemberRuntimePicker'
 import { SkillIdentityMark } from './SkillIdentityMark'
 import { SafeMarkdown } from './SafeMarkdown'
 import { skillReadingContent } from './skill-reading-content'
+import { nativeSkillDiagnosticLabel, nativeSkillDiagnosticText } from './native-skill-diagnostics'
 import { SkillFileNavigation } from './SkillFileNavigation'
 import { adapterLabel, visibleProductRuntimes } from './runtime-products'
 import { readErrorMessage } from './error-message'
@@ -95,7 +96,7 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
         <div className="rebuilt-skills-toolbar"><strong>Skills</strong><span>{scan?.skills.length ?? '—'}<UiText zh={" 项"} /></span></div>
         <label className="rebuilt-skills-search"><span className="sr-only"><UiText zh={"搜索 Skills"} /></span><input type="search" placeholder={uiAttribute("搜索 Skill")} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
         {error && <div className="rebuilt-skills-error" role="alert"><UiText zh={"执行端暂不可读："} />{error}<button type="button" onClick={() => void load(true)}><UiText zh={"重试"} /></button></div>}
-        {scan?.errors.length ? <div className="rebuilt-skills-error" role="status"><UiText zh={"部分来源暂不可读。已发现的 Skill 仍可查看。"} /><button type="button" onClick={() => void load(true)}><UiText zh={"重试"} /></button></div> : null}
+        <NativeSkillDiagnostics diagnostics={scan?.diagnostics ?? []} />
         {loading && !scan && <p className="rebuilt-skills-empty"><UiText zh={"正在读取 Skills…"} /></p>}
         {!loading && scan && scan.skills.length === 0 && <p className="rebuilt-skills-empty"><UiText zh={"这个智能体尚未发现 Skills。"} /></p>}
         {scan && visible.length === 0 && scan.skills.length > 0 && <p className="rebuilt-skills-empty"><UiText zh={"没有匹配的 Skill。"} /></p>}
@@ -104,12 +105,32 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
       {separator}
       <section id={`${id}-detail`} className={`rebuilt-skills-detail ${detailVisible ? 'is-detail-visible' : ''}`} aria-label={uiAttribute("Skill 预览")}>
         <button type="button" className="rebuilt-skills-back" onClick={() => setDetailVisible(false)}><UiText zh={"返回列表"} /></button>
-        {selected ? <><header><h2>{selected.name}</h2><p>{selected.description}</p><div className="rebuilt-skill-source"><span title={selected.entryPath}>{selected.entryPath}</span><button type="button" onClick={() => void copyPath(selected)} aria-label={uiAttribute("复制 Skill 路径")}><UiText zh={"复制路径"} /></button></div></header><div className="rebuilt-skills-content"><SkillFileNavigation files={files} path={filePath} onSelect={(path) => { setFilePath(path); setRaw(false) }}>
+        {selected ? <><header><h2>{selected.name}</h2><p>{selected.description}</p><div className="rebuilt-skill-source"><span title={selected.entryPath}>{selected.entryPath}</span><button type="button" onClick={() => void copyPath(selected)} aria-label={uiAttribute("复制 Skill 路径")}><UiText zh={"复制路径"} /></button></div><NativeSkillDiagnostics diagnostics={scan?.diagnostics.filter((diagnostic) => diagnostic.skillId === selected.id) ?? []} /></header><div className="rebuilt-skills-content"><SkillFileNavigation files={files} path={filePath} onSelect={(path) => { setFilePath(path); setRaw(false) }}>
           {/\.(?:md|markdown)$/iu.test(filePath) && <div className="capability-view-modes" role="group" aria-label={uiAttribute("Skill 预览方式")}><button type="button" aria-pressed={!raw} onClick={() => setRaw(false)}><UiText zh={"阅读"} /></button><button type="button" aria-pressed={raw} onClick={() => setRaw(true)}><UiText zh={"源码"} /></button></div>}
         </SkillFileNavigation>{contentError ? <div className="rebuilt-skills-error" role="alert"><UiText zh={"正文暂不可读："} />{contentError}<button type="button" onClick={() => setContentRevision((revision) => revision + 1)}><UiText zh={"重试"} /></button></div> : content === null ? <p className="rebuilt-skills-empty"><UiText zh={"正在读取正文…"} /></p> : content.status === 'too_large' ? <p className="rebuilt-skills-empty"><UiText zh={"该文件较大，暂不支持正文预览。"} /></p> : content.status === 'binary' ? <p className="rebuilt-skills-empty"><UiText zh={"该文件不是文本文件。"} /></p> : raw || !/\.(?:md|markdown)$/iu.test(filePath) ? <pre className="capability-source-code">{content.content}</pre> : <SafeMarkdown className="capability-reading" mode="document">{skillReadingContent(content.content ?? '')}</SafeMarkdown>}</div></> : <p className="rebuilt-skills-empty"><UiText zh={"选择一项 Skill 查看正文。"} /></p>}
       </section>
     </div>
   </div>
+}
+
+function NativeSkillDiagnostics({ diagnostics }: { diagnostics: NativeSkillDiagnostic[] }): React.JSX.Element | null {
+  const [copyError, setCopyError] = useState<string | null>(null)
+  if (!diagnostics.length) return null
+  const summary = [...new Set(diagnostics.map((diagnostic) => nativeSkillDiagnosticLabel(diagnostic.kind)))].join(' · ')
+  return <details className="native-skill-diagnostics">
+    <summary>{summary} ({diagnostics.length})</summary>
+    <ul>{diagnostics.map((diagnostic, index) => <li key={index}>
+      <strong>{nativeSkillDiagnosticLabel(diagnostic.kind)}</strong>
+      <code>{diagnostic.path}</code><p>{diagnostic.message}</p>
+    </li>)}</ul>
+    {diagnostics.some((diagnostic) => diagnostic.kind === 'metadata') && <p><UiText zh="相关 Skill 仍可使用。修改文件后刷新可更新诊断。" /></p>}
+    <button type="button" className="rebuilt-skill-action" onClick={() => {
+      setCopyError(null)
+      void navigator.clipboard.writeText(diagnostics.map(nativeSkillDiagnosticText).join('\n\n'))
+        .catch((reason) => setCopyError(readErrorMessage(reason)))
+    }}><UiText zh="复制诊断" /></button>
+    {copyError && <p role="alert">{copyError}</p>}
+  </details>
 }
 
 export function ToolboxSettings({ agents }: { agents: AgentProfile[] }): React.JSX.Element {

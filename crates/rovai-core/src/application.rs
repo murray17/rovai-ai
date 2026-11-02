@@ -10324,6 +10324,7 @@ impl Core {
                 }
                 let runtime_search = self.runtime_search_environment.read().await.clone();
                 let mut references = Vec::new();
+                let mut diagnostics = Vec::new();
                 let discovery = self.native_skill_discovery.clone();
                 let refresh = params.refresh;
                 let scans = tokio::task::spawn_blocking(move || {
@@ -10353,7 +10354,11 @@ impl Core {
                 for (member_id, scan) in scans {
                     match scan {
                         Ok(scan) => {
-                            errors.extend(scan.errors);
+                            for diagnostic in scan.diagnostics {
+                                if !diagnostics.contains(&diagnostic) {
+                                    diagnostics.push(diagnostic);
+                                }
+                            }
                             for skill in scan.skills {
                                 if old_projection_paths.contains(
                                     &std::path::Path::new(&skill.entry_path)
@@ -10369,12 +10374,16 @@ impl Core {
                                     .entry(id.clone())
                                     .or_default()
                                     .insert(member_id.clone());
-                                candidates.entry(id.clone()).or_insert_with(|| json!({"id": id, "name": skill.name, "description": skill.description, "source": "native", "sourceScope": skill.source_scope, "entryPath": skill.entry_path}));
                                 references.push(skill);
                             }
                         }
                         Err(error) => errors.push(format!("{member_id}: {error}")),
                     }
+                }
+                // Display and register exactly the same deduplicated native candidates.
+                rovai_core::native_skills::deduplicate_native_skills(&mut references);
+                for skill in &references {
+                    candidates.insert(skill.id.clone(), json!({"id": skill.id, "name": skill.name, "description": skill.description, "source": "native", "sourceScope": skill.source_scope, "entryPath": skill.entry_path}));
                 }
                 let mut database = self.database.lock().await;
                 rovai_core::native_skills::remember_native_skill_references(
@@ -10389,7 +10398,7 @@ impl Core {
                         Ok(value)
                     })
                     .collect::<Result<Vec<Value>>>()?;
-                Ok(json!({"skills": skills, "errors": errors}))
+                Ok(json!({"skills": skills, "errors": errors, "diagnostics": diagnostics}))
             }
             "skills.get" => {
                 let params: SkillIdParams = serde_json::from_value(request.params.clone())?;

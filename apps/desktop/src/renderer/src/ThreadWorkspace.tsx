@@ -1,3 +1,4 @@
+import { nativeSkillDiagnosticText } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
 import { isReferenceAtom, isReferenceSegment, projectReference } from './thread-reference'
 import { ReplyDetails } from './ReplyDetails'
@@ -1892,7 +1893,7 @@ export function ThreadWorkspace({
     candidates: ComposerSkillCandidates
     status: 'loading' | 'ready' | 'error'
     refreshFailed: boolean
-  }>({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
+  }>({ candidates: { skills: [], errors: [], diagnostics: [] }, status: 'loading', refreshFailed: false })
   const [skillCatalogRefreshing, setSkillCatalogRefreshing] = useState(false)
   const refreshSkillCatalogRef = useRef<((refresh?: boolean) => void) | null>(null)
   const composerEditorRef = useRef<HTMLDivElement>(null)
@@ -2356,7 +2357,7 @@ export function ThreadWorkspace({
     let cancelled = false
     let requestSequence = 0
     let requested = false
-    setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
+    setComposerSkillCatalog({ candidates: { skills: [], errors: [], diagnostics: [] }, status: 'loading', refreshFailed: false })
     setSkillCatalogRefreshing(false)
     const loadSkillCatalog = async (refresh = false): Promise<void> => {
       if (requested && !refresh) return
@@ -2380,7 +2381,7 @@ export function ThreadWorkspace({
     const invalidate = (): void => {
       requestSequence += 1
       requested = false
-      setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
+      setComposerSkillCatalog({ candidates: { skills: [], errors: [], diagnostics: [] }, status: 'loading', refreshFailed: false })
     }
     const unsubscribeInvalidation = client.onInvalidated?.(invalidate)
     const unsubscribe = client.onEvent?.((event) => {
@@ -6545,7 +6546,7 @@ export function ThreadWorkspace({
               pendingInviteIds={pendingInviteIds}
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
-              skillCatalogErrors={composerSkillCatalog.candidates.errors}
+              skillCatalogErrors={[...composerSkillCatalog.candidates.errors, ...(composerSkillCatalog.candidates.diagnostics ?? []).map(nativeSkillDiagnosticText)]}
               skillCatalogRefreshFailed={composerSkillCatalog.refreshFailed}
               skillCatalogRefreshing={skillCatalogRefreshing}
               onNeedSkills={() => refreshSkillCatalogRef.current?.()}

@@ -304,7 +304,7 @@ pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
                     },
             } => {
                 validate_composer_identity(skill_id, "Skill Atom")?;
-                crate::skill::validate_skill_name(name_at_send)?;
+                crate::skill::validate_skill_reference_name(skill_id, name_at_send)?;
             }
         }
     }
@@ -591,7 +591,7 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
                 if skill_id.is_empty() || skill_id.trim() != skill_id || skill_id.len() > 256 {
                     anyhow::bail!("Skill Mention requires a canonical Skill ID");
                 }
-                crate::skill::validate_skill_name(name_at_send)?;
+                crate::skill::validate_skill_reference_name(skill_id, name_at_send)?;
             }
             StructuredThreadMessageSegment::ExternalQuote {
                 sender_display_name,
@@ -1433,6 +1433,24 @@ mod tests {
             serde_json::from_value(serde_json::to_value(&content).unwrap()).unwrap();
         assert_eq!(canonical_content_digest(&round_tripped).unwrap(), digest);
 
+        for name in ["Native_Name", "中文 技能", &"n".repeat(80)] {
+            let native = vec![Segment::SkillMention {
+                skill_id: "native:registered".into(),
+                name_at_send: name.into(),
+            }];
+            validate_user_authored_content(&native).unwrap();
+            let document: ComposerDocument = serde_json::from_value(serde_json::json!({
+                "version": 2, "segments": [{"kind": "atom", "atom": {"type": "skill", "skillId": "native:registered", "nameAtSend": name}}]
+            })).unwrap();
+            validate_composer_document(&document).unwrap();
+            assert!(
+                validate_content(&[Segment::SkillMention {
+                    skill_id: "rovai:managed".into(),
+                    name_at_send: name.into()
+                }])
+                .is_err()
+            );
+        }
         for malformed in [
             r#"{"kind":"skill_mention","skillId":"skill-review","nameAtSend":"review-pr","path":"/tmp/SKILL.md"}"#,
             r#"{"kind":"skill_mention","skillId":" skill-review","nameAtSend":"review-pr"}"#,

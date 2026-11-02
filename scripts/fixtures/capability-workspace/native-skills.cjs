@@ -13,6 +13,54 @@ module.exports = async ({ run, click, key, settle, capture, snapshot, window }) 
   await require('./file-navigation.cjs')({ run, click, key, settle, capture, window })
   await click('刷新')
   assert.equal(await run("window.capabilityTest.requests.filter(r => r.method === 'nativeSkills.list').at(-1).params.refresh"), true)
+  // Metadata issues remain selectable; real failures and incomplete scans keep their own labels.
+  const diagnostics = [
+    { kind: 'metadata', path: '/fixture/native/ui-ux-pro-max/SKILL.md', message: 'name must be a string', skillId: 'native-1' },
+    { kind: 'file_read', path: '/fixture/native/blocked/SKILL.md', message: 'Permission denied' },
+    { kind: 'directory_read', path: '/fixture/locked', message: 'Directory access denied' },
+    { kind: 'scan_truncated', path: '/fixture/many', message: 'Directory entry limit reached (512)' }
+  ]
+  await run(`window.capabilityTest.setNativeDiagnostics(${JSON.stringify(diagnostics)})`)
+  await click('刷新')
+  assert.equal(await run("document.querySelector('aside.rebuilt-skills-list').querySelectorAll('.rebuilt-skill-row').length"), 2)
+  assert.ok((await snapshot()).text.includes('扫描结果不完整'))
+  assert.ok(!(await snapshot()).text.includes('部分来源暂不可读'))
+  await run("document.querySelector('aside .native-skill-diagnostics summary').click()")
+  await click('复制诊断')
+  const copied = await run('window.capabilityTest.copiedDiagnostic()')
+  assert.ok(copied.includes('/fixture/locked') && copied.includes('Directory access denied'))
+  assert.ok(await run("document.querySelector('.rebuilt-skills-detail .native-skill-diagnostics').textContent.includes('name must be a string')"))
+  await capture('native-skills-diagnostics')
+  await run('window.capabilityTest.setNativeDiagnostics([])')
+  await click('刷新')
+  assert.equal(await run("document.querySelectorAll('.native-skill-diagnostics').length"), 0)
+
+  for (const [source, body] of [
+    ['# Plain document', 'Plain document'],
+    ['\uFEFF---\r\n---\r\n# Empty header', 'Empty header'],
+    ['---\nname: [broken\n---\n# Bad YAML body', 'Bad YAML body'],
+    ['---\nname: unclosed', 'name: unclosed']
+  ]) {
+    await run(`window.capabilityTest.setNativeContent(${JSON.stringify(source)})`)
+    await click('刷新')
+    await click('阅读')
+    assert.ok(await run(`document.querySelector('.capability-reading').textContent.includes(${JSON.stringify(body)})`))
+    if (source.includes('[broken')) assert.ok(!await run("document.querySelector('.capability-reading').textContent.includes('[broken')"))
+    await click('源码')
+    assert.equal(await run("document.querySelector('.capability-source-code').textContent"), source)
+  }
+  await run('window.capabilityTest.setNativeContent(null)')
+  await click('阅读')
+  // A refresh finishing after a Runtime switch cannot restore stale diagnostics.
+  await run(`window.capabilityTest.setNativeDiagnostics(${JSON.stringify(diagnostics)}); window.capabilityTest.holdNativeList()`)
+  await click('刷新')
+  await run('window.capabilityTest.setNativeDiagnostics([])')
+  await click('选择智能体，当前为 Codex CLI')
+  await run("[...document.querySelectorAll('[role=menuitemradio]')].find(item => item.getAttribute('data-state') === 'unchecked').click()")
+  await settle()
+  await run('window.capabilityTest.releaseNativeList()')
+  await settle()
+  assert.equal(await run("document.querySelectorAll('.native-skill-diagnostics').length"), 0)
   await capture('native-skills-day-wide')
 
   await click('工具箱')

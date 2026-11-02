@@ -29,7 +29,7 @@ use crate::skill::{SkillContentFile, SkillContentView};
 
 const DIRECTORY_CACHE_CAPACITY: usize = 128;
 const DIRECTORY_CACHE_TTL: Duration = Duration::from_secs(300);
-const MAX_SKILLS_PER_ROOT: usize = 512;
+const MAX_SCAN_ENTRIES_PER_ROOT: usize = 512;
 const MAX_NATIVE_PREVIEW_FILES: usize = 512;
 const MAX_NATIVE_PREVIEW_ENTRIES: usize = 2048;
 const MAX_NATIVE_PREVIEW_BYTES: u64 = 1024 * 1024;
@@ -162,7 +162,37 @@ pub struct NativeSkill {
 #[serde(rename_all = "camelCase")]
 pub struct NativeSkillScan {
     pub skills: Vec<NativeSkill>,
-    pub errors: Vec<String>,
+    pub diagnostics: Vec<NativeSkillDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NativeSkillDiagnosticKind {
+    Metadata,
+    FileRead,
+    DirectoryRead,
+    ScanTruncated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSkillDiagnostic {
+    pub kind: NativeSkillDiagnosticKind,
+    pub path: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill_id: Option<String>,
+}
+
+impl NativeSkillDiagnostic {
+    fn new(kind: NativeSkillDiagnosticKind, path: &Path, message: impl ToString) -> Self {
+        Self {
+            kind,
+            path: path.to_string_lossy().into_owned(),
+            message: message.to_string(),
+            skill_id: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +204,12 @@ pub struct RememberNativeSkillReferencesCommand {
 impl sealed::Sealed for RememberNativeSkillReferencesCommand {}
 impl DomainCommand for RememberNativeSkillReferencesCommand {
     const TYPE: &'static str = "native_skill.references.remember";
+}
+
+/// The displayed native candidates and the registration batch share this result.
+pub fn deduplicate_native_skills(skills: &mut Vec<NativeSkill>) {
+    let mut seen = HashSet::new();
+    skills.retain(|skill| seen.insert(skill.id.clone()));
 }
 
 pub fn remember_native_skill_references(
@@ -221,7 +257,7 @@ struct DirectorySkill {
 #[derive(Debug, Clone)]
 struct DirectoryScan {
     skills: Vec<DirectorySkill>,
-    errors: Vec<String>,
+    diagnostics: Vec<NativeSkillDiagnostic>,
 }
 
 #[derive(Debug, Clone)]
@@ -362,7 +398,7 @@ impl NativeSkillDiscoveryRequest<'_> {
             codex_disabled_skill_folders(adapter, &home, project.as_deref(), configuration);
         let mut scan = NativeSkillScan {
             skills: Vec::new(),
-            errors: config_errors,
+            diagnostics: config_errors,
         };
         let mut seen_roots = HashSet::new();
         let mut seen_files = HashSet::new();
@@ -375,7 +411,8 @@ impl NativeSkillDiscoveryRequest<'_> {
                 .directories
                 .entry(key.clone())
                 .or_insert_with(|| self.discovery.ensure_directory(&key, adapter, self.refresh));
-            scan.errors.extend(directory.errors.iter().cloned());
+            scan.diagnostics
+                .extend(directory.diagnostics.iter().cloned());
             for skill in &directory.skills {
                 if !seen_files.insert(skill.canonical_path.clone()) {
                     continue;
@@ -431,7 +468,7 @@ fn directory_key(root: &Path) -> PathBuf {
 fn scan_directory(root: &Path, adapter: AdapterKind) -> DirectoryScan {
     let mut scan = NativeSkillScan {
         skills: Vec::new(),
-        errors: Vec::new(),
+        diagnostics: Vec::new(),
     };
     scan_root(adapter, "user", root, &mut HashSet::new(), &mut scan);
     DirectoryScan {
@@ -449,7 +486,7 @@ fn scan_directory(root: &Path, adapter: AdapterKind) -> DirectoryScan {
                 canonical_path: skill.canonical_path,
             })
             .collect(),
-        errors: scan.errors,
+        diagnostics: scan.diagnostics,
     }
 }
 
@@ -458,7 +495,11 @@ fn codex_disabled_skill_folders(
     home: &Path,
     project: Option<&Path>,
     configuration: &RuntimeStartupConfiguration,
-) -> (HashSet<PathBuf>, HashSet<String>, Vec<String>) {
+) -> (
+    HashSet<PathBuf>,
+    HashSet<String>,
+    Vec<NativeSkillDiagnostic>,
+) {
     if adapter != AdapterKind::CodexCli {
         return (HashSet::new(), HashSet::new(), Vec::new());
     }
@@ -475,14 +516,22 @@ fn codex_disabled_skill_folders(
             Ok(contents) => contents,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => {
-                errors.push(format!("{}: {error}", config_path.display()));
+                errors.push(NativeSkillDiagnostic::new(
+                    NativeSkillDiagnosticKind::FileRead,
+                    &config_path,
+                    error,
+                ));
                 continue;
             }
         };
         let config: toml::Value = match toml::from_str(&contents) {
             Ok(value) => value,
             Err(error) => {
-                errors.push(format!("{}: {error}", config_path.display()));
+                errors.push(NativeSkillDiagnostic::new(
+                    NativeSkillDiagnosticKind::Metadata,
+                    &config_path,
+                    error,
+                ));
                 continue;
             }
         };
@@ -490,9 +539,10 @@ fn codex_disabled_skill_folders(
             continue;
         };
         let Some(entries) = entries.as_array() else {
-            errors.push(format!(
-                "{}: skills.config is not an array",
-                config_path.display()
+            errors.push(NativeSkillDiagnostic::new(
+                NativeSkillDiagnosticKind::Metadata,
+                &config_path,
+                "skills.config is not an array",
             ));
             continue;
         };
@@ -750,113 +800,233 @@ fn scan_root(
     seen: &mut HashSet<PathBuf>,
     scan: &mut NativeSkillScan,
 ) {
+    use NativeSkillDiagnosticKind::{DirectoryRead, FileRead, ScanTruncated};
     let items = match fs::read_dir(root) {
         Ok(items) => items,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) if missing_path(root, &error) => return,
         Err(error) => {
-            scan.errors.push(format!("{}: {error}", root.display()));
+            scan.diagnostics
+                .push(NativeSkillDiagnostic::new(DirectoryRead, root, error));
             return;
         }
     };
     for (index, item) in items.enumerate() {
-        if index >= MAX_SKILLS_PER_ROOT {
-            scan.errors
-                .push(format!("{}: scan limit reached", root.display()));
+        // Observe a further entry before reporting truncation: exactly 512 is complete.
+        if index >= MAX_SCAN_ENTRIES_PER_ROOT {
+            scan.diagnostics.push(NativeSkillDiagnostic::new(
+                ScanTruncated,
+                root,
+                "Scan results are incomplete: directory entry limit reached (512)",
+            ));
             break;
         }
         let item = match item {
             Ok(item) => item,
             Err(error) => {
-                scan.errors.push(format!("{}: {error}", root.display()));
+                scan.diagnostics
+                    .push(NativeSkillDiagnostic::new(DirectoryRead, root, error));
                 continue;
             }
         };
         let entry = item.path();
+        let kind = match item.file_type() {
+            Ok(kind) => kind,
+            Err(error) => {
+                scan.diagnostics
+                    .push(NativeSkillDiagnostic::new(FileRead, &entry, error));
+                continue;
+            }
+        };
         if item.file_name() == ".system"
             && root.file_name().is_none_or(|name| name != ".system")
-            && item.file_type().is_ok_and(|kind| kind.is_dir())
+            && kind.is_dir()
         {
             scan_root(adapter, scope, &entry, seen, scan);
             continue;
         }
-        let skill_file = if entry.is_dir() {
+        // Preserve native entry links, but surface failed resolution instead of
+        // silently turning metadata errors into is_dir()/is_file() == false.
+        let metadata = match fs::metadata(&entry) {
+            Ok(metadata) => metadata,
+            Err(error) => {
+                scan.diagnostics
+                    .push(NativeSkillDiagnostic::new(FileRead, &entry, error));
+                continue;
+            }
+        };
+        let skill_file = if metadata.is_dir() {
             entry.join("SKILL.md")
         } else {
-            entry.clone()
+            entry
         };
-        if skill_file.file_name().is_none_or(|name| name != "SKILL.md") || !skill_file.is_file() {
+        if skill_file.file_name().is_none_or(|name| name != "SKILL.md") {
             continue;
+        }
+        match fs::metadata(&skill_file) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => {
+                scan.diagnostics.push(NativeSkillDiagnostic::new(
+                    FileRead,
+                    &skill_file,
+                    "Skill entry is not a regular file",
+                ));
+                continue;
+            }
+            Err(error) if missing_path(&skill_file, &error) => continue,
+            Err(error) => {
+                scan.diagnostics
+                    .push(NativeSkillDiagnostic::new(FileRead, &skill_file, error));
+                continue;
+            }
         }
         let canonical = match skill_file.canonicalize() {
             Ok(path) => path,
             Err(error) => {
-                scan.errors
-                    .push(format!("{}: {error}", skill_file.display()));
+                scan.diagnostics
+                    .push(NativeSkillDiagnostic::new(FileRead, &skill_file, error));
                 continue;
             }
         };
         if !seen.insert(canonical.clone()) {
             continue;
         }
-        match read_native_skill(&skill_file, &canonical, scope, adapter) {
-            Ok(skill) => scan.skills.push(skill),
-            Err(error) => scan
-                .errors
-                .push(format!("{}: {error:#}", skill_file.display())),
+        match read_native_skill_with_diagnostics(&skill_file, &canonical, scope, adapter) {
+            Ok((skill, diagnostics)) => {
+                scan.skills.push(skill);
+                scan.diagnostics.extend(diagnostics);
+            }
+            Err(error) => {
+                let mut diagnostic =
+                    NativeSkillDiagnostic::new(FileRead, &skill_file, format!("{error:#}"));
+                diagnostic.skill_id = Some(native_skill_id(&canonical));
+                scan.diagnostics.push(diagnostic);
+            }
         }
     }
 }
 
+fn missing_path(path: &Path, error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound
+        && fs::symlink_metadata(path)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+}
+
+fn native_skill_id(canonical: &Path) -> String {
+    format!(
+        "native:{:x}",
+        Sha256::digest(canonical.to_string_lossy().as_bytes())
+    )
+}
+
+/// Original source is never rewritten. Diagnostics affect discovery UI only;
+/// all source revalidation uses this same permissive reader.
 pub fn read_native_skill(
     entry: &Path,
     canonical: &Path,
     scope: &str,
     adapter: AdapterKind,
 ) -> Result<NativeSkill> {
-    let content = fs::read_to_string(entry).with_context(|| "Skill entry is unreadable")?;
-    let mut lines = content.split_inclusive('\n');
+    read_native_skill_with_diagnostics(entry, canonical, scope, adapter).map(|(skill, _)| skill)
+}
+
+fn read_native_skill_with_diagnostics(
+    entry: &Path,
+    canonical: &Path,
+    scope: &str,
+    adapter: AdapterKind,
+) -> Result<(NativeSkill, Vec<NativeSkillDiagnostic>)> {
     ensure!(
-        lines
-            .next()
-            .is_some_and(|line| line.trim_end_matches(['\r', '\n']) == "---"),
-        "Skill frontmatter is missing"
+        fs::metadata(entry)?.is_file(),
+        "Skill entry is not a regular file"
     );
-    let mut yaml = String::new();
-    let mut terminated = false;
-    for line in lines {
-        if line.trim_end_matches(['\r', '\n']) == "---" {
-            terminated = true;
-            break;
+    let content = fs::read_to_string(entry).context("Skill entry is unreadable")?;
+    ensure!(
+        !content.contains('\0'),
+        "Skill entry is binary (contains NUL)"
+    );
+    let text = content.strip_prefix('\u{feff}').unwrap_or(&content);
+    let mut lines = text.split_inclusive('\n');
+    let mut body = text;
+    let mut metadata = serde_yaml::Value::Null;
+    let mut problems = Vec::new();
+    let first_line = lines.next().unwrap_or_default();
+    if first_line.trim_end_matches(['\r', '\n']) == "---" {
+        let mut offset = first_line.len();
+        let yaml_start = offset;
+        let mut closed = false;
+        for line in lines {
+            let start = offset;
+            offset += line.len();
+            if line.trim_end_matches(['\r', '\n']) == "---" {
+                closed = true;
+                body = &text[offset..];
+                match serde_yaml::from_str::<serde_yaml::Value>(&text[yaml_start..start]) {
+                    Ok(value) if value.is_mapping() || value.is_null() => metadata = value,
+                    Ok(_) => problems.push("frontmatter must be a mapping".to_owned()),
+                    Err(error) => problems.push(format!("Invalid frontmatter YAML: {error}")),
+                }
+                break;
+            }
         }
-        yaml.push_str(line);
+        if !closed {
+            // The reading view keeps the original document; never describe YAML as prose.
+            body = "";
+            problems.push("Skill frontmatter is unterminated".to_owned());
+        }
     }
-    ensure!(terminated, "Skill frontmatter is unterminated");
-    #[derive(Deserialize)]
-    struct Metadata {
-        name: Option<String>,
-        description: Option<String>,
-    }
-    let metadata: Metadata = serde_yaml::from_str(&yaml)?;
-    let name = metadata.name.unwrap_or_else(|| {
-        entry
+    let name = native_metadata_field(&metadata, "name", &mut problems).unwrap_or_else(|| {
+        canonical
             .parent()
             .and_then(Path::file_name)
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned()
     });
-    ensure!(!name.trim().is_empty(), "Skill name is empty");
-    let canonical_path = canonical.to_string_lossy().into_owned();
-    let id = format!("native:{:x}", Sha256::digest(canonical_path.as_bytes()));
-    Ok(NativeSkill {
-        id,
-        name,
-        description: metadata.description.unwrap_or_default(),
-        entry_path: entry.to_string_lossy().into_owned(),
-        canonical_path,
-        source_scope: scope.to_owned(),
-        adapter_kind: adapter,
-    })
+    let description = native_metadata_field(&metadata, "description", &mut problems)
+        .unwrap_or_else(|| {
+            body.lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+                .unwrap_or_default()
+                .to_owned()
+        });
+    let id = native_skill_id(canonical);
+    let diagnostics = problems
+        .into_iter()
+        .map(|message| NativeSkillDiagnostic {
+            kind: NativeSkillDiagnosticKind::Metadata,
+            path: canonical.to_string_lossy().into_owned(),
+            message,
+            skill_id: Some(id.clone()),
+        })
+        .collect();
+    Ok((
+        NativeSkill {
+            id,
+            name,
+            description,
+            entry_path: entry.to_string_lossy().into_owned(),
+            canonical_path: canonical.to_string_lossy().into_owned(),
+            source_scope: scope.to_owned(),
+            adapter_kind: adapter,
+        },
+        diagnostics,
+    ))
+}
+
+fn native_metadata_field(
+    metadata: &serde_yaml::Value,
+    field: &str,
+    problems: &mut Vec<String>,
+) -> Option<String> {
+    match metadata.get(field) {
+        None | Some(serde_yaml::Value::Null) => None,
+        Some(serde_yaml::Value::String(value)) => (!value.trim().is_empty()).then(|| value.clone()),
+        Some(_) => {
+            problems.push(format!("{field} must be a string"));
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -997,6 +1167,119 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 0);
+
+        // Exercise the same aggregate -> register -> select -> preflight path as
+        // skills.candidates. The first displayed source must also be registered.
+        let home = fixture.join("home");
+        let directory = home.join(".agents/skills/Canonical_Name");
+        fs::create_dir_all(&directory).unwrap();
+        let entry = directory.join("SKILL.md");
+        fs::write(&entry, "# Native document").unwrap();
+        #[cfg(unix)]
+        for alias in [".codex/skills/first-entry", ".pi/agent/skills/second-entry"] {
+            let alias = home.join(alias);
+            fs::create_dir_all(alias.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&directory, alias).unwrap();
+        }
+        let configuration = RuntimeStartupConfiguration {
+            environment: vec![RuntimeEnvironmentVariable {
+                name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.into(),
+                value: home.to_string_lossy().into_owned(),
+            }],
+            ..RuntimeStartupConfiguration::default()
+        };
+        let discovery = NativeSkillDiscovery::default();
+        let mut candidates = Vec::new();
+        for adapter in [AdapterKind::CodexCli, AdapterKind::Pi] {
+            candidates.extend(
+                discovery
+                    .discover(adapter, None, true, false, &configuration)
+                    .unwrap()
+                    .skills,
+            );
+        }
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].id, candidates[1].id);
+        assert_eq!(candidates[0].name, "Canonical_Name");
+        assert_eq!(candidates[1].name, "Canonical_Name");
+        #[cfg(unix)]
+        assert_ne!(candidates[0].entry_path, candidates[1].entry_path);
+        let first = candidates[0].clone();
+        deduplicate_native_skills(&mut candidates);
+        assert_eq!(candidates, vec![first.clone()]);
+        remember_native_skill_references(&mut database, &candidates).unwrap();
+        let registered: (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT name, entry_path FROM native_skill_reference WHERE id=?1",
+                [&first.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(registered, (first.name.clone(), first.entry_path.clone()));
+        let content = vec![
+            crate::camp_content::StructuredThreadMessageSegment::SkillMention {
+                skill_id: first.id.clone(),
+                name_at_send: first.name.clone(),
+            },
+        ];
+        crate::camp_content::validate_user_authored_content(&content).unwrap();
+        let transaction = database.connection().unchecked_transaction().unwrap();
+        let selection = crate::current_input_skill::freeze_skill_selection(
+            &transaction,
+            &content,
+            AdapterKind::Pi,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        let digest = selection.canonical_digest().unwrap();
+        let exposure = crate::skill_projection::PreparedSkillExposure {
+            snapshot: crate::skill_projection::SkillExposureSnapshot::default(),
+            digest: String::new(),
+        };
+        let resolve = || {
+            crate::current_input_skill::resolve_current_input_skills(
+                database.connection(),
+                &selection,
+                &digest,
+                &exposure,
+                AdapterKind::Pi,
+            )
+            .unwrap()
+        };
+        for text in [
+            "# Native document",
+            "---\nname:\n---\nMissing fields",
+            "---\nname: [broken\n---\nBody",
+            "---\nname: unclosed",
+        ] {
+            fs::write(&entry, text).unwrap();
+            let claimed = crate::current_input_skill::projected_skill_links_for_claim(
+                database.connection(),
+                &selection,
+                AdapterKind::Pi,
+                &fixture,
+            )
+            .unwrap();
+            let resolved = resolve();
+            assert_eq!(claimed, resolved.links);
+            assert_eq!(resolved.links.len(), 1, "{text}");
+            assert_eq!(resolved.links[0].name, first.name);
+        }
+        let frozen = resolve();
+        fs::write(&entry, "---\nname: renamed\n---\nBody").unwrap();
+        assert!(resolve().links.is_empty());
+        assert_eq!(selection.entries[0].name_at_send, "Canonical_Name");
+        assert_eq!(selection.canonical_digest().unwrap(), digest);
+        // Recovery validates frozen evidence without rereading the changed file.
+        crate::current_input_skill::validate_persisted_resolution(
+            &serde_json::to_string(&frozen.resolution).unwrap(),
+            &frozen.digest,
+            &selection,
+            &digest,
+            "",
+        )
+        .unwrap();
         drop(database);
         fs::remove_dir_all(fixture).unwrap();
     }
@@ -1061,7 +1344,7 @@ mod tests {
                     .collect::<Vec<_>>();
                 names.sort_unstable();
                 assert_eq!(names, expected, "{adapter:?}, {root:?}");
-                assert!(scan.errors.is_empty());
+                assert!(scan.diagnostics.is_empty());
                 assert!(scan.skills.iter().all(|skill| skill.source_scope == "user"));
             }
         }
@@ -1103,7 +1386,7 @@ mod tests {
             for (_, root) in roots {
                 let scanned =
                     discovery.ensure_directory(&directory_key(&root), AdapterKind::HermesCli, true);
-                assert!(scanned.errors.is_empty());
+                assert!(scanned.diagnostics.is_empty());
                 names.extend(scanned.skills.into_iter().map(|skill| skill.name));
             }
             names.sort();
@@ -1162,7 +1445,7 @@ mod tests {
                 &configuration,
             )
             .unwrap();
-        assert!(scan.errors.is_empty());
+        assert!(scan.diagnostics.is_empty());
         assert_eq!(
             scan.skills
                 .iter()
@@ -1284,7 +1567,7 @@ mod tests {
 
         let mut scan = NativeSkillScan {
             skills: Vec::new(),
-            errors: Vec::new(),
+            diagnostics: Vec::new(),
         };
         let mut seen = HashSet::new();
         scan_root(
@@ -1302,11 +1585,16 @@ mod tests {
             &mut scan,
         );
 
-        assert_eq!(scan.skills.len(), 2);
-        assert_eq!(scan.skills[0].name, scan.skills[1].name);
-        assert_ne!(scan.skills[0].id, scan.skills[1].id);
-        assert_eq!(scan.errors.len(), 1);
-        assert!(scan.errors[0].contains("broken"));
+        assert_eq!(scan.skills.len(), 3);
+        let reviews = scan
+            .skills
+            .iter()
+            .filter(|skill| skill.name == "review")
+            .collect::<Vec<_>>();
+        assert_eq!(reviews.len(), 2);
+        assert_ne!(reviews[0].id, reviews[1].id);
+        assert_eq!(scan.diagnostics.len(), 1);
+        assert!(scan.diagnostics[0].path.contains("broken"));
 
         // Canonical paths remain identity evidence, while Runtime-facing links
         // must be usable by native file tools that reject Windows verbatim paths.
@@ -1343,7 +1631,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(claimed, resolved.links);
-        assert_eq!(claimed.len(), 2);
+        assert_eq!(claimed.len(), 3);
         for (index, skill) in scan.skills.iter().enumerate() {
             assert_eq!(
                 claimed[index].path,
@@ -1356,6 +1644,189 @@ mod tests {
             );
         }
         assert_eq!(selection.canonical_digest().unwrap(), digest);
+
+        let document = fixture.join("canonical_name");
+        fs::create_dir(&document).unwrap();
+        let entry = document.join("SKILL.md");
+        let cases = [
+            ("# Plain\nBody", "canonical_name", "# Plain", 0),
+            ("\u{feff}# BOM", "canonical_name", "# BOM", 0),
+            (
+                "---\n---\n# Empty header",
+                "canonical_name",
+                "# Empty header",
+                0,
+            ),
+            (
+                "---\nname:\ndescription: ''\n---\nBody",
+                "canonical_name",
+                "Body",
+                0,
+            ),
+            (
+                "---\nname: Native_Name\n---\nBody",
+                "Native_Name",
+                "Body",
+                0,
+            ),
+            (
+                "---\nname: [bad]\ndescription: valid\n---\nBody",
+                "canonical_name",
+                "valid",
+                1,
+            ),
+            (
+                "---\nname: valid\ndescription: 42\n---\nBody",
+                "valid",
+                "Body",
+                1,
+            ),
+            ("---\nname: [bad\n---\nBody", "canonical_name", "Body", 1),
+            ("---\nname: unclosed", "canonical_name", "", 1),
+            (
+                "\u{feff}---\r\nname: Native_Name\r\ndescription: >-\r\n  中文 \"quoted\"\r\n  next \\ path\r\n---\r\nBody",
+                "Native_Name",
+                "中文 \"quoted\" next \\ path",
+                0,
+            ),
+            (
+                "---\ndescription: |\n  第一行\n  second \\ line\n---\nBody",
+                "canonical_name",
+                "第一行\nsecond \\ line\n",
+                0,
+            ),
+        ];
+        for (source, name, description, problems) in cases {
+            fs::write(&entry, source).unwrap();
+            let canonical = entry.canonicalize().unwrap();
+            let (skill, diagnostics) = read_native_skill_with_diagnostics(
+                &entry,
+                &canonical,
+                "user",
+                AdapterKind::CodexCli,
+            )
+            .unwrap();
+            assert_eq!(
+                (skill.name.as_str(), skill.description.as_str()),
+                (name, description),
+                "{source}"
+            );
+            assert_eq!(diagnostics.len(), problems, "{source}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|item| item.kind == NativeSkillDiagnosticKind::Metadata
+                        && item.skill_id.as_deref() == Some(&skill.id))
+            );
+            assert_eq!(
+                read_native_skill_content(&document.canonicalize().unwrap(), "SKILL.md")
+                    .unwrap()
+                    .content
+                    .as_deref(),
+                Some(source)
+            );
+        }
+        fs::write(&entry, "a".repeat(MAX_NATIVE_PREVIEW_BYTES as usize + 1)).unwrap();
+        assert!(
+            read_native_skill(
+                &entry,
+                &entry.canonicalize().unwrap(),
+                "user",
+                AdapterKind::CodexCli
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            read_native_skill_content(&document.canonicalize().unwrap(), "SKILL.md")
+                .unwrap()
+                .status,
+            "too_large"
+        );
+        for bytes in [b"text\0binary".as_slice(), &[0xff]] {
+            fs::write(&entry, bytes).unwrap();
+            let result = scan_directory(&document, AdapterKind::CodexCli);
+            assert!(result.skills.is_empty());
+            assert_eq!(
+                result.diagnostics[0].kind,
+                NativeSkillDiagnosticKind::FileRead
+            );
+            assert!(result.diagnostics[0].skill_id.is_some());
+        }
+
+        // Failed path checks must not be swallowed or discard unrelated successes.
+        let failures = fixture.join("failures");
+        fs::create_dir_all(failures.join("good")).unwrap();
+        fs::write(failures.join("good/SKILL.md"), "Readable").unwrap();
+        fs::create_dir_all(failures.join("ordinary-directory")).unwrap();
+        fs::create_dir_all(failures.join("unsupported/SKILL.md")).unwrap();
+        let result = scan_directory(&failures, AdapterKind::CodexCli);
+        assert_eq!(result.skills.len(), 1);
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].kind,
+            NativeSkillDiagnosticKind::FileRead
+        );
+        assert!(result.diagnostics[0].path.ends_with("unsupported/SKILL.md"));
+        assert_eq!(
+            scan_directory(&entry, AdapterKind::CodexCli).diagnostics[0].kind,
+            NativeSkillDiagnosticKind::DirectoryRead
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{PermissionsExt, symlink};
+            let broken = failures.join("dangling");
+            symlink(failures.join("absent"), &broken).unwrap();
+            let loop_path = failures.join("loop");
+            symlink(&loop_path, &loop_path).unwrap();
+            let denied = failures.join("denied");
+            fs::create_dir(&denied).unwrap();
+            fs::write(denied.join("SKILL.md"), "blocked").unwrap();
+            fs::set_permissions(&denied, fs::Permissions::from_mode(0o000)).unwrap();
+            let permission_denied = fs::metadata(denied.join("SKILL.md")).is_err();
+            let result = scan_directory(&failures, AdapterKind::CodexCli);
+            let blocked_root = scan_directory(&denied, AdapterKind::CodexCli);
+            fs::set_permissions(&denied, fs::Permissions::from_mode(0o700)).unwrap();
+            for path in [&broken, &loop_path] {
+                assert!(
+                    result
+                        .diagnostics
+                        .iter()
+                        .any(|item| item.path == path.to_string_lossy()
+                            && item.kind == NativeSkillDiagnosticKind::FileRead)
+                );
+            }
+            if permission_denied {
+                assert!(
+                    result
+                        .diagnostics
+                        .iter()
+                        .any(|item| item.path == denied.join("SKILL.md").to_string_lossy())
+                );
+                assert_eq!(
+                    blocked_root.diagnostics[0].kind,
+                    NativeSkillDiagnosticKind::DirectoryRead
+                );
+            }
+            assert!(result.skills.iter().any(|skill| skill.name == "good"));
+        }
+        let budget = fixture.join("budget");
+        fs::create_dir(&budget).unwrap();
+        for index in 0..MAX_SCAN_ENTRIES_PER_ROOT {
+            fs::write(budget.join(format!("{index}.txt")), "not a Skill").unwrap();
+        }
+        assert!(
+            scan_directory(&budget, AdapterKind::CodexCli)
+                .diagnostics
+                .is_empty()
+        );
+        fs::write(budget.join("extra.txt"), "not a Skill").unwrap();
+        let result = scan_directory(&budget, AdapterKind::CodexCli);
+        assert!(result.skills.is_empty());
+        assert_eq!(result.diagnostics.len(), 1);
+        assert_eq!(
+            result.diagnostics[0].kind,
+            NativeSkillDiagnosticKind::ScanTruncated
+        );
         fs::remove_dir_all(fixture).unwrap();
     }
 
@@ -1366,7 +1837,7 @@ mod tests {
         let shared = home.join(".agents/skills");
         let entry = shared.join("review/SKILL.md");
         fs::create_dir_all(entry.parent().unwrap()).unwrap();
-        fs::write(&entry, "---\nname: review\ndescription: One\n---\n").unwrap();
+        fs::write(&entry, "---\nname: [broken\n---\nOne").unwrap();
         #[cfg(unix)]
         {
             let pi_root = home.join(".pi/agent/skills");
@@ -1393,6 +1864,8 @@ mod tests {
             .unwrap();
         assert_eq!(codex.skills[0].description, "One");
         assert_eq!(pi.skills[0].description, "One");
+        assert_eq!(codex.diagnostics, pi.diagnostics);
+        assert_eq!(codex.diagnostics.len(), 1);
         assert_eq!(codex.skills[0].id, pi.skills[0].id);
         assert_eq!(pi.skills[0].adapter_kind, AdapterKind::Pi);
         #[cfg(unix)]
@@ -1407,6 +1880,7 @@ mod tests {
             .discover(AdapterKind::CodexCli, None, true, &configuration)
             .unwrap();
         assert_eq!(updated.skills[0].description, "Two");
+        assert!(updated.diagnostics.is_empty());
         fs::write(&entry, "---\nname: review\ndescription: Three\n---\n").unwrap();
         let reused = refresh
             .discover(AdapterKind::Pi, None, true, &configuration)

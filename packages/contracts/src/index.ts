@@ -3732,9 +3732,16 @@ export interface NativeSkillView {
   adapterKind: AdapterKind
 }
 
+export interface NativeSkillDiagnostic {
+  kind: 'metadata' | 'file_read' | 'directory_read' | 'scan_truncated'
+  path: string
+  message: string
+  skillId?: string
+}
+
 export interface NativeSkillScan {
   skills: NativeSkillView[]
-  errors: string[]
+  diagnostics: NativeSkillDiagnostic[]
 }
 
 export interface ToolboxSkillView {
@@ -3758,6 +3765,7 @@ export interface ComposerSkillCandidate {
 export interface ComposerSkillCandidates {
   skills: ComposerSkillCandidate[]
   errors: string[]
+  diagnostics: NativeSkillDiagnostic[]
 }
 
 export type SkillRevisionSourceType = 'bundled' | 'local_folder' | 'github'

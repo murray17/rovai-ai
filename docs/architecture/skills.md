@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skills
 authority: current-skills-source-configuration-and-delivery-boundaries
 status: accepted
-last_updated: 2026-10-19
+last_updated: 2026-11-02
 ---
 
 # Skills 来源、配置与模型投递
@@ -35,6 +35,12 @@ Renderer / 结构化 SkillMention(skillId, nameAtSend)
 ```
 
 `rovai:<name>` 只指向工具箱闭合集；`native:<canonical-path-hash>` 只指向已由 Core 发现登记的原生入口；旧 UUID 按历史来源处理。同名不同文件保持不同身份，同一真实文件的多入口按目标归并。失效引用仍随消息发送，解析为 unavailable 并省略消息局部文件链接；不能改绑同名技能。模型可见的 `skills[{name,path}]` 仅在该条消息实际选择且来源仍可用时出现。原生 Skill 不进入任一 Rovai 索引。
+
+原生发现与来源重验共用宽松文档读取：元数据问题不排除可读文档，名称缺省稳定取 canonical
+文件所属目录名；候选去重后的同一结果用于登记。原生名称不受受管目录命名格式限制。读取失败、
+可恢复元数据问题和扫描截断以轻量诊断交给列表与选择器，均不注入模型。具体正文、错误与预算边界
+由 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md#原生文档接受与诊断)拥有；不改变受管校验、
+缓存权威、投递版本轴或已有冻结 Selection／Resolution／Manifest 的恢复。
 
 平台索引随本 Run 的启动材料冻结，具体投递由 Runtime 规则决定；后续 Run 可以使用当前材料，不以旧 Binding 的 Bootstrap 为续聊门槛。`TEAM_GUIDANCE` 位于身份之后、平台索引之前。公共 claim 同时固定动态工具箱索引和实际字节预算，见 [Profile 13](../contracts/context-delivery-profile-v13.md)。同一 Run/Binding/generation 的已准备输入保持冻结，不重新读取后续配置；补发也使用该次适用的完整 Bootstrap，不发送第二条只含 Skills 的任务消息。新 Manifest 不复制退役的独立 proof/digest，恢复边界见 [Input Snapshot Storage](../contracts/input-snapshot-storage-v1.md)。
 

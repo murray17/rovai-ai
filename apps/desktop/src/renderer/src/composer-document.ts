@@ -178,8 +178,9 @@ function validateComposerAtom(value: unknown): value is ComposerAtom {
     return hasOnlyKeys(value, ['type', 'skillId', 'nameAtSend'])
       && canonicalIdentity(value.skillId)
       && typeof value.nameAtSend === 'string'
-      && value.nameAtSend.length <= 64
-      && SKILL_NAME_PATTERN.test(value.nameAtSend)
+      && (value.skillId.startsWith('native:')
+        ? value.nameAtSend.trim().length > 0
+        : value.nameAtSend.length <= 64 && SKILL_NAME_PATTERN.test(value.nameAtSend))
   }
   return false
 }
