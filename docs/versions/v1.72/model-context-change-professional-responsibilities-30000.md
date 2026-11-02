@@ -3,10 +3,13 @@ document_type: model-context-change
 version: v1.72
 change_id: professional-responsibilities-30000
 revision: 2
-confirmation_status: pending
-authority: proposed-model-input-change-statement
+confirmation_status: confirmed
+confirmed_revision: 2
+confirmed_by: User
+confirmed_at: 2026-11-02T10:05:06Z
+authority: confirmed-model-input-change-statement
 implementation_baseline: 277b562f178c62b38a8f50dfe81282118566786f
-implementation_status: not_started
+implementation_status: in_progress
 last_updated: 2026-11-02
 ---
 
@@ -19,10 +22,11 @@ sequence 1 的原方案、五点评审，以及 User 在 sequence 3
 （`18f3559c-6fe1-454e-b0c3-33f128223649`）采纳评审并收紧的实施范围。
 R1 为 Thread 中的原方案；R2 是首次落入仓库的完整修订，不另建并行评审或实施方案。
 
-User 本轮授权修订方案，尚未要求实施本文件。`confirmation_status: pending` 不代表方案方向被否定；
-完成全文审阅并明确授权实施该 revision 后，才据实填写 confirmed revision、by、at 和确认定位。
-[模型上下文治理](../../development/model-context-change-governance.md)允许未确认时调查和编辑提案，
-不得据此修改实现、Schema 或当前合同。文档门禁会如实报告未确认；不伪造确认、不增加 checker 例外。
+User 已收到完整 R2 及上下文改动摘要，在 sequence 7
+（`c3348faa-076c-4a8f-8c09-0d8640aaa8ba`）明确要求“那你改完pr到main merge”，授权实施本 revision。
+随后 sequence 8（`7a75e01c-162a-464a-a91a-7f2f1d269775`）要求“先不要到main merge”；
+当前授权范围为实施、验证、推送并创建 PR，暂不合入 main。确认时间为本次登记时间，不冒充消息发送时间。
+按[模型上下文治理](../../development/model-context-change-governance.md)记录该确认；R2 的前后语义保持。
 
 ## 目标与范围
 
@@ -285,4 +289,4 @@ DEMO-101～112，repetitions=1，两臂相同 Runtime／模型／权限／Judge�
    PR 需说明正文保存上限与单次执行预算的区别，以及冻结输入不能靠修改设置重新解释。
 
 文档检查使用 `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=<base SHA> pnpm docs:check:ci`。
-本提案未确认时，确认字段检查预期不通过；其余文档链接与决定治理另行核对，不修改门禁规避该状态。
+实施前确认已记录；文档门禁必须正常通过，不增加 checker 例外。
