@@ -34,14 +34,14 @@ Team 修改、复制或删除不会重投递，也不会覆盖既有 Thread；�
 Claim 的 Bootstrap 内容与实际 UTF-8 字节预算包含指引；超预算按既有失败路径处理，不截断必需段。
 已物化输入继续使用原始最终 Blob，accepted/unknown 业务输入不因升级或 Team 编辑重放。
 v6 stable-component digest 包含指引；恢复从不可变 Thread 启动材料取得同一文本。
-Member Identity 仍按既有规则瞬时格式化，不为本功能增加身份快照。
+新 public claim 使用其既有冻结 Member Identity；其他路径沿既有读取与格式化规则，本功能不另建身份快照。
 
 ## 版本轴
 
 Bootstrap contract `native_session_bootstrap_v6` / formatter **6**。Migration 213 保留旧 v3–v5 Evidence；
 旧 v5 和冻结 claim 恢复继续成立，v5 stable digest 计算不变，旧 Evidence 不倒填 Team 指引。
-现有 session charter **25**、binding compatibility **16**、Dynamic Manifest/formatter **40/42**、
-Profile **15/16** 均不变；完整动态合同见 [ContextManifest v42](context-manifest-evidence-v42.md)。
+现行 session charter **26**、binding compatibility **16**、public／non-batch Dynamic Manifest/formatter
+**43/44**、Profile **15/16** 保持；完整动态合同见 [ContextManifest v44](context-manifest-evidence-v44.md)。
 
 ## Hermes 的 user 层投递例外
 

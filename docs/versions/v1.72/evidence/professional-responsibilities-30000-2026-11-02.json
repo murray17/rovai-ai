@@ -1,0 +1,558 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-02",
+  "revision": 2,
+  "change": "professional-responsibilities-30000",
+  "baseline": {
+    "source": {
+      "commit": "277b562f178c62b38a8f50dfe81282118566786f",
+      "contentDigest": "ef1ee4c3e68c0ef6d275a2b1e2bae6f7522e57353828e88628433d895a5d8833"
+    },
+    "coreDigest": "141ab249db77ca9232a21fa644c8c3f9c83fc783ca18787b5a768fc017a22951",
+    "cliDigest": "5f93a2af51496d0a72f531b2e615a7bf7e04b65677cd390a5f7892d6a9919d38"
+  },
+  "candidate": {
+    "source": {
+      "commit": "173b1bfdd8605902b64c3dc1cf542615f9bfc516",
+      "contentDigest": "a7fa975c728a6250266b7d3bfbcdb140ad43a8ab3148910ef3925646b6740471"
+    },
+    "coreDigest": "76c36433adf27efbeaacd3904da50070b5034278d935b0bf5a65d32a130f3d07",
+    "cliDigest": "275777b245c14d879405c1b9b098a458e384b217c686e2e6d8cbb78c9397a6e0"
+  },
+  "goals": {
+    "responsibilityScalars": 30000,
+    "bootstrapBodyBytes": 262144,
+    "defaultExecutionPayloadBytes": 262144,
+    "legacyFixedReserveBytes": 131072
+  },
+  "invariants": [
+    "Public claim production code unchanged",
+    "Existing delivery/identity edit rules and frozen recovery unchanged",
+    "No schema migration or version-axis increment",
+    "No main merge authorized"
+  ],
+  "checks": {
+    "rustWorkspace": {
+      "command": "pnpm test:rust:pr",
+      "passed": 484,
+      "failed": 0,
+      "ignored": 1
+    },
+    "contextTargeted": {
+      "feature": "slow-tests",
+      "passed": 5,
+      "failed": 0,
+      "names": [
+        "bootstrap_formatter_has_fixed_three_section_and_identity_field_order",
+        "newly_bound_session_bootstraps_on_its_current_generation",
+        "replacement_binding_bootstrap_keeps_history_on_demand_after_the_accepted_watermark",
+        "redelivery_overlay_is_frozen_at_prepare_and_acknowledges_only_its_revision",
+        "changed_bootstrap_splits_before_claim_and_materializes_the_frozen_snapshot"
+      ]
+    },
+    "frontend": {
+      "passed": 43,
+      "failed": 0,
+      "files": [
+        "member-identity-draft.test.ts",
+        "member-identity-save.test.ts",
+        "ThreadWorkspace.run-artifacts.test.ts"
+      ],
+      "finalSaveOwnerRerun": {
+        "passed": 3,
+        "failed": 0,
+        "reason": "Use the actual Core validation error path in the draft-retention fixture."
+      }
+    },
+    "commandCodeMod": {
+      "passed": 1,
+      "failed": 0
+    },
+    "docsTests": {
+      "passed": 10,
+      "failed": 0
+    },
+    "skillTests": {
+      "passed": 3,
+      "failed": 0
+    },
+    "releaseNotes": {
+      "passed": 12,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "docsCheck": "passed",
+    "docsDiffGate": "passed",
+    "skillsCheck": "passed",
+    "rustfmt": "passed"
+  },
+  "native": {
+    "openCode": {
+      "fixture": "opencode-identity-r2",
+      "status": "passed",
+      "scalars": 30000,
+      "utf8Bytes": 119580,
+      "responsibilitiesSha256": "d31000ba317f54fd813513902bfd81b31388011f7bcf8989a49a7704f39e97ab",
+      "runIds": [
+        "835faa54-ca03-4273-b2c9-0ce7d4ddba6d",
+        "5ba14e52-e36f-4b8a-91d7-fdedc0502454",
+        "0fffc8bb-6879-43ee-9435-f9ff9be5058e"
+      ],
+      "nativeSessionId": "ses_e643148f7ffefG4gCE9fsPZMXB",
+      "runtimeVersion": "opencode v2.2.0",
+      "observedRuntime": [
+        {
+          "runtime_adapter_kind": "opencode-cli",
+          "runtime_reported_version": "opencode v2.2.0",
+          "runtime_observed_model_id": "sub2api/gpt-6.1-sol"
+        },
+        {
+          "runtime_adapter_kind": "opencode-cli",
+          "runtime_reported_version": "opencode v2.2.0",
+          "runtime_observed_model_id": "sub2api/gpt-6.1-sol"
+        },
+        {
+          "runtime_adapter_kind": "opencode-cli",
+          "runtime_reported_version": "opencode v2.2.0",
+          "runtime_observed_model_id": "sub2api/gpt-6.1-sol"
+        }
+      ],
+      "nativeSessionPreserved": true,
+      "coldResumeAfterCoreRestart": true,
+      "frozenClaimEvidence": {
+        "runId": "835faa54-ca03-4273-b2c9-0ce7d4ddba6d",
+        "bytes": 124269,
+        "sha256": "1f3690eeccefa3e747abded79c8d4e7c8632b0a250b8a7e1cf205115b70f4781",
+        "responsibilitiesSha256": "d31000ba317f54fd813513902bfd81b31388011f7bcf8989a49a7704f39e97ab"
+      },
+      "nativePayloadEvidence": {
+        "bytes": 123867,
+        "sha256": "5d4866a703b7da232757ff727612642175971ad4176874791a4b89fae62d9e39",
+        "bootstrapBytes": 122253,
+        "bootstrapSha256": "d66f888ebbe87528b103351ce92378c9ad1316e37b1c3ca904fe77314be847cc",
+        "responsibilitiesSha256": "d31000ba317f54fd813513902bfd81b31388011f7bcf8989a49a7704f39e97ab"
+      },
+      "deliveries": [
+        {
+          "id": "2e4644a7-5c32-45fc-8bba-8466547a74db",
+          "agent_run_id": "835faa54-ca03-4273-b2c9-0ce7d4ddba6d",
+          "execution_epoch": 1,
+          "status": "accepted",
+          "context_manifest_id": "9db09ff0-9bff-4106-ab84-dc8bcc871e8f",
+          "native_binding_id": "1669d1d2-6c98-4436-9ee8-a720cd3017f4",
+          "native_binding_generation": 1,
+          "dynamic_payload_digest": "sha256:a655fa2da404b260cbd9d6d62ed40de06633852f4d7aaec6e27da4b3532f6aac",
+          "runtime_request_digest": "cdfba63df82eb15e09d02005fb0fc9f155e1629aab12746e1313e8241af9c83e",
+          "bootstrap_redelivery_revision": null,
+          "runtime_attachment_auth_receipt_digest": null
+        }
+      ]
+    },
+    "commandCode": {
+      "fixture": "command-identity-r2",
+      "status": "passed",
+      "scalars": 30000,
+      "utf8Bytes": 119580,
+      "responsibilitiesSha256": "b6b4d6d00428f9baa54d5bac81f1f12a10989fe3e35d0a026c6dba896ea8054d",
+      "runIds": [
+        "d9c2f47d-7c54-45b6-814c-b6b6c0ded006",
+        "2927cb3a-3d28-4900-9971-c04865d37586",
+        "3913c6aa-c38f-4a07-917c-bd1aa5ad75db"
+      ],
+      "nativeSessionId": "8d33fadb-6613-410c-8c8a-3d03e8761507",
+      "runtimeVersion": "1.88.0",
+      "observedRuntime": [
+        {
+          "runtime_adapter_kind": "command-code-cli",
+          "runtime_reported_version": "1.88.0",
+          "runtime_observed_model_id": "sub2api/gpt-6-sol"
+        },
+        {
+          "runtime_adapter_kind": "command-code-cli",
+          "runtime_reported_version": "1.88.0",
+          "runtime_observed_model_id": "sub2api/gpt-6-sol"
+        },
+        {
+          "runtime_adapter_kind": "command-code-cli",
+          "runtime_reported_version": "1.88.0",
+          "runtime_observed_model_id": "sub2api/gpt-6-sol"
+        }
+      ],
+      "nativeSessionPreserved": true,
+      "coldResumeAfterCoreRestart": true,
+      "frozenClaimEvidence": {
+        "runId": "d9c2f47d-7c54-45b6-814c-b6b6c0ded006",
+        "bytes": 124262,
+        "sha256": "0a65568ba8a4ea98fec12153ba03c203c849f0b8a90c703c51557da2effb468d",
+        "responsibilitiesSha256": "b6b4d6d00428f9baa54d5bac81f1f12a10989fe3e35d0a026c6dba896ea8054d"
+      },
+      "deliveries": [
+        {
+          "id": "f607b826-5b4c-4124-a89b-f891656a47b0",
+          "agent_run_id": "d9c2f47d-7c54-45b6-814c-b6b6c0ded006",
+          "execution_epoch": 1,
+          "status": "accepted",
+          "context_manifest_id": "e4d412e8-d9b5-4cd5-97f5-0dab34a9b4b7",
+          "native_binding_id": "d8e23e10-ad51-4a6b-be63-7744bf9acbc3",
+          "native_binding_generation": 1,
+          "dynamic_payload_digest": "sha256:60fed99c5eab9445a4a427b42df11b31f609ed5f62c74f3dd7b049e3c0465a4f",
+          "runtime_request_digest": "077af705f98cd15c842b5f78147fb888b6ccceda83d6198d03bb850e099b9ed8",
+          "bootstrap_redelivery_revision": null,
+          "runtime_attachment_auth_receipt_digest": null
+        }
+      ],
+      "proofLayer": "Frozen 30000-scalar claim and accepted input; paid-model request body not captured. Markers are auxiliary only."
+    },
+    "openCodeBatch": {
+      "fixture": "opencode-budget",
+      "status": "passed",
+      "responsibilityScalars": 30000,
+      "responsibilitiesSha256": "8006b06cbdae045b4915717b3d32d4b80e45d9be4ccfd17d5b3b2bb91d1e7189",
+      "nativeSessionPreserved": true,
+      "claims": [
+        {
+          "runId": "faf90a68-8aad-45d2-b8b9-a034094fed14",
+          "bytes": 244691,
+          "sha256": "9c98e390b5f7b2b31930a24532869aaa17e50f698e335ea7720fe756bf0d4ba6"
+        },
+        {
+          "runId": "3321eda4-0524-4202-958b-1f0584320355",
+          "bytes": 244669,
+          "sha256": "0786b04f0e0bc1c71c719cb6f51e9c724b0ea19d1aaf565a7332ee2d29eb707d"
+        }
+      ],
+      "deliveries": [
+        {
+          "id": "b35add23-a8b7-4a6a-bde5-8c589e479ea2",
+          "agent_run_id": "3321eda4-0524-4202-958b-1f0584320355",
+          "status": "accepted",
+          "native_binding_id": "7029488e-336e-4158-9e18-1bab1ee15564",
+          "native_binding_generation": 1,
+          "runtime_request_digest": "85f6c5e1d6b48d5f52f4447d6e083edef4415b9ea315035636cbe784aed47a01"
+        },
+        {
+          "id": "46f537d5-ce66-4311-98cd-356d0f152bfb",
+          "agent_run_id": "59b52269-8b95-482b-baba-d31dce8ba928",
+          "status": "accepted",
+          "native_binding_id": "7029488e-336e-4158-9e18-1bab1ee15564",
+          "native_binding_generation": 1,
+          "runtime_request_digest": "7769534272b43663cf1504817a822a0e5a971a32482933a4dafda7a96063bf37"
+        },
+        {
+          "id": "f7b4263f-e881-4ba7-b354-9b48a18a8911",
+          "agent_run_id": "db2b1c2f-05af-45c5-8698-b7ceedb070be",
+          "status": "accepted",
+          "native_binding_id": "7029488e-336e-4158-9e18-1bab1ee15564",
+          "native_binding_generation": 1,
+          "runtime_request_digest": "e37fcad524e10b42cfa0187393d3fcf2fecb67220c6b2ff7463af6c7473b06b1"
+        },
+        {
+          "id": "ef156b84-0d26-4e80-b4dd-cd7aa4183e3d",
+          "agent_run_id": "faf90a68-8aad-45d2-b8b9-a034094fed14",
+          "status": "accepted",
+          "native_binding_id": "7029488e-336e-4158-9e18-1bab1ee15564",
+          "native_binding_generation": 1,
+          "runtime_request_digest": "1324b6c70de298ae2e3350f65ae429fe070a56758e2c82981d7707274258f39e"
+        }
+      ],
+      "runs": [
+        {
+          "id": "59b52269-8b95-482b-baba-d31dce8ba928",
+          "status": "succeeded",
+          "last_error_code": null,
+          "inputCount": 1
+        },
+        {
+          "id": "db2b1c2f-05af-45c5-8698-b7ceedb070be",
+          "status": "succeeded",
+          "last_error_code": null,
+          "inputCount": 1
+        },
+        {
+          "id": "faf90a68-8aad-45d2-b8b9-a034094fed14",
+          "status": "succeeded",
+          "last_error_code": null,
+          "inputCount": 1
+        },
+        {
+          "id": "3321eda4-0524-4202-958b-1f0584320355",
+          "status": "succeeded",
+          "last_error_code": null,
+          "inputCount": 1
+        }
+      ],
+      "manifests": [
+        {
+          "context_manifest_version": 43,
+          "context_delivery_profile_version": 15
+        },
+        {
+          "context_manifest_version": 43,
+          "context_delivery_profile_version": 15
+        },
+        {
+          "context_manifest_version": 43,
+          "context_delivery_profile_version": 15
+        },
+        {
+          "context_manifest_version": 43,
+          "context_delivery_profile_version": 15
+        }
+      ],
+      "nativePayloadEvidence": [
+        {
+          "runId": "59b52269-8b95-482b-baba-d31dce8ba928",
+          "deliveryId": "46f537d5-ce66-4311-98cd-356d0f152bfb",
+          "status": "accepted",
+          "bytes": 123889,
+          "sha256": "a1fe676e95e80674baf854204fe114b0df70d35dc1c4230afffcafdb936cecb8",
+          "requestDigest": "7769534272b43663cf1504817a822a0e5a971a32482933a4dafda7a96063bf37",
+          "identityScalars": 30000
+        },
+        {
+          "runId": "db2b1c2f-05af-45c5-8698-b7ceedb070be",
+          "deliveryId": "f7b4263f-e881-4ba7-b354-9b48a18a8911",
+          "status": "accepted",
+          "bytes": 1209,
+          "sha256": "27e7a9e9d6f55942c4e28a1569d8645b8e73878d814a5125782f07484468a7ad",
+          "requestDigest": "e37fcad524e10b42cfa0187393d3fcf2fecb67220c6b2ff7463af6c7473b06b1",
+          "identityScalars": null
+        },
+        {
+          "runId": "faf90a68-8aad-45d2-b8b9-a034094fed14",
+          "deliveryId": "ef156b84-0d26-4e80-b4dd-cd7aa4183e3d",
+          "status": "accepted",
+          "bytes": 244181,
+          "sha256": "244327b1d162dbc9ee1d114dcb305fd03b1c8937170b0836b5a3174f5deb4e1f",
+          "requestDigest": "1324b6c70de298ae2e3350f65ae429fe070a56758e2c82981d7707274258f39e",
+          "identityScalars": 30000
+        },
+        {
+          "runId": "3321eda4-0524-4202-958b-1f0584320355",
+          "deliveryId": "b35add23-a8b7-4a6a-bde5-8c589e479ea2",
+          "status": "accepted",
+          "bytes": 121217,
+          "sha256": "59e84e1594a6e5cd979501a04b7f89f995ad31e773afec1671ee9aabed39e40f",
+          "requestDigest": "85f6c5e1d6b48d5f52f4447d6e083edef4415b9ea315035636cbe784aed47a01",
+          "identityScalars": null
+        }
+      ]
+    },
+    "commandCodeTransport": {
+      "fixture": "command-native-r3",
+      "scope": "Official Command Code 1.88.0 production ACP/Mod with synthetic loopback provider; no real-model quality claim",
+      "status": "passed",
+      "exact256KiBAccepted": true,
+      "coldExactSession": true,
+      "evidence": [
+        {
+          "request": "provider-request-0.json",
+          "input": "USER_INPUT_UNCHANGED_0_0",
+          "bootstrapBytes": 51,
+          "bootstrapSha256": "ee630d0706b045abd23da68fbaf825f488dd7a7b63ddbd81773f5de1dab38716",
+          "systemBytes": 43526,
+          "systemSha256": "dc06ed11fc33c1e0af10b72d64642aaf25748617a6829ca0173473e39cbad46e"
+        },
+        {
+          "request": "provider-request-2.json",
+          "input": "USER_INPUT_UNCHANGED_0_1",
+          "bootstrapBytes": 30,
+          "bootstrapSha256": "46c405f9f0ec50a7978d7083f9fe94355100d1a735a0126d61a0a3852e05c785",
+          "systemBytes": 43505,
+          "systemSha256": "96b8fd11317b4e480f2080ec4815fba3652860ac1c15ec2fa2917942327103b5"
+        },
+        {
+          "request": "provider-request-3.json",
+          "input": "USER_INPUT_UNCHANGED_0_2",
+          "bootstrapBytes": 51,
+          "bootstrapSha256": "ee630d0706b045abd23da68fbaf825f488dd7a7b63ddbd81773f5de1dab38716",
+          "systemBytes": 43526,
+          "systemSha256": "dc06ed11fc33c1e0af10b72d64642aaf25748617a6829ca0173473e39cbad46e"
+        },
+        {
+          "request": "provider-request-4.json",
+          "input": "USER_INPUT_UNCHANGED_0_3",
+          "bootstrapBytes": 262144,
+          "bootstrapSha256": "b010ad6e7125d17d81ea50bafc6f351bec55e83b40d44f0f9992652e36d6f1e0",
+          "systemBytes": 305619,
+          "systemSha256": "fc62da1ffe9c00db907432b61292cd55ad47e10638c4b1c2236907ed7342304c"
+        },
+        {
+          "request": "provider-request-5.json",
+          "input": "USER_INPUT_UNCHANGED_1_0",
+          "bootstrapBytes": 30,
+          "bootstrapSha256": "43102312667662db62335c63b157bb9501e7a8fc40427898faf679bbe8e9f630",
+          "systemBytes": 43505,
+          "systemSha256": "5f00501e02a39b195ae8fad3b91ffb91a9c7b6e83dccaa1c26c2e9b31de3ce2f"
+        }
+      ],
+      "extractorCorrection": "Auxiliary title generation request excluded by matching the exact synthetic user input; all original requests and the initial failed extractor report retained."
+    },
+    "cline": {
+      "fixture": "cline-identity",
+      "status": "blocked",
+      "reason": "runtime_platform_not_qualified / runtime_platform.qualification_evidence_missing on macos-arm64",
+      "boundaryOwner": "cline::tests::long_bootstrap_bindings_preserve_utf8_and_enforce_body_limits passed; not real Runtime acceptance"
+    }
+  },
+  "gate": {
+    "status": "cancelled_by_user",
+    "suite": "context-regression@2.12.0",
+    "scoring": "2.10.0",
+    "cases": 12,
+    "repetitions": 1,
+    "arms": [
+      "baseline",
+      "candidate"
+    ],
+    "model": "gpt-6.1-sol",
+    "runtime": "codex-cli 0.165.0",
+    "reasoning": "medium",
+    "judge": "tool-disabled CLI, catalog_bound_alias",
+    "budget": {
+      "wallSeconds": 14400,
+      "maxParallelCases": 2,
+      "judgeSeconds": 2400,
+      "maximumAttempts": 2
+    },
+    "cancellation": {
+      "sequence": 10,
+      "messageId": "b6141a87-66db-4a8f-bfde-ec3f1bd8eba2",
+      "text": "不用这么评测",
+      "meaning": "Stop the extensive generic paired evaluation; retain completed evidence and deliver the PR using the scoped checks already performed."
+    },
+    "completedTrials": 14,
+    "totalPlannedTrials": 24,
+    "completed": [
+      {
+        "trial": "DEMO-101-1-baseline",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:37:24.857Z"
+      },
+      {
+        "trial": "DEMO-101-1-candidate",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:39:14.126Z"
+      },
+      {
+        "trial": "DEMO-102-1-baseline",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:38:33.805Z"
+      },
+      {
+        "trial": "DEMO-102-1-candidate",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:37:10.806Z"
+      },
+      {
+        "trial": "DEMO-103-1-baseline",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:42:39.070Z"
+      },
+      {
+        "trial": "DEMO-103-1-candidate",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:45:34.816Z"
+      },
+      {
+        "trial": "DEMO-104-1-baseline",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:44:03.298Z"
+      },
+      {
+        "trial": "DEMO-104-1-candidate",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:41:26.903Z"
+      },
+      {
+        "trial": "DEMO-105-1-baseline",
+        "hardOutcome": "fail",
+        "verifiedDelivery": "fail",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:46:02.263Z"
+      },
+      {
+        "trial": "DEMO-105-1-candidate",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:48:06.134Z"
+      },
+      {
+        "trial": "DEMO-106-1-baseline",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:52:30.057Z"
+      },
+      {
+        "trial": "DEMO-106-1-candidate",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:49:01.847Z"
+      },
+      {
+        "trial": "DEMO-107-1-baseline",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:49:55.932Z"
+      },
+      {
+        "trial": "DEMO-107-1-candidate",
+        "hardOutcome": "pass",
+        "verifiedDelivery": "pass",
+        "evaluationState": "complete",
+        "completedAt": "2026-11-02T10:51:25.494Z"
+      }
+    ],
+    "formalGateVerdict": "not_produced",
+    "processesStopped": true
+  },
+  "limitations": [
+    "Actual cold-resume failure/replacement and after-claim redelivery are covered by deterministic existing owners; real smoke proves successful cold resume only.",
+    "Cline real product execution was blocked by existing platform qualification; no gate override or qualification change.",
+    "The Judge is bound to CLI/catalog/model alias, not immutable provider weights; report is diagnostic, not pinned-snapshot formal acceptance."
+  ],
+  "retainedAttempts": [
+    {
+      "fixture": "opencode-identity",
+      "reason": "First real Run passed; evidence SQL referenced a nonexistent runtime_payload_digest column. Corrected to canonical runtime_request_digest and reran fresh fixture."
+    },
+    {
+      "fixture": "command-identity",
+      "reason": "Same evidence SQL correction; fresh successful rerun retained."
+    },
+    {
+      "fixture": "command-native",
+      "reason": "Local provider fixture lacked synthetic native auth placeholder; no production change."
+    },
+    {
+      "fixture": "command-native-r2",
+      "reason": "Fixture model name differed from existing test owner rovai-probe/model; corrected fixture only."
+    },
+    {
+      "fixture": "command-native-r3/report.json",
+      "reason": "Native Rust test passed. Initial evidence extractor included auxiliary title generation; verified-report.json excludes it using exact synthetic user input."
+    }
+  ],
+  "privateEvidenceRoot": "/Users/murray.xue/VSCodeProjects/opensource/rovai-evaluation-evidence/responsibilities-30000-20261102",
+  "finalProductionContentMatchesTestedCandidate": true
+}

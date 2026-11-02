@@ -123,7 +123,7 @@ describe('inline member identity save', () => {
         status: 'rejected',
         code: 'agent_profile.version_conflict'
       },
-      { ...receipt(5), status: 'rejected', code: 'agent_profile.professional_responsibilities_too_long' }
+      new Error('专业职责最多 30,000 个字符。')
     ]) {
       const request = vi.fn()
       if (failure instanceof Error) request.mockRejectedValue(failure)

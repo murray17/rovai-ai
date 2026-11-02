@@ -9,7 +9,7 @@ confirmed_by: User
 confirmed_at: 2026-11-02T10:05:06Z
 authority: confirmed-model-input-change-statement
 implementation_baseline: 277b562f178c62b38a8f50dfe81282118566786f
-implementation_status: in_progress
+implementation_status: implemented
 last_updated: 2026-11-02
 ---
 
@@ -27,6 +27,10 @@ User 已收到完整 R2 及上下文改动摘要，在 sequence 7
 随后 sequence 8（`7a75e01c-162a-464a-a91a-7f2f1d269775`）要求“先不要到main merge”；
 当前授权范围为实施、验证、推送并创建 PR，暂不合入 main。确认时间为本次登记时间，不冒充消息发送时间。
 按[模型上下文治理](../../development/model-context-change-governance.md)记录该确认；R2 的前后语义保持。
+
+实施期间 User 在 sequence 10（`b6141a87-66db-4a8f-bfde-ec3f1bd8eba2`）明确要求“不用这么评测”。
+已停止本轮通用模型两臂评测及其子进程，保留已有证据，不补跑该矩阵；交付按已完成的边界、恢复、
+真实运行和工程检查收口。此最新指示调整验收范围，不改变 R2 的字段、容量与兼容语义，也不授权合入 main。
 
 ## 目标与范围
 
@@ -290,3 +294,31 @@ DEMO-101～112，repetitions=1，两臂相同 Runtime／模型／权限／Judge�
 
 文档检查使用 `pnpm docs:test`、`pnpm docs:check`、`DOCS_BASE_REF=<base SHA> pnpm docs:check:ci`。
 实施前确认已记录；文档门禁必须正常通过，不增加 checker 例外。
+
+## 实施与验收记录（2026-11-02）
+
+M1～M4、M6、M8 已实施；M5 只扩展原有测试 owner，公开 claim 与实际组包生产代码未重写。
+M7 复用原 smoke 并补充冻结内容及原生字节核对。新增生产抽象只有旧分派固定预留常量；无迁移、
+调度重构或版本轴递增。当前交付为 PR，按 sequence 8 暂不合入 main。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| Rust 工作区 | `pnpm test:rust:pr`：484 通过、0 失败、1 个原有 opt-in 忽略 |
+| 上下文定向回归 | `slow-tests` 下 5 项实际运行并通过；覆盖实际封装、claim 后补发、替换绑定、冻结恢复及小输入预留 |
+| 前端／内嵌脚本 | 身份、草稿保存、失败详情 43 项通过；调整保存拒绝夹具后该 owner 3 项再通过；Command Code Mod 1 项通过 |
+| 工程检查 | TypeScript、rustfmt、文档检查、diff 文档门禁、Skill 检查通过；文档测试 10 项、Skill 测试 3 项、双语发布说明测试 12 项通过 |
+| OpenCode 真实运行 | 2.2.0 / `sub2api/gpt-6.1-sol`：30,000 字职责首次执行、续聊、Core 重启恢复通过；123,867 字节原生输入与 accepted request digest 完整匹配 |
+| OpenCode 大输入 | 含完整职责、非空记忆入口与大消息的 244,181 字节原生包完整匹配 accepted 摘要；两条大消息分批成功；后续 121,217 字节动态包未强制补发职责 |
+| Command Code 真实运行 | 1.88.0 / `sub2api/gpt-6-sol`：30,000 字职责保存读取、首次执行、续聊和 Core 重启恢复通过；保留完整冻结快照与 accepted 定位，模型标记仅作辅助 |
+| Command Code 正文通道 | 官方 1.88.0 + 生产 ACP/Mod + 本地合成 Provider：262,144 字节正文在系统层出现一次，A→B→A 与同 ID 冷恢复通过；完整请求及摘要保留，不作为真实模型质量结论 |
+| Cline | 正文 262,144／262,145 字节及 Rule 文件边界测试通过；真实产品运行被既有 macOS arm64 平台资格门禁阻止，未绕过，未标记实跑通过 |
+| 通用模型 Gate | 按 User sequence 10 取消。两臂各 25 项前置合同检查通过；停止前 14／24 个任务执行有结果，13 通过、1 个基线任务失败；不生成“Gate 通过”结论，也不再补跑 |
+
+完整数值、Run／Delivery／Binding 定位、原生输入与冻结内容 SHA-256、首次失败及修正记录见
+[脱敏验收证据](evidence/professional-responsibilities-30000-2026-11-02.json)。
+候选 Core／CLI 来自 `173b1bfdd8605902b64c3dc1cf542615f9bfc516`；后续仅修正验收脚本、测试夹具和文档，
+Core／Skill 的生产内容摘要保持一致。原始证据保留在 JSON 记录的本机独立目录，不把真实凭据或用户职责写入仓库。
+
+真实 smoke 证明成功冷恢复；cold resume 失败后替换 Session、claim 后补发由确定性 owner 覆盖，
+未将这些分支冒充真实模型实测。Cline 平台资格、固定 Provider 权重与其他 Runtime／模型矩阵不扩入本轮。
+旧冻结输入继续原样恢复；较旧二进制不保证接受新保存的超过 10,000 字符资料。

@@ -8,11 +8,12 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { startQualificationCore } from './lib/qualification-core.mjs'
+import { digestJson } from './lib/qualification-common.mjs'
 import { composerDocumentForAddress } from './lib/create-configured-camp.mjs'
 
 const source = resolve(import.meta.dirname, '..')
 const fixture = process.argv[2]
-const adapterKind = process.argv[3] ?? 'opencode-cli'
+const adapterKind = process.argv[3] ?? 'codex-cli'
 const responsibilityScalars = Number(process.argv[4] ?? 30_000)
 const coreExecutable = resolve(process.argv[5] ?? join(source, 'target/debug/rovai-core'))
 assert.ok([10_000, 30_000].includes(responsibilityScalars))
@@ -94,7 +95,7 @@ try {
   assert.equal(frozen.memberIdentity.professionalResponsibilities, duties)
   await writeFile(join(fixture, 'first-claim.json'), claim.context_json)
   report.frozenClaimEvidence = { runId: first.id, bytes: Buffer.byteLength(claim.context_json), sha256: hash(claim.context_json), responsibilitiesSha256: hash(frozen.memberIdentity.professionalResponsibilities) }
-  report.deliveries = database.prepare('SELECT id,agent_run_id,status,native_binding_id,native_binding_generation,runtime_payload_digest FROM runtime_input_delivery WHERE agent_run_id=?').all(first.id)
+  report.deliveries = database.prepare('SELECT id,agent_run_id,execution_epoch,status,context_manifest_id,native_binding_id,native_binding_generation,dynamic_payload_digest,runtime_request_digest,bootstrap_redelivery_revision,runtime_attachment_auth_receipt_digest FROM runtime_input_delivery WHERE agent_run_id=?').all(first.id)
   assert.ok(report.deliveries.some(delivery => delivery.status === 'accepted'))
   if (adapterKind === 'cline-cli') {
     const bindings = []
@@ -112,14 +113,16 @@ try {
   if (adapterKind === 'opencode-cli') {
     const native = execFileSync('opencode', ['session', 'export', binding.native_session_id], { cwd: project, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 30_000 })
     await writeFile(join(fixture, 'native-session.json'), native)
-    const payloads = []
-    const visit = value => {
-      if (!value || typeof value !== 'object') return
-      if (typeof value.text === 'string' && value.text.includes('[MEMBER_IDENTITY]\n')) payloads.push(value.text)
-      for (const child of Object.values(value)) if (typeof child === 'object') visit(child)
-    }
-    visit(JSON.parse(native))
-    const payload = payloads.find(text => report.deliveries.some(delivery => delivery.runtime_payload_digest === `sha256:${hash(text)}`))
+    const payloads = JSON.parse(native).messages
+      .filter(message => message.type === 'user' && typeof message.text === 'string')
+      .map(message => message.text)
+    const payload = payloads.find(text => report.deliveries.some(delivery => delivery.runtime_request_digest === digestJson({
+      schemaVersion: 1, agentRunId: delivery.agent_run_id, executionEpoch: delivery.execution_epoch,
+      contextManifestId: delivery.context_manifest_id, nativeBindingId: delivery.native_binding_id,
+      nativeBindingGeneration: delivery.native_binding_generation, dynamicPayloadDigest: delivery.dynamic_payload_digest,
+      runtimePayloadDigest: `sha256:${hash(text)}`, bootstrapRedeliveryRevision: delivery.bootstrap_redelivery_revision,
+      runtimeAttachmentAuthReceiptDigest: delivery.runtime_attachment_auth_receipt_digest
+    })))
     assert.ok(payload, 'Native user input must match the accepted runtime payload digest in full')
     const identity = JSON.parse(payload.split('[MEMBER_IDENTITY]\n')[1].split('\n[/MEMBER_IDENTITY]')[0])
     assert.equal(identity.professionalResponsibilities, duties)

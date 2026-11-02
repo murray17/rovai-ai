@@ -111,7 +111,7 @@ try {
       await writeFile(join(fixture, `${run.id}-claim.json`), row.context_json)
       report.claims.push({ runId: run.id, bytes: Buffer.byteLength(row.context_json), sha256: createHash('sha256').update(row.context_json).digest('hex') })
     }
-    report.deliveries = database.prepare('SELECT id,agent_run_id,status,native_binding_id,native_binding_generation,runtime_payload_digest FROM runtime_input_delivery WHERE agent_run_id IN (SELECT id FROM agent_run WHERE camp_id=?)').all(threadId)
+    report.deliveries = database.prepare('SELECT id,agent_run_id,status,native_binding_id,native_binding_generation,runtime_request_digest FROM runtime_input_delivery WHERE agent_run_id IN (SELECT id FROM agent_run WHERE camp_id=?)').all(threadId)
 
     report.manifests = database.prepare('SELECT context_manifest_version,context_delivery_profile_version FROM context_manifest WHERE agent_run_id IN (SELECT id FROM agent_run WHERE camp_id=?) ORDER BY created_at').all(threadId)
   }
