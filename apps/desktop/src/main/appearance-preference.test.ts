@@ -40,7 +40,7 @@ describe('appearance preference', () => {
     expect(nativeThemeSource('ember')).toBe('dark')
     expect(resolvedTheme(false)).toBe('day')
     expect(resolvedTheme(true)).toBe('night')
-    expect(themeBackground('day')).toBe('#ECEEEF')
+    expect(themeBackground('day')).toBe('#F2F4F1')
     expect(themeBackground('night')).toBe('#0D1114')
   })
 
