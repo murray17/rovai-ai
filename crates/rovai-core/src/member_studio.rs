@@ -385,12 +385,12 @@ mod tests {
         ] {
             assert_eq!(
                 schema["properties"]["professionalResponsibilities"]["maxLength"],
-                10_000
+                30_000
             );
             for text in [
-                "中".repeat(10_000),
-                "😀".repeat(10_000),
-                "e\u{0301}".repeat(5_000),
+                "中".repeat(30_000),
+                "😀".repeat(30_000),
+                "e\u{0301}".repeat(15_000),
             ] {
                 input["professionalResponsibilities"] = json!(format!(" \u{feff}{text}\n"));
                 validate(operation, &input).unwrap();

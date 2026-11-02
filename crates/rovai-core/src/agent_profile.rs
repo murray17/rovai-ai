@@ -5316,8 +5316,8 @@ pub(crate) fn validate_member_identity_input(
     Ok(())
 }
 
-pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 10_000;
-pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 10,000 个字符。";
+pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 30_000;
+pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 30,000 个字符。";
 
 /// ECMAScript String.trim whitespace, matching the existing identity editor.
 /// U+FEFF is trimmed; U+0085 is retained. Interior formatting is untouched.
@@ -5908,10 +5908,10 @@ fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> Command
 #[test]
 fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
     for text in [
-        "中".repeat(10_000),
-        "😀".repeat(10_000),
-        "e\u{0301}".repeat(5_000),
-        "\"\n\u{0000}中😀".repeat(2_000),
+        "中".repeat(30_000),
+        "😀".repeat(30_000),
+        "e\u{0301}".repeat(15_000),
+        "\"\n\u{0000}中😀".repeat(6_000),
     ] {
         let padded = format!(" \u{feff}\r\n{text}\u{3000} ");
         // A final newline/control may be content; padding is normalized before counting.
@@ -5920,7 +5920,7 @@ fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
             normalize_professional_responsibilities(&padded).unwrap(),
             expected
         );
-        let too_long = format!("中{}", "😀".repeat(10_000));
+        let too_long = format!("中{}", "😀".repeat(30_000));
         assert_eq!(
             normalize_professional_responsibilities(&too_long)
                 .unwrap_err()

@@ -1,33 +1,38 @@
 // Real model acceptance: isolated Core, full identity, CLI transport, and native resume.
-// Usage: node scripts/smoke-member-routing.mjs <empty-absolute-fixture-root> [adapter-kind]
+// Usage: node scripts/smoke-member-routing.mjs <empty-absolute-fixture-root> [adapter-kind] [responsibility-scalars] [core-executable]
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { glob, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { startQualificationCore } from './lib/qualification-core.mjs'
+import { digestJson } from './lib/qualification-common.mjs'
 import { composerDocumentForAddress } from './lib/create-configured-camp.mjs'
 
 const source = resolve(import.meta.dirname, '..')
 const fixture = process.argv[2]
 const adapterKind = process.argv[3] ?? 'codex-cli'
+const responsibilityScalars = Number(process.argv[4] ?? 30_000)
+const coreExecutable = resolve(process.argv[5] ?? join(source, 'target/debug/rovai-core'))
+assert.ok([10_000, 30_000].includes(responsibilityScalars))
 assert.ok(fixture && isAbsolute(fixture), 'Supply an empty absolute fixture root')
 assert.deepEqual(await readdir(fixture), [], 'Never reuse an existing data directory')
 const data = join(fixture, 'core'), project = join(fixture, 'project')
 await mkdir(data); await mkdir(project)
-console.error(`Automatic acceptance: Core=${join(source, 'target/debug/rovai-core')}; data=${data}; skills=${join(data, 'managed-skill-library')}; MCP=${join(data, 'mcp.json')}`)
+console.error(`Automatic acceptance: Core=${coreExecutable}; data=${data}; skills=${join(data, 'managed-skill-library')}; MCP=${join(data, 'mcp.json')}`)
 const markers = Object.fromEntries(['begin', 'middle', 'end'].map(key => [key, `${key.toUpperCase()}_${randomUUID()}`]))
-const filler = '😀'.repeat(10_000)
+const filler = '😀'.repeat(responsibilityScalars)
 const scalarLength = value => Array.from(value).length
-const prefix = `${markers.begin}\n中文与 JSON 转义："\\\n${Array.from(filler).slice(0, 4_800).join('')}\n${markers.middle}\n`
-const duties = prefix + Array.from(filler).slice(0, 10_000 - scalarLength(prefix) - scalarLength(markers.end) - 1).join('') + `\n${markers.end}`
-assert.equal(scalarLength(duties), 10_000)
+const prefix = `${markers.begin}\n中文与 JSON 转义："\\\n${Array.from(filler).slice(0, responsibilityScalars / 2 - 200).join('')}\n${markers.middle}\n`
+const duties = prefix + Array.from(filler).slice(0, responsibilityScalars - scalarLength(prefix) - scalarLength(markers.end) - 1).join('') + `\n${markers.end}`
+assert.equal(scalarLength(duties), responsibilityScalars)
 const hash = value => createHash('sha256').update(value).digest('hex')
 const report = { adapterKind, startedAt: new Date().toISOString(), scalars: scalarLength(duties), utf8Bytes: Buffer.byteLength(duties), responsibilitiesSha256: hash(duties), status: 'running' }
 const notifications = []
 let database, core
-const startCore = () => startQualificationCore({ coreExecutable: join(source, 'target/debug/rovai-core'), dataDirectory: data,
+const startCore = () => startQualificationCore({ coreExecutable, dataDirectory: data,
   workingDirectory: project, runtimeCacheDirectory: join(fixture, 'cache'), mcpConfigPath: join(data, 'mcp.json'),
   onNotification: message => notifications.push(message) })
 try {
@@ -84,7 +89,49 @@ try {
   const binding = database.prepare('SELECT native_session_id,native_binding_generation FROM conversation WHERE camp_id=? AND agent_id=?').get(threadId, 'agent_1')
   assert.ok(binding.native_session_id)
   const manifests = () => database.prepare('SELECT context_manifest_version,formatter_version,context_delivery_profile_version,collaboration_state_included FROM context_manifest WHERE agent_run_id IN (SELECT id FROM agent_run WHERE camp_id=?) ORDER BY created_at').all(threadId)
-  assert.equal(manifests()[0].context_manifest_version, 34)
+  assert.equal(manifests()[0].context_manifest_version, 43)
+  const claim = database.prepare('SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?').get(first.id)
+  const frozen = JSON.parse(claim.context_json)
+  assert.equal(frozen.memberIdentity.professionalResponsibilities, duties)
+  await writeFile(join(fixture, 'first-claim.json'), claim.context_json)
+  report.frozenClaimEvidence = { runId: first.id, bytes: Buffer.byteLength(claim.context_json), sha256: hash(claim.context_json), responsibilitiesSha256: hash(frozen.memberIdentity.professionalResponsibilities) }
+  report.deliveries = database.prepare('SELECT id,agent_run_id,execution_epoch,status,context_manifest_id,native_binding_id,native_binding_generation,dynamic_payload_digest,runtime_request_digest,bootstrap_redelivery_revision,runtime_attachment_auth_receipt_digest FROM runtime_input_delivery WHERE agent_run_id=?').all(first.id)
+  assert.ok(report.deliveries.some(delivery => delivery.status === 'accepted'))
+  if (adapterKind === 'cline-cli') {
+    const bindings = []
+    for await (const path of glob('**/config/rules/rovai-managed-bootstrap.md', { cwd: fixture })) {
+      const rule = await readFile(join(fixture, path), 'utf8')
+      if (!rule.includes('[MEMBER_IDENTITY]')) continue
+      const identity = JSON.parse(rule.split('[MEMBER_IDENTITY]\n')[1].split('\n[/MEMBER_IDENTITY]')[0])
+      assert.equal(identity.professionalResponsibilities, duties)
+      bindings.push({ path, bytes: Buffer.byteLength(rule), sha256: hash(rule), responsibilitiesSha256: hash(identity.professionalResponsibilities) })
+    }
+    assert.ok(bindings.length, 'The native Rule must retain the complete bound responsibilities')
+    report.nativeRuleEvidence = bindings
+  }
+
+  if (adapterKind === 'opencode-cli') {
+    const native = execFileSync('opencode', ['session', 'export', binding.native_session_id], { cwd: project, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 30_000 })
+    await writeFile(join(fixture, 'native-session.json'), native)
+    const payloads = JSON.parse(native).messages
+      .filter(message => message.type === 'user' && typeof message.text === 'string')
+      .map(message => message.text)
+    const payload = payloads.find(text => report.deliveries.some(delivery => delivery.status === 'accepted' && delivery.runtime_request_digest === digestJson({
+      schemaVersion: 1, agentRunId: delivery.agent_run_id, executionEpoch: delivery.execution_epoch,
+      contextManifestId: delivery.context_manifest_id, nativeBindingId: delivery.native_binding_id,
+      nativeBindingGeneration: delivery.native_binding_generation, dynamicPayloadDigest: delivery.dynamic_payload_digest,
+      runtimePayloadDigest: `sha256:${hash(text)}`, bootstrapRedeliveryRevision: delivery.bootstrap_redelivery_revision,
+      runtimeAttachmentAuthReceiptDigest: delivery.runtime_attachment_auth_receipt_digest
+    })))
+    assert.ok(payload, 'Native user input must match the accepted runtime payload digest in full')
+    const identity = JSON.parse(payload.split('[MEMBER_IDENTITY]\n')[1].split('\n[/MEMBER_IDENTITY]')[0])
+    assert.equal(identity.professionalResponsibilities, duties)
+    const bootstrapEnd = Math.max(...['[/MEMORY_ENTRYPOINT]', '[/ROVAI_PLATFORM_SKILLS]'].map(marker => payload.indexOf(marker) < 0 ? 0 : payload.indexOf(marker) + marker.length))
+    const bootstrap = payload.slice(payload.indexOf('[SESSION_CHARTER]'), bootstrapEnd)
+    await writeFile(join(fixture, 'first-runtime-payload.txt'), payload)
+    await writeFile(join(fixture, 'first-bootstrap.txt'), bootstrap)
+    report.nativePayloadEvidence = { bytes: Buffer.byteLength(payload), sha256: hash(payload), bootstrapBytes: Buffer.byteLength(bootstrap), bootstrapSha256: hash(bootstrap), responsibilitiesSha256: hash(identity.professionalResponsibilities) }
+  }
   // Editing only a peer's details must not force roster redelivery or reset the native session.
   const peerProfile = await core.request('members.get', { agentId: 'agent_2' })
   await core.request('members.update', { commandId: randomUUID(), command: { agentId: 'agent_2', expectedVersion: peerProfile.version,

@@ -349,7 +349,9 @@ mod tests {
         assert!(!ready.exists());
         for text in [
             "  中文\n\"quotes\" \\ = ${literal}\n  ".to_owned(),
-            "😀".repeat(crate::context::MAX_SESSION_BOOTSTRAP_BYTES / 4),
+            serde_json::to_string(&json!({"professionalResponsibilities": "\0".repeat(30_000)}))
+                .unwrap(),
+            "😀".repeat(65_536),
             "\"".repeat(crate::context::MAX_SESSION_BOOTSTRAP_BYTES),
         ] {
             let prompt = bootstrap_prompt(&text).unwrap();
@@ -363,7 +365,7 @@ mod tests {
         for text in [
             String::new(),
             " \n".into(),
-            "x".repeat(crate::context::MAX_SESSION_BOOTSTRAP_BYTES + 1),
+            format!("{}x", "😀".repeat(65_536)),
         ] {
             assert!(bootstrap_prompt(&text).is_err());
         }

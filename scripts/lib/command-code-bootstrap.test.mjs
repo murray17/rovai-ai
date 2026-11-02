@@ -35,13 +35,14 @@ test('Command Mod registers before ready and replaces instructions only after va
         const a = '甲的 Charter', b = '乙的 Charter';
         // A→B→A proves replacement; every update returns no model prompt/message.
         for (const text of [a, b, a, '  中文\\n"quotes" \\\\ = \${literal}  ',
-            '😀'.repeat(32768), '"'.repeat(128 * 1024)]) {
+            '😀'.repeat(65536), '"'.repeat(256 * 1024),
+            JSON.stringify({ professionalResponsibilities: String.fromCharCode(0).repeat(30000) })]) {
           assert.equal(command.handler({ args: JSON.stringify(text) }), undefined);
           assert.equal(hooks.appendSystemPrompt(), text);
         }
         command.handler({ args: JSON.stringify(a) });
         for (const args of ['PRIVATE_INVALID_JSON', 'null', '42', '{}', '[]',
-            JSON.stringify(''), JSON.stringify('  '), JSON.stringify('😀'.repeat(32769))]) {
+            JSON.stringify(''), JSON.stringify('  '), JSON.stringify('😀'.repeat(65536) + 'x')]) {
           assert.throws(() => command.handler({ args }), { message: 'command_code_bootstrap_invalid' });
           assert.equal(hooks.appendSystemPrompt(), a);
         }

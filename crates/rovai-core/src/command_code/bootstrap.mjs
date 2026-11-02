@@ -18,7 +18,7 @@ export default function (cmd) {
       let next;
       try {
         next = JSON.parse(args);
-        if (typeof next !== 'string' || !next.trim() || Buffer.byteLength(next) > 128 * 1024) throw new Error();
+        if (typeof next !== 'string' || !next.trim() || Buffer.byteLength(next) > 256 * 1024) throw new Error();
       } catch {
         throw new Error('command_code_bootstrap_invalid');
       }

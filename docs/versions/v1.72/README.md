@@ -11,6 +11,17 @@ last_updated: 2026-11-02
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 专业职责 30,000 字符（2026-11-02）
+
+[R2 独立变更说明](model-context-change-professional-responsibilities-30000.md)合并五点评审与 User 收紧的范围：
+职责 30,000 scalar、相关 Bootstrap 正文 256 KiB、执行包默认 256 KiB；保留现有 claim，隔离旧分派固定预留。
+文内列出最小改动、版本轴不变的依据、内容保留、定向回归及复用 12 Case Gate 的边界。
+已完成字段扩容、正文上限及旧预留解耦；工程与定向回归、OpenCode／Command Code 实跑通过。
+User 后续要求停止通用模型矩阵，已停止并留证；Cline 实跑受现有平台资格限制。
+结果见 [R2 实施记录](model-context-change-professional-responsibilities-30000.md#实施与验收记录2026-11-02)与
+[验收证据](evidence/professional-responsibilities-30000-2026-11-02.json)。User 已授权 [PR #987](https://github.com/murray17/rovai-ai/pull/987) 合入 main；
+smoke 摘要匹配补齐同一条 accepted 投递约束，构造数据与既有证据复核通过，未重跑真实模型。
+
 ## 取消执行条统一保留（2026-11-02）
 
 公开取消 Run 的会话执行条与继续入口改为按 `cancelled` 状态判断，覆盖 App 退出与其他取消原因。
