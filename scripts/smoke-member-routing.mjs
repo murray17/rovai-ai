@@ -2,6 +2,7 @@
 // Usage: node scripts/smoke-member-routing.mjs <empty-absolute-fixture-root> [adapter-kind] [responsibility-scalars] [core-executable]
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { glob, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
@@ -108,6 +109,26 @@ try {
     report.nativeRuleEvidence = bindings
   }
 
+  if (adapterKind === 'opencode-cli') {
+    const native = execFileSync('opencode', ['session', 'export', binding.native_session_id], { cwd: project, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 30_000 })
+    await writeFile(join(fixture, 'native-session.json'), native)
+    const payloads = []
+    const visit = value => {
+      if (!value || typeof value !== 'object') return
+      if (typeof value.text === 'string' && value.text.includes('[MEMBER_IDENTITY]\n')) payloads.push(value.text)
+      for (const child of Object.values(value)) if (typeof child === 'object') visit(child)
+    }
+    visit(JSON.parse(native))
+    const payload = payloads.find(text => report.deliveries.some(delivery => delivery.runtime_payload_digest === `sha256:${hash(text)}`))
+    assert.ok(payload, 'Native user input must match the accepted runtime payload digest in full')
+    const identity = JSON.parse(payload.split('[MEMBER_IDENTITY]\n')[1].split('\n[/MEMBER_IDENTITY]')[0])
+    assert.equal(identity.professionalResponsibilities, duties)
+    const bootstrapEnd = Math.max(...['[/MEMORY_ENTRYPOINT]', '[/ROVAI_PLATFORM_SKILLS]'].map(marker => payload.indexOf(marker) < 0 ? 0 : payload.indexOf(marker) + marker.length))
+    const bootstrap = payload.slice(payload.indexOf('[SESSION_CHARTER]'), bootstrapEnd)
+    await writeFile(join(fixture, 'first-runtime-payload.txt'), payload)
+    await writeFile(join(fixture, 'first-bootstrap.txt'), bootstrap)
+    report.nativePayloadEvidence = { bytes: Buffer.byteLength(payload), sha256: hash(payload), bootstrapBytes: Buffer.byteLength(bootstrap), bootstrapSha256: hash(bootstrap), responsibilitiesSha256: hash(identity.professionalResponsibilities) }
+  }
   // Editing only a peer's details must not force roster redelivery or reset the native session.
   const peerProfile = await core.request('members.get', { agentId: 'agent_2' })
   await core.request('members.update', { commandId: randomUUID(), command: { agentId: 'agent_2', expectedVersion: peerProfile.version,
