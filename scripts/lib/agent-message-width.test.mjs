@@ -38,6 +38,20 @@ test('public message widths follow their own content and recover on resize/repla
       tableScroll:table ? table.scrollWidth-table.clientWidth : 0, codeScroll:pre ? pre.scrollWidth-pre.clientWidth : 0,
       rowHeight:row.querySelector('tr')?.getBoundingClientRect().height ?? 0 }]
   })))()`)
+  const assertTableTextFits = async () => {
+    const overflow = await b.evaluate(`(() => [...document.querySelectorAll('[data-fixture-id="middle"] :is(th, td)')].flatMap((cell, index) => {
+      const bounds = cell.getBoundingClientRect(), walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT), issues = [];
+      while (walker.nextNode()) {
+        if (!walker.currentNode.textContent.trim()) continue;
+        const range = document.createRange(); range.selectNodeContents(walker.currentNode);
+        for (const rect of range.getClientRects()) {
+          if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1) issues.push(index);
+        }
+      }
+      return issues;
+    }))()`)
+    assert.deepEqual(overflow, [], 'table text must stay inside its own cell')
+  }
   const change = async (scene, quoted = true) => {
     await b.evaluate(`widthFixture.setMiddle(${JSON.stringify(scene)}); widthFixture.setQuote(${quoted})`)
     await settle()
@@ -61,8 +75,14 @@ test('public message widths follow their own content and recover on resize/repla
   assert.equal((await change('prose')).text, 780)
   await b.evaluate('widthFixture.setAttachments(false)')
   const huge = await change('hugeTable')
-  assert.equal(huge.text, 930)
-  assert.ok(huge.tableScroll > 0)
+  assert.ok(huge.text <= 930)
+  assert.equal(huge.tableScroll, 0, 'long tokens wrap instead of forcing a wider table')
+  assert.ok(await b.evaluate(`(() => {
+    const cell = document.querySelector('[data-fixture-id="middle"] tbody td:last-child'), range = document.createRange();
+    range.selectNodeContents(cell);
+    return new Set([...range.getClientRects()].map(rect => rect.top)).size > 1;
+  })()`), 'the continuous identifier uses multiple lines')
+  await assertTableTextFits()
   const code = await change('longCode')
   assert.equal(code.text, 930)
   assert.ok(code.codeScroll > 0)
@@ -95,6 +115,30 @@ test('public message widths follow their own content and recover on resize/repla
     await b.evaluate('document.documentElement.dataset.theme="day"')
     await settle()
     await b.capture(join(process.env.ROVAI_MESSAGE_WIDTH_EVIDENCE, 'day-wide.png'))
+  }
+  // Long URL segments wrap inside their cells without painting over a neighbor.
+  for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
+    await b.evaluate(`document.documentElement.dataset.themeId=${JSON.stringify(theme)}; document.documentElement.dataset.theme=${JSON.stringify(['night', 'ember'].includes(theme) ? 'night' : 'day')}`)
+    for (const width of [1040, 1440, 2560]) {
+      await viewport(width)
+      const address = await change('addressTable', false)
+      assert.equal(address.tableScroll, 0, 'three-column address tables fit a desktop reading area')
+      await assertTableTextFits()
+    }
+  }
+  await b.evaluate('document.documentElement.style.setProperty("--fixture-pane-width", "420px")')
+  assert.ok((await change('addressTable', false)).tableScroll > 0, 'narrow panes scroll the complete table')
+  await assertTableTextFits()
+  await b.evaluate('document.documentElement.style.removeProperty("--fixture-pane-width"); document.documentElement.style.zoom="2"')
+  await viewport(1040)
+  await settle()
+  await assertTableTextFits()
+  await b.evaluate('document.documentElement.style.zoom="1"')
+  await viewport(1440)
+  for (const theme of ['day', 'night']) {
+    await b.evaluate(`document.documentElement.dataset.themeId=${JSON.stringify(theme)}; document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+    await settle()
+    if (process.env.ROVAI_MESSAGE_WIDTH_EVIDENCE) await b.capture(join(process.env.ROVAI_MESSAGE_WIDTH_EVIDENCE, `${theme}-address.png`))
   }
   assert.deepEqual(b.errors, [])
 })
