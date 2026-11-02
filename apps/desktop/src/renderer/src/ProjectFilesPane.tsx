@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import type { ProjectFileEntry } from '@contracts'
-import { ProjectFileIcon, DirectoryTreeIcon } from './ProjectFileIcon'
+import { ProjectFileIcon, ProjectFolderIcon } from './ProjectFileIcon'
 import { useProjectFiles } from './ProjectFilesContext'
 import { ProjectFilesStore } from './project-files-store'
 import { useOptionalFilePreview } from './FilePreviewContext'
@@ -11,14 +11,11 @@ import { uiAttribute } from './interface-language'
 import { useShortcutLabel } from './ShortcutProvider'
 import './project-files.css'
 
-export function ProjectFolderIcon(): React.JSX.Element {
-  return <svg className="project-folder-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true"><path d="M2.5 5.5h6l1.5 2h7.5v9h-15z"/></svg>
-}
 export function ProjectFilesButton(): React.JSX.Element | null {
   const browser = useProjectFiles(), shortcut = useShortcutLabel('project-files')
   if (!browser?.store) return null
   const label = `${uiAttribute(browser.visible ? '隐藏文件目录' : '显示文件目录')} (${shortcut})`
-  return <button type="button" className="project-files-toggle" data-active={browser.active} aria-label={label} title={label} aria-controls="project-files-pane" aria-expanded={browser.visible} onClick={event => browser.toggle(event.currentTarget)}><DirectoryTreeIcon /></button>
+  return <button type="button" className="project-files-toggle" data-active={browser.active} aria-label={label} title={label} aria-controls="project-files-pane" aria-expanded={browser.visible} onClick={event => browser.toggle(event.currentTarget)}><ProjectFolderIcon /></button>
 }
 
 interface Row { entry: ProjectFileEntry; depth: number; parent: string }

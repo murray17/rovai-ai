@@ -137,3 +137,11 @@ Rovai AI does not claim rights in third-party product names, logos,
 trademarks, characters, or people merely because a compatibility surface,
 notice, schema, or project artwork refers to them. All such rights remain with
 their respective owners.
+
+## 10. Phosphor Folder Icon
+
+The shared project-folder glyph uses Phosphor's regular `folder-open.svg`,
+under the MIT License. Its geometry is unchanged; the React wrapper applies
+Rovai's existing sizes, `currentColor`, and decorative accessibility attributes.
+Source: https://github.com/phosphor-icons/core/blob/main/assets/regular/folder-open.svg.
+The complete license is retained in `legal/licenses/phosphor-icons/LICENSE`.

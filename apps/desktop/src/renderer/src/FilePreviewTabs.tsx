@@ -7,7 +7,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import { useFilePreview, useFilePreviewApi, canDownloadFile } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
-import { ProjectFileIcon, DirectoryTreeIcon } from './ProjectFileIcon'
+import { ProjectFileIcon, ProjectFolderIcon } from './ProjectFileIcon'
 import { Icon } from './MissionControls'
 import { ExecutionIcon } from './ExecutionIcons'
 import { previewTabLabel, previewTabLabels, previewTabPresentation } from './file-preview-tab-presentation'
@@ -338,7 +338,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   onClick={() => activate(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                 >
-                  {tab.kind === 'file_picker' ? <DirectoryTreeIcon className="file-preview-tab-icon" /> : tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
+                  {tab.kind === 'file_picker' ? <ProjectFolderIcon className="file-preview-tab-icon" /> : tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
                     <ExecutionIcon className="icon file-preview-execution-icon" />
                   ) : tab.kind === 'file' ? <ProjectFileIcon fileName={fileName} /> : <FilePreviewTabIcon
                     kind={icon}
