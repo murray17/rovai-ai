@@ -100,7 +100,9 @@ Fast 可用性补修按 User 最新取舍执行：移除 Codex 新增的键／�
   覆盖手动与 App 退出取消的静态状态、最终耗时、切群／刷新、未知回执与受理后收起；日夜截图已核对。
 - 聚合 `test:run-presence-ui` 的 reply-details 在 `regroup-middle` 断言失败，同一未修改基线独立复现。
   根 checkout 的 `pnpm test`／文档门禁被 Git 忽略的旧 `docs/prototypes/` 失效链接阻断；
-  原型原样保留，通用门禁另在仅含受管文件的验证快照执行。
+  原型原样保留。仅含受管文件的验证快照中，完整 `pnpm test` 通过（Vitest 3052 passed / 2 skipped，
+  Node 层 365 passed / 2 skipped），通用文档单测、检查与上述 base 的差分门禁均通过。
+- Status：ready；改动仅提交与推送任务分支，未合入主线。
 
 ## 手动停止保留执行条（2026-10-29）
 
