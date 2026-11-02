@@ -796,8 +796,8 @@ html[lang="en"] .settings-app-update-badge svg { display: none; }
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
-.primary-button { border: 1px solid var(--brand); color: var(--brand-contrast); background: var(--brand); }
-.primary-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+.primary-button { border: 1px solid var(--conversation-action); color: var(--conversation-action-contrast); background: var(--conversation-action); }
+.primary-button:hover:not(:disabled) { border-color: var(--conversation-action-hover); background: var(--conversation-action-hover); }
 .quiet-button, .safe-button { border: 1px solid var(--line-strong); color: var(--ink); background: var(--surface); }
 .quiet-button.compact { min-height: 28px; padding: 4px 9px; font-size: 11px; }
 .quiet-button:hover:not(:disabled), .safe-button:hover:not(:disabled) { background: var(--surface-muted); }
