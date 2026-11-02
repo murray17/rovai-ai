@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: single-chat
 authority: single-chat-component-boundaries-and-data-flow
-last_updated: 2026-10-18
+last_updated: 2026-11-02
 ---
 
 # Single Chat Architecture
@@ -142,12 +142,15 @@ tool 与 command 分组；终态自动折叠过程而不是删除 Evidence，fin
 Snapshot 的 Run 同时携带 `executionEvidenceChangeSequence`；执行窗口按独立 change cursor 合并原位更新，不能把
 `executionEvidenceCount` 当作 revision。私有 thought/reasoning 正文在 Renderer state 前丢弃，只保留 content-free phase。
 
+进入 Thread 时即读取 active Conversation 列表，供收起状态下仍可见的入口显示数量与运行标记；列表监听当前 Thread 的
+`single_chat.changed` 与客户端失效通知，不依赖 Panel 可见性，也不设轮询。列表读取串行合并，读取期间的新通知触发一次补读，
+离开 Thread 或组件卸载后旧读取不可写回。
 Panel 打开或切换对象时由 Renderer 唯一决定 target、清空旧 Snapshot 并管理 loading；一个 target request
 sequence 同时校验当前队员，阻止迟到结果跨目标写回。后台 `refreshList` 只更新 active Conversation 列表和
-运行标记；`refreshCurrent` 只读当前完整 Snapshot，以一个 in-flight 标记串行化同一目标的读取，期间重复刷新合并为完成后
+运行标记；`refreshCurrent` 只在 Panel 可见时读取当前完整 Snapshot，以一个 in-flight 标记串行化同一目标的读取，期间重复刷新合并为完成后
 的一次补读。Mutation 返回的 Snapshot 可立即呈现，但仍通过同一补读入口确保修改前的在途读取不会成为最后结果。
 这些后台读取不切换目标、不清空 Snapshot，也不修改 loading。空闲时无计时器；运行期约每 800ms 只读当前 Conversation，
-Panel 收起、Thread 离开或组件卸载使旧 target request 失效并停止刷新。
+Panel 收起、Thread 离开或组件卸载使旧 target request 失效并停止正文刷新。
 
 ## 取消、结束与并发
 

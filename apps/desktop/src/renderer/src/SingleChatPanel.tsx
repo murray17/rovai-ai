@@ -193,11 +193,13 @@ function nonEmptyEventString(value: unknown): string | null {
 export function singleChatChangeRefreshTarget(
   event: CoreEvent,
   threadId: string,
-  currentConversationId: string | null
+  currentConversationId: string | null,
+  panelVisible = true
 ): SingleChatChangeRefreshTarget {
   if (event.method !== 'single_chat.changed') return 'none'
   const params = eventRecord(event.params)
   if (params?.threadId !== threadId) return 'none'
+  if (!panelVisible) return 'conversation-list'
   const result = eventRecord(params.result)
   const resultPayload = eventRecord(result?.payload)
   const conversationId = nonEmptyEventString(params.conversationId)
@@ -691,6 +693,10 @@ export function SingleChatPanel({
   const selectedAgentIdRef = useRef<string | null>(initialAgentId)
   const currentConversationIdRef = useRef<string | null>(null)
   const conversationsRef = useRef<SingleChatConversationView[]>([])
+  const listReadScopeRef = useRef<{
+    pending: Promise<SingleChatConversationView[] | undefined> | null
+    refreshAgain: boolean
+  } | null>(null)
   const snapshotRef = useRef<SingleChatSnapshot | null>(null)
   const targetRequestSequenceRef = useRef(0)
   const currentReadInFlightRef = useRef<{
@@ -796,7 +802,7 @@ export function SingleChatPanel({
   }, [threadId, selectedAgentId, snapshot?.conversation.id, bodyDraftKey])
   const activeRun = currentSnapshot?.agentRuns.find((run) => NON_TERMINAL_RUNS.has(run.status)) ?? null
   const runningCount = conversations.filter((conversation) => (
-    conversation.id === currentSnapshot?.conversation.id
+    visible && conversation.id === currentSnapshot?.conversation.id
       ? currentSnapshot.conversation.activeAgentRunId !== null
       : conversation.activeAgentRunId !== null
   )).length
@@ -930,21 +936,46 @@ export function SingleChatPanel({
     return reading
   }, [acceptSnapshot, threadId])
 
-  const refreshList = useCallback(async (): Promise<SingleChatConversationView[] | undefined> => {
-    if (!visibleRef.current || campIdRef.current !== threadId) return undefined
-    try {
-      const nextConversations = await client.request<SingleChatConversationView[]>('singleChat.list', { threadId })
-      if (!visibleRef.current || campIdRef.current !== threadId) return undefined
-      conversationsRef.current = nextConversations
-      setConversations(nextConversations)
-      return nextConversations
-    } catch (nextError) {
-      if (visibleRef.current && campIdRef.current === threadId) {
-        setError(readErrorMessage(nextError, uiAttribute('单聊列表暂时无法读取。')))
+  const refreshList = useCallback((): Promise<SingleChatConversationView[] | undefined> => {
+    const scope = listReadScopeRef.current
+    if (!scope || campIdRef.current !== threadId) return Promise.resolve(undefined)
+    scope.refreshAgain = true
+    if (scope.pending) return scope.pending
+
+    const reading = (async (): Promise<SingleChatConversationView[] | undefined> => {
+      let latest: SingleChatConversationView[] | undefined
+      while (scope === listReadScopeRef.current && campIdRef.current === threadId && scope.refreshAgain) {
+        scope.refreshAgain = false
+        try {
+          const nextConversations = await client.request<SingleChatConversationView[]>('singleChat.list', { threadId })
+          if (scope !== listReadScopeRef.current || campIdRef.current !== threadId) return undefined
+          if (scope.refreshAgain) continue
+          conversationsRef.current = nextConversations
+          setConversations(nextConversations)
+          latest = nextConversations
+        } catch (nextError) {
+          if (scope === listReadScopeRef.current && campIdRef.current === threadId
+            && visibleRef.current && !scope.refreshAgain) {
+            setError(readErrorMessage(nextError, uiAttribute('单聊列表暂时无法读取。')))
+          }
+        }
       }
-      return undefined
-    }
-  }, [threadId])
+      return latest
+    })()
+    scope.pending = reading
+    void reading.then(() => { scope.pending = null })
+    return reading
+  }, [client, threadId])
+
+  useEffect(() => {
+    listReadScopeRef.current = { pending: null, refreshAgain: false }
+    conversationsRef.current = []
+    setConversations([])
+    // The entry remains visible when the transcript panel is closed.
+    // An initially open panel performs its own list read below.
+    if (!visibleRef.current) void refreshList()
+    return () => { listReadScopeRef.current = null }
+  }, [refreshList])
 
   useEffect(() => {
     if (!visible) {
@@ -1022,12 +1053,12 @@ export function SingleChatPanel({
   }, [currentSnapshot?.conversation.id, pollingRequired, refreshCurrent, visible])
 
   useEffect(() => {
-    if (!visible) return
     return client.onEvent?.((event) => {
       const target = singleChatChangeRefreshTarget(
         event,
         threadId,
-        currentConversationIdRef.current
+        currentConversationIdRef.current,
+        visibleRef.current
       )
       if (target === 'current-conversation') {
         void refreshCurrent().catch(() => undefined)
@@ -1035,15 +1066,14 @@ export function SingleChatPanel({
         void refreshList().catch(() => undefined)
       }
     })
-  }, [threadId, client, refreshCurrent, refreshList, visible])
+  }, [threadId, client, refreshCurrent, refreshList])
 
   useEffect(() => {
-    if (!visible) return
     return client.onInvalidated?.(() => {
       void refreshList().catch(() => undefined)
       void refreshCurrent().catch(() => undefined)
     })
-  }, [client, refreshCurrent, refreshList, visible])
+  }, [client, refreshCurrent, refreshList])
 
   useEffect(() => {
     if (!visible || !activeRun) return

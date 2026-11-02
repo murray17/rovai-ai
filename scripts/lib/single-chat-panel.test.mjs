@@ -15,6 +15,7 @@ import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const fixtureSource = join(root, 'scripts/fixtures/single-chat-panel')
 
+test('Single Chat entry count loads and stays current while the panel is closed', { timeout: 90_000 }, t => runFixture(t, '--entry-count'))
 test('Single Chat input history preserves drafts and sends preview as a new pending input', { timeout: 90_000 }, t => runFixture(t, '--input-history'))
 
 test('production Single Chat panel preserves private conversation layout and terminal disclosure', { timeout: 90_000 }, t => runFixture(t))
@@ -62,6 +63,14 @@ async function runFixture(t, mode = '--panel') {
     assert.ok(reportLine, `Single Chat native UI report was missing:\n${output}`)
     const report = JSON.parse(reportLine)
     assert.equal(report.ok, true)
+    if (mode === '--entry-count') {
+      assert.deepEqual(report.verified, {
+        initialCount: true, closedPanelEvents: true, invalidation: true,
+        noIdlePolling: true, noHiddenTranscriptReads: true, runningState: true, lateReadFence: true
+      })
+      process.stdout.write(`${JSON.stringify(report)}\n`)
+      return
+    }
     if (mode === '--input-history') {
       assert.deepEqual(report.verified, { inputHistory: true, previewSend: true, draftRecovery: true })
       return

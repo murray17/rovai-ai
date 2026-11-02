@@ -23,7 +23,9 @@ app.whenReady().then(async () => {
   window.webContents.on('console-message', (event) => console.error(event.message))
   const webOpens = []
   window.webContents.setWindowOpenHandler(({ url }) => { webOpens.push(url); return { action: 'deny' } })
-  await window.loadFile(renderer, mode === '--input-history' ? { query: { inputHistory: '1' } } : undefined)
+  const query = mode === '--input-history' ? { inputHistory: '1' }
+    : mode === '--entry-count' ? { entryCount: '1' } : undefined
+  await window.loadFile(renderer, query ? { query } : undefined)
   const run = (code) => window.webContents.executeJavaScript(code, true)
   const settle = async (milliseconds = 40) => {
     await wait(milliseconds)
@@ -98,6 +100,77 @@ app.whenReady().then(async () => {
   }
 
   try {
+    if (mode === '--entry-count') {
+      const state = () => run('window.singleChatTest.entryCountState()')
+      await waitFor('window.singleChatTest?.entryCountState().count === "1"')
+      const thread = (await state()).threadId
+      const event = async (code, extra = {}) => {
+        await run(`window.singleChatTest.entryEvent(${JSON.stringify({ threadId: thread,
+          result: { code, payload: { conversationId: 'single-chat-fixture-conversation' } }, ...extra })})`)
+      }
+      const setConversations = (count, running = false, targetThread = thread) => run(
+        `window.singleChatTest.setEntryConversations(${JSON.stringify(targetThread)}, ${count}, ${running})`
+      )
+      assert.equal((await state()).hidden, true, 'entry count loads before opening the panel')
+      assert.equal((await state()).gets, 0, 'closed panel does not load a private transcript')
+      assert.equal((await state()).lists.length, 1)
+      await wait(1_000)
+      assert.equal((await state()).lists.length, 1, 'entry count does not poll')
+
+      await setConversations(2)
+      await event('single_chat.opened')
+      await waitFor('window.singleChatTest.entryCountState().count === "2"')
+      await setConversations(1)
+      await event('single_chat.ended')
+      await waitFor('window.singleChatTest.entryCountState().count === "1"')
+      await setConversations(2)
+      await run('window.singleChatTest.invalidateEntryList()')
+      await waitFor('window.singleChatTest.entryCountState().count === "2"')
+
+      const reads = (await state()).lists.length
+      await event('single_chat.opened', { threadId: 'unrelated-thread' })
+      await settle()
+      assert.equal((await state()).lists.length, reads, 'other Thread changes do not read this list')
+
+      await click('[data-detail="single-chat"]')
+      await waitFor("Boolean(document.querySelector('.single-chat-final'))")
+      await click('[data-detail="single-chat"]')
+      await setConversations(2, true)
+      await event('single_chat.reply_queued')
+      await waitFor('window.singleChatTest.entryCountState().running')
+      await setConversations(2)
+      await run(`window.singleChatTest.entryEvent(${JSON.stringify({ threadId: thread,
+        conversationId: 'single-chat-fixture-conversation', reason: 'run_updated' })})`)
+      await waitFor('!window.singleChatTest.entryCountState().running')
+      const gets = (await state()).gets
+
+      await run('window.singleChatTest.holdEntryListReads()')
+      await setConversations(3)
+      await event('single_chat.opened')
+      await waitFor('window.singleChatTest.entryCountState().held === 1')
+      await setConversations(1)
+      await event('single_chat.ended')
+      await run('window.singleChatTest.releaseEntryListReads()')
+      await waitFor('window.singleChatTest.entryCountState().count === "1"')
+
+      await run('window.singleChatTest.holdEntryListReads()')
+      await setConversations(3)
+      await event('single_chat.opened')
+      await waitFor('window.singleChatTest.entryCountState().held === 1')
+      await run('window.singleChatTest.switchThread("empty-thread")')
+      await waitFor('window.singleChatTest.entryCountState().held === 2')
+      await run('window.singleChatTest.releaseEntryListReads()')
+      await waitFor('window.singleChatTest.entryCountState().count === "0"')
+      await settle()
+      assert.equal((await state()).count, '0', 'late reads cannot restore the previous Thread count')
+      assert.equal((await state()).gets, gets, 'hidden list refreshes never read a transcript')
+      console.log(JSON.stringify({ ok: true, verified: {
+        initialCount: true, closedPanelEvents: true, invalidation: true,
+        noIdlePolling: true, noHiddenTranscriptReads: true, runningState: true, lateReadFence: true
+      } }))
+      window.destroy(); app.quit()
+      return
+    }
     await waitFor("Boolean(document.querySelector('.single-chat-final'))")
     if (mode === '--input-history') {
       const input = '.single-chat-composer textarea'
@@ -527,7 +600,7 @@ app.whenReady().then(async () => {
     assert.equal(composerEnter.defaultPrevented, true)
     assert.equal(composerEnter.state.sendRequests, 1)
 
-    assert.equal(composerEnter.state.sendFeedback, '连接中')
+    assert.equal(composerEnter.state.sendFeedback, '准备中…')
     assert.equal(composerEnter.state.composerDisabled, true)
     for (const type of ['dragenter', 'dragover', 'dragleave', 'drop']) {
       dragged = await drag(type, '.single-chat-transcript')
@@ -543,14 +616,14 @@ app.whenReady().then(async () => {
 
     await run('window.singleChatTest.holdSend()')
     composerEnter = await dispatchComposerEnter(false)
-    assert.equal(composerEnter.state.sendFeedback, '连接中')
+    assert.equal(composerEnter.state.sendFeedback, '准备中…')
     await run('window.singleChatTest.releaseSend()')
-    await waitFor("window.singleChatTest.state().liveText.includes('连接中')")
+    await waitFor("window.singleChatTest.state().liveText.includes('启动中…')")
     state = await settle()
     assert.equal(state.sendFeedback, '')
     assert.equal(state.liveSummaryVisible, false)
     assert.equal(state.liveOpen, true)
-    assert.match(state.publicText, /连接中/)
+    assert.match(state.publicText, /启动中…/)
     assert.doesNotMatch(state.liveText, /工作了|正在工作|等待开始|正在处理/)
     const dayQueued = await capture('single-chat-day-queued-1180x800')
 
@@ -564,7 +637,7 @@ app.whenReady().then(async () => {
         for (const selector of ['.single-chat-run-history.is-live', '.public-execution-fixture .process-content']) {
           const surface = document.querySelector(selector)
           if (surface?.querySelector('.single-chat-narration, .stream-narration')
-            && [...surface.querySelectorAll('.process-action.current')].some(node => /Thinking|思考中|连接中/.test(node.textContent))) {
+            && [...surface.querySelectorAll('.process-action.current')].some(node => /Thinking|思考中|启动中/.test(node.textContent))) {
             window.feedbackOverlaps.push(selector)
           }
         }
@@ -578,7 +651,7 @@ app.whenReady().then(async () => {
         assert.match(state.publicText, /思考中/)
       } else {
         assert.match(state.liveText, /我正在检查双主题/)
-        assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中/)
+        assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|准备中|启动中/)
         assert.deepEqual(await run('window.feedbackOverlaps'), [])
       }
       assert.equal(state.liveSummaryVisible, false)
@@ -590,7 +663,7 @@ app.whenReady().then(async () => {
     assert.equal(state.composerDisabled, false)
     assert.equal(state.stopVisible, true)
     assert.match(state.liveGroupAccessibleLabel, /执行中.*pnpm run accept:single-chat-ui/)
-    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中|工作了|正在工作/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|准备中|启动中|工作了|正在工作/)
     const singleLive = '.single-chat-run-history.is-live'
     const publicFixture = '.public-execution-fixture'
     await click(`${singleLive} .tool-group-summary`)
@@ -607,7 +680,7 @@ app.whenReady().then(async () => {
     await run("document.documentElement.dataset.theme = 'night'")
     state = await phase('returned')
     assert.match(state.liveGroupAccessibleLabel, /执行中/)
-    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中|工作了|正在工作/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|准备中|启动中|工作了|正在工作/)
     await waitFor("Boolean(document.querySelector('.single-chat-run-history.is-live .tool-result-retry'))")
     await click(`${singleLive} .tool-result-retry`)
     await waitFor("document.querySelector('.single-chat-run-history.is-live .tool-call-result-scroll')?.textContent.includes('PRIVATE_RESULT_END')")
@@ -634,7 +707,7 @@ app.whenReady().then(async () => {
     }
     state = await phase('continuation')
     assert.match(state.liveGroupLabel, /已完成 1 个步骤/)
-    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|连接中/)
+    assert.doesNotMatch(state.liveText + state.publicText, /Thinking|思考中|准备中|启动中/)
     assert.deepEqual(await run('window.feedbackOverlaps'), [])
     await run('window.feedbackObserver.disconnect()')
     assert.equal(await run(`document.querySelector('${singleLive} .tool-group-state[role]') !== null`), false)
@@ -657,7 +730,7 @@ app.whenReady().then(async () => {
 
     state = await phase('waiting')
     assert.match(state.liveGroupLabel, /等待审批/)
-    assert.doesNotMatch(state.liveText, /Thinking|思考中|连接中/)
+    assert.doesNotMatch(state.liveText, /Thinking|思考中|准备中|启动中/)
     state = await phase('failed')
     assert.equal(state.liveOpen, null)
     assert.match(state.body, /运行 26 秒后失败/)
