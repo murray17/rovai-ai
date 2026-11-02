@@ -518,6 +518,9 @@ Thread Header 的任务、队员和单聊入口在英文下分别使用 `Tasks /
 Thread Header 的“当前会话”详情入口包含一个独立“单聊”项；打开后使用锚定在会话区右上方的非模态 panel，
 与既有成员/Task/文件详情互斥，但不改变 Thread route、公共时间线、Composer Draft 或执行台位置。入口显示 active
 Single Chat 数量；任一会话正在回复时复用紧凑运行 spinner，不用未读或通知语义。
+数量与运行标记在进入 Thread 的正式快照就绪后异步读取；缓存预览期间不自动查询，消息展示与输入可用不等待该结果。
+不必先打开单聊 panel；panel 收起时通过当前 Thread 的变更事件和客户端失效通知刷新列表，
+不加载私有正文、不启动计时刷新。切换 Thread 或离开时丢弃旧列表读取结果。
 
 panel 顶部先显示标题，再显示单聊对象选择栏和直接“结束”按钮，不提供省略号菜单。选择器 trigger 使用当前队员头像、
 显示名和团队角色；展开列表每个选项也显示头像、名称和角色，不把对象分成“已有单聊 / 新的单聊”两组，也不暴露
@@ -558,6 +561,7 @@ panel 每次打开时读取一次 active Conversation 列表和当前对象的�
 Conversation 存在非终态 Run，或存在会在 Run 结束后自动发布的 `queued` Pending Input 时，才按约 800ms 周期只读取当前
 Conversation；读到不再满足这两个条件的 terminal Snapshot 后立即停止，`needs_repair` 不触发轮询。panel 可见时沿用
 `single_chat.changed` 做定向刷新：`refreshList` 只读列表并更新对象列表/运行标记，不选择对象、不加载正文也不改变 loading；
+列表有在途读取时，重复需求合并为完成后的一次补读，供入口和 panel 共用；
 `refreshCurrent` 只读当前 Conversation Snapshot。轮询、事件与本地 mutation 共用同一 `refreshCurrent`；同一目标已有 get 在途时
 不并发新读取，期间的重复需求合并为当前读取完成后的一次补读。接口返回完整 Snapshot 时可先直接呈现，但在途旧读取不得成为
 本地修改后的最后结果。所有后台刷新都不清空 Snapshot、不切换对象且不改变 loading。panel 收起后停止计时刷新，再次打开时重新执行

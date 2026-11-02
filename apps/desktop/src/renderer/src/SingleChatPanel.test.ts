@@ -407,7 +407,7 @@ describe('Single Chat presentation', () => {
     expect(inFlightRefresh).toHaveBeenCalledTimes(1)
   })
 
-  it('routes Single Chat changes to the narrowest visible-panel read', () => {
+  it('routes Single Chat changes to the entry list or the visible transcript', () => {
     expect(singleChatChangeRefreshTarget(
       changed({ threadId: 'camp-1', conversationId: 'conversation-1' }),
       'camp-1',
@@ -420,6 +420,12 @@ describe('Single Chat presentation', () => {
     )).toBe('none')
     expect(singleChatChangeRefreshTarget(changed({ threadId: 'other' }), 'camp-1', 'conversation-1'))
       .toBe('none')
+    expect(singleChatChangeRefreshTarget(changed({ threadId: 'other' }), 'camp-1', 'conversation-1', false))
+      .toBe('none')
+    expect(singleChatChangeRefreshTarget(changed({ threadId: 'camp-1', conversationId: 'conversation-1' }),
+      'camp-1', 'conversation-1', false)).toBe('conversation-list')
+    expect(singleChatChangeRefreshTarget(changed({ threadId: 'camp-1', conversationId: 'conversation-2' }),
+      'camp-1', 'conversation-1', false)).toBe('conversation-list')
     expect(singleChatChangeRefreshTarget({ method: 'agent.text.delta', params: { threadId: 'camp-1' } }, 'camp-1', 'conversation-1'))
       .toBe('none')
 
@@ -450,7 +456,7 @@ describe('Single Chat presentation', () => {
     }), 'camp-1', 'conversation-1')).toBe('conversation-list')
   })
 
-  it('keeps list reads out of the 800ms run loop and gates all reads on panel visibility', () => {
+  it('keeps list reads out of the 800ms run loop and gates transcript reads on panel visibility', () => {
     expect(source.match(/'singleChat\.list'/gu)).toHaveLength(1)
     expect(source.match(/'singleChat\.get'/gu)).toHaveLength(1)
     const pollStart = source.indexOf('const pollingRequired = singleChatSnapshotNeedsPolling(currentSnapshot)')
@@ -463,8 +469,6 @@ describe('Single Chat presentation', () => {
     expect(pollingEffect).toContain('refreshCurrent,')
     expect(pollingEffect).not.toContain('singleChat.list')
     expect(SINGLE_CHAT_POLL_INTERVAL_MS).toBe(800)
-    expect(source).toContain("if (!visible) return\n    return client.onEvent?")
-    expect(source).toContain("if (!visible) return\n    return client.onInvalidated?")
   })
 
   it('separates list reads and target loading from coalesced current-conversation reads', () => {

@@ -6166,6 +6166,7 @@ export function ThreadWorkspace({
                 members={snapshot.members}
                 entryHost={detailEntryHost}
                 visible={singleChatVisible}
+                prefetchEnabled={workspaceEntrySnapshotReady}
                 onOpen={onOpenSingleChat}
                 onClose={mobile ? closeMobileSecondaryPanel : onCloseSingleChat}
                 onNotify={onNotify}

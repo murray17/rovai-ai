@@ -6,6 +6,7 @@ import type {
   CoreEvent,
   ThreadMemberView,
   CanonicalRuntimeActivityView,
+  SingleChatConversationView,
   SingleChatSnapshot,
   NotificationSingleChatSource,
   StoredCommandResult
@@ -19,12 +20,22 @@ import '../../../apps/desktop/src/renderer/src/styles.css'
 
 const threadId = 'rvcamp_01m1jkkpkzfvgraw1p4r9zfb7v'
 const inputHistoryMode = new URLSearchParams(location.search).has('inputHistory')
+const entryCountMode = new URLSearchParams(location.search).has('entryCount')
 const copiedLinks: string[] = []
 const recoveredDrafts = new Map<string, unknown>()
+const invalidationListeners = new Set<() => void>()
 let recoveryWrites = 0
-const fixtureClient = new Proxy(desktopThreadClient, { get: (target, key) => key === 'editingRecovery'
-  ? { get: (id: string) => recoveredDrafts.get(id), set: (id: string, value: unknown) => { recoveryWrites++; recoveredDrafts.set(id, structuredClone(value)) } }
-  : Reflect.get(target, key) }) as ThreadClient
+const fixtureClient = new Proxy(desktopThreadClient, { get: (target, key) => {
+  if (key === 'editingRecovery') return {
+    get: (id: string) => recoveredDrafts.get(id),
+    set: (id: string, value: unknown) => { recoveryWrites++; recoveredDrafts.set(id, structuredClone(value)) }
+  }
+  if (key === 'onInvalidated') return (listener: () => void) => {
+    invalidationListeners.add(listener)
+    return () => invalidationListeners.delete(listener)
+  }
+  return Reflect.get(target, key)
+} }) as ThreadClient
 const conversationId = 'single-chat-fixture-conversation'
 const members: ThreadMemberView[] = [
   {
@@ -156,6 +167,10 @@ const terminalSnapshot: SingleChatSnapshot = {
     narration('narration-cancelled', 'run-cancelled', 1, '正在核对取消后的状态投影。')
   ]
 }
+
+const entryConversations = new Map<string, SingleChatConversationView[]>([[threadId, [terminalSnapshot.conversation]]])
+let holdEntryListReads = false
+const heldEntryListReads: (() => void)[] = []
 
 function runningSnapshot(): SingleChatSnapshot {
   return {
@@ -324,7 +339,12 @@ Object.assign(window, {
     },
     request: async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
       requests.push({ method, params })
-      if (method === 'singleChat.list') return [currentSnapshot.conversation]
+      if (method === 'singleChat.list') {
+        if (!entryCountMode) return [currentSnapshot.conversation]
+        const result = structuredClone(entryConversations.get(String(params?.threadId)) ?? [])
+        if (holdEntryListReads) await new Promise<void>(resolve => heldEntryListReads.push(resolve))
+        return result
+      }
       if (method === 'singleChat.get') return currentSnapshot
       if (inputHistoryMode && method === 'messageQuotes.mutateDraft') {
         currentSnapshot = { ...currentSnapshot,
@@ -408,11 +428,14 @@ const notificationPresentations: number[] = []
 let notificationRequest = 0
 let restorePanel: () => void
 let showPanel: (visible: boolean) => void
+let switchThread: (thread: string) => void
 const bubbledDragEvents: string[] = []
 
 function Fixture(): React.JSX.Element {
   const [entryHost, setEntryHost] = useState<HTMLDivElement | null>(null)
-  const [visible, setVisible] = useState(true)
+  const [visible, setVisible] = useState(!entryCountMode)
+  const [activeThreadId, setActiveThreadId] = useState(threadId)
+  switchThread = setActiveThreadId
   const [mount, setMount] = useState(0)
   restorePanel = () => setMount(current => current + 1)
   showPanel = setVisible
@@ -447,7 +470,7 @@ function Fixture(): React.JSX.Element {
           kind: 'single_chat', conversationId: notificationTarget.conversationId, agentRunId: notificationTarget.agentRunId,
           threadTurnId: 'turn-run-complete', active: true } : null}
         onNotificationFocusPresented={requestId => { if (!notificationPresentations.includes(requestId)) notificationPresentations.push(requestId) }}
-        threadId={threadId}
+        threadId={activeThreadId}
         members={members}
         entryHost={entryHost}
         visible={visible}
@@ -462,6 +485,34 @@ createRoot(document.getElementById('root')!).render(<ThreadClientProvider client
 
 Object.assign(window, {
   singleChatTest: {
+    entryCountState: () => ({
+      threadId,
+      count: document.querySelector('[data-detail="single-chat"] small')?.textContent,
+      hidden: document.querySelector<HTMLElement>('.single-chat-popover')?.hidden,
+      running: Boolean(document.querySelector('[data-detail="single-chat"] .camp-loading-spinner')),
+      lists: requests.filter(request => request.method === 'singleChat.list').map(request => request.params),
+      gets: requests.filter(request => request.method === 'singleChat.get').length,
+      held: heldEntryListReads.length
+    }),
+    setEntryConversations: (thread: string, count: number, running = false) => {
+      entryConversations.set(thread, Array.from({ length: count }, (_, index) => ({
+        ...terminalSnapshot.conversation,
+        threadId: thread,
+        id: index === 0 ? conversationId : `${conversationId}-${index}`,
+        agentId: members[index].agentId,
+        activeAgentRunId: running && index === 0 ? 'run-running' : null
+      })))
+    },
+    entryEvent: (params: Record<string, unknown>) => {
+      for (const listener of eventListeners) listener({ method: 'single_chat.changed', params })
+    },
+    invalidateEntryList: () => { for (const listener of invalidationListeners) listener() },
+    holdEntryListReads: () => { holdEntryListReads = true },
+    releaseEntryListReads: () => {
+      holdEntryListReads = false
+      for (const release of heldEntryListReads.splice(0)) release()
+    },
+    switchThread: (thread: string) => switchThread(thread),
     inputHistoryState: () => ({
       reads: requests.filter(request => request.method.endsWith('.inputHistory')).length,
       queue: currentSnapshot.pendingInputs.items.map(item => item.body)
