@@ -3649,7 +3649,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .safe-markdown.is-document .markdown-table-frame { margin: 17px 0 20px; }
 .safe-markdown.is-document .markdown-table-scroll > table { display: table; width: 100%; min-width: 520px; margin: 0; overflow: visible; font-size: 14px; line-height: var(--reading-leading, 1.7); }
 .safe-markdown.is-document th,
-.safe-markdown.is-document td { overflow-wrap: normal; word-break: normal; }
+.safe-markdown.is-document td { overflow-wrap: break-word; word-break: normal; }
 .safe-markdown.is-document hr { margin: 28px 0; border: 0; border-top: 1px solid var(--line); }
 .markdown-inert-link { cursor: text; }
 .message-actions {
@@ -9565,7 +9565,7 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .safe-markdown .markdown-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .safe-markdown .markdown-table-scroll > table { margin: 0; }
 .public-agent-message .agent-message-content .markdown-table-scroll > table { display: table; width: 100%; min-width: 640px; max-width: none; }
-.public-agent-message .agent-message-content .markdown-table-scroll :is(th, td) { overflow-wrap: normal; }
+.public-agent-message .agent-message-content .markdown-table-scroll :is(th, td) { overflow-wrap: break-word; }
 @media (min-width: 1800px) {
   .public-agent-message { --agent-message-prose-width: 780px; }
 }

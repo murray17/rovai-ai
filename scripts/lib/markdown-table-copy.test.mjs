@@ -56,6 +56,16 @@ test('Markdown tables copy complete rich/plain cells with accessible controls an
   assert.doesNotMatch(projection.html,/private|secret|onclick|data-|图标|复制/)
   await click('.table-document .markdown-table-copy'); await copied('.table-document .markdown-table-frame')
   assert.equal(await text(), '项目\t说明\n行列与格式\t"一\n二，带有 ""引号"""\n代码 与链接\t参考文档')
+  const documentToken='https://example.com/reports/'+'0123456789abcdef'.repeat(20)
+  await b.evaluate(`__tableCopy.setDocumentSource(${JSON.stringify('| 地址 | 说明 |\n| --- | --- |\n| `'+documentToken+'` | 完整保留 |')})`)
+  await b.wait('document.querySelector(".table-document code")?.textContent.includes("https://example.com/reports/")')
+  assert.ok(await b.evaluate(`(() => {
+    const cell=document.querySelector('.table-document td'),bounds=cell.getBoundingClientRect(),range=document.createRange();
+    range.selectNodeContents(cell.querySelector('code'));const rects=[...range.getClientRects()];
+    return new Set(rects.map(rect=>rect.top)).size>1 && rects.every(rect=>rect.left>=bounds.left-1 && rect.right<=bounds.right+1);
+  })()`), 'document URLs wrap without overflowing their cell')
+  await click('.table-document .markdown-table-copy'); await copied('.table-document .markdown-table-frame')
+  assert.equal(await text(), '地址\t说明\n'+documentToken+'\t完整保留')
   await idle()
   await b.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 })
   await b.evaluate('document.activeElement.blur()')
@@ -79,9 +89,25 @@ test('Markdown tables copy complete rich/plain cells with accessible controls an
     await b.capture(join(out, `${theme}.png`))
   }
   await b.evaluate('document.documentElement.dataset.themeId="day";document.documentElement.dataset.theme="day"')
-  // Wide cells stay scrollable while the button stays outside the scroll viewport.
+  // A wrapped identifier still copies completely, without inserting visual line breaks.
   await b.evaluate('__tableCopy.setSource("| 名称 | 完整内容 |\\n| --- | --- |\\n| 长内容 | " + "very_long_identifier_".repeat(35) + " |")')
   await b.wait(`document.querySelector('${frame} td:last-child').textContent.includes('very_long_identifier_')`)
+  await b.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  await idle()
+  assert.ok(await b.evaluate(`(() => {
+    const cell=document.querySelector('${frame} td:last-child'),range=document.createRange();range.selectNodeContents(cell);
+    return new Set([...range.getClientRects()].map(rect=>rect.top)).size>1;
+  })()`))
+  assert.equal(await b.evaluate(`(() => { const e=document.querySelector('${frame} .markdown-table-scroll');return e.scrollWidth-e.clientWidth })()`),0)
+  await click(button); await copied(frame)
+  assert.equal(await text(), '名称\t完整内容\n长内容\t' + 'very_long_identifier_'.repeat(35))
+  // Many columns still scroll while the copy button stays outside the viewport.
+  const headings=Array.from({length:8},(_,i)=>`Column ${i+1}`)
+  const values=headings.map((_,i)=>`column_${i+1}_`+'wide_identifier_'.repeat(3))
+  const wideSource='| '+headings.join(' | ')+' |\n| '+headings.map(()=>'---').join(' | ')+' |\n| '+values.join(' | ')+' |'
+  const wideText=headings.join('\t')+'\n'+values.join('\t')
+  await b.evaluate(`__tableCopy.setSource(${JSON.stringify(wideSource)})`)
+  await b.wait(`document.querySelectorAll('${frame} th').length === 8`)
   await b.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
   await idle()
   const corner = await b.evaluate(`document.querySelector('${button}').getBoundingClientRect().x`)
@@ -89,7 +115,7 @@ test('Markdown tables copy complete rich/plain cells with accessible controls an
   assert.equal(await b.evaluate(`document.querySelector('${button}').getBoundingClientRect().x`), corner)
   assert.equal(await b.evaluate(`document.querySelector('${button}').getBoundingClientRect().left>=document.querySelector('${frame} .markdown-table-scroll').getBoundingClientRect().right`),true)
   await click(button); await copied(frame)
-  assert.equal(await text(), '名称\t完整内容\n长内容\t' + 'very_long_identifier_'.repeat(35))
+  assert.equal(await text(), wideText)
   for (const width of [1040, 2560, 520, 390]) {
     await b.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: false })
     await b.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')

@@ -66,8 +66,9 @@ function EdgeCases() {
 
 function TableCases() {
   const [source, setSource] = useState(tableSource)
+  const [documentSource, setDocumentSource] = useState('| 项目 | 说明 |\n| --- | --- |\n| **行列与格式** | 一<br>二，带有 "引号" |\n| `代码` 与链接 | [参考文档](https://example.com/reference) |')
   const [visible, setVisible] = useState(true)
-  Object.assign(window, { __tableCopy: { setSource, setVisible, createTableClipboardData,
+  Object.assign(window, { __tableCopy: { setSource, setDocumentSource, setVisible, createTableClipboardData,
     quote: () => readMessageQuoteText(document.querySelector('.table-message .safe-markdown') as HTMLElement),
     find: () => createFileFindDomIndex(document.querySelector('.table-document .safe-markdown') as HTMLElement).text,
     language: (language: string) => changeInterfaceLanguage(languageTestApi, language as any)
@@ -78,7 +79,7 @@ function TableCases() {
       <div className="message-surface"><AgentMessageContent className="final-copy"><SafeMarkdown>{source}</SafeMarkdown></AgentMessageContent></div>
     </section>}
     <h2>文档中的表格</h2>
-    <section className="table-document file-preview-markdown"><SafeMarkdown mode="document">{'| 项目 | 说明 |\n| --- | --- |\n| **行列与格式** | 一<br>二，带有 "引号" |\n| `代码` 与链接 | [参考文档](https://example.com/reference) |'}</SafeMarkdown></section>
+    <section className="table-document file-preview-markdown"><SafeMarkdown mode="document">{documentSource}</SafeMarkdown></section>
   </main>
 }
 
