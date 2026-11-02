@@ -648,6 +648,7 @@ export function SingleChatPanel({
   members,
   entryHost,
   visible,
+  prefetchEnabled = true,
   onOpen,
   onClose,
   onLeaveGuardChange,
@@ -671,6 +672,7 @@ export function SingleChatPanel({
   members: ThreadMemberView[]
   entryHost?: HTMLElement | null
   visible: boolean
+  prefetchEnabled?: boolean
   onOpen(): void
   onClose(): void
   onLeaveGuardChange?(guard: (() => ThreadLeavePreparation) | null): void
@@ -689,6 +691,7 @@ export function SingleChatPanel({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const focusPanel = useRef(false)
   const visibleRef = useRef(visible)
+  const prefetchEnabledRef = useRef(prefetchEnabled)
   const campIdRef = useRef(threadId)
   const selectedAgentIdRef = useRef<string | null>(initialAgentId)
   const currentConversationIdRef = useRef<string | null>(null)
@@ -808,6 +811,7 @@ export function SingleChatPanel({
   )).length
 
   visibleRef.current = visible
+  prefetchEnabledRef.current = prefetchEnabled
   campIdRef.current = threadId
   activeMembersRef.current = activeMembers
   memberByIdRef.current = memberById
@@ -938,7 +942,8 @@ export function SingleChatPanel({
 
   const refreshList = useCallback((): Promise<SingleChatConversationView[] | undefined> => {
     const scope = listReadScopeRef.current
-    if (!scope || campIdRef.current !== threadId) return Promise.resolve(undefined)
+    if (!scope || campIdRef.current !== threadId
+      || (!visibleRef.current && !prefetchEnabledRef.current)) return Promise.resolve(undefined)
     scope.refreshAgain = true
     if (scope.pending) return scope.pending
 
@@ -971,11 +976,14 @@ export function SingleChatPanel({
     listReadScopeRef.current = { pending: null, refreshAgain: false }
     conversationsRef.current = []
     setConversations([])
-    // The entry remains visible when the transcript panel is closed.
-    // An initially open panel performs its own list read below.
-    if (!visibleRef.current) void refreshList()
     return () => { listReadScopeRef.current = null }
   }, [refreshList])
+
+  useEffect(() => {
+    // Keep automatic entry reads behind the formal workspace snapshot.
+    // An open panel still performs its own user-requested read below.
+    if (prefetchEnabled && !visibleRef.current) void refreshList()
+  }, [prefetchEnabled, refreshList])
 
   useEffect(() => {
     if (!visible) {

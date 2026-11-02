@@ -23,7 +23,8 @@ app.whenReady().then(async () => {
     if (event.level === 'warning' || event.level === 'error' || event.level >= 2) errors.push(event.message)
   })
   await window.loadFile(renderer, attachmentReview ? { query: { review: 'attachments' } }
-    : mode === '--input-history' ? { query: { inputHistory: '1' } } : undefined)
+    : mode === '--input-history' ? { query: { inputHistory: '1' } }
+      : mode === '--single-chat-entry' ? { query: { singleChatEntry: '1' } } : undefined)
   const run = code => window.webContents.executeJavaScript(code, true).catch(error => { throw new Error(`Fixture action failed: ${code}`, { cause: error }) })
   const state = async () => { await run('window.campOpenTest.settle()'); return run('window.campOpenTest.state()') }
   const capture = async name => writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage()).toPNG())
@@ -41,6 +42,39 @@ app.whenReady().then(async () => {
       `${label}: attachments may extend left to the agent avatar or name track`)
   }
   try {
+    if (mode === '--single-chat-entry') {
+      const entry = () => run('window.campOpenTest.singleChatEntryState()')
+      const waitFor = async expression => {
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (await run(expression)) return
+          await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        throw new Error(`Single Chat entry condition timed out: ${expression}`)
+      }
+      await waitFor('window.campOpenTest?.singleChatEntryState().messages > 0')
+      await run('window.campOpenTest.settle()')
+      assert.deepEqual((await entry()).reads, [], 'cached preview does not prefetch before the formal snapshot is ready')
+      await run('window.campOpenTest.completeEntrySnapshot()')
+      await waitFor('window.campOpenTest.singleChatEntryState().reads.length === 1')
+      assert.equal((await entry()).pending, true, 'hold the count query open independently of the workspace')
+      assert.ok((await entry()).messages > 0, 'messages are visible while the count query is pending')
+      assert.equal((await entry()).editable, true, 'the public composer is ready without the count result')
+      await run('document.querySelector("#camp-message").focus()')
+      await window.webContents.insertText('会话首屏优先')
+      await waitFor('window.campOpenTest.localDraftState().body === "会话首屏优先"')
+      await new Promise(resolve => setTimeout(resolve, 1_000))
+      assert.deepEqual((await entry()).reads, ['singleChat.list'], 'a slow count query does not cause polling or transcript reads')
+      await run('window.campOpenTest.releaseSingleChatEntryList()')
+      await waitFor('window.campOpenTest.singleChatEntryState().count === "1"')
+      assert.equal((await run('window.campOpenTest.localDraftState()')).body, '会话首屏优先')
+      assert.equal(errors.length, 0, errors.join('\n'))
+      console.log(JSON.stringify({ ok: true, mode, verified: {
+        waitsForFormalSnapshot: true, independentCountQuery: true, visibleMessages: true,
+        responsiveComposer: true, oneListRead: true, noTranscriptRead: true
+      } }))
+      app.exit(0)
+      return
+    }
     if (mode === '--input-history') {
       const settle = () => run('window.campOpenTest.settle()')
       const history = async () => { await settle(); return run('window.campOpenTest.inputHistoryState()') }

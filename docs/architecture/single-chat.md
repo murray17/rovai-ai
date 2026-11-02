@@ -142,7 +142,9 @@ tool 与 command 分组；终态自动折叠过程而不是删除 Evidence，fin
 Snapshot 的 Run 同时携带 `executionEvidenceChangeSequence`；执行窗口按独立 change cursor 合并原位更新，不能把
 `executionEvidenceCount` 当作 revision。私有 thought/reasoning 正文在 Renderer state 前丢弃，只保留 content-free phase。
 
-进入 Thread 时即读取 active Conversation 列表，供收起状态下仍可见的入口显示数量与运行标记；列表监听当前 Thread 的
+进入 Thread 的正式快照就绪后，独立异步读取 active Conversation 列表，供收起状态下仍可见的入口显示数量与运行标记；
+缓存预览期间不自动读取列表，主会话的展示与输入就绪不等待列表结果。用户主动打开 Panel 时仍可按打开路径读取。
+列表监听当前 Thread 的
 `single_chat.changed` 与客户端失效通知，不依赖 Panel 可见性，也不设轮询。列表读取串行合并，读取期间的新通知触发一次补读，
 离开 Thread 或组件卸载后旧读取不可写回。
 Panel 打开或切换对象时由 Renderer 唯一决定 target、清空旧 Snapshot 并管理 loading；一个 target request
