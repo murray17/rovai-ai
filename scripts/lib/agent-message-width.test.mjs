@@ -75,8 +75,13 @@ test('public message widths follow their own content and recover on resize/repla
   assert.equal((await change('prose')).text, 780)
   await b.evaluate('widthFixture.setAttachments(false)')
   const huge = await change('hugeTable')
-  assert.equal(huge.text, 930)
-  assert.ok(huge.tableScroll > 0)
+  assert.ok(huge.text <= 930)
+  assert.equal(huge.tableScroll, 0, 'long tokens wrap instead of forcing a wider table')
+  assert.ok(await b.evaluate(`(() => {
+    const cell = document.querySelector('[data-fixture-id="middle"] tbody td:last-child'), range = document.createRange();
+    range.selectNodeContents(cell);
+    return new Set([...range.getClientRects()].map(rect => rect.top)).size > 1;
+  })()`), 'the continuous identifier uses multiple lines')
   await assertTableTextFits()
   const code = await change('longCode')
   assert.equal(code.text, 930)
@@ -111,12 +116,13 @@ test('public message widths follow their own content and recover on resize/repla
     await settle()
     await b.capture(join(process.env.ROVAI_MESSAGE_WIDTH_EVIDENCE, 'day-wide.png'))
   }
-  // Long URL segments must determine column width instead of painting over a neighbor.
+  // Long URL segments wrap inside their cells without painting over a neighbor.
   for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
     await b.evaluate(`document.documentElement.dataset.themeId=${JSON.stringify(theme)}; document.documentElement.dataset.theme=${JSON.stringify(['night', 'ember'].includes(theme) ? 'night' : 'day')}`)
     for (const width of [1040, 1440, 2560]) {
       await viewport(width)
-      await change('addressTable', false)
+      const address = await change('addressTable', false)
+      assert.equal(address.tableScroll, 0, 'three-column address tables fit a desktop reading area')
       await assertTableTextFits()
     }
   }
