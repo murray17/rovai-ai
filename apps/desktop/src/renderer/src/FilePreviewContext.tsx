@@ -6,6 +6,7 @@ import type { FilePreviewApi, ResolvedTheme } from '@contracts'
 import { desktopFilePreviewApi } from './desktop-file-preview-api'
 import { FilePreviewLayoutProvider, useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { ProjectFilesProvider } from './ProjectFilesContext'
+import { ProjectFilesPane } from './ProjectFilesPane'
 import { FileFindProvider } from './FilePreviewFind'
 import { FilePreviewResources } from './file-preview-resources'
 import { FilePreviewPaneContent } from './FilePreviewPane'
@@ -27,6 +28,7 @@ function RetainedPreview({ session, resolvedTheme, current, bounds, resizing, mi
   session: FilePreviewSession; resolvedTheme: ResolvedTheme; current: boolean; bounds: CSSProperties | null; resizing: boolean; missionActivity?: ReactNode
   registerExecutionHost(threadId: string, element: HTMLDivElement | null): void
 }): React.JSX.Element {
+  const layout = useOptionalFilePreviewLayout()
   const state = session.getSnapshot()
   const value = useMemo(() => ({ ...sessionValue(session, resolvedTheme), isCurrentThread: current }), [session, state, resolvedTheme, current])
   const visible = current && value.paneVisible && !!bounds
@@ -42,6 +44,7 @@ function RetainedPreview({ session, resolvedTheme, current, bounds, resizing, mi
         missionActivity={missionActivity}
         executionHostRef={executionHostRef}
       />
+      {visible && layout?.directoryDrawer && <ProjectFilesPane />}
     </div>
   </FilePreviewContext.Provider>
 }

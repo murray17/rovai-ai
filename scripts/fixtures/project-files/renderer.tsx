@@ -9,8 +9,10 @@ import { ShortcutProvider } from '../../../apps/desktop/src/renderer/src/Shortcu
 import { shortcutDefaults } from '../../../apps/desktop/src/shared/shortcuts'
 import { initializeInterfaceLanguage, useInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
 import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
+import { MissionSurface } from '../../../apps/desktop/src/renderer/src/MissionSurface'
 import { createReviewModel } from '../host-web-parity/model'
 import '../../../apps/desktop/src/renderer/src/styles.css'
+import '../../../apps/desktop/src/renderer/src/mission.css'
 
 const bridge = (window as unknown as { fixtureApi: { files: FilePreviewApi; platform: NodeJS.Platform; thread(): Promise<string> } }).fixtureApi
 document.documentElement.dataset.rovaiPlatform = bridge.platform
@@ -30,10 +32,15 @@ let thread = ''
 function Fixture(): React.JSX.Element {
   const [theme, setTheme] = useState<ResolvedTheme>('day')
   const [context, setContext] = useState({ threadId: thread, directory: true, name: 'project' })
+  const [missionDrawer, setMissionDrawer] = useState(false)
   useInterfaceLanguage()
-  Object.assign(window, { fixtureContext: (threadId: string, directory: boolean, name = directory ? 'project' : '快速对话') => { thread = threadId; setContext({ threadId, directory, name }) }, fixtureTheme: (value: ResolvedTheme, id = value) => { document.documentElement.dataset.themeId = id; document.documentElement.dataset.theme = value; setTheme(value) }, fixtureEnglish: () => initializeInterfaceLanguage({ interfaceLanguage: 'en', interfaceLanguagePreference: 'en', systemLanguage: 'en', languageRevision: 1, readError: false }) })
+  Object.assign(window, { fixtureMission: (open: boolean) => setMissionDrawer(open), fixtureContext: (threadId: string, directory: boolean, name = directory ? 'project' : '快速对话') => { thread = threadId; setContext({ threadId, directory, name }) }, fixtureTheme: (value: ResolvedTheme, id = value) => { document.documentElement.dataset.themeId = id; document.documentElement.dataset.theme = value; setTheme(value) }, fixtureEnglish: () => initializeInterfaceLanguage({ interfaceLanguage: 'en', interfaceLanguagePreference: 'en', systemLanguage: 'en', languageRevision: 1, readError: false }) })
+  const header = <AppHeader thread={null} threadTitle="本地开发入口" contextLabel={context.name} onFocusApprovals={() => {}}
+    leading={missionDrawer ? <div className="mission-session-leading"><button className="file-preview-toggle" aria-label="关闭使命抽屉" onClick={() => setMissionDrawer(false)}>×</button></div> : undefined}/>
   return <ThreadClientProvider client={chromeClient}><ShortcutProvider api={shortcutApi} platform={bridge.platform}><FilePreviewProvider api={bridge.files} threadId={context.threadId} resolvedTheme={theme} projectFilesEnabled={context.directory}>
-    <div className="app-shell app-shell-camp"><aside style={{ gridRow: '1 / -1', padding: 24, background: 'var(--rail)' }}>Rovai AI</aside><AppHeader thread={null} threadTitle="本地开发入口" contextLabel={context.name} onFocusApprovals={() => {}}/><main className="content task-content"><Workspace/></main></div>
+    <div className="app-shell app-shell-camp navigation-shell" style={{ '--rail-width': '270px' } as React.CSSProperties}><aside style={{ gridRow: '1 / -1', padding: 24, background: 'var(--rail)' }}>Rovai AI</aside>{!missionDrawer && header}<main className={`content task-content${missionDrawer ? ' mission-active-content' : ''}`}>
+      {missionDrawer ? <><div style={{ padding: 32 }}>使命板</div><MissionSurface full={false} onExpand={() => {}} onClose={() => setMissionDrawer(false)}>{header}<Workspace/></MissionSurface></> : <Workspace/>}
+    </main></div>
   </FilePreviewProvider></ShortcutProvider></ThreadClientProvider>
 }
 bridge.thread().then(id => { thread = id; createRoot(document.getElementById('root')!).render(<Fixture/>) })

@@ -48,7 +48,7 @@
 .project-files-project .project-folder-icon { width: 14px; height: 14px; flex-basis: 14px; }
 .project-files-toggle:focus-visible, .project-files-project:focus-visible { outline: 1px solid var(--control-line); outline-offset: 2px; }
 .project-files-pane { grid-column: -2 / -1; grid-row: 1 / -1; position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--conversation-surface); color: var(--ink); font-family: inherit; font-size: 13px; font-weight: 400; z-index: 19; }
-.workspace-grid > .project-files-pane.is-drawer { position: absolute; top: 0; bottom: 0; right: 0; max-width: calc(100% - 24px); z-index: 31; }
+:is(.workspace-grid, .file-preview-retained-host) > .project-files-pane.is-drawer { position: absolute; top: 0; bottom: 0; right: 0; max-width: calc(100% - 24px); z-index: 31; }
 .project-files-scrim { position: absolute; inset: 0; border: 0; padding: 0; background: transparent; z-index: 30; }
 .project-files-search { display: flex; flex: 0 0 28px; align-items: center; gap: 6px; margin: 7px 8px 5px; padding: 0 7px; min-width: 0; border: 1px solid var(--line); border-radius: 4px; }
 .project-files-search > svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 1.4; color: var(--faint); }
