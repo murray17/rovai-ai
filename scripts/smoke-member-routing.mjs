@@ -116,7 +116,7 @@ try {
     const payloads = JSON.parse(native).messages
       .filter(message => message.type === 'user' && typeof message.text === 'string')
       .map(message => message.text)
-    const payload = payloads.find(text => report.deliveries.some(delivery => delivery.runtime_request_digest === digestJson({
+    const payload = payloads.find(text => report.deliveries.some(delivery => delivery.status === 'accepted' && delivery.runtime_request_digest === digestJson({
       schemaVersion: 1, agentRunId: delivery.agent_run_id, executionEpoch: delivery.execution_epoch,
       contextManifestId: delivery.context_manifest_id, nativeBindingId: delivery.native_binding_id,
       nativeBindingGeneration: delivery.native_binding_generation, dynamicPayloadDigest: delivery.dynamic_payload_digest,
