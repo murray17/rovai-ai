@@ -1799,7 +1799,7 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
         {
             write_indented_help(
                 output,
-                "Up to 10,000 Unicode scalar values after trimming. Use \"\" to clear. For long or multiline text, use --input-file with a UTF-8 JSON file.",
+                "Up to 30,000 Unicode scalar values after trimming. Use \"\" to clear. For long or multiline text, use --input-file with a UTF-8 JSON file.",
             );
         }
         if description.name == "member.update" {
@@ -2608,9 +2608,9 @@ mod tests {
             let description = builtin_tool_description(operation, true).unwrap();
             assert!(
                 operation_help_text(&description)
-                    .contains("10,000 Unicode scalar values after trimming")
+                    .contains("30,000 Unicode scalar values after trimming")
             );
-            let mut input = json!({"professionalResponsibilities": format!(" \u{feff}{}\n", "😀".repeat(10_000))});
+            let mut input = json!({"professionalResponsibilities": format!(" \u{feff}{}\n", "😀".repeat(30_000))});
             if operation == "member.create" {
                 input["displayName"] = json!("Long member");
                 input["creationKey"] = json!("51d668e1-6dc7-4f39-80b2-0555f823715a");
@@ -2634,7 +2634,7 @@ mod tests {
                     .unwrap()
                     .chars()
                     .count(),
-                10_000
+                30_000
             );
         }
         let view = builtin_tool_description("memory.view", true).unwrap();

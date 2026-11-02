@@ -49,7 +49,7 @@ pub fn context_payload_too_large_failure(runtime_kind: AdapterKind) -> RuntimeFa
         RuntimeFailurePhase::Execution,
         "context_payload_too_large",
         "输入内容过大，未开始执行。",
-        Some("输入内容过大，无法开始执行。请改用文件附件，或拆分后发送。".into()),
+        Some("本次完整输入超过执行容量，未开始执行。已保存的队员资料和已提交消息保留。请精简当前输入或专业职责后重新提交；若需精简本对话已固定的团队指引，请使用精简后的指引新建对话并重新提交。".into()),
         false,
     )
 }

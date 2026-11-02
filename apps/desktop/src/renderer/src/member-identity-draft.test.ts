@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { EMPTY_IDENTITY, identityCommand, identityDraftFor, identityDraftIssue } from './member-identity-draft'
 
 describe('professional responsibilities draft', () => {
-  it.each(['中'.repeat(10_000), '😀'.repeat(10_000), 'e\u0301'.repeat(5_000), '"\n\0中😀'.repeat(2_000)])(
-    'accepts 10,000 scalars after trimming and preserves the overlong draft',
+  it.each(['中'.repeat(30_000), '😀'.repeat(30_000), 'e\u0301'.repeat(15_000), '"\n\0中😀'.repeat(6_000)])(
+    'accepts 30,000 scalars after trimming and preserves the overlong draft',
     (text) => {
       const draft = { ...EMPTY_IDENTITY, displayName: '队员', professionalResponsibilities: ` \uFEFF${text}\n ` }
       expect(identityDraftIssue(draft, null, [])).toBeNull()

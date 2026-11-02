@@ -4,7 +4,7 @@ contract: native-session-bootstrap-v6
 status: accepted
 version: 6
 source_version: v1.72
-last_updated: 2026-10-25
+last_updated: 2026-11-02
 ---
 
 # Native Session Bootstrap v6
@@ -50,3 +50,14 @@ Hermes 复用本合同完整 B，按[Hermes Managed Runtime v1](hermes-managed-r
 它以完整 B digest 和接受回执去重，并在既有输入账本引用包含完整规则的冻结 Managed Blob；
 这是 [Hermes R2](../versions/v1.72/model-context-change-hermes-first-input.md) 确认的运输/证据例外，
 不改变其他 Adapter、不改变 B 的 section/formatter 或 Team 指引的固定来源。
+
+## 职责与正文容量
+
+按[已确认 R2](../versions/v1.72/model-context-change-professional-responsibilities-30000.md)，职责保存上限为
+30,000 Unicode scalar；Cline、Command Code 的 Bootstrap 正文上限为 **262,144 字节（256 KiB）**，
+Command Code 内嵌 Mod 同步检查正文 UTF-8 大小，JSON 传输转义不等同于正文大小。
+执行包默认仍为 256 KiB。新 public claim 保持冻结正文、实际封装和分隔符预留；旧 `message_delivery`
+preflight 固定预留单独保持 128 KiB 加原封装，不与正文上限共用数值。独立系统通道按原语义分别检查。
+字段可保存不保证组合输入可执行；必需输入超限拒绝准入，不截断职责。已保存资料、已提交消息及历史
+冻结输入保留；编辑不触发补发或重建 Session，修改设置不能重新解释旧执行。缩短已冻结团队指引须新建对话。
+section、formatter、Binding、Profile 和 Manifest 的现行版本均不因此递增，不新增迁移。
