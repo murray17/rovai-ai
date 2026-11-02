@@ -8,7 +8,8 @@ import { FilePreviewTabs } from './FilePreviewTabs'
 import { FileFindButton } from './FilePreviewFind'
 import { UiText, uiAttribute } from './interface-language'
 import { useProjectFiles } from './ProjectFilesContext'
-import { ProjectFilesButton, ProjectFolderIcon } from './ProjectFilesPane'
+import { ProjectFilesButton } from './ProjectFilesPane'
+import { ProjectFolderIcon } from './ProjectFileIcon'
 
 export function AppHeader({
   threadTitle,
