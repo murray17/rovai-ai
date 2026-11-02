@@ -19,7 +19,8 @@ last_updated: 2026-11-02
 已完成字段扩容、正文上限及旧预留解耦；工程与定向回归、OpenCode／Command Code 实跑通过。
 User 后续要求停止通用模型矩阵，已停止并留证；Cline 实跑受现有平台资格限制。
 结果见 [R2 实施记录](model-context-change-professional-responsibilities-30000.md#实施与验收记录2026-11-02)与
-[验收证据](evidence/professional-responsibilities-30000-2026-11-02.json)。仅交付 PR，暂不合入 main。
+[验收证据](evidence/professional-responsibilities-30000-2026-11-02.json)。User 已授权 [PR #987](https://github.com/murray17/rovai-ai/pull/987) 合入 main；
+smoke 摘要匹配补齐同一条 accepted 投递约束，构造数据与既有证据复核通过，未重跑真实模型。
 
 ## 取消执行条统一保留（2026-11-02）
 

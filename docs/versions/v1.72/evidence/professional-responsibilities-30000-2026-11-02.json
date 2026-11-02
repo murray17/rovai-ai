@@ -28,9 +28,27 @@
   "invariants": [
     "Public claim production code unchanged",
     "Existing delivery/identity edit rules and frozen recovery unchanged",
-    "No schema migration or version-axis increment",
-    "No main merge authorized"
+    "No schema migration or version-axis increment"
   ],
+  "reviewFollowup": {
+    "userSequence": 12,
+    "messageId": "b7420016-9277-41d4-a05c-7a7164a8a783",
+    "mainMergeAuthorized": true,
+    "fix": "Match the native payload digest only against the same accepted delivery record.",
+    "checkedAt": "2026-11-02T13:04:00.107Z",
+    "scriptSha256": "d59e40ede0d33e642ba96a75572d540ea3e0a04ad21821b01c543d1046bd7e97",
+    "originalFalsePositiveReproduced": true,
+    "syntheticChecksPassed": 3,
+    "existingEvidenceReverified": {
+      "directory": "opencode-identity-r2",
+      "deliveries": 1,
+      "status": "accepted",
+      "payloadBytes": 123867,
+      "payloadSha256": "5d4866a703b7da232757ff727612642175971ad4176874791a4b89fae62d9e39",
+      "runtimeRequestDigest": "cdfba63df82eb15e09d02005fb0fc9f155e1629aab12746e1313e8241af9c83e"
+    },
+    "realModelRerun": false
+  },
   "checks": {
     "rustWorkspace": {
       "command": "pnpm test:rust:pr",
