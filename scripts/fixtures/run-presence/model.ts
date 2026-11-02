@@ -469,10 +469,10 @@ export const model = {
     update({ stopId: id })
   },
   restoreStopFocus() { if (stopTrigger?.isConnected) stopTrigger.focus() },
-  stop(id: string) {
+  stop(id: string, cancelReasonCode = 'user_requested_agent_run_stop') {
     const source = state.snapshot.agentRuns.find((r: any) => r.id === id && ['running','waiting'].includes(r.status))
     if (!source) { update({ stopId: null }); return }
-    halt(); stopped.set(id, { run: { ...source, status: 'cancelled', endedAt: new Date().toISOString(), cancelReasonCode: 'user_requested_agent_run_stop', cancelRequestedAt: new Date().toISOString() },
+    halt(); stopped.set(id, { run: { ...source, status: 'cancelled', endedAt: new Date().toISOString(), cancelReasonCode, cancelRequestedAt: new Date().toISOString() },
       publishedIds: state.snapshot.messages.filter((m: any) => m.sourceAgentRunId === id).map((m: any) => m.id) })
     refresh()
   },

@@ -6,10 +6,17 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-01
+last_updated: 2026-11-02
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 取消执行条统一保留（2026-11-02）
+
+公开取消 Run 的会话执行条与继续入口改为按 `cancelled` 状态判断，覆盖 App 退出与其他取消原因。
+沿用每位队员最新未受理继续、新 Run 替换与刷新恢复规则；“你已中断”仍仅用于手动停止。
+当前规范见 [Run Process Detail Surface v59](../../contracts/run-process-detail-surface-v59.md)，
+改动和验证归[实施记录](implementation-plan.md#取消执行条统一保留2026-11-02)。
 
 ## 项目目录浏览（2026-11-01）
 

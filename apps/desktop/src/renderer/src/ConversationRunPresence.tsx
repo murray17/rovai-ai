@@ -9,7 +9,7 @@ import { ToolCallIcon } from './ExecutionToolGroup'
 import { MemberAvatar } from './MemberAvatar'
 import { MessageAuthorProfileTrigger } from './MessageAuthorProfileTrigger'
 import { RunModelSummary } from './ThreadModelInformation'
-import { formatRunPresenceDuration, isUserInterruptedRun, runPresenceElapsedSeconds, runPresencePreview, type ConversationRunPresenceSlot } from './conversation-run-presence'
+import { formatRunPresenceDuration, runPresenceElapsedSeconds, runPresencePreview, type ConversationRunPresenceSlot } from './conversation-run-presence'
 import { identityColorToken } from './theme'
 import { uiAttribute, useInterfaceLanguage } from './interface-language'
 import { agentRunIsStarting, agentRunHasCurrentActivity, type LiveRuntimeEvent } from './ui-model'
@@ -100,7 +100,7 @@ export function ConversationRunPresence({ snapshot, slot, profiles, installation
         const state = submittingId === run.id && ['queued', 'running', 'waiting'].includes(run.status) ? 'stopping' : stopState(run)
         const canStop = state === 'available' || state === 'stopping' || state === 'confirming'
         const inputTooLarge = run.failure?.code === 'context_payload_too_large'
-        const canContinue = !inputTooLarge && (run.status === 'failed' || isUserInterruptedRun(run))
+        const canContinue = !inputTooLarge && (run.status === 'failed' || run.status === 'cancelled')
           && run.invocationKind === 'batch' && (run.inputMessageIds?.length ?? 0) > 0
         const description = inputTooLarge ? uiAttribute('输入内容过大，查看详情') : run.status === 'failed' ? uiAttribute('执行中断，查看原因')
           : uiAttribute('查看执行过程')
