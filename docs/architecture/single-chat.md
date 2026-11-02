@@ -21,8 +21,8 @@ Single Chat 是现有执行基础设施上的一种私有 Conversation 模式。
 | Desktop Main / Preload | Single Chat Core method allowlist、公共附件选择/预览/打开/Reveal bridge 和事件转发 | 业务状态、附件内容仓库、目标选择、私有输出生成 |
 | `SingleChatService` | Conversation 生命周期、原子 open/send/end、附件 Draft revision、Pending FIFO、Snapshot/History | Runtime process、Prompt 执行、公共投影 |
 | Source Attachment 基础设施 | `LocalAttachmentSourceRef` 观察/清洗/重检、owner 精确读取、原路径投影与公共 AttachmentCard 能力 | Source 永久可用性、Single Chat transcript、队列顺序 |
-| Context builder | 无 Memory 的专用 Bootstrap、专用 Charter/Guidance、过滤后 Skill exposure、私有水位上的公共增量和公共 resolved attachment paths | transcript 自动重放、连续性解释、异步唤醒、授权替代 |
-| Built-in Router | 冻结 `single_chat_v1` policy version；v2 的五项只读 allowlist、当前 Camp scope 与当前单聊历史反向解析 | Runtime 原生 delegation、通用 Capability DSL、Mission mutation |
+| Context builder | 无 Memory 入口的专用 Bootstrap、Charter/Guidance、当前 Skill 索引与消息局部链接、私有水位上的公共增量和公共 resolved attachment paths | transcript 自动重放、连续性解释、异步唤醒、授权替代 |
+| Built-in Router | 冻结 `single_chat_v1` policy version；v2 的五项只读 allowlist、当前 Thread scope 与当前单聊历史反向解析 | Runtime 原生 delegation、通用 Capability DSL、Mission mutation |
 | Runtime terminal service | 冻结 route 复核、恰好一条私有 final、迟到事件 fence | Renderer 展示、队列编辑 |
 | Existing Scheduler/Fleet | 普通 capacity/readiness、dispatch、Binding、cleanup 和空闲 Conversation 的 Pending 发布 | Single Chat 专用回复槽、跨 Conversation cleanup fence |
 
@@ -38,7 +38,7 @@ Renderer singleChat.send(body, draftRevision)
   → SingleChatService transaction
       ├── Conversation 无 active Run 且无 Pending
       │     → user conversation_message + Source Refs
-      │     → CampTurn(kind=single_chat)
+      │     → ThreadTurn(kind=single_chat)
       │     → AgentRun(invocation=single_chat, private route, fixed policy)
       │     → 清空 Draft，并推进 Draft/Conversation revision
       └── Conversation 有 active Run 或 Pending
@@ -58,9 +58,9 @@ Renderer singleChat.send(body, draftRevision)
 Conversation 状态并决定直接准入或 Pending 入队；后台 ACK、final 等对 Conversation version 的推进不构成用户输入冲突，
 只有独立的 Draft revision 继续保护附件 Draft 的精确消费。
 
-队列以 `conversation_id + enqueue_sequence` 定序。Camp 公屏队列、其他 Single Chat、同一队员的 successor Conversation
+队列以 `conversation_id + enqueue_sequence` 定序。Thread 公屏队列、其他 Single Chat、同一队员的 successor Conversation
 和普通 Scheduler capacity 都不共享这个顺序域。Pending 尚未发布时不占用 ConversationMessage sequence，不创建
-CampTurn/AgentRun，也不推进 Conversation version。
+ThreadTurn/AgentRun，也不推进 Conversation version。
 
 正常发送、Pending 编辑／移除／发布、前一 Run 终态提交、Runtime readiness 与 cleanup 变化主动通知
 non-batch 推进者。通知各自保留一个合并许可，读取状态与进入等待之间的提交不会丢失；通知不代替准入。
@@ -101,7 +101,7 @@ Single Chat 不拥有附件内容根、copy receipt、retention worker 或专用
 宿主重检不保证 Runtime 可读；Agent 按现有权限访问，原生工具按实际访问结果报告错误，不增加 preflight 或 fallback。
 
 `LocalAttachmentOwnerLocator` 用四类 Single Chat owner 精确恢复 Source Ref：Composer、Pending canonical、Pending edit
-working copy 和已发送 Message。每次读取都校验 Camp、Conversation kind、Message/Pending 所属关系和 attachment ref id；
+working copy 和已发送 Message。每次读取都校验 Thread、Conversation kind、Message/Pending 所属关系和 attachment ref id；
 Renderer 通过公共 `AttachmentCard`、Preview、Open、Reveal 与 FilePreview 使用这些 owner，不接收 `source_path` 或 Runtime
 临时路径。
 
@@ -109,29 +109,25 @@ Renderer 通过公共 `AttachmentCard`、Preview、Open、Reveal 与 FilePreview
 
 新单聊的 `RUN_FACTS` 仅提供附件输出根及按条件出现的未结算外部效果，不重复稳定模式与权限说明。
 专用 Charter/Guidance 继续指导模型；工具 policy 与私有终态路由从 AgentRun 冻结记录读取。
-当前版本为 [Manifest 42 / Facts 13](../contracts/context-manifest-evidence-v42.md)，Profile 16 保持，
+当前字段与版本配对由 [ContextManifest](../contracts/context-manifest-evidence-v44.md) 拥有，
 旧冻结输入原字节恢复，不为字段删除轮换 Native Session。
 
 普通 `camp_member` Conversation 与 Single Chat 使用独立 Native Binding 和 accepted public watermark。Context builder
-在同一 Manifest/Delivery 管线内根据 invocation 分支：Single Chat Bootstrap 只渲染 Charter 与 Member Identity，不调用
-Memory Entrypoint；Dynamic Context 选择专用 Charter/Guidance，排除 Self Active Tasks 与 A2A Guidance，并允许目标 Agent
-自己的公屏输出进入新增公共窗口。Member Skill exposure 仍沿用既有投影，但在 Manifest 与 Adapter 共用的 snapshot/digest
-形成前按 official bundled source identity 排除 `cli-operations` 与 `memory-stewardship`；其余 Skills 和 MCP projection
-保持既有路径。Manifest 仍记录 exact bytes、digest、selection 与 omission；accepted ACK 仍是唯一水位推进点。
+在同一 Manifest/Delivery 管线内根据 invocation 分支：Single Chat Bootstrap 包含专用 Charter、Member Identity
+和平台 Skills 索引，省略 Team Guidance 与 Memory Entrypoint。Dynamic Context 保留专用 Guidance、当前附加
+Skills 索引与 CURRENT_INPUT，排除 Self Active Tasks 与 A2A Guidance，并允许目标 Agent 自己的公屏输出进入
+新增公共窗口。Skill 来源与原路径解析遵循 [Skills 架构](skills.md)，索引和文件可读不扩大 Single Chat 的操作权限。
+Manifest 保存最终输入及必要恢复材料，不复制退役的独立 proof/digest；accepted ACK 仍是唯一水位推进点。
 
 模型不接收 Native Session 连续性或替换原因，也不接收自动私有 transcript replay。需要但缺少此前私聊正文时，Runtime
 通过始终可用的 `single_chat.history` 请求 Core；Router 只从已认证当前 Run 解析 active destination，并把读取上界锁在
 `CURRENT_INPUT` 之前。History 的附件只提供清洗后的名称、类型、大小和 ref id 等元数据，不把旧附件自动注入当前 Run。
 
-新 Single Chat Run 冻结 operation policy version 2：除现有 `camp.search`、`camp.read` 与
-`single_chat.history` 外，只增加全局只读 `mission.list/get`。Mission read 不切换当前 Camp/Mission，也不取得
+新 Single Chat Run 冻结 operation policy version 2：除现有 `thread.search`、`thread.read` 与
+`single_chat.history` 外，只增加全局只读 `mission.list/get`。Mission read 不切换当前 Thread/Mission，也不取得
 写权限。历史 version 1 Run 保留原三项 allowlist；terminal/history 路径接受两种已知冻结版本，未知版本
-fail closed。Charter revision 9 引入该入口；revision 10 只轮换共享 Binding compatibility。
-Charter revision 22 按 [R2](../versions/v1.72/model-context-change-charter-memory-concision.md)
-精简 Single Chat 教学，保留当前请求、引用定位、显式修改条件、封闭白名单与读取范围。
-共享 Binding compatibility 保持 16，已有单聊继续使用冻结 Bootstrap。
-revision 23 扩展公共会话渠道文件提示，当前 revision 24 删除公共 Task 教学；Single Chat 文案及排除规则保持。
-完整 `cli-operations` Skill 仍从 Single Chat exposure 排除。
+fail closed。专用 Charter/Guidance 保留当前请求、引用参考、显式修改条件、封闭白名单与读取范围。
+启动材料按本次 Run/Binding/generation 冻结；新 Run 的材料更新不因命名或格式变化强制更换原生 Session。
 
 ## 输出与迟到事件
 
@@ -151,12 +147,12 @@ sequence 同时校验当前队员，阻止迟到结果跨目标写回。后台 `
 运行标记；`refreshCurrent` 只读当前完整 Snapshot，以一个 in-flight 标记串行化同一目标的读取，期间重复刷新合并为完成后
 的一次补读。Mutation 返回的 Snapshot 可立即呈现，但仍通过同一补读入口确保修改前的在途读取不会成为最后结果。
 这些后台读取不切换目标、不清空 Snapshot，也不修改 loading。空闲时无计时器；运行期约每 800ms 只读当前 Conversation，
-Panel 收起、Camp 离开或组件卸载使旧 target request 失效并停止刷新。
+Panel 收起、Thread 离开或组件卸载使旧 target request 失效并停止刷新。
 
 ## 取消、结束与并发
 
 启动协调在普通 AgentRun recovery 分类前先把非终态 Single Chat Run 交给既有 abortive cancellation。该规则只结束当前
-回复，不结束 Conversation，也不恢复旧 Native Turn。用户结束只指定 `campId + conversationId`，不提供 expected version 或 active
+回复，不结束 Conversation，也不恢复旧 Native Turn。用户结束只指定 `threadId + conversationId`，不提供 expected version 或 active
 Run ID。`SingleChatService` 在 Command Gateway 的同一事务内读取 exact Conversation 当前状态：active 时使用同一取消结算，
 在事务提交点关闭输出路由、删除 Composer Draft 与 Pending edit session，并把未发布 Pending 标为 cancelled；已 ended 时
 返回成功 no-op，不再次取消资源、推进 version 或写 ended 领域事件。所有清理都只移除 Source Ref，不删除用户原始文件。

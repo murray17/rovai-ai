@@ -9,8 +9,8 @@ last_updated: 2026-10-29
 # Windows Desktop Platform
 
 本文组合 Windows x64 Desktop 的平台模块、进程、IPC、存储、Renderer 与发布边界。它不重新拥有 Runtime
-领域、Built-in operation、Skill Library 或 AgentRun terminal 语义；这些长期权威仍由对应 ADR、Contract 与
-Architecture 持有。
+领域、Built-in operation、Skills 来源与投递或 AgentRun terminal 语义；这些长期权威由对应的当前
+Architecture 与 Contract 持有。
 
 ## 1. Supported host envelope
 
@@ -31,8 +31,10 @@ Host envelope 通过不等于 Runtime 可选。每个 Adapter 还必须通过
 | Executable identity | device/inode + fingerprint | opened volume/file ID + fingerprint | frozen executable identity |
 | Private storage | create-new + 0700/0600 | creation-time protected DACL | private create/atomic write helpers |
 | Attachment traversal | `openat`/no-follow | handle-relative reparse-safe traversal | bounded immutable snapshot |
-| SkillProjection | managed native links | copy + journal + root gate | reconcile/verify/Snapshot |
+| Legacy Skill projection cleanup | observation-owned native links | known managed copies + journal + root gate | explicit user-authorized cleanup |
 | Window chrome | hidden titlebar + traffic lights | hidden title strip + top-level menu projection + native submenu/WCO | platform presentation only |
+
+New Skills use original native paths and managed release files under [Skills](skills.md); the legacy projection row covers cleanup only.
 
 These are real two-adapter seams. Domain callers do not select OS implementations or import `windows-sys`; Windows API
 use remains inside the corresponding adapter.
@@ -90,9 +92,9 @@ MCP 管理初始化按[外部 MCP 配置边界](foundational-invariants.md#skill
 不改写 JSON。通用私有存储准入仍拒绝未知对象。权限审计使用元数据句柄，读取失败保留为检查失败；
 诊断自检不调用初始化或修复。
 
-The derived legacy Camp Published Attachment View is the explicit `<data_dir>\runtime-files` private child; Windows never
+The derived legacy Thread Published Attachment View is the explicit `<data_dir>\runtime-files` private child; Windows never
 uses the macOS Home-based instance directory. Root/managed containers accept effective ordinary access while retaining native type/identity/reparse checks, and Runtime
-may receive only one current-Camp `attachments` descendant. Existing Authority remains under Core `camp-attachments`;
+may receive only one current-Thread `attachments` descendant. Existing Authority remains under Core `camp-attachments`;
 new Desktop user attachments instead keep source refs and use current Run Temp only when the source lies outside
 executionRoot. This storage backend does not qualify any Adapter: every `windows-x64` row remains `not_qualified` until
 independent exact-root, read-only, sandbox and lifecycle evidence exists.
@@ -149,4 +151,4 @@ Signed release qualification requires real Windows 10 22H2 and Windows 11 machin
 - [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)
 - [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)
 - [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)
-- [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)
+- [Skills 来源与投递不变量](foundational-invariants.md#skills-library-projection)

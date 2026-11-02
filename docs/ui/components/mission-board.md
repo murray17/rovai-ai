@@ -2,7 +2,7 @@
 document_type: ui-contract
 authority: mission-renderer-presentation
 status: accepted
-last_updated: 2026-10-25
+last_updated: 2026-10-30
 ---
 
 # Mission board
@@ -11,12 +11,12 @@ The board header's creation entry is **新使命**, using the current theme prim
 (`--conversation-action` / `--conversation-action-contrast`, black in Day) and their hover token.
 This entry still opens the same creation dialog; the dialog's labels and submission choices are unchanged.
 
-Desktop and wide Web expose one 使命板 navigation entry between 记忆 and 定时任务, and retain its surface, route and interaction model.
+Desktop and wide Web expose one 使命板 navigation entry in the order defined by [App Shell](app-shell-navigation.md).
 When one or more Missions have unread Agent replies, a blue dot sits at the entry's right edge and is vertically
 centered; the accessible label includes the number of Missions with unread replies, but the visual indicator never
 renders a numeral. The indicator follows Core-owned `MissionRecord.hasUnread`, independent of Mission status and
-running Agents. Ordinary project/recent/pin navigation does not duplicate Mission Camps. Mobile exposes the same
-entry in its main drawer, with four status selectors and one scrolling card list. Its full Camp view returns to
+running Agents. Ordinary project/recent/pin navigation does not duplicate Mission Threads. Mobile exposes the same
+entry in its main drawer, with four status selectors and one scrolling card list. Its full Thread view returns to
 the board from the left panel button; an open file/activity preview returns to the conversation first. Long press
 opens shared card actions instead of drag-and-drop. Mobile creation/editing uses the same forms in a bottom sheet.
 See [Mobile WebUI](../host-web-mobile.md#使命板) for the phone presentation and validation boundary.
@@ -90,20 +90,20 @@ header and one scrollable, selectable text region. Escape returns to the roster 
 without closing the Mission dialog. Short guidance needs no full-reader link. Mobile uses the same component
 and theme tokens with 44px targets; landscape keeps the bounded picker within the viewport. The split
 primary button defaults to 新建; its dropdown offers 开始使命. Both paths stay on the board without opening the
-new Camp. No independent-workspace checkbox is offered; Core decides from the selected project. One unfinished
+new Thread. No independent-workspace checkbox is offered; Core decides from the selected project. One unfinished
 Mission draft is retained for the lifetime of the mounted creation flow, including title, description, project,
 team, tags and attachments, whenever the dialog is dismissed and reopened. Only a confirmed successful create
 clears it. Failed or uncertain creation retains the exact definition, attachment draft and command identity for
 safe retry.
 
 Production Edit opens only from the card/list right-click or Shift+F10 menu. It reuses the same wide writing
-dialog; prototype-only previews may expose a direct shortcut. Name, description, tags and source attachments
+dialog. Name, description, tags and source attachments
 remain editable. Project and existing member/lead management remain locked in the definition dialog; references can add outsiders on save. Cancel and Save remain at
 the right; the attachment action stays at the left. Save is disabled until normalized content or the attachment
 set differs and validates against 1–200 name / 12,000 description limits. It submits the internal revision
 captured when opened. A stale edit stays open, replaces all editable fields with the latest definition and asks
 the user to edit again. Success closes the dialog and refreshes the board, opened Mission, conversation title
-and main Camp title.
+and main Thread title.
 
 Card opening shows a right conversation drawer with Activity selected in the shared file preview. The left
 edge supports pointer and keyboard resizing, cancellation and double-click expansion. It defaults to
@@ -113,7 +113,7 @@ immediately on pointer movement, without waiting for release; folding restores t
 When a visible preview and the message area no longer fit while the drawer is shrinking, the preview is
 hidden first and its tabs/read state are retained, so the message area never disappears as an accidental
 result of resizing. This is workspace presentation, not operating-system fullscreen. The same
-CampWorkspace, Composer and preview owner stay mounted across these changes.
+ThreadWorkspace, Composer and preview owner stay mounted across these changes.
 
 Opening a Mission notification on Desktop/wide Web shows the board with that Mission's drawer open,
 including when the same Mission was already expanded to a full conversation. The notification still
@@ -122,12 +122,12 @@ Message/turn targeting hides a compact preview first, retaining its tabs and rea
 
 The drawer hides the conversation title and places close/expand at the left. Full presentation shows
 project › conversation title, preceded by return-to-board and fold-to-drawer; the fold control keeps its existing
-position and uses the inward-corner collapse glyph from the approved board prototype. Both use one full-width
+position and uses the inward-corner collapse glyph. Both use one full-width
 AppHeader with 执行、任务、队员、单聊、活动 in the message column and the preview toggle at the far
 right. There is no Mission ellipsis action in the conversation header. With bottom execution placement, entering
 the drawer or producing a Run from its Composer does not automatically select a member or expand execution;
 explicit execution entry remains available. Full Mission presentation and other execution placements keep their
-shared Camp workspace behavior.
+shared Thread workspace behavior.
 
 Mission descriptions keep their literal text and structured member references. HTTP(S) URLs reuse the message
 link presentation, including one decorative 14px globe and the existing open/selection behavior; local file
@@ -153,7 +153,7 @@ Activity is a real closeable preview tab containing delivery and Mission history
 Clicking the Activity entry opens or restores it when absent/hidden and selects it when another preview tab is
 active. Clicking the selected Activity entry closes that tab.
 Closing selects an adjacent remaining file; closing the last tab also hides the preview. Hiding the whole
-preview retains all tabs and reading state. Activity acquires no file handle and remains scoped to its Camp.
+preview retains all tabs and reading state. Activity acquires no file handle and remains scoped to its Thread.
 In Mission conversations the shared preview tab strip occupies the preview column of the same header,
 with the same low-contrast divider continuing through the body. Activity, Execution and ordinary files share
 the saved preview ratio and the same 420px stable minimum.
@@ -195,8 +195,10 @@ steps, 80px Shift+arrow steps, and Home/double-click default restoration, while 
 above the reader. A bounded per-Mission memory cache restores a viewed file
 without clearing its content or flashing loading state. Cache misses never show the prior file beneath a new
 selection; duplicate requests coalesce and late responses cannot replace the current selection. A file request
-carries its view association, rereads current Git state with a fresh private index and asks for an explicit full
-view refresh when the association is stale. Definition-only edits do not rescan Git. Binary/type/rename
+carries its view association and reads only the selected trusted paths with a fresh private index. The detail
+header, type icon, copied path and statistics use the returned `fileDiff.file`; list and aggregate statistics
+remain those of the retained list. Unrelated file or checkout changes do not block a detail read. An invalid
+workspace or selected-item association asks for the existing explicit refresh. Definition-only edits do not rescan Git. Binary/type/rename
 data and Git modes remain in the contract, but the dialog does not print a
 raw “Git 文件模式” row. Agent files reuse AttachmentCard, file preview and source-message navigation.
 Activity displays actual Mission history. The delete confirmation is intentionally concise and does not repeat
@@ -204,11 +206,11 @@ the Mission title, worktree path or branch. When a workspace record exists it ad
 `同时清理 Worktree 及本地分支` option and a focusable `?` explaining that unchecked resources stay in place.
 The existing card/list right-click menu shows `清理使命 Worktree` only from Core's `cleanupAvailable`; there is
 no conversation-header ellipsis or retained-workspace page. Its dialog states that it removes the Worktree and
-local branch, lists the two identifiers, and uses only neutral `取消` / `清理` actions. A cleanup preflight refusal
+local branch, lists the two identifiers, and uses ordinary `取消` / `清理` actions under [DESIGN.md](../../../DESIGN.md#components). A cleanup preflight refusal
 for unsaved content or an unsafe detached commit is reported asynchronously, keeps the Mission workspace ready and
 shows the existing inline alert with the exact reason, resource status and `再次清理` action. A cleanup failure after partial or uncertain deletion keeps the
 Mission and returns to the same explicit retry path. After Core durably accepts the cleanup intent, the
-dialog closes without waiting for Git work, the Mission list or the current Camp to refresh. The card adds one
+dialog closes without waiting for Git work, the Mission list or the current Thread to refresh. The card adds one
 full-width bottom resource row without changing its business-status lane: spinner plus `正在清理 Worktree…`
 while pending, persistent `Worktree 清理失败 · 查看` (or `分支清理失败 · 查看`) after failure, and
 `✓ Worktree 已清理` for about four seconds after an observed success. Leaving/re-entering or refreshing does
@@ -220,7 +222,7 @@ and branch checkpoints, and `重试未完成步骤`; a partial branch failure ne
 recoverable. A refresh failure is separately worded as cleanup having started but status refresh failing and
 cannot revert a later success.
 
-Delete-with-cleanup removes the card after Camp deletion and cleanup-intent persistence commit, without waiting
+Delete-with-cleanup removes the card after Thread deletion and cleanup-intent persistence commit, without waiting
 for filesystem work. A later failure raises the same actionable Toast and remains in the existing
 `工作区待清理` dialog, which shows both checkpoints and retries only unfinished work; it never restores the card.
 Retained resources never enter that route. No percentage, countdown, pause action or new task center is added.
@@ -231,7 +233,7 @@ such as “爱丽丝 将状态改为‘未开始’”, for both user and Agent 
 
 Business and ownership rules are defined by [Mission v12](../../contracts/mission-v12.md), not this presentation
 contract. Theme and ordinary conversation behavior remain under [DESIGN.md](../../../DESIGN.md) and
-[Camp workspace](conversation-workspace.md).
+[Thread workspace](conversation-workspace.md).
 
 ## Description member mentions
 
@@ -263,7 +265,7 @@ atomically; failures retain the draft for correction/retry. A successful save do
 
 Mission reading renders the same blue inline names and a basic member-profile popover; unavailable references
 retain their ID and are visually unavailable. Creation dismissal retains structured content alongside the existing
-draft. Editing keeps its revision conflict behavior. Day/Night and narrow layouts share this implementation.
+draft. Editing keeps its revision conflict behavior. All registered palettes and narrow layouts share this implementation.
 
 ### Resize settlement
 

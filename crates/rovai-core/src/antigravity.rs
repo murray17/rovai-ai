@@ -187,15 +187,6 @@ impl AntigravityAppRuntimeAdapter {
     }
 
     pub fn initialize_storage(&self) -> Result<()> {
-        let legacy_log_dir = self.log_dir.with_file_name("agy");
-        if legacy_log_dir.exists() {
-            std::fs::remove_dir_all(&legacy_log_dir).with_context(|| {
-                format!(
-                    "failed to remove legacy Antigravity companion logs {}",
-                    legacy_log_dir.display()
-                )
-            })?;
-        }
         let log_dir = &self.log_dir;
         std::fs::create_dir_all(log_dir).with_context(|| {
             format!(
@@ -1653,12 +1644,25 @@ fn normalize_antigravity_tool_step(
         let cached_command = capture.started_shell_commands.remove(&tool_call_id);
         observed_command.or(cached_command)
     };
-    let input = command.map(|command| serde_json::json!({"command": command}));
+    let agent_tool = crate::runtime_subagent::is_agent_tool(
+        crate::agent_profile::AdapterKind::AntigravityApp,
+        tool_name,
+    );
+    let input = if agent_tool {
+        tool_info
+            .get("parameters")
+            .filter(|value| !value.is_null())
+            .and_then(|value| serde_json::to_string_pretty(value).ok())
+            .map(Value::String)
+    } else {
+        command.map(|command| serde_json::json!({"command": command}))
+    };
     Ok(Some(AntigravityRuntimeEvent {
         event_type: "runtime.action",
         payload: serde_json::json!({
             "toolCallId": tool_call_id,
             "toolName": tool_name,
+            "runtimeToolType": if agent_tool { Some("agent") } else { None },
             "status": status,
             "kind": antigravity_tool_kind(tool_name),
             "input": input,
@@ -3243,8 +3247,15 @@ exec sleep 30
         .expect("fake Antigravity companion should be written");
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
             .expect("fake Antigravity companion should be executable");
+        let legacy_log = root.join("runtime-private/agy/previous-run.log");
+        std::fs::create_dir_all(legacy_log.parent().unwrap()).unwrap();
+        std::fs::write(&legacy_log, b"retained historical companion log").unwrap();
         let adapter =
             Arc::new(AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize"));
+        assert_eq!(
+            std::fs::read(&legacy_log).unwrap(),
+            b"retained historical companion log"
+        );
         let run_id = uuid::Uuid::new_v4().to_string();
         let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
         let request = AntigravityRunRequest {
@@ -3327,6 +3338,10 @@ exec sleep 30
                 .expect("private log directory should exist")
                 .next()
                 .is_none()
+        );
+        assert_eq!(
+            std::fs::read(&legacy_log).unwrap(),
+            b"retained historical companion log"
         );
         // Cancellation during the prompt-free exception must never spawn --print.
         std::fs::write(

@@ -43,4 +43,4 @@ continuation、External MCP、逐平台准入字段与消费规则及十二种 R
 - [Runtime Launch and Verification v24](runtime-launch-and-verification-v24.md)
 - [Runtime Platform Admission v1](runtime-platform-admission-v1.md)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
-- [Member workspace surface brief](../../apps/desktop/.impeccable/surfaces/member-workspace.md)
+- [Member workspace surface brief](../ui/surfaces/member-workspace.md)

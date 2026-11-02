@@ -2299,7 +2299,7 @@ fn load_attachments(
                         &attachment_id,
                     )
                 } else {
-                    crate::camp_attachment_view::resolve_published_attachment_path(
+                    crate::camp_attachment::legacy_attachment_source_path(
                         transaction,
                         &camp_id,
                         &attachment_id,
@@ -3015,7 +3015,7 @@ mod slow_tests {
                 ) VALUES (
                     'message-1', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 1, 'user', 'local_user', 'A😀中B',
                     '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"A😀中B"}]',
-                    '[{"id":"00000000-0000-4000-8000-000000000001","sourcePath":"/private/definitely-missing-source.txt","displayName":"source.txt","kind":"file","mediaType":"text/plain","observedByteSize":17}]',
+                    '[{"id":"00000000-0000-4000-8000-000000000001","sourcePath":"__SOURCE_ATTACHMENT_PATH__","displayName":"source.txt","kind":"file","mediaType":"text/plain","observedByteSize":17}]',
                     '["agent_5"]',
                     '2026-08-01T00:00:00Z'
                 );
@@ -3031,7 +3031,14 @@ mod slow_tests {
                      '', '[]', '[]', '2026-08-01T00:00:02Z', 'withdrawn');
                 INSERT INTO camp_message_delivery(message_id, recipient_agent_id, status)
                 VALUES ('message-2', 'agent_1', 'waiting');
-                "#,
+                "#
+                .replace(
+                    "__SOURCE_ATTACHMENT_PATH__",
+                    &crate::test_support::absolute_test_path(
+                        "/private/definitely-missing-source.txt",
+                    ),
+                )
+                .as_str(),
             )
             .unwrap();
         for position in 0..12 {
@@ -3051,7 +3058,10 @@ mod slow_tests {
                         position,
                         "text name".repeat(100),
                         "text/plain",
-                        format!("/private/attachment/{position}")
+                        format!(
+                            "{}/attachment/{position}",
+                            crate::test_support::absolute_test_path("/private")
+                        )
                     ],
                 )
                 .unwrap();

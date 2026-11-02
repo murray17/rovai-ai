@@ -3,10 +3,26 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-10-29
+last_updated: 2026-11-01
 ---
 
 # v1.72 实施与验收
+
+## 原生子代理平铺执行记录（2026-11-01）
+
+按 User 确认方案，在独立 worktree 收敛为普通 command：机器人图标、单文本详情、来源隔离、稳定首次记录顺序与既有步骤分组。
+当前规范为 [Surface v58](../../contracts/run-process-detail-surface-v58.md)，取舍见 [D72](decisions.md#v1-72-d72)，
+改动、迁移、测试归属与真实模型边界见[实施记录](subagent-flat-execution.md)。后续按 User 授权以原生 env 关闭 Qoder 后台 Agent，保留同步子代理；不新增调度或自动续跑。
+
+
+## 评测指标采集修复（2026-10-30）
+
+独立 worktree 修复 Regression 静态 Runtime 准入、当前 lifecycle 命令证据关联及全指标采集汇总。
+三轮完整真实 LLM 评测后，质量 112/112、协作 17/17 采齐，未知为 0；最终质量 95.8333，
+DEMO-105 未交付报告、DEMO-106 声明佐证不足的扣分保留。采集验收完成，Gate 仍如实记录验收失败。
+实现、冻结身份、旧失败、Rust 测试归属与验证边界见[实施记录](evaluation-metric-coverage.md)，
+当前合同为 [Execution Evaluation v16](../../contracts/execution-evaluation-v16.md)。
+本次不修改题目、评分权重、产品模型上下文或生产数据库 schema。
 
 ## 模型目录兼容与原生执行（2026-10-29）
 
@@ -2332,7 +2348,7 @@ ZCode 根调用结束/压缩触发合并读取，Pi/Antigravity 保留独立字�
 按 User 确认的 R2 HTML 稿落实普通侧栏与「关于与更新」。侧栏使用可读的透明状态入口，设置菜单图标与更新
 状态采用独立尺寸规则，修复状态被 22px 图标槽挤压的问题；英文窄栏允许入口另起一行。页面顶部合并当前
 版本、状态与操作，日志优先于折叠检查记录，版本号进入日志 Tab，下载只保留一处可见百分比。当前
-[设置 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md#关于与更新)同步实际 880px 阅读轨道。
+[设置 brief](../../ui/surfaces/settings-workspace.md#关于与更新)同步实际 880px 阅读轨道。
 
 当前/候选版本分离、语言切换、安全 Markdown、明确下载/安装、提示代次、只读 Desktop Web、Server 重连
 和精确发布回退链接继续原合同；无 Main/Core 更新状态机、API、Schema、发布源、模型上下文或 Runtime 变化。
@@ -4455,3 +4471,187 @@ Mission 抽屉和 Diff 文件树已有最终指针提交与缩放换算，保留
 真实 Core/浏览器、能力、生命周期和已接受差异分别记录于
 [Linux 验收](../../research/command-code-runtime/linux-acceptance-2026-10-25.md)；
 公开范围见 [V1.72-D61](decisions.md#v1-72-d61)，不增加 Runtime 管理机制。
+
+## 轻量文件编辑（2026-10-29）
+
+新增 Host `file_edit` 写入逻辑、Desktop/Web 文件适配、窗口编辑状态和 CodeMirror 编辑视图；UI 仅增加源码切换、圆点和路径行保存图标。
+Worktree：`../rovai-ai-project-files-prototype`；分支 `rovai/project-files-prototype`；基线 `4d274ad0a`；Governance：none；Status：ready。
+Rust 写入单测 3 项通过；`pnpm test:rust:pr` 共 480 passed / 1 既有 ignored。完整 Vitest 为 3029 passed / 2 既有 skipped。
+窗口草稿回归覆盖提交 A／继续输入 B、迟到读取、结果未知核对、版本冲突、失败关闭和同文件多标签关闭后继续保存。
+Desktop/Web 前端构建与 TypeScript 检查通过；真实 preload 和原生窗口关闭夹具通过。
+现有 Host/Web 集成 owner 在隔离工作区调用 Desktop admission 和 Web HTTP 两条真实链路并完成磁盘回读；
+覆盖句柄归属、BOM/CRLF、JSON 转义后的请求大小、外部冲突、明确覆盖和删除后拒绝重建，无真实 Runtime。
+V13 继续以模拟目录承载浏览交互，复用生产编辑组件；人工检查中英文、浅色/深色、720px 窄窗、草稿与撤销保留、
+Markdown 保存后预览刷新、关闭确认和冲突取消。生产目录服务不由此次交互稿推导为已交付。
+当前仅验证 macOS 开发产物，不代表 Windows/Linux 发行包或压缩体积已验收。
+按 User 既有偏好提交并推送原分支，保留 worktree 待后续评审，不自动创建 PR。
+
+### V14 实测后的四项修订（2026-10-29，User seq37）
+
+复用 `../rovai-ai-project-files-prototype`，分支 `rovai/project-files-prototype`，本轮基线 `8d8aa769e`；
+Governance：none；Status：ready。保留当前字体、图标、路径行、草稿、撤销和关闭确认，不新增组件框架或编辑流程。
+
+1. 模拟保存等待后重新读取 Map 当前条目，再比较版本和写入；外部修改／删除不能让旧对象返回假成功。
+2. 目录只由自身展开状态控制。宽窗打开目录不打开预览、不创建虚拟标签；收起 sidecar、关闭最后一个文件都保留目录状态。
+   这条最新批复取代先前“目录入口同时打开 sidecar／打开文件占位标签”和“关闭目录来源标签联动关闭目录”的交互；
+   窄窗选文件后收起抽屉继续保留。删除原型中的虚拟标签与目录标签归属逻辑，不增加目录框架。
+3. 生产编辑状态核对未知保存结果时区分提交内容、保存前基线、真正外部变化；基线未变只恢复手动重试，不弹冲突、不自动重写。
+4. 生产编辑内容读取成功后才记已加载状态；临时失败保留预览，现有错误行提示“无法载入编辑内容／重试”，同版本可重试。
+   真正不支持编辑保持只读；不增加权限选择界面。
+
+验收继续分别记录原型与真实 Host：原型覆盖等待中的外部变化、目录独立显隐、核对三分支、首次编辑读取失败恢复；
+现有 `host-web` 隔离 owner 补 Desktop/Web 保存与外部变化交错，以及 HTML 源码真实写入后重新取得预览内容。
+不能以 HTML 内存 Map 或占位预览接口替代真实文件系统验收。目录服务仍不由本次原型推导为已经上线。
+
+验证结果：
+
+- 编辑 store 定向回归 13 项通过，其中新增 6 项覆盖未知保存三分支、覆盖保存的基线及首次读取失败；
+  连同预览资源、HTML 生命周期和 Web 预览生成共 84 项通过。原有 A/B 输入竞态、草稿与关闭保护继续通过。
+- `host-web` 既有隔离 owner 通过；真实 Desktop 保存请求在传输等待期间发生外部磁盘修改，Host 返回冲突且原内容保留。
+  Desktop/Web 均实际保存 HTML 并回读，由生产 `onSaved` 回调自动发起候选刷新，分别核验 HTTP 页面和 Web 生成文档内容；
+  HTML ready 提交由测试驱动，未将该集成断言当成真实浏览器像素验收。
+- V15 模拟用例通过等待期间的 Map 替换、删除拒绝、重开回读及原有浏览状态检查；变换后的 TypeScript 无诊断。
+- 实际 Safari 检查中文宽窗：两个入口互相开关、仅目录打开、sidecar 隐藏后目录保留、最后标签关闭后目录保留；
+  首次编辑读取失败提示与重试恢复、离线未写入核对不弹冲突、保留草稿并手动重试成功。
+  英文深色 720px 检查目录抽屉、选文件自动关闭、固定入口和原有源码／预览图标；截图与源码随 V15 交付。
+- `pnpm typecheck`、Desktop/Web 构建通过，无新增依赖。文档测试 10 项通过，并执行当前文档门禁。
+  Rust 生产代码未变，未重复全 Rust 套件；不推导 Windows/Linux 安装包、包体增量、崩溃恢复或外部进程强互斥。
+
+### 连续保存后的预览补刷（2026-10-29，User seq41）
+
+复用上述 worktree 与分支，基线 `ae7914205`；Governance：none；Status：ready。
+共享 controller 按文件合并“保存后待刷新”标记，当前刷新结束后读取最新已保存内容；关闭、淘汰与释放时清理。
+不更改布局、保存协议或编辑状态。新增一个 A→B→C 回归：延迟 HTML A，保存 B、输入 C，再完成 A；
+最终模拟磁盘／预览／保存基线均为 B，草稿 C、CodeMirror 光标、撤销历史及编辑滚动位置保留。
+已有迟到候选清理用例同时验证关闭、淘汰、冷却和释放后不会触发残留补刷。
+该用例在旧 controller 上因缺少第二次刷新失败，修复后通过；文件预览、编辑状态和 Web HTML 相关 85 项测试通过。
+`pnpm typecheck`、Desktop/Web 构建及文档治理单测 10 项通过。
+`pnpm docs:check`、以 `ae7914205` 为 base 的 `pnpm docs:check:ci` 通过。
+`pnpm test:rust:pr` 首轮 Core 433 通过、1 忽略，Runtime 子进程清理用例因
+`runtime_probe_stdout_cleanup_timed_out` 失败；保留首轮结果，不记为全量一次通过。
+单独重跑 `runtime_probe_process::tests::` 5 项通过，原 workspace 测试二进制复跑该模块同样通过；
+`cargo test --workspace --exclude rovai-core` 补跑其余包通过。本轮未改 Rust 代码或测试。
+本轮使用受控文件接口与 HTML 就绪回执验证共享 controller；没有新增浏览器或真实 Host 的端到端验收。
+
+### 文件编辑主线交付（2026-11-01，User seq67）
+
+复用原 worktree 与 `rovai/project-files-prototype`，合入 main `7fe673050`；用户明确要求 PR 合并与本机 App 安装。
+范围为当前项目文本编辑、手动保存、未保存保护和连续保存后的预览补刷；生产目录服务仍未接入，历史 Diff 仍只读。
+冲突合并保留主线 Thread 术语和文档导航，编辑决定改用未占用的 D71。CodeMirror commands 按实际 Renderer 用途声明为
+devDependency，避免在编译后的前端之外重复携带 npm 包；不升级其他依赖。
+
+合入后的本地验证：TypeScript、Desktop/Web 构建、文档治理通过；Vitest 3036 通过、2 既有跳过，Node 主套件
+365 通过、2 平台跳过。默认 Rust workspace 480 通过、0 失败、1 既有 ignored，包含共享写入的 3 个 owner。
+这些 owner 分别拥有格式与摘要冲突、不可回写来源拒绝、大小与同 Host 并发；先前没有写入合同，使用临时普通文件
+而不是数据库/模型夹具；最小命令为 `cargo test -p rovai-core --lib file_edit::tests::`。
+真实 preload 和原生关窗 owner 通过。隔离 Host/Web owner 经 Desktop admission 与 Web HTTP 完成真实磁盘保存、
+外部冲突、明确覆盖、删除拒绝以及 HTML 候选内容回读，无模型或日常数据访问。
+
+原生布局 owner 的旧断言分别依赖复制按钮加入前的表格 scroll 宽度、14px 文件图标和手写旧表格 DOM；
+调整为测量完整表格 frame、区分 16px 类型图标与 14px 操作图标，并复用生产 SafeMarkdown。
+只读夹具明确返回编辑不可用，不把缺少模拟方法误报为产品读取故障；没有为通过测试修改生产布局。
+修订后的完整原生预览 owner 通过，覆盖阅读状态、窄窗、主题、File Change、查找与自动刷新。
+macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；实际安装结果及打包 App 隔离验收记录随本次交付保存。
+本轮不据此推导 Windows/Linux、原用户数据副本或崩溃恢复验收。
+
+## Windows 分支固定上游合流（2026-11-02）
+
+### 交付状态与保留边界
+
+**代码已同步到任务工作副本，尚未提交。** 原 HEAD 为
+`8ec5dcee3ea37a6405ce40042f99ad6b30829dad`，固定上游及 MERGE_HEAD 为
+`889a8b7c2f40f94e9c60416a564550fabc750a47`；冲突条目为零。上游尚不是已提交祖先；
+本次没有在任务仓库执行 commit、push、PR、安装、破坏性重置或清理。
+
+- 原35个工作文件、patch、原staged状态与原索引保存在工作空间私人备份
+  `machines/DESKTOP-GKG3VV9/local/rovai-upstream-sync/20261102T024010228585Z`；恢复后独立重算
+  11份备份文件与ZIP内35个文件SHA256，全部一致。原HEAD/WIP安全引用及stash保留，未drop/pop。
+- 原执行阶段stash退出0；merge退出1（5文件冲突）；WIP binary patch三方恢复退出1
+  （另5文件冲突）。两阶段均逐块解决，没有整文件取上游覆盖本地功能。
+- 上游migration219执行activity-v5升级，本地聊天扩展使用220..224/schema170..174。
+  旧209..213/schema158、159及旧219..223/activity-v4已知完整前缀，仅在回执和实际布局匹配时
+  事务前移，保留时间戳与业务数据；新上游169无聊天来源继续向前升级，不恢复退役协议。
+- 四家Claude/Codex/CodeBuddy/OpenCode的windows_account、普通聊天claim/continuation冻结isolation、
+  执行清理范围、Bot独立导航/分页/置顶/编辑/删除与本地飞书八工具run/epoch/input/target授权
+  经独立静态审阅保留。决定编号更正见[D75](decisions.md#v1-72-d75)及末尾勘误，历史正文未重写。
+
+### 真实验证与失败处理
+
+本轮日志位于工作空间`.cache/rovai-upstream-sync/`；旧1308汇总不是本轮证据。数据库、文件及CLI
+均使用合成隔离fixture，没有读取日常库或模型/渠道凭据，没有真实外发。重型构建和全量测试串行，
+jobs1/threads1；慢速刷新夹具使用本版本既有`RUST_MIN_STACK=33554432`，不改生产栈或系统配置。
+
+| 范围 | 实际结果 | 本轮日志 |
+| --- | --- | --- |
+| `cargo check --workspace --locked -j1` | 退出0；首次PATH缺Cargo退出127，修正命令级PATH后执行 | `recovery-production-check-r1/r2.log` |
+| 最终树all-features workspace `--no-run -j1` | 退出0；仅证明编译，7个test harness、4个example产物 | `recovery-test-build-r4.log/jsonl` |
+| legacy steer数据保留owner | 1 passed/0 failed/exit0；晚改辅助实现已重新编译补验 | `recovery-legacy-steer-r1.log` |
+| 聊天迁移来源owner | 1 passed/0 failed/exit0；三来源、部分前缀、损坏/伪完成拒绝、回滚、重复迁移矩阵 | `recovery-chat-migration-r1.log` |
+| 修正两项Windows测试前的完整Core lib all-features | **1296 passed/2 failed/18 ignored，退出101**；Cargo未继续其他harness/doc-tests | `recovery-workspace-all-features-r3.log` |
+| 修后ProjectFiles引用边界owner | 1 passed/0 failed/exit0，0.02s | `recovery-project-files-fixed-r4.log` |
+| 修后Mission私有索引owner | 1 passed/0 failed/exit0，18.97s | `recovery-mission-index-fixed-r4.log` |
+| 最终树重复完整r4 | **用户要求中止，未完成，不计通过**；托管neoRF8已停止，三个精确进程均不存在 | `recovery-workspace-all-features-r4.log` |
+| 此前未执行的其他6个harness，各一次 | CLI33、Host3、Web11，共47 passed/0 failed；另外三个0项，六次均exit0 | `remaining-harness-once-results.json`及原始日志 |
+| `pnpm typecheck`，仅一次 | **退出2，未通过**；导航可选回调不满足必需函数类型 | `typecheck-once.log` |
+
+本轮实证并处理的测试问题（原失败均保留）：
+
+1. `application/execution_drivers.rs`旧夹具仍阻塞已不影响普通执行的MCP，测试持JoinSet锁等待，
+   准备任务越过旧门禁后又取同锁。原二进制90秒有界复现exit124；仅将第二个阻塞项改为实际必需
+   的builtin-tools，保留12处断言。修后12.41s/exit0，后续完整r3同项亦通过；生产MCP独立性未回退。
+2. 默认测试栈发生STATUS_STACK_OVERFLOW；按已有32MiB命令级测试栈，同一二进制定向20.26s/exit0。
+   没有修改生产线程栈、profile或测试断言。
+3. `project_files.rs:737`直接比较普通Windows路径与同一文件的verbatim路径，独立复现2.31s/exit101。
+   只将实际解析路径canonicalize后精确比较，保留跨root/client/generation拒绝断言。
+4. `mission_workspace.rs`新子模块clone继承系统Git的autocrlf=true，而父合成仓库local=false；
+   原3153行实际CRLF与期望LF不符，独立复现7.67s/exit101。仅为该合成submodule add追加
+   命令级`-c core.autocrlf=false`；original LF、父子真实index、.git/.gitmodules原字节断言均保留。
+   未修改生产Git、用户全局配置或私有索引逻辑。
+
+### 未完成与验收口径
+
+- **没有最终树整轮全绿结论。** 原完整1296/2/18、修后两项各1通过、用户中止重复r4是三段独立
+  证据，不可拼接为最终全量通过。18项ignored包含真实账户/Runtime及测试helper，不当作实机验证。
+- 类型检查阻塞在`ThreadNavigation.tsx:1046`：`onCreate?(): void`为可选属性，但仅按`pinTargetKey`
+  创建菜单项后，`onSelect: onCreate`不满足`SidebarActionMenuItem`的必需回调类型。原错误已保存；
+  随后按原实施授权作唯一最小修复：菜单初始化条件改为`pinTargetKey && onCreate`，只在回调存在时
+  添加new-chat项；保留必需回调类型，不用断言/cast/no-op掩盖。只读核对diff与调用点后收尾，
+  **修后未重复类型检查，未宣称通过**。pnpm入口按准确锁同步依赖，锁文件未改，未主动降级或删包。
+- doc-tests、完整前端测试、Desktop构建及真实GUI/账户/模型Runtime验收本轮未执行，日常App未安装。
+  已过导航等历史证据不重跑，也不扩张为最终树验收。
+- `pnpm docs:check`唯一一次退出0：v1.72及172个版本目录一致性、决定治理与链接检查通过，
+  日志`docs-check-once.log`。本段结果及上述导航修复记录是在该次门禁后补充，**未重复文档校验**；
+  `docs:test`与diff-aware `docs:check:ci`本轮未执行，不推导为通过。
+- 最后一次已编译测试树为`54d8f7d287a9bb5ff0161d998be791f7f8e3b89f`，
+  `source-freeze-ctx_5a3f7a4ca63a-r4.json`保存5569个tracked文件hash，父级已独立逐项核对。
+  后续交付快照`a2087109ac41d1a19bef454cdf2980acbbf6ede5`另含导航回调判断一行与实施报告，
+  不是已完成整轮验证的源码树。快照后的本段表述勘误仅更新报告，未重复运行类型检查、文档门禁或测试。
+
+### 2 失败与 18 ignored 跟进判定（2026-11-02）
+
+初次为只读评估；后续仅补执行第 18 项 Pi no-Prompt 就绪 smoke 一次通过，其余未新增测试执行。原始 18 ignored 不作为实机通过证据，不改变前述 1296/2/18 与中止 r4 的口径；后续单项结果独立记录，不拼成最终全量全绿。
+
+r3 两项失败已闭环：`project_files.rs:737` 比较前 canonicalize 实际路径，`mission_workspace.rs:3069` 合成 submodule add 追加 `-c core.autocrlf=false`，各执行 1 次通过（`recovery-project-files-fixed-r4.log`、`recovery-mission-index-fixed-r4.log`），不复跑。
+
+| # | 测试 | ignore 理由 | 父 owner / 既有实测 | 判定 | 优先级 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `acp.rs:18767` account_product_acp_start_and_session | 需既有 Windows 账户部署与已装真实 Runtime，仅隔离 fixture | 无本版实测；10-29 记录只有 ACP Host 兼容摘要，未记录该 owner 通过 | 必要，缺部署前置 | 高 |
+| 2 | `antigravity.rs:2277` isolated_completion_real_runtime_smoke | 手工本地 Runtime smoke | 无；断言真实模型回答，Antigravity 未在 windows_account 产品范围 | 待授权真实调用 | 后置 |
+| 3 | `application.rs:35784` account_cli_reaches_real_core_and_fences_lease | 需既有非管理员部署与已构建 CLI，仅合成 Core 业务 | 10-29 `account-real-core-cli-04` 1 passed（历史，不作本版新测） | 必要，缺部署前置 | 高 |
+| 4 | `builtin_tool_runtime.rs:1710` existing_account_builtin_bridge_is_job_scoped | 需既有非管理员部署与产品 CLI，仅本地 IPC 无模型 | 10-29 `account-builtin-live-07`/`-08-source` 1 passed（历史） | 必要，缺部署前置 | 高 |
+| 5 | `codex.rs:3544` agent_runs_use_distinct_processes_and_native_home_sessions | 手工本地 Runtime smoke | 无；真实 `Reply exactly` turn，Codex 0.165.0 在 PATH | 待授权真实调用 | 后置 |
+| 6 | `managed_process.rs:2375` windows_core_eof_helper | managed process 子进程 helper | 父 owner `windows_main_force_kill_closes_core_stdin_and_runtime_job`（:2166），r3:1013/1017 ok | 已覆盖无需 | 无 |
+| 7 | `managed_process.rs:2274` windows_handle_probe_helper | 同上 | 父 owner `windows_handle_list_excludes_unrelated_inheritable_handle`（:2049），r3:1004 ok | 已覆盖无需 | 无 |
+| 8 | `managed_process.rs:2211` windows_job_child_helper | 同上 | 父 owner :1799/:1889、`claude.rs:3739`、`runtime_probe_process.rs:581`，r3:996/1010/555/1357 ok | 已覆盖无需 | 无 |
+| 9 | `managed_process.rs:2241` windows_job_grandchild_helper | 同上 | 父 owner :1889 经 child helper 派生，r3:1010 ok | 已覆盖无需 | 无 |
+| 10 | `managed_process.rs:2291` windows_job_owner_helper | 同上 | 父 owner :2117，r3:1007/1009 ok | 已覆盖无需 | 无 |
+| 11 | `managed_process.rs:2344` windows_main_owner_helper | 同上 | 父 owner :2166，r3:1013/1015 ok | 已覆盖无需 | 无 |
+| 12 | `managed_process.rs:2331` windows_owned_runtime_helper | 同上 | 父 owner :2117/:2166 与 `runtime_fleet.rs:3870`，r3:1342 ok | 已覆盖无需 | 无 |
+| 13 | `windows_account.rs:1451` account_helper_entry | 仅受信账户 bootstrap 子进程入口 | 默认非 ignored owner `windows_account.rs:985` 真实驱动；r3:1024 为 `account_bootstrap_requires_request_and_relays_native_exit ... ok` 完整行（1019 是子进程摘要，不作依据）；另见第 3、4 项调用点 | 已覆盖（默认层） | 无 |
+| 14 | `windows_account.rs:1379` account_node_userinfo_matches_shared_control | 需既有账户部署与显式 Node 入口，无模型 | 无历史通过记录，Node 入口变量未设 | 必要，缺部署前置 | 高 |
+| 15 | `windows_account.rs:1193` existing_account_filesystem_uses_verified_token | 需显式既有非管理员部署；不输出模型或凭据 | 10-29 `account-filesystem-live-03` 1 passed（历史）。该 owner 用 `current_exe`+`whoami`，不需要产品 CLI；实际前置是部署引用/owner DPAPI 与 `ROVAI_ACCOUNT_FS_PROBE_FILE`/`FS_FIXTURE_ROOT`/`FS_OUTPUT_ROOT`，缺引用只证明未配置，不证明账户不存在 | 必要，缺部署前置 | 高 |
+| 16 | `windows_account.rs:1126` existing_account_launch_starts_repeated_workspace_turns | 手工既有账户+owner DPAPI，仅跑 whoami | 无历史通过记录 | 必要，缺部署前置 | 高 |
+| 17 | `pi/host.rs:3939` native_pi_host_starts_with_canonical_workspace | 需 native Pi 与隔离 root/`PI_CODING_AGENT_DIR` | 该 owner 本版未执行；默认 no-Prompt 分支，仅 `ROVAI_PI_ACCOUNT_REAL_MODEL` 才调用模型；本机 npm `pi.cmd` 已在第 18 项成功启动，不能仅因 shim 判入口不合格 | 可无模型启动，暂不扩测；第 18 项不替代本 owner 的 canonical workspace 验证 | 中 |
+| 18 | `pi/host.rs:4365` real_pi_machine_ready_smoke | 需本机合格 Pi 与原生配置 | **本版 2026-11-02 一次：1 passed/0 failed/exit0/4.18s**，lib `rovai_core-4c77935543c5f43e.exe`，白名单 env、新 UUID HOME/PI_CODING_AGENT_DIR/TEMP、`ROVAI_REAL_PI_EXECUTABLE=pi.cmd`、`PI_TELEMETRY=0`，日志 `pi-machine-ready-once.log`；仅证明 no-Prompt 就绪，不证明模型/历史/账户/其他 Runtime | 已推进（最小一次），仅覆盖就绪分支 | 中 |
+
+前置布尔（父级独立复核一致）：`ROVAI_WINDOWS_ACCOUNT_CONFIG` 在 Process/User/Machine 均未设置，账户 CLI/FS/Core/Node 根与显式 Node 入口未设，Pi 两个显式 smoke 变量未设；`target/debug` 产品 CLI/Core/Host 存在但不代表当前部署。10-29 历史通过只用于排优先级，不冒充本版结果。最小下一步：第 15 项 `existing_account_filesystem_uses_verified_token` 仍是最优先无模型账户 smoke，前置为现成非管理员账户部署引用、owner-bound DPAPI 配置，以及 `ROVAI_ACCOUNT_FS_PROBE_FILE` 指向的合成可读文件、`ROVAI_ACCOUNT_FS_FIXTURE_ROOT` 宿主私有合成夹具目录，以及 `ROVAI_ACCOUNT_FS_OUTPUT_ROOT` 账户可写输出目录；它不需要产品 CLI，缺引用不等于账户不存在、也不构成新增授权。第 18 项本轮通过只覆盖 no-Prompt 就绪分支，Pi 不因此扩大四家 Claude/Codex/CodeBuddy/OpenCode 的账户隔离产品范围；模型、历史、账户与其他 Runtime 仍需另行授权。该次 env 含 `PI_TELEMETRY=0` 与隔离 HOME/PI_CODING_AGENT_DIR/TEMP，但不含父级后补的 `PI_OFFLINE=1`/`PI_SKIP_VERSION_CHECK=1`（追加指令在开跑后到达），因此只按隔离与 no-Prompt 就绪记录，不断言启动网络被 flag 关闭，也不重跑第二次。

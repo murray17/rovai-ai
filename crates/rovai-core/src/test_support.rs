@@ -419,7 +419,10 @@ mod slow_tests {
         let mut database = fresh_schema_database_fast_owned();
         database
             .connection()
-            .execute("DELETE FROM schema_migration WHERE version = 93", [])
+            .execute(
+                "DELETE FROM schema_migration WHERE version = ?1",
+                [crate::db::CURRENT_PROJECTION_SCHEMA_VERSION + 50],
+            )
             .unwrap();
         database.close();
         let error = Database::open_verified_test_clone(

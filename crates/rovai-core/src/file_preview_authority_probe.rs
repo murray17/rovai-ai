@@ -154,10 +154,11 @@ fn measure(database: &Database, data: &Path, id: &str, path: &str) -> Value {
         )
         .unwrap();
     let key_sql = legacy_file_activity_key_sql(operation.is_some());
-    let key_params: [&dyn rusqlite::ToSql; 8] = [
+    let key_params: [&dyn rusqlite::ToSql; 9] = [
         &"preview-run",
         &1,
         &versions[0],
+        &crate::canonical_activity::V4_CLASSIFIER_VERSION,
         &versions[1],
         &versions[2],
         &versions[3],

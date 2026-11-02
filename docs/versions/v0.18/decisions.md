@@ -253,7 +253,7 @@ does not grant Capability or policy permission.
 <a id="adr-0064-references"></a>
 ### References
 
-- [Current memory UI design](../../../apps/desktop/.impeccable/surfaces/memory-workspace.md)
+- [Current memory UI design](../../ui/surfaces/memory-workspace.md)
 - [ADR-0019: Application-Global Memory Ownership](../v0.10/decisions.md#adr-0019)
 - [ADR-0024: Closed Memory Kinds](../v0.10/decisions.md#adr-0024)
 - [ADR-0027: Memory-Domain Forgetting](../v0.10/decisions.md#adr-0027)

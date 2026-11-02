@@ -150,7 +150,7 @@ Adapter 已经收到明确原生事件时投影，不为填满 Runtime 矩阵新
 
 该事件使用本地 Execution Evidence/Managed Blob 以支持长 summary 惰性读取，但 Canonical Activity classifier 明确返回
 non-activity，public execution query 明确排除，Main 的飞书/钉钉 Host 与局域网执行台也不因它唤醒。它不是公共 Evidence、
-Camp Message、世界地图活动或 Runtime detector policy。呈现合同见
+Thread Message、世界地图活动或 Runtime detector policy。呈现合同见
 [Run Process Detail Surface v43](../contracts/run-process-detail-surface-v43.md)。
 
 ## Observer Lease 与去重
@@ -162,7 +162,7 @@ adapterInstallationId + hostInstanceId + relayProcessId + nativeSessionId
 ```
 
 Observer Lease 在 bind 或 verified Resume 后建立，可跨 AgentRun 存续，但不延长 AgentRun lease，也不
-授权 prompt、Built-in Tool 或 Camp/Task/Message/Memory mutation。Binding/Host/Session/policy epoch
+授权 prompt、Built-in Tool 或 Thread/Task/Message/Memory mutation。Binding/Host/Session/policy epoch
 替换和 Core restart fence 旧 Lease；Resume 同一 Session 到新 Host 使用新 identity。
 
 Runtime-specific signal 最终进入同一 Session-scoped Core command。Core 验证 active Lease、current

@@ -38,18 +38,18 @@ git --version
 
 ## Git 是动态工作区能力
 
-Rovai-ai 产品工作区可以是：
+Rovai AI 产品工作区可以是：
 
 - 普通非 Git 目录；
 - 尚无 Commit 的空 Git 仓库；
 - 有 HEAD 的 Git 仓库；
 - 在生命周期中获得或失去 Git 能力的目录。
 
-因此，启动应用、创建普通目录 Camp 或打包 App 不要求用户工作区包含 `.git`，更不要求
+因此，启动应用、创建普通目录 Thread 或打包 App 不要求用户工作区包含 `.git`，更不要求
 至少一个 Commit。Git 只在某项能力或测试明确需要它时成为前置条件，例如创建 Git
 fixture、采集 Run Git observation 或验证 Git 相关 UI。
 
-开发 Rovai-ai 源码通常仍通过 Git 管理；这与产品工作区是否必须是 Git 仓库是两件事。
+开发 Rovai AI 源码通常仍通过 Git 管理；这与产品工作区是否必须是 Git 仓库是两件事。
 
 ## Agent Runtime 是按用途选择的能力
 

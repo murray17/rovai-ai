@@ -6106,6 +6106,7 @@ mod slow_tests {
                 AdapterKind::CursorAgent,
                 AdapterKind::KimiCodeCli,
                 AdapterKind::MinimaxCodeCli,
+                AdapterKind::HermesCli,
                 AdapterKind::GrokBuild,
                 AdapterKind::DeepseekHarness,
                 AdapterKind::ZcodeApp,

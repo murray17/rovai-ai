@@ -300,7 +300,7 @@ pub(crate) fn schema_matches(connection: &Connection) -> rusqlite::Result<bool> 
     Ok(true)
 }
 
-/// Additive migration 219. Every table is chat-only state and never feeds Camp.
+/// Additive migration 220. Every table is chat-only state and never feeds Camp.
 pub(crate) fn migrate(database: &mut Database) -> Result<()> {
     let transaction = database
         .connection_mut()
@@ -406,7 +406,7 @@ pub(crate) fn migrate(database: &mut Database) -> Result<()> {
     )?;
     // Additive chat tables do not change any existing projection, so the
     // projection schema marker stays at 154.
-    transaction.execute_batch("INSERT INTO schema_migration VALUES(219,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=169,updated_at=datetime('now') WHERE singleton=1;")?;
+    transaction.execute_batch("INSERT INTO schema_migration VALUES(220,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=170,updated_at=datetime('now') WHERE singleton=1;")?;
     transaction.commit()?;
     Ok(())
 }
@@ -1851,7 +1851,8 @@ mod tests {
             author_external_id: "ou_requester".into(),
             author_name: "Requester".into(),
             author_is_owner: false,
-            body: "Ask the contact for a progress report and forward: Initial synthetic delegation".into(),
+            body: "Ask the contact for a progress report and forward: Initial synthetic delegation"
+                .into(),
             quote_message_id: None,
             mentions: vec![ChatMention {
                 open_id: "ou_mention".into(),
@@ -2293,15 +2294,62 @@ mod tests {
         )
         .unwrap();
         assert_eq!(before["status"], "queued");
-        assert_eq!(execute(&mut database,&run,"frr10-before","feishu.forward",&json!({"targetRef":target,"inputRef":input_ref,"text":"Different body"})).unwrap()["errorCode"],"request_conflict");
-        let unknown = execute(&mut database,&run,"frr04-unknown","feishu.forward",&json!({"targetRef":target,"inputRef":input_ref,"text":"Synthetic unknown outcome"})).unwrap();
-        assert_eq!(unknown["status"],"queued");
-        let claimed_unknown=service.claim(&mut database,PROVIDER,APP,"frr04-unknown-host",10).unwrap();
-        let claimed_unknown=claimed_unknown.iter().find(|o|o.text=="Synthetic unknown outcome").unwrap();
-        service.settle(&mut database,&ChatOutboundSettleCommand {outbound_id:claimed_unknown.id.clone(),worker_id:"frr04-unknown-host".into(),lease_token:claimed_unknown.lease_token.clone(),status:"unknown".into(),external_message_id:None,failure_code:None}).unwrap();
-        let replay_unknown=execute(&mut database,&run,"frr04-unknown","feishu.forward",&json!({"targetRef":target,"inputRef":input_ref,"text":"Synthetic unknown outcome"})).unwrap();
-        assert_eq!(replay_unknown["status"],"unknown");
-        assert!(service.claim(&mut database,PROVIDER,APP,"frr04-unknown-again",10).unwrap().iter().all(|o|o.id!=claimed_unknown.id));
+        assert_eq!(
+            execute(
+                &mut database,
+                &run,
+                "frr10-before",
+                "feishu.forward",
+                &json!({"targetRef":target,"inputRef":input_ref,"text":"Different body"})
+            )
+            .unwrap()["errorCode"],
+            "request_conflict"
+        );
+        let unknown = execute(
+            &mut database,
+            &run,
+            "frr04-unknown",
+            "feishu.forward",
+            &json!({"targetRef":target,"inputRef":input_ref,"text":"Synthetic unknown outcome"}),
+        )
+        .unwrap();
+        assert_eq!(unknown["status"], "queued");
+        let claimed_unknown = service
+            .claim(&mut database, PROVIDER, APP, "frr04-unknown-host", 10)
+            .unwrap();
+        let claimed_unknown = claimed_unknown
+            .iter()
+            .find(|o| o.text == "Synthetic unknown outcome")
+            .unwrap();
+        service
+            .settle(
+                &mut database,
+                &ChatOutboundSettleCommand {
+                    outbound_id: claimed_unknown.id.clone(),
+                    worker_id: "frr04-unknown-host".into(),
+                    lease_token: claimed_unknown.lease_token.clone(),
+                    status: "unknown".into(),
+                    external_message_id: None,
+                    failure_code: None,
+                },
+            )
+            .unwrap();
+        let replay_unknown = execute(
+            &mut database,
+            &run,
+            "frr04-unknown",
+            "feishu.forward",
+            &json!({"targetRef":target,"inputRef":input_ref,"text":"Synthetic unknown outcome"}),
+        )
+        .unwrap();
+        assert_eq!(replay_unknown["status"], "unknown");
+        assert!(
+            service
+                .claim(&mut database, PROVIDER, APP, "frr04-unknown-again", 10)
+                .unwrap()
+                .iter()
+                .all(|o| o.id != claimed_unknown.id)
+        );
         assert_eq!(database.connection().query_row("SELECT count(*) FROM channel_chat_outbound WHERE body='Synthetic unknown outcome'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         database
             .connection()
@@ -2324,23 +2372,58 @@ mod tests {
             panic!("FRR-10 initial context must be ready")
         };
         let chat_projection = |payload: &str| -> serde_json::Value {
-            serde_json::from_str(payload.split("[CHAT_REPLY_CONTEXT]\n").nth(1).unwrap()
-                .split("\n[/CHAT_REPLY_CONTEXT]").next().unwrap()).unwrap()
+            serde_json::from_str(
+                payload
+                    .split("[CHAT_REPLY_CONTEXT]\n")
+                    .nth(1)
+                    .unwrap()
+                    .split("\n[/CHAT_REPLY_CONTEXT]")
+                    .next()
+                    .unwrap(),
+            )
+            .unwrap()
         };
         let initial_route = chat_projection(&initial_context.rendered_payload);
         assert_eq!(initial_route["schemaVersion"], 1);
         assert_eq!(initial_route["inputMode"], "initial");
         assert_eq!(initial_route["inputs"][0]["origin"], "channel_chat");
-        assert_eq!(initial_route["inputs"][0]["sender"], json!({"kind":"external_person","displayName":"Requester","isOwner":false}));
+        assert_eq!(
+            initial_route["inputs"][0]["sender"],
+            json!({"kind":"external_person","displayName":"Requester","isOwner":false})
+        );
         assert_eq!(initial_route["inputs"][0]["channel"]["inputRef"], input_ref);
-        assert_eq!(initial_route["finalResponse"], json!({"mode":"host_auto_reply","audienceInputRefs":[input_ref],"includesLocalInput":false,"deliveryReceipt":"not_observed"}));
-        assert_eq!(initial_route["guidance"].as_str().unwrap().lines().count(), 6);
-        let source: String = database.connection().query_row("SELECT current_input_source_json FROM context_manifest WHERE id=?1",[&initial_context.manifest_id],|r|r.get(0)).unwrap();
+        assert_eq!(
+            initial_route["finalResponse"],
+            json!({"mode":"host_auto_reply","audienceInputRefs":[input_ref],"includesLocalInput":false,"deliveryReceipt":"not_observed"})
+        );
+        assert_eq!(
+            initial_route["guidance"].as_str().unwrap().lines().count(),
+            6
+        );
+        let source: String = database
+            .connection()
+            .query_row(
+                "SELECT current_input_source_json FROM context_manifest WHERE id=?1",
+                [&initial_context.manifest_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         let source: serde_json::Value = serde_json::from_str(&source).unwrap();
         assert_eq!(source["chatReplyContext"]["projection"], initial_route);
-        assert_eq!(source["chatReplyContext"]["projectionDigest"], crate::command::canonical_json_digest(&initial_route).unwrap());
-        let claim: String = database.connection().query_row("SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?1",[&run.agent_run_id],|r|r.get(0)).unwrap();
-        let frozen_claim: crate::context::ClaimedBatchContext = serde_json::from_str(&claim).unwrap();
+        assert_eq!(
+            source["chatReplyContext"]["projectionDigest"],
+            crate::command::canonical_json_digest(&initial_route).unwrap()
+        );
+        let claim: String = database
+            .connection()
+            .query_row(
+                "SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?1",
+                [&run.agent_run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let frozen_claim: crate::context::ClaimedBatchContext =
+            serde_json::from_str(&claim).unwrap();
         let claim: serde_json::Value = serde_json::from_str(&claim).unwrap();
         assert!(frozen_claim.payload_len().unwrap() >= initial_context.runtime_payload.len());
         let without_chat = {
@@ -2348,21 +2431,50 @@ mod tests {
             value["chatReplyContext"] = serde_json::Value::Null;
             serde_json::from_value::<crate::context::ClaimedBatchContext>(value).unwrap()
         };
-        let section = format!("[CHAT_REPLY_CONTEXT]\n{}\n[/CHAT_REPLY_CONTEXT]\n\n", serde_json::to_string(&initial_route).unwrap());
-        assert_eq!(frozen_claim.payload_len().unwrap() - without_chat.payload_len().unwrap(), section.len());
-        let long_name="长显示名界".repeat(500);
-        let mut long_claim=claim.clone();
-        long_claim["chatReplyContext"]["inputs"][0]["sender"]["displayName"]=json!(long_name);
-        let long_frozen:crate::context::ClaimedBatchContext=serde_json::from_value(long_claim).unwrap();
-        assert_eq!(long_frozen.payload_len().unwrap()-frozen_claim.payload_len().unwrap(),long_name.len()-"Requester".len());
+        let section = format!(
+            "[CHAT_REPLY_CONTEXT]\n{}\n[/CHAT_REPLY_CONTEXT]\n\n",
+            serde_json::to_string(&initial_route).unwrap()
+        );
+        assert_eq!(
+            frozen_claim.payload_len().unwrap() - without_chat.payload_len().unwrap(),
+            section.len()
+        );
+        let long_name = "长显示名界".repeat(500);
+        let mut long_claim = claim.clone();
+        long_claim["chatReplyContext"]["inputs"][0]["sender"]["displayName"] = json!(long_name);
+        let long_frozen: crate::context::ClaimedBatchContext =
+            serde_json::from_value(long_claim).unwrap();
+        assert_eq!(
+            long_frozen.payload_len().unwrap() - frozen_claim.payload_len().unwrap(),
+            long_name.len() - "Requester".len()
+        );
         assert_eq!(claim["chatReplyContext"], initial_route);
-        assert!(!claim.as_object().unwrap().contains_key("chat_reply_context"));
-        assert!(initial_context.rendered_payload.find("[/CHAT_REPLY_CONTEXT]").unwrap() < initial_context.rendered_payload.find("[RUN_INPUT]").unwrap());
+        assert!(
+            !claim
+                .as_object()
+                .unwrap()
+                .contains_key("chat_reply_context")
+        );
+        assert!(
+            initial_context
+                .rendered_payload
+                .find("[/CHAT_REPLY_CONTEXT]")
+                .unwrap()
+                < initial_context
+                    .rendered_payload
+                    .find("[RUN_INPUT]")
+                    .unwrap()
+        );
         let version: (i64,i64,i64,i64) = database.connection().query_row("SELECT context_manifest_version,formatter_version,run_facts_schema_version,context_delivery_profile_version FROM context_manifest WHERE id=?1",[&initial_context.manifest_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap();
-        assert_eq!(version,(43,43,11,15));
+        assert_eq!(version, (43, 43, 11, 15));
         database.connection().execute("UPDATE channel_chat_message SET author_name='Changed after freeze',author_is_owner=1 WHERE id=?1", [&input_ref]).unwrap();
-        let ContextMaterialization::Ready(replayed) = ContextService.materialize(&mut database,&blobs,&request).unwrap() else {panic!("frozen replay required")};
-        assert_eq!(replayed.rendered_payload,initial_context.rendered_payload);
+        let ContextMaterialization::Ready(replayed) = ContextService
+            .materialize(&mut database, &blobs, &request)
+            .unwrap()
+        else {
+            panic!("frozen replay required")
+        };
+        assert_eq!(replayed.rendered_payload, initial_context.rendered_payload);
         let initial_delivery = ContextService
             .prepare_input_delivery_for_context(
                 &mut database,
@@ -2450,27 +2562,67 @@ mod tests {
         assert!(projected.to_string().contains(local_body));
         let local_route = chat_projection(&local_context.rendered_payload);
         assert_eq!(local_route["inputMode"], "steer");
-        assert_eq!(local_route["inputs"], json!([{
-            "messageId":local_id,"origin":"local_composer",
-            "sender":{"kind":"local_user","displayName":null,"isOwner":null},
-            "channel":null,"reply":{"mode":"thread_only","target":"current_thread"}
-        }]));
-        assert_eq!(local_route["finalResponse"], json!({"mode":"host_auto_reply_with_local_input","audienceInputRefs":[input_ref],"includesLocalInput":true,"deliveryReceipt":"not_observed"}));
-        let source: String = database.connection().query_row("SELECT current_input_source_json FROM context_manifest WHERE id=?1",[&local_context.manifest_id],|r|r.get(0)).unwrap();
+        assert_eq!(
+            local_route["inputs"],
+            json!([{
+                "messageId":local_id,"origin":"local_composer",
+                "sender":{"kind":"local_user","displayName":null,"isOwner":null},
+                "channel":null,"reply":{"mode":"thread_only","target":"current_thread"}
+            }])
+        );
+        assert_eq!(
+            local_route["finalResponse"],
+            json!({"mode":"host_auto_reply_with_local_input","audienceInputRefs":[input_ref],"includesLocalInput":true,"deliveryReceipt":"not_observed"})
+        );
+        let source: String = database
+            .connection()
+            .query_row(
+                "SELECT current_input_source_json FROM context_manifest WHERE id=?1",
+                [&local_context.manifest_id],
+                |r| r.get(0),
+            )
+            .unwrap();
         let source: serde_json::Value = serde_json::from_str(&source).unwrap();
-        assert_eq!(source["chatReplyContext"]["sourceCampMessageIds"],json!([local_id]));
-        assert_eq!(source["chatReplyContext"]["sourceInboundIds"],json!([]));
-        assert_eq!(source["chatReplyContext"]["projection"],local_route);
+        assert_eq!(
+            source["chatReplyContext"]["sourceCampMessageIds"],
+            json!([local_id])
+        );
+        assert_eq!(source["chatReplyContext"]["sourceInboundIds"], json!([]));
+        assert_eq!(source["chatReplyContext"]["projection"], local_route);
         let local_delivery = ContextService
             .prepare_input_delivery_for_context(&mut database, &run.agent_run_id, 1, &local_context)
             .unwrap();
-        ContextService.mark_input_delivery_not_accepted(&mut database, &local_delivery.id, "synthetic FRR-11 rejection").unwrap();
-        assert_eq!(ContextService.runtime_input_delivery_status(&database,&local_delivery.id).unwrap().as_deref(),Some("not_accepted"));
-        assert_eq!(execute(&mut database,&run,"frr11-result","feishu.result",&json!({"requestId":"search"})).unwrap()["status"],"ready");
+        ContextService
+            .mark_input_delivery_not_accepted(
+                &mut database,
+                &local_delivery.id,
+                "synthetic FRR-11 rejection",
+            )
+            .unwrap();
+        assert_eq!(
+            ContextService
+                .runtime_input_delivery_status(&database, &local_delivery.id)
+                .unwrap()
+                .as_deref(),
+            Some("not_accepted")
+        );
+        assert_eq!(
+            execute(
+                &mut database,
+                &run,
+                "frr11-result",
+                "feishu.result",
+                &json!({"requestId":"search"})
+            )
+            .unwrap()["status"],
+            "ready"
+        );
         assert_eq!(execute(&mut database,&run,"frr10-before","feishu.forward",&json!({"targetRef":target,"inputRef":input_ref,"text":"Initial synthetic delegation"})).unwrap(),before);
-        let retried = ContextService.prepare_input_delivery_for_context(&mut database,&run.agent_run_id,1,&local_context).unwrap();
-        assert_eq!(retried.id,local_delivery.id);
-        assert_eq!(retried.status,"prepared");
+        let retried = ContextService
+            .prepare_input_delivery_for_context(&mut database, &run.agent_run_id, 1, &local_context)
+            .unwrap();
+        assert_eq!(retried.id, local_delivery.id);
+        assert_eq!(retried.status, "prepared");
         assert!(
             ContextService
                 .begin_runtime_input_dispatch(
@@ -2606,7 +2758,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_220_adds_member_chat_state() {
+    fn migration_221_adds_member_chat_state() {
         let mut database = seeded_runtime_database_owned();
         assert!(crate::channel_chat_tools::schema_matches(database.connection()).unwrap());
         assert!(matches!(
@@ -2620,7 +2772,8 @@ mod tests {
             crate::db::DatabaseContractClassification::Unknown(_)
         ));
         database.connection().execute("ALTER TABLE channel_chat_target_grant RENAME COLUMN broken_department TO department",[]).unwrap();
-        database.connection().execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=221;").unwrap();
+        database.connection().execute_batch("DELETE FROM schema_migration WHERE version=224; UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1;").unwrap();
+        database.connection().execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=222;").unwrap();
         assert!(matches!(
             crate::db::classify_database_contract(database.connection()).unwrap(),
             crate::db::DatabaseContractClassification::SupportedMigrationSource(_)
@@ -2631,7 +2784,7 @@ mod tests {
         assert!(matches!(
             crate::db::classify_database_contract(database.connection()).unwrap(),
             crate::db::DatabaseContractClassification::SupportedMigrationSource(ref m)
-                if m.projection_schema_version == 171
+                if m.projection_schema_version == 172
         ));
         crate::db::assert_chat_tool_upgrade_sources(&mut database);
         let columns: i64 = database
@@ -2657,7 +2810,7 @@ mod tests {
         let applied: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 220",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 221",
                 [],
                 |row| row.get(0),
             )

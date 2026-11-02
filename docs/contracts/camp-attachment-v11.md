@@ -4,7 +4,7 @@ contract: camp-attachment
 version: 11
 status: accepted
 authority: live-source-attachment-display-names
-last_updated: 2026-10-21
+last_updated: 2026-10-31
 ---
 
 # Camp Attachment v11
@@ -21,11 +21,11 @@ last_updated: 2026-10-21
 显示名必须同时满足：
 
 - 去掉 Unicode 首尾空白后非空；此判断不改写存储值；
-- 最多 120 个 Unicode 码点；
 - 不含 Unicode 控制字符，或 U+202A–U+202E、U+2066–U+2069 双向文本控制字符。
 
 不满足时拒绝该引用；这些检查在 Source Ref 读写和 Core 观察入口一致执行。已通过检查的名称不做
 替换、截断或 trim。原始位置始终来自 `sourcePath`；打开、预览与 Runtime 读取不拼接显示名。
+显示名不设 120 码点上限；文件名是否可创建由真正落盘入口及文件系统处理。
 UUID、绝对 UTF-8 路径、重复 ID、目录元数据以及源文件存在、可读和 kind 检查保持原有边界。
 
 ## 真正落盘的文件名

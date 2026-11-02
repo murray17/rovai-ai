@@ -71,7 +71,8 @@ app.whenReady().then(async () => {
       const primary = platform === 'darwin' ? 'meta' : 'control'
       const capture = async name => writeFileSync(join(dirname(userData), `${platform}-${name}.png`), (await window.webContents.capturePage()).toPNG())
       await window.loadFile(renderer, { query: { platform } }); await settle()
-      assert.equal(await run('document.querySelectorAll("[data-command]").length'), 23)
+      assert.equal(await run('document.querySelectorAll("[data-command]").length'), 25)
+      assert.equal(await run('!!document.querySelector("[data-command=quick-open]")'), false)
       await run('document.activeElement?.blur()'); await capture('day')
       assert.equal(await run('getComputedStyle(document.querySelector(".shortcut-field-control")).borderTopColor'), 'rgba(0, 0, 0, 0)')
       const defaults = store.get().preferences

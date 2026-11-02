@@ -1189,7 +1189,7 @@ impl TeamToolService {
                 || envelope.payload.camp_id != current.camp_id
             {
                 return Err(anyhow::anyhow!(
-                    "internal camp identity invariant violated for public message send"
+                    "internal Thread identity invariant violated for public message send"
                 ));
             }
             persist_queued_agent_message(

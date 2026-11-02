@@ -32,7 +32,7 @@ DEMO-105 的既有 sealed manifest 保留历史标题中的 Gather，避免改�
 
 ## 评分与报告口径
 
-新执行使用 [scoring-v2.2.json](scoring-v2.2.json)：目标达成 50、证据一致性 25、边界遵守 25；协作保留五项状态与三组统计，不设总分。每个 Case 的权重、适用项、判定来源和具体依据均在运行前冻结。
+新执行使用 [scoring-v2.10.json](scoring-v2.10.json)：目标达成 50、证据一致性 25、边界遵守 25；协作保留五项状态与三组统计，不设总分。每个 Case 的权重、适用项、判定来源和具体依据均在运行前冻结。
 
 Suite 2.0.0 只升级评价和报告配置；Suite 2.1.0 将 DEMO-111 指向独立的 v2 目录，公开结构化状态取值并修正错误文案完全匹配造成的误判，保留原 v1 目录和 seal。评分权重及工具失败要求保持；通用集仍为 12 个 Case。无真实 Judge 的旧结果不可直接换算新分数。规则与限制见 [Execution Evaluation v6](../../docs/contracts/execution-evaluation-v6.md)。
 
@@ -50,3 +50,7 @@ Suite 2.6.0 使用 scoring 2.4.0 / generic-task-v6；DEMO-106 1.3.0 加强同一
 Suite 2.7.0 / scoring 2.5.0 / generic-task-v7 保持同一题目、权重及关键条件，新增原生命令证据补取与初始文件证据，修复仲裁结果公开发布；见 [Execution Evaluation v9](../../docs/contracts/execution-evaluation-v9.md)。真实执行和证据重评分别记账，不增加重复样本数。
 
 Suite 2.8.0 / scoring 2.6.0 / generic-task-v8 补充严格并行／哈希检查来源，并按最终交付区分结果事实、执行声明和限制披露。中间审查与已知参与者正文留在 Process，旧评分报告保持；见 [Execution Evaluation v10](../../docs/contracts/execution-evaluation-v10.md)。
+
+Suite 2.12.0 的当前评分为 2.10.0 / generic-task-v12。完整性按所有适用质量与协作检查统计，
+合理低分仍是有效判定；未知与评测器故障保持缺口。当前字段见
+[Execution Evaluation v16](../../docs/contracts/execution-evaluation-v16.md)。

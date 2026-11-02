@@ -272,11 +272,20 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
     let context_path = env::var_os(ROVAI_CLI_CONTEXT_ENV)
         .map(PathBuf::from)
         .context("ROVAI_CLI_CONTEXT is not set")?;
-    let early_context=if env::var_os("ROVAI_ACCOUNT_BUILTIN").is_some(){None}else{Some(load_context().await?)};
-    let relay_process_id=if let Some(locator)=env::var_os("ROVAI_ACCOUNT_BUILTIN") {
-        let locator:Value=serde_json::from_str(&locator.to_string_lossy())?;
-        locator["processId"].as_str().context("account Hook process locator unavailable")?.to_string()
-    }else{early_context.as_ref().unwrap().process_auth()?.0};
+    let early_context = if env::var_os("ROVAI_ACCOUNT_BUILTIN").is_some() {
+        None
+    } else {
+        Some(load_context().await?)
+    };
+    let relay_process_id = if let Some(locator) = env::var_os("ROVAI_ACCOUNT_BUILTIN") {
+        let locator: Value = serde_json::from_str(&locator.to_string_lossy())?;
+        locator["processId"]
+            .as_str()
+            .context("account Hook process locator unavailable")?
+            .to_string()
+    } else {
+        early_context.as_ref().unwrap().process_auth()?.0
+    };
     let mut hook_input = String::new();
     std::io::stdin()
         .read_to_string(&mut hook_input)
@@ -341,15 +350,39 @@ async fn run_compaction_hook(args: &[String]) -> Result<()> {
     }))?;
     let request_id = Uuid::new_v4().to_string();
     let observed_at = chrono::Utc::now().to_rfc3339();
-    let outbox_record=CompactionObservationOutboxRecord {
-        schema_version:COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,request_id:request_id.clone(),adapter_kind:adapter_kind.clone(),host_instance_id:host_instance_id.clone(),relay_process_id,native_session_id:native_session_id.clone(),hook_event_name:hook_event_name.clone(),trigger:trigger.clone(),source_event_digest:source_event_digest.clone(),observed_at,
+    let outbox_record = CompactionObservationOutboxRecord {
+        schema_version: COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION,
+        request_id: request_id.clone(),
+        adapter_kind: adapter_kind.clone(),
+        host_instance_id: host_instance_id.clone(),
+        relay_process_id,
+        native_session_id: native_session_id.clone(),
+        hook_event_name: hook_event_name.clone(),
+        trigger: trigger.clone(),
+        source_event_digest: source_event_digest.clone(),
+        observed_at,
     };
-    let staged_observation=stage_compaction_observation(&context_path,&outbox_record)?;
-    let context=match early_context {Some(context)=>context,None=>load_context().await?};
-    let (process_id,process_token)=context.process_auth()?;
-    let display_auth=context.auth().ok();
-    let request=CompactionHookIpcRequest {
-        kind:COMPACTION_OBSERVATION_IPC_KIND.into(),ipc_protocol_version:COMPACTION_HOOK_IPC_PROTOCOL_VERSION,process_id,process_token,request_id,adapter_kind:adapter_kind.clone(),host_instance_id:host_instance_id.clone(),native_session_id,hook_event_name,trigger,source_event_digest,display_auth,summary_text,
+    let staged_observation = stage_compaction_observation(&context_path, &outbox_record)?;
+    let context = match early_context {
+        Some(context) => context,
+        None => load_context().await?,
+    };
+    let (process_id, process_token) = context.process_auth()?;
+    let display_auth = context.auth().ok();
+    let request = CompactionHookIpcRequest {
+        kind: COMPACTION_OBSERVATION_IPC_KIND.into(),
+        ipc_protocol_version: COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
+        process_id,
+        process_token,
+        request_id,
+        adapter_kind: adapter_kind.clone(),
+        host_instance_id: host_instance_id.clone(),
+        native_session_id,
+        hook_event_name,
+        trigger,
+        source_event_digest,
+        display_auth,
+        summary_text,
     };
     let mut last_error = None;
     for attempt in 0..COMPACTION_HOOK_ATTEMPTS {
@@ -377,10 +410,17 @@ fn stage_compaction_observation(
         .parent()
         .context("Built-in Tool context has no process root")?;
     let outbox = if env::var_os("ROVAI_ACCOUNT_BUILTIN").is_some() {
-        let path=env::var_os("ROVAI_ACCOUNT_COMPACTION_OUTBOX").map(PathBuf::from).context("account compaction outbox is not configured")?;
-        anyhow::ensure!(path.is_absolute(),"account compaction outbox must be absolute");
+        let path = env::var_os("ROVAI_ACCOUNT_COMPACTION_OUTBOX")
+            .map(PathBuf::from)
+            .context("account compaction outbox is not configured")?;
+        anyhow::ensure!(
+            path.is_absolute(),
+            "account compaction outbox must be absolute"
+        );
         path
-    } else {process_root.join("compaction-observation-outbox")};
+    } else {
+        process_root.join("compaction-observation-outbox")
+    };
     fs::create_dir_all(&outbox).with_context(|| {
         format!(
             "failed to create compaction observation outbox {}",

@@ -585,8 +585,9 @@ app.whenReady().then(async () => {
         const doc = document.querySelector('.file-preview-tab-panel:not([hidden]) .safe-markdown')
         const paragraph = [...doc.children].find(n => n.tagName === 'P')
         const table = doc.querySelector('.markdown-table-scroll')
+        const tableFrame = table.closest('.markdown-table-frame')
         return { document: doc.getBoundingClientRect().width, paragraph: paragraph.getBoundingClientRect().width,
-          table: table.getBoundingClientRect().width, scrolls: table.scrollWidth > table.clientWidth,
+          table: tableFrame.getBoundingClientRect().width, scrolls: table.scrollWidth > table.clientWidth,
           overflow: document.documentElement.scrollWidth > innerWidth }
       })()`)
       closeTo(wide.document, 1120, 'Wide preview expands the document track')
@@ -759,7 +760,7 @@ app.whenReady().then(async () => {
   await check('attachment display names remove the path row and return its height to the viewer', async () => {
     const projectFile = await run('window.previewTest.pathSnapshot()')
     assert.equal(projectFile.pathVisible, true)
-    closeTo(projectFile.pathHeight, 31, 'Project-relative path row height')
+    closeTo(projectFile.pathHeight, 33, 'Project-relative path row height')
     assert.equal(projectFile.updateVisible, false)
     await run('window.previewTest.openAttachment()')
     const fileNameOnly = await run('window.previewTest.pathSnapshot()')
@@ -773,7 +774,8 @@ app.whenReady().then(async () => {
   })
 
   await check('tabs shrink equally before minimum-width overflow, and expand again after closing', async () => {
-    await viewport(1_540)
+    // The fixed directory control occupies one additional 36px toolbar slot.
+    await viewport(1_604)
     const tabs = async () => { await snapshot(); return run('window.previewTest.tabSnapshot()') }
     const equalWidths = (state, width) => state.tabs.forEach(tab => closeTo(tab.width, width, 'Equal tab widths'))
     await run('window.previewTest.openTab(0)')
@@ -800,7 +802,7 @@ app.whenReady().then(async () => {
     equalWidths(crowded, 120)
     assert.equal(crowded.overflow, true)
     assert.ok(crowded.tabs.every(tab => tab.faded))
-    assert.ok(crowded.tabs.every(tab => tab.iconWidth === 14 && tab.closeWidth === 24))
+    assert.ok(crowded.tabs.every(tab => tab.iconWidth === (tab.fileIcon ? 16 : 14) && tab.closeWidth === 24))
     await capture('tabs-minimum-day')
 
     await run('document.querySelector("[role=tab]").focus()')
@@ -824,7 +826,7 @@ app.whenReady().then(async () => {
     await run('window.previewTest.setTheme("night")')
     await snapshot()
     await capture('tabs-minimum-night')
-    await viewport(1_540)
+    await viewport(1_604)
     const expanded = await tabs()
     closeTo(expanded.tabs[0].width, shrinking.tabs[0].width, 'Widening the preview expands tabs')
     assert.equal(expanded.overflow, false)
@@ -1090,18 +1092,18 @@ app.whenReady().then(async () => {
     closeTo(split.conversation, 420, 'Last split conversation width')
     const compact = await viewport(1_110)
     assert.equal(compact.compact, true)
-    assert.equal(compact.returnVisible, true)
+    assert.equal(compact.returnVisible, false)
     assert.equal(compact.controlsVisible, false)
     assert.equal(compact.handle, null)
     assert.equal(compact.aligned, true)
     assert.equal(compact.overflow, false)
     assert.equal(compact.focused, 'file-preview-tab-activate')
     closeTo(compact.width, compact.available, 'Compact preview width')
-    await run('document.querySelector(".file-preview-return").click()')
+    await click('.file-preview-toggle[aria-controls="file-preview-pane"]')
     const back = await snapshot()
     assert.equal(back.visible, false)
     assert.equal(back.controlsVisible, true)
-    assert.match(back.focused, /camp-timeline/)
+    assert.equal(back.focused, 'file-preview-toggle')
     assert.equal(back.stored, '0.56')
     await open()
     await viewport(1_040, 700)
@@ -1239,7 +1241,7 @@ app.whenReady().then(async () => {
     assert.match(review.text, /历史新内容/)
     assert.equal(review.fileReads, reads, 'Historical review never reads the working file')
     assert.deepEqual(review.reviewRequests, [{ threadId: 'camp-1', agentRunId: 'run-1', executionEpoch: 1 }])
-    assert.deepEqual(review.tabs.map(tab => tab.icon), ['code', 'file_change'])
+    assert.deepEqual(review.tabs.map(tab => tab.icon), ['file', 'file_change'])
     assert.ok(review.tabs.every(tab => tab.iconVisible && tab.noDrag))
     assert.equal(review.headerDrag, 'drag')
     assert.ok(review.dragSpace >= 24)
@@ -1304,7 +1306,7 @@ app.whenReady().then(async () => {
     assert.deepEqual((await reviewSnapshot()).overflow, [])
     await capture('file-change-night-2560x1440')
     await viewport(1_110)
-    assert.equal((await snapshot()).returnVisible, true)
+    assert.equal((await snapshot()).returnVisible, false)
     assert.equal((await reviewSnapshot()).reviewVisible, true)
     await click('.file-preview-toggle')
     assert.equal((await snapshot()).controlsVisible, true)
@@ -1316,8 +1318,8 @@ app.whenReady().then(async () => {
     assert.equal((await reviewSnapshot()).toggleVisible, true)
     await click('.file-preview-toggle')
     assert.equal((await reviewSnapshot()).emptyVisible, true)
-    assert.equal((await snapshot()).focused, 'file-preview-return')
-    await click('.file-preview-return')
+    assert.equal((await snapshot()).focused, 'file-preview-toggle')
+    await click('.file-preview-toggle[aria-controls="file-preview-pane"]')
     await viewport(1_440)
     await run('window.previewTest.openReview(); window.previewTest.switchCamp()')
     assert.equal((await snapshot()).visible, false)

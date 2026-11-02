@@ -121,11 +121,11 @@ last_updated: 2026-10-20
 
 ### 3.4 Bootstrap 与 Context
 
-- [ ] Session Charter、Member Identity 和 Memory Entrypoint 位于 Runtime 的 System、Developer 或等价高权限指令层。
-- [ ] Bootstrap 不伪装成普通用户消息，不进入 Tool output 或公开 narration。
-- [ ] 首次 Session、warm reuse、Host 切换 Session、cold resume 后均使用目标 Native Binding 的正确 Bootstrap。
+- [ ] 按 [Bootstrap v6](../contracts/native-session-bootstrap-v6.md) 与目标 Runtime 合同验证完整启动材料、可选 section 和已准入的投递层；Hermes 沿其 user 层投递规则。
+- [ ] Bootstrap 由 Core 组装，不作为用户业务请求、Tool output 或公开 narration；同包前置时遵守对应 Runtime 的 envelope 与实际字节预算。
+- [ ] 首次 Session、warm reuse、Host 切换 Session、cold resume 按正式投递矩阵使用本次 Run/Binding/generation 的启动材料。
 - [ ] Bootstrap 不重复、不丢失、不从 Session A 串入 Session B。
-- [ ] 每个 Prompt 使用当前冻结的 ContextManifest、Skill exposure、MCP exposure、附件授权和 delivery/epoch。
+- [ ] 每个 Prompt 使用当前冻结的 ContextManifest、Skill 来源解析与索引、MCP exposure、附件授权和 delivery/epoch。
 
 ### 3.5 Compaction Continuity
 

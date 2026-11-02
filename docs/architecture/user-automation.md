@@ -40,9 +40,9 @@ owner，因此 V1 不采用。
 | 组件 | 拥有 | 不拥有 |
 | --- | --- | --- |
 | `rovai app` CLI | 参数/文件读取、context discovery、IPC、Trial journal/编排、双 cursor wait、安全 bundle | 领域授权、Core credential、Runtime launch、AgentRun terminal 推断 |
-| Electron Main server | endpoint 生命周期、用户 credential、closed dispatch、错误脱敏、Camp window navigation | 任意 Core invoke、Trial/Benchmark entity、Runtime output 替代公共消息 |
-| Core | Camp/Message/Delivery/AgentRun mutation、claim、terminal、Evidence、公共消息、诊断安全投影 | CLI journal、Trial 生命周期、自动打开 Desktop |
-| Renderer | 复用既有 Camp activation 呈现目标 Camp | endpoint、credential、路径、Core method 选择 |
+| Electron Main server | endpoint 生命周期、用户 credential、closed dispatch、错误脱敏、Thread window navigation | 任意 Core invoke、Trial/Benchmark entity、Runtime output 替代公共消息 |
+| Core | Thread/Message/Delivery/AgentRun mutation、claim、terminal、Evidence、公共消息、诊断安全投影 | CLI journal、Trial 生命周期、自动打开 Desktop |
+| Renderer | 复用既有 Thread activation 呈现目标 Thread | endpoint、credential、路径、Core method 选择 |
 | Runtime Adapter | 既有 Run 执行和 Evidence 生产 | Trial 资格、导出格式、User Automation transport |
 
 ## 调用与故障边界
@@ -52,7 +52,7 @@ service；Main 不直接访问 SQLite。成员创建与 Runtime 配置只映射�
 `members.runtime.set`、`members.runtime.clear` 三个既有 Domain Command；显式模型配置前可通过
 `runtime.product.check` 与 `runtime.modelCatalog.open` 两个固定 Read Model 核对可用性和目录，不能透传 path、
 环境或 provider secret。`camp send` 只发出一个带幂等 `commandId` 的
-`userAutomation.camp.send`；Core 在一个 Domain Command transaction 中复用正式 Message publication 与目标
+`userAutomation.thread.send`；Core 在一个 Domain Command transaction 中复用正式 Message publication 与目标
 Delivery 创建，不提前创建 AgentRun，也不以 Composer 作为中间存储或读取、覆盖、消费 Renderer 当前输入。
 当前合同无法解释的新状态必须失败并要求升级，不能以
 convenience path 绕过。
@@ -74,9 +74,9 @@ Diagnostic Trial 只回答“这个已配置成员 Runtime 能否在当前产品
 
 Core 的安全诊断投影把 frozen facts、公开输出与派生摘要组合成 allowlist view。Main 和 CLI 不读取 raw Runtime
 payload 后再做黑名单脱敏；这样新私有字段不会因调用方忘记删除而进入终端或 bundle。公共结果必须来自
-CampMessage publication seam，Evidence 只说明观察事实，不替代消息、Task outcome 或 terminal authority。
+ThreadMessage publication seam，Evidence 只说明观察事实，不替代消息、Task outcome 或 terminal authority。
 
-Workspace inspection 只读取目录身份和轻量 Git metadata；Camp 创建重新执行目录准入，但不重复 inspection。
+Workspace inspection 只读取目录身份和轻量 Git metadata；Thread 创建重新执行目录准入，但不重复 inspection。
 Run 起止 observation 同样不扫描 tracked/untracked 工作树，新 `dirty` 为 unavailable。历史 dirty boolean 只作为
 既有诊断事实继续读取；Files Changed Card 仍完全来自 Runtime Evidence。
 
@@ -111,4 +111,4 @@ dispatcher、Contract、CLI help、错误/安全测试与版本影响记录；�
 
 ## 评测宿主
 
-`eval.*` 调用 Main 的封闭 EvaluationHostService，不透传 Core method 或 shell。服务只管理用户注册的开发者 Runner、活动进程和本地 job 文件；评测 Case、评分与尝试历史仍由既有 Qualification/Gate 模块拥有。定时任务仍由 Core 创建普通 AutomationRun/Camp，Host 观察其权威身份并执行，Agent 读取该 Camp 的报告回执。此能力与 Diagnostic Trial 保持独立，不能把 Trial bundle 直接提升为 Gate 结果。
+`eval.*` 调用 Main 的封闭 EvaluationHostService，不透传 Core method 或 shell。服务只管理用户注册的开发者 Runner、活动进程和本地 job 文件；评测 Case、评分与尝试历史仍由既有 Qualification/Gate 模块拥有。定时任务仍由 Core 创建普通 AutomationRun/Thread，Host 观察其权威身份并执行，Agent 读取该 Thread 的报告回执。此能力与 Diagnostic Trial 保持独立，不能把 Trial bundle 直接提升为 Gate 结果。

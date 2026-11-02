@@ -60,7 +60,6 @@ function validEntry(value: unknown): value is RegistryEntry {
     && isAbsolute(entry.sourcePath)
     && typeof entry.displayName === 'string'
     && entry.displayName.length > 0
-    && Array.from(entry.displayName).length <= 120
     && (entry.kind === 'file' || entry.kind === 'directory')
     && (entry.mediaType === null || typeof entry.mediaType === 'string')
     && (entry.observedByteSize === null

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { EditorState } from '@codemirror/state'
+import { history, undoDepth } from '@codemirror/commands'
 import type { FilePreviewApi, ResolvedFilePreview, OpenFilePreviewRequest, FilePreviewTextContent } from '@contracts'
 import { FilePreviewResources } from './file-preview-resources'
 import { filePreviewSessionStore } from './file-preview-session'
@@ -185,6 +187,44 @@ describe('window-owned preview resources', () => {
     await removed
     expect(session.getSnapshot()).toMatchObject({ activeTabId: b, paneVisible: false })
     expect(session.getSnapshot().tabs.some(tab => tab.id === a)).toBe(false)
+  })
+
+  it('replaces the empty directory tab with a reused file and retains directory ownership across Thread restoration', async () => {
+    const { owner, api } = fixture()
+    owner.activate('directory')
+    const session = owner.session('directory')
+    session.actions.openProjectFiles()
+    const pickerId = session.getSnapshot().activeTabId!
+    session.actions.openProjectFiles()
+    expect(session.getSnapshot()).toMatchObject({ paneVisible: true, tabs: [{ kind: 'file_picker', id: pickerId }] })
+    expect(session.getSnapshot().tabs).toHaveLength(1)
+    expect(api.open).not.toHaveBeenCalled()
+    expect(api.readText).not.toHaveBeenCalled()
+    session.actions.close(pickerId)
+    expect(session.getSnapshot()).toMatchObject({ paneVisible: false, tabs: [] })
+
+    // A file first opened from the conversation must keep its original tab and reading state.
+    await open(owner, 'directory', 'file.txt')
+    const existing = active(session)
+    session.actions.saveReading(existing.id, { codeScrollTop: 160 })
+    session.actions.openProjectFiles()
+    expect(session.getSnapshot().tabs).toHaveLength(2)
+    const outcome = await session.actions.open({ kind: 'project_file', threadId: 'directory', rawReference: 'file.txt' })
+    expect(outcome).toEqual({ kind: 'preview', tabId: existing.id })
+    expect(session.getSnapshot().tabs).toHaveLength(1)
+    expect(active(session)).toMatchObject({ id: existing.id, openedFromDirectory: true, reading: { codeScrollTop: 160 } })
+    session.actions.hidePane()
+    session.actions.openProjectFiles()
+    expect(session.getSnapshot()).toMatchObject({ paneVisible: true, activeTabId: existing.id })
+    expect(session.getSnapshot().tabs).toHaveLength(1)
+
+    await open(owner, 'another-thread')
+    session.cool()
+    owner.dispose()
+    const restored = new FilePreviewResources(api)
+    resources.push(restored)
+    restored.activate('directory')
+    expect(restored.session('directory').getSnapshot().tabs).toMatchObject([{ id: existing.id, openedFromDirectory: true }])
   })
 
   it('keeps mission activity in the shared tab lifecycle without acquiring a file handle', async () => {
@@ -702,7 +742,7 @@ describe('automatic file refresh', () => {
       else a.actions.hidePane()
       await advance(1000)
       expect(api.reload).not.toHaveBeenCalled()
-      expect(a.getSnapshot().tabs.find(tab => tab.id === first.id)).toMatchObject({ hasExternalUpdate: true })
+      expect(a.getSnapshot().tabs.find(tab => tab.id === first.id)).toMatchObject({ hasExternalUpdate: false, needsRefresh: true })
     })
 
     it.each(['refresh', 'cold'] as const)('rechecks visibility before %s after waiting for resource admission', async mode => {
@@ -722,7 +762,7 @@ describe('automatic file refresh', () => {
       admission.resolve(); await advance(0)
       expect(api.reload).not.toHaveBeenCalled()
       expect(api.restore).not.toHaveBeenCalled()
-      expect(active(a)).toMatchObject({ isRefreshing: false, hasExternalUpdate: true, refreshError: null })
+      expect(active(a)).toMatchObject({ isRefreshing: false, hasExternalUpdate: false, needsRefresh: true, refreshError: null })
       if (mode === 'cold') expect(active(a).loadState).toBe('cold')
       a.actions.showPane(); await advance(0)
       expect(mode === 'refresh' ? api.reload : api.restore).toHaveBeenCalledTimes(1)
@@ -769,7 +809,7 @@ describe('automatic file refresh', () => {
       expect(api.reload).toHaveBeenCalledTimes(1)
       expect(active(a).content).toBe(first.content)
       read.resolve(textResult('earlier save')); await advance(0)
-      expect(active(a).hasExternalUpdate).toBe(true)
+      expect(active(a)).toMatchObject({ hasExternalUpdate: false, needsRefresh: true })
       await advance()
       expect(api.reload).toHaveBeenCalledTimes(2)
       expect(active(a).content).toMatchObject({ text: 'last save' })
@@ -811,7 +851,12 @@ describe('automatic file refresh', () => {
         return result
       })
       const reserve = vi.spyOn(owner, 'reserveHtml')
+      const announced: boolean[] = []
+      const unsubscribe = owner.subscribe(() => announced.push(active(a).hasExternalUpdate))
       update('a', [first.previewKey!]); await advance(1000)
+      a.actions.hidePane(); a.actions.showPane(); await advance()
+      unsubscribe()
+      expect(announced.every(value => !value)).toBe(true)
       expect(active(a)).toMatchObject({ file: first.file, content: first.content, isRefreshing: false, hasExternalUpdate: false, refreshError: null })
       expect(active(a).candidate).toBeUndefined()
       expect(api.prepareHtmlSite).toHaveBeenCalledTimes(1)
@@ -822,6 +867,33 @@ describe('automatic file refresh', () => {
       expect(active(a).htmlSource?.text).toBe('<p>original source</p>')
       expect(api.readText).toHaveBeenCalledTimes(1)
       expect(active(a).requestGeneration).toBe(first.requestGeneration)
+    })
+
+    it('checks a dirty file before announcing a real external change without replacing its draft or undo history', async () => {
+      const { owner, api, update } = fixture()
+      let disk = { key: 'current-file', text: 'cached body', version: '1' }
+      api.readEditableFile = vi.fn(async () => ({ ok: true as const, value: disk }))
+      api.saveTextFile = vi.fn()
+      const a = await open(owner, 'a'), first = active(a)
+      await owner.edits.attach(first.id, first.file!)
+      const doc = owner.edits.get(first.id)!
+      const editor = EditorState.create({ doc: disk.text, extensions: [history()] })
+        .update({ changes: { from: 0, insert: 'draft ' } }).state
+      doc.editorState = editor
+      owner.edits.change(doc, editor.doc.toString())
+      update('a', [first.previewKey!]); await advance()
+      expect(active(a)).toMatchObject({ hasExternalUpdate: false, needsRefresh: false })
+      expect(api.reload).not.toHaveBeenCalled()
+      disk = { ...disk, text: 'external', version: '2' }
+      update('a', [first.previewKey!])
+      expect(active(a).hasExternalUpdate).toBe(false)
+      await advance()
+      expect(active(a).hasExternalUpdate).toBe(true)
+      expect(doc).toMatchObject({ draft: 'draft cached body', savedText: 'cached body', conflict: disk })
+      expect(doc.editorState).toBe(editor)
+      expect(undoDepth(editor)).toBe(1)
+      expect(owner.edits.dialog).toBeNull()
+      expect(api.saveTextFile).not.toHaveBeenCalled()
     })
 
     it.each(['digest', 'file identity', 'preview key'] as const)('loads again when the %s differs despite equal size and mtime', async change => {
@@ -847,7 +919,7 @@ describe('automatic file refresh', () => {
       expect(active(a).content).toMatchObject({ text: 'changed body' })
     })
 
-    it.each(['manual', 'error', 'released handle'] as const)('fully loads the same version for %s recovery', async entry => {
+    it.each(['manual', 'error', 'released handle'] as const)('loads unchanged content only when %s needs recovery', async entry => {
       const { owner, api, update } = fixture()
       const a = await open(owner, 'a'), first = active(a)
       const original = vi.mocked(api.reload).getMockImplementation()!
@@ -880,8 +952,8 @@ describe('automatic file refresh', () => {
       if (entry === 'manual') await a.actions.reload(first.id)
       else { a.actions.hidePane(); a.actions.showPane() }
       await advance()
-      expect(api.readText).toHaveBeenCalledTimes(2)
-      expect(active(a)).toMatchObject({ content: { text: 'reloaded body' }, isRefreshing: false, refreshError: null })
+      expect(api.readText).toHaveBeenCalledTimes(entry === 'manual' ? 1 : 2)
+      expect(active(a)).toMatchObject({ content: { text: entry === 'manual' ? 'cached body' : 'reloaded body' }, isRefreshing: false, refreshError: null })
     })
 
     it('keeps a new notification arriving during an unchanged candidate check', async () => {
@@ -897,7 +969,7 @@ describe('automatic file refresh', () => {
       update('a', [first.previewKey!]); await advance()
       update('a', [first.previewKey!])
       pending.resolve(result); await advance(0)
-      expect(active(a).hasExternalUpdate).toBe(true)
+      expect(active(a)).toMatchObject({ hasExternalUpdate: false, needsRefresh: true })
       expect(api.readText).toHaveBeenCalledTimes(1)
       vi.mocked(api.readText).mockResolvedValueOnce(textResult('actual later change'))
       await advance()
@@ -931,6 +1003,59 @@ describe('automatic file refresh', () => {
       expect(active(a)).toMatchObject({ file: candidate.file, isRefreshing: false, hasExternalUpdate: false })
       expect(active(a).candidate).toBeUndefined()
       expect(api.release).toHaveBeenCalledWith({ handleId: 'handle-3' })
+    })
+
+    it('refreshes saved HTML B after delayed preview A while preserving unsaved editor C', async () => {
+      const { owner, api, update } = fixture()
+      let disk = '<p>original</p>', version = 0
+      const snapshot = () => ({ key: 'editable-page', text: disk, version: String(version) })
+      api.readEditableFile = vi.fn(async () => ({ ok: true as const, value: snapshot() }))
+      api.saveTextFile = vi.fn(async request => {
+        expect(request.expectedVersion).toBe(String(version))
+        disk = request.text; version++
+        return { ok: true as const, value: snapshot() }
+      })
+      const prepare = vi.mocked(api.prepareHtmlSite).getMockImplementation()!
+      vi.mocked(api.prepareHtmlSite).mockImplementation(async request => {
+        const text = disk, result = await prepare(request)
+        if (result.ok) result.value.sandboxedDocument = text
+        return result
+      })
+      const a = await open(owner, 'a', 'page.html'), first = active(a)
+      await owner.edits.attach(first.id, first.file!)
+      const doc = owner.edits.get(first.id)!
+      doc.editorState = EditorState.create({ doc: disk, extensions: [history()] })
+      const edit = (text: string) => {
+        doc.editorState = doc.editorState!.update({ changes: { from: 0, to: doc.editorState!.doc.length, insert: text }, selection: { anchor: 4 } }).state
+        owner.edits.change(doc, text)
+      }
+      edit('<p>A</p>'); expect(await owner.edits.save(doc)).toBe(true); await advance(0)
+      const candidateA = active(a).candidate!
+      expect(candidateA.loaded.content).toMatchObject({ kind: 'html', preview: { sandboxedDocument: '<p>A</p>' } })
+      edit('<p>B</p>'); expect(await owner.edits.save(doc)).toBe(true)
+      edit('<p>C</p>'); doc.scrollTop = 80
+      const editorC = doc.editorState!, undoCount = undoDepth(editorC)
+      expect(undoCount).toBeGreaterThan(0)
+      update('a', [first.previewKey!]); await advance()
+      expect(api.reload).toHaveBeenCalledTimes(1)
+      a.actions.completeHtmlRefresh(first.id, candidateA.file.handleId)
+      a.actions.displayed(first.id, candidateA.file.handleId)
+      await advance(0)
+      expect(api.reload).toHaveBeenCalledTimes(2)
+      const candidateB = active(a).candidate!
+      expect(candidateB.loaded.content).toMatchObject({ kind: 'html', preview: { sandboxedDocument: '<p>B</p>' } })
+      a.actions.completeHtmlRefresh(first.id, candidateB.file.handleId)
+      a.actions.displayed(first.id, candidateB.file.handleId)
+      await owner.edits.attach(first.id, candidateB.file)
+      await advance(1000)
+      expect(active(a)).toMatchObject({ content: { kind: 'html', preview: { sandboxedDocument: '<p>B</p>' } }, isRefreshing: false, candidate: undefined })
+      expect(disk).toBe('<p>B</p>')
+      expect(doc).toMatchObject({ savedText: '<p>B</p>', draft: '<p>C</p>', version: '2', scrollTop: 80 })
+      expect(doc.editorState).toBe(editorC)
+      expect(doc.editorState!.selection.main.anchor).toBe(4)
+      expect(undoDepth(doc.editorState!)).toBe(undoCount)
+      expect(api.saveTextFile).toHaveBeenCalledTimes(2)
+      expect(api.reload).toHaveBeenCalledTimes(2)
     })
 
     it('waits for HTML readiness and merges changes while the candidate is loading', async () => {
@@ -1007,6 +1132,7 @@ describe('automatic file refresh', () => {
       const candidate = deferred<Awaited<ReturnType<FilePreviewApi['reload']>>>()
       vi.mocked(api.reload).mockReturnValueOnce(candidate.promise)
       update('a', [first.previewKey!]); await advance()
+      await a.actions.reload(first.id, false, true) // A saved refresh pending behind this read must also be discarded.
       if (action === 'close') a.actions.close(first.id)
       else if (action === 'evict') a.evict(first.id)
       else if (action === 'cool') a.cool()

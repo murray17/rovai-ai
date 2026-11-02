@@ -179,6 +179,7 @@ import {
   parseChooseRootRequest,
   parseCopyPathRequest,
   parseFilePreviewThread,
+  parseSaveTextRequest,
   parseGenerationRequest,
   parseHtmlSiteRequest,
   parseHandleRequest,
@@ -195,6 +196,7 @@ const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
 
 const allowedMethods = new Set<CoreMethod>([
+  'projectFiles.request',
   'health.check',
   'preferences.tasks.get',
   'preferences.tasks.set',
@@ -1331,6 +1333,11 @@ ipcMain.handle('rovai:file-preview-restore', (event, value: unknown) =>
 ipcMain.handle('rovai:file-preview-reopen', (event, value: unknown) =>
   filePreview.reopen(requireFilePreviewSender(event), parseReopenRequest(value)))
 
+ipcMain.handle('rovai:file-preview-read-editable', (event, value) =>
+  filePreview.editText(requireFilePreviewSender(event), parseGenerationRequest(value), false))
+ipcMain.handle('rovai:file-preview-save-text', (event, value) =>
+  filePreview.editText(requireFilePreviewSender(event), parseSaveTextRequest(value), true))
+
 ipcMain.handle('rovai:file-preview-read-text', (event, value: unknown) =>
   filePreview.readText(requireFilePreviewSender(event), parseGenerationRequest(value)))
 
@@ -2252,7 +2259,6 @@ ipcMain.handle(
       if (!isAttachmentId(attachment.id)
         || typeof attachment.displayName !== 'string'
         || !attachment.displayName.trim()
-        || Array.from(attachment.displayName).length > 120
         || (attachment.kind !== 'file' && attachment.kind !== 'directory')
         || (attachment.fileCount !== null
           && (!Number.isSafeInteger(attachment.fileCount) || Number(attachment.fileCount) < 0))

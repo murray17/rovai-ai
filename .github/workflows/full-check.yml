@@ -196,6 +196,27 @@ jobs:
           cargo check --workspace --all-targets
           --target x86_64-pc-windows-msvc
 
+      - name: Exercise optional storage and Runtime fault isolation
+        shell: pwsh
+        run: |
+          foreach ($owner in @('managed_blob::tests::', 'mcp_projection::tests::', 'runtime_mcp::tests::', 'camp_attachment_view::tests::', 'runtime_custom_api::tests::', 'runtime_startup::tests::', 'member_environment::tests::', 'core_subsystems::tests::')) {
+            cargo test -p rovai-core --features extended-tests --lib --target x86_64-pc-windows-msvc $owner -- --test-threads=2
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Install Node for native Core RPC acceptance
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+
+      - name: Exercise native Core startup and in-process optional retry
+        shell: pwsh
+        run: |
+          cargo build -p rovai-core --bin rovai-core --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:ROVAI_CORE_BIN = (Resolve-Path 'target/x86_64-pc-windows-msvc/debug/rovai-core.exe').Path
+          node --test --test-name-pattern='Thread output|optional startup|a missing Pi|authority recovery|a startup retry' scripts/lib/core-startup-availability.test.mjs
+
       - name: Exercise Windows managed process ownership
         run: >-
           cargo test -p rovai-core --lib
@@ -291,6 +312,7 @@ jobs:
           cargo test -p rovai-core --features slow-tests --lib
           --target x86_64-pc-windows-msvc
           mcp::slow_tests::
+
 
   server-updates:
     name: Server update tests / ${{ matrix.target }}

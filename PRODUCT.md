@@ -1,7 +1,5 @@
 # Product
 
-<!-- impeccable:product-schema 1 -->
-
 ## Platform
 
 desktop
@@ -53,16 +51,6 @@ The product name, macOS application bundle, macOS executable and Helper names ar
 “Rovai-ai” remains only where legacy data, the Windows executable or the repository slug requires it.
 Copy is calm, direct and evidence-first. Uncertainty, partial coverage and the next available action
 are stated plainly rather than hidden behind optimistic status language.
-
-## Evidence on Hand
-
-- Product scope and current claims: `README.md`.
-- Durable visual system and brand mark: `DESIGN.md` and `docs/ui/`.
-- Runtime compatibility evidence: `docs/runtime-compatibility.md`.
-- Current monitoring scope, field semantics and acceptance: `docs/versions/v0.96/`,
-  `docs/contracts/runtime-monitoring-v1.md` and `docs/research/runtime-monitoring/README.md`.
-- The supplied monitoring HTML is a prototype for information coverage; its sample values are not
-  production evidence and must not ship as fallback data.
 
 ## Product Principles
 

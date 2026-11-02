@@ -143,7 +143,7 @@ mod tests {
         drop(database);
         let mut database = Database::open(&directory).unwrap();
         let candidates = service
-            .snapshot_pending_camps_for_startup_cleanup(&database)
+            .snapshot_pending_camps_for_startup_cleanup(&database, &chrono::Utc::now().to_rfc3339())
             .unwrap();
         assert_eq!(
             service

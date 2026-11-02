@@ -1,3 +1,8 @@
+import { useFileEdits } from './FileEditContext'
+import { fileEditDirty } from './file-edit-store'
+import { EditableCodeViewer } from './EditableCodeViewer'
+import { DialogControlIcon } from './AppDialog'
+import { useShortcutAction, useShortcutLabel } from './ShortcutProvider'
 import { usePreviewHost } from './FilePreviewContext'
 import { FilePreviewTabs } from './FilePreviewTabs'
 import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
@@ -6,6 +11,7 @@ import { MarkdownFilePreview } from './MarkdownFilePreview'
 import { FileFindScope } from './FilePreviewFind'
 import { FileFindDomAdapter } from './FileFindDomAdapter'
 import { HtmlViewer } from './HtmlFileViewer'
+import { FilePreviewViewSwitch } from './FilePreviewViewSwitch'
 import { useFilePreview, useFilePreviewApi, canDownloadFile, type FilePreviewTabModel } from './FilePreviewContext'
 import { FileChangesPreview } from './FileChangesPreview'
 import { FilePreviewTabIcon, ResourceReferenceIcon } from './FilePreviewTabIcon'
@@ -303,7 +309,9 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
     return api.readChildImage({ handleId: file.handleId, expectedGeneration: file.contentGeneration, rawReference })
   }, [api, file])
   if (!tab.content) return <div className="file-preview-empty-content" />
+  if (tab.content.kind === 'unsupported') return <UnsupportedFile tab={tab}/>
   if (tab.content.kind === 'markdown' && file) {
+    if (tab.htmlSourceMode) return <SourceViewer tab={tab} />
     return (
       <div className="file-preview-markdown" ref={root} tabIndex={0}
         onKeyDown={(event) => selectPreviewContents(event, event.currentTarget.querySelector('.file-preview-markdown-document'))}>
@@ -343,6 +351,13 @@ function Viewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   return <SourceViewer tab={tab} />
 }
 
+function UnsupportedFile({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
+  const { openInSystem } = useFilePreview()
+  return <div className="file-preview-unavailable"><strong>{tab.file?.fileName}</strong><p>{uiAttribute('此文件暂不支持预览')}</p>
+    {tab.file?.capabilities.includes('open_in_system') && <button type="button" onClick={() => { void openInSystem(tab.id) }}>{uiAttribute('使用系统应用打开')}</button>}
+  </div>
+}
+
 function FileDownloadAction({ tab, full = false }: { tab: FilePreviewTabModel; full?: boolean }): React.JSX.Element {
   const { download } = useFilePreview()
   const busy = tab.downloadState === 'preparing'
@@ -376,7 +391,33 @@ function FileDownloadFeedback({ tab }: { tab: FilePreviewTabModel }): React.JSX.
 
 function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const api = useFilePreviewApi()
-  const { reload, retry, changePage, revealInFolder, displayed } = useFilePreview()
+  const { reload, retry, changePage, revealInFolder, displayed, toggleHtmlSource, resolvedTheme, activeTabId, paneVisible, isCurrentThread } = useFilePreview()
+  const edits = useFileEdits()
+  const doc = edits?.get(tab.id)
+  const sourceSwitch = tab.content?.kind === 'html' || tab.content?.kind === 'markdown'
+  const showEditor = !!doc && (!sourceSwitch || !!tab.htmlSourceMode)
+  const active = paneVisible && isCurrentThread !== false && activeTabId === tab.id
+  const saveShortcut = useShortcutLabel('save-file')
+  useEffect(() => { if (tab.file && tab.content && tab.content.kind !== 'page') void edits?.attach(tab.id, tab.file) }, [edits, tab.id, tab.file?.handleId, tab.file?.contentGeneration, tab.content?.kind])
+  useShortcutAction('save-file', target => {
+    if (!doc || !edits || !(target instanceof Element) || !target.closest('.file-preview-pane')) return false
+    void edits.save(doc); return true
+  }, active)
+  const editor = showEditor && active && doc && edits ? <EditableCodeViewer key={doc.key} doc={doc} store={edits} theme={resolvedTheme} target={tab.file?.target} /> : null
+  const editActions = <div className="file-preview-edit-actions">
+    {sourceSwitch && <FilePreviewViewSwitch interactive={tab.content?.kind === 'html'} sourceMode={!!tab.htmlSourceMode}
+      onChange={() => toggleHtmlSource(tab.id)} />}
+    {doc && fileEditDirty(doc) && <button type="button" className="file-action-button" disabled={doc.saving}
+      title={uiAttribute('保存（{0}）', saveShortcut)} aria-label={uiAttribute('保存（{0}）', saveShortcut)} aria-busy={doc.saving}
+      onClick={() => void edits?.save(doc)}><DialogControlIcon name="save" /></button>}
+  </div>
+  const editLoadError = edits?.failures.get(tab.id)
+  const editError = editLoadError ?? doc?.error
+  const editFeedback = editError && <div className="file-preview-refresh-error" role="alert"><span>{editError}</span>
+    {editLoadError && tab.file ? <button type="button" disabled={edits?.isAttaching(tab.id)}
+      onClick={() => void edits?.attach(tab.id, tab.file!)}>{uiAttribute('重试')}</button>
+      : doc && <button type="button" disabled={doc.saving} onClick={() => void edits?.save(doc)}>{uiAttribute(doc.unknown ? '核对保存结果' : doc.conflict ? '处理冲突' : '重试')}</button>}
+  </div>
   const [pathActionError, setPathActionError] = useState<string | null>(null)
   useEffect(() => setPathActionError(null), [tab.file?.handleId, tab.id])
   useEffect(() => { if (tab.file && tab.content && tab.content.kind !== 'html') displayed(tab.id, tab.file.handleId) }, [tab.file?.handleId, tab.content, tab.id, displayed])
@@ -385,7 +426,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   const downloadAction = downloadAvailable ? <FileDownloadAction key={tab.id} tab={tab} /> : null
   const showPath = tab.loadState === 'ready' && previewPathIsVisible(tab.presentation)
   const showUpdate = tab.loadState === 'ready' && Boolean(tab.file)
-    && (tab.hasExternalUpdate || tab.isRefreshing)
+    && tab.hasExternalUpdate
   const updateAction = showUpdate ? (
     <button
       className="file-preview-update-action"
@@ -416,18 +457,24 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   </> : null
   if (tab.content?.kind === 'html') {
     return <>
-      <HtmlViewer tab={tab} downloadAction={downloadAction} pathControl={pathControl} updateAction={tab.isRefreshing ? null : updateAction} />
-      <FileDownloadFeedback tab={tab} />
+      <div className="file-preview-path-row">{pathControl}{tab.isRefreshing ? null : updateAction}{editActions}{downloadAction}</div>
+      {editFeedback}<FileDownloadFeedback tab={tab} />
+      <div className="file-preview-saved-preview" hidden={showEditor} inert={showEditor}>
+        <HtmlViewer tab={doc ? { ...tab, htmlSourceMode: false } : tab} hideToolbar downloadAction={null} pathControl={null} updateAction={null} />
+      </div>
+      {showEditor && <div className="file-preview-content">{editor}</div>}
     </>
   }
   return (
     <>
-      {(showPath || updateAction || (tab.content && downloadAvailable)) && <div className={showPath || downloadAvailable ? "file-preview-path-row" : "file-preview-update-row"}>
+      {(showPath || sourceSwitch || updateAction || !!doc || (tab.content && downloadAvailable)) && <div className={showPath || sourceSwitch || downloadAvailable ? "file-preview-path-row" : "file-preview-update-row"}>
         {pathControl}
         {updateAction}
+        {editActions}
         {downloadAction}
       </div>}
       <FileDownloadFeedback tab={tab} />
+      {editFeedback}
       <div className="file-preview-content">
         {tab.loadState === 'opening' && !tab.content && (
           <OpeningIndicator />
@@ -444,7 +491,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
             </div>
           </div>
         )}
-        {tab.content && <Viewer tab={tab} />}
+        {showEditor ? editor : tab.content && <Viewer tab={tab} />}
         {tab.refreshError && (
           <div className="file-preview-refresh-error" role="alert">
             <span>{tab.refreshError}</span>
@@ -534,20 +581,19 @@ export function FilePreviewPaneContent({ visible, missionActivity, executionHost
     <section id={visible ? "file-preview-pane" : undefined} className="file-preview-pane" hidden={!paneVisible} aria-label={uiAttribute("文件预览")}>
       {tabs.length === 0 && <div className="file-preview-empty">
         <FilePreviewTabIcon kind="text" />
-        <h2><UiText zh={"选择一个文件预览"} /></h2>
-        <p><UiText zh={"点击会话中的文件链接或 File Change 卡片，在这里查看文件和变更。"} /></p>
+        <h2><UiText zh={"选择文件"} /></h2>
       </div>}
       {tabs.map((tab) => <section
         key={tab.id}
         id={`file-preview-panel-${tab.id}`}
-        className="file-preview-tab-panel"
+        className={`file-preview-tab-panel${tab.kind === 'file' ? ' file-preview-document-panel' : ''}`}
         hidden={!visible || tab.id !== activeTabId}
         role="tabpanel"
         tabIndex={0}
         aria-label={tabLabels.get(tab.id) ?? previewTabLabel(tab, language)}
         aria-labelledby={`file-preview-tab-${tab.id}`}
       >
-        {tab.kind === 'execution'
+        {tab.kind === 'file_picker' ? null : tab.kind === 'execution'
           ? <div ref={executionHostRef} className="execution-preview-host" />
           : <ReadingPanel tab={tab}>{tab.kind === 'mission_activity' ? missionActivity : <FileFindScope id={tab.id}>{tab.kind === 'file_change' ? <FileChangesPreview tab={tab} visible={visible && tab.id === activeTabId} /> : <FilePreviewDocument tab={tab} />}</FileFindScope>}</ReadingPanel>}
       </section>)}

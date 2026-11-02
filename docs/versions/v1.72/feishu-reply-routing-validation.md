@@ -26,7 +26,7 @@ last_updated: 2026-10-28
 - `context_contract.rs`、`db_chat_reply.rs`、`db.rs`：public43/Facts11/Profile15；增量213/schema159扩展已有版本准入、保留旧表行/Blob/grant/outbound，失败回滚。旧158与当前159状态闭集分别验证。
 - 复用既有聊天、数据库、历史恢复、预算owner；仅新增一个低成本内存SQLite projector矩阵owner，拥有来源关联与最终受众语义，未新增重型独立测试。保留前阶段FRR-10所有特征断言和原始日志。
 - `scripts/frr-r3-model.mjs`使用生产Core与生产`ChannelChatService`，仅`sendText`/联系人查询为合成接收器，无飞书/Lark凭据和真实发送。`qualification-runner.mjs`补逐case Windows私有根与独立CodeBuddy配置，模板仅含环境变量引用。
-- 当前合同、Profile15配对、架构、术语、导航和版本决定D53已同步；未push、PR、发布或修改日常实例。
+- 当前合同、Profile15配对、架构、术语、导航和版本决定D70（原D53重编号）已同步；未push、PR、发布或修改日常实例。
 
 ## 产物与摘要
 
@@ -152,3 +152,7 @@ Rust统一 `CARGO_BUILD_JOBS=1 cargo test --offline -p rovai-core --lib --featur
 
 显式8KiB、单条超限、姓名UTF-8差额由已通过确定性owner拥有；FRR-13原计划的可执行近预算模型分支已补完，不再列未跑。
 尚未通过的是完整通用Gate及固定Judge，不能用专项通过替代。
+
+## 历史勘误：2026-11-02 决定编号合流
+
+本报告上文的 D70／原 D53 是当时分支编号，保留原验收事实和未完成结论。固定上游合流后，聊天来源决定唯一入口为 [V1.72-D75](decisions.md#v1-72-d75)，上游 D70 仍指可选历史文件与单个 Runtime 故障范围；编号说明见决定末尾勘误。

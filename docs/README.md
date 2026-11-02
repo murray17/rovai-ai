@@ -1,168 +1,77 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-10-27
+last_updated: 2026-10-31
 ---
 
-# Rovai-ai 文档导航
+# Rovai AI 文档导航
 
-人类用户统一称 User，旧 Session 与别名规则见 [User Naming v1](contracts/user-naming-v1.md)。
+先按任务选入口；精确字段与协议从[合同索引](contracts/README.md)确认当前版本，只读取相关章节。
+不默认加载全部架构、合同或历史版本。
+文档说明规范，代码、Migration、测试与验收证据说明实现。
 
-公开会话统一称 Thread；改名和兼容边界先读 [Thread Naming v1](contracts/thread-naming-v1.md)。
+## 按任务读取
 
-本文件定义 `docs/` 的职责、权威边界和读取顺序。人和 AI 在处理架构、实现、规划或文档任务前，应先从这里判断需要读取哪些资料，而不是默认加载全部历史文档。
-
-## 从这里开始
-
-| 你想做什么 | 入口 |
+| 任务 | 入口 |
 |---|---|
-| 安装和使用 Rovai | [用户指南](guides/README.md) |
-| 查看产品界面与实际协作 | [产品展示](product-showcase.md) |
-| 浏览系统架构图解 | [系统架构图解](architecture/system-views.md) |
-| 参与开发 | [开发者指南](development/README.md) |
-| 理解当前架构 | [长期架构](architecture/README.md) |
-| 查看当前决策 | [当前决定](decisions/CURRENT.md) |
-| 查看当前版本 | [版本记录](versions/README.md) |
+| 理解产品与领域词汇 | [PRODUCT.md](../PRODUCT.md)；术语与概念边界见 [CONTEXT.md](../CONTEXT.md) |
+| 修改架构或业务实现 | 从[架构索引](architecture/README.md)选择相关专题；跨主题约束查[基础不变量](architecture/foundational-invariants.md) |
+| 修改 Renderer UI/UX | 先读 [DESIGN.md](../DESIGN.md)和[UI 索引](ui/README.md)，再读目标主题、组件或 surface brief |
+| 修改 Thread 创建、成员、消息、单聊或草稿 | 按目标读[创建](architecture/camp-activation-lifecycle.md)、[成员关系](architecture/dynamic-camp-membership.md)、[公共投递](architecture/public-a2a-message-delivery.md)、[单聊](architecture/single-chat.md)或[输入框](architecture/camp-composer-draft.md) |
+| 修改 Team、Mission 或 Task | [Team](architecture/team-management.md)、[Mission](architecture/missions.md)或[Task](contracts/durable-task-v6.md) |
+| 修改 Thread/User 名称、ID 或兼容边界 | [Thread Naming](contracts/thread-naming-v1.md)、[Thread Identity](architecture/camp-identity.md)及 [User Naming](contracts/user-naming-v1.md) |
+| 修改 Runtime 发现、配置、权限、启动或新增接入 | [Runtime 边界](architecture/runtime-catalog-boundaries.md)；新增接入另读[接入 Checklist](development/runtime-integration-checklist.md) |
+| 修改执行恢复、停止或退出 | [AgentRun Recovery](architecture/agent-run-recovery.md)或[Planned Shutdown](architecture/planned-shutdown.md) |
+| 修改 Rovai 的 Bootstrap、Dynamic Context、模型输入选择、证据或版本 | **先遵守[模型上下文变更治理](development/model-context-change-governance.md)的独立说明与二次确认要求**，再读[Bootstrap](architecture/foundational-invariants.md#context-session-bootstrap)与[ContextManifest](architecture/foundational-invariants.md#context-manifest-run-facts) |
+| 修改 Skills、Built-in CLI 或外部 MCP | Skills 读[来源与投递](architecture/skills.md)；CLI/MCP 读[Built-in Tool Runtime](architecture/builtin-tool-runtime.md) |
+| 修改 Memory | [在线捕获、治理与 Agent 读写](architecture/online-memory-capture.md) |
+| 修改文件、附件或预览 | [附件与原路径引用](architecture/camp-published-attachment-view.md)或[文件预览](architecture/file-preview.md) |
+| 修改渠道 | 按 Provider 选择[飞书](architecture/feishu-channel.md)、[Lark](architecture/lark-channel.md)或[钉钉](architecture/dingtalk-channel.md) |
+| 修改启动、数据库、Host 或 Server | [启动与数据库准入](architecture/availability-first-runtime.md)或[统一 Rust Host](architecture/unified-rust-host.md) |
+| 修改 Windows 平台行为 | [Windows 架构](architecture/windows-desktop-platform.md)与[交互差异](ui/windows-interaction-delta.md) |
+| 修改定时任务或用户自动化 CLI | [Automation](architecture/scheduled-automation.md)或[User Automation](architecture/user-automation.md) |
+| 修改 Runtime 活动、用量或通知 | [活动映射](runtime-activity/README.md)、[运行监控](architecture/runtime-monitoring.md)或[通知](architecture/notification-episodes.md) |
+| 修改评测、Benchmark 或真实模型验收 | [评测流程](development/evaluation.md)；Benchmark 专题另读[协议架构](architecture/benchmark-protocol.md) |
+| 修改仓库 Skill 的结构与触发描述 | [Skill 编写规范](development/skill-authoring.md)；涉及模型投递时同时遵守模型上下文变更治理 |
+| 判断当前版本目标、范围、进度或切换版本 | [版本索引](versions/README.md)中的唯一 `current` 条目；切换时执行该索引的检查清单 |
+| 修改文档、记录决定或查设计理由 | [文档与决定治理](decisions/README.md)；理由从[当前决定导航](decisions/CURRENT.md)进入 |
+| 本地运行、测试、构建或管理 worktree | [开发者指南](development/README.md)；启动 App/Core/Runtime 前读[隔离流程](development/local-workflow.md)，worktree 操作读[生命周期规则](development/worktrees.md) |
 
-## 维护者与 Coding Agent 按任务读取
+使用产品见[用户指南](guides/README.md)，系统概览见[架构图解](architecture/system-views.md)，界面展示见[产品展示](product-showcase.md)。
 
-| 任务 | 必读资料 |
+## 文档归属
+
+| 内容 | 权威位置 |
 |---|---|
-| 修改 Team 模板、创建默认配置或团队指引 | [Team 管理架构](architecture/team-management.md)、[Team Templates v1](contracts/team-templates-v1.md)、[Bootstrap v6](contracts/native-session-bootstrap-v6.md)及[Team 工作区](ui/components/team-workspace.md) |
-| 修改 Mission、使命工作区、累计 Git Diff、使命上下文或桌面使命板 | [使命架构](architecture/missions.md)、[Mission v12](contracts/mission-v12.md)、[ContextManifest v42](contracts/context-manifest-evidence-v42.md)及[使命板 UI](ui/components/mission-board.md) |
-| 修改共享 Core 运行层、Host、Desktop Web 或独立 Server | [统一 Rust Host](architecture/unified-rust-host.md)、[当前版本](versions/README.md)、[Availability-first Runtime](architecture/availability-first-runtime.md)与[本地隔离流程](development/local-workflow.md) |
-| 修改 Runtime 结构化图片、原生生图自动展示准入、混合临时文件生命周期、Run 图片读取、图片附件 Gallery、消息附件分区/几何或本地图片与飞书显式文件交付边界 | [Runtime 图片架构](architecture/runtime-images.md)、[Runtime Images v5](contracts/runtime-images-v5.md)、[Camp Open Projection v30](contracts/camp-open-projection-v30.md)、[v1.53 交付范围](versions/v1.53/README.md)及[统一图片与文件展示](ui/components/conversation-workspace.md#runtime-图片与消息图片) |
-| 修改 Thread 成员 Fast、二态控件、可空偏好、绑定代次或单次执行档位 | [Camp Member Fast v3](contracts/camp-member-fast-v3.md)、[Runtime Launch v63](contracts/runtime-launch-and-verification-v63.md)、[Usage v9](contracts/runtime-usage-monitoring-v9.md)、[Thread 会话工作区](ui/components/conversation-workspace.md) |
-| 判断长期架构约束或修改领域、持久化、安全、Runtime 边界 | 先读[当前 Architecture 索引](architecture/README.md)和相关当前 Contract；需要理解取舍时再从[当前决定导航](decisions/CURRENT.md)进入版本理由 |
-| 修改 Domain Command Gateway、`command.result` 持久回放、事件 payload/订阅、`event_log` 回执存储或幂等结果 | [Domain Command Result v1](contracts/domain-command-result-v1.md)、[Core 事务与 Read Side 不变量](architecture/foundational-invariants.md#core-command-transaction)、[Availability-first Runtime](architecture/availability-first-runtime.md)及[v1.53 实施计划](versions/v1.53/implementation-plan.md) |
-| 新增或修改 Version Decision、Architecture、Contract、版本文档或文档路由 | [决策治理与准入](decisions/README.md)、[当前决定导航](decisions/CURRENT.md)、对应目录 README，并运行通用文档门禁；禁止新增数字 ADR |
-| 判断当前版本目标、范围、进度或验收口径 | 从[版本索引中的唯一 `current` 条目](versions/README.md)进入对应版本概览与实施计划 |
-| 修改 public Thread 输入框、发送失败保留、撤回、附件 source refs 或 Desktop-local 编辑状态 | [Camp Composer Draft v19](contracts/camp-composer-draft-v19.md)、[Public Thread Composer 架构](architecture/camp-composer-draft.md)、[Camp Message Send v26](contracts/camp-message-send-v26.md)、[结构化 Mention 与 Atom](ui/components/structured-mentions.md)及[Thread 会话工作区](ui/components/conversation-workspace.md) |
-| 修改公共/单聊输入框上下键历史、本轮内容提取或草稿预览 | [Input History v1](contracts/input-history-v1.md)、[Public Thread Composer 架构](architecture/camp-composer-draft.md)、[Single Chat Architecture](architecture/single-chat.md)及[本版实施与验收](versions/v1.72/input-history-implementation.md) |
-| 修改撤回消息两分钟重新编辑、本机恢复副本或撤回回执核对 | [Message Reedit v1](contracts/message-reedit-v1.md)、[Public Thread Composer 架构](architecture/camp-composer-draft.md)、[Domain Command Result v1](contracts/domain-command-result-v1.md)及[输入历史](contracts/input-history-v1.md) |
-| 修改 Thread 内单聊、私有 Conversation、Single Chat Context/Built-in policy、私有 terminal 路由、结束/取消、Conversation 级待发送队列或单聊 UI | [Single Chat v9](contracts/single-chat-v9.md)、[Single Chat Architecture](architecture/single-chat.md)、[Camp Attachment v11](contracts/camp-attachment-v11.md)、[Thread 会话工作区](ui/components/conversation-workspace.md#camp-内单聊) |
-| 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
-| 新增 Agent Runtime、建立真实 Probe、判断 Settings Preview 或主机平台准入边界 | [Agent Runtime 接入与准入 Checklist](development/runtime-integration-checklist.md)、[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)、[Runtime Platform Admission v2](contracts/runtime-platform-admission-v2.md)、[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[当前 Pi Runtime 版本](versions/v1.39/README.md)、[Pi Parity Matrix](research/pi-runtime-reintegration-parity-matrix.md)、[Kimi Research](research/kimi-code-runtime-research.md)、[Cursor Research](research/cursor-agent-runtime-research.md)及[TRAE Research/Probe](research/trae-cli-runtime/README.md) |
-| 修改 Runtime Usage、监控 collection、Coverage、成本层或设置页运行监控 | [Evidence 与 Usage 不变量](architecture/foundational-invariants.md#evidence-usage)、[Runtime Monitoring 架构](architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v11](contracts/runtime-usage-monitoring-v11.md)及[可采集性审计](research/runtime-monitoring/README.md) |
-| 修改执行台 Run 用量入口或原生 Session 上下文圆环 | [Runtime Execution Metrics v7](contracts/runtime-execution-metrics-v7.md)、[Runtime Monitoring 架构](architecture/runtime-monitoring.md)、[Thread 会话工作区](ui/components/conversation-workspace.md#camp-执行过程)及[最新原生格式兼容验收](research/runtime-monitoring/native-format-compatibility-2026-10-02.md) |
-| 修改 Runtime 子进程启动、主机平台准入、ACP Client FS/Terminal、Thread attachment root、Run tmp writable root、浅检测/深检、模型目录缓存、检查 attempt、公开 Runtime failure/command、运行中 Runtime diagnostic、Session continuation/cold resume、replay quarantine、静态 Installation、`light_ready`/`installed_unverified`、执行期验证或 nullable Runtime version | [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[Runtime 进程与校验不变量](architecture/foundational-invariants.md#runtime-process-verification)、[Runtime 恢复与关闭不变量](architecture/foundational-invariants.md#runtime-recovery-shutdown)、[Managed Runtime Process v2](contracts/managed-runtime-process-v2.md)、[ACP Client Terminal v3](contracts/acp-client-terminal-v3.md)、[Runtime Platform Admission v2](contracts/runtime-platform-admission-v2.md)、[Runtime Launch and Verification v74](contracts/runtime-launch-and-verification-v74.md)、[Thread Published Attachment View](architecture/camp-published-attachment-view.md)及[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md) |
-| 修改队员头像、身份编辑或渠道头像导出 | [Member Avatar v4](contracts/member-avatar-v4.md)、[队员身份 UI](ui/components/member-identity.md)、[成员投影](architecture/foundational-invariants.md#member-projection)及[队员工作区 brief](../apps/desktop/.impeccable/surfaces/member-workspace.md) |
-| 修改队员 Runtime 权限默认、ACP permission response、模型 Picker、Kiro trust-all、TRAE/Cursor/Kimi/Pi permission mode、Kimi/Pi provider 配置或 permission schema drift | [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[Runtime Launch and Verification v74](contracts/runtime-launch-and-verification-v74.md)、[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)及[队员工作区 brief](../apps/desktop/.impeccable/surfaces/member-workspace.md) |
-| 修改 Thread 主键、`CampId/campId/camp_id`、Thread 文件路径、本机 Thread locator 或 Thread/Native Session identity seam | [Camp Identity v1](contracts/camp-identity-v1.md)、[Thread Identity Architecture](architecture/camp-identity.md)、[Thread 生命周期不变量](architecture/foundational-invariants.md#camp-lifecycle)及当前 Context/History/Built-in 合同 |
-| 修改 Thread 动态添加/移除队员、零成员会话、Default Lead 替换、membership generation/version、离队 cutover/reconciliation、外部 roster 同步或成员管理 UI | [Camp Membership v3](contracts/camp-membership-v3.md)、[动态 Thread 队员关系](architecture/dynamic-camp-membership.md)、[成员生命周期不变量](architecture/foundational-invariants.md#member-lifecycle)、[协作与执行准入不变量](architecture/foundational-invariants.md#collaboration-admission)、[Camp Open Projection v30](contracts/camp-open-projection-v30.md)及[Thread 会话工作区](ui/components/conversation-workspace.md) |
-| 修改飞书、Lark 或钉钉渠道、渠道 credential/Developer Session 存储、队员 Bot、Owner identity、OAuth、Quick Chat/Project Catalog、PendingCampBinding、渠道会话、ExternalPrincipal、多 Bot、ChannelTurnRequest、群 roster、执行控制台、永久输出/附件、卡片/Outbox 或渠道设置 UI | 先读 [Channel Message Bridge v1](contracts/channel-message-bridge-v1.md)与[Channel Storage v3](contracts/channel-storage-v3.md)，再按 Provider 读取 [Feishu Channel v17](contracts/feishu-channel-v17.md)与[飞书渠道架构](architecture/feishu-channel.md)，[Lark Channel v1](contracts/lark-channel-v1.md)与[Lark 渠道架构](architecture/lark-channel.md)，或 [DingTalk Channel v14](contracts/dingtalk-channel-v14.md)与[钉钉渠道架构](architecture/dingtalk-channel.md)；共享边界继续读[Camp Membership v3](contracts/camp-membership-v3.md)、[Camp Attachment v11](contracts/camp-attachment-v11.md)、[ContextManifest Evidence v31](contracts/context-manifest-evidence-v31.md)及[渠道设置](ui/components/channel-settings.md) |
-| 修改渠道 Host 唤醒/watchdog、维护回执、FIFO 提升或 delivery lease 恢复 | [Channel Host Maintenance v5](contracts/channel-host-maintenance-v5.md)、[Core 事务不变量](architecture/foundational-invariants.md#core-command-transaction)及对应 Provider 当前合同 |
-| 修改渠道 Thread 自动命名、来源前缀或手动重命名展示 | [Channel Camp Naming v1](contracts/channel-camp-naming-v1.md)、[Thread 命名不变量](architecture/foundational-invariants.md#camp-lifecycle)、[App Shell 与统一侧栏](ui/components/app-shell-navigation.md) |
-| 新增或修改 Runtime Activity 映射规则 | [Runtime Activity Mapping 维护指南](runtime-activity/README.md)及[Registry](runtime-activity/registry.md) |
-| 修改内置 Agent CLI、IPC、Envelope、receipt、完整结果运输、Single Chat history、定时 Automation、Mission、队员创建、Agent Send 或幂等合同 | [Built-in Tool Transport v44](contracts/builtin-tool-transport-v44.md)、[Built-in 运输不变量](architecture/foundational-invariants.md#skills-builtin-transport)、[Skill Library 与投影不变量](architecture/foundational-invariants.md#skills-library-projection)、[Camp Message Send v26](contracts/camp-message-send-v26.md)及[Current User Attention v10](contracts/current-user-attention-v10.md) |
-| 修改普通用户 `rovai app`、Workspace inspection、Thread/Run 终端自动化、Diagnostic Trial、双 cursor 或诊断 bundle | [User Automation v6](contracts/user-automation-v6.md)、[User Automation Architecture](architecture/user-automation.md)、[Workspace 与动态 Git 不变量](architecture/foundational-invariants.md#camp-workspace)及[当前版本](versions/v1.54/README.md) |
-| 修改 Desktop 定时任务、Automation 定义/快照、started/skipped(overlap)、普通 Delivery claim、结果、Owner 通知或 Automation 工作区 | [Scheduled Automation v5](contracts/scheduled-automation-v5.md)、[Scheduled Automation Architecture](architecture/scheduled-automation.md)、[Scheduled Automation 不变量](architecture/foundational-invariants.md#scheduled-automation)及[Automation 工作区](ui/components/automation-workspace.md) |
-| 修改 `camp.search`、`camp.read`、`history.search`、公共读取范围、实时可见性、recipient suppression、撤回过滤、Thread message publication fence 或 Agent read 附件输出 | [Camp History v16](contracts/camp-history-v16.md)、[公共上下文不变量](architecture/foundational-invariants.md#context-public-history)、[History 与寻址不变量](architecture/foundational-invariants.md#collaboration-history-addressing)、[Message Delivery 不变量](architecture/foundational-invariants.md#collaboration-delivery)、[Built-in Tool Runtime](architecture/builtin-tool-runtime.md)及[Public Thread Message/Delivery 架构](architecture/public-a2a-message-delivery.md) |
-| 修改 Memory 在线捕获、complete exact-Scope View、Agent mutation、copyable target、Hearth Review、active body quota、clean break、候选清除、Forget 闭包或审核并发 | [Online Memory Capture 架构](architecture/online-memory-capture.md)、[Memory Capture v3](contracts/memory-capture-v3.md)、[Memory 写入与存储不变量](architecture/foundational-invariants.md#memory-write-store)及[Memory 读取与投影不变量](architecture/foundational-invariants.md#memory-read-projection) |
-| 修改通知来源、Episode 聚合、未读/清除、会话可见确认、增量、浮层设置或类型化导航 | [Notification Episode v12](contracts/notification-episode-v12.md)、[Current User Attention v10](contracts/current-user-attention-v10.md)、[通知事实与投影](architecture/foundational-invariants.md#core-notifications)及[Notification Episode 架构](architecture/notification-episodes.md) |
-| 修改 Desktop 用户 source attachment、Agent 原路径引用与历史 Managed v2、legacy Draft/Published 授权、Composer/Pending/Agent ingress、Timeline 系统打开、按动作 availability、Runtime resolver/root 或模型附件路径 | [Camp Attachment v11](contracts/camp-attachment-v11.md)、[Camp Published Attachment View v4（legacy）](contracts/camp-published-attachment-view-v4.md)、[Thread Attachments 架构](architecture/camp-published-attachment-view.md)、[ContextManifest Evidence v25](contracts/context-manifest-evidence-v25.md)、[Camp History Retrieval v6](contracts/camp-history-v6.md)、[Camp Identity v1](contracts/camp-identity-v1.md)、[Thread 资源不变量](architecture/foundational-invariants.md#camp-resources)、[Thread 会话工作区](ui/components/conversation-workspace.md)及[会话区拖放 UI](ui/components/conversation-drop-zone.md) |
-| 修改用户消息回复、接收者选择、Composer Text + Atom/Typeahead/Clipboard、Renderer 当前输入、发送失败保留、离开 Thread/退出提醒、纯附件发送或失效换人 | [Composer 不变量](architecture/foundational-invariants.md#camp-composer)、[Camp Composer v14](contracts/camp-composer-draft-v14.md)、[Thread Composer 架构](architecture/camp-composer-draft.md)、[结构化 Mention 与 Atom](ui/components/structured-mentions.md)及[Thread 会话工作区](ui/components/conversation-workspace.md) |
-| 修改 Thread 打开、冷启动恢复壳层、投影/存在性检查、会话历史分页、运行中 Evidence、membership reconciliation、AgentRun 文件变化、high-water/cache 或首屏性能日志 | [Camp Open Projection v30](contracts/camp-open-projection-v30.md)、[Thread Open Read Path](architecture/camp-open-read-path.md)、[Core 受管内容不变量](architecture/foundational-invariants.md#core-managed-content)、[协作与执行准入不变量](architecture/foundational-invariants.md#collaboration-admission)及[Thread 会话工作区](ui/components/conversation-workspace.md) |
-| 修改 Desktop Navigation Snapshot、Sidecar Project 顺序/冻结/同步、侧栏 Run marker、Core 失效通知、全局刷新协调、失败退避、前后台刷新或安全轮询 | [Desktop Navigation Refresh](architecture/desktop-navigation-refresh.md)、[Core Snapshot 不变量](architecture/foundational-invariants.md#core-read-side)、[产品与导航不变量](architecture/foundational-invariants.md#product-navigation)及[App Shell 与统一侧栏](ui/components/app-shell-navigation.md) |
-| 修改 Desktop 启动壳层、Full Core Supervisor、data-dir lease、SQLite authority 准入/迁移、generation fencing、bootstrap diagnostics 或 Core request failure transport | [Desktop 可用性与权威准入不变量](architecture/foundational-invariants.md#desktop-authority-admission)、[Availability-first Runtime](architecture/availability-first-runtime.md)、[Desktop Runtime Availability v3](contracts/desktop-runtime-availability-v3.md)及[Bootstrap Shell](ui/components/bootstrap-shell.md) |
-| 修改 Desktop 当前 Thread `Command/Ctrl+F`、完整会话正文 exact count、命中遍历、地图快捷返回或旧消息 anchored 定位 | [Camp Conversation Find v1](contracts/camp-conversation-find-v1.md)、[Thread Open Read Path](architecture/camp-open-read-path.md)、[Thread 会话工作区](ui/components/conversation-workspace.md)、[Core 受管内容不变量](architecture/foundational-invariants.md#core-managed-content)及[History 与寻址不变量](architecture/foundational-invariants.md#collaboration-history-addressing) |
-| 修改 Thread 永久删除、异步受理、删除准入 fence、删除后的 Runtime 收敛或受管资源清理 | [Camp Permanent Deletion v4](contracts/camp-permanent-deletion-v4.md)、[Thread 永久删除架构](architecture/camp-deletion.md)、[Thread Published Attachment View](architecture/camp-published-attachment-view.md)、[Thread 资源不变量](architecture/foundational-invariants.md#camp-resources)、[协作与执行准入不变量](architecture/foundational-invariants.md#collaboration-admission)、[Runtime 恢复与关闭不变量](architecture/foundational-invariants.md#runtime-recovery-shutdown)及[Runtime 进程与校验不变量](architecture/foundational-invariants.md#runtime-process-verification) |
-| 修改首次安装判断、新手训练页、无 Runtime 延后配置、断点恢复、首次队员/Runtime provisioning、`初次集结` 或 starter 输入行为 | [First-run Onboarding v7](contracts/first-run-onboarding-v7.md)、[First-run Onboarding 架构](architecture/first-run-onboarding.md)、[Availability-first Runtime](architecture/availability-first-runtime.md)、[首次训练 UI](ui/components/first-run-onboarding.md)、[Thread 生命周期不变量](architecture/foundational-invariants.md#camp-lifecycle)、[Runtime Catalog 与 Installation 不变量](architecture/foundational-invariants.md#runtime-catalog-installation)及[Camp Composer Draft v19](contracts/camp-composer-draft-v19.md) |
-| 修改界面语言偏好、内置队员候选资料语言或本地化边界 | [Interface Language v2](contracts/interface-language-v2.md)、[首次训练 UI](ui/components/first-run-onboarding.md)及[App Shell 与设置](ui/components/app-shell-navigation.md#设置与返回)；发布说明正文选择另读下一行 App Update 合同 |
-| 修改应用更新、发布说明语言分段、双语发布源或更新页显示与回退 | [App Update v7](contracts/app-update-v7.md)、[Desktop App Updates](architecture/desktop-app-updates.md)、[共用发布源与打包](development/packaging.md#主动检查更新发布集合)及[设置工作区](../apps/desktop/.impeccable/surfaces/settings-workspace.md#关于与更新)；界面语言偏好 API 仍由 [Interface Language v2](contracts/interface-language-v2.md)拥有 |
-| 编写或更新仓库 Skill 的触发 `description`、正文分层、references 或 `agents/openai.yaml` | [Skill 编写与 description 路由规范](development/skill-authoring.md)；若同时修改投影、bootstrap 或执行完整性，再按下一行读取架构约束 |
-| 修改当前 Skills 受管文件、队员工具箱、Harness 原生发现、旧项目投影清理或设置页 | [Skills 架构](architecture/skills.md)、[Skills Rebuild v2](contracts/skills-rebuild-v2.md)、[Skills UI](ui/components/skills-settings.md)及[Runtime 进程与校验不变量](architecture/foundational-invariants.md#runtime-process-verification)；旧 Revision/投影恢复再读[历史 Skill Projection](architecture/skill-projection-reconciliation.md) |
-| 修改 Composer Skill Picker 的结构化身份、claim-time 批次资格、`RUN_INPUT.messages[].skills` 文件链接或对应 Manifest Evidence | 先按[核心模型上下文变更治理](development/model-context-change-governance.md)确认 revision，再读[ContextManifest 与 Run Facts 不变量](architecture/foundational-invariants.md#context-manifest-run-facts)、[Skills Rebuild v2](contracts/skills-rebuild-v2.md)、[Run Input Skill Links v2](contracts/current-input-skill-links-v2.md)、[ContextManifest Evidence v31](contracts/context-manifest-evidence-v31.md)、[Skills 架构](architecture/skills.md)及[Thread 会话工作区](ui/components/conversation-workspace.md) |
-| 修改 CLI 教学分层、Agent inline 寻址、协作 Skill 消息拓扑、`cli-operations` 触发/reference，或 official Skill 精确集合、固定 GitHub 来源与管理策略 | [Message Delivery 不变量](architecture/foundational-invariants.md#collaboration-delivery)、[Built-in 运输不变量](architecture/foundational-invariants.md#skills-builtin-transport)、[History 与寻址不变量](architecture/foundational-invariants.md#collaboration-history-addressing)、[Skill Library 与投影不变量](architecture/foundational-invariants.md#skills-library-projection)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
-| 修改 Task 状态、字段、可见性、权限、列表、CampMember 收口、self-active awareness 或 linked execution 准入 | [Durable Task v6](contracts/durable-task-v6.md)、[ContextManifest 与 Run Facts 不变量](architecture/foundational-invariants.md#context-manifest-run-facts)及[Durable Task 不变量](architecture/foundational-invariants.md#collaboration-task) |
-| 修改 waiting Delivery、目标 Conversation 路由、FIFO batch claim、多输入 AgentRun、input budget、accepted 增量窗口或投递 Profile | [Public Thread Message/Delivery 架构](architecture/public-a2a-message-delivery.md)、[Message Delivery v18](contracts/message-delivery-v18.md)、[ContextManifest 与 Run Facts 不变量](architecture/foundational-invariants.md#context-manifest-run-facts)、[Context Delivery Profile v15](contracts/context-delivery-profile-v15.md)及[ContextManifest v42](contracts/context-manifest-evidence-v42.md) |
-| 修改 Native Session Bootstrap、AgentRun Dynamic Context、`RUN_INPUT`、增量公共窗口、模型可见字段/JSON、遗漏、ContextManifest Evidence、Runtime Input Delivery Evidence 或 Formatter/Manifest/Profile 版本边界 | 先按[核心模型上下文变更治理](development/model-context-change-governance.md)建立独立说明并取得二次确认，再读[Context 当前规范](architecture/foundational-invariants.md#context-session-bootstrap)、[ContextManifest v42](contracts/context-manifest-evidence-v42.md)、[Run Facts v10](contracts/run-facts-v10.md)及当前版本实施计划 |
-| 修改 AgentRun 局部停止入口、直接提交、权威停止状态，实际模型观测、命令/搜索详情、Tool 聚合、持久化输出预算、Runtime Compaction 本地展示、运行中 Runtime diagnostic、首值冻结、默认策略回退、执行台位置偏好、进入恢复或模型展示 | [Runtime Catalog 与 Installation 不变量](architecture/foundational-invariants.md#runtime-catalog-installation)、[产品/执行表面不变量](architecture/foundational-invariants.md#product-execution-surface)、[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)、[Run Process Detail Surface v56](contracts/run-process-detail-surface-v56.md)、[Camp Open Projection v30](contracts/camp-open-projection-v30.md)及[Thread 会话工作区](ui/components/conversation-workspace.md) |
-| 修改 Runtime-reported 文件操作、阅读操作、Command Diff、AgentRun 文件变化卡片、managed output 排除、归约/读取授权或文件变化呈现 | [Runtime File Change Observation v9](contracts/runtime-file-change-observation-v9.md)、[Runtime File Change Observation 架构](architecture/runtime-file-change-observation.md)、[Evidence/Activity 不变量](architecture/foundational-invariants.md#evidence-canonical-activity)、[Thread 会话工作区](ui/components/conversation-workspace.md)及[v1.64 实施计划](versions/v1.64/implementation-plan.md) |
-| 修改 Thread 文件预览、Files Changed 预览路由、执行过程文件入口、消息文件链接、路径呈现或解析基准、窗口内 Tab 恢复、项目内子文件独立恢复、owner-scoped 附件打开、具体文件能力、预览句柄/分页/Root Grant、HTML 沙箱、root watcher、文件 Tabs 或刷新 | [File Preview v23](contracts/file-preview-v23.md)、[File Preview Architecture](architecture/file-preview.md)、[Thread 文件预览区](ui/components/file-preview.md)、[Thread 会话工作区](ui/components/conversation-workspace.md)、[v1.64 交付范围](versions/v1.64/README.md)及[v1.30 初始实施](versions/v1.30/implementation-plan.md) |
-| 修改 `MEMBER_IDENTITY`、`COLLABORATION_STATE`、peer 选择、Lead 引用、projection digest/inclusion 或 accepted ACK 水位 | [成员投影不变量](architecture/foundational-invariants.md#member-projection)、[Collaboration State v4](contracts/collaboration-state-v4.md)及[Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
-| 修改诊断自检、单项修复、三态分类、Recovery 或 v5 导出/脱敏 | [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[Diagnostics Center v2](contracts/diagnostics-center-v2.md)及[诊断中心架构](architecture/diagnostics-center.md) |
-| 修改上下文 Gate、内置 Skill 回归、每周任务评测、每日 Trace 导出／统计／分析 | [双轨评测流程](development/evaluation.md)、[Execution Evaluation v15](contracts/execution-evaluation-v15.md)、[User Automation v6](contracts/user-automation-v6.md)与[双轨架构](architecture/execution-evaluation.md) |
-| 修改 Benchmark 协议、Judge View、Tool-use/协作测量、Team/Solo paired experiment、Profile、比较资格、失败分类或 Project Review 投影 | [Benchmark 与 Judge 不变量](architecture/foundational-invariants.md#qualification-benchmark)、[Benchmark Protocol v3](contracts/benchmark-protocol-v3.md)、[Semantic Judge Views v12](contracts/semantic-judge-views-v12.md)、[Tool Interaction Measurement v2](contracts/tool-interaction-measurement-v2.md)、[Paired Collaboration Experiment v1](contracts/paired-collaboration-experiment-v1.md)及[Benchmark Protocol 架构](architecture/benchmark-protocol.md) |
-| 理解内置 CLI、Core Router、Runtime Fleet、Bootstrap 与外部 MCP 的长期结构 | [Built-in Tool Runtime 架构](architecture/builtin-tool-runtime.md) |
-| 修改 Native Session compaction detector、Observer Lease、Runtime 补发 policy、Bootstrap Delivery Gate 或 redelivery payload | [Native Session Bootstrap Redelivery 架构](architecture/native-session-bootstrap-redelivery.md)、[Session 与 Bootstrap 不变量](architecture/foundational-invariants.md#context-session-bootstrap)及[ContextManifest 与 Run Facts 不变量](architecture/foundational-invariants.md#context-manifest-run-facts) |
-| 修改取消、Runtime 清理、Input 发送边界或半取消恢复 | [Cancellation Settlement v2](contracts/cancellation-settlement-v2.md)、[Runtime 恢复与关闭](architecture/foundational-invariants.md#runtime-recovery-shutdown)，再读对应 Input、成员、渠道或退出合同 |
-| 修改运行中网络中断分类、固定退避、online/resume wake、Core 重启、accepted Runtime input、Session/Turn 恢复、失败后隔离门禁或精确 Run Stop | [AgentRun Recovery 架构](architecture/agent-run-recovery.md)、[Runtime 恢复与关闭不变量](architecture/foundational-invariants.md#runtime-recovery-shutdown)、[Network Interruption Recovery v2](contracts/network-interruption-recovery-v2.md)及[Accepted Input Recovery v8](contracts/accepted-input-recovery-v8.md) |
-| 修改主动退出/重启/更新、Core drain、launch/terminal admission、Runtime planned stop、durable shutdown fence、shutdown deadline 或 Desktop child-exit wait | [Camp Composer Draft v19](contracts/camp-composer-draft-v19.md)、[Planned Shutdown 架构](architecture/planned-shutdown.md)、[Runtime 恢复与关闭不变量](architecture/foundational-invariants.md#runtime-recovery-shutdown)及[Planned Shutdown v8](contracts/planned-shutdown-v8.md)；public Composer 不再有 Core Draft fence |
-| 理解历史设计与演进原因 | [版本索引](versions/README.md)及对应历史版本；历史内容不能作为当前约束 |
-| 修改 Renderer UI/UX | 先读根目录[全局设计系统](../DESIGN.md)和[UI 规范索引](ui/README.md)，再按目标读取对应主题、复杂组件、`apps/desktop/.impeccable/surfaces/` brief 与 QA |
-| 修改当前用户名称/头像、个人资料保存或历史作者/结构化提及展示 | [Current User Profile v1](contracts/current-user-profile-v1.md)、[个人资料 UI](ui/components/member-identity.md#当前用户个人资料)与[Current User Mention](ui/components/structured-mentions.md#current-user-mention) |
-| 修改 Windows x64 Desktop、Named Pipe、Job、DACL、data root、Runtime Files Root、Skill copy、NSIS、签名或 Windows 交互差异 | [Windows Desktop Platform](architecture/windows-desktop-platform.md)、[Windows Private Storage v2](contracts/windows-private-storage-v2.md)、[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[v1.05](versions/v1.05/README.md)、[Windows Interaction Delta](ui/windows-interaction-delta.md)及相应当前 Contract |
-| 本地运行、测试、Smoke Test 或 macOS 构建 | [开发者指南](development/README.md) |
-| 创建、复用、交接或清理开发用 Git worktree | [Git Worktree 生命周期与清理](development/worktrees.md) |
+| 共享领域词汇与概念区别 | `CONTEXT.md`；只放简短定义，不放字段表、算法、配额或演进记录 |
+| 当前系统结构、组件职责与跨主题不变量 | `docs/architecture/` |
+| 当前字段、wire shape、授权、错误、幂等与可测试边界 | 对应的当前 `docs/contracts/` 文档 |
+| 产品定位与品牌 | `PRODUCT.md` |
+| 视觉、交互、主题、组件与页面构图 | `DESIGN.md` 与 `docs/ui/`，按 UI 索引分工 |
+| 本地环境、隔离、测试与发布流程 | `docs/development/` |
+| 版本目标、交付范围、进度与验收 | `docs/versions/` 中的当前版本 |
+| 决定理由与取舍 | 对应版本的 `decisions.md`；路由和治理归 `docs/decisions/` |
+| Runtime 活动映射目录与变更门禁 | `docs/runtime-activity/` |
+| 调研、兼容性与复盘证据 | `docs/research/`、`runtime-compatibility.md`、`docs/postmortems/`；不替代当前规范或实现状态 |
 
-读取相关文档后，仍必须检查目标代码、Migration 和测试；文档不能替代实施事实。
-
-## 目录职责
-
-### `docs/decisions/`
-
-保存版本决定的治理、当前理由导航、数字 ADR clean-break 证据与旧 ID 映射。Version Decisions 回答“为什么在该版本作出这个改变、拒绝了什么、主要后果是什么”。
-
-- Decisions 不是当前规范或实现真源；当前规范由 Architecture、Contracts、Context、UI 和 Development 直接拥有。
-- 当前版本使用版本内决定 ID；禁止新增数字 ADR 或全局替代图。
-- 历史版本决定冻结，只允许明确勘误、链接或元数据修复。
-- `CURRENT.md` 是人工导航，Manifest/Coverage/Legacy Map 只证明本次迁移和追溯，不创造产品约束。
-
-完整规则见[版本决策治理](decisions/README.md)。`docs/adr/README.md` 仅为旧目录退役说明。
-
-### `docs/versions/`
-
-保存各版本的目标、版本内设计过程、实施计划、验收记录和发布范围。
-
-- `lifecycle: current` 的版本可以随实施事实更新。
-- `lifecycle: historical` 的版本是历史快照，不约束当前实现。
-- 重要取舍记录在版本 `decisions.md`；跨版本当前语义必须同时写入真正拥有它的当前权威文档。
-
-完整规则与当前版本指针见 [版本索引](versions/README.md)。
-
-### 其他文档
-
-`runtime-compatibility.md` 保存 Agent Runtime 实测兼容性证据；`docs/research/` 保存实现前的来源简报、
-可复核 Probe 记录与脱敏 Capability Snapshot，不拥有产品准入或当前版本状态；`docs/runtime-activity/` 长期维护
-跨 Runtime 活动映射目录和变更门禁；`docs/ui/` 和
-`docs/development/` 分别拥有 UI 规范与本地开发流程。它们都不是领域架构或版本状态
-真源。本地开发统一从 [开发者指南](development/README.md) 进入。
-
-`docs/contracts/` 保存字段级、可测试的长期接口合同；`docs/architecture/` 保存跨版本系统结构、
-组件职责和权威边界。版本文档只引用它们，不复制完整协议或长期架构。
-
-`docs/postmortems/` 保存中文无责事故复盘、证据与纠正措施跟踪。复盘解释故障如何发生、如何
-降低复发风险；它们不能替代当前架构与合同、当前版本范围或实现证据。
-
-### 本地原型
-
-`docs/prototypes/` 整个目录由 Git 忽略，保留在本机用于 HTML 交互稿、设计比较、截图和评审素材；
-不得强制提交其中的文件。该目录不会随仓库克隆，构建、测试和当前文档不得依赖它存在。
-已确认的交互规则和验收结论分别整理到当前 UI 合同、有效的 surface brief 或版本验收记录。
-历史文档中的原型链接指向取消跟踪前的固定提交，仅用于追溯当时的评审上下文。
+规则只在拥有它的位置维护；索引和术语表引用它，不复制完整规格。
+历史版本是冻结记录，不约束当前实现；决定理由不能覆盖当前 Architecture 或 Contract。
 
 ## 权威性与冲突处理
 
-不存在一个覆盖所有问题的单一优先级，必须先判断问题类型：
+- 先区分问题：术语、当前设计、精确协议、版本范围、实现事实或历史理由；按上表选择来源。
+- 当前版本以[版本索引](versions/README.md)为准，不从旧版本的 `accepted` 推断现行范围或完成状态。
+- 发现文档与实现不一致时，指出双方位置、缺失证据与本次修复范围；不得静默选一方覆盖另一方。
+- Architecture 与 Contract 不得静默互相推翻；修改长期语义时同步实际拥有它的当前文档。
 
-- “为什么选择某个长期边界”：从 Decisions CURRENT 进入相关版本决定。
-- “当前接受设计如何组合”：读取 Architecture；稳定不变量必须由 Architecture、当前 Contract 或其他明确当前权威直接拥有。
-- “精确字段、wire shape、错误和幂等语义”：读取当前 Contract。
-- “当前版本要交付什么、进展如何”：读取当前版本文档。
-- “仓库现在实际实现了什么”：检查代码、Migration、测试和可复现验收证据。
+## 文档维护
 
-如果这些来源不一致，必须明确报告“文档—实现漂移”，指出冲突位置和缺失证据；禁止静默
-选择一种说法，也禁止用决定或合同的 `accepted` 推断“已实现”。Architecture 与 Contract 不得静默互相推翻；决定理由不能覆盖当前规范。
+- 写当前可执行内容，删除重复规则、过期要求、评审过程和已完成迁移的流水账；保留必要的兼容与恢复边界。
+- 新决定使用当前版本内 ID，不新增数字 ADR。历史正文的更正、链接与元数据修复遵守[决定治理](decisions/README.md)。
+- 更新受影响的引用与 fragment。新增或修改 Architecture、Contract、Version Decision、版本文档或路由时，运行[通用文档门禁](decisions/README.md#自动治理)；不得添加功能、版本或 Skill 专属例外。
+- 引用实施状态时提供代码、Migration、测试或可复现验收证据。
 
-## AI 使用规则
+## 本地原型
 
-1. 先读取本文，再按任务选择最小必要文档集。
-2. 从 Architecture/Contracts 读取当前规范；需要理由时从 Decisions CURRENT 选择相关版本决定，不默认加载全部历史。
-3. 只把版本索引标记的当前版本用于当前范围和状态判断。
-4. 历史版本可用于解释背景，不得覆盖当前权威或当前代码事实。
-5. 引用决定时使用版本内 ID或迁移保留的旧 ADR ID；引用实施状态时同时给出代码、Migration、测试或验收依据。
-6. 新版本、新决定或任何主题文档都使用同一动态门禁；不得为某个 Skill、功能名或版本新增通配例外。
-
-
-消息选文引用变更：先读[已确认上下文说明](versions/v1.56/model-context-change-partial-message-quotes.md)、[Message Quotes v1](contracts/message-quotes-v1.md)与[架构](architecture/message-quotes.md)，再读 Composer/Pending/Single Chat 及会话 UI 合同。
+`docs/prototypes/` 由 Git 忽略，仅供本机交互稿、截图和评审素材使用，不得强制提交；构建、测试与当前文档不能依赖它存在。
+确认后的交互规则归当前 UI 合同或 surface brief，验收结果归版本记录。历史原型链接固定到当时提交，仅供追溯。

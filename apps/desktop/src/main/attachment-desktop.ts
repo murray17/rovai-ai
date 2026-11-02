@@ -28,7 +28,6 @@ export function parseDesktopAttachmentTarget(
     target.attachmentId !== requestedAttachmentId
     || typeof target.displayName !== 'string'
     || !target.displayName
-    || Array.from(target.displayName).length > 120
     || (target.kind !== 'file' && target.kind !== 'directory')
     || typeof target.mediaType !== 'string'
     || !target.mediaType

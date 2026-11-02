@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 /// and the legacy shared draft remain outside the network capability.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub enum Operation {
+    #[serde(rename = "projectFiles.request")]
+    ProjectFiles,
     #[serde(rename = "missions.workspace.cleanup")]
     MissionWorkspaceCleanup,
     #[serde(rename = "missions.cleanup.list")]
@@ -377,6 +379,7 @@ pub enum Operation {
 impl Operation {
     pub fn timeout(self) -> std::time::Duration {
         std::time::Duration::from_secs(match self {
+            Self::ProjectFiles => 30,
             Self::MissionCleanupRetry
             | Self::MissionChanges
             | Self::MissionFileDiff
@@ -444,6 +447,7 @@ impl Operation {
 
     pub fn method(self) -> &'static str {
         match self {
+            Self::ProjectFiles => "projectFiles.request",
             Self::TasksGet => "preferences.tasks.get",
             Self::TasksSet => "preferences.tasks.set",
             Self::TeamsList => "teams.list",

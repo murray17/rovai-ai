@@ -2,12 +2,15 @@ import type { FilePreviewApi } from '@contracts'
 
 /** Native file operations stay lazy; explicit browser adapters never enter this path. */
 export const desktopFilePreviewApi: FilePreviewApi = {
+  projectFiles: { request: input => window.rovai.request('projectFiles.request', input) },
   updateRetention: input => window.rovai.filePreview.updateRetention?.(input) ?? Promise.resolve(),
   onResourcesReleased: listener => window.rovai.filePreview.onResourcesReleased?.(listener) ?? (() => undefined),
   bindThread: id => window.rovai.filePreview.bindThread(id),
   open: input => window.rovai.filePreview.open(input),
   restore: input => window.rovai.filePreview.restore(input),
   reopen: input => window.rovai.filePreview.reopen(input),
+  readEditableFile: request => window.rovai.filePreview.readEditableFile!(request),
+  saveTextFile: request => window.rovai.filePreview.saveTextFile!(request),
   readText: input => window.rovai.filePreview.readText(input),
   readPage: input => window.rovai.filePreview.readPage(input),
   resolveLine: input => window.rovai.filePreview.resolveLine(input),

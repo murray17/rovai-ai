@@ -4,7 +4,7 @@ contract: mission-v13
 authority: mission-team-creation
 status: accepted
 version: 13
-last_updated: 2026-10-29
+last_updated: 2026-10-31
 ---
 
 # Mission v13
@@ -35,3 +35,13 @@ Workspace cleanup admission and `cleanupAvailable` share the current execution o
 nonterminal Runs, waiting Deliveries, and terminal cleanup owned by this Core block removal. Ownership
 uses the existing exact Run/epoch snapshot and includes shared execution-root conflicts. A prior-generation
 missing ACK cannot alone block cleanup, and cleanup does not fabricate or repair that historical ACK.
+
+Ordinary non-Mission dispatch may bypass the Mission lifecycle gate only for an already validated canonical
+execution root proven disjoint from persisted workspace and preparation paths, including ancestor/descendant
+relationships and all preparation/cleanup states. Shared or uncertain paths retain the existing serialized
+flow. Mission preparation, current Run/epoch occupancy, Stop ownership, branch identity and dirty-state
+cleanup protections are unchanged. The proof uses existing records without a new lock table or persistent state.
+
+If any Mission has no persisted workspace plan yet, existing records cannot rule out the path its first
+preparation will choose. Ordinary dispatch conservatively retains the gate in this case, including a
+not-yet-started Mission. No filesystem scan or extra coordination state is introduced to remove that wait.

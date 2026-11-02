@@ -77,7 +77,7 @@ separate and can evolve independently behind the seam.
 
 ## Actor and Scope routing
 
-Core derives A, Camp C, Run and epoch from active lease/Binding. Model fields never establish authority.
+Core derives A, Thread C, Run and epoch from active lease/Binding. Model fields never establish authority.
 
 ```text
 add companion
@@ -223,7 +223,7 @@ distinction.
 
 v0.78 使用 pre-release Memory-domain clean break，不迁移或 grandfather 旧 Memory。Migration 清空 formal
 Memory、Revision、keys、Hearth Review Item、Supersession、Memory access evidence/FTS、Memory domain events 与
-Memory command results，重建支持 `view` kind 的 evidence schema，同时保留 Camp、Task、Message、AgentProfile、
+Memory command results，重建支持 `view` kind 的 evidence schema，同时保留 Thread、Task、Message、AgentProfile、
 Runtime/Skill/MCP 和其他应用状态。测试从真实旧 schema fixture 证明清理边界与非 Memory 状态保留。
 
 ## Explicit non-components

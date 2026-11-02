@@ -27,4 +27,4 @@ Camp Open 中都直接投影 `message_delivery.source_agent_run_id`，与公开�
 
 旧 reader 可以忽略新增字段；新 reader 在旧投影缺失字段时不猜测归属。因此 Snapshot schema 34 / Open
 schema 5 保持不变，不新增数据库列、Migration、Event 或模型可见上下文。执行台只展示来源精确匹配当前
-Run 的公开投递对象，呈现规则见 [Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。
+Run 的公开投递对象，呈现规则见 [Camp 执行过程](../ui/components/conversation-workspace.md#thread-执行过程)。

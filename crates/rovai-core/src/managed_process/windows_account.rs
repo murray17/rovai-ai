@@ -280,14 +280,30 @@ impl AccountFilesystem {
         self.projected_files.get(source).cloned()
     }
 
-    pub async fn run_operation<T:Send+'static>(&self,operation:impl FnOnce()->Result<T>+Send+'static)->Result<T>{self.execute(operation).await}
-
-    pub async fn observe_sources(&self, paths:Vec<String>, execution_root:PathBuf)->Result<Vec<crate::local_attachment_source::LocalAttachmentSourceRef>> {
-        self.execute(move || crate::local_attachment_source::observe_agent_source_attachments(&paths,&execution_root)).await
+    pub async fn run_operation<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.execute(operation).await
     }
 
-    pub async fn read_avatar(&self,path:PathBuf)->Result<Vec<u8>> {
-        self.execute(move ||Ok(crate::member_avatar::read_selected_avatar(&path)?)).await
+    pub async fn observe_sources(
+        &self,
+        paths: Vec<String>,
+        execution_root: PathBuf,
+    ) -> Result<Vec<crate::local_attachment_source::LocalAttachmentSourceRef>> {
+        self.execute(move || {
+            crate::local_attachment_source::observe_agent_source_attachments(
+                &paths,
+                &execution_root,
+            )
+        })
+        .await
+    }
+
+    pub async fn read_avatar(&self, path: PathBuf) -> Result<Vec<u8>> {
+        self.execute(move || Ok(crate::member_avatar::read_selected_avatar(&path)?))
+            .await
     }
 
     pub async fn read_text(&self, path: PathBuf) -> Result<String> {
@@ -702,8 +718,15 @@ fn materialize_inputs(request: &mut AccountRequest) -> Result<AccountInputs> {
             }
         }
         for key in ["ROVAI_PI_HOST_BINDING_FILE"] {
-            if super::super::environment_value(&request.environment,key.as_ref())==Some(source.as_os_str()) {
-                super::super::insert_environment(&mut request.environment,key.into(),target.as_os_str().to_owned());matched=true;
+            if super::super::environment_value(&request.environment, key.as_ref())
+                == Some(source.as_os_str())
+            {
+                super::super::insert_environment(
+                    &mut request.environment,
+                    key.into(),
+                    target.as_os_str().to_owned(),
+                );
+                matched = true;
             }
         }
         if let Some(value) = super::super::environment_value(
@@ -1352,23 +1375,74 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore="requires existing account deployment and explicitly selected Node executable; no model"]
+    #[ignore = "requires existing account deployment and explicitly selected Node executable; no model"]
     async fn account_node_userinfo_matches_shared_control() {
-        let node=PathBuf::from(std::env::var_os("ROVAI_ACCOUNT_NODE_EXE").unwrap());
-        let cwd=PathBuf::from(std::env::var_os("ROVAI_ACCOUNT_NODE_ROOT").unwrap());std::fs::create_dir_all(&cwd).unwrap();
-        for isolated in [false,true] {
-            let mut probe=tokio::process::Command::new(std::env::current_exe().unwrap());
-            probe.args(helper_arguments()).current_dir(&cwd).env("ROVAI_ACCOUNT_TEST_WIN32_USERINFO","1");
-            let mut probe=ManagedProcessLaunchSpec::capture(&probe,super::super::super::ManagedProcessPurpose::RuntimeProbe,ManagedStdinPolicy::Null,ManagedWindowsArgvDialect::MicrosoftCrt,"win32-userinfo-probe").unwrap();
-            if isolated{probe=probe.with_windows_account(WindowsAccountLaunch::for_isolation("windows_account").unwrap()).unwrap();}
-            let mut probe=WindowsManagedProcess::spawn(&probe).unwrap();let mut output=Vec::new();tokio::io::AsyncReadExt::read_to_end(&mut probe.take_stdout().unwrap(),&mut output).await.unwrap();assert!(probe.wait().await.unwrap().success());wait_for_empty(&probe).await;
-            println!("win32_userinfo_account={} result={}",isolated,String::from_utf8(output).unwrap().trim());
-            let mut command=tokio::process::Command::new(&node);
+        let node = PathBuf::from(std::env::var_os("ROVAI_ACCOUNT_NODE_EXE").unwrap());
+        let cwd = PathBuf::from(std::env::var_os("ROVAI_ACCOUNT_NODE_ROOT").unwrap());
+        std::fs::create_dir_all(&cwd).unwrap();
+        for isolated in [false, true] {
+            let mut probe = tokio::process::Command::new(std::env::current_exe().unwrap());
+            probe
+                .args(helper_arguments())
+                .current_dir(&cwd)
+                .env("ROVAI_ACCOUNT_TEST_WIN32_USERINFO", "1");
+            let mut probe = ManagedProcessLaunchSpec::capture(
+                &probe,
+                super::super::super::ManagedProcessPurpose::RuntimeProbe,
+                ManagedStdinPolicy::Null,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "win32-userinfo-probe",
+            )
+            .unwrap();
+            if isolated {
+                probe = probe
+                    .with_windows_account(
+                        WindowsAccountLaunch::for_isolation("windows_account").unwrap(),
+                    )
+                    .unwrap();
+            }
+            let mut probe = WindowsManagedProcess::spawn(&probe).unwrap();
+            let mut output = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut probe.take_stdout().unwrap(), &mut output)
+                .await
+                .unwrap();
+            assert!(probe.wait().await.unwrap().success());
+            wait_for_empty(&probe).await;
+            println!(
+                "win32_userinfo_account={} result={}",
+                isolated,
+                String::from_utf8(output).unwrap().trim()
+            );
+            let mut command = tokio::process::Command::new(&node);
             command.args(["-e",r#"try{const u=require('os').userInfo();console.log(JSON.stringify({userinfo:true,hasName:!!u.username,hasHome:!!u.homedir}));}catch(e){console.log(JSON.stringify({userinfo:false,code:e.code,syscall:e.info&&e.info.syscall}));process.exitCode=1;}"#]).current_dir(&cwd);
-            let mut spec=ManagedProcessLaunchSpec::capture(&command,super::super::super::ManagedProcessPurpose::RuntimeProbe,ManagedStdinPolicy::Null,ManagedWindowsArgvDialect::MicrosoftCrt,"node-userinfo-probe").unwrap();
-            if isolated{spec=spec.with_windows_account(WindowsAccountLaunch::for_isolation("windows_account").unwrap()).unwrap();}
-            let mut child=WindowsManagedProcess::spawn(&spec).unwrap();let mut bytes=Vec::new();tokio::io::AsyncReadExt::read_to_end(&mut child.take_stdout().unwrap(),&mut bytes).await.unwrap();let code=child.wait().await.unwrap();wait_for_empty(&child).await;
-            println!("node_userinfo_account={} exit={} result={}",isolated,code.code().unwrap_or(1),String::from_utf8(bytes).unwrap().trim());
+            let mut spec = ManagedProcessLaunchSpec::capture(
+                &command,
+                super::super::super::ManagedProcessPurpose::RuntimeProbe,
+                ManagedStdinPolicy::Null,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "node-userinfo-probe",
+            )
+            .unwrap();
+            if isolated {
+                spec = spec
+                    .with_windows_account(
+                        WindowsAccountLaunch::for_isolation("windows_account").unwrap(),
+                    )
+                    .unwrap();
+            }
+            let mut child = WindowsManagedProcess::spawn(&spec).unwrap();
+            let mut bytes = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut child.take_stdout().unwrap(), &mut bytes)
+                .await
+                .unwrap();
+            let code = child.wait().await.unwrap();
+            wait_for_empty(&child).await;
+            println!(
+                "node_userinfo_account={} exit={} result={}",
+                isolated,
+                code.code().unwrap_or(1),
+                String::from_utf8(bytes).unwrap().trim()
+            );
         }
     }
 
@@ -1376,28 +1450,93 @@ mod tests {
     #[ignore = "subprocess-only trusted account bootstrap entry"]
     fn account_helper_entry() {
         if std::env::var_os("ROVAI_ACCOUNT_TEST_WIN32_USERINFO").is_some() {
-            use windows_sys::Win32::{System::{Threading::{GetCurrentProcess,OpenProcessToken},WindowsProgramming::GetUserNameW},Security::TOKEN_QUERY,Foundation::{GetLastError,CloseHandle}};
-            #[link(name="userenv")]
-            unsafe extern "system" {fn GetUserProfileDirectoryW(token:HANDLE,path:*mut u16,size:*mut u32)->i32;}
-            let mut token=null_mut();let token_ok=unsafe{OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&mut token)}!=0;
-            let token_error=if token_ok{0}else{unsafe{GetLastError()}};
-            let mut profile_size=0;unsafe{GetUserProfileDirectoryW(token,null_mut(),&mut profile_size)};let profile_size_error=unsafe{GetLastError()};
-            let mut profile=vec![0u16;profile_size as usize];let profile_ok=unsafe{GetUserProfileDirectoryW(token,profile.as_mut_ptr(),&mut profile_size)}!=0;let profile_error=if profile_ok{0}else{unsafe{GetLastError()}};
-            let mut fixed=[0u16;257];let mut fixed_size=257;let fixed_ok=unsafe{GetUserNameW(fixed.as_mut_ptr(),&mut fixed_size)}!=0;let fixed_error=if fixed_ok{0}else{unsafe{GetLastError()}};
-            let mut large=vec![0u16;32768];let mut large_size=32768;let large_ok=unsafe{GetUserNameW(large.as_mut_ptr(),&mut large_size)}!=0;let large_error=if large_ok{0}else{unsafe{GetLastError()}};
-            if token_ok{unsafe{CloseHandle(token)};}
-            println!("{}",serde_json::json!({"token_ok":token_ok,"token_error":token_error,"profile_size":profile_size,"profile_size_error":profile_size_error,"profile_ok":profile_ok,"profile_error":profile_error,"username_257_ok":fixed_ok,"username_257_size":fixed_size,"username_257_error":fixed_error,"username_large_ok":large_ok,"username_large_size":large_size,"username_large_error":large_error}));
+            use windows_sys::Win32::{
+                Foundation::{CloseHandle, GetLastError},
+                Security::TOKEN_QUERY,
+                System::{
+                    Threading::{GetCurrentProcess, OpenProcessToken},
+                    WindowsProgramming::GetUserNameW,
+                },
+            };
+            #[link(name = "userenv")]
+            unsafe extern "system" {
+                fn GetUserProfileDirectoryW(token: HANDLE, path: *mut u16, size: *mut u32) -> i32;
+            }
+            let mut token = null_mut();
+            let token_ok =
+                unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } != 0;
+            let token_error = if token_ok {
+                0
+            } else {
+                unsafe { GetLastError() }
+            };
+            let mut profile_size = 0;
+            unsafe { GetUserProfileDirectoryW(token, null_mut(), &mut profile_size) };
+            let profile_size_error = unsafe { GetLastError() };
+            let mut profile = vec![0u16; profile_size as usize];
+            let profile_ok =
+                unsafe { GetUserProfileDirectoryW(token, profile.as_mut_ptr(), &mut profile_size) }
+                    != 0;
+            let profile_error = if profile_ok {
+                0
+            } else {
+                unsafe { GetLastError() }
+            };
+            let mut fixed = [0u16; 257];
+            let mut fixed_size = 257;
+            let fixed_ok = unsafe { GetUserNameW(fixed.as_mut_ptr(), &mut fixed_size) } != 0;
+            let fixed_error = if fixed_ok {
+                0
+            } else {
+                unsafe { GetLastError() }
+            };
+            let mut large = vec![0u16; 32768];
+            let mut large_size = 32768;
+            let large_ok = unsafe { GetUserNameW(large.as_mut_ptr(), &mut large_size) } != 0;
+            let large_error = if large_ok {
+                0
+            } else {
+                unsafe { GetLastError() }
+            };
+            if token_ok {
+                unsafe { CloseHandle(token) };
+            }
+            println!(
+                "{}",
+                serde_json::json!({"token_ok":token_ok,"token_error":token_error,"profile_size":profile_size,"profile_size_error":profile_size_error,"profile_ok":profile_ok,"profile_error":profile_error,"username_257_ok":fixed_ok,"username_257_size":fixed_size,"username_257_error":fixed_error,"username_large_ok":large_ok,"username_large_size":large_size,"username_large_error":large_error})
+            );
             std::process::exit(0);
         }
         if std::env::var_os("ROVAI_ACCOUNT_TEST_BUILTIN").is_some() {
             let mut go = [0];
             std::io::stdin().read_exact(&mut go).unwrap();
             if std::env::var_os("ROVAI_ACCOUNT_TEST_HOOK").is_some() {
-                let host=std::env::var("ROVAI_ACCOUNT_TEST_HOOK_HOST").unwrap_or_else(|_|"synthetic-account-host".into());
-                let mut hook=std::process::Command::new(std::env::var_os("ROVAI_ACCOUNT_TEST_CLI").unwrap()).args(["__compaction-hook","--adapter-kind","opencode-cli","--host-instance-id",&host,"--source-signal","session.compacted"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
-                let event=std::env::var("ROVAI_ACCOUNT_TEST_HOOK_EVENT").unwrap_or_else(|_|"synthetic-hook".into());
-                let payload=serde_json::json!({"session_id":"synthetic-session","hook_event_name":"session.compacted","trigger":"completed","observation_id":event});
-                hook.stdin.take().unwrap().write_all(&serde_json::to_vec(&payload).unwrap()).unwrap();
+                let host = std::env::var("ROVAI_ACCOUNT_TEST_HOOK_HOST")
+                    .unwrap_or_else(|_| "synthetic-account-host".into());
+                let mut hook =
+                    std::process::Command::new(std::env::var_os("ROVAI_ACCOUNT_TEST_CLI").unwrap())
+                        .args([
+                            "__compaction-hook",
+                            "--adapter-kind",
+                            "opencode-cli",
+                            "--host-instance-id",
+                            &host,
+                            "--source-signal",
+                            "session.compacted",
+                        ])
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                        .unwrap();
+                let event = std::env::var("ROVAI_ACCOUNT_TEST_HOOK_EVENT")
+                    .unwrap_or_else(|_| "synthetic-hook".into());
+                let payload = serde_json::json!({"session_id":"synthetic-session","hook_event_name":"session.compacted","trigger":"completed","observation_id":event});
+                hook.stdin
+                    .take()
+                    .unwrap()
+                    .write_all(&serde_json::to_vec(&payload).unwrap())
+                    .unwrap();
                 assert!(hook.wait().unwrap().success());
                 std::process::exit(0);
             }

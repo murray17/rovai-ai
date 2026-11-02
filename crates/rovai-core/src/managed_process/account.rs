@@ -115,10 +115,23 @@ impl WindowsAccountLaunch {
                 super::insert_environment(&mut result, "PSModulePath".into(), value);
             }
         }
-        if let Some(process)=super::environment_value(&result,"ROVAI_ACCOUNT_PROCESS_ID".as_ref()).map(ToOwned::to_owned) {
+        if let Some(process) =
+            super::environment_value(&result, "ROVAI_ACCOUNT_PROCESS_ID".as_ref())
+                .map(ToOwned::to_owned)
+        {
             let instance=super::environment_value(&result,"ROVAI_ACCOUNT_INSTANCE_KEY".as_ref()).context("managed_process.account_instance_required: account process requires an explicit instance key")?;
-            let outbox=self.profile_root.join("rovai-runtime-outbox").join(instance).join("builtin-tools").join(process).join("compaction-observation-outbox");
-            super::insert_environment(&mut result,"ROVAI_ACCOUNT_COMPACTION_OUTBOX".into(),outbox.into_os_string());
+            let outbox = self
+                .profile_root
+                .join("rovai-runtime-outbox")
+                .join(instance)
+                .join("builtin-tools")
+                .join(process)
+                .join("compaction-observation-outbox");
+            super::insert_environment(
+                &mut result,
+                "ROVAI_ACCOUNT_COMPACTION_OUTBOX".into(),
+                outbox.into_os_string(),
+            );
         }
         // This is deployment configuration, not a child credential transport.
         super::remove_environment(&mut result, "ROVAI_WINDOWS_ACCOUNT_CONFIG".as_ref());

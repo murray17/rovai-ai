@@ -32,4 +32,4 @@ remains visible offline. Older and Server snapshots retain the v5 missing-value 
 
 - [Desktop App Updates architecture](../architecture/desktop-app-updates.md)
 - [macOS packaging](../development/packaging.md)
-- [Settings workspace surface brief](../../apps/desktop/.impeccable/surfaces/settings-workspace.md#关于与更新)
+- [Settings workspace surface brief](../ui/surfaces/settings-workspace.md#关于与更新)

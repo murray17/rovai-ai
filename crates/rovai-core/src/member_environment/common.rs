@@ -35,7 +35,12 @@ pub fn current(c: &Connection, kind: AdapterKind) -> Result<Environment> {
 }
 pub fn get(c: &Connection, kind: AdapterKind) -> Result<Value> {
     let revision = revision(c, kind)?;
-    Ok(json!({"revision":revision, "environment":read(c, kind, revision)?}))
+    Ok(match read(c, kind, revision) {
+        Ok(environment) => json!({"revision":revision, "environment":environment}),
+        Err(_) => {
+            json!({"revision":revision, "environment":{}, "error":"通用环境变量无法读取。原记录已保留，请重新填写后保存。"})
+        }
+    })
 }
 
 pub fn resolve(c: &Connection, kind: AdapterKind, edit: &Edit) -> Result<Environment> {
@@ -54,7 +59,9 @@ pub fn prepare(c: &Connection, kind: AdapterKind, edit: Edit) -> Result<Prepared
     Ok(Prepared {
         kind,
         expected_revision: edit.expected_revision,
-        changed: values != read(c, kind, edit.expected_revision)?,
+        // An explicit replacement is still protected by the existing revision
+        // check. Preserve the damaged ciphertext as an older revision.
+        changed: read(c, kind, edit.expected_revision).map_or(true, |saved| values != saved),
         ciphertext: encrypt(
             c,
             &format!("common:{}:{}", kind.as_str(), edit.expected_revision + 1),

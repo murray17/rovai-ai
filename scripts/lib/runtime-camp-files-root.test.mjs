@@ -75,6 +75,12 @@ test('removes only a marked Runtime Files Root owned by a temporary data directo
     await access(external)
 
     await mkdir(root, { recursive: true })
+    await mkdir(output, { recursive: true })
+    await writeFile(join(output, 'new-core.txt'), 'no historical marker')
+    assert.equal(await removeEphemeralRuntimeCampFilesRoot(dataDirectory, { homeDirectory, temporaryDirectory }), true)
+    await assert.rejects(access(output), { code: 'ENOENT' })
+
+    await mkdir(root, { recursive: true })
     await writeFile(join(root, '.runtime-camp-files-root.json'), JSON.stringify({
       schemaVersion: 3,
       instanceKey: basename(dirname(root)),

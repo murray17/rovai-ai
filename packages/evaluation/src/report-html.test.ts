@@ -11,6 +11,18 @@ afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>rm(root,{recursi
 const temp=async():Promise<string>=>{const path=await mkdtemp(join(tmpdir(),'rovai-report-test-'));roots.push(path);return path}
 
 describe('offline report contract — synthetic fixtures only',()=>{
+  it('shows metric collection separately from low scores and leaves legacy coverage unknown',()=>{
+    const report={kind:'weekly_regression',assessment:{arms:{candidate:{quality:{total:40},collection:{status:'incomplete',
+      quality:{status:'complete',evaluated:112,applicable:112,unknown:0,notApplicable:0},
+      collaboration:{status:'incomplete',evaluated:16,applicable:17,unknown:1,notApplicable:43}}}}}}
+    const html=renderGateHtml(report)
+    expect(html).toContain('指标采集完整性')
+    expect(html).toContain('112 / 112')
+    expect(html).toContain('16 / 17')
+    expect(html).toContain('低分和不满足也属于已采集')
+    expect(html).toContain('40')
+    expect(renderGateHtml({kind:'weekly_regression'})).not.toContain('id="collection"')
+  })
   it('separates the new handoff cohort from the complete retained open backlog',()=>{
     const metrics=reportMetrics({a2a:{terminalCoverage:{numerator:3,denominator:4},openWaitReasonsAsOf:{target_running:5,unknown:1}}})
     expect(metrics.a2a).toMatchObject({cohortOpenCountAsOf:1,openCountAsOf:6})

@@ -112,4 +112,4 @@ this contract adds no new preference field or language selector.
 - [Interface Language v1](interface-language-v1.md)
 - [macOS packaging and shared release source](../development/packaging.md#主动检查更新发布集合)
 - [Windows packaging](../development/packaging-windows.md)
-- [Settings workspace surface brief](../../apps/desktop/.impeccable/surfaces/settings-workspace.md#关于与更新)
+- [Settings workspace surface brief](../ui/surfaces/settings-workspace.md#关于与更新)

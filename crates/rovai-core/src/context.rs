@@ -1,5 +1,5 @@
-mod claim;
 mod chat_reply;
+mod claim;
 mod hermes_rules;
 mod input;
 pub(crate) use claim::ClaimedBatchContext;
@@ -28,6 +28,7 @@ const LEGACY_GATHER_COMPLETION_INPUT_SCHEMA_VERSION: i64 = 3;
 
 use crate::{
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig, validate_stored_member_identity},
+    camp_attachment::{DesktopAttachmentOpenCandidate, ThreadAttachmentStore},
     camp_attachment_view::{
         CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION, RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
         ThreadAttachmentViewReceiptV2, load_camp_attachment_view_receipt,
@@ -346,6 +347,19 @@ impl std::fmt::Display for ContextPayloadTooLarge {
 
 impl std::error::Error for ContextPayloadTooLarge {}
 
+/// Only lives for one input preparation; no persistent cache or recovery queue.
+pub type LegacyAttachmentReads = BTreeMap<String, (DesktopAttachmentOpenCandidate, Option<String>)>;
+
+#[derive(Debug)]
+pub struct PendingLegacyAttachmentReads(pub Vec<DesktopAttachmentOpenCandidate>);
+
+impl std::fmt::Display for PendingLegacyAttachmentReads {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("selected historical attachments require filesystem reads")
+    }
+}
+impl std::error::Error for PendingLegacyAttachmentReads {}
+
 #[derive(Debug, Default)]
 pub struct ContextService;
 
@@ -385,7 +399,7 @@ impl ContextService {
         blob_store: &ManagedBlobStore,
         request: &MaterializeContextRequest<'_>,
     ) -> Result<ContextMaterialization> {
-        self.materialize_inner(database, blob_store, None, None, &[], request, None)
+        self.materialize_inner(database, blob_store, None, None, &[], request, None, None)
     }
 
     pub fn materialize_with_skill_exposure(
@@ -402,6 +416,7 @@ impl ContextService {
             None,
             &[],
             request,
+            None,
             None,
         )
     }
@@ -422,6 +437,7 @@ impl ContextService {
             source_attachment_paths,
             request,
             None,
+            None,
         )
     }
 
@@ -440,6 +456,7 @@ impl ContextService {
             Some(mcp_projection),
             &[],
             request,
+            None,
             None,
         )
     }
@@ -460,6 +477,7 @@ impl ContextService {
             Some(mcp_projection),
             source_attachment_paths,
             request,
+            None,
             None,
         )
     }
@@ -521,6 +539,33 @@ impl ContextService {
             source_attachment_paths,
             request,
             Some(delivery_id),
+            None,
+        )
+    }
+
+    /// Two-phase input preparation: select under the database lock, then ask the
+    /// caller to read just those files outside it before freezing the input.
+    #[allow(clippy::too_many_arguments)]
+    pub fn materialize_with_attachment_reads(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+        skill_exposure: Option<&PreparedSkillExposure>,
+        mcp_projection: Option<&PreparedMcpProjection>,
+        source_attachment_paths: &[String],
+        request: &MaterializeContextRequest<'_>,
+        source_delivery_id: Option<&str>,
+        reads: &LegacyAttachmentReads,
+    ) -> Result<ContextMaterialization> {
+        self.materialize_inner(
+            database,
+            blob_store,
+            skill_exposure,
+            mcp_projection,
+            source_attachment_paths,
+            request,
+            source_delivery_id,
+            Some(reads),
         )
     }
 
@@ -533,6 +578,7 @@ impl ContextService {
         source_attachment_paths: &[String],
         request: &MaterializeContextRequest<'_>,
         source_delivery_id: Option<&str>,
+        legacy_reads: Option<&LegacyAttachmentReads>,
     ) -> Result<ContextMaterialization> {
         let mut result = self.materialize_unsealed(
             database,
@@ -542,6 +588,7 @@ impl ContextService {
             source_attachment_paths,
             request,
             source_delivery_id,
+            legacy_reads,
         )?;
         if let ContextMaterialization::Ready(context) = &mut result {
             if let Some(evidence) = &mut context.hermes_rules {
@@ -569,6 +616,7 @@ impl ContextService {
         source_attachment_paths: &[String],
         request: &MaterializeContextRequest<'_>,
         source_delivery_id: Option<&str>,
+        legacy_reads: Option<&LegacyAttachmentReads>,
     ) -> Result<ContextMaterialization> {
         if request.execution_epoch < 1 {
             anyhow::bail!("Context materialization requires a claimed AgentRun epoch");
@@ -763,7 +811,7 @@ impl ContextService {
             Some(_) => current_public_camp_batch_context_delivery_profile()?,
             None => current_context_delivery_profile()?,
         };
-        let batch_model_context = if selected_messages.is_some() {
+        let mut batch_model_context = if selected_messages.is_some() {
             selected_messages
         } else {
             (snapshot.invocation_kind == "batch")
@@ -862,7 +910,59 @@ impl ContextService {
             )?);
         }
         let current_input = load_current_input(database, &snapshot)?;
-        let attachment_refs = load_current_attachment_refs(database, &current_input)?;
+        let mut attachment_refs = load_current_attachment_refs(database, &current_input)?;
+        let mut pending_reads = BTreeMap::new();
+        let mut legacy_message_ids = HashSet::new();
+        if let Some(reads) = legacy_reads {
+            for message in originating_public_user_message
+                .iter_mut()
+                .chain(reference_closure.iter_mut().map(|entry| &mut entry.message))
+                .chain(recent_messages.iter_mut())
+                .chain(
+                    batch_model_context
+                        .iter_mut()
+                        .flat_map(|batch| batch.run_input_messages.iter_mut()),
+                )
+            {
+                let restored = selected_legacy_attachments(
+                    database,
+                    &message.camp_id,
+                    Some(&message.message_id),
+                    None,
+                    reads,
+                    &mut pending_reads,
+                )?;
+                if !restored.is_empty() {
+                    legacy_message_ids.insert(message.message_id.clone());
+                    replace_legacy_message_attachments(&mut message.attachments, restored);
+                }
+            }
+            let restored = selected_legacy_attachments(
+                database,
+                &snapshot.camp_id,
+                current_input.source_camp_message_id.as_deref(),
+                current_input.source_conversation_message_id.as_deref(),
+                reads,
+                &mut pending_reads,
+            )?;
+            let legacy_ids = restored
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<HashSet<_>>();
+            attachment_refs
+                .retain(|attachment| !legacy_ids.contains(attachment.attachment_id.as_str()));
+            attachment_refs.extend(
+                restored
+                    .into_iter()
+                    .filter_map(|(_, attachment)| attachment)
+                    .map(|attachment| ThreadAttachmentRef {
+                        attachment_id: attachment.attachment_id,
+                        path: attachment.path,
+                        content_digest: attachment.content_digest,
+                        legacy_view_backed: false,
+                    }),
+            );
+        }
         let mut attachment_paths = attachment_refs
             .iter()
             .map(|attachment| attachment.path.clone())
@@ -947,6 +1047,32 @@ impl ContextService {
                     context.run_input_projection(&current_input_skill_resolution.links)
                 })
             });
+        if legacy_reads.is_some()
+            && let (Some(batch), Some(messages)) = (
+                batch_model_context.as_ref(),
+                batch_run_input_value
+                    .as_mut()
+                    .and_then(|value| value.get_mut("messages"))
+                    .and_then(Value::as_array_mut),
+            )
+        {
+            for message in messages {
+                if let Some(selected) = batch.run_input_messages.iter().find(|selected| {
+                    legacy_message_ids.contains(&selected.message_id)
+                        && message["messageId"].as_str() == Some(selected.message_id.as_str())
+                }) {
+                    if selected.attachments.is_empty() {
+                        message
+                            .as_object_mut()
+                            .expect("input message")
+                            .remove("attachments");
+                    } else {
+                        message["attachments"] =
+                            model_batch_message(selected)["attachments"].clone();
+                    }
+                }
+            }
+        }
         if batch_context_manifest_version.is_some_and(|version| version < 32) {
             if let Some(messages) = batch_run_input_value
                 .as_mut()
@@ -968,12 +1094,17 @@ impl ContextService {
                 claimed.chat_reply_context.clone()
             } else {
                 chat_reply::project(
-                    database.connection(), &snapshot.camp_id,
-                    batch_run_input_value.as_ref().context("Chat reply context requires batch input")?,
+                    database.connection(),
+                    &snapshot.camp_id,
+                    batch_run_input_value
+                        .as_ref()
+                        .context("Chat reply context requires batch input")?,
                     source_delivery_id.map(|_| snapshot.agent_run_id.as_str()),
                 )?
             }
-        } else { None };
+        } else {
+            None
+        };
         let a2a_guidance = prepare_a2a_guidance(database, &snapshot)?;
         let bootstrap_payload = if hermes {
             if source_delivery_id.is_some() {
@@ -1157,6 +1288,41 @@ impl ContextService {
         } else {
             final_referenced_attachment_ids(&attachment_refs, &shared_conversation)
         };
+        if !pending_reads.is_empty() {
+            let selected_ids = attachment_refs
+                .iter()
+                .map(|attachment| attachment.attachment_id.as_str())
+                .chain(
+                    shared_conversation
+                        .originating_public_user_message
+                        .iter()
+                        .chain(
+                            shared_conversation
+                                .reference_closure
+                                .iter()
+                                .map(|entry| &entry.message),
+                        )
+                        .chain(shared_conversation.recent_messages.iter())
+                        .chain(
+                            batch_model_context
+                                .iter()
+                                .flat_map(|batch| batch.run_input_messages.iter()),
+                        )
+                        .flat_map(|message| {
+                            message
+                                .attachments
+                                .iter()
+                                .map(|attachment| attachment.attachment_id.as_str())
+                        }),
+                )
+                .collect::<HashSet<_>>();
+            pending_reads.retain(|id, _| selected_ids.contains(id.as_str()));
+            if !pending_reads.is_empty() {
+                return Err(
+                    PendingLegacyAttachmentReads(pending_reads.into_values().collect()).into(),
+                );
+            }
+        }
         let (camp_attachment_view_receipt, camp_attachment_view_receipt_digest) =
             load_optional_legacy_view_receipt(
                 database.connection(),
@@ -6815,6 +6981,82 @@ fn resolve_context_attachment_path(
     }
 }
 
+fn selected_legacy_attachments(
+    database: &Database,
+    camp_id: &str,
+    message_id: Option<&str>,
+    conversation_message_id: Option<&str>,
+    reads: &LegacyAttachmentReads,
+    pending: &mut BTreeMap<String, DesktopAttachmentOpenCandidate>,
+) -> Result<Vec<(String, Option<SharedMessageAttachment>)>> {
+    let store = ThreadAttachmentStore::new(
+        database
+            .path()
+            .parent()
+            .context("database has no directory")?,
+    );
+    let mut statement = database.connection().prepare(
+        "SELECT id FROM message_attachment WHERE camp_id=?1 AND
+         ((?2 IS NOT NULL AND camp_message_id=?2) OR (?3 IS NOT NULL AND conversation_message_id=?3))
+         ORDER BY position, id")?;
+    let ids = statement
+        .query_map(
+            params![camp_id, message_id, conversation_message_id],
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    ids.into_iter()
+        .map(|id| {
+            let candidate = match store.desktop_open_candidate(database, camp_id, &id) {
+                Ok(Some(candidate)) => candidate,
+                Ok(None) => return Ok((id, None)),
+                Err(error) => {
+                    eprintln!(
+                        "legacy_attachment_locator_unavailable attachment_id={id}: {error:#}"
+                    );
+                    return Ok((id, None));
+                }
+            };
+            let path = match reads
+                .get(&id)
+                .filter(|(observed, _)| observed == &candidate)
+            {
+                Some((_, path)) => path.clone(),
+                None => {
+                    pending.insert(id.clone(), candidate.clone());
+                    Some(candidate.path.to_string_lossy().into_owned())
+                }
+            };
+            let attachment = path.map(|path| SharedMessageAttachment {
+                attachment_id: id.clone(),
+                name: candidate.display_name,
+                media_type: candidate.media_type,
+                path,
+                content_digest: Some(candidate.content_digest),
+                legacy_view_backed: false,
+            });
+            Ok((id, attachment))
+        })
+        .collect()
+}
+
+fn replace_legacy_message_attachments(
+    attachments: &mut Vec<SharedMessageAttachment>,
+    restored: Vec<(String, Option<SharedMessageAttachment>)>,
+) {
+    let ids = restored
+        .iter()
+        .map(|(id, _)| id.as_str())
+        .collect::<HashSet<_>>();
+    attachments.retain(|attachment| !ids.contains(attachment.attachment_id.as_str()));
+    let mut resolved = restored
+        .into_iter()
+        .filter_map(|(_, attachment)| attachment)
+        .collect::<Vec<_>>();
+    resolved.append(attachments);
+    *attachments = resolved;
+}
+
 fn load_message_source_refs(
     connection: &Connection,
     message_id: Option<&str>,
@@ -11292,7 +11534,17 @@ mod slow_tests {
                 .rendered_payload
                 .contains("managed-v2-context.txt")
         );
-        assert!(materialized.rendered_payload.contains(&projected_path));
+        let input_json = materialized
+            .rendered_payload
+            .split_once("[RUN_INPUT]\n")
+            .and_then(|(_, rest)| rest.split_once("\n[/RUN_INPUT]"))
+            .map(|(input, _)| input)
+            .expect("RUN_INPUT must be present");
+        let input: Value = serde_json::from_str(input_json).unwrap();
+        assert_eq!(
+            input["messages"][0]["attachments"][0]["path"],
+            projected_path
+        );
         assert!(
             !materialized
                 .rendered_payload
@@ -11557,9 +11809,17 @@ mod slow_tests {
                     crate::db::upgrade_message_senders_fixture(&mut fixture.database);
                 } else {
                     let immutable: String = fixture.database.connection().query_row("SELECT sql FROM sqlite_master WHERE name='agent_run_input_context_projection_immutable'", [], |r| r.get(0)).unwrap();
-                    fixture.database.connection().execute_batch("DROP TRIGGER agent_run_input_context_projection_immutable;").unwrap();
+                    fixture
+                        .database
+                        .connection()
+                        .execute_batch("DROP TRIGGER agent_run_input_context_projection_immutable;")
+                        .unwrap();
                     fixture.database.connection().execute("UPDATE agent_run_input SET context_manifest_version=?1 WHERE agent_run_id=?2", params![expected_version, fixture.run_id]).unwrap();
-                    fixture.database.connection().execute_batch(&immutable).unwrap();
+                    fixture
+                        .database
+                        .connection()
+                        .execute_batch(&immutable)
+                        .unwrap();
                 }
                 // A later profile change and departure cannot change already claimed names.
                 fixture
@@ -11670,16 +11930,23 @@ mod slow_tests {
 
     #[test]
     fn attachment_only_current_input_is_empty_and_reuses_stable_camp_attachment_paths() {
+        // Frozen View compatibility and new target reads share the content/privacy owner.
+        for targeted in [false, true] {
+            check_historical_attachment_input(targeted);
+        }
+    }
+
+    fn check_historical_attachment_input(targeted: bool) {
         let mut fixture = fixture();
         let claim_recipient_display_name: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT default_recipient_display_name FROM agent_run_input WHERE agent_run_id = ?1",
-                [&fixture.run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
+        .database
+        .connection()
+        .query_row(
+            "SELECT default_recipient_display_name FROM agent_run_input WHERE agent_run_id = ?1",
+            [&fixture.run_id],
+            |row| row.get(0),
+        )
+        .unwrap();
         let renamed_recipient_display_name = "领取后改名";
         fixture
             .database
@@ -11705,11 +11972,11 @@ mod slow_tests {
             .connection()
             .execute(
                 r#"
-                UPDATE camp_message
-                SET body = '', structured_content_json = ?2, content_digest = ?3,
-                    effective_recipient_ids_json = '["agent_1"]'
-                WHERE id = ?1
-                "#,
+            UPDATE camp_message
+            SET body = '', structured_content_json = ?2, content_digest = ?3,
+                effective_recipient_ids_json = '["agent_1"]'
+            WHERE id = ?1
+            "#,
                 params![
                     camp_message_id,
                     serde_json::to_string(&empty_content).unwrap(),
@@ -11768,10 +12035,132 @@ mod slow_tests {
         view_store
             .complete_publication(&mut fixture.database, &publication.operation_id)
             .unwrap();
+        let missing_id = Uuid::new_v4().to_string();
+        if targeted {
+            // A selected but missing source must not hide the healthy attachment.
+            let missing_path = fixture
+                .directory
+                .join("camp-attachments")
+                .join(&fixture.camp_id)
+                .join(&missing_id)
+                .join("missing.txt");
+            fixture.database.connection().execute(
+                "INSERT INTO message_attachment(id, camp_id, camp_message_id, position, display_name,
+                    media_type, byte_size, content_digest, storage_path, preview_kind,
+                    created_by_type, created_by_id, created_at)
+                 SELECT ?1, camp_id, camp_message_id, position+1, 'missing.txt', media_type,
+                    byte_size, content_digest, ?2, preview_kind, created_by_type, created_by_id, created_at
+                 FROM message_attachment WHERE id=?3",
+                params![missing_id, missing_path.to_string_lossy(), attachment_id]).unwrap();
+        }
         let service = ContextService;
         freeze_fixture_claim(&mut fixture);
-        let first = service
-            .materialize(
+        let mut reads = LegacyAttachmentReads::new();
+        let sentinel = view_store
+            .root()
+            .join(".staging")
+            .join("unknown-history.txt");
+        if targeted {
+            let projected = resolve_published_attachment_path(
+                fixture.database.connection(),
+                &fixture.camp_id,
+                &attachment_id,
+            )
+            .unwrap();
+            let parent = std::path::Path::new(&projected).parent().unwrap();
+            crate::local_attachment_snapshot::make_owned_tree_removable(parent).unwrap();
+            std::fs::remove_file(&projected).unwrap();
+            std::fs::write(&sentinel, b"preserve unknown historical content").unwrap();
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE camp_attachment_view_operation SET status='copying' WHERE id=?1",
+                    [&publication.operation_id],
+                )
+                .unwrap();
+            for state in ["ready", "initializing", "rebuilding", "integrity_failed"] {
+                fixture
+                    .database
+                    .connection()
+                    .execute(
+                        "UPDATE camp_attachment_view SET state=?2 WHERE camp_id=?1",
+                        params![fixture.camp_id, state],
+                    )
+                    .unwrap();
+                let pending = service
+                    .materialize_with_attachment_reads(
+                        &mut fixture.database,
+                        &store,
+                        None,
+                        None,
+                        &[],
+                        &MaterializeContextRequest {
+                            agent_run_id: &fixture.run_id,
+                            execution_epoch: fixture.execution_epoch,
+                            charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                            max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                        },
+                        None,
+                        &LegacyAttachmentReads::new(),
+                    )
+                    .unwrap_err()
+                    .downcast::<PendingLegacyAttachmentReads>()
+                    .unwrap();
+                assert_eq!(
+                    pending.0.len(),
+                    2,
+                    "only attachments in the selected input are read"
+                );
+                for candidate in pending.0 {
+                    let path = ThreadAttachmentStore::new(&fixture.directory)
+                        .verify_runtime_read_candidate(&candidate)
+                        .ok();
+                    if candidate.attachment_id() == attachment_id {
+                        let path = path.as_ref().expect("healthy source remains readable");
+                        assert_eq!(
+                            std::fs::read_to_string(path).unwrap(),
+                            private_attachment_body
+                        );
+                        assert_eq!(
+                            crate::camp_attachment::legacy_attachment_source_path(
+                                fixture.database.connection(),
+                                &fixture.camp_id,
+                                &attachment_id
+                            )
+                            .unwrap(),
+                            *path
+                        );
+                    } else {
+                        assert_eq!(candidate.attachment_id(), missing_id);
+                        assert!(path.is_none());
+                    }
+                    reads.insert(candidate.attachment_id().to_owned(), (candidate, path));
+                }
+            }
+            assert_eq!(
+                std::fs::read(&sentinel).unwrap(),
+                b"preserve unknown historical content"
+            );
+        }
+        let first = if targeted {
+            service.materialize_with_attachment_reads(
+                &mut fixture.database,
+                &store,
+                None,
+                None,
+                &[],
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+                None,
+                &reads,
+            )
+        } else {
+            service.materialize(
                 &mut fixture.database,
                 &store,
                 &MaterializeContextRequest {
@@ -11781,7 +12170,8 @@ mod slow_tests {
                     max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
                 },
             )
-            .unwrap();
+        }
+        .unwrap();
         let ContextMaterialization::Ready(first) = first else {
             panic!("small context should be ready");
         };
@@ -11793,8 +12183,12 @@ mod slow_tests {
         assert!(!first.rendered_payload.contains("sourceInboxMessageId"));
         assert!(!first.rendered_payload.contains("replyToMessageId"));
         assert!(first.rendered_payload.contains("requirements.txt"));
-        assert!(first.rendered_payload.contains("runtime-files"));
-        assert!(!first.rendered_payload.contains("camp-attachments"));
+        assert!(!first.rendered_payload.contains("missing.txt"));
+        assert_eq!(first.rendered_payload.contains("runtime-files"), !targeted);
+        assert_eq!(
+            first.rendered_payload.contains("camp-attachments"),
+            targeted
+        );
         assert!(!first.rendered_payload.contains("sourceConversationId"));
         assert!(!first.rendered_payload.contains("contentDigest"));
         assert!(!first.rendered_payload.contains("managed-blob://"));
@@ -11808,12 +12202,16 @@ mod slow_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let stable_path = resolve_published_attachment_path(
-            fixture.database.connection(),
-            &fixture.camp_id,
-            &attachment_id,
-        )
-        .unwrap();
+        let stable_path = if targeted {
+            authority_path.clone()
+        } else {
+            resolve_published_attachment_path(
+                fixture.database.connection(),
+                &fixture.camp_id,
+                &attachment_id,
+            )
+            .unwrap()
+        };
         let run_input_json = first
             .rendered_payload
             .split_once("[RUN_INPUT]\n")
@@ -11843,8 +12241,8 @@ mod slow_tests {
             .connection()
             .query_row(
                 "SELECT context_manifest_version,formatter_version,run_facts_schema_version,
-                        context_delivery_profile_json,shared_message_evidence_json
-                 FROM context_manifest WHERE id=?1",
+                    context_delivery_profile_json,shared_message_evidence_json
+             FROM context_manifest WHERE id=?1",
                 [&first.manifest_id],
                 |row| {
                     Ok((
@@ -11859,7 +12257,11 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             (manifest_version, formatter_version, facts_version),
-            (40, 40, 11)
+            (
+                PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION,
+                PUBLIC_CAMP_BATCH_CONTEXT_FORMATTER_VERSION,
+                11
+            )
         );
         assert_eq!(profile_json, None);
         assert_eq!(
@@ -11968,15 +12370,20 @@ mod slow_tests {
             "FOLLOWUP_WITH_HISTORICAL_ATTACHMENT",
         );
         let ContextMaterialization::Ready(followup) = service
-            .materialize(
+            .materialize_with_attachment_reads(
                 &mut fixture.database,
                 &store,
+                None,
+                None,
+                &[],
                 &MaterializeContextRequest {
                     agent_run_id: &followup_run_id,
                     execution_epoch: followup_epoch,
                     charter_delivery_mode: CharterDeliveryMode::NativeAppend,
                     max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
                 },
+                None,
+                &LegacyAttachmentReads::new(),
             )
             .unwrap()
         else {
@@ -11991,14 +12398,14 @@ mod slow_tests {
                 .contains(&attachment_content_digest)
         );
         let (evidence_json, evidence_digest): (String, Option<String>) = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT shared_message_evidence_json, shared_message_evidence_digest FROM context_manifest WHERE id = ?1",
-                [&followup.manifest_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
+        .database
+        .connection()
+        .query_row(
+            "SELECT shared_message_evidence_json, shared_message_evidence_digest FROM context_manifest WHERE id = ?1",
+            [&followup.manifest_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
         let evidence: Value = serde_json::from_str(&evidence_json).unwrap();
         assert_eq!(evidence, json!([]));
         assert_eq!(evidence_digest, None);
@@ -12018,10 +12425,10 @@ mod slow_tests {
             .connection()
             .execute(
                 r#"
-                UPDATE message_attachment
-                SET runtime_projection_state = 'recovery_required'
-                WHERE id = ?1
-                "#,
+            UPDATE message_attachment
+            SET runtime_projection_state = 'recovery_required'
+            WHERE id = ?1
+            "#,
                 [&attachment_id],
             )
             .unwrap();
@@ -12063,6 +12470,21 @@ mod slow_tests {
             serde_json::from_str::<Value>(&degraded_attachment_refs).unwrap(),
             json!([])
         );
+        if targeted {
+            assert_eq!(
+                std::fs::read(&sentinel).unwrap(),
+                b"preserve unknown historical content"
+            );
+            std::fs::remove_file(&sentinel).unwrap();
+            fixture
+                .database
+                .connection()
+                .execute(
+                    "UPDATE camp_attachment_view_operation SET status='completed' WHERE id=?1",
+                    [&publication.operation_id],
+                )
+                .unwrap();
+        }
         ThreadAttachmentStore::new(&fixture.directory)
             .remove_camp(&fixture.camp_id)
             .unwrap();
@@ -12983,7 +13405,7 @@ mod slow_tests {
             execution_root: &fixture.directory,
         };
         let projection = projection_service
-            .prepare(&fixture.database, &config_store, &projection_request)
+            .prepare(&fixture.database, Ok(&config_store), &projection_request)
             .unwrap();
         let snapshot_root = fixture.directory.join("runtime/mcp").join(&fixture.run_id);
         assert_eq!(
@@ -13063,7 +13485,7 @@ mod slow_tests {
         // The real Manifest writer leaves both retired digests NULL. The next
         // prepare must still recover the original private configuration.
         let repeated = projection_service
-            .prepare(&fixture.database, &config_store, &projection_request)
+            .prepare(&fixture.database, Ok(&config_store), &projection_request)
             .unwrap();
         assert_eq!(repeated.snapshot, projection.snapshot);
         assert_eq!(repeated.servers, projection.servers);
@@ -13072,7 +13494,7 @@ mod slow_tests {
         fixture.database = Database::open(&fixture.directory).unwrap();
         let reopened_service = McpProjectionService::new(&fixture.directory);
         let reopened = reopened_service
-            .prepare(&fixture.database, &config_store, &projection_request)
+            .prepare(&fixture.database, Ok(&config_store), &projection_request)
             .unwrap();
         assert_eq!(reopened.snapshot, projection.snapshot);
         assert_eq!(reopened.servers, projection.servers);
@@ -13081,7 +13503,7 @@ mod slow_tests {
         let redispatched = reopened_service
             .prepare(
                 &fixture.database,
-                &config_store,
+                Ok(&config_store),
                 &McpProjectionRequest {
                     execution_epoch: fixture.execution_epoch + 1,
                     ..projection_request
@@ -13131,7 +13553,7 @@ mod slow_tests {
                 )
                 .unwrap();
             let error = reopened_service
-                .prepare(&fixture.database, &config_store, &projection_request)
+                .prepare(&fixture.database, Ok(&config_store), &projection_request)
                 .unwrap_err();
             assert!(
                 error
@@ -13144,7 +13566,7 @@ mod slow_tests {
             reopened_service
                 .prepare(
                     &fixture.database,
-                    &config_store,
+                    Ok(&config_store),
                     &McpProjectionRequest {
                         agent_run_id: &other_run,
                         ..projection_request.clone()
@@ -13162,22 +13584,28 @@ mod slow_tests {
             .unwrap();
         assert!(
             reopened_service
-                .prepare(&fixture.database, &config_store, &projection_request)
+                .prepare(&fixture.database, Ok(&config_store), &projection_request)
                 .is_ok()
         );
 
-        // Existing maintenance removes crashed staging without retiring a live Run.
+        // A live Run's temporary directory may still be in use; leave it intact.
         let staging = snapshot_root.join(".interrupted.tmp");
         std::fs::create_dir(&staging).unwrap();
         std::fs::write(staging.join("canonical.json"), b"partial").unwrap();
-        reopened_service
-            .cleanup_terminal_and_orphaned(&fixture.database)
-            .unwrap();
-        assert!(!staging.exists());
+        let guard = tokio::sync::Mutex::new(fixture.database);
+        reopened_service.cleanup_terminal(
+            &guard,
+            &mut crate::maintenance_budget::MaintenanceBudget::new(
+                128,
+                std::time::Duration::from_secs(2),
+            ),
+        );
+        fixture.database = guard.into_inner();
+        assert!(staging.exists());
         assert!(projection.canonical_path.exists());
 
         if run_scoped {
-            assert_eq!(std::fs::read_dir(&snapshot_root).unwrap().count(), 1);
+            assert_eq!(std::fs::read_dir(&snapshot_root).unwrap().count(), 2);
             // Losing a frozen snapshot must not fall back to global config or
             // import an epoch directory, even if one contains identical bytes.
             let legacy = snapshot_root.join("99");
@@ -13186,7 +13614,7 @@ mod slow_tests {
             std::fs::write(legacy.join("canonical.json"), &bytes).unwrap();
             std::fs::remove_dir_all(projection.canonical_path.parent().unwrap()).unwrap();
             let error = reopened_service
-                .prepare(&fixture.database, &config_store, &projection_request)
+                .prepare(&fixture.database, Ok(&config_store), &projection_request)
                 .unwrap_err();
             assert!(
                 error
@@ -13204,9 +13632,36 @@ mod slow_tests {
                 [&fixture.run_id],
             )
             .unwrap();
-        reopened_service
-            .cleanup_terminal_and_orphaned(&fixture.database)
+        let guard = tokio::sync::Mutex::new(fixture.database);
+        reopened_service.cleanup_terminal(
+            &guard,
+            &mut crate::maintenance_budget::MaintenanceBudget::new(
+                128,
+                std::time::Duration::from_secs(2),
+            ),
+        );
+        fixture.database = guard.into_inner();
+        assert!(
+            snapshot_root.exists(),
+            "terminal alone is not a real cleanup receipt"
+        );
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET cancel_acknowledged_at=updated_at WHERE id=?1",
+                [&fixture.run_id],
+            )
             .unwrap();
+        let guard = tokio::sync::Mutex::new(fixture.database);
+        reopened_service.cleanup_terminal(
+            &guard,
+            &mut crate::maintenance_budget::MaintenanceBudget::new(
+                128,
+                std::time::Duration::from_secs(2),
+            ),
+        );
+        fixture.database = guard.into_inner();
         assert!(!snapshot_root.exists());
         fixture.cleanup();
     }
@@ -16166,7 +16621,7 @@ mod slow_tests {
             additional_skills: None,
             a2a_guidance: None,
             single_chat_guidance: None,
-                chat_reply_context: None,
+            chat_reply_context: None,
             current_input: Some(&json!({"source":{"type":"user"},"body":"work"})),
             run_input: None,
         })

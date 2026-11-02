@@ -2,8 +2,7 @@
 document_type: ui-platform-contract
 authority: renderer-windows-interaction-delta
 status: accepted
-source_version: v1.05
-last_updated: 2026-10-25
+last_updated: 2026-10-30
 ---
 
 # Windows Interaction Delta
@@ -12,22 +11,13 @@ last_updated: 2026-10-25
 Renderer 继续使用同一组件树、信息架构、主题 Token、领域动作和持久状态。平台差异由
 只读 `HostPlatformKey` 投影到展示层，不复制业务状态机，也不允许 Renderer 自行推断安全或 Runtime 准入。
 
-生产实现状态由代码、自动化和真实 Windows 证据决定；本文 `accepted` 不表示 Windows UI 已完成。原
-[v1.05 HTML 交互稿](https://github.com/murray17/rovai-ai/blob/0de773a75231038e384c03cd761fea56344a6e4f/docs/prototypes/windows-interaction-delta/index.html)只保留历史评审上下文，不代表当前
-Windows chrome，也不能成为第三份组件、文案或状态真源。
-
 ## 1. 保持不变的产品结构
 
-- App Shell 使用默认 270px、可调宽且可完全收起的 rail、50px App 顶行及同一 Project / Camp / Quick Chat 导航；
-- 设置分类、队员工作区、Camp 工作区、Memory、Diagnostics、Onboarding 和 Planned Shutdown 不增删一级入口；
+- App Shell 使用默认 270px、可调宽且可完全收起的 rail、50px App 顶行及同一 Project / Thread / Quick Chat 导航；
+- 设置分类、队员工作区、Thread 工作区、Memory、Diagnostics、Onboarding 和 Planned Shutdown 不增删一级入口；
 - 五套配色使用同一生产组件；`system` 只解析为 Day / Night，不改变内容或能力；
 - Core command、Draft、selection、focus return、version check、Recovery 和未保存 Runtime 草稿保护保持同义；
 - Runtime 平台准入、机器可用性与 Settings Preview 是三个正交事实，任何一个都不得借另一个的视觉状态表达。
-
-配套 HTML 评审稿必须从这些生产页面出发做差异叠加：Quick Chat 使用全幅空状态；Settings 侧栏替换主侧栏；Members
-保留 270px 主侧栏、236px 队员列表与既有详情轨道；Runtime 使用真实 Catalog 行与产品 Logo。不得用额外评审侧栏、
-舞台留白、圆角/阴影窗口卡片或缩小版导航重画一套“近似 Rovai AI”。原型专用控制只能作为不占布局的、默认收起的
-评审层，并必须支持切回无 Windows 投影的 macOS 对照态。
 
 ## 2. 平台投影
 
@@ -64,7 +54,7 @@ Windows `BrowserWindow` 保留系统 frame，但以 `titleBarStyle: hidden` 隐�
 隐藏标题文字层后，Windows 复用既有 `.topbar`、
 `.window-drag-strip` 与 `.unified-sidebar-drag` 受控拖拽区；既有按钮继续保持 `no-drag`。
 
-Windows 的统一侧栏只把 traffic-light 预留从 38px 收至 8px；品牌、一级导航、Project / Camp、设置和所有右侧
+Windows 的统一侧栏只把 traffic-light 预留从 38px 收至 8px；品牌、一级导航、Project / Thread、设置和所有右侧
 页面结构、内容与尺寸不变。Windows 主窗口的 caption close / Alt+F4 由 Main 统一处理；默认显示现有 AppDialog
 风格的“关闭窗口”，提供“最小化到托盘”“退出 Rovai”和默认未选中的“记住我的选择”。取消、Esc 和弹窗 × 保留窗口。
 不记住只执行本次选择；记住后立即同步设置并在重启后保留。设置 → 通用 → 窗口提供“每次询问 / 最小化到系统托盘 /
@@ -90,7 +80,7 @@ Onboarding 先呈现准入，再呈现机器状态：
 | --- | --- | --- | --- |
 | `qualified` | 正常状态机 | 继续现有 checking / 可用 / 需登录 / 未安装等文案 | 按现有合同检查、选择、保存、执行 |
 | `not_qualified` | 不存在 | `Windows 尚未验证`，并说明不是本机安装故障 | 无检查、安装、选择或执行 |
-| `preview` | 真实本机状态 | 版本与检查/安装/登录结果；检查详情保留资格记录未齐备的说明，无测试、试运行或实验性标签 | 允许检查、安装、选择与执行；不宣称 qualified |
+| `preview` | 真实本机状态 | 版本与检查/安装/登录结果；无资格未齐备说明、测试、试运行或实验性标签 | 允许检查、安装、选择与执行；不宣称 qualified |
 | `unsupported` | 不存在 | `此平台不支持`，并显示稳定产品级说明 | 无检查、安装、选择或执行 |
 
 禁止把 `not_qualified` 画成 `not_installed`、`unavailable`、红色健康失败或永不结束的 checking；禁止显示“重新扫描”
@@ -114,7 +104,7 @@ Windows 目录选择继续使用系统 Dialog。选择后，Core 的 Host/Storag
 - Explorer 动作只在对象仍通过 Core identity 验证时可用；失败保留对象上下文并允许重试或重新选择。
 
 路径使用等宽数字/证据字体、`overflow-wrap: anywhere` 和可复制原文；不全局小写、不用盘符字符串决定同一对象。
-普通设置、队员和 Camp 页面不显示 `%LOCALAPPDATA%` 私有目录；需要诊断时沿用 allowlist/redaction 和显式 Save Dialog。
+普通设置、队员和 Thread 页面不显示 `%LOCALAPPDATA%` 私有目录；需要诊断时沿用 allowlist/redaction 和显式 Save Dialog。
 
 ## 6. Installer、Upgrade 与 Uninstall
 
@@ -146,4 +136,3 @@ Installer UX。缺少真机证据时，对应 Checkpoint 保持未完成。
 - [Renderer 无障碍基线](qa/accessibility.md)
 - [Renderer 主题覆盖矩阵](qa/theme-matrix.md)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
-- [v1.05 实施计划](../versions/v1.05/implementation-plan.md)

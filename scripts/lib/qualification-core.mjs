@@ -26,7 +26,7 @@ export function frozenMemberRuntimeDifferences(member, profile) {
   }
   // Member reads are static, even after runtime.product.check succeeds. The
   // Runner checks the real installation separately; this is not model drift.
-  if (!['ready', 'installed_unverified'].includes(profile?.runtimeReadiness?.status)) {
+  if (!['ready', 'light_ready', 'installed_unverified'].includes(profile?.runtimeReadiness?.status)) {
     compare('runtimeReadiness.status', 'ready', profile?.runtimeReadiness?.status)
   }
   compare('runtimeReadiness.blockers', [], profile?.runtimeReadiness?.blockers)
@@ -34,6 +34,20 @@ export function frozenMemberRuntimeDifferences(member, profile) {
     compare(`runtimeConfiguration.${field}`, member[field], profile?.runtimeConfiguration?.[field])
   }
   return differences
+}
+
+export function selectFrozenRuntimeInstallations(installations, kinds, { allowUnverified = false } = {}) {
+  const selected = Object.fromEntries(kinds.map(kind => [kind, installations.find(candidate =>
+    candidate.adapterKind === kind && candidate.installationClass === 'managed_default'
+      && candidate.authScope === 'default' && candidate.enabled && candidate.pathState === 'valid'
+      && typeof candidate.executablePath === 'string' && candidate.executablePath)]))
+  if (Object.values(selected).some(value => !value)) return null
+  // Regression execution uses the current Core launch admission. A static
+  // installation is not a successful probe, and is recorded as such below.
+  if (allowUnverified) return selected
+  return Object.values(selected).every(value => value.snapshot?.probeStatus === 'ready')
+    && (!selected['antigravity-app'] || selected['antigravity-app'].snapshot.capabilities.includes('builtin_cli.transport.v24'))
+    ? selected : null
 }
 
 export async function findCompetingRovaiProcesses() {

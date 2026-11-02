@@ -3,10 +3,42 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-10-29
+last_updated: 2026-11-01
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d72"></a>
+## V1.72-D72：原生子代理沿用平铺 command，状态归本次工具调用
+
+- 状态：accepted
+- 日期：2026-11-01
+- 授权：User 在子代理 Thread sequence 10/12 确认通用 command、机器人图标与单文本详情，sequence 16 授权真实模型测试，sequence 22 要求独立 worktree 实施。
+- 当前权威：[Run Process Detail Surface v58](../../contracts/run-process-detail-surface-v58.md)、[执行记录架构](../../architecture/foundational-invariants.md#evidence-canonical-activity)、[Runtime Activity Registry](../../runtime-activity/registry.md)。
+
+同步委派可能直接返回报告，异步启动、读取报告与独立完成通知则是不同事实。选择一条真实调用一行，按已记录顺序平铺主／子工具，
+只在有原生字段证据时标记类型和归属；已确认的子代理正文与不能确定作者的并发文本在正文聚合前过滤，工具实际返回保留。
+启动调用只显示自身状态，独立通知不冒充启动结果；工具名称、真实参数、报告和通用错误读取都沿普通 command。
+
+接受协议未转发子工具时没有其内部步骤，也接受 Copilot/Qoder 等匿名并发输出无法安全展示的限制。只做显示归属，不增加
+子任务调度、自动续跑、后台开关或日志补采。未选择代理树、子代理面板、按工具名／时间配对或按结果文案推断任务成功。
+
+分类语义以 Migration 219 原子切换到 schema 169/activity-v5；旧 Evidence 不回填，已有 operation 按原分类器继续归约。
+代价是旧版本应用不能直接打开升级后的数据库；迁移失败事务回滚，历史业务数据保持。实现与验收见[实施记录](subagent-flat-execution.md)。
+
+<a id="v1-72-d70"></a>
+## V1.72-D70：可选历史文件与单个 Runtime 故障不阻断原工作区
+
+- 状态：accepted
+- 日期：2026-10-30
+- 授权：User sequence 31 确认六项全部实施，①②③优先、⑥同步、④⑤同轮；要求保留现场的原会话与原使命副本验收。
+- 当前权威：[Availability-first Runtime](../../architecture/availability-first-runtime.md#optional-startup-boundary)、[附件](../../contracts/camp-attachment-v12.md#历史存储的故障范围)、[Runtime 设置](../../contracts/runtime-launch-and-verification-v74.md#本机配置的局部故障)、[MCP 快照](../../contracts/input-snapshot-storage-v1.md#mcp-snapshot-storage-layout)、[文件变化与 Blob](../../architecture/runtime-file-change-observation.md#故障边界)。
+
+健康数据库仍可能被旧附件根身份、损坏临时记录、未使用 Runtime 配置或外部 MCP 文件阻断；把历史扫描移到后台但继续持有全局数据库锁，仍会阻塞原会话读取与新任务。选择把错误收窄到实际文件、Runtime 或工具，以现有状态与错误投影表达；Runtime discovery 独立启动，历史维护逐条有界且不随功能重试重跑。
+
+接受无法证明归属的残留继续占用磁盘，不通过全盘库存、额外持久队列或恢复服务换取彻底清理。保留实例锁、迁移事务、冻结 Run 快照、当前真实停止结果、具体目标身份检查和删除前的引用复核。损坏配置区别于缺失：保留原值及错误，只允许用户显式、版本检查后的修正，不自动换程序或账号。
+
+本决定替代当前规范中旧附件根身份/遍历决定全局准入、MCP 全局 ready 决定普通执行、Adapter 初始化必须清理旧文件的要求。派生视图可按需重建；不改数据库 schema、不补成功回执、不清空原会话。跨平台与原用户数据副本验收分别记录，开发启动或合成数据不能替代交付门槛。
 
 <a id="v1-72-d69"></a>
 ## V1.72-D69：历史进程清理不决定工作区可用性
@@ -317,7 +349,7 @@ AI 创建队员的专项窗口内生命周期继续由 D09 对应合同约束。
 
 - 状态：accepted
 - 日期：2026-10-06
-- 当前权威：[Camp Member Fast v3](../../contracts/camp-member-fast-v3.md)、[Runtime 边界](../../architecture/runtime-catalog-boundaries.md#camp-队员-fast-边界)
+- 当前权威：[Camp Member Fast v3](../../contracts/camp-member-fast-v3.md)、[Runtime 边界](../../architecture/runtime-catalog-boundaries.md#thread-队员-fast-边界)
 
 ### 背景与选择
 
@@ -451,7 +483,7 @@ User 确认交互稿及模型仍读取 `@名字` 文字后，授权实现、创�
 
 - 状态：accepted
 - 日期：2026-10-09
-- 当前权威：[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md#4-ownership-and-termination)、[Windows Desktop Platform](../../architecture/windows-desktop-platform.md#3-managed-processes-and-shutdown)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md#后续执行与清理)、[Camp 会话工作区](../../ui/components/conversation-workspace.md#public-camp-v160-当前边界)
+- 当前权威：[Managed Runtime Process v2](../../contracts/managed-runtime-process-v2.md#4-ownership-and-termination)、[Windows Desktop Platform](../../architecture/windows-desktop-platform.md#3-managed-processes-and-shutdown)、[Cancellation Settlement v2](../../contracts/cancellation-settlement-v2.md#后续执行与清理)、[Camp 会话工作区](../../ui/components/conversation-workspace.md#public-thread-当前边界)
 
 ### 背景与选择
 
@@ -885,7 +917,7 @@ User 确认 1—5 一起实施。SQL 全文比对、上下文中间副本与摘�
 
 - 状态：accepted
 - 日期：2026-10-13
-- 当前权威：[Camp Membership v3](../../contracts/camp-membership-v3.md)、[成员生命周期](../../architecture/foundational-invariants.md#member-lifecycle)和[会话队员 UI](../../ui/components/conversation-workspace.md#camp-队员管理)
+- 当前权威：[Camp Membership v3](../../contracts/camp-membership-v3.md)、[成员生命周期](../../architecture/foundational-invariants.md#member-lifecycle)和[会话队员 UI](../../ui/components/conversation-workspace.md#thread-队员管理)
 
 ### 背景与选择
 
@@ -1470,3 +1502,66 @@ Desktop 最多追加一次启动重启，避免叠加 SQLite 5 秒等待。接�
 
 未选择继续增加 macOS/Windows 例外、自动修权、损坏库自动 quarantine 后建空库或引入新重试框架：这些选择或继续扩大
 状态空间，或会让老用户误见空会话。此决定替代历史启动票据/元数据复核与现有启动目录 ACL 模板的当前约束，保留历史理由。
+
+<a id="v1-72-d71"></a>
+## V1.72-D71：文件轻量编辑以 Host 乐观保存和窗口内草稿完成
+
+- 状态：accepted
+- 日期：2026-10-29
+- 当前权威：[File Preview v24](../../contracts/file-preview-v24.md)、[File Preview Architecture](../../architecture/file-preview.md#轻量文本编辑)
+
+### 背景与选择
+
+User 明确要求在已有阅读区直接修改、手动保存到原文件，并限定不引入自动保存、持久事务、恢复中心或完整 IDE。
+Desktop 与 Web 复用 Rust Host 的来源重验、内容摘要和同目录替换，窗口 controller 外的同一资源 owner 保留草稿。
+提交内容与继续输入分开确认，保存未知先读核对；覆盖必须再次比较观察到的版本。文件树与布局本轮不重构。
+
+### 取舍
+
+只支持 2 MiB 内完整、可回写 UTF-8 文本；混合换行、硬链接等特殊文件保持只读。原子替换不等于跨进程锁，
+保留基本权限不等于完整 metadata 保真；窗口内撤销历史不等于崩溃恢复。这些边界避免正常保存引入额外授权和管理流程。
+
+<a id="v1-72-d73"></a>
+## V1.72-D73：项目目录按当前工作根浏览，入口状态独立于预览
+
+- 状态：accepted
+- 日期：2026-11-01
+- 授权：User 对 V14 的目录独立性批复及 sequence 73 补齐生产实现的要求。
+- 当前权威：[File Preview v25](../../contracts/file-preview-v25.md)、[项目目录浏览](../../architecture/file-preview.md#项目目录浏览)、[文件目录界面](../../ui/components/file-preview.md#项目文件目录)。
+
+既有编辑交付没有生产目录入口，文件仍依赖对话链接。选择共享前端轻文件树、Host 按层读取与有界路径搜索，
+沿用现有预览与文本保存。两个入口控制同一目录；目录和 sidecar 分开管理，不创建虚拟打开文件标签。
+实际工作副本由 Thread 业务绑定决定，浏览不创建副本、不要求第二次位置选择，也不扩展普通文件打开的目录权限。
+
+接受非稳定分页、无搜索续传、根重建后旧来源失效及监听失败时手动恢复。事件通知使用现有请求运输的有界等待，
+关闭视图或断线后回收内存作用域。不采用全项目索引、轮询扫描、文件管理菜单或新的资源恢复框架。
+
+<a id="v1-72-d74"></a>
+## V1.72-D74：目录一次读取、相对路径定位，去掉逐文件登记
+
+- 状态：accepted
+- 日期：2026-11-01
+- 授权：User 要求按 V15 修正界面，并以可用性优先收敛目录服务、恢复普通 Markdown 源码入口。
+- 当前权威：[File Preview v26](../../contracts/file-preview-v26.md)、[项目目录浏览](../../architecture/file-preview.md#项目目录浏览)、[文件预览 UI](../../ui/components/file-preview.md)。
+
+按页返回仍逐页重扫目录，逐文件登记又使浏览量成为功能门槛。选择单层一次有界读取、前端本地分批显示、
+可逆相对路径定位；保留当前工作根与代次、实际访问边界和资源释放，不增加索引、快照协议或登记表淘汰。
+此选择替代 D73 中的非稳定 offset 分页。纯读取事件不应让缓存失效；过滤事件种类，不加另一层调度。
+源码/预览切换属于阅读能力，不能依赖可编辑草稿或项目目录来源；只读文件仍只读。
+
+<a id="v1-72-d75"></a>
+## V1.72-D75：聊天来源说明与现有工具授权分开（原分支 D53，重编号保留）
+
+- 状态：accepted
+- 日期：2026-10-28
+- 编号说明：本决定在原 Windows 分支内记为 V1.72-D53；合并上游 0.5.3 后 D53 已被上游「长粘贴文件归属 Thread」占用，正文不改，改记 D70。
+- 确认：开发者经父级msg_bfe84aabceb6明确选择revision3；未声称逐字阅读技术全文
+- 当前权威：[Manifest43](../../contracts/context-manifest-evidence-v43.md)、[聊天Bot v3](../../contracts/feishu-chat-bot-v3.md)、[聊天架构](../../architecture/feishu-channel.md#聊天-bot-普通回复与逐输入来源)
+
+普通回复由Host自动回原聊天，却缺少模型可见的逐输入来源说明。选择在动态输入中完整说明身份、内容保护、自动回复和受托工具区别，并保留claim冻结与历史恢复，不修改Bootstrap或制造新授权。FRR-10证明旧grant仍绑定初始来信，不证明合法目标上的合成调用已扩大权限。拒绝全工具冻结、窄写冻结及本轮逐调用授权重构，保留正常受托发送和result；代价是服务器仍无逐调用新委托来源硬保证。该限制明确公开，提示词不冒充安全凭据；真实模型错误归属、泄露、 无委托外发及缺证据仍阻断交付。
+
+## 历史勘误：2026-11-02 聊天回复决定合流编号
+
+原 Windows 分支以 D53 记录聊天来源说明，前次合流临时改记 D70；固定上游同时已使用 D53 与 D70。
+保留上游决定正文和原聊天决定内容，仅将本地唯一入口改为 [V1.72-D75](#v1-72-d75)，并同步当前导航。
+原编号说明保留为当时记录，不代表当前 D70；可复核依据为固定上游 889a8b7c2f40f94e9c60416a564550fabc750a47 和保留 WIP 3f481728a30785a6dfdc6666e0ef81cb5b899cb5。

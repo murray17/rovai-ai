@@ -35,7 +35,7 @@ function contextLayer(s, y, name, token, description, tone, drawing, badge = '')
 export function renderLayeredContext() {
   const s = sketch();
   const bootstrap =
-    label(21, 34, 'Session Bootstrap · 稳定会话引导', 27, { color: T.green.main, weight: 600 })
+    label(21, 34, 'Session Bootstrap · 会话启动材料', 27, { color: T.green.main, weight: 600 })
     + contextLayer(s, 58, '会话约定', 'Session Charter', '协作约定 · Rovai CLI 入口与使用方式', T.green,
       book(s, 790, 86, 78, 60, T.green)
       + pill(895, 95, 140, 'rovai --help', T.green, 18))
@@ -44,31 +44,34 @@ export function renderLayeredContext() {
       + box(s, 872, 207, 180, 66, '#fff', T.gugu.border, false, 9)
       + label(963, 235, '咕咕', 22, { color: T.gugu.main, weight: 600, anchor: 'middle' })
       + label(963, 258, '边界验证与复现', 16, { color: P.muted, anchor: 'middle' }))
-    + contextLayer(s, 314, '记忆入口', 'Memory Entrypoint', '按授权范围发现记忆，正文按需读取', T.ding,
-      [0, 1, 2].map(i => book(s, 768 + i * 92, 340, 61, 56, [T.green, T.ding, T.gugu][i])).join(''))
-    + panel(s, 1139, 58, 347, 365, 'Native Session', T.green)
-    + avatar(s, 'gugu', 1312, 218, 57)
-    + label(1312, 322, ['建立时注入', '适用时补送'], 21, { color: T.green.main, anchor: 'middle', leading: 40 });
+    + contextLayer(s, 314, '团队指引', 'TEAM_GUIDANCE', '创建 Thread 时固定；非空时提供', T.teal,
+      file(s, 748, 339, 300, 'Thread 固定指引', T.teal), '可选')
+    + contextLayer(s, 442, '平台 Skills', 'ROVAI_PLATFORM_SKILLS', '平台操作与记忆维护索引 · 不授予权限', T.green,
+      file(s, 748, 467, 300, '平台 Skill 索引', T.green))
+    + contextLayer(s, 570, '记忆入口', 'MEMORY_ENTRYPOINT', '授权范围与检索入口；正文按需读取', T.ding,
+      [0, 1, 2].map(i => book(s, 768 + i * 92, 596, 61, 56, [T.green, T.ding, T.gugu][i])).join(''))
+    + panel(s, 1139, 58, 347, 621, 'Native Session', T.green)
+    + avatar(s, 'gugu', 1312, 283, 57)
+    + label(1312, 404, ['按 Runtime 规则投递', '实际字节计入预算', '单聊省略团队与记忆层'], 20, { color: T.green.main, anchor: 'middle', leading: 40 });
 
   const dynamic =
-    label(21, 483, '动态上下文 · 每次 AgentRun 按需组装', 27, { color: T.teal.main, weight: 600 })
-    + contextLayer(s, 514, '同伴名册', 'COLLABORATION_STATE', '可协作对象 · 名片与职责 · 寻址信息', T.gugu,
+    label(21, 483, '公开动态上下文 · 每次输入独立冻结', 27, { color: T.teal.main, weight: 600 })
+    + contextLayer(s, 514, '同伴名册', 'COLLABORATION_STATE', 'ID · 名称 · 团队角色；启动或完整投影变化时提供', T.gugu,
       avatar(s, 'ding', 819, 568, 31)
       + avatar(s, 'cheese', 961, 568, 31)
       + connection('M864 569 H916', T.gugu, { both: true, width: 2.1 }))
-    + contextLayer(s, 642, '自身责任', 'SELF_ACTIVE_TASKS', '我负责的未完成 Task · 目标与进展', T.cheese,
+    + contextLayer(s, 642, '自身任务', 'SELF_ACTIVE_TASKS', '启用 Task 时可选提供；完整本批输入优先', T.cheese,
       box(s, 748, 663, 301, 68, '#fffdf4', T.cheese.border, false, 8)
       + label(776, 692, '☐ 导出回归验证', 20, { color: T.cheese.main, weight: 600 })
       + label(776, 716, '检查空数据与边界场景', 17, { color: P.muted }))
-    + contextLayer(s, 770, '公共历史', 'SHARED_CONVERSATION', '来源消息 · 引用链 · 最近讨论与成果', T.ding,
-      [0, 1, 2].map(i => box(s, 755 + i * 87, 790 + i * 7, 118, 60, '#fff', T.ding.border, false, 8)
-        + label(795 + i * 87, 827 + i * 7, ['目标', '反馈', '成果'][i], 17, { color: T.ding.main, anchor: 'middle' })).join(''))
-    + contextLayer(s, 898, '本次执行事实', 'RUN_FACTS', '当前 Run · 关联 Mission/Task · 外部效果', T.teal,
-      pill(758, 934, 122, 'Mission', T.teal, 19)
-      + connection('M887 953 H923', T.teal, { width: 2.1 })
-      + pill(932, 934, 116, 'Run', T.teal, 19))
-    + contextLayer(s, 1026, '工作区', 'WORKSPACE', '本次 Run 的项目根、分支与执行位置', T.green,
-      file(s, 748, 1047, 300, '项目根 · 当前分支', T.green))
+    + contextLayer(s, 770, '本次执行事实', 'RUN_FACTS', '当前 Run 与历史提示；需要历史时调用 thread.read', T.teal,
+      pill(758, 806, 122, 'Mission', T.teal, 19)
+      + connection('M887 825 H923', T.teal, { width: 2.1 })
+      + pill(932, 806, 116, 'Run', T.teal, 19))
+    + contextLayer(s, 898, '工作区', 'WORKSPACE', 'Mission 执行位置；首次或变化时提供', T.green,
+      file(s, 748, 919, 300, '项目根 · 当前分支', T.green))
+    + contextLayer(s, 1026, '附加 Skills', 'ROVAI_ADDITIONAL_SKILLS', '成员配置与显式选择的索引；允许空索引', T.ding,
+      file(s, 748, 1047, 300, '可用 Skill 名称与路径', T.ding))
     + contextLayer(s, 1154, '本批输入', 'RUN_INPUT', '有序消息批次 · 附件与 Skill 引用', T.cheese,
       avatar(s, 'ding', 790, 1213, 30)
       + envelope(s, 852, 1190, 99, 58, T.cheese)
@@ -77,16 +80,16 @@ export function renderLayeredContext() {
   const selection =
     '<path d="M1100 529 H1114 V1249 H1100 M1114 829 H1130" fill="none" stroke="#9bbdc0" stroke-width="2"/>'
     + panel(s, 1140, 514, 346, 227, 'Context Profile', T.teal)
-    + label(1313, 614, ['可见范围 · 输入预算', '选择与裁剪各层内容'], 20, { color: T.teal.main, anchor: 'middle', leading: 42 })
+    + label(1313, 614, ['完整批次 · 实际字节预算', '可选任务按预算取舍'], 20, { color: T.teal.main, anchor: 'middle', leading: 42 })
     + connection('M1313 748 V783', T.teal, { width: 2.2 })
     + page(s, 1158, 791, 309, 218, T.green)
     + label(1313, 872, 'ContextManifest', 24, { color: T.green.main, weight: 600, anchor: 'middle' })
-    + label(1313, 916, ['实际动态输入', '选择 · 裁剪 · 遗漏'], 20, { color: T.green.main, anchor: 'middle', leading: 38 })
+    + label(1313, 916, ['冻结最终动态输入', '恢复使用原字节'], 20, { color: T.green.main, anchor: 'middle', leading: 38 })
     + connection('M1313 1017 V1071', T.green, { width: 2.2 })
     + avatar(s, 'gugu', 1313, 1137, 54)
     + pill(1216, 1220, 194, '本次 AgentRun', T.gugu, 18);
 
-  return frame(1300, bootstrap + dynamic + selection);
+  return frame(1556, bootstrap + '<g transform="translate(0 256)">' + dynamic + selection + '</g>');
 }
 
 export function renderSessionComic() {
@@ -100,7 +103,7 @@ export function renderSessionComic() {
     avatar(s, 'gugu', 150, 269, 60, true)
     + book(s, 290, 146, 382, 207, T.gugu, false)
     + label(481, 124, 'Session Bootstrap', 23, { color: T.gugu.main, weight: 600, anchor: 'middle' })
-    + label(310, 257, ['协作约定', '身份与职责', '记忆入口'], 21, { color: P.ink, leading: 38 })
+    + label(310, 257, ['会话约定与身份', '团队指引与 Skills', '记忆入口'], 21, { color: P.ink, leading: 38 })
     + pill(515, 284, 128, 'Run 1', T.gugu, 19)
     + envelope(s, 554, 224, 61, 37, T.gugu)
     + label(482, 409, '稳定引导 + 首次动态输入', 21, { color: T.gugu.main, anchor: 'middle' });
@@ -125,12 +128,12 @@ export function renderSessionComic() {
     + label(370, 718, '压缩', 22, { color: T.ding.main, anchor: 'middle' })
     + page(s, 466, 668, 192, 173, T.ding, '原生会话摘要')
     + avatar(s, 'gugu', 288, 883, 37)
-    + pill(350, 886, 318, '原生压缩信号已接入时', T.ding, 18);
+    + pill(350, 886, 318, 'Runtime 支持压缩补发时', T.ding, 18);
 
   const continueWork =
     label(1123, 607, 'Bootstrap Redelivery', 25, { color: T.green.main, weight: 600, anchor: 'middle' })
     + page(s, 797, 656, 216, 169, T.green)
-    + label(905, 723, ['身份', '约定', '记忆入口'], 20, { color: T.green.main, anchor: 'middle', leading: 37 })
+    + label(905, 723, ['会话启动材料', '身份与固定规则', 'Skills 与记忆入口'], 20, { color: T.green.main, anchor: 'middle', leading: 37 })
     + label(1063, 747, '+', 42, { color: T.green.main, anchor: 'middle' })
     + envelope(s, 1114, 683, 123, 73, T.cheese)
     + label(1175, 800, '本次动态输入', 20, { color: T.cheese.main, anchor: 'middle' })

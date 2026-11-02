@@ -1636,7 +1636,7 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   height: 28px;
   flex: 1 1 auto;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   padding: 0 4px 0 8px;
   overflow: hidden;
   border: 0;
@@ -1650,8 +1650,10 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
   flex: 1 1 0;
   padding-inline-end: 16px;
   overflow: hidden;
-  font-size: 10.5px;
-  font-weight: 600;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
   text-align: start;
   white-space: nowrap;
 }
@@ -2197,7 +2199,7 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 }
 .camp-topbar.has-file-preview.file-preview-compact,
 .workspace-grid.file-preview-open.inspector-collapsed.file-preview-compact { grid-template-columns: minmax(0, 1fr); }
-.camp-topbar.file-preview-compact .topbar-conversation-context { display: none; }
+.camp-topbar.has-file-preview.file-preview-compact .topbar-conversation-context { display: none; }
 .camp-topbar.file-preview-compact .file-preview-tabs { border-left: 0; }
 .workspace-grid.file-preview-open.file-preview-compact .timeline-pane,
 .workspace-grid.file-preview-open.file-preview-compact .conversation-controls { display: none; }
@@ -2354,7 +2356,7 @@ button.file-preview-html-feedback:hover { background: var(--surface-hover); }
 .execution-config-line { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .execution-config-line .execution-model-params { flex: 0 1 auto; }
 .execution-drawer-header h2 { overflow: hidden; margin: 0; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.execution-model-params { min-width: 0; overflow: hidden; color: var(--brand-ink); font: 600 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.execution-model-params { min-width: 0; overflow: hidden; color: var(--muted); font: 600 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .execution-drawer-header p { overflow: hidden; margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .execution-drawer-actions { display: flex; flex: 0 0 auto; align-items: center; align-self: center; gap: 8px; }
 .execution-drawer-fast-slot { display: inline-flex; flex: 0 0 auto; min-width: 54px; min-height: 28px; align-items: center; }
@@ -8906,6 +8908,14 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 :root .app-dialog :is(.primary-button,.quiet-button,.danger-button,.approve-button) { min-height:36px; border-radius:7px; font-size:12.5px; font-weight:500; }
 :root .app-dialog .quiet-button { background:transparent; border-color:transparent; }
 :root .app-dialog .quiet-button:hover:not(:disabled) { background:var(--surface-hover); }
+:root .app-dialog.file-close-dialog { width:min(440px,calc(100vw - 32px)); }
+.file-close-dialog .app-dialog-header { padding-bottom:0; }
+.file-close-dialog .app-dialog-title { overflow-wrap:anywhere; }
+.file-close-dialog .app-dialog-footer { padding-top:22px; }
+.file-close-dialog .dialog-actions { position:static; background:transparent; }
+.file-close-dialog .dialog-actions button { min-width:64px; }
+:root .file-close-dialog .quiet-button:focus-visible { background:var(--surface-hover); }
+:root .file-close-dialog .danger-button:focus-visible { background:color-mix(in srgb,var(--danger) 10%,var(--danger-soft)); }
 /* User-confirmed danger treatment: pale red surface + red text, in both themes. */
 :is(.app-dialog,.compact-dialog) :is(.danger-button,.compact-danger) { color:var(--danger); background:var(--danger-soft); border:1px solid transparent; box-shadow:none; font-weight:500; }
 :is(.app-dialog,.compact-dialog) :is(.danger-button,.compact-danger):hover:not(:disabled) { color:var(--danger); background:color-mix(in srgb,var(--danger) 10%,var(--danger-soft)); border-color:color-mix(in srgb,var(--danger) 22%,transparent); }
@@ -9560,3 +9570,10 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 @media (min-width: 1800px) {
   .public-agent-message { --agent-message-prose-width: 780px; }
 }
+
+/* Editing adds only controls within the existing path row. */
+.file-preview-edit-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.file-preview-edit-actions:empty { display: none; }
+.file-preview-tab-dirty { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; opacity: .75; }
+.file-preview-saved-preview { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.file-preview-saved-preview[hidden] { display: none; }

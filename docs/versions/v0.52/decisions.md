@@ -227,7 +227,7 @@ Removing the prefix changes explicit invocation and project-native projection pa
 - [v0.52 overview](README.md)
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](../v0.37/decisions.md#adr-0105)
 - [ADR-0144: Self-Contained Duo Grilling Bundled Skills](../v0.49/decisions.md#adr-0144)
-- [Skill settings UI strategy](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Skill settings UI strategy](../../ui/surfaces/settings-workspace.md)
 - [Domain terminology](../../../CONTEXT.md)
 - [`analyze-agent-codebase` source](../../../skills/analyze-agent-codebase/SKILL.md)
 <!-- legacy-adr-body:end id=ADR-0150 -->

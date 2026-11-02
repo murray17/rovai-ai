@@ -2,6 +2,8 @@
 mod attachment_paths;
 #[path = "db_automation_naming.rs"]
 mod automation_naming;
+#[path = "db_chat_reply.rs"]
+mod chat_reply;
 #[path = "db_claim_context.rs"]
 mod claim_context;
 #[path = "db_compact_execution.rs"]
@@ -44,12 +46,12 @@ mod run_continuation;
 mod shared_environment;
 #[path = "db_simplification.rs"]
 mod simplification;
-#[path = "db_chat_reply.rs"]
-mod chat_reply;
 #[path = "db_single_chat_facts.rs"]
 mod single_chat_facts;
 #[path = "db_steer.rs"]
 mod steer;
+#[path = "db_subagent.rs"]
+mod subagent;
 #[path = "db_task_capability.rs"]
 mod task_capability;
 #[path = "db_teams.rs"]
@@ -59,6 +61,10 @@ mod web_pasted_text;
 #[cfg(test)]
 pub(crate) fn assert_task_capability_upgrade(database: &mut Database) {
     task_capability::assert_upgrade(database);
+}
+#[cfg(test)]
+pub(crate) fn assert_subagent_classifier_upgrade(database: &mut Database) {
+    subagent::assert_upgrade(database);
 }
 #[cfg(test)]
 pub(crate) fn assert_single_chat_facts_upgrade(database: &mut Database) {
@@ -504,7 +510,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 173;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 174;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1003,6 +1009,7 @@ struct CurrentMigrationState {
     v221: bool,
     v222: bool,
     v223: bool,
+    v224: bool,
 }
 
 impl CurrentMigrationState {
@@ -1024,6 +1031,14 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v224 {
+            let mut previous = *self;
+            previous.v224 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 174
+                && self.v223
+                && previous.admits("v1.72", 173, classifier);
+        }
         if self.v223 {
             let mut previous = *self;
             previous.v223 = false;
@@ -1061,8 +1076,9 @@ impl CurrentMigrationState {
             previous.v219 = false;
             return contract == CURRENT_DATA_CONTRACT_VERSION
                 && schema == 169
+                && classifier == crate::canonical_activity::CLASSIFIER_VERSION
                 && self.v218
-                && previous.admits("v1.72", 168, classifier);
+                && previous.admits("v1.72", 168, V147_CLASSIFIER_VERSION);
         }
         if self.v218 {
             let mut previous = *self;
@@ -3377,11 +3393,12 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
                         | 166
                         | 167
                         | 168
-                | 173
-                | 169
-                | 170
-                | 171
-                | 172
+                        | 174
+                        | 173
+                        | 169
+                        | 170
+                        | 171
+                        | 172
                 )
         })
     {
@@ -3748,7 +3765,7 @@ pub(super) fn downgrade_chat_extensions_for_test(connection: &Connection) {
     chat_reply::downgrade_for_test(connection);
     if !connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=219)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=220)",
             [],
             |row| row.get::<_, bool>(0),
         )
@@ -3756,7 +3773,9 @@ pub(super) fn downgrade_chat_extensions_for_test(connection: &Connection) {
     {
         return;
     }
-    connection.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+    connection
+        .execute_batch("PRAGMA foreign_keys=OFF;")
+        .unwrap();
     let tx = connection.unchecked_transaction().unwrap();
     for table in [
         "channel_chat_target_grant",
@@ -3771,9 +3790,14 @@ pub(super) fn downgrade_chat_extensions_for_test(connection: &Connection) {
         "channel_chat_bot",
     ] {
         let count: i64 = tx
-            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
             .unwrap();
-        assert_eq!(count, 0, "a historical fixture cannot discard chat state in {table}");
+        assert_eq!(
+            count, 0,
+            "a historical fixture cannot discard chat state in {table}"
+        );
         tx.execute_batch(&format!("DROP TABLE {table}")).unwrap();
     }
     tx.execute_batch(
@@ -3786,8 +3810,8 @@ pub(super) fn downgrade_chat_extensions_for_test(connection: &Connection) {
              CASE WHEN project_binding_kind='directory' THEN 'directory:'||project_path ELSE 'quick-chat' END,
              COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id
          ) WHERE deletion_operation_id IS NULL;
-         DELETE FROM schema_migration WHERE version BETWEEN 219 AND 223;
-         UPDATE rovai_data_contract SET projection_schema_version=168 WHERE singleton=1;",
+         DELETE FROM schema_migration WHERE version BETWEEN 220 AND 224;
+         UPDATE rovai_data_contract SET projection_schema_version=169 WHERE singleton=1;",
     ).unwrap();
     tx.commit().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
@@ -3798,15 +3822,17 @@ pub(super) fn downgrade_chat_extensions_for_test(connection: &Connection) {
 // open_admitted deliberately does not run schema migrations.
 #[cfg(test)]
 pub(crate) fn assert_chat_tool_upgrade_sources(database: &mut Database) {
+    database.migrate(false).unwrap();
+    chat_reply::assert_legacy_chat_upgrade_sources();
     chat_reply::assert_upgrade(database);
-    for source in [220, 219, 218] {
-        database.connection.execute_batch("DROP INDEX camp_navigation_window_idx; ALTER TABLE camp DROP COLUMN navigation_is_chat_bot; DELETE FROM schema_migration WHERE version=222; CREATE INDEX camp_navigation_window_idx ON camp (CASE WHEN project_binding_kind='directory' THEN 'directory:'||project_path ELSE 'quick-chat' END,COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id) WHERE deletion_operation_id IS NULL;").unwrap();
-        database.connection.execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=221;").unwrap();
-        if source < 220 {
-            database.connection.execute_batch("DROP TABLE channel_chat_conversation; ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled; ALTER TABLE agent_profile DROP COLUMN chat_materials_path; ALTER TABLE conversation DROP COLUMN permission_override_json; DELETE FROM schema_migration WHERE version=220;").unwrap();
+    for source in [221, 220, 219] {
+        database.connection.execute_batch("DROP INDEX camp_navigation_window_idx; ALTER TABLE camp DROP COLUMN navigation_is_chat_bot; DELETE FROM schema_migration WHERE version=223; CREATE INDEX camp_navigation_window_idx ON camp (CASE WHEN project_binding_kind='directory' THEN 'directory:'||project_path ELSE 'quick-chat' END,COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id) WHERE deletion_operation_id IS NULL;").unwrap();
+        database.connection.execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=222;").unwrap();
+        if source < 221 {
+            database.connection.execute_batch("DROP TABLE channel_chat_conversation; ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled; ALTER TABLE agent_profile DROP COLUMN chat_materials_path; ALTER TABLE conversation DROP COLUMN permission_override_json; DELETE FROM schema_migration WHERE version=221;").unwrap();
         }
-        if source < 219 {
-            database.connection.execute_batch("DROP TABLE channel_chat_outbound; DROP TABLE channel_chat_item; DROP TABLE channel_chat_turn; DROP TABLE channel_chat_message; DROP TABLE channel_chat_credential; DROP TABLE channel_chat_bot; DELETE FROM schema_migration WHERE version=219;").unwrap();
+        if source < 220 {
+            database.connection.execute_batch("DROP TABLE channel_chat_outbound; DROP TABLE channel_chat_item; DROP TABLE channel_chat_turn; DROP TABLE channel_chat_message; DROP TABLE channel_chat_credential; DROP TABLE channel_chat_bot; DELETE FROM schema_migration WHERE version=220;").unwrap();
         }
         // The synthetic source keeps the marker of its own step so the chain sees a
         // consistent intermediate layout instead of the current projection.
@@ -3863,6 +3889,14 @@ fn classify_chat_schema(
     connection: &Connection,
     marker: DatabaseContractMarker,
 ) -> rusqlite::Result<DatabaseContractClassification> {
+    classify_chat_schema_with_receipt_offset(connection, marker, 0)
+}
+
+fn classify_chat_schema_with_receipt_offset(
+    connection: &Connection,
+    marker: DatabaseContractMarker,
+    offset: i64,
+) -> rusqlite::Result<DatabaseContractClassification> {
     let (
         chat_receipt,
         member_receipt,
@@ -3872,8 +3906,8 @@ fn classify_chat_schema(
         mapping_tables,
     ): (bool, bool, i64, i64, i64, i64) = connection.query_row(
         "SELECT
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=219),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=220),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=?1),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=?2),
             (SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN (
                 'channel_chat_bot','channel_chat_credential','channel_chat_message',
                 'channel_chat_turn','channel_chat_item','channel_chat_outbound')),
@@ -3883,7 +3917,7 @@ fn classify_chat_schema(
                 WHERE name='permission_override_json'),
             (SELECT COUNT(*) FROM sqlite_master WHERE type='table'
                 AND name='channel_chat_conversation')",
-        [],
+        [220 - offset, 221 - offset],
         |row| {
             Ok((
                 row.get(0)?,
@@ -3906,8 +3940,18 @@ fn classify_chat_schema(
         member_columns == 0 && conversation_columns == 0 && mapping_tables == 0
     };
     let (tool_receipt, navigation_receipt): (bool, bool) = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=221), EXISTS(SELECT 1 FROM schema_migration WHERE version=222)", [], |r| Ok((r.get(0)?,r.get(1)?)),
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=?1), EXISTS(SELECT 1 FROM schema_migration WHERE version=?2)", [222 - offset, 223 - offset], |r| Ok((r.get(0)?,r.get(1)?)),
     )?;
+    let reply_receipt: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=?1)",
+        [224 - offset],
+        |r| r.get(0),
+    )?;
+    let reply_valid = !reply_receipt
+        || (navigation_receipt
+            && tool_receipt
+            && (chat_reply::schema_matches(connection)?
+                || chat_reply::legacy_schema_matches(connection)?));
     let tool_layout = crate::channel_chat_tools::schema_matches(connection)?;
     let tools_absent = chat_tool_schema_absent(connection)?;
     let navigation_layout = chat_bot_navigation_schema_matches(connection)?;
@@ -3926,7 +3970,7 @@ fn classify_chat_schema(
         navigation_absent || (member_receipt && tool_receipt && navigation_layout)
     };
     Ok(
-        if !chat_valid || !member_valid || !tool_valid || !navigation_valid {
+        if !chat_valid || !member_valid || !tool_valid || !navigation_valid || !reply_valid {
             DatabaseContractClassification::Unknown(Some(marker))
         } else if chat_receipt
             && member_receipt
@@ -3940,6 +3984,96 @@ fn classify_chat_schema(
         },
     )
 }
+fn legacy_chat_migration_source(
+    connection: &Connection,
+    marker: &DatabaseContractMarker,
+) -> rusqlite::Result<bool> {
+    if marker.contract_version != CURRENT_DATA_CONTRACT_VERSION
+        || marker.classifier_version != V147_CLASSIFIER_VERSION
+        || !(154..=159).contains(&marker.projection_schema_version)
+    {
+        return Ok(false);
+    }
+    let expected = if marker.projection_schema_version == 159 {
+        213
+    } else {
+        marker.projection_schema_version + 50
+    };
+    let receipts: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=209)
+             AND EXISTS(SELECT 1 FROM schema_migration WHERE version=?1)
+             AND NOT EXISTS(SELECT 1 FROM schema_migration WHERE version>213)",
+        [expected],
+        |row| row.get(0),
+    )?;
+    if !receipts
+        || !matches!(
+            classify_chat_schema_with_receipt_offset(connection, marker.clone(), 11)?,
+            DatabaseContractClassification::Current(_)
+                | DatabaseContractClassification::SupportedMigrationSource(_)
+        )
+    {
+        return Ok(false);
+    }
+    let reply_receipt: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=213)",
+        [],
+        |row| row.get(0),
+    )?;
+    let input_shape = match marker.projection_schema_version {
+        159 => reply_receipt && chat_reply::legacy_schema_matches(connection)?,
+        158 if reply_receipt => chat_reply::legacy_schema_matches(connection)?,
+        158 => single_chat_facts::schema_matches(connection)?,
+        157 => task_capability::schema_matches(connection)?,
+        156 => task_capability::legacy_schema_matches(connection)?,
+        _ => steer::schema_matches(connection),
+    };
+    Ok(input_shape
+        && (!reply_receipt || marker.projection_schema_version >= 158)
+        && simplification::current_structure_matches(connection)?
+        && simplification::schema_matches(connection)?
+        && (marker.projection_schema_version < 155 || minimax::schema_matches(connection)?)
+        && execution_storage::schema_matches(connection)?
+        && live_directory::schema_matches(connection)?
+        && unified_activity::schema_matches(connection)?
+        && compact_execution::schema_matches(connection)?
+        && !notification_interruption::schema_matches(connection)?)
+}
+
+fn shifted_chat_migration_source(
+    connection: &Connection,
+    marker: &DatabaseContractMarker,
+) -> rusqlite::Result<bool> {
+    if marker.contract_version != CURRENT_DATA_CONTRACT_VERSION
+        || marker.classifier_version != V147_CLASSIFIER_VERSION
+        || !(169..=173).contains(&marker.projection_schema_version)
+    {
+        return Ok(false);
+    }
+    let complete: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=218)
+            AND EXISTS(SELECT 1 FROM schema_migration WHERE version=219)
+            AND EXISTS(SELECT 1 FROM schema_migration WHERE version=?1)
+            AND NOT EXISTS(SELECT 1 FROM schema_migration WHERE version>223)",
+        [marker.projection_schema_version + 50],
+        |row| row.get(0),
+    )?;
+    let reply: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=223)",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(complete
+        && quote_text::schema_matches(connection)?
+        && (!reply || chat_reply::schema_matches(connection)?)
+        && (marker.projection_schema_version < 173 || reply)
+        && matches!(
+            classify_chat_schema_with_receipt_offset(connection, marker.clone(), 1)?,
+            DatabaseContractClassification::Current(_)
+                | DatabaseContractClassification::SupportedMigrationSource(_)
+        ))
+}
+
 pub(crate) fn classify_startup_contract(
     connection: &Connection,
 ) -> rusqlite::Result<DatabaseContractClassification> {
@@ -3965,7 +4099,9 @@ pub(crate) fn classify_startup_contract(
         let core_tables: i64 = connection.query_row(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('schema_migration','agent_profile','camp','camp_message','agent_run','canonical_runtime_activity','event_log')",
             [], |row| row.get(0))?;
-        if core_tables != 7 || marker.classifier_version != V147_CLASSIFIER_VERSION {
+        if core_tables != 7
+            || marker.classifier_version != crate::canonical_activity::CLASSIFIER_VERSION
+        {
             return Ok(DatabaseContractClassification::Unknown(Some(marker)));
         }
         let complete: bool = connection.query_row(
@@ -4025,6 +4161,13 @@ pub(crate) fn classify_database_contract(
     let Some(marker) = marker else {
         return Ok(DatabaseContractClassification::Unknown(None));
     };
+    if legacy_chat_migration_source(connection, &marker)?
+        || shifted_chat_migration_source(connection, &marker)?
+    {
+        return Ok(DatabaseContractClassification::SupportedMigrationSource(
+            marker,
+        ));
+    }
     // Current databases do not re-prove every historical migration's SQL text.
     // Older layouts retain their migration-specific source recognition below.
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
@@ -4053,6 +4196,7 @@ pub(crate) fn classify_database_contract(
                 | 166
                 | 167
                 | 168
+                | 174
                 | 173
                 | 169
                 | 170
@@ -4087,7 +4231,12 @@ pub(crate) fn classify_database_contract(
             && (marker.projection_schema_version < 161
                 || shared_environment::schema_matches(connection)?)
             && (marker.projection_schema_version < 155 || minimax::schema_matches(connection)?)
-            && marker.classifier_version == V147_CLASSIFIER_VERSION
+            && marker.classifier_version
+                == if marker.projection_schema_version >= 169 {
+                    crate::canonical_activity::CLASSIFIER_VERSION
+                } else {
+                    V147_CLASSIFIER_VERSION
+                }
             && simplification::current_structure_matches(connection)?
             && (marker.projection_schema_version < 146
                 || simplification::schema_matches(connection)?)
@@ -4097,7 +4246,7 @@ pub(crate) fn classify_database_contract(
                 } else if marker.projection_schema_version == 148 {
                     claim_context::schema_matches(connection)
                 } else {
-                    if marker.projection_schema_version >= 173 {
+                    if marker.projection_schema_version >= 174 {
                         chat_reply::schema_matches(connection)?
                     } else if marker.projection_schema_version >= 160 {
                         notification_interruption::exit_schema_matches(connection)?
@@ -4105,7 +4254,8 @@ pub(crate) fn classify_database_contract(
                         notification_interruption::schema_matches(connection)?
                     } else if marker.projection_schema_version == 158 {
                         single_chat_facts::schema_matches(connection)?
-                            && connection.query_row("SELECT NOT EXISTS(SELECT 1 FROM schema_migration WHERE version=219) AND NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name='agent_run_input_v43_only_insert' OR (name='context_manifest' AND sql LIKE '%context_manifest_version = 43%'))", [], |r| r.get::<_,bool>(0))?
+                            && (connection.query_row("SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name='agent_run_input_v43_only_insert' OR (name='context_manifest' AND sql LIKE '%context_manifest_version = 43%'))", [], |r| r.get::<_,bool>(0))?
+                                || (chat_reply::legacy_schema_matches(connection)? && connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=224)", [], |r| r.get::<_,bool>(0))?))
                     } else if marker.projection_schema_version == 157 {
                         task_capability::schema_matches(connection)?
                     } else if marker.projection_schema_version == 156 {
@@ -4144,8 +4294,9 @@ pub(crate) fn classify_database_contract(
         } else if marker.projection_schema_version >= 158 {
             let current = marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION;
             match classify_chat_schema(connection, marker)? {
-                DatabaseContractClassification::Current(marker) if !current =>
-                    DatabaseContractClassification::SupportedMigrationSource(marker),
+                DatabaseContractClassification::Current(marker) if !current => {
+                    DatabaseContractClassification::SupportedMigrationSource(marker)
+                }
                 classification => classification,
             }
         } else {
@@ -4316,7 +4467,7 @@ pub(crate) fn classify_database_contract(
     }
     if marker.contract_version == CURRENT_DATA_CONTRACT_VERSION
         && marker.projection_schema_version == CURRENT_PROJECTION_SCHEMA_VERSION
-        && marker.classifier_version == V147_CLASSIFIER_VERSION
+        && marker.classifier_version == crate::canonical_activity::CLASSIFIER_VERSION
     {
         classify_chat_schema(connection, marker)
     } else {
@@ -6448,7 +6599,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=220),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=221),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=222),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=223)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=224)
         "#,
         [],
         |row| {
@@ -6607,6 +6759,7 @@ fn load_current_migration_state(
                 v221: row.get(151)?,
                 v222: row.get(152)?,
                 v223: row.get(153)?,
+                v224: row.get(154)?,
             })
         },
     )
@@ -8989,6 +9142,10 @@ impl Database {
         configure_runtime_connection(&self.connection, &self.path)?;
         if !fresh_database {
             migration_step!(
+                "migration_legacy_chat_receipts",
+                self.reconcile_legacy_chat_migration_numbers()
+            );
+            migration_step!(
                 "migration_reconciliation",
                 self.reconcile_legacy_feishu_migration_collision()
             );
@@ -9900,21 +10057,32 @@ impl Database {
                 migration_step!("migration_218", quote_text::migrate(self));
             }
             if !self.schema_migration_applied(219)? {
-                migration_step!("migration_219", crate::channel_chat::migrate(self));
+                migration_step!("migration_219", subagent::migrate(self));
             }
             if !self.schema_migration_applied(220)? {
-                migration_step!("migration_220", self.migrate_chat_bot_member_reuse());
+                migration_step!("migration_220", crate::channel_chat::migrate(self));
+            }
+            if !self.schema_migration_applied(221)? {
+                migration_step!("migration_221", self.migrate_chat_bot_member_reuse());
             }
             self.reconcile_chat_navigation_receipt()?;
-            if !self.schema_migration_applied(221)? {
-                migration_step!("migration_221", crate::channel_chat_tools::migrate(self));
-            }
             if !self.schema_migration_applied(222)? {
-                migration_step!("migration_222", self.migrate_chat_bot_navigation());
+                migration_step!("migration_222", crate::channel_chat_tools::migrate(self));
             }
             if !self.schema_migration_applied(223)? {
-                migration_step!("migration_223", chat_reply::migrate(self));
+                migration_step!("migration_223", self.migrate_chat_bot_navigation());
             }
+            migration_step!(
+                "migration_chat_projection",
+                self.reconcile_chat_projection_marker()
+            );
+            if !self.schema_migration_applied(224)? {
+                migration_step!("migration_224", chat_reply::migrate(self));
+            }
+            migration_step!(
+                "migration_chat_projection",
+                self.reconcile_chat_projection_marker()
+            );
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10795,21 +10963,32 @@ impl Database {
             migration_step!("migration_218", quote_text::migrate(self));
         }
         if !self.schema_migration_applied(219)? {
-            migration_step!("migration_219", crate::channel_chat::migrate(self));
+            migration_step!("migration_219", subagent::migrate(self));
         }
         if !self.schema_migration_applied(220)? {
-            migration_step!("migration_220", self.migrate_chat_bot_member_reuse());
+            migration_step!("migration_220", crate::channel_chat::migrate(self));
+        }
+        if !self.schema_migration_applied(221)? {
+            migration_step!("migration_221", self.migrate_chat_bot_member_reuse());
         }
         self.reconcile_chat_navigation_receipt()?;
-        if !self.schema_migration_applied(221)? {
-            migration_step!("migration_221", crate::channel_chat_tools::migrate(self));
-        }
         if !self.schema_migration_applied(222)? {
-            migration_step!("migration_222", self.migrate_chat_bot_navigation());
+            migration_step!("migration_222", crate::channel_chat_tools::migrate(self));
         }
         if !self.schema_migration_applied(223)? {
-            migration_step!("migration_223", chat_reply::migrate(self));
+            migration_step!("migration_223", self.migrate_chat_bot_navigation());
         }
+        migration_step!(
+            "migration_chat_projection",
+            self.reconcile_chat_projection_marker()
+        );
+        if !self.schema_migration_applied(224)? {
+            migration_step!("migration_224", chat_reply::migrate(self));
+        }
+        migration_step!(
+            "migration_chat_projection",
+            self.reconcile_chat_projection_marker()
+        );
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
         {
@@ -11025,13 +11204,115 @@ impl Database {
             chat_bot_member_reuse_v210_schema_matches(&transaction)?,
             "chat Bot member reuse schema did not apply"
         );
-        transaction.execute_batch("INSERT INTO schema_migration VALUES(220,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=170,updated_at=datetime('now') WHERE singleton=1;")?;
+        transaction.execute_batch("INSERT INTO schema_migration VALUES(221,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=171,updated_at=datetime('now') WHERE singleton=1;")?;
         transaction.commit()?;
         Ok(())
     }
 
+    fn reconcile_legacy_chat_migration_numbers(&mut self) -> Result<()> {
+        let marker = match classify_database_contract(self.connection())? {
+            DatabaseContractClassification::SupportedMigrationSource(marker) => marker,
+            _ => return Ok(()),
+        };
+        let legacy = legacy_chat_migration_source(self.connection(), &marker)?;
+        let shifted = shifted_chat_migration_source(self.connection(), &marker)?;
+        if !legacy && !shifted {
+            return Ok(());
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            if legacy {
+                legacy_chat_migration_source(&tx, &marker)?
+            } else {
+                shifted_chat_migration_source(&tx, &marker)?
+            },
+            "Legacy chat source changed before reconciliation"
+        );
+        if legacy {
+            tx.execute(
+                "UPDATE schema_migration SET version=version+11 WHERE version BETWEEN 209 AND 213",
+                [],
+            )?;
+        } else {
+            // Descending updates avoid a primary-key collision with the next receipt.
+            for version in (219..=223).rev() {
+                tx.execute(
+                    "UPDATE schema_migration SET version=version+1 WHERE version=?1",
+                    [version],
+                )?;
+            }
+        }
+        let projection = if legacy {
+            marker.projection_schema_version.min(158)
+        } else {
+            168
+        };
+        tx.execute("UPDATE rovai_data_contract SET projection_schema_version=?1,updated_at=datetime('now') WHERE singleton=1", [projection])?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&tx)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref source) if source.projection_schema_version==projection),
+            "Legacy chat migration receipts failed admission"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn reconcile_chat_projection_marker(&mut self) -> Result<()> {
+        let marker: i64 = self.connection.query_row(
+            "SELECT projection_schema_version FROM rovai_data_contract WHERE singleton=1",
+            [],
+            |row| row.get(0),
+        )?;
+        let reply_applied = self.schema_migration_applied(224)?;
+        let target = if reply_applied {
+            CURRENT_PROJECTION_SCHEMA_VERSION
+        } else {
+            173
+        };
+        if marker < 145 {
+            return Ok(());
+        }
+        if marker == target {
+            return Ok(());
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            quote_text::schema_matches(&tx)?
+                && (!reply_applied || chat_reply::schema_matches(&tx)?),
+            "Retained chat migrations require complete upstream quote and reply schemas"
+        );
+        let contract = DatabaseContractMarker {
+            contract_version: CURRENT_DATA_CONTRACT_VERSION.to_owned(),
+            projection_schema_version: marker,
+            classifier_version: crate::canonical_activity::CLASSIFIER_VERSION.to_owned(),
+        };
+        anyhow::ensure!(
+            matches!(
+                classify_chat_schema(&tx, contract)?,
+                DatabaseContractClassification::Current(_)
+            ),
+            "Retained chat migration receipts require complete layouts"
+        );
+        tx.execute("UPDATE rovai_data_contract SET projection_schema_version=?1,updated_at=datetime('now') WHERE singleton=1",
+            [target])?;
+        anyhow::ensure!(
+            matches!(
+                classify_database_contract(&tx)?,
+                DatabaseContractClassification::Current(_)
+                    | DatabaseContractClassification::SupportedMigrationSource(_)
+            ),
+            "Retained chat projection failed final admission"
+        );
+        tx.commit()?;
+        Ok(())
+    }
+
     fn reconcile_chat_navigation_receipt(&mut self) -> Result<()> {
-        if !self.schema_migration_applied(221)? || self.schema_migration_applied(222)? {
+        if !self.schema_migration_applied(222)? || self.schema_migration_applied(223)? {
             return Ok(());
         }
         if !chat_bot_navigation_schema_matches(self.connection())? {
@@ -11046,12 +11327,12 @@ impl Database {
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tools {
-            tx.execute("INSERT INTO schema_migration(version,applied_at) SELECT 222,applied_at FROM schema_migration WHERE version=221",[])?;
+            tx.execute("INSERT INTO schema_migration(version,applied_at) SELECT 223,applied_at FROM schema_migration WHERE version=222",[])?;
         } else {
             // Preserve the old navigation receipt and its timestamp under its
             // unambiguous number before applying the still-missing tools.
             tx.execute(
-                "UPDATE schema_migration SET version=222 WHERE version=221",
+                "UPDATE schema_migration SET version=223 WHERE version=222",
                 [],
             )?;
         }
@@ -11086,7 +11367,7 @@ impl Database {
                  navigation_activity_sequence DESC, id
              ) WHERE deletion_operation_id IS NULL;",
         )?;
-        transaction.execute_batch("INSERT INTO schema_migration VALUES(222,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=172,updated_at=datetime('now') WHERE singleton=1;")?;
+        transaction.execute_batch("INSERT INTO schema_migration VALUES(223,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=173,updated_at=datetime('now') WHERE singleton=1;")?;
         anyhow::ensure!(
             chat_bot_navigation_schema_matches(&transaction)?,
             "navigation migration layout mismatch"
@@ -31339,6 +31620,8 @@ impl Database {
             |row| row.get(0),
         )?;
         match classifier.as_str() {
+            crate::canonical_activity::CLASSIFIER_VERSION
+                if self.schema_migration_applied(219)? => {}
             V147_CLASSIFIER_VERSION if self.schema_migration_applied(147)? => {}
             V142_CLASSIFIER_VERSION if self.schema_migration_applied(142)? => {}
             V116_CLASSIFIER_VERSION => {}
@@ -36171,24 +36454,7 @@ fn downgrade_runtime_session_context_for_test(connection: &Connection) {
 
 #[cfg(test)]
 fn downgrade_navigation_summary_for_test(connection: &Connection) {
-    // The historical projection helpers do not remove additive chat storage.
-    // Preserve its receipts too; otherwise this fixture invents partial corruption.
-    let chat_receipts = connection
-        .prepare("SELECT version, applied_at FROM schema_migration WHERE version IN (209,210,211)")
-        .unwrap()
-        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
-        .unwrap()
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .unwrap();
     downgrade_runtime_session_context_for_test(connection);
-    for (version, applied_at) in chat_receipts {
-        connection
-            .execute(
-                "INSERT OR IGNORE INTO schema_migration(version,applied_at) VALUES(?1,?2)",
-                params![version, applied_at],
-            )
-            .unwrap();
-    }
     let applied: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=177)",
@@ -36210,8 +36476,7 @@ fn downgrade_navigation_summary_for_test(connection: &Connection) {
         ALTER TABLE camp DROP COLUMN navigation_activity_sequence;
         ALTER TABLE camp DROP COLUMN navigation_activity_at;
         ALTER TABLE camp DROP COLUMN navigation_completion_sequence;
-        ALTER TABLE camp DROP COLUMN navigation_is_chat_bot;
-        DELETE FROM schema_migration WHERE version IN (177, 212);
+        DELETE FROM schema_migration WHERE version=177;
         UPDATE rovai_data_contract SET projection_schema_version=126 WHERE singleton=1;",
         )
         .unwrap();
@@ -40877,16 +41142,16 @@ mod tests {
              VALUES ('nav-worker','Worker','directory','/repo','2026-01-02','2026-01-02');
              DROP INDEX camp_navigation_window_idx;
              ALTER TABLE camp DROP COLUMN navigation_is_chat_bot;
-             DELETE FROM schema_migration WHERE version=222;
+             DELETE FROM schema_migration WHERE version=223;
              CREATE INDEX camp_navigation_window_idx ON camp (
                  CASE WHEN project_binding_kind = 'directory' THEN 'directory:' || project_path ELSE 'quick-chat' END,
                  COALESCE(navigation_activity_at, created_at) DESC, navigation_activity_sequence DESC, id
              ) WHERE deletion_operation_id IS NULL;
              CREATE TEMP TRIGGER reject_bot_navigation_receipt BEFORE INSERT ON schema_migration
-             WHEN NEW.version=222 BEGIN SELECT RAISE(ABORT,'Bot navigation receipt failure'); END;",
+             WHEN NEW.version=223 BEGIN SELECT RAISE(ABORT,'Bot navigation receipt failure'); END;",
         ).unwrap();
         assert!(reopened.migrate_chat_bot_navigation().is_err());
-        assert!(!reopened.schema_migration_applied(222).unwrap());
+        assert!(!reopened.schema_migration_applied(223).unwrap());
         assert_eq!(reopened.connection().query_row(
             "SELECT COUNT(*) FROM pragma_table_info('camp') WHERE name='navigation_is_chat_bot'",
             [], |row| row.get::<_, i64>(0),
@@ -40897,7 +41162,7 @@ mod tests {
             .unwrap();
         drop(reopened);
         let mut migrated = Database::open(&directory).unwrap();
-        assert!(migrated.schema_migration_applied(222).unwrap());
+        assert!(migrated.schema_migration_applied(223).unwrap());
         assert_eq!(tables(&migrated), before_bot_migration);
         let bots = crate::read_model::ReadModelService
             .navigation_snapshot(&mut migrated)
@@ -41220,11 +41485,10 @@ mod tests {
              VALUES('run-old',1,'unavailable','message-old',2,'old',29)",
             [],
         ).unwrap_err();
-        assert!(
-            old_insert
-                .to_string()
-                .contains("must use ContextManifest v43")
-        );
+        assert!(old_insert.to_string().contains(&format!(
+            "must use ContextManifest v{}",
+            crate::context_contract::PUBLIC_CAMP_BATCH_CONTEXT_MANIFEST_VERSION
+        )));
         for (column, invalid) in [
             ("claim_previous_public_boundary_sequence", -1),
             ("claim_has_additional_public_messages", 2),
@@ -42452,7 +42716,7 @@ mod tests {
             let native_description = if version == 186 {
                 let created = crate::mission::MissionService::default().create(&mut database, &crate::command::CommandEnvelope {
                     command_id: "main-185-migration".into(), actor: crate::command::ActorRef::User{user_id:"local_user".into()}, camp_id:None, expected_versions:vec![],execution_epoch:None,
-                    payload: serde_json::from_value(serde_json::json!({"title":"Preserved", "descriptionContent":[{"kind":"text","text":"literal @名字\n"},{"kind":"member_mention","agentId":"agent_1"}], "projectPath":"/tmp", "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1"})).unwrap(),
+                    payload: serde_json::from_value(serde_json::json!({"title":"Preserved", "descriptionContent":[{"kind":"text","text":"literal @名字\n"},{"kind":"member_mention","agentId":"agent_1"}], "projectPath":crate::test_support::absolute_test_path("/tmp"), "projectBindingKind":"directory", "memberAgentIds":["agent_1"], "defaultLeadAgentId":"agent_1"})).unwrap(),
                 }).unwrap();
                 let id = created.result.payload["missionId"]
                     .as_str()
@@ -42757,6 +43021,7 @@ mod tests {
             v221: version >= 221,
             v222: version >= 222,
             v223: version >= 223,
+            v224: version >= 224,
         }
     }
 
@@ -42858,7 +43123,24 @@ mod tests {
     #[test]
     fn current_migration_state_admission_matrix() {
         let supported = [
-            ("v1.72/schema 158 before chat reply context", "v1.72", 158, 212),
+            (
+                "v1.72/schema 173 before chat reply context",
+                "v1.72",
+                173,
+                223,
+            ),
+            (
+                "v1.72/schema 168 before subagent classifier",
+                "v1.72",
+                168,
+                218,
+            ),
+            (
+                "v1.72/schema 167 before literal quote text",
+                "v1.72",
+                167,
+                217,
+            ),
             (
                 "v1.72/schema 166 before Hermes user rules",
                 "v1.72",
@@ -42997,7 +43279,13 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                223,
+                224,
+            ),
+            (
+                "v1.72/schema 167 before literal quote text",
+                "v1.72",
+                167,
+                217,
             ),
             (
                 "v1.72/schema 152 before compact operations",
@@ -43557,7 +43845,9 @@ mod tests {
             ),
         ];
         for (name, contract, schema, through) in supported {
-            let classifier = if through >= 147 {
+            let classifier = if through >= 219 {
+                crate::canonical_activity::CLASSIFIER_VERSION
+            } else if through >= 147 {
                 V147_CLASSIFIER_VERSION
             } else if through >= 142 {
                 V142_CLASSIFIER_VERSION
@@ -43573,11 +43863,11 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(223);
+        let current = migration_state_through(224);
         assert!(current.admits(
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
-            V147_CLASSIFIER_VERSION,
+            crate::canonical_activity::CLASSIFIER_VERSION,
         ));
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
@@ -43646,174 +43936,198 @@ mod tests {
         missing_hermes.v216 = false;
         let mut missing_hermes_rules = current;
         missing_hermes_rules.v217 = false;
+        let mut missing_quote_text = current;
+        missing_quote_text.v218 = false;
         let mut missing_interruption = current;
         missing_interruption.v209 = false;
         let mut missing_single_chat_facts = current;
         missing_single_chat_facts.v208 = false;
         let mut missing_chat_reply = current;
-        missing_chat_reply.v213 = false;
+        missing_chat_reply.v224 = false;
+        let mut missing_subagent_classifier = current;
+        missing_subagent_classifier.v219 = false;
         let rejected = [
-            ("current marker without chat reply context", missing_chat_reply, CURRENT_DATA_CONTRACT_VERSION, CURRENT_PROJECTION_SCHEMA_VERSION, V147_CLASSIFIER_VERSION),
+            (
+                "current marker without chat reply context",
+                missing_chat_reply,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                V147_CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without subagent classifier receipt",
+                missing_subagent_classifier,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
+            ),
+            (
+                "current marker without literal quote text receipt",
+                missing_quote_text,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
+            ),
             (
                 "current marker without Automation naming",
                 missing_automation_naming,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Team guidance limit migration",
                 missing_team_guidance_limit,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Hermes rules receipt",
                 missing_hermes_rules,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Hermes catalog receipt",
                 missing_hermes,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Team schema",
                 missing_teams,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without interruption facts",
                 missing_interruption,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without compact Single Chat facts",
                 missing_single_chat_facts,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without catalog/continuation convergence",
                 missing_convergence,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without pending draft retention",
                 missing_pending_draft,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without User projection",
                 missing_user_projection,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without member receipts",
                 missing_member_creation,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without session context migration",
                 missing_session_context,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without native ratio migration",
                 missing_native_ratio,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Thread convergence migration",
                 missing_thread_convergence,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without navigation summary migration",
                 missing_navigation_summary,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without execution lifecycle migration",
                 missing_execution_lifecycle,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Task single-description migration",
                 missing_task_description,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without notification Single Chat migration",
                 missing_notification_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi edit Diff classifier migration",
                 missing_pi_edit_diff_classifier,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Scheduled Automation migration",
                 missing_scheduled_automations,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current without command result storage receipt",
                 missing_command_result_storage,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current without Evidence compaction receipt",
                 missing_evidence_compaction,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current without classifier receipt",
                 missing_classifier,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "deployed source with future receipt",
@@ -43827,70 +44141,70 @@ mod tests {
                 missing_runtime_image_display_source,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Single Chat migration",
                 missing_single_chat,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native execution migration",
                 missing_pi_native_execution,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-input migration",
                 missing_pi_native_input,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Source Attachment migration",
                 missing_source_attachments,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi native-capabilities migration",
                 missing_pi_native_capabilities,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Pi Runtime migration",
                 missing_pi_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without cancellation dispatch boundary",
                 missing_cancellation_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Runtime image migration",
                 missing_image_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "current marker without Quick Chat picker migration",
                 missing_quick_chat_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "old picker marker with the new resolved constraint",
@@ -43904,7 +44218,7 @@ mod tests {
                 missing_index_migration,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "old joined marker with a newer index migration",
@@ -43932,7 +44246,7 @@ mod tests {
                 missing_intermediate,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "one marker beyond source",
@@ -43946,14 +44260,14 @@ mod tests {
                 current,
                 "v99.0",
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
             (
                 "future schema",
                 current,
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION + 1,
-                V147_CLASSIFIER_VERSION,
+                crate::canonical_activity::CLASSIFIER_VERSION,
             ),
         ];
         for (name, state, contract, schema, classifier) in rejected {
@@ -44318,7 +44632,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(223));
+        assert_eq!(state, migration_state_through(224));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -44380,7 +44694,7 @@ mod tests {
                 }
                 "current_receipt" => {
                     connection
-                        .execute("DELETE FROM schema_migration WHERE version=223", [])
+                        .execute("DELETE FROM schema_migration WHERE version=224", [])
                         .unwrap();
                 }
                 "steer_identity" => {
@@ -44496,7 +44810,7 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM schema_migration", [], |row| row
                     .get::<_, i64>(0))
                 .unwrap(),
-            6
+            CURRENT_PROJECTION_SCHEMA_VERSION + 50 - 217 + 1
         );
         drop(reopened);
         drop(lease);
@@ -46079,7 +46393,7 @@ mod tests {
             )
             .unwrap();
         assert!(manifest_schema.contains(
-            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43))"
+            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44))"
         ));
         let conversation: (Option<String>, Option<String>, i64, i64) = reopened
             .connection()
@@ -46413,7 +46727,7 @@ mod tests {
             )
             .unwrap();
         assert!(manifest_schema.contains(
-            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43))"
+            "CHECK(formatter_version IN (20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44))"
         ));
         assert!(manifest_schema.contains(
             "CHECK(context_delivery_profile_version IN (4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16))"
@@ -46934,6 +47248,7 @@ mod tests {
                     | SkillDeliveryGroupKey::Dsh
                     | SkillDeliveryGroupKey::Cline
                     | SkillDeliveryGroupKey::CommandCode
+                    | SkillDeliveryGroupKey::Hermes
             )
         }) {
             for (skill_id, revision_id) in [
@@ -47153,6 +47468,7 @@ mod tests {
                     | SkillDeliveryGroupKey::Dsh
                     | SkillDeliveryGroupKey::Cline
                     | SkillDeliveryGroupKey::CommandCode
+                    | SkillDeliveryGroupKey::Hermes
             )
         }) {
             for (skill_id, revision_id) in [
@@ -47337,6 +47653,7 @@ mod tests {
                     | SkillDeliveryGroupKey::Dsh
                     | SkillDeliveryGroupKey::Cline
                     | SkillDeliveryGroupKey::CommandCode
+                    | SkillDeliveryGroupKey::Hermes
             )
         }) {
             for (skill_id, revision_id) in [
@@ -47699,6 +48016,7 @@ mod tests {
                     | SkillDeliveryGroupKey::Dsh
                     | SkillDeliveryGroupKey::Cline
                     | SkillDeliveryGroupKey::CommandCode
+                    | SkillDeliveryGroupKey::Hermes
             )
         }) {
             for (skill_id, revision_id) in [
@@ -49710,7 +50028,7 @@ mod tests {
             (
                 CURRENT_DATA_CONTRACT_VERSION.to_string(),
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                V147_CLASSIFIER_VERSION.to_string(),
+                crate::canonical_activity::CLASSIFIER_VERSION.to_string(),
             )
         );
         assert!(!directory.join("inactive-data-quarantine").exists());
@@ -53293,6 +53611,8 @@ mod tests {
             .connection()
             .execute_batch(
                 r#"
+                DROP TRIGGER execution_activity_no_copy;
+                DROP VIEW execution_activity;
                 DROP TABLE agent_run_execution_evidence;
                 ALTER TABLE camp_message DROP COLUMN presentation_json;
                 DELETE FROM schema_migration WHERE version = 28;

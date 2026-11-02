@@ -46,6 +46,7 @@ struct Handle {
     restore: Option<Value>,
     project_root: Option<PathBuf>,
     name: String,
+    preview_key: String,
     token: String,
     version: Value,
     analysis: Option<Arc<content::Analysis>>,
@@ -182,85 +183,17 @@ pub(super) async fn download_preview(
 fn is_core_file_source_kind(kind: Option<&str>) -> bool {
     matches!(
         kind,
-        Some("camp_workspace" | "message_reference" | "run_evidence" | "run_activity_file")
+        Some(
+            "project_file"
+                | "camp_workspace"
+                | "message_reference"
+                | "run_evidence"
+                | "run_activity_file"
+        )
     )
 }
 
-// Resolve the path portion only. The production TS reference parser remains the
-// presentation owner for line/heading targets; Core validates the original source.
-fn reference_path(raw: &str, base: &std::path::Path) -> Result<PathBuf> {
-    ensure!(
-        raw.len() <= 16_384 && !raw.contains(['\0', '\r', '\n']),
-        "source_not_authorized"
-    );
-    let mut raw = raw.trim();
-    for (left, right) in [
-        ('`', '`'),
-        ('"', '"'),
-        ('\'', '\''),
-        ('(', ')'),
-        ('[', ']'),
-        ('{', '}'),
-        ('<', '>'),
-    ] {
-        if let Some(inner) = raw.strip_prefix(left).and_then(|s| s.strip_suffix(right)) {
-            raw = inner;
-            break;
-        }
-    }
-    let path = raw.split(['#', '?']).next().unwrap_or_default();
-    let path = if raw.contains('#') {
-        path
-    } else {
-        let positive =
-            |v: &str| !v.is_empty() && !v.starts_with('0') && v.bytes().all(|b| b.is_ascii_digit());
-        if let Some((prefix, suffix)) = path.rsplit_once(':') {
-            if positive(suffix) {
-                if let Some((file, line)) = prefix.rsplit_once(':') {
-                    if positive(line) { file } else { prefix }
-                } else {
-                    prefix
-                }
-            } else if suffix
-                .split_once('-')
-                .is_some_and(|(a, b)| positive(a) && positive(b))
-            {
-                prefix
-            } else {
-                path
-            }
-        } else {
-            path
-        }
-    };
-    ensure!(!path.is_empty(), "source_not_authorized");
-    // URL joining treats a Windows drive letter as a scheme. Normalize only
-    // absolute local-drive references, preserving the existing one-time URL decoding.
-    #[cfg(windows)]
-    let windows_absolute = {
-        let bytes = path.as_bytes();
-        (bytes.len() >= 3
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && matches!(bytes[2], b'/' | b'\\'))
-        .then(|| format!("file:///{}", path.replace('\\', "/")))
-    };
-    #[cfg(windows)]
-    let path = windows_absolute.as_deref().unwrap_or(path);
-    let url = if path.to_ascii_lowercase().starts_with("file://") {
-        url::Url::parse(path)?
-    } else {
-        let base = url::Url::from_directory_path(base)
-            .map_err(|_| anyhow::anyhow!("source_not_authorized"))?;
-        base.join(path)?
-    };
-    ensure!(
-        url.scheme() == "file" && url.host_str().is_none_or(|host| host == "localhost"),
-        "source_not_authorized"
-    );
-    url.to_file_path()
-        .map_err(|_| anyhow::anyhow!("source_not_authorized"))
-}
+use rovai_core::file_reference_path::reference_path;
 
 async fn resolve(state: &WebState, client: &DraftClient, source: &Value) -> Result<ResolvedSource> {
     if source["kind"] == "attachment" {
@@ -374,12 +307,22 @@ fn image_mime(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
-fn preview_key(handle: &Handle) -> String {
+async fn preview_key(client: &str, path: &std::path::Path) -> Result<String> {
     let mut key = Sha256::new();
     key.update(b"rovai-web-preview-v1\0");
-    key.update(handle.client.as_bytes());
-    key.update(handle.path.as_os_str().as_encoded_bytes());
-    format!("web:{:x}", key.finalize())
+    key.update(client.as_bytes());
+    key.update(path.as_os_str().as_encoded_bytes());
+    let parent = tokio::fs::metadata(path.parent().context("file_not_found")?).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        key.update(format!("{}:{}", parent.dev(), parent.ino()));
+    }
+    #[cfg(not(unix))]
+    {
+        key.update(format!("{:?}", parent.created().ok()));
+    }
+    Ok(format!("web:{:x}", key.finalize()))
 }
 
 fn page_range(text: &str, offset: u64, maximum: u64) -> Result<(usize, usize)> {
@@ -417,6 +360,8 @@ async fn metadata(
         .to_lowercase();
     let (kind, mime) = if let Some(mime) = image_mime(&content.prefix) {
         ("image", mime)
+    } else if handle.source["kind"] == "project_file" && (content.has_nul || !content.text) {
+        ("unsupported", "application/octet-stream")
     } else {
         ensure!(!content.has_nul && content.text, "decode_failed");
         // HTML bytes travel only through authenticated, generation-bound reads.
@@ -438,7 +383,7 @@ async fn metadata(
             },
         )
     };
-    let preview_key = preview_key(handle);
+    let preview_key = &handle.preview_key;
     let (display_path, presentation) = if let Some(relative) = handle
         .project_root
         .as_ref()
@@ -556,7 +501,7 @@ async fn file_operation(
                 Err(_) => true,
             };
             if changed {
-                let key = preview_key(&handle);
+                let key = handle.preview_key.clone();
                 if let Some(camp_id) = handle.source["threadId"].as_str() {
                     updates.entry(camp_id.to_owned()).or_default().push(key);
                 }
@@ -609,14 +554,19 @@ async fn file_operation(
                 .and_then(|s| s.to_str())
                 .context("source_not_authorized")?
                 .to_owned();
-            // Match Desktop: only project children get a durable independent
-            // restore request. External children retain their exact parent source.
+            // Current file links keep an exact independent source, including outside the project.
             let workspace = json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":"."});
-            let restore = if let Ok(root) = resolve(state, client, &workspace).await {
-                path.strip_prefix(&root.root).ok().and_then(|relative| relative.to_str()).map(|relative|
-                    json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":relative}))
-            } else {
+            let restore = if parent.source["kind"] == "attachment" {
                 None
+            } else {
+                let root = resolve(state, client, &workspace).await.ok();
+                let reference = root
+                    .as_ref()
+                    .and_then(|root| path.strip_prefix(&root.root).ok())
+                    .unwrap_or(&path);
+                Some(
+                    json!({"kind":"camp_workspace","threadId":parent.source["threadId"],"rawReference":reference}),
+                )
             };
             Handle {
                 path,
@@ -651,6 +601,7 @@ async fn file_operation(
                 root: resolved.root,
                 allow_children: resolved.allow_children,
                 name: resolved.name,
+                preview_key: String::new(),
                 preview_token: new_token()?,
                 session: session.clone(),
                 token: new_token()?,
@@ -658,6 +609,7 @@ async fn file_operation(
                 analysis: None,
             }
         };
+        handle.preview_key = preview_key(client.id(), &handle.path).await?;
         let (file, analysis) = metadata(&handle, &id, &permit).await?;
         handle.analysis = Some(analysis);
         handle.version = file["contentVersion"].clone();
@@ -705,6 +657,25 @@ async fn file_operation(
         return Ok(json!({"released":true}));
     }
     reauthorize(state, client, &handle).await?;
+    if matches!(body.action.as_str(), "readEditableFile" | "saveTextFile") {
+        ensure!(
+            handle
+                .analysis
+                .as_ref()
+                .is_some_and(|analysis| Some(analysis.generation.as_str())
+                    == request["expectedGeneration"].as_str()),
+            "source_not_authorized"
+        );
+        let source = handle.restore.as_ref().unwrap_or(&handle.source);
+        let reply = state.core.request_for_editor(
+            if body.action == "saveTextFile" { "filePreview.saveText" } else { "filePreview.readEditable" },
+            json!({"source":source,"path":handle.path,"text":request.get("text"),"expectedVersion":request.get("expectedVersion")}),
+            client.clone(),
+        ).await?;
+        return Ok(reply
+            .result
+            .unwrap_or_else(|| rovai_core::file_edit::failure("source_not_authorized")));
+    }
     if matches!(body.action.as_str(), "reload" | "reopen") {
         ensure!(
             Some(handle.token.as_str()) == request["reopenToken"].as_str(),

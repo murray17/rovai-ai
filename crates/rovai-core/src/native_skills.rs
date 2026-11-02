@@ -31,6 +31,7 @@ const DIRECTORY_CACHE_CAPACITY: usize = 128;
 const DIRECTORY_CACHE_TTL: Duration = Duration::from_secs(300);
 const MAX_SKILLS_PER_ROOT: usize = 512;
 const MAX_NATIVE_PREVIEW_FILES: usize = 512;
+const MAX_NATIVE_PREVIEW_ENTRIES: usize = 2048;
 const MAX_NATIVE_PREVIEW_BYTES: u64 = 1024 * 1024;
 
 /// Read an exact file under a previously validated native Skill directory.
@@ -45,47 +46,27 @@ pub fn read_native_skill_content(root: &Path, selected: &str) -> Result<SkillCon
                 .all(|part| matches!(part, Component::Normal(_))),
         "Native Skill file path is invalid"
     );
-    let mut files = Vec::new();
-    let mut pending = vec![(root.to_path_buf(), String::new(), 0usize)];
-    while let Some((directory, prefix, depth)) = pending.pop() {
-        ensure!(depth <= 8, "Native Skill directory is too deep to preview");
-        for entry in fs::read_dir(&directory)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let path = if prefix.is_empty() {
-                name
-            } else {
-                format!("{prefix}/{}", name)
-            };
-            let metadata = fs::symlink_metadata(entry.path())?;
-            if metadata.file_type().is_symlink() {
-                continue;
-            }
-            if metadata.is_dir() {
-                pending.push((entry.path(), path, depth + 1));
-            } else if metadata.is_file() {
-                files.push(SkillContentFile {
-                    path,
-                    bytes: metadata.len(),
-                });
-                ensure!(
-                    files.len() <= MAX_NATIVE_PREVIEW_FILES,
-                    "Native Skill has too many files to preview"
-                );
-            }
-        }
+    // Enumeration used to supply both file admission and menu entries. Check only
+    // the selected path chain now, retaining the no-linked-child boundary.
+    let mut selected_path = root.to_path_buf();
+    let mut selected_metadata = None;
+    for component in relative.components() {
+        selected_path.push(component);
+        let metadata = fs::symlink_metadata(&selected_path)?;
+        ensure!(
+            !metadata.file_type().is_symlink(),
+            "Native Skill file path contains a link"
+        );
+        selected_metadata = Some(metadata);
     }
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    let file = files
-        .iter()
-        .find(|file| file.path == selected)
-        .context("Native Skill file is unavailable")?;
-    let selected_file = root.join(relative).canonicalize()?;
+    let metadata = selected_metadata.context("Native Skill file is unavailable")?;
+    ensure!(metadata.is_file(), "Native Skill file is unavailable");
+    let selected_file = selected_path.canonicalize()?;
     ensure!(
         selected_file.starts_with(root),
         "Native Skill file left its source directory"
     );
-    let (status, content) = if file.bytes > MAX_NATIVE_PREVIEW_BYTES {
+    let (status, content) = if metadata.len() > MAX_NATIVE_PREVIEW_BYTES {
         ("too_large", None)
     } else {
         let bytes = fs::read(selected_file)?;
@@ -98,6 +79,65 @@ pub fn read_native_skill_content(root: &Path, selected: &str) -> Result<SkillCon
             }
         }
     };
+
+    // Keep the selected document and entry point reachable even in a partial menu.
+    let mut files = vec![SkillContentFile {
+        path: selected.to_string(),
+        bytes: metadata.len(),
+    }];
+    if selected != "SKILL.md"
+        && let Ok(entry) = fs::symlink_metadata(root.join("SKILL.md"))
+        && entry.is_file()
+        && !entry.file_type().is_symlink()
+    {
+        files.push(SkillContentFile {
+            path: "SKILL.md".into(),
+            bytes: entry.len(),
+        });
+    }
+    let mut listed: HashSet<String> = files.iter().map(|file| file.path.clone()).collect();
+    let mut visited = 0;
+    let mut pending = vec![(root.to_path_buf(), String::new(), 0usize)];
+    'scan: while let Some((directory, prefix, depth)) = pending.pop() {
+        if visited >= MAX_NATIVE_PREVIEW_ENTRIES || files.len() >= MAX_NATIVE_PREVIEW_FILES {
+            break;
+        }
+        let Ok(entries) = fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries {
+            // Count directories and unreadable entries too, so empty subtrees
+            // cannot make a small menu require an unbounded traversal.
+            if visited >= MAX_NATIVE_PREVIEW_ENTRIES || files.len() >= MAX_NATIVE_PREVIEW_FILES {
+                break 'scan;
+            }
+            visited += 1;
+            let Ok(entry) = entry else { continue };
+            let Ok(metadata) = fs::symlink_metadata(entry.path()) else {
+                continue;
+            };
+            if metadata.file_type().is_symlink() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let path = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            if metadata.is_dir() {
+                if depth < 8 {
+                    pending.push((entry.path(), path, depth + 1));
+                }
+            } else if metadata.is_file() && listed.insert(path.clone()) {
+                files.push(SkillContentFile {
+                    path,
+                    bytes: metadata.len(),
+                });
+            }
+        }
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(SkillContentView {
         path: selected.to_string(),
         content,
@@ -845,6 +885,87 @@ mod tests {
         assert!(read_native_skill_content(&skill, "../private.md").is_err());
         #[cfg(unix)]
         assert!(read_native_skill_content(&skill, "references/linked.md").is_err());
+        for invalid in [
+            "",
+            "/SKILL.md",
+            "./SKILL.md",
+            "references/../SKILL.md",
+            "references\\example.md",
+        ] {
+            assert!(
+                read_native_skill_content(&skill, invalid).is_err(),
+                "{invalid}"
+            );
+        }
+        assert!(read_native_skill_content(&skill, "missing.md").is_err());
+        assert!(read_native_skill_content(&skill, "references").is_err());
+        fs::write(skill.join("binary.bin"), b"a\0b").unwrap();
+        assert_eq!(
+            read_native_skill_content(&skill, "binary.bin")
+                .unwrap()
+                .status,
+            "binary"
+        );
+        fs::File::create(skill.join("large.txt"))
+            .unwrap()
+            .set_len(MAX_NATIVE_PREVIEW_BYTES + 1)
+            .unwrap();
+        let large = read_native_skill_content(&skill, "large.txt").unwrap();
+        assert_eq!(large.status, "too_large");
+        assert!(large.content.is_none());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(skill.join("SKILL.md"), skill.join("local-link.md"))
+                .unwrap();
+            std::os::unix::fs::symlink(skill.join("references"), skill.join("linked-directory"))
+                .unwrap();
+            assert!(read_native_skill_content(&skill, "local-link.md").is_err());
+            assert!(read_native_skill_content(&skill, "linked-directory/example.md").is_err());
+        }
+        let resources = skill.join("many");
+        fs::create_dir(&resources).unwrap();
+        for index in 0..=MAX_NATIVE_PREVIEW_FILES {
+            fs::write(resources.join(format!("{index}.md")), "resource").unwrap();
+        }
+        for selected in ["SKILL.md", "references/example.md", "many/512.md"] {
+            let view = read_native_skill_content(&skill, selected).unwrap();
+            assert_eq!(view.status, "text");
+            assert!(!view.content.unwrap().is_empty());
+            assert!(view.files.len() <= MAX_NATIVE_PREVIEW_FILES);
+            assert!(view.files.iter().any(|file| file.path == selected));
+            assert!(view.files.iter().any(|file| file.path == "SKILL.md"));
+        }
+        fs::remove_dir_all(resources).unwrap();
+        let deep = skill.join("deep/a/b/c/d/e/f/g/h/i");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("leaf.md"), "deep selected content").unwrap();
+        let view = read_native_skill_content(&skill, "SKILL.md").unwrap();
+        assert_eq!(view.content.as_deref(), Some("# Guide\n"));
+        assert!(!view.files.iter().any(|file| file.path.ends_with("leaf.md")));
+        // Menu depth bounds do not make an explicitly selected regular file unreadable.
+        assert_eq!(
+            read_native_skill_content(&skill, "deep/a/b/c/d/e/f/g/h/i/leaf.md")
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("deep selected content")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let blocked = skill.join("unreadable");
+            fs::create_dir(&blocked).unwrap();
+            fs::write(blocked.join("private.md"), "blocked").unwrap();
+            fs::set_permissions(&blocked, fs::Permissions::from_mode(0o000)).unwrap();
+            let access_denied = fs::read_dir(&blocked).is_err();
+            let body = read_native_skill_content(&skill, "SKILL.md");
+            let selected = read_native_skill_content(&skill, "unreadable/private.md");
+            fs::set_permissions(&blocked, fs::Permissions::from_mode(0o700)).unwrap();
+            assert_eq!(body.unwrap().content.as_deref(), Some("# Guide\n"));
+            if access_denied {
+                assert!(selected.is_err());
+            }
+        }
         fs::remove_dir_all(fixture).unwrap();
     }
 
@@ -917,6 +1038,7 @@ mod tests {
                 let mut configuration = RuntimeStartupConfiguration {
                     custom_api_snapshot: None,
                     common_environment_unavailable: false,
+                    configuration_error: None,
                     program_path: None,
                     environment: vec![RuntimeEnvironmentVariable {
                         name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
@@ -1073,6 +1195,7 @@ mod tests {
         let configuration = RuntimeStartupConfiguration {
             custom_api_snapshot: None,
             common_environment_unavailable: false,
+            configuration_error: None,
             program_path: None,
             environment: vec![RuntimeEnvironmentVariable {
                 name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),
@@ -1253,6 +1376,7 @@ mod tests {
         let configuration = RuntimeStartupConfiguration {
             custom_api_snapshot: None,
             common_environment_unavailable: false,
+            configuration_error: None,
             program_path: None,
             environment: vec![RuntimeEnvironmentVariable {
                 name: if cfg!(windows) { "USERPROFILE" } else { "HOME" }.to_owned(),

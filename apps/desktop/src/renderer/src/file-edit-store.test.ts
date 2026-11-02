@@ -1,0 +1,160 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { FileEditResult, FilePreviewApi, ResolvedFilePreview } from '@contracts'
+import { FileEditStore, fileEditDirty } from './file-edit-store'
+const stores: FileEditStore[] = []
+afterEach(() => stores.splice(0).forEach(store => store.dispose()))
+const snapshot = (text: string, version = text, key = 'same-host-file'): FileEditResult => ({ ok: true, value: { key, text, version } })
+const file = (id = 'handle'): ResolvedFilePreview => ({ handleId: id, contentGeneration: id, kind: 'code', fileName: 'example.ts' } as ResolvedFilePreview)
+async function fixture() {
+  const api = { readEditableFile: vi.fn(async () => snapshot('original')), saveTextFile: vi.fn(async () => snapshot('saved')) }
+  const store = new FileEditStore(api as unknown as FilePreviewApi); stores.push(store)
+  await store.attach('tab', file())
+  return { store, api, doc: store.get('tab')! }
+}
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
+
+describe('window file editing buffers', () => {
+  it('keeps B dirty when A completes; blocks concurrent writes and does not replace drafts on handle refresh', async () => {
+    const { store, api, doc } = await fixture()
+    const pending = deferred<FileEditResult>(); api.saveTextFile.mockReturnValueOnce(pending.promise)
+    store.change(doc, 'A'); const save = store.save(doc)
+    store.change(doc, 'B'); expect(await store.save(doc)).toBe(false)
+    pending.resolve(snapshot('A', 'new-version')); expect(await save).toBe(true)
+    expect(doc.savedText).toBe('A'); expect(doc.draft).toBe('B'); expect(fileEditDirty(doc)).toBe(true)
+    api.readEditableFile.mockResolvedValueOnce(snapshot('A', 'new-version'))
+    await store.attach('tab', file('refreshed'))
+    expect(doc.draft).toBe('B'); expect(api.saveTextFile).toHaveBeenCalledTimes(1)
+    await store.attach('other-thread-tab', file('other-thread'))
+    expect(store.get('other-thread-tab')).toBe(doc)
+    store.release(['tab']); expect(store.get('other-thread-tab')?.draft).toBe('B')
+  })
+
+  it('ignores a capability read that arrives after a newer save confirmation', async () => {
+    const { store, api, doc } = await fixture()
+    const read = deferred<FileEditResult>(); api.readEditableFile.mockReturnValueOnce(read.promise)
+    const attach = store.attach('other', file('later-handle'))
+    store.change(doc, 'saved'); api.saveTextFile.mockResolvedValueOnce(snapshot('saved', 'v2'))
+    await store.save(doc); read.resolve(snapshot('original', 'v1')); await attach
+    expect(doc).toMatchObject({ draft: 'saved', savedText: 'saved', version: 'v2' })
+    expect(store.get('other')).toBe(doc)
+  })
+
+  it('ignores an external-update check that returns an older version after saving', async () => {
+    const { store, api, doc } = await fixture()
+    store.change(doc, 'saved')
+    const read = deferred<FileEditResult>(); api.readEditableFile.mockReturnValueOnce(read.promise)
+    const check = store.checkDisk(doc, false)
+    api.saveTextFile.mockResolvedValueOnce(snapshot('saved', 'v2'))
+    await store.save(doc); store.change(doc, 'later draft')
+    read.resolve(snapshot('original', 'v1')); expect(await check).toBeUndefined()
+    expect(doc).toMatchObject({ draft: 'later draft', savedText: 'saved', version: 'v2', error: null, conflict: undefined })
+    expect(store.dialog).toBeNull()
+  })
+
+  it('reconciles an unknown result by reading, never resubmits, and retains later input', async () => {
+    const { store, api, doc } = await fixture()
+    store.change(doc, 'A'); api.saveTextFile.mockRejectedValueOnce(new Error('connection lost'))
+    expect(await store.save(doc)).toBe(false); expect(doc.unknown?.text).toBe('A')
+    store.change(doc, 'B'); api.readEditableFile.mockResolvedValueOnce(snapshot('A', 'on-disk'))
+    expect(await store.save(doc)).toBe(true)
+    expect(api.saveTextFile).toHaveBeenCalledTimes(1)
+    expect(doc).toMatchObject({ draft: 'B', savedText: 'A', version: 'on-disk', unknown: undefined })
+  })
+
+  it('restores manual retry when an unknown save left the original baseline unchanged', async () => {
+    const { store, api, doc } = await fixture()
+    store.change(doc, 'A'); api.saveTextFile.mockRejectedValueOnce(new Error('offline before write'))
+    await store.save(doc); store.change(doc, 'B')
+    api.readEditableFile.mockResolvedValueOnce(snapshot('original', 'same-content-current-version'))
+    expect(await store.reconcile(doc)).toBe(false)
+    expect(doc).toMatchObject({ draft: 'B', savedText: 'original', version: 'same-content-current-version', unknown: undefined, conflict: undefined })
+    expect(store.dialog).toBeNull(); expect(api.saveTextFile).toHaveBeenCalledTimes(1)
+    api.saveTextFile.mockResolvedValueOnce(snapshot('B', 'retry-version'))
+    expect(await store.save(doc)).toBe(true)
+    expect(api.saveTextFile).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'B', expectedVersion: 'same-content-current-version' }))
+  })
+
+  it('compares an uncertain overwrite with the disk snapshot the user chose to overwrite', async () => {
+    const { store, api, doc } = await fixture(); store.change(doc, 'A')
+    doc.conflict = { key: doc.key, text: 'outside', version: 'disk-2' }
+    api.saveTextFile.mockRejectedValueOnce(new Error('offline'))
+    const save = store.save(doc); store.dialog!.resolve('save'); await save
+    api.readEditableFile.mockResolvedValueOnce(snapshot('outside', 'disk-2'))
+    await store.reconcile(doc)
+    expect(doc).toMatchObject({ draft: 'A', savedText: 'outside', version: 'disk-2', unknown: undefined, conflict: undefined })
+    expect(store.dialog).toBeNull(); expect(fileEditDirty(doc)).toBe(true)
+  })
+
+  it('retains a real external conflict after an uncertain save without writing again', async () => {
+    const { store, api, doc } = await fixture(); store.change(doc, 'A')
+    api.saveTextFile.mockRejectedValueOnce(new Error('response lost')); await store.save(doc)
+    api.readEditableFile.mockResolvedValueOnce(snapshot('outside', 'disk-2'))
+    expect(await store.reconcile(doc)).toBe(false)
+    expect(doc.conflict?.text).toBe('outside'); expect(doc.draft).toBe('A')
+    expect(api.saveTextFile).toHaveBeenCalledTimes(1); expect(store.dialog).toBeNull()
+  })
+
+  it.each(['result', 'exception'] as const)('allows same-generation retry after an initial read %s failure', async failure => {
+    const api = { readEditableFile: vi.fn(async () => snapshot('original')), saveTextFile: vi.fn(async () => snapshot('saved')) }
+    if (failure === 'result') api.readEditableFile.mockResolvedValueOnce({ ok: false, error: { code: 'write_failed', message: 'temporary read failure' } })
+    else api.readEditableFile.mockRejectedValueOnce(new Error('offline'))
+    const store = new FileEditStore(api as unknown as FilePreviewApi); stores.push(store)
+    await store.attach('tab', file())
+    expect(store.get('tab')).toBeUndefined(); expect(store.failures.get('tab')).toBe('无法载入编辑内容')
+    await store.attach('tab', file())
+    expect(store.get('tab')?.draft).toBe('original'); expect(store.failures.has('tab')).toBe(false)
+    await store.attach('tab', file()); expect(api.readEditableFile).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps an explicitly unsupported text file read-only without a transient failure notice', async () => {
+    const api = { readEditableFile: vi.fn(async (): Promise<FileEditResult> => ({ ok: false, error: { code: 'edit_unavailable', message: 'read only' } })), saveTextFile: vi.fn() }
+    const store = new FileEditStore(api as unknown as FilePreviewApi); stores.push(store)
+    await store.attach('tab', file())
+    expect(store.get('tab')).toBeUndefined(); expect(store.failures.has('tab')).toBe(false)
+  })
+
+  it('uses the observed conflict version for an explicit overwrite', async () => {
+    const { store, api, doc } = await fixture(); store.change(doc, 'draft')
+    api.saveTextFile.mockResolvedValueOnce({ ok: false, error: { code: 'edit_conflict', message: 'conflict' }, current: { key: doc.key, text: 'outside', version: 'disk-2' } })
+    const save = store.save(doc)
+    await vi.waitFor(() => expect(store.dialog?.kind).toBe('conflict'))
+    api.saveTextFile.mockResolvedValueOnce(snapshot('draft', 'disk-3'))
+    store.dialog!.resolve('save'); expect(await save).toBe(true)
+    expect(api.saveTextFile).toHaveBeenLastCalledWith(expect.objectContaining({ text: 'draft', expectedVersion: 'disk-2' }))
+    expect(doc.savedText).toBe('draft')
+  })
+
+  it('uses a remaining tab handle when closing another tab for the same file', async () => {
+    const { store, api, doc } = await fixture()
+    await store.attach('other-tab', file('other-handle'))
+    expect(store.get('other-tab')).toBe(doc)
+    store.release(['other-tab']); store.change(doc, 'saved')
+    expect(await store.save(doc)).toBe(true)
+    expect(api.saveTextFile).toHaveBeenLastCalledWith(expect.objectContaining({ handleId: 'handle', expectedGeneration: 'handle' }))
+  })
+
+  it('does not offer overwrite for a replaced directory and closes only after explicit discard without saving', async () => {
+    const { store, api, doc } = await fixture(); store.change(doc, 'draft')
+    api.saveTextFile.mockResolvedValueOnce({ ok: false, error: { code: 'edit_conflict', message: 'conflict' }, current: { key: 'replacement-directory', text: 'outside', version: 'other' } })
+    expect(await store.save(doc)).toBe(false); expect(store.dialog).toBeNull(); expect(doc.conflict).toBeUndefined()
+    const close = store.confirmClose(['tab']); expect(store.dialog?.kind).toBe('close')
+    store.dialog!.resolve('cancel'); expect(await close).toBe(false)
+    expect(doc.draft).toBe('draft'); expect(fileEditDirty(doc)).toBe(true)
+    const confirmed = store.confirmClose(['tab'])
+    store.dialog!.resolve('discard'); expect(await confirmed).toBe(true)
+    expect(api.saveTextFile).toHaveBeenCalledTimes(1)
+    expect(store.shouldWarnOnUnload()).toBe(true); store.acceptExit(); expect(store.shouldWarnOnUnload()).toBe(false)
+    store.change(doc, 'later'); expect(store.shouldWarnOnUnload()).toBe(true)
+  })
+
+  it('discard re-reads the latest disk and cannot clear a draft on a failed reload', async () => {
+    const { store, api, doc } = await fixture(); store.change(doc, 'draft')
+    doc.conflict = { key: doc.key, text: 'outside', version: 'disk-2' }
+    api.readEditableFile.mockRejectedValueOnce(new Error('offline'))
+    const first = store.handleConflict(doc); store.dialog!.resolve('discard')
+    expect(await first).toBe(false); expect(doc.draft).toBe('draft')
+    api.readEditableFile.mockResolvedValueOnce(snapshot('latest', 'disk-3'))
+    const second = store.handleConflict(doc); store.dialog!.resolve('discard')
+    expect(await second).toBe(true); expect(doc.draft).toBe('latest'); expect(fileEditDirty(doc)).toBe(false)
+  })
+})

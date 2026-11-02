@@ -2,7 +2,7 @@ import ts from 'typescript'
 
 // Parse a closed data-flow subset. No eval, constant folding, arbitrary calls,
 // mutation, spreads, computed keys, or dynamically produced verification text.
-export function directExecWrapper(input) {
+export function directExecWrapper(input, { defaultWorkdir = null } = {}) {
   if (typeof input !== 'string' || input.length > 50_000) return null
   const file = ts.createSourceFile('native-witness.js', input, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
   if (file.parseDiagnostics.length) return null
@@ -31,10 +31,12 @@ export function directExecWrapper(input) {
     throw new Error('non-literal input')
   }
   function invocation(node) {
+    while (ts.isParenthesizedExpression(node)) node = node.expression
     if (!ts.isAwaitExpression(node) || !ts.isCallExpression(node.expression)) return null
     const call = node.expression
     if (!property(call.expression, 'tools', 'exec_command') || call.arguments.length !== 1) return null
     const value = literal(call.arguments[0])
+    if (value.workdir === undefined && typeof defaultWorkdir === 'string') value.workdir = defaultWorkdir
     if (typeof value.cmd !== 'string' || typeof value.workdir !== 'string') throw new Error('missing direct command')
     return value
   }
@@ -63,9 +65,10 @@ export function directExecWrapper(input) {
           || !named(statement.expression.expression, 'text') || statement.expression.arguments.length !== 1) return null
       const value = statement.expression.arguments[0]
       if (!args) {
-        const invoked = invocation(value)
+        const outputProperty = ts.isPropertyAccessExpression(value) && value.name.text === 'output'
+        const invoked = invocation(outputProperty ? value.expression : value)
         if (!invoked) return null
-        args = invoked; outputs.push('json'); continue
+        args = invoked; outputs.push(outputProperty ? 'text' : 'json'); continue
       }
       if (property(value, resultName, 'output')) outputs.push('text')
       else if (jsonReturn(value)) outputs.push('json')

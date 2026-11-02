@@ -33,5 +33,10 @@ describe('startup editor draft contract', () => {
       { path: ['environment', 'HTTP_PROXY'], before: 'before', after: '  after  ', label: '环境变量 HTTP_PROXY' }
     ])
     expect(startupEdits(saved, saved.configuration)).toEqual([])
+    const invalid = { ...saved, configuration: { programPath: null, environment: [], configurationError: 'invalid' } }
+    expect(startupEdits(invalid, invalid.configuration)).toEqual([])
+    expect(startupEdits(invalid, { programPath: null, environment: [] })).toEqual([
+      { path: ['programPath'], before: null, after: null, label: '程序路径' }
+    ])
   })
 })

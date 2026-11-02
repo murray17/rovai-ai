@@ -3,7 +3,7 @@ document_type: ui-component
 component: channel-settings
 authority: channel-settings-presentation-and-interaction
 status: accepted
-last_updated: 2026-09-28
+last_updated: 2026-10-30
 ---
 
 # 渠道设置
@@ -43,13 +43,13 @@ Web 页面定时授权读取进度，读取失败保留原发布记录并将实�
 
 ## 页面结构
 
-页面沿用设置工作区的 Porcelain Day / Steel Night 世界和现有 `SettingsPageHeader`：
+页面遵循 [DESIGN.md](../../../DESIGN.md) 与[设置工作区 brief](../surfaces/settings-workspace.md)，复用现有 `SettingsPageHeader`：
 
 1. `Settings / Channels` eyebrow、标题“渠道”、Owner 本机说明；
 2. 飞书与钉钉可选 Provider Tab，均使用打包进 App 的真实品牌图标，并显示各自真实连接状态；
 3. 当前 Provider 的渠道连接，展示真实开发者用户名、企业与可选 email，提供对应登录、重连、切换和断开；
 4. 当前 Provider 的队员 Bot 列表，按成员稳定顺序显示头像、名称、角色、发布状态和单行动作；
-5. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Camp 或队员行。
+5. 页面最底部显示默认折叠的“局域网执行台”全局设置，不放入单个 Bot、Thread 或队员行。
 
 窄窗口保持同一内容顺序，表格式行折为纵向信息，不产生横向滚动。共享色彩只使用现有语义 Token；头像、按钮、
 Dialog、状态点和间距复用现有组件语法。
@@ -168,7 +168,7 @@ Renderer 不显示“会话接入”、待处理项目选择、绑定异常或�
 项目卡沿用 Rovai 克制、信息先行的表达：标题为“选择 Rovai 项目”。飞书正文为“选择一个项目，或直接开始快速对话。”，
 后接“选择项目后，这个话题之后都会使用该项目；快速对话不绑定项目。”；普通群用“群聊”替换“话题”。项目下拉框独占
 一行，仅显示 bounded project display name；下一行依次为“开始快速对话”和“刷新项目”。没有可用项目时不展示空下拉框，
-保留两个按钮及可直接快速对话的说明。两种选择都冻结同一个 Camp 工作区，不提供换绑入口。
+保留两个按钮及可直接快速对话的说明。两种选择都冻结同一个 Thread 工作区，不提供换绑入口。
 卡片不得显示 canonical path、外部 identity、credential 或内部错误。钉钉固定使用平台内置通用 AI Markdown 模板，
 用户无需创建、选择或发布模板；卡片使用 Stream callback 且禁止转发。项目以最近使用顺序显示最多六个按钮，随后是
 “开始快速对话”和“刷新项目”，没有项目时仍能直接 Quick Chat；不为模拟飞书下拉框增加用户自定义模板前置条件。
@@ -231,12 +231,12 @@ Unicode 字符，超长用省略号收尾。引用只作展示，不跳转、不
 详情仍默认折叠，不增加确认框或迁移提示。
 
 Web 执行台延续 Porcelain Day / Steel Night 的冷瓷灰、Steel 品牌、身份色与中性 Evidence 层级，不建立暖色替代主题。
-顶部只保留 Camp 名与“只读”，随后显示当前选中 Run 的触发消息和该队员的执行记录；外部触发者在该阅读面固定显示
+顶部只保留 Thread 名与“只读”，随后显示当前选中 Run 的触发消息和该队员的执行记录；外部触发者在该阅读面固定显示
 为“你”，不显示“飞书成员”，A2A Run 则显示实际发起队员的名称与首字头像。进行中的 Run 直接显示，终态 Run 收在默认折叠的“执行历史”下；
 终态链接明确聚焦的 Run 应展开历史区以显示该条记录。每个 AgentRun 都有独立过程 disclosure，当前链接聚焦的 Run 默认展开、其他历史 Run 默认收起；连续操作组
 与每个 Command 继续使用生产执行台的嵌套 disclosure，即使没有公开结果也保留可展开行。点击 Run 标题只切换顶部触发消息，
 不代替折叠入口。
-Run 卡头、状态图形、工具组、命令结果与 Markdown 正文沿用桌面执行台的生产组件和语义 Token；网页外壳只拥有 Camp 顶栏、触发消息、只读身份、历史区与手机触控尺寸。
+Run 卡头、状态图形、工具组、命令结果与 Markdown 正文沿用桌面执行台的生产组件和语义 Token；网页外壳只拥有 Thread 顶栏、触发消息、只读身份、历史区与手机触控尺寸。
 文件变化只展开公开路径与增删计数，不显示私有 diff 或本地文件预览入口。SSE 快照更新不得清空用户已展开的 Run、工具组和结果；断线时保留最近内容并显示重连状态。
 页面无写控制、分页或解释性图例，桌面与手机使用同一阅读顺序，无横向滚动；状态有文本、可见键盘焦点和最小 44px 手机点击区域。
 
@@ -255,7 +255,7 @@ Run 卡头、状态图形、工具组、命令结果与 Markdown 正文沿用桌
 ## References
 
 - [全局设计系统](../../../DESIGN.md)
-- [设置工作区 brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [设置工作区 brief](../surfaces/settings-workspace.md)
 - [Feishu Channel v17](../../contracts/feishu-channel-v17.md)
 - [飞书渠道架构](../../architecture/feishu-channel.md)
 - [Lark Channel v1](../../contracts/lark-channel-v1.md)

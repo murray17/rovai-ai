@@ -1197,6 +1197,7 @@ pub fn merge_projection(
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests {
     use super::*;
+    use crate::test_support::absolute_test_path;
     use serde_json::json;
 
     #[test]
@@ -1209,13 +1210,13 @@ mod tests {
                     "sourceEventKind": "item/completed.fileChange.completed",
                     "semanticKind": "codex_file_change_snapshot",
                     "entries": [{
-                        "path": "/repo/src/app.ts",
+                        "path": absolute_test_path("/repo/src/app.ts"),
                         "kind": {"type": "update"},
                         "diff": "@@ -1 +1,2 @@\n-old\n+new\n+next\n"
                     }]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("codex-cli"),
         )
         .expect("candidate should be present")
@@ -1235,7 +1236,7 @@ mod tests {
         let mini = |patch: &str| {
             json!({"runtimeDiff":{"adapterKind":"minimax-code-cli","protocolFamily":"acp-v1",
             "sourceEventKind":"session/update.tool_call_update.completed","semanticKind":"minimax_file_patch",
-            "entries":[{"path":"src/app.ts","changeKind":"update","diff":patch}]}})
+            "entries":[{"path":"src/app.ts","changeKind":"update","diff":patch.replace("/repo", &absolute_test_path("/repo"))}]}})
         };
         for patch in [
             mini_patch.to_string(),
@@ -1243,10 +1244,13 @@ mod tests {
                 "Index: /repo/src/app.ts\n===================================================================\n{mini_patch}"
             ),
         ] {
-            let admitted =
-                admit_runtime_diff(&mini(&patch), Path::new("/repo"), Some("minimax-code-cli"))
-                    .unwrap()
-                    .unwrap();
+            let admitted = admit_runtime_diff(
+                &mini(&patch),
+                Path::new(&absolute_test_path("/repo")),
+                Some("minimax-code-cli"),
+            )
+            .unwrap()
+            .unwrap();
             assert_eq!(
                 admitted.evidence_entries[0]["semantics"],
                 "unified_diff_snapshot"
@@ -1265,9 +1269,13 @@ mod tests {
             "--- /repo/src/app.ts\n+++ /repo/src/app.ts\npreview without hunk".into(),
         ] {
             assert!(
-                admit_runtime_diff(&mini(&patch), Path::new("/repo"), Some("minimax-code-cli"))
-                    .unwrap()
-                    .is_err()
+                admit_runtime_diff(
+                    &mini(&patch),
+                    Path::new(&absolute_test_path("/repo")),
+                    Some("minimax-code-cli")
+                )
+                .unwrap()
+                .is_err()
             );
         }
         let mut false_complete = mini(mini_patch);
@@ -1275,7 +1283,7 @@ mod tests {
         assert_eq!(
             admit_runtime_diff(
                 &false_complete,
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some("minimax-code-cli")
             )
             .unwrap(),
@@ -1284,10 +1292,10 @@ mod tests {
         assert_eq!(
             admit_runtime_diff_with_file_operation_path_and_managed_output_root(
                 &mini(mini_patch),
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some("minimax-code-cli"),
                 None,
-                Some(Path::new("/repo/src"))
+                Some(Path::new(&absolute_test_path("/repo/src")))
             )
             .unwrap(),
             Err(RUNTIME_DIFF_MANAGED_OUTPUT_ROOT)
@@ -1300,9 +1308,9 @@ mod tests {
                     "sourceEventKind": "tool_execution_end.completed",
                     "semanticKind": "pi_edit_patch",
                     "entries": [{
-                        "path": "/repo/src/app.ts",
+                        "path": absolute_test_path("/repo/src/app.ts"),
                         "changeKind": "update",
-                        "diff": patch
+                        "diff": patch.replace("/repo", &absolute_test_path("/repo"))
                     }]
                 }
             })
@@ -1316,7 +1324,7 @@ mod tests {
                 "+++new-content\n",
                 "+next\n",
             )),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("pi"),
         )
         .expect("candidate should be present")
@@ -1343,8 +1351,12 @@ mod tests {
             "--- /repo/src/app.ts\n+++ /repo/src/app.ts\n",
         ] {
             assert_eq!(
-                admit_runtime_diff(&payload(patch), Path::new("/repo"), Some("pi"))
-                    .expect("candidate should be present"),
+                admit_runtime_diff(
+                    &payload(patch),
+                    Path::new(&absolute_test_path("/repo")),
+                    Some("pi")
+                )
+                .expect("candidate should be present"),
                 Err("runtime_diff_content_invalid")
             );
         }
@@ -1360,17 +1372,17 @@ mod tests {
                     "sourceEventKind": "item/completed.fileChange.completed",
                     "semanticKind": "codex_file_change_snapshot",
                     "entries": [{
-                        "path": "/repo/new.txt",
+                        "path": absolute_test_path("/repo/new.txt"),
                         "kind": {"type": "add"},
                         "diff": "first\nsecond\n"
                     }, {
-                        "path": "/repo/old.txt",
+                        "path": absolute_test_path("/repo/old.txt"),
                         "kind": {"type": "delete"},
                         "diff": "gone\n"
                     }]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("codex-cli"),
         )
         .expect("candidate should be present")
@@ -1398,7 +1410,9 @@ mod tests {
 
     #[test]
     fn cross_root_diffs_keep_user_files_and_exclude_managed_run_output() {
-        let managed_output_root = Path::new("/rovai/runtime/builtin-tools/process/run-tmp");
+        let managed_output_root_path =
+            absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp");
+        let managed_output_root = Path::new(&managed_output_root_path);
         let result = admit_runtime_diff_with_file_operation_path_and_managed_output_root(
             &json!({
                 "runtimeDiff": {
@@ -1409,14 +1423,14 @@ mod tests {
                     "entries": [
                         {"path": "../secret", "kind": {"type": "update"}, "diff": "+x"},
                         {
-                            "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html",
+                            "path": absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp/report.html"),
                             "kind": {"type": "add"},
                             "diff": "temporary\n"
                         }
                     ]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("codex-cli"),
             None,
             Some(managed_output_root),
@@ -1424,7 +1438,7 @@ mod tests {
         .expect("candidate should be present")
         .expect("an explicit cross-root Runtime path should be admitted");
         assert_eq!(result.entries.len(), 1);
-        assert_eq!(result.entries[0].path, "/secret");
+        assert_eq!(result.entries[0].path, absolute_test_path("/secret"));
 
         let managed_only = admit_runtime_diff_with_file_operation_path_and_managed_output_root(
             &json!({
@@ -1434,13 +1448,13 @@ mod tests {
                     "sourceEventKind": "item/completed.fileChange.completed",
                     "semanticKind": "codex_file_change_snapshot",
                     "entries": [{
-                        "path": "/rovai/runtime/builtin-tools/process/run-tmp/report.html",
+                        "path": absolute_test_path("/rovai/runtime/builtin-tools/process/run-tmp/report.html"),
                         "kind": {"type": "add"},
                         "diff": "temporary\n"
                     }]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("codex-cli"),
             None,
             Some(managed_output_root),
@@ -1453,21 +1467,23 @@ mod tests {
             "b//rovai/runtime/builtin-tools/process/run-tmp/report.html\n",
             "new file mode 100644\n--- /dev/null\n",
             "+++ b//rovai/runtime/builtin-tools/process/run-tmp/report.html\n@@ -0,0 +1 @@\n+x\n",
-        );
+        )
+        .replace("/rovai/", &absolute_test_path("/rovai/"));
         let managed_source_snapshot = concat!(
             "diff --git a//rovai/runtime/builtin-tools/process/run-tmp/source.html ",
             "b/src/published.html\n",
             "similarity index 100%\n",
             "rename from /rovai/runtime/builtin-tools/process/run-tmp/source.html\n",
             "rename to src/published.html\n",
-        );
+        )
+        .replace("/rovai/", &absolute_test_path("/rovai/"));
         let snapshot = format!(
             "diff --git a/src/app.ts b/src/app.ts\n\
              --- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n{managed_snapshot}{managed_source_snapshot}"
         );
         let filtered = filter_unified_diff_snapshot_outside_root(
             &snapshot,
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             managed_output_root,
         )
         .expect("a structured snapshot should be filterable");
@@ -1476,8 +1492,8 @@ mod tests {
         assert!(!filtered.contains("src/published.html"));
         assert_eq!(
             filter_unified_diff_snapshot_outside_root(
-                managed_snapshot,
-                Path::new("/repo"),
+                &managed_snapshot,
+                Path::new(&absolute_test_path("/repo")),
                 managed_output_root,
             )
             .as_deref(),
@@ -1489,28 +1505,45 @@ mod tests {
     fn file_uris_and_paths_use_relative_inside_and_absolute_outside_display_root() {
         assert_eq!(
             normalize_reported_path_for_display(
-                Path::new("/repo with space"),
-                "file:///repo%20with%20space/src/app.ts"
+                Path::new(&absolute_test_path("/repo with space")),
+                Url::from_file_path(absolute_test_path("/repo with space/src/app.ts"))
+                    .unwrap()
+                    .as_str()
             )
             .as_deref(),
             Some("src/app.ts")
         );
         assert_eq!(
-            normalize_reported_path_for_display(Path::new("/repo"), "file:///outside/app.ts")
-                .as_deref(),
-            Some("/outside/app.ts")
+            normalize_reported_path_for_display(
+                Path::new(&absolute_test_path("/repo")),
+                Url::from_file_path(absolute_test_path("/outside/app.ts"))
+                    .unwrap()
+                    .as_str()
+            )
+            .as_deref(),
+            Some(absolute_test_path("/outside/app.ts").as_str())
         );
         assert_eq!(
-            normalize_reported_path_for_display(Path::new("/repo"), "../outside/app.ts").as_deref(),
-            Some("/outside/app.ts")
+            normalize_reported_path_for_display(
+                Path::new(&absolute_test_path("/repo")),
+                "../outside/app.ts"
+            )
+            .as_deref(),
+            Some(absolute_test_path("/outside/app.ts").as_str())
         );
         assert!(
-            normalize_reported_path_for_display(Path::new("/repo"), "https://example.com/app.ts")
-                .is_none()
+            normalize_reported_path_for_display(
+                Path::new(&absolute_test_path("/repo")),
+                "https://example.com/app.ts"
+            )
+            .is_none()
         );
         assert!(
-            normalize_reported_path_for_display(Path::new("/repo"), "/outside/.git/config")
-                .is_none()
+            normalize_reported_path_for_display(
+                Path::new(&absolute_test_path("/repo")),
+                &absolute_test_path("/outside/.git/config")
+            )
+            .is_none()
         );
     }
 
@@ -1572,13 +1605,13 @@ mod tests {
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "semanticKind": "complete_before_after",
                     "entries": [{
-                        "path": "/src/app.ts",
+                        "path": absolute_test_path("/src/app.ts"),
                         "oldText": "before\n",
                         "newText": "after\n"
                     }]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("kiro-cli"),
             Some("src/app.ts"),
         )
@@ -1595,19 +1628,22 @@ mod tests {
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "semanticKind": "complete_before_after",
                     "entries": [{
-                        "path": "/src/other.ts",
+                        "path": absolute_test_path("/src/other.ts"),
                         "oldText": "before\n",
                         "newText": "after\n"
                     }]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("kiro-cli"),
             Some("src/app.ts"),
         )
         .expect("candidate should be present")
         .expect("a real absolute cross-root Kiro path should remain absolute");
-        assert_eq!(mismatched_kiro.entries[0].path, "/src/other.ts");
+        assert_eq!(
+            mismatched_kiro.entries[0].path,
+            absolute_test_path("/src/other.ts")
+        );
 
         let qoder = admit_runtime_diff_with_file_operation_path(
             &json!({
@@ -1617,28 +1653,28 @@ mod tests {
                     "sourceEventKind": "session/update.tool_call_update.completed",
                     "semanticKind": "complete_before_after",
                     "entries": [{
-                        "path": "/src/app.ts",
+                        "path": absolute_test_path("/src/app.ts"),
                         "oldText": "before\n",
                         "newText": "after\n"
                     }]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("qoder-cli"),
             Some("src/app.ts"),
         )
         .expect("candidate should be present")
         .expect("ACP adapters should retain an absolute path outside the display root");
-        assert_eq!(qoder.entries[0].path, "/src/app.ts");
+        assert_eq!(qoder.entries[0].path, absolute_test_path("/src/app.ts"));
     }
 
     #[test]
     fn generated_unified_diff_uses_absolute_headers_for_cross_root_files() {
-        let patch =
-            unified_diff_from_complete_states("/outside/app.ts", Some("before\n"), Some("after\n"))
-                .expect("different complete states should produce a patch");
-        assert!(patch.starts_with("--- /outside/app.ts\n+++ /outside/app.ts\n"));
-        assert!(!patch.contains("a//outside"));
+        let path = absolute_test_path("/outside/app.ts");
+        let patch = unified_diff_from_complete_states(&path, Some("before\n"), Some("after\n"))
+            .expect("different complete states should produce a patch");
+        assert!(patch.starts_with(&format!("--- {path}\n+++ {path}\n")));
+        assert!(!patch.contains(&format!("a/{}", absolute_test_path("/outside"))));
     }
 
     #[test]
@@ -1652,9 +1688,13 @@ mod tests {
                     {"oldText":"second\n","newText":"changed\n"}]
             }]
         }});
-        let admitted = admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
-            .unwrap()
-            .unwrap();
+        let admitted = admit_runtime_diff(
+            &payload,
+            Path::new(&absolute_test_path("/repo")),
+            Some("cline-cli"),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(admitted.semantic_kind, "reported_mutation");
         assert_eq!(
             (admitted.entries[0].additions, admitted.entries[0].deletions),
@@ -1667,33 +1707,49 @@ mod tests {
         hermes["runtimeDiff"]["sourceEventKind"] =
             json!("session/update.tool_call_update.completed.file_result");
         assert!(
-            admit_runtime_diff(&hermes, Path::new("/repo"), Some("hermes-cli"))
-                .unwrap()
-                .is_err(),
+            admit_runtime_diff(
+                &hermes,
+                Path::new(&absolute_test_path("/repo")),
+                Some("hermes-cli")
+            )
+            .unwrap()
+            .is_err(),
             "Retired private Hermes fragments are not current native evidence"
         );
         let mut legacy = payload.clone();
         legacy["runtimeDiff"]["protocolFamily"] = json!("cline-hub-v1");
         assert!(
-            admit_runtime_diff(&legacy, Path::new("/repo"), Some("cline-cli"))
-                .unwrap()
-                .is_err()
+            admit_runtime_diff(
+                &legacy,
+                Path::new(&absolute_test_path("/repo")),
+                Some("cline-cli")
+            )
+            .unwrap()
+            .is_err()
         );
         let mut terminal = payload.clone();
         terminal["runtimeDiff"]["protocolFamily"] = serde_json::json!("acp-v1");
         terminal["runtimeDiff"]["sourceEventKind"] =
             serde_json::json!("session/update.tool_call_update.completed.apply_patch");
         assert!(
-            admit_runtime_diff(&terminal, Path::new("/repo"), Some("cline-cli"))
-                .unwrap()
-                .is_ok()
+            admit_runtime_diff(
+                &terminal,
+                Path::new(&absolute_test_path("/repo")),
+                Some("cline-cli")
+            )
+            .unwrap()
+            .is_ok()
         );
         terminal["runtimeDiff"]["sourceEventKind"] =
             serde_json::json!("session/update.tool_call_update.failed.apply_patch");
         assert!(
-            admit_runtime_diff(&terminal, Path::new("/repo"), Some("cline-cli"))
-                .unwrap()
-                .is_err()
+            admit_runtime_diff(
+                &terminal,
+                Path::new(&absolute_test_path("/repo")),
+                Some("cline-cli")
+            )
+            .unwrap()
+            .is_err()
         );
         let rebuilt = projection_from_evidence(&serde_json::json!({"runtimeDiff":{
             "schemaVersion":1,"status":"available","semanticKind":"reported_mutation","entries":admitted.evidence_entries
@@ -1705,32 +1761,44 @@ mod tests {
         ] {
             payload["runtimeDiff"]["sourceEventKind"] = serde_json::json!(source);
             assert!(
-                admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
-                    .unwrap()
-                    .is_err()
+                admit_runtime_diff(
+                    &payload,
+                    Path::new(&absolute_test_path("/repo")),
+                    Some("cline-cli")
+                )
+                .unwrap()
+                .is_err()
             );
         }
         payload["runtimeDiff"]["sourceEventKind"] =
             serde_json::json!("session/update.tool_call_update.completed.editor");
         assert!(
-            admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
-                .unwrap()
-                .is_ok()
+            admit_runtime_diff(
+                &payload,
+                Path::new(&absolute_test_path("/repo")),
+                Some("cline-cli")
+            )
+            .unwrap()
+            .is_ok()
         );
         assert!(
-            admit_runtime_diff(&payload, Path::new("/repo"), Some("qoder-cli"))
-                .unwrap()
-                .is_err()
+            admit_runtime_diff(
+                &payload,
+                Path::new(&absolute_test_path("/repo")),
+                Some("qoder-cli")
+            )
+            .unwrap()
+            .is_err()
         );
         payload["runtimeDiff"]["entries"][0]["path"] =
-            serde_json::json!("/repo/run-tmp/private.ts");
+            serde_json::json!(absolute_test_path("/repo/run-tmp/private.ts"));
         assert_eq!(
             admit_runtime_diff_with_file_operation_path_and_managed_output_root(
                 &payload,
-                Path::new("/repo"),
+                Path::new(&absolute_test_path("/repo")),
                 Some("cline-cli"),
                 None,
-                Some(Path::new("/repo/run-tmp"))
+                Some(Path::new(&absolute_test_path("/repo/run-tmp")))
             )
             .unwrap()
             .unwrap_err(),
@@ -1739,9 +1807,13 @@ mod tests {
         payload["runtimeDiff"]["entries"][0]["path"] = serde_json::json!("src/a.ts");
         payload["runtimeDiff"]["entries"][0]["fragments"] = serde_json::json!([]);
         assert!(
-            admit_runtime_diff(&payload, Path::new("/repo"), Some("cline-cli"))
-                .unwrap()
-                .is_err()
+            admit_runtime_diff(
+                &payload,
+                Path::new(&absolute_test_path("/repo")),
+                Some("cline-cli")
+            )
+            .unwrap()
+            .is_err()
         );
         // CRLF normalization makes rendered fragments smaller than their source.
         // Enforce the file budget across fragments, not only on rendered text.
@@ -1779,7 +1851,7 @@ mod tests {
                     }]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("qoder-cli"),
         )
         .unwrap()
@@ -1821,9 +1893,13 @@ mod tests {
             }]
         }});
         assert!(
-            admit_runtime_diff(&unsupported, Path::new("/repo"), Some("hermes-cli"))
-                .unwrap()
-                .is_err()
+            admit_runtime_diff(
+                &unsupported,
+                Path::new(&absolute_test_path("/repo")),
+                Some("hermes-cli")
+            )
+            .unwrap()
+            .is_err()
         );
     }
 
@@ -1846,7 +1922,7 @@ mod tests {
                     "entries": [{"path": "empty.txt", "oldText": "content\n", "newText": ""}]
                 }
             }),
-            Path::new("/repo"),
+            Path::new(&absolute_test_path("/repo")),
             Some("cursor-agent"),
         )
         .expect("candidate should be present")
@@ -1886,11 +1962,13 @@ mod tests {
                     }]
                 }
             });
-            let admitted = admit_runtime_diff(&payload, Path::new("/repo"), Some(adapter.as_str()))
-                .expect("ACP diff candidate should exist")
-                .unwrap_or_else(|reason| {
-                    panic!("{} should be admitted: {reason}", adapter.as_str())
-                });
+            let admitted = admit_runtime_diff(
+                &payload,
+                Path::new(&absolute_test_path("/repo")),
+                Some(adapter.as_str()),
+            )
+            .expect("ACP diff candidate should exist")
+            .unwrap_or_else(|reason| panic!("{} should be admitted: {reason}", adapter.as_str()));
             assert_eq!(admitted.entries.len(), 1);
             assert_eq!(
                 (admitted.entries[0].additions, admitted.entries[0].deletions),
@@ -1909,15 +1987,19 @@ mod tests {
                 "semanticKind": "exact_mutation",
                 "entries": [{
                     "semantics": "exact_mutation",
-                    "path": "/repo/src/app.ts",
+                    "path": absolute_test_path("/repo/src/app.ts"),
                     "oldText": "const enabled = false",
                     "newText": "const enabled = true"
                 }]
             }
         });
-        let admitted = admit_runtime_diff(&payload, Path::new("/repo"), Some("claude-code-cli"))
-            .expect("candidate should be present")
-            .expect("Claude Edit exact mutation should be admitted");
+        let admitted = admit_runtime_diff(
+            &payload,
+            Path::new(&absolute_test_path("/repo")),
+            Some("claude-code-cli"),
+        )
+        .expect("candidate should be present")
+        .expect("Claude Edit exact mutation should be admitted");
 
         assert_eq!(admitted.semantic_kind, "exact_mutation");
         assert_eq!(admitted.entries[0].path, "src/app.ts");
@@ -1992,9 +2074,13 @@ mod tests {
                 }
             });
             assert!(
-                admit_runtime_diff(&payload, Path::new("/repo"), Some("claude-code-cli"))
-                    .expect("candidate should be present")
-                    .is_err()
+                admit_runtime_diff(
+                    &payload,
+                    Path::new(&absolute_test_path("/repo")),
+                    Some("claude-code-cli")
+                )
+                .expect("candidate should be present")
+                .is_err()
             );
         }
     }
@@ -2011,8 +2097,12 @@ mod tests {
             }
         });
         assert_eq!(
-            admit_runtime_diff(&payload, Path::new("/repo"), Some("antigravity-app"))
-                .expect("candidate should be present"),
+            admit_runtime_diff(
+                &payload,
+                Path::new(&absolute_test_path("/repo")),
+                Some("antigravity-app")
+            )
+            .expect("candidate should be present"),
             Err("runtime_diff_source_not_allowlisted")
         );
     }

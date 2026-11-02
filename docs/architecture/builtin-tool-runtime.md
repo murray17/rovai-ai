@@ -55,7 +55,7 @@ Current User Attention 与 progressive CLI teaching 分别见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)和
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)；当前 official Skill inventory、Agent 主导队员创建、
 逐队员工具箱与 Harness 原生 Skills 来源见 [Skills 架构](skills.md)；
-旧 Library 与项目投影仅保留历史恢复，见 [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)。
+旧 Library 与项目投影仅保留历史恢复，见 [Skills 来源与投递不变量](foundational-invariants.md#skills-library-projection)。
 Memory 单命令的局部 Transport 决策见
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)，独立 Hearth Review 与 actor-bounded mutation
 组合见 [Online Memory Capture](online-memory-capture.md)。Complete exact-Scope View 与 copyable target
@@ -203,9 +203,9 @@ Thread History exact help 保持三段职责：目标未知时用 `history.searc
 `rovai thread list` 对新 Run 使用当前名称和最新可见消息活动，旧 Run 继续使用已冻结目录。
 跨 Thread `thread.search` 和 `history.search` 仍受 Run 的全局消息发布边界限制；列表读取不推进这个边界。
 
-`thread.read` exact help 展示 timeline `--limit 20`／`--before CURSOR`、exact item `--message-id MESSAGE_ID`
-和回复链 `--reply-chain MESSAGE_ID --limit 20`。省略 limit 时为 20，显式上限为 100；旧 `--thread` 仅作兼容输入。
-`mode`、`direction`、`around`、`after` 和 generic `cursor` 均不是当前输入字段。
+`thread.read` exact help 展示 timeline、exact item `--message-id MESSAGE_ID` 和回复链 `--reply-chain MESSAGE_ID`。
+timeline 与回复链使用互斥的 `--before/--after`，`--after 0` 从最早可见消息开始；limit 默认 20、最大 100。
+旧 `--thread` 仅作兼容输入；`mode`、`direction`、`around` 和 generic `cursor` 不是当前输入字段。
 
 `rovai send --help` 的基础示例分别演示 `--public-only`、Agent-only 与 `--public-only --to-user`。
 `--to-user` 的精确字段帮助拥有“新产生且未解决的 User 决定、回答或行动”条件，且消息局部不继承、
@@ -225,8 +225,8 @@ CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 gramm
 目录静态复用，说明和 schema 不再计算目录摘要；真正不兼容的接口改动使用原协议版本。
 当前 Contract/CLI 与 Agent Output 版本由本页开头的 Transport 合同拥有；IPC 和 Envelope 沿现有封闭协议，不生成或校验结果摘要 receipt。
 [Thread Runs v1](../contracts/thread-runs-v1.md) 复用公开读取范围，用一个事务组合实际 Run 和按队员聚合的等待消息；不进入调度写路径。
-Thread History 当前使用 v14。Charter revision 为 23；Binding compatibility 保持 16 及原冻结 context tuple，
-Antigravity 使用当前工具协议版本，不含目录指纹。当前目录变化不轮换旧 Session；恢复和压缩补发复用原 Bootstrap。
+Thread History 由 [当前读取合同](../contracts/camp-history-v17.md) 定义。
+Antigravity 使用当前工具协议版本，不含目录指纹；目录与 Bootstrap 文案更新不轮换旧 Session。
 新 Binding 的 Bootstrap 与新 Run 的 Formatter/Manifest 以当前 ContextManifest 合同为准；原生恢复继续使用绑定已冻结的兼容身份。
 Skill 正文与 reference 通过现有受管同步更新原路径；旧、新 Session 后续读取均可使用新版。
 
@@ -339,18 +339,19 @@ Lease → AgentRun + executionEpoch + NativeBinding
       → authenticated current Thread
 ```
 
-带 `files` 的 Send 将一次 invocation 分成短授权、锁外 Authority freeze、短重授权/commit 三段。第一段只做
-request replay 与 exact lease/run/epoch/run-tmp 认证；随后释放全局 invocation guard 和 Database mutex，在
-blocking work 中执行 no-follow copy/hash/fsync；最后重取 guard/Database 并验证同一身份后提交统一 publication
-aggregate。重放不重新读源，身份漂移只清理本 operation 尚未拥有的 Authority 节点。该分段是 Send adapter 的
-内部实现，不扩大 generic Router interface，也不把路径或 projection 状态加入 Agent output。
-
-推导。首次调用将它写入内部 `ThreadMessageSendCommand.camp_id`；持久 Replay 读取已记录的
+首次调用将推导结果写入内部 `ThreadMessageSendCommand.camp_id`；持久 Replay 读取已记录的
 `camp_id + source AgentRun + executionEpoch`，不重新使用当前活跃身份。Thread History service 先认证调用方
 Run/epoch，再把所有存续公共 Thread 作为可读范围；目标 Thread membership/profile 不参与授权。`thread.read` 直接解析目标
-Thread 并使用调用时 sequence boundary；ContextManifest history catalog 不限制它。`camp.list`、跨 Thread
-`thread.search` 和 `history.search` 继续使用冻结 global public boundary 保持 discovery 时序，并为旧 Manifest
-漏掉的 Thread 动态补足 catalog。显式 read/search 在发布边界内可读取 recallable 或 waiting 原文，但不 claim Delivery 或关闭撤回；撤回后 read 只返回 `Message withdrawn`，搜索不命中。任何 message ID 都不能绕过 publication、tombstone 或 quote-source 边界。
+Thread 并使用调用时 sequence boundary；ContextManifest history catalog 不限制它。新 Run 的 `thread.list`
+使用当前名称和最新可见活动，旧 Manifest 沿用其冻结目录；跨 Thread `thread.search` 和 `history.search`
+仍受冻结 global public boundary 限制。显式 read/search 在各自发布边界内可读取 recallable 或 waiting 原文，
+但不 claim Delivery 或关闭撤回；撤回后 read 只返回 `Message withdrawn`，搜索不命中。message ID 不能绕过
+承载消息的 publication 或 tombstone 边界。已保存 quotes 按承载消息投影，不重验来源，见
+[Message Quotes v2](../contracts/message-quotes-v2.md)。
+
+新 Agent `send --file` 按 [Attachment v10](../contracts/camp-attachment-v10.md) 登记真实路径 Source Ref。
+Core 观察指定对象与必要元数据，不复制、移动、冻结或改权限；消息事务写入有序引用，失败不删除源文件。
+读取使用当前源内容，旧受管附件仅按原记录恢复，不成为新发布或普通 Run 的准入条件。
 
 ### 新 Session
 
@@ -563,7 +564,7 @@ Lead 用一次普通多目标 `rovai send` 邀请 2–3 位成员，尽量收齐
 `grill-duo`、`grill-duo-with-docs` 与 `review-duo` 同样按工具箱队员配置提供。自然标题只
 提供公屏阅读线索；Skill 进入后使用可信 `RUN_INPUT` message sender、显式 Agent recipient 和公共消息中的
 真实 reply relation。Agent 不提供或选择 reply ID，Core 使用所属 Run 的冻结锚点发布 Agent 输出。
-两个 Grill 按 [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)使用 Skill-owned 有界开放轮次：
+两个 Grill 按 [Skills 来源与投递不变量](foundational-invariants.md#skills-library-projection)使用 Skill-owned 有界开放轮次：
 每轮包含 1–4 个前提已确认且彼此独立的问题，一条初始 A2A 邀请和一条固定搭档直接回复覆盖全轮；未回答题
 保留稳定编号与建议，改变的问题单独重新复核，当前轮关闭前不混入新题。它们不接入 Gather，也不创建 Core
 持久轮次。普通版排除领域词汇/ADR 维护；文档版把完整执行协议保留在自己的 `SKILL.md`，并随受管目录提供
@@ -571,7 +572,7 @@ domain-modeling、glossary 和 ADR references。面向搭档或用户的当前�
 返回 accepted 后结束；accepted 不代表接收方开始或完成。三个 CLI 动作只在各 Skill 的“消息方式”章节
 定义一次，其它阶段只说明本轮内容与推进条件，不复制命令示例。
 
-Review Duo 按 [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)使用正常 Thread 会话中的
+Review Duo 按 [Skills 来源与投递不变量](foundational-invariants.md#skills-library-projection)使用正常 Thread 会话中的
 四消息拓扑：Lead 向固定搭档发送 Standards 请求，public-only 保存独立 Spec 结果；搭档直接返回一条
 Standards 结果后，Lead public-only 发布有界最终报告。四条消息携带相同的不可变 Git 或 patch 评审范围，
 Lead 只接受可信当前搭档对当前有效请求的直接回复，并且同一 Lead 在一个 Thread 中一次只推进一场未完成评审。
@@ -595,77 +596,50 @@ Context Source State
 ```
 
 Context Source State 是 ThreadMessage、Attachment、ThreadMember、Task 和 Memory 等领域真源。模型 DTO
-只含隐私过滤后对当前行动有用的字段；ContextManifest 冻结 source refs/digests、选择、顺序、包含/省略、
-遗漏和 exact Dynamic Context bytes/digest；Runtime Input Delivery 单独绑定 Manifest、Run epoch、Binding
+只含当前行动所需且获授权的字段；ContextManifest 保存必要来源、选择/遗漏元数据及最终输入 Blob，
+不再复制退役的独立 proof/digest，见 [Input Snapshot Storage](../contracts/input-snapshot-storage-v1.md)。Runtime Input Delivery 单独绑定 Manifest、Run epoch、Binding
 generation 与投递版本。只有 accepted ACK 推进水位，Message Delivery/AgentRun 创建、transport send、
 failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完整对象或复用同名 digest 合并权威。
 
 ### Self Identity 与 Peer Routing Identity
 
-Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
-文案变化由 Bootstrap Evidence 的精确 bytes/digest 证明，不单独创建 Bootstrap v4。v0.94 同时改变
-AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break 全部旧 Binding/Session 技术
-状态，因此 replacement Session 原子获得新 Charter；既有 Evidence 不回写。
-v1.23 不修改 Bootstrap wrapper、Formatter 或数据库，而是在 Native Binding context contract 中加入
-`sessionCharterRevision: 2`；该字段只进入每个 Adapter 的 Binding compatibility digest，使新 Run 轮换旧
-Native Session 并投递完整新 Charter，历史 Bootstrap Evidence 保留原 bytes/digest。
-当前 Charter revision 为 23，User 通知主 flag 为 `--to-user`，结构化用户提及投影为 `@User`。
-这些兼容教学更新保留 Binding compatibility 16；既有 Session 继续使用自身冻结的 Bootstrap，不因新 Charter
-revision 轮换。新 Session 才冻结新模板，既有 Evidence 保持原 bytes/digest。
-`MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
-既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
-Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
+当前 Charter 与 Binding 版本由 [ContextManifest](../contracts/context-manifest-evidence-v44.md) 及
+[Bootstrap v6](../contracts/native-session-bootstrap-v6.md) 拥有。新输入使用 `--to-user` 和 `@User`；
+旧 `agent_v1` 投影与冻结字节保持。普通正文不作全局替换。
 
-Hermes 的运输/证据例外见 [Hermes Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md)：
-完整 Core Bootstrap 在 user 层首次或更新输入中投递，完整 B digest 与最终正文 Managed Blob
-随既有输入账本冻结；接受回执决定去重，身份更新不新建 Session。此例外不改变其他 Runtime。
+`MEMBER_IDENTITY` 是 Native Session 唯一的 self identity，不进入 Dynamic Context。公共 claim 固定本轮
+身份与启动材料，使准备、恢复和实际字节预算一致；后续身份编辑不修改已领取输入或自动轮换 Session。
+稳定 Bootstrap component digest 不含身份，也不建立独立身份历史。
+Hermes 按 [Managed Runtime v1](../contracts/hermes-managed-runtime-v1.md) 在 user 层投递完整 Bootstrap，
+并以完整 B digest、冻结 Managed Blob 和接受回执去重；此运输/证据例外不改变其他 Runtime。
 
-public Context Formatter v28 的 `COLLABORATION_STATE` 投影 只描述 peers。Core 从 stable current
-ThreadMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
-只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
-`defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
-Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
-
-Core 先构建完整 v3 projection，再计算 `collaboration_state_digest`。ContextManifest v28 无论本轮是否
-渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
-Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
-digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
-模型投影的内部变化不会形成重复 Collaboration State 或部分 self update。
+`COLLABORATION_STATE` 仅包含当前同伴的 `agentId/name/teamRole`、`defaultLeadAgentId` 与
+`selfIsDefaultLead`。self 被排除，away 和 leave-requested 关系保留到正式 left。只有需要 Bootstrap 或完整
+投影变化时才输出；匹配的 accepted ACK 才推进已接受 digest。详细职责、身份、可用性与执行资格不在
+名册内，调用资格仍由 Core 实时判断。字段见 [Collaboration State v4](../contracts/collaboration-state-v4.md)。
 
 ### Self Active Task Projection
 
-Profile v8 继续对目标 Agent 当前 Thread 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
-八项。Formatter v28 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
-`SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
-`{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
-将所有 Task entry 淘汰时才省略整个 section。Default Lead 不获得其他成员 Task 的隐式 projection。
-公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
-selection/budget omission。
+公共 Run 启用 Task capability 时，按 `updatedAt DESC, taskId DESC` 选择本人最多八项 active Task，
+每项仅含 `taskId/title/status`。真实空集合输出 `{"tasks":[]}`；完整 RUN_INPUT 优先，可选 Task 因预算
+从尾部移除，必要时省略整个 section，并保留遗漏元数据。Single Chat 不输出此段，Default Lead 不获得
+他人 Task 的隐式投影。完整面板通过 `task list/get` 读取，修改继续接受 live 授权。
 
-ContextManifest v28 冻结 inclusion、有序 `taskId/updatedAt` references、optional omission count
-与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
-全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
-materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只
-复用冻结 bytes。完整共享面板通过 Thread-wide `task list/get` 按需读取，所有 mutation 继续读取 live
-Task 并由 Core 重授权。
+新 Manifest 保留最终输入 Blob，不再复制独立 Task proof 或 digest，见
+[Input Snapshot Storage](../contracts/input-snapshot-storage-v1.md)。
 
-### Shared Conversation 与 Run Facts
+### 公开输入与 Run Facts
 
-public Formatter 28 按 `COLLABORATION_STATE? → SELF_ACTIVE_TASKS? → SHARED_CONVERSATION? → RUN_FACTS →
-WORKSPACE? → RUN_INPUT` 输出。`RUN_INPUT.messages[]` 完整、有序且非空；没有 `CURRENT_INPUT`、
-`A2A_GUIDANCE` 或来源型特殊分支。Single Chat 使用 Formatter 26 与 `CURRENT_INPUT`。
+当前公开输入顺序为 `COLLABORATION_STATE? → SELF_ACTIVE_TASKS? → RUN_FACTS → WORKSPACE? →
+ROVAI_ADDITIONAL_SKILLS → RUN_INPUT`。RUN_INPUT 保留完整有序批次；Single Chat 使用独立 CURRENT_INPUT。
+历史按需调用 `thread.read/search`，不自动生成 SHARED_CONVERSATION；旧 section 只按冻结版本恢复。
+Run Facts 的 historyHint 仅提供参考点，不增加工作责任或要求读取。
 
-同一 Structured `CurrentUserMention(local_user)` 在 Human/FTS 投影为 `@你`，新 Agent 输入与 Thread History
-使用 `agent_v2` 的 `@User`；历史 `agent_v1` 的 `@Principal`、bytes 与 digest 保持。普通正文不作全局替换。
-旧 Shared selector 的 accepted 增量窗口和 count/cursor 只按其冻结 Profile 恢复；新公开 Run 的历史按需读取，
-不生成 `SHARED_CONVERSATION`。当前版本由 [ContextManifest v42](../contracts/context-manifest-evidence-v42.md)
-及其继承链拥有；附件输出位置不构成文件权限。
-
-每条 public Run Input 可按 [Run Input Skill Links v2](../contracts/current-input-skill-links-v2.md)增加
-optional `skills[{name,path}]`。Picker identity、per-message send snapshot、start-time desired state 与
-verified Exposure 由 Core resolver 组合；正文和附件不变，零 entry 省略字段。ContextManifest 28 保存
-完整 included/omitted resolution 与 exact bytes；Runtime Adapter 仍只发送既有完整 payload，不解释 Skill
-或创建 Provider-specific input item。
+显式 Skill 的 source identity、来源解析、消息局部 `skills[{name,path}]` 和动态索引在公共 claim 固定；
+准备阶段可移除失效链接，不在 claim 后添加链接。不可用来源按合同记录 omission，不提升权限。索引与文件职责见
+[Skills 架构](skills.md)。每个初始或 Steer 输入拥有自己的 Manifest；Adapter 发送已冻结最终 payload，
+不重新解释 Skill 或拼接第二份业务输入。当前版本配对见
+[ContextManifest](../contracts/context-manifest-evidence-v44.md)。
 
 ### Context compaction redelivery accounting
 
@@ -713,7 +687,7 @@ user-configured MCP    ── Runtime-native MCP Projection
 两条路径不共享 catalog、授权、receipt、生命周期或代理层。外部 MCP 继续由 Library、Assignment、
 Projection 和 Exposure Snapshot 管理；built-in operations 永不进入 `McpProjectionInput`、
 Runtime MCP config 或 MCP runtime-name mapping。`rovai_team` 没有保留语义，同名外部 Server 只是
-普通第三方 MCP。新建 MCP Library 为空，Rovai-ai 不物化或恢复任何产品内置第三方 Server；定义只
+普通第三方 MCP。新建 MCP Library 为空，Rovai AI 不物化或恢复任何产品内置第三方 Server；定义只
 来自用户手动添加或确认导入。见
 [外部 MCP 不变量](foundational-invariants.md#skills-external-mcp)。
 

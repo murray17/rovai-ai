@@ -4,6 +4,7 @@ import { basename, dirname, join, toNamespacedPath } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createPastedTextAttachment, LocalComposerAttachmentRegistry } from './local-composer-attachments'
+import { openDesktopAttachmentTarget, parseDesktopAttachmentTarget, revealDesktopAttachmentTarget } from './attachment-desktop'
 
 const temporaryRoots: string[] = []
 
@@ -238,30 +239,47 @@ describe('Local Composer attachment authority', () => {
 
   it('restores an exact Main-owned image source and serves bounded preview bytes', async () => {
     const { root, registryPath } = await fixture()
-    const imagePath = join(root, 'screenshot.png')
-    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
-    await writeFile(imagePath, bytes)
-    const first = new LocalComposerAttachmentRegistry(registryPath)
-    const attachment = await first.prepare({
-      threadId: 'camp-a', sourcePath: imagePath, displayName: 'screenshot_14:17:26.png', mediaType: 'image/png'
-    })
-    expect(attachment).toMatchObject({
-      displayName: 'screenshot_14:17:26.png', previewKind: 'image', availability: 'available', sourcePath: imagePath
-    })
+    for (const [fileName, displayName] of [
+      ['screenshot.png', 'screenshot_14:17:26.png'],
+      [`${'a'.repeat(121)}.png`, `${'a'.repeat(121)}.png`]
+    ]) {
+      const imagePath = join(root, fileName)
+      const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47])
+      await writeFile(imagePath, bytes)
+      const first = new LocalComposerAttachmentRegistry(registryPath)
+      const attachment = await first.prepare({
+        threadId: 'camp-a', sourcePath: imagePath, displayName, mediaType: 'image/png'
+      })
+      expect(attachment).toMatchObject({
+        displayName, previewKind: 'image', availability: 'available', sourcePath: imagePath
+      })
+      expect((await first.restore('camp-a', [attachment]))[0]).toMatchObject(attachment)
 
-    const restoredOwner = new LocalComposerAttachmentRegistry(registryPath)
-    const [restored] = await restoredOwner.restore('camp-a', [attachment])
-    expect(restored).toMatchObject({
-      id: attachment.id, displayName: attachment.displayName, previewKind: 'image', sourcePath: imagePath
-    })
-    const preview = await restoredOwner.preview({
-      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
-    })
-    expect(preview?.availability).toBe('available')
-    expect(preview?.preview?.bytes).toEqual(new Uint8Array(bytes))
-    expect((await restoredOwner.resolveTarget({
-      owner: 'composer', threadId: 'camp-a', attachmentRefId: attachment.id
-    }))?.target).toMatchObject({ path: imagePath, canShowPath: true })
+      const restoredOwner = new LocalComposerAttachmentRegistry(registryPath)
+      const [restored] = await restoredOwner.restore('camp-a', [attachment])
+      expect(restored).toMatchObject({
+        id: attachment.id, displayName, previewKind: 'image', availability: 'available', sourcePath: imagePath
+      })
+      const locator = { owner: 'composer' as const, threadId: 'camp-a', attachmentRefId: attachment.id }
+      const preview = await restoredOwner.preview(locator)
+      expect(preview?.availability).toBe('available')
+      expect(preview?.preview?.bytes).toEqual(new Uint8Array(bytes))
+      const resolved = await restoredOwner.resolveTarget(locator)
+      const target = parseDesktopAttachmentTarget(resolved?.target, attachment.id)
+      expect(target).toMatchObject({ path: imagePath, displayName, canShowPath: true })
+      const accessed: string[] = []
+      expect(await openDesktopAttachmentTarget(target!, {
+        confirm: async () => true,
+        openPath: async (path) => { accessed.push(path); return '' }
+      })).toEqual({ opened: true, error: null })
+      expect(await revealDesktopAttachmentTarget(target!, {
+        canReveal: async () => true,
+        revealPath: (path) => { accessed.push(path) }
+      })).toEqual({ revealed: true, error: null })
+      expect(accessed).toEqual([imagePath, imagePath])
+      expect(await readFile(imagePath)).toEqual(bytes)
+      expect(await readdir(root)).toContain(fileName)
+    }
   })
 
   it('keeps a source file above 25 MiB available from selection through restore and open', async () => {

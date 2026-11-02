@@ -50,9 +50,7 @@ use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
     CodexRuntime,
 };
-use core_subsystems::{
-    CoreSubsystems, SubsystemInitialization, SubsystemUnavailable, runtime_subsystem_id,
-};
+use core_subsystems::{CoreSubsystems, SubsystemUnavailable, runtime_subsystem_id};
 use pi::{
     PiAgentRunRuntimeRequest, PiIncoming, PiPromptImage, PiRpcRuntimeAdapter, PiRuntime,
     PreparedPiPromptImage,
@@ -112,7 +110,6 @@ use rovai_core::{
         ThreadAttachmentStore, desktop_target_for_source_attachment,
         legacy_attachment_belongs_to_owner, preview_source_attachment,
     },
-    camp_attachment_publication::unresolved_publication_camp_ids,
     camp_attachment_view::{PreparedThreadAttachmentCleanup, ThreadAttachmentViewStore},
     camp_content::ComposerDocument,
     camp_deletion::{
@@ -191,7 +188,6 @@ use rovai_core::{
         LocalAttachmentFailure, LocalAttachmentOwnerLocator, load_agent_run_source_attachments,
         observe_source_attachment, resolve_source_attachments_for_run,
     },
-    managed_attachment::ManagedAttachmentStore,
     managed_blob::ManagedBlobStore,
     mcp::{
         CommitMcpImportParams, CreateMcpServerParams, DeleteMcpServerParams, McpConfigStore,
@@ -200,9 +196,7 @@ use rovai_core::{
     },
     mcp_import::McpImportScanner,
     mcp_projection::{McpProjectionRequest, McpProjectionService, PreparedMcpProjection},
-    member_studio::{
-        MEMBER_CREATE_TOOL_NAME, MemberCreateInput, MemberOperationError,
-    },
+    member_studio::{MEMBER_CREATE_TOOL_NAME, MemberCreateInput, MemberOperationError},
     member_tool::{
         MEMBER_GET_TOOL_NAME, MEMBER_LIST_TOOL_NAME, MEMBER_UPDATE_TOOL_NAME, MemberGetInput,
         MemberUpdateInput, authorize_member_target, get_member, list_members,
@@ -825,6 +819,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
     matches!(
         method,
         "health.check"
+            | "projectFiles.request"
             | "runtime.status.get"
             | "diagnostics.check"
             | "diagnostics.export"
@@ -2431,6 +2426,7 @@ struct ClaudeInputAcceptanceTarget<'a> {
 }
 
 struct Core {
+    project_files: Arc<crate::project_files::ProjectFiles>,
     execution_wake: crate::execution_wake::ExecutionWake,
     non_batch_retry_at: Mutex<Option<tokio::time::Instant>>,
     database: Arc<Mutex<Database>>,
@@ -2438,9 +2434,8 @@ struct Core {
     pasted_text_operations: Mutex<()>,
     notification_interruption_reader: Mutex<NotificationInterruptionReader>,
     subsystems: CoreSubsystems,
-    subsystem_initialization: Mutex<SubsystemInitialization>,
+    subsystem_initialization: Mutex<()>,
     removed_skill_project_roots: RemovedSkillProjectRoots,
-    startup_pending_camp_ids: Vec<String>,
     builtin_tool_listener: Mutex<Option<LocalIpcListener>>,
     builtin_tool_listener_notify: Notify,
     runtime_usage: Mutex<RuntimeUsageBuffer>,
@@ -2917,6 +2912,25 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    async fn resolve_project_file(
+        &self,
+        params: &ResolveFilePreviewSourceParams,
+    ) -> Result<Option<crate::file_preview_authority::ResolvedFilePreviewSource>> {
+        let binding = {
+            let database = self.database.lock().await;
+            crate::project_files::binding(&database, &params.camp_id).ok()
+        };
+        let Some(binding) = binding else {
+            return Ok(None);
+        };
+        let thread = params.camp_id.clone();
+        let reference = params.raw_reference.clone().unwrap_or_default();
+        tokio::task::spawn_blocking(move || {
+            crate::project_files::resolve_source(binding, thread, &reference).ok()
+        })
+        .await
+        .context("Project file resolution failed")
+    }
     async fn attachment_view_gate(&self, camp_id: &str) -> Arc<RwLock<()>> {
         let mut gates = self.attachment_view_gates.lock().await;
         gates
@@ -2970,7 +2984,7 @@ impl Core {
     }
 
     async fn verified_camp_attachment_admission(
-        &self,
+        self: &Arc<Self>,
         camp_id: &str,
         workspace: &Path,
     ) -> Result<(ThreadAttachmentReadAdmission, ThreadOutputDirectory)> {
@@ -3142,10 +3156,14 @@ impl Core {
     }
 
     async fn cleanup_mcp_projections_best_effort(&self) {
-        let database = self.database.lock().await;
-        if let Err(error) = self.mcp_projection.cleanup_terminal_and_orphaned(&database) {
-            eprintln!("failed to clean MCP Runtime projections: {error:#}");
-        }
+        let database = self.database.clone();
+        let service = McpProjectionService::new(&self.data_dir);
+        let _ = tokio::task::spawn_blocking(move || {
+            let mut budget =
+                rovai_core::maintenance_budget::MaintenanceBudget::new(128, Duration::from_secs(2));
+            service.cleanup_terminal(&database, &mut budget);
+        })
+        .await;
     }
 
     async fn forget_deleted_camp_runtimes(&self, camp_id: &str) {
@@ -5218,6 +5236,7 @@ impl Core {
                     rovai_core::runtime_startup::RuntimeStartupConfiguration {
                         custom_api_snapshot: None,
                         common_environment_unavailable: false,
+                        configuration_error: None,
                         program_path: Some(
                             existing_entrypoint_locator
                                 .as_ref()
@@ -6564,33 +6583,95 @@ impl Core {
                         );
                     }
                 }
-                let mut account_avatar=None;
+                let mut account_avatar = None;
                 #[cfg(windows)]
-                if let Some(filesystem)=&authorized.account_filesystem {
-                    if matches!(operation.as_str(),MEMBER_CREATE_TOOL_NAME|MEMBER_UPDATE_TOOL_NAME) && let Some(path)=input["avatarFile"].as_str() {
+                if let Some(filesystem) = &authorized.account_filesystem {
+                    if matches!(
+                        operation.as_str(),
+                        MEMBER_CREATE_TOOL_NAME | MEMBER_UPDATE_TOOL_NAME
+                    ) && let Some(path) = input["avatarFile"].as_str()
+                    {
                         drop(invocation_guard.take());
-                        let workspace={let database=self.database.lock().await;TeamToolService::default().agent_file_ingress_scope(&database,&authorized.agent_run_id,authorized.execution_epoch)};
-                        let workspace=match workspace {Ok(Some((_,workspace)))=>workspace,_=>return BuiltinToolIpcResponse::ipc_error("builtin_tool.run_not_bound","Avatar source scope is unavailable")};
-                        let path=rovai_core::runtime::resolve_agent_local_path(Path::new(path),workspace.path());
-                        account_avatar=match filesystem.read_avatar(path).await {
-                            Ok(bytes)=>Some(bytes),
-                            Err(_)=>{
-                                if operation==MEMBER_UPDATE_TOOL_NAME {
-                                    if invocation_guard.is_none(){invocation_guard=Some(self.builtin_tool_leases.invocation_guard().await);}
-                                    let current=self.builtin_tool_leases.authenticate(&auth).await;
-                                    if !matches!(current,Ok(ref current)if current.agent_run_id==authorized.agent_run_id&&current.execution_epoch==authorized.execution_epoch){return BuiltinToolIpcResponse::ipc_error("builtin_tool.run_not_bound","Avatar replay lease was fenced");}
-                                    let replay:Result<Option<CommandExecution>>=async {
-                                        let mut database=self.database.lock().await;
-                                        let run=TeamToolService::default().authenticate_attested_binding(&database,&authorized.native_binding.native_binding_id,&authorized.native_binding.binding_credential,&format!("builtin-cli:{request_id}"),&authorized.agent_run_id,authorized.execution_epoch)?;
-                                        let mut replay_input=input.clone();
-                                        crate::member_studio::resolve_member_avatar_input(&database,&run,&operation,&mut replay_input)?;
-                                        crate::member_tool::replay_member_update(&mut database,&run,serde_json::from_value(replay_input)?)
-                                    }.await;
-                                    if let Ok(Some(execution))=replay {
-                                        if let Ok(envelope)=BuiltinToolInvocationEnvelope::success(&operation,&request_id,command_execution_payload(execution).unwrap_or(Value::Null)) {return BuiltinToolIpcResponse::Envelope{envelope};}
+                        let workspace = {
+                            let database = self.database.lock().await;
+                            TeamToolService::default().agent_file_ingress_scope(
+                                &database,
+                                &authorized.agent_run_id,
+                                authorized.execution_epoch,
+                            )
+                        };
+                        let workspace = match workspace {
+                            Ok(Some((_, workspace))) => workspace,
+                            _ => {
+                                return BuiltinToolIpcResponse::ipc_error(
+                                    "builtin_tool.run_not_bound",
+                                    "Avatar source scope is unavailable",
+                                );
+                            }
+                        };
+                        let path = rovai_core::runtime::resolve_agent_local_path(
+                            Path::new(path),
+                            workspace.path(),
+                        );
+                        account_avatar = match filesystem.read_avatar(path).await {
+                            Ok(bytes) => Some(bytes),
+                            Err(_) => {
+                                if operation == MEMBER_UPDATE_TOOL_NAME {
+                                    if invocation_guard.is_none() {
+                                        invocation_guard =
+                                            Some(self.builtin_tool_leases.invocation_guard().await);
+                                    }
+                                    let current =
+                                        self.builtin_tool_leases.authenticate(&auth).await;
+                                    if !matches!(current,Ok(ref current)if current.agent_run_id==authorized.agent_run_id&&current.execution_epoch==authorized.execution_epoch)
+                                    {
+                                        return BuiltinToolIpcResponse::ipc_error(
+                                            "builtin_tool.run_not_bound",
+                                            "Avatar replay lease was fenced",
+                                        );
+                                    }
+                                    let replay: Result<Option<CommandExecution>> = async {
+                                        let mut database = self.database.lock().await;
+                                        let run = TeamToolService::default()
+                                            .authenticate_attested_binding(
+                                                &database,
+                                                &authorized.native_binding.native_binding_id,
+                                                &authorized.native_binding.binding_credential,
+                                                &format!("builtin-cli:{request_id}"),
+                                                &authorized.agent_run_id,
+                                                authorized.execution_epoch,
+                                            )?;
+                                        let mut replay_input = input.clone();
+                                        crate::member_studio::resolve_member_avatar_input(
+                                            &database,
+                                            &run,
+                                            &operation,
+                                            &mut replay_input,
+                                        )?;
+                                        crate::member_tool::replay_member_update(
+                                            &mut database,
+                                            &run,
+                                            serde_json::from_value(replay_input)?,
+                                        )
+                                    }
+                                    .await;
+                                    if let Ok(Some(execution)) = replay {
+                                        if let Ok(envelope) = BuiltinToolInvocationEnvelope::success(
+                                            &operation,
+                                            &request_id,
+                                            command_execution_payload(execution)
+                                                .unwrap_or(Value::Null),
+                                        ) {
+                                            return BuiltinToolIpcResponse::Envelope { envelope };
+                                        }
                                     }
                                 }
-                                return builtin_tool_rejection(&operation,&request_id,"member.invalid_image","Avatar source is not readable by the Runtime account");
+                                return builtin_tool_rejection(
+                                    &operation,
+                                    &request_id,
+                                    "member.invalid_image",
+                                    "Avatar source is not readable by the Runtime account",
+                                );
                             }
                         };
                     }
@@ -6640,7 +6721,7 @@ impl Core {
                     if let Some((_camp_id, workspace)) = scope {
                         let files = send_input.files;
                         #[cfg(windows)]
-                        let account_filesystem=authorized.account_filesystem.clone();
+                        let account_filesystem = authorized.account_filesystem.clone();
                         let observation=async move {
                             #[cfg(windows)]
                             if let Some(filesystem)=account_filesystem {
@@ -6673,7 +6754,9 @@ impl Core {
                     drop(invocation_guard.take());
                 }
                 if !source_files.is_empty() || account_avatar.is_some() {
-                    if invocation_guard.is_none(){invocation_guard=Some(self.builtin_tool_leases.invocation_guard().await);}
+                    if invocation_guard.is_none() {
+                        invocation_guard = Some(self.builtin_tool_leases.invocation_guard().await);
+                    }
                     let reauthorized = self.builtin_tool_leases.authenticate(&auth).await;
                     if !matches!(reauthorized, Ok(ref current)
                         if current.agent_run_id == authorized.agent_run_id
@@ -7011,7 +7094,7 @@ impl Core {
         attested_run: Option<(String, i64)>,
         evidence_request_id: Option<String>,
         source_files: Vec<rovai_core::local_attachment_source::LocalAttachmentSourceRef>,
-        account_avatar:Option<Vec<u8>>,
+        account_avatar: Option<Vec<u8>>,
         send_input_file_path: Option<String>,
         run_tmp: &Path,
     ) -> TeamToolIpcResponse {
@@ -8037,7 +8120,12 @@ impl Core {
         if request.method.starts_with("skills.") {
             self.subsystems.require("skills")?;
         }
-        if request.method.starts_with("mcp.") && request.method != "mcp.config.repairPermissions" {
+        if request.method.starts_with("mcp.")
+            && !matches!(
+                request.method.as_str(),
+                "mcp.config.get" | "mcp.config.repairPermissions"
+            )
+        {
             self.subsystems.require("mcp")?;
         }
         let _ = &request.params;
@@ -12311,9 +12399,91 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "projectFiles.request" => {
+                let params: crate::project_files::Request =
+                    serde_json::from_value(request.params.clone())?;
+                let binding = if matches!(params.action.as_str(), "release" | "cancelSearch") {
+                    None
+                } else {
+                    let database = self.database.lock().await;
+                    crate::project_files::binding(&database, &params.thread_id).ok()
+                };
+                Ok(self
+                    .project_files
+                    .request(request.client.id().to_owned(), binding, params)
+                    .await)
+            }
+            "filePreview.readEditable" | "filePreview.saveText" => {
+                let params: crate::file_edit::EditRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let resolved = if params.source["kind"] == "attachment" {
+                    let locator: LocalAttachmentOwnerLocator =
+                        serde_json::from_value(params.source["locator"].clone())?;
+                    let source = {
+                        let database = self.database.lock().await;
+                        rovai_core::local_attachment_source::load_source_attachment_for_client(
+                            &database,
+                            &locator,
+                            &request.client,
+                        )?
+                    };
+                    // Original-file links are editable; managed historical copies are not.
+                    let Some(source) = source else {
+                        return Ok(crate::file_edit::failure("edit_unavailable"));
+                    };
+                    let parent = std::path::Path::new(&source.source_path)
+                        .parent()
+                        .context("Source file has no parent")?
+                        .to_string_lossy()
+                        .into_owned();
+                    Some(
+                        crate::file_preview_authority::ResolvedFilePreviewSource::FileTarget {
+                            camp_id: locator.camp_id().to_owned(),
+                            source_kind: "attachment".into(),
+                            source_identity: source.id,
+                            root_path: parent.clone(),
+                            base_path: parent,
+                            raw_reference: source.source_path,
+                            allow_children: true,
+                        },
+                    )
+                } else if params.source["kind"] == "project_file" {
+                    self.resolve_project_file(&serde_json::from_value(params.source.clone())?)
+                        .await?
+                } else {
+                    let source: ResolveFilePreviewSourceParams =
+                        serde_json::from_value(params.source.clone())?;
+                    if source.kind == "run_evidence"
+                        && source.action.as_deref() != Some("open_current")
+                    {
+                        return Ok(crate::file_edit::failure("edit_unavailable"));
+                    }
+                    let database = self.database.lock().await;
+                    if source.kind == "skill_reference" {
+                        resolve_skill_preview_source(&database, &self.data_dir, &source)?
+                    } else {
+                        resolve_file_preview_source(
+                            &database,
+                            &ManagedBlobStore::new(&self.data_dir),
+                            source,
+                        )?
+                    }
+                };
+                let saving = request.method == "filePreview.saveText";
+                tokio::task::spawn_blocking(move || {
+                    crate::file_edit::execute(params, resolved, saving)
+                })
+                .await
+                .context("File edit task failed")
+            }
             "filePreview.resolveSource" => {
                 let params: ResolveFilePreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;
+                if params.kind == "project_file" {
+                    return Ok(serde_json::to_value(
+                        self.resolve_project_file(&params).await?,
+                    )?);
+                }
                 let database = self.database.lock().await;
                 let resolved = if params.kind == "skill_reference" {
                     resolve_skill_preview_source(&database, &self.data_dir, &params)?
@@ -13676,6 +13846,7 @@ impl Core {
                         &camp_id,
                         rovai_core::runtime::AgentRunWorkspace::runtime_managed_path(project_path),
                         None,
+                        None,
                     )
                     .await;
                 let value = match prepared {
@@ -14012,7 +14183,7 @@ impl Core {
             return;
         }
         let workspace = candidate.execution_workspace();
-        let _project_path = match self.validate_dispatch_workspace(&candidate).await {
+        let validated_project_path = match self.validate_dispatch_workspace(&candidate).await {
             Ok(path) => path,
             Err(error) => {
                 self.reject_agent_run_dispatch(
@@ -14058,7 +14229,10 @@ impl Core {
                 return;
             }
         }
-        let workspace = match self.prepare_mission_workspace(&candidate).await {
+        let workspace = match self
+            .prepare_mission_workspace(&candidate, &validated_project_path)
+            .await
+        {
             Ok(Some(workspace)) => workspace,
             Ok(None) => return,
             Err(error) => {
@@ -15380,22 +15554,34 @@ impl Core {
         let source_attachment_paths = self
             .resolve_agent_run_source_attachment_paths(execution)
             .await?;
-        let materialization = {
-            let mut database = self.database.lock().await;
-            ContextService.materialize_with_exposures_and_source_attachments(
-                &mut database,
-                &ManagedBlobStore::new(&self.data_dir),
-                skill_exposure,
-                mcp_projection,
-                &source_attachment_paths,
-                &MaterializeContextRequest {
-                    agent_run_id: &execution.agent_run_id,
-                    execution_epoch: execution.execution_epoch,
-                    charter_delivery_mode: request.charter_delivery_mode,
-                    max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
-                },
-            )
-        }?;
+        let mut reads = rovai_core::context::LegacyAttachmentReads::new();
+        let materialization = loop {
+            let result = {
+                let mut database = self.database.lock().await;
+                ContextService.materialize_with_attachment_reads(
+                    &mut database,
+                    &ManagedBlobStore::new(&self.data_dir),
+                    Some(skill_exposure),
+                    Some(mcp_projection),
+                    &source_attachment_paths,
+                    &MaterializeContextRequest {
+                        agent_run_id: &execution.agent_run_id,
+                        execution_epoch: execution.execution_epoch,
+                        charter_delivery_mode: request.charter_delivery_mode,
+                        max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
+                    },
+                    None,
+                    &reads,
+                )
+            };
+            match result {
+                Ok(materialization) => break materialization,
+                Err(error) => {
+                    self.resolve_pending_legacy_attachment_reads(error, &mut reads)
+                        .await?
+                }
+            }
+        };
         match materialization {
             ContextMaterialization::Ready(prepared) => Ok(Some(prepared)),
             ContextMaterialization::Waiting(wait) => {
@@ -15428,56 +15614,59 @@ impl Core {
         let source_attachment_paths = self
             .resolve_agent_run_source_attachment_paths(execution)
             .await?;
-        let preparation = {
-            // The Core database mutex is the logical Runtime Input preparation
-            // boundary. A Compaction Observer cannot commit between selecting
-            // the pending revision and persisting RuntimeInputDelivery.prepared.
-            let mut database = self.database.lock().await;
-            let materialize_request = MaterializeContextRequest {
-                agent_run_id: &execution.agent_run_id,
-                execution_epoch: execution.execution_epoch,
-                charter_delivery_mode: request.charter_delivery_mode,
-                max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
-            };
-            let materialization = match mcp_projection {
-                Some(mcp_projection) => ContextService
-                    .materialize_with_exposures_and_source_attachments(
-                        &mut database,
-                        &ManagedBlobStore::new(&self.data_dir),
-                        skill_exposure,
-                        mcp_projection,
-                        &source_attachment_paths,
-                        &materialize_request,
-                    )?,
-                None => ContextService.materialize_with_skill_exposure_and_source_attachments(
+        let mut reads = rovai_core::context::LegacyAttachmentReads::new();
+        let preparation = loop {
+            let attempt: Result<_> = async {
+                // The Core database mutex is the logical Runtime Input preparation
+                // boundary. A Compaction Observer cannot commit between selecting
+                // the pending revision and persisting RuntimeInputDelivery.prepared.
+                let mut database = self.database.lock().await;
+                let materialize_request = MaterializeContextRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    charter_delivery_mode: request.charter_delivery_mode,
+                    max_payload_bytes: runtime_max_context_payload_bytes(&execution.runtime),
+                };
+                let materialization = ContextService.materialize_with_attachment_reads(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
-                    skill_exposure,
+                    Some(skill_exposure),
+                    mcp_projection,
                     &source_attachment_paths,
                     &materialize_request,
-                )?,
-            };
-            match materialization {
-                ContextMaterialization::Ready(context) => {
-                    let delivery = match request.proposed_delivery_id {
-                        Some(identity) => ContextService
-                            .prepare_input_delivery_for_context_with_identity(
+                    None,
+                    &reads,
+                )?;
+                Ok(match materialization {
+                    ContextMaterialization::Ready(context) => {
+                        let delivery = match request.proposed_delivery_id {
+                            Some(identity) => ContextService
+                                .prepare_input_delivery_for_context_with_identity(
+                                    &mut database,
+                                    &execution.agent_run_id,
+                                    execution.execution_epoch,
+                                    &context,
+                                    identity,
+                                )?,
+                            None => ContextService.prepare_input_delivery_for_context(
                                 &mut database,
                                 &execution.agent_run_id,
                                 execution.execution_epoch,
                                 &context,
-                                identity,
                             )?,
-                        None => ContextService.prepare_input_delivery_for_context(
-                            &mut database,
-                            &execution.agent_run_id,
-                            execution.execution_epoch,
-                            &context,
-                        )?,
-                    };
-                    Some(Ok((context, delivery)))
+                        };
+                        Some(Ok((context, delivery)))
+                    }
+                    ContextMaterialization::Waiting(wait) => Some(Err(wait)),
+                })
+            }
+            .await;
+            match attempt {
+                Ok(preparation) => break preparation,
+                Err(error) => {
+                    self.resolve_pending_legacy_attachment_reads(error, &mut reads)
+                        .await?
                 }
-                ContextMaterialization::Waiting(wait) => Some(Err(wait)),
             }
         };
         match preparation {
@@ -15498,6 +15687,38 @@ impl Core {
             }
             None => Ok(None),
         }
+    }
+
+    async fn resolve_pending_legacy_attachment_reads(
+        &self,
+        error: anyhow::Error,
+        reads: &mut rovai_core::context::LegacyAttachmentReads,
+    ) -> Result<()> {
+        let pending = error.downcast::<rovai_core::context::PendingLegacyAttachmentReads>()?;
+        let store = ThreadAttachmentStore::new(&self.data_dir);
+        let resolved = tokio::task::spawn_blocking(move || {
+            pending
+                .0
+                .into_iter()
+                .map(|candidate| {
+                    let id = candidate.attachment_id().to_owned();
+                    let path = match store.verify_runtime_read_candidate(&candidate) {
+                        Ok(path) => Some(path),
+                        Err(error) => {
+                            eprintln!(
+                                "legacy_attachment_read_unavailable attachment_id={id}: {error:#}"
+                            );
+                            None
+                        }
+                    };
+                    (id, (candidate, path))
+                })
+                .collect::<rovai_core::context::LegacyAttachmentReads>()
+        })
+        .await
+        .context("legacy Attachment read task failed")?;
+        reads.extend(resolved);
+        Ok(())
     }
 
     async fn resolve_agent_run_source_attachment_paths(
@@ -15560,13 +15781,12 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
     ) -> Result<PreparedMcpProjection> {
-        self.subsystems.require("mcp")?;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         let mut projection = {
             let database = self.database.lock().await;
             self.mcp_projection.prepare(
                 &database,
-                self.mcp_config()?,
+                self.mcp_config(),
                 &McpProjectionRequest {
                     agent_run_id: &execution.agent_run_id,
                     execution_epoch: execution.execution_epoch,
@@ -16671,7 +16891,7 @@ impl Core {
     }
 
     async fn verified_camp_runtime_authorization(
-        &self,
+        self: &Arc<Self>,
         camp_id: &str,
         _workspace: &Path,
     ) -> Result<ThreadOutputDirectory> {
@@ -17197,7 +17417,7 @@ impl Core {
                 camp_id: &execution.camp_id,
                 agent_id: &execution.agent_id,
                 cwd: &execution_root,
-                workspace_isolation:&execution.workspace.isolation,
+                workspace_isolation: &execution.workspace.isolation,
                 frozen_runtime: &execution.runtime,
                 runtime_compatibility_digest: &runtime_compatibility_digest,
                 native_session_id: binding_credential.native_session_id.as_deref(),
@@ -17395,7 +17615,8 @@ impl Core {
                 )
             })
             .collect::<Vec<_>>();
-        let prepared_images: Vec<PreparedPiPromptImage> = runtime.prepare_input_images(image_sources).await?;
+        let prepared_images: Vec<PreparedPiPromptImage> =
+            runtime.prepare_input_images(image_sources).await?;
         let image_evidence = prepared_images
             .iter()
             .enumerate()
@@ -20305,13 +20526,21 @@ async fn run_core(
             .clone()
             .with_startup_configurations(rovai_core::runtime_startup::load_all(&database)?),
     );
+    // Unit tests hand `embedded` a synthetic search snapshot. Publishing it to the
+    // process-wide command path would redirect every later Git/Runtime fixture in
+    // this test binary (an empty snapshot even clears PATH for child processes).
+    #[cfg(not(test))]
     runtime_search_environment.activate_for_runtime_commands();
+    let search_summary = runtime_search_environment.summary();
+    database.record_runtime_search_environment_generation(
+        search_summary.generation,
+        &search_summary.created_at,
+    )?;
     // These recoveries fence durable execution/input state. Unlike optional
     // filesystem maintenance, their failure cannot expose normal execution.
     let compaction_detector_policies =
         DesiredCompactionDetectorPolicies::from_process_environment();
     let recovery = (|| -> Result<_> {
-        ManagedBlobStore::new(&data_dir).recover_gc_state(&mut database)?;
         recover_legacy_pending_cancellations(&mut database)?;
         rovai_core::single_chat::recover_pending_edit_sessions(&database)?;
         AutomationService::default().recover_interrupted(&mut database)?;
@@ -20358,15 +20587,6 @@ async fn run_core(
         )?;
         return Ok(());
     }
-    // Freeze candidate IDs before exposing RPC, then recheck eligibility at
-    // deletion time. A failed optional snapshot skips cleanup for this boot;
-    // neither fail authority readiness nor rescan newly created Camps on retry.
-    let startup_pending_camp_ids = CollaborationService::default()
-        .snapshot_pending_camps_for_startup_cleanup(&database)
-        .unwrap_or_else(|error| {
-            eprintln!("Startup pending Thread cleanup skipped: {error:#}");
-            Vec::new()
-        });
     let skill_library = SkillLibraryService::deferred(skill_library_root);
     let mcp_config = mcp_config_path
         .map_or_else(McpConfigStore::default_path, Ok)
@@ -20396,6 +20616,7 @@ async fn run_core(
     )?);
     let planned_shutdown = PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string());
     let core = Arc::new(Core {
+        project_files: Arc::new(crate::project_files::ProjectFiles::default()),
         execution_wake: database.execution_wake.clone(),
         delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
         agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
@@ -20406,9 +20627,8 @@ async fn run_core(
         database: Arc::new(Mutex::new(database)),
         pasted_text_operations: Mutex::new(()),
         subsystems: CoreSubsystems::new(),
-        subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
+        subsystem_initialization: Mutex::new(()),
         removed_skill_project_roots,
-        startup_pending_camp_ids,
         builtin_tool_listener: Mutex::new(None),
         builtin_tool_listener_notify: Notify::new(),
         runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
@@ -20730,11 +20950,71 @@ async fn run_core(
             report.cleaned, report.skipped, report.budget_exhausted, report.diagnostics
         );
     });
+    let optional_core = core.clone();
+    tokio::spawn(async move {
+        optional_core.initialize_optional_subsystems().await;
+    });
+    let maintenance_core = core.clone();
+    let maintenance_cutoff = chrono::Utc::now().to_rfc3339();
+    tokio::spawn(async move {
+        let mut budget =
+            rovai_core::maintenance_budget::MaintenanceBudget::new(256, Duration::from_secs(3));
+        let candidates = {
+            let database =
+                tokio::time::timeout(Duration::from_millis(50), maintenance_core.database.lock())
+                    .await;
+            match database {
+                Ok(database) => CollaborationService::default()
+                    .snapshot_pending_camps_for_startup_cleanup(&database, &maintenance_cutoff),
+                Err(_) => Ok(Vec::new()),
+            }
+        };
+        match candidates {
+            Ok(candidates) => {
+                for camp in candidates {
+                    if !budget.take() {
+                        break;
+                    }
+                    let result = {
+                        let Ok(mut database) = tokio::time::timeout(
+                            Duration::from_millis(50),
+                            maintenance_core.database.lock(),
+                        )
+                        .await
+                        else {
+                            break;
+                        };
+                        CollaborationService::default()
+                            .discard_empty_pending_camps_on_startup(&mut database, &[camp])
+                    };
+                    match result {
+                        Ok(camps) => {
+                            for camp in camps {
+                                emit_navigation_invalidated(
+                                    &maintenance_core.output,
+                                    "camps.discardPending",
+                                    Some(&camp),
+                                );
+                                // Unreferenced output trees may contain newly written or
+                                // original files. Retain them instead of a historical sweep.
+                            }
+                        }
+                        Err(error) => budget.report("pending Thread retirement", error),
+                    }
+                }
+            }
+            Err(error) => budget.report("pending Thread candidates", error),
+        }
+        let cleanup_core = maintenance_core.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            ManagedBlobStore::new(&cleanup_core.data_dir)
+                .recover_gc_state(&cleanup_core.database, &mut budget);
+        })
+        .await;
+        maintenance_core.finish_subsystem("maintenance", Ok(()));
+    });
     let runtime_discovery_core = core.clone();
     let mut runtime_discovery_handle = tokio::spawn(async move {
-        runtime_discovery_core
-            .initialize_optional_subsystems()
-            .await;
         runtime_discovery_core.run_runtime_discovery().await;
         runtime_discovery_core
             .recover_pending_execution_intents()
@@ -22022,6 +22302,8 @@ async fn process_agent_run_pi_message(
                         "evidenceId": evidence_id,
                         "revision": evidence.as_ref().and_then(|value| value.revision),
                         "changeSequence": evidence.as_ref().and_then(|value| value.change_sequence),
+                        "sequence": evidence.as_ref().map(|value| value.sequence),
+                        "occurredAt": evidence.as_ref().map(|value| &value.occurred_at),
                         "outputTruncated": evidence.as_ref().and_then(|value| value.output_truncated),
                         "payload": public_payload,
                         "canonical": evidence.as_ref().and_then(|value| value.canonical.as_ref()),
@@ -22738,6 +23020,7 @@ async fn process_acp_events(
                             "executionEpoch":execution_epoch,"adapterKind":AdapterKind::ZcodeApp,
                             "nativeMethod":"_zcode/background","evidenceId":evidence.id,
                             "revision":evidence.revision,"changeSequence":evidence.change_sequence,
+                            "sequence":evidence.sequence,"occurredAt":evidence.occurred_at,
                             "outputTruncated":evidence.output_truncated,
                             "payload":evidence.payload,"canonical":evidence.canonical}),
                         );
@@ -23186,6 +23469,8 @@ async fn process_agent_run_acp_delta_batch(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -23461,8 +23746,19 @@ async fn process_agent_run_acp_message(
         )
         .await;
     }
+    let display_params = if method == "session/update" {
+        let Some(params) = runtime
+            .execution_display_params(native_prompt_id, &params)
+            .await
+        else {
+            return;
+        };
+        params
+    } else {
+        params.clone()
+    };
     let completed_action = match runtime
-        .observe_message(native_prompt_id, &method, &params)
+        .observe_message(native_prompt_id, &method, &display_params)
         .await
     {
         Ok(completion) => completion,
@@ -23474,7 +23770,7 @@ async fn process_agent_run_acp_message(
     let (event_type, payload) = normalize_acp_event_with_completion(
         adapter_kind,
         &method,
-        &params,
+        &display_params,
         completed_action.as_ref(),
     );
     if event_type == "runtime.usage" {
@@ -23525,6 +23821,8 @@ async fn process_agent_run_acp_message(
             "evidenceId": evidence_id,
             "revision": evidence.as_ref().and_then(|evidence| evidence.revision),
             "changeSequence": evidence.as_ref().and_then(|evidence| evidence.change_sequence),
+            "sequence": evidence.as_ref().map(|evidence| evidence.sequence),
+            "occurredAt": evidence.as_ref().map(|evidence| &evidence.occurred_at),
             "outputTruncated": evidence.as_ref().and_then(|evidence| evidence.output_truncated),
             "payload": public_payload,
             "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
@@ -23643,6 +23941,16 @@ fn normalize_acp_event_with_completion(
             ("agent.thought.delta", payload)
         }
         Some("tool_call") | Some("tool_call_update") => {
+            if crate::runtime_subagent::acp_lifecycle_notice(adapter_kind, &update) {
+                return ("runtime.event", json!({"lifecycle":true}));
+            }
+            let tool_name = crate::runtime_subagent::acp_tool_name(adapter_kind, &update);
+            let agent_tool = tool_name
+                .as_deref()
+                .is_some_and(|name| crate::runtime_subagent::is_agent_tool(adapter_kind, name));
+            let task_parameters = tool_name.as_deref().is_some_and(|name| {
+                rovai_core::runtime_subagent::exposes_task_parameters(adapter_kind, name)
+            });
             let public_command =
                 acp::public_acp_shell_command(adapter_kind, update.get("rawInput"))
                     .or_else(|| completion.and_then(|value| value.public_command.clone()));
@@ -23680,8 +23988,11 @@ fn normalize_acp_event_with_completion(
             let mut payload = json!({
                 "runtimeRootOutput": crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update),
                 "sessionUpdate": update.get("sessionUpdate"),
+                "operationId": update.get("operationId"),
+                "runtimeSource": update.get("runtimeSource"),
                 "toolCallId": update.get("toolCallId"),
-                "toolName": update.get("toolName"),
+                "toolName": tool_name,
+                "runtimeToolType": if agent_tool { Some("agent") } else { None },
                 "status": public_status,
                 "kind": public_kind,
                 "title": update.get("title"),
@@ -23693,8 +24004,12 @@ fn normalize_acp_event_with_completion(
                     (adapter_kind == AdapterKind::MinimaxCodeCli)
                         .then(|| public_acp_content_text(update.pointer("/rawOutput/content")))
                         .flatten()
-                }),
-                "input": public_command,
+                }).or_else(|| task_parameters.then(|| update.get("rawOutput")
+                    .filter(|value| !value.is_null()).and_then(|value| serde_json::to_string_pretty(value).ok())).flatten()),
+                "input": if task_parameters {
+                    update.get("rawInput").filter(|value| !value.is_null())
+                        .and_then(|value| serde_json::to_string_pretty(value).ok())
+                } else { public_command },
                 "rawInputDigest": update
                     .get("rawInput")
                     .and_then(|value| canonical_json_digest(value).ok())
@@ -23783,7 +24098,13 @@ fn normalize_acp_event_with_completion(
             }
             ("runtime.action", payload)
         }
-        Some("plan") => ("runtime.plan", update),
+        Some("plan") => {
+            let root =
+                crate::runtime::is_root_output(params) && crate::runtime::is_root_output(&update);
+            let mut update = update;
+            update["runtimeRootOutput"] = json!(root);
+            ("runtime.plan", update)
+        }
         Some("usage_update") => ("runtime.usage", update),
         _ => ("runtime.event", update),
     }
@@ -24130,6 +24451,8 @@ async fn process_runtime_event(
             "evidenceId": evidence.id,
             "revision": evidence.revision,
             "changeSequence": evidence.change_sequence,
+            "sequence": evidence.sequence,
+            "occurredAt": evidence.occurred_at,
             "outputTruncated": evidence.output_truncated,
             "payload": evidence.payload,
             "canonical": evidence.canonical,
@@ -24315,6 +24638,8 @@ async fn persist_runtime_compaction_display(
             "evidenceId": evidence.id,
             "revision": evidence.revision,
             "changeSequence": evidence.change_sequence,
+            "sequence": evidence.sequence,
+            "occurredAt": evidence.occurred_at,
             "outputTruncated": evidence.output_truncated,
             "payload": evidence.payload,
             "canonical": evidence.canonical,
@@ -25658,6 +25983,8 @@ async fn process_agent_run_codex_delta_batch(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -25714,6 +26041,8 @@ async fn persist_interrupted_codex_activities(
                 "evidenceId": evidence.id,
                 "revision": evidence.revision,
                 "changeSequence": evidence.change_sequence,
+                "sequence": evidence.sequence,
+                "occurredAt": evidence.occurred_at,
                 "outputTruncated": evidence.output_truncated,
                 "payload": evidence.payload,
                 "canonical": evidence.canonical,
@@ -25898,6 +26227,8 @@ async fn process_agent_run_codex_message(
             "evidenceId": evidence_id,
             "revision": evidence.as_ref().and_then(|evidence| evidence.revision),
             "changeSequence": evidence.as_ref().and_then(|evidence| evidence.change_sequence),
+            "sequence": evidence.as_ref().map(|evidence| evidence.sequence),
+            "occurredAt": evidence.as_ref().map(|evidence| &evidence.occurred_at),
             "outputTruncated": evidence.as_ref().and_then(|evidence| evidence.output_truncated),
             "payload": public_payload,
             "canonical": evidence.as_ref().and_then(|evidence| evidence.canonical.as_ref()),
@@ -28679,6 +29010,7 @@ mod tests {
             );
         }
         assert!(!data_dir.join("camp-attachments").exists());
+        drop(inspection);
         drop(locked);
 
         ThreadAttachmentStore::new(&data_dir)
@@ -28887,6 +29219,7 @@ mod tests {
         )?);
 
         Ok(Core {
+            project_files: Arc::new(crate::project_files::ProjectFiles::default()),
             execution_wake: database.execution_wake.clone(),
             delivery_batch_scheduler_notify: database.execution_wake.delivery.clone(),
             agent_run_cancellation_notify: database.execution_wake.cancellation.clone(),
@@ -28898,9 +29231,8 @@ mod tests {
             pasted_text_operations: Mutex::new(()),
             automation_scheduler_control: RwLock::new(None),
             subsystems: CoreSubsystems::ready_for_test(),
-            subsystem_initialization: Mutex::new(SubsystemInitialization::default()),
+            subsystem_initialization: Mutex::new(()),
             removed_skill_project_roots: RemovedSkillProjectRoots::default(),
-            startup_pending_camp_ids: Vec::new(),
             builtin_tool_listener: Mutex::new(None),
             builtin_tool_listener_notify: Notify::new(),
             runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
@@ -30577,6 +30909,7 @@ done
                 rovai_core::runtime_startup::RuntimeStartupConfiguration {
                     custom_api_snapshot: None,
                     common_environment_unavailable: false,
+                    configuration_error: None,
                     program_path: Some(executable.to_string_lossy().into_owned()),
                     environment: vec![rovai_core::runtime_startup::RuntimeEnvironmentVariable {
                         name: "ROVAI_CATALOG_FIXTURE".into(),
@@ -30894,6 +31227,7 @@ done
                         rovai_core::runtime_startup::RuntimeStartupConfiguration {
                             custom_api_snapshot: None,
                         common_environment_unavailable: false,
+                    configuration_error: None,
                             program_path: Some(executable.to_string_lossy().into_owned()),
                             environment: Vec::new(),
                         },
@@ -31498,7 +31832,7 @@ done
         let root = root.canonicalize().unwrap();
         let workspace = root.join("data/quick-chat");
         fs::create_dir_all(&workspace).unwrap();
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
 
         let (camp_id, execution) = {
             let mut database = core.database.lock().await;
@@ -31579,7 +31913,7 @@ done
         let root = root.canonicalize().unwrap();
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
 
         let camp_id = {
             let mut database = core.database.lock().await;
@@ -31765,7 +32099,7 @@ done
         let root = root.canonicalize().unwrap();
         let workspace = root.join("workspace");
         fs::create_dir_all(&workspace).unwrap();
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let core = Arc::new(runtime_resolution_test_core(&root).unwrap());
         let source = root.join("published.txt");
         fs::write(&source, b"published source reference").unwrap();
 
@@ -31855,28 +32189,112 @@ done
             );
         }
 
-        let view_attachment_root = core
-            .attachment_views
-            .root()
-            .join("camps")
-            .join(&camp_id)
-            .join("attachments");
+        // Dispatch does not inspect historical attachments. Selected input reads
+        // use the original file verifier outside the shared database mutex.
+        fs::write(&source, b"historical attachment").unwrap();
+        let attachment_id = {
+            let mut database = core.database.lock().await;
+            let store = ThreadAttachmentStore::new(&core.data_dir);
+            core.attachment_views
+                .ensure_empty_camp_ready(&mut database, &camp_id)
+                .unwrap();
+            let draft = store
+                .save_body(&mut database, &camp_id, "Legacy message")
+                .unwrap();
+            let draft = store
+                .prepare_from_path(
+                    &mut database,
+                    &camp_id,
+                    draft.revision,
+                    &source,
+                    "published.txt",
+                )
+                .unwrap();
+            let command_id = uuid::Uuid::new_v4().to_string();
+            let publication = core
+                .attachment_views
+                .stage_publication(&mut database, &store, &camp_id, &command_id, draft.revision)
+                .unwrap()
+                .unwrap();
+            core.attachment_views
+                .gate_publication(&mut database, &publication)
+                .unwrap();
+            core.attachment_views
+                .promote_publication(&mut database, &publication)
+                .unwrap();
+            let execution = CollaborationService::default()
+                .send_user_camp_draft_with_publication(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id,
+                        actor: ActorRef::User {
+                            user_id: "test-user".into(),
+                        },
+                        camp_id: Some(camp_id.clone()),
+                        expected_versions: vec![],
+                        execution_epoch: None,
+                        payload: rovai_core::collaboration::SendUserThreadDraftCommand {
+                            draft_client: Default::default(),
+                            camp_id: camp_id.clone(),
+                            draft_revision: draft.revision,
+                            execution: None,
+                        },
+                    },
+                    Some(&publication.operation_id),
+                )
+                .unwrap();
+            assert_eq!(execution.result.status, CommandResultStatus::Applied);
+            core.attachment_views
+                .complete_publication(&mut database, &publication.operation_id)
+                .unwrap();
+            core.attachment_views
+                .mark_legacy_view_broken_for_test(&mut database, &camp_id)
+                .unwrap();
+            publication.attachment_ids[0].clone()
+        };
+        core.verified_camp_attachment_admission(&camp_id, &workspace)
+            .await
+            .unwrap();
+        let database = core.database.lock().await;
+        assert!(
+            rovai_core::camp_attachment_view::resolve_published_attachment_path(
+                database.connection(),
+                &camp_id,
+                &attachment_id
+            )
+            .is_err()
+        );
+        let candidate = ThreadAttachmentStore::new(&core.data_dir)
+            .desktop_open_candidate(&database, &camp_id, &attachment_id)
+            .unwrap()
+            .unwrap();
+        let mut reads = rovai_core::context::LegacyAttachmentReads::new();
+        // Holding the DB mutex here deterministically catches a regression that
+        // reacquires it for file verification (a timeout reports that deadlock).
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            core.resolve_pending_legacy_attachment_reads(
+                rovai_core::context::PendingLegacyAttachmentReads(vec![candidate]).into(),
+                &mut reads,
+            ),
+        )
+        .await
+        .expect("file reads must not acquire the global database mutex")
+        .unwrap();
+        let path = reads[&attachment_id].1.as_ref().unwrap();
+        assert_eq!(fs::read(path).unwrap(), b"historical attachment");
+        drop(database);
+
+        let camps_root = core.attachment_views.root().join("camps");
         drop(admission);
+        core.attachment_views
+            .remove_camp_view(&mut *core.database.lock().await, &camp_id)
+            .unwrap();
         ThreadAttachmentStore::new(&core.data_dir)
             .remove_camp(&camp_id)
             .unwrap();
         drop(core);
-        fs::set_permissions(&view_attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
-        fs::set_permissions(
-            view_attachment_root.parent().unwrap(),
-            fs::Permissions::from_mode(0o700),
-        )
-        .unwrap();
-        fs::set_permissions(
-            view_attachment_root.parent().unwrap().parent().unwrap(),
-            fs::Permissions::from_mode(0o700),
-        )
-        .unwrap();
+        fs::set_permissions(&camps_root, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -34147,37 +34565,7 @@ done
                 },
             )
             .unwrap();
-        let agent_run_id = sent.result.payload["agentRunIds"][0]
-            .as_str()
-            .unwrap()
-            .to_string();
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
-                [&agent_run_id],
-            )
-            .unwrap();
-        // Tool output is bounded before persistence. A plan explanation uses
-        // the ordinary managed-Blob path that this concurrency test reads.
-        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
-        let evidence = ExecutionEvidenceService
-            .record_runtime_event(
-                &mut database,
-                &ManagedBlobStore::new(&data_dir),
-                &agent_run_id,
-                1,
-                "runtime.plan",
-                &json!({
-                    "explanation": secret,
-                    "plan": [],
-                }),
-            )
-            .unwrap()
-            .unwrap();
-        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
-        let evidence_id = evidence.id.clone();
-
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
         let mission_git = crate::mission_workspace::MissionGit::new(git_path.clone()).unwrap();
         let repository = mission_git.inspect(&source).await.unwrap().unwrap();
         let worktree = root.join("mission-worktree");
@@ -34209,7 +34597,7 @@ done
         mission_git.materialize(&workspace).await.unwrap();
         workspace.state = "ready".into();
         fs::write(worktree.join("tracked.txt"), "changed\n").unwrap();
-        let database = Database::open_with_runtime_camp_files_root(
+        let mut database = Database::open_with_runtime_camp_files_root(
             &data_dir,
             attachment_views.root(),
             attachment_views.root_identity_digest(),
@@ -34222,6 +34610,57 @@ done
                 [&workspace.id],
             )
             .unwrap();
+        // Current sends enqueue Deliveries. Claim only after the real Mission
+        // workspace is ready instead of expecting the retired immediate Run IDs.
+        let prepared = crate::delivery_queue::capture_prepared_batch_workspace(
+            &database,
+            &camp_id,
+            AgentRunWorkspace {
+                execution_root: workspace.working_directory.clone(),
+                access: "write".into(),
+                isolation: "git_worktree".into(),
+            },
+            json!({"workingDirectory": workspace.working_directory, "branch": workspace.branch}),
+        )
+        .unwrap();
+        let workspaces =
+            crate::delivery_queue::BatchWorkspaces::from([(camp_id.clone(), Ok(prepared))]);
+        let agent_run_id = crate::delivery_queue::claim_waiting_delivery_batches_with_workspaces(
+            &mut database,
+            1,
+            &workspaces,
+            &[],
+        )
+        .unwrap()
+        .pop()
+        .expect("ready Mission Delivery should be claimed");
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status='running',execution_epoch=1 WHERE id=?1",
+                [&agent_run_id],
+            )
+            .unwrap();
+        // Tool output is bounded before persistence. A plan explanation uses
+        // the ordinary managed-Blob path that this concurrency test reads.
+        let secret = format!("MISSION_GIT_BLOB_{}", "x".repeat(24_000));
+        let evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                &agent_run_id,
+                1,
+                "runtime.plan",
+                &json!({
+                    "explanation": secret,
+                    "plan": [],
+                }),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(evidence.is_truncated && evidence.content_blob_id.is_some());
+        let evidence_id = evidence.id.clone();
+
         let database_path = database.path().to_path_buf();
         drop(database);
         drop(attachment_views);
@@ -34775,6 +35214,171 @@ done
         assert!(worktree.exists());
         assert_ne!(worktree, source);
 
+        // A held lifecycle gate gives a deterministic admission boundary. The
+        // ordinary Thread must bypass it only for roots proven unrelated; no slow
+        // Git process is needed for these assertions.
+        let independent = root.join("independent");
+        let sibling_prefix = root.join(format!(
+            "{}-independent",
+            worktree.file_name().unwrap().to_str().unwrap()
+        ));
+        fs::create_dir(&independent).unwrap();
+        fs::create_dir(&sibling_prefix).unwrap();
+        let ordinary_camp = {
+            let mut database = core.database.lock().await;
+            let created = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".into(),
+                        },
+                        camp_id: None,
+                        expected_versions: vec![],
+                        execution_epoch: None,
+                        payload: CreateThreadCommand {
+                            team: None,
+                            name: Some("Independent workspace".into()),
+                            project_binding_kind: ProjectBindingKind::Directory,
+                            project_path: independent.to_string_lossy().into_owned(),
+                            member_agent_ids: vec![candidate.agent_id.clone()],
+                            default_lead_agent_id: candidate.agent_id.clone(),
+                            collaboration_mode: ThreadCollaborationMode::Peer,
+                            activation_state: ThreadActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            created.result.payload["threadId"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let (workspace_id, preparation_token): (String, String) = core
+            .database
+            .lock()
+            .await
+            .connection()
+            .query_row(
+                "SELECT id,preparation_token FROM mission_workspace WHERE camp_id=?1",
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let staging = root.join(format!(".rovai-mission-prepare-{preparation_token}"));
+        fs::create_dir(&staging).unwrap();
+        let nested = worktree.join("nested");
+        fs::create_dir(&nested).unwrap();
+        let lifecycle = core.mission_workspace_gate.lock().await;
+        for state in ["ready", "preparing", "cleanup_pending"] {
+            core.database
+                .lock()
+                .await
+                .connection()
+                .execute(
+                    "UPDATE mission_workspace SET state=?2 WHERE id=?1",
+                    rusqlite::params![workspace_id, state],
+                )
+                .unwrap();
+            for (thread, directory, immediate) in [
+                (ordinary_camp.as_str(), independent.as_path(), true),
+                (ordinary_camp.as_str(), sibling_prefix.as_path(), true),
+                (ordinary_camp.as_str(), worktree.as_path(), false),
+                (ordinary_camp.as_str(), nested.as_path(), false),
+                (ordinary_camp.as_str(), root.as_path(), false),
+                (ordinary_camp.as_str(), staging.as_path(), false),
+                (camp_id.as_str(), independent.as_path(), false),
+            ] {
+                let execution = AgentRunWorkspace::runtime_managed_path(
+                    directory.to_string_lossy().into_owned(),
+                );
+                let mut preparation = std::pin::pin!(core.prepare_mission_execution_workspace(
+                    thread,
+                    execution.clone(),
+                    None,
+                    Some(directory)
+                ));
+                let polled = std::future::poll_fn(|cx| {
+                    std::task::Poll::Ready(std::future::Future::poll(preparation.as_mut(), cx))
+                })
+                .await;
+                assert_eq!(
+                    polled.is_ready(),
+                    immediate,
+                    "{state}, {directory:?}: {polled:?}"
+                );
+                if let std::task::Poll::Ready(result) = polled {
+                    assert_eq!(result.unwrap(), Some(execution));
+                }
+            }
+        }
+        // Missing canonical validation and malformed historical ownership retain
+        // the serialized path, rather than adding a new refusal to ordinary runs.
+        for malformed in [false, true] {
+            if malformed {
+                core.database
+                    .lock()
+                    .await
+                    .connection()
+                    .execute(
+                        "UPDATE mission_workspace SET worktree_path='relative/unknown' WHERE id=?1",
+                        [&workspace_id],
+                    )
+                    .unwrap();
+            }
+            let execution =
+                AgentRunWorkspace::runtime_managed_path(independent.to_string_lossy().into_owned());
+            let mut preparation = std::pin::pin!(core.prepare_mission_execution_workspace(
+                &ordinary_camp,
+                execution,
+                None,
+                malformed.then_some(independent.as_path())
+            ));
+            let polled = std::future::poll_fn(|cx| {
+                std::task::Poll::Ready(std::future::Future::poll(preparation.as_mut(), cx))
+            })
+            .await;
+            assert!(polled.is_pending());
+        }
+        core.database
+            .lock()
+            .await
+            .connection()
+            .execute(
+                "UPDATE mission_workspace SET state='ready',worktree_path=?2 WHERE id=?1",
+                rusqlite::params![workspace_id, worktree.to_str().unwrap()],
+            )
+            .unwrap();
+        // Before the first plan is persisted, Git inspection can still choose a
+        // managed path. Missing association data is not evidence of independence.
+        {
+            let database = core.database.lock().await;
+            let connection = database.connection();
+            connection
+                .execute_batch("SAVEPOINT missing_workspace_proof")
+                .unwrap();
+            connection
+                .execute("DELETE FROM mission_workspace WHERE id=?1", [&workspace_id])
+                .unwrap();
+            let disjoint =
+                crate::mission_workspace::execution_root_is_disjoint(connection, &independent)
+                    .unwrap();
+            connection
+                .execute_batch(
+                    "ROLLBACK TO missing_workspace_proof; RELEASE missing_workspace_proof",
+                )
+                .unwrap();
+            assert!(
+                !disjoint,
+                "an unplanned Mission must retain lifecycle serialization"
+            );
+        }
+        drop(lifecycle);
+        fs::remove_dir(staging).unwrap();
+        fs::remove_dir(nested).unwrap();
+        assert!(worktree.join("tracked.txt").is_file());
+
         let wrapper_root = root.join("blocking-git");
         fs::create_dir_all(&wrapper_root).unwrap();
         let entered = wrapper_root.join("entered");
@@ -34795,10 +35399,84 @@ done
             RuntimeSearchEnvironment::for_test_paths(3, vec![wrapper_root.clone()]),
         );
 
+        // Normal ready reuse performs one complete identity validation. Count
+        // this chain only, not every Git operation involved in dispatch.
+        fs::write(&release, "ready reuse").unwrap();
+        let reused = core
+            .prepare_mission_workspace(&candidate, &source)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reused, prepared);
+        let calls = fs::read_to_string(&invocations).unwrap();
+        for query in ["--show-toplevel", "--git-common-dir", "--git-dir"] {
+            assert_eq!(
+                calls
+                    .lines()
+                    .filter(|line| line.split_whitespace().any(|arg| arg == query))
+                    .count(),
+                1,
+                "normal ready reuse must validate identity once: {query}\n{calls}"
+            );
+        }
+        let admin = std::process::Command::new(&git_path)
+            .arg("-C")
+            .arg(&worktree)
+            .args(["rev-parse", "--path-format=absolute", "--git-dir"])
+            .output()
+            .unwrap();
+        assert!(admin.status.success());
+        let admin = PathBuf::from(String::from_utf8(admin.stdout).unwrap().trim());
+        for marker in ["rovai-mission-owner", "gitdir"] {
+            let path = admin.join(marker);
+            let original = fs::read(&path).unwrap();
+            fs::write(&path, "wrong-owner-or-registration").unwrap();
+            assert!(
+                core.prepare_mission_workspace(&candidate, &source)
+                    .await
+                    .is_err(),
+                "ready reuse must still reject an invalid {marker}"
+            );
+            fs::write(&path, original).unwrap();
+        }
+
+        // A non-destructive cleanup failure can become ready inside this call,
+        // but it is still a recovery path and keeps the final validation.
+        {
+            let database = core.database.lock().await;
+            database.connection().execute(
+                "UPDATE mission_workspace SET state='cleanup_failed',diagnostic='mission.workspace_dirty' WHERE camp_id=?1",
+                [&camp_id],
+            ).unwrap();
+        }
+        fs::write(&invocations, "").unwrap();
+        assert!(
+            core.prepare_mission_workspace(&candidate, &source)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let recovery_calls = fs::read_to_string(&invocations).unwrap();
+        assert!(
+            recovery_calls
+                .lines()
+                .filter(|line| line.split_whitespace().any(|arg| arg == "--show-toplevel"))
+                .count()
+                >= 2,
+            "cleanup failure recovery must not take the normal-reuse shortcut: {recovery_calls}"
+        );
+        fs::remove_file(&release).unwrap();
+        fs::remove_file(&entered).unwrap();
+        fs::write(&invocations, "").unwrap();
+
         let prepare_task = tokio::spawn({
             let core = core.clone();
             let candidate = candidate.clone();
-            async move { core.prepare_mission_workspace(&candidate).await }
+            let validated_source = source.clone();
+            async move {
+                core.prepare_mission_workspace(&candidate, &validated_source)
+                    .await
+            }
         });
         tokio::time::timeout(Duration::from_secs(10), async {
             while !entered.exists() {
@@ -35134,9 +35812,10 @@ done
                 uuid::Uuid::new_v4()
             ),
         };
-        let config = BuiltinToolProcessConfigFactory::new(&cli, &endpoint, &core.data_dir.join("runtime"))
-            .create()
-            .unwrap();
+        let config =
+            BuiltinToolProcessConfigFactory::new(&cli, &endpoint, &core.data_dir.join("runtime"))
+                .create()
+                .unwrap();
         let auth = core
             .builtin_tool_leases
             .bind(&config, &run_id, epoch, &binding, &workspace)
@@ -35176,7 +35855,10 @@ done
         .unwrap();
         let mut child = ManagedProcess::spawn(spec).unwrap();
         let bridge = config
-            .start_account_bridge(child.account_authority().unwrap(),child.account_filesystem())
+            .start_account_bridge(
+                child.account_authority().unwrap(),
+                child.account_filesystem(),
+            )
             .unwrap();
         child.take_stdin().unwrap().write_all(b"G").await.unwrap();
         let mut bytes = Vec::new();
@@ -35240,34 +35922,103 @@ done
                 .iter()
                 .any(|member| member["agentId"].as_str() == Some(execution.agent_id.as_str()))
         );
-        let readable=workspace.join("synthetic-account-attachment.txt");std::fs::write(&readable,"SYNTHETIC_ATTACHMENT_ALLOWED").unwrap();
-        let send=|path:&Path|rovai_core::builtin_tool_transport::BuiltinToolIpcRequest{ipc_protocol_version:BUILTIN_TOOL_IPC_PROTOCOL_VERSION,auth:auth.clone(),body:rovai_core::builtin_tool_transport::BuiltinToolIpcRequestBody::Invoke{request_id:uuid::Uuid::new_v4().to_string(),operation:rovai_core::message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME.into(),input:json!({"body":"synthetic account attachment acceptance","publicOnly":true,"files":[path.to_string_lossy()]}),send_input_file_path:None}};
-        let sent=core.handle_builtin_tool_ipc(send(&readable)).await;
-        let BuiltinToolIpcResponse::Envelope{envelope}=sent else{panic!("account attachment must reach real Core envelope");};
-        assert!(envelope.ok,"readable source must publish");
-        let private=rovai_core::platform::private_storage::create_private_directory(&root.join(format!("synthetic-private-{}",uuid::Uuid::new_v4()))).unwrap();
-        let private_file=private.join("not-a-secret.txt");rovai_core::platform::private_storage::create_private_bytes(&private_file,b"SYNTHETIC_PRIVATE_SOURCE").unwrap();
-        let rejected=core.handle_builtin_tool_ipc(send(&private_file)).await;
-        assert!(matches!(rejected,BuiltinToolIpcResponse::Envelope{ref envelope}if !envelope.ok),"private source must be OS-rejected");
-        assert_eq!(std::fs::read(&private_file).unwrap(),b"SYNTHETIC_PRIVATE_SOURCE");
-        let avatar_path=workspace.join("synthetic-avatar.png");
-        image::RgbaImage::from_pixel(8,8,image::Rgba([40,100,180,255])).save(&avatar_path).unwrap();
-        let version={let db=core.database.lock().await;db.connection().query_row("SELECT version FROM agent_profile WHERE id=?1",rusqlite::params![execution.agent_id],|row|row.get::<_,i64>(0)).unwrap()};
-        let avatar=|path:&Path,expected:i64| {let request_id=uuid::Uuid::new_v4().to_string();rovai_core::builtin_tool_transport::BuiltinToolIpcRequest{ipc_protocol_version:BUILTIN_TOOL_IPC_PROTOCOL_VERSION,auth:auth.clone(),body:rovai_core::builtin_tool_transport::BuiltinToolIpcRequestBody::Invoke{request_id:request_id.clone(),operation:"member.update".into(),input:json!({"requestId":request_id,"agentId":execution.agent_id,"expectedVersion":expected,"avatarFile":path.to_string_lossy()}),send_input_file_path:None}}};
-        let avatar_request=avatar(&avatar_path,version);
-        let changed=core.handle_builtin_tool_ipc(avatar_request.clone()).await;
-        let BuiltinToolIpcResponse::Envelope{envelope}=changed else{panic!("avatar update must return business envelope");};
-        assert!(envelope.ok,"readable account avatar must be imported from memory");
-        let original_avatar=std::fs::read(&avatar_path).unwrap();std::fs::remove_file(&avatar_path).unwrap();
-        let replay=core.handle_builtin_tool_ipc(avatar_request.clone()).await;
-        assert!(matches!(replay,BuiltinToolIpcResponse::Envelope{ref envelope}if envelope.ok),"same current lease must replay persistent receipt after source removal");
-        std::fs::write(&avatar_path,&original_avatar).unwrap();
-        let private_avatar=private.join("private-avatar.png");
-        rovai_core::platform::private_storage::create_private_bytes(&private_avatar,&std::fs::read(&avatar_path).unwrap()).unwrap();
-        let rejected=core.handle_builtin_tool_ipc(avatar(&private_avatar,version+1)).await;
-        assert!(matches!(rejected,BuiltinToolIpcResponse::Envelope{ref envelope}if !envelope.ok),"private avatar source must be refused before host decode");
+        let readable = workspace.join("synthetic-account-attachment.txt");
+        std::fs::write(&readable, "SYNTHETIC_ATTACHMENT_ALLOWED").unwrap();
+        let send = |path: &Path| rovai_core::builtin_tool_transport::BuiltinToolIpcRequest {
+            ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+            auth: auth.clone(),
+            body: rovai_core::builtin_tool_transport::BuiltinToolIpcRequestBody::Invoke {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                operation: rovai_core::message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME.into(),
+                input: json!({"body":"synthetic account attachment acceptance","publicOnly":true,"files":[path.to_string_lossy()]}),
+                send_input_file_path: None,
+            },
+        };
+        let sent = core.handle_builtin_tool_ipc(send(&readable)).await;
+        let BuiltinToolIpcResponse::Envelope { envelope } = sent else {
+            panic!("account attachment must reach real Core envelope");
+        };
+        assert!(envelope.ok, "readable source must publish");
+        let private = rovai_core::platform::private_storage::create_private_directory(
+            &root.join(format!("synthetic-private-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let private_file = private.join("not-a-secret.txt");
+        rovai_core::platform::private_storage::create_private_bytes(
+            &private_file,
+            b"SYNTHETIC_PRIVATE_SOURCE",
+        )
+        .unwrap();
+        let rejected = core.handle_builtin_tool_ipc(send(&private_file)).await;
+        assert!(
+            matches!(rejected,BuiltinToolIpcResponse::Envelope{ref envelope}if !envelope.ok),
+            "private source must be OS-rejected"
+        );
+        assert_eq!(
+            std::fs::read(&private_file).unwrap(),
+            b"SYNTHETIC_PRIVATE_SOURCE"
+        );
+        let avatar_path = workspace.join("synthetic-avatar.png");
+        image::RgbaImage::from_pixel(8, 8, image::Rgba([40, 100, 180, 255]))
+            .save(&avatar_path)
+            .unwrap();
+        let version = {
+            let db = core.database.lock().await;
+            db.connection()
+                .query_row(
+                    "SELECT version FROM agent_profile WHERE id=?1",
+                    rusqlite::params![execution.agent_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap()
+        };
+        let avatar = |path: &Path, expected: i64| {
+            let request_id = uuid::Uuid::new_v4().to_string();
+            rovai_core::builtin_tool_transport::BuiltinToolIpcRequest {
+                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+                auth: auth.clone(),
+                body: rovai_core::builtin_tool_transport::BuiltinToolIpcRequestBody::Invoke {
+                    request_id: request_id.clone(),
+                    operation: "member.update".into(),
+                    input: json!({"requestId":request_id,"agentId":execution.agent_id,"expectedVersion":expected,"avatarFile":path.to_string_lossy()}),
+                    send_input_file_path: None,
+                },
+            }
+        };
+        let avatar_request = avatar(&avatar_path, version);
+        let changed = core.handle_builtin_tool_ipc(avatar_request.clone()).await;
+        let BuiltinToolIpcResponse::Envelope { envelope } = changed else {
+            panic!("avatar update must return business envelope");
+        };
+        assert!(
+            envelope.ok,
+            "readable account avatar must be imported from memory"
+        );
+        let original_avatar = std::fs::read(&avatar_path).unwrap();
+        std::fs::remove_file(&avatar_path).unwrap();
+        let replay = core.handle_builtin_tool_ipc(avatar_request.clone()).await;
+        assert!(
+            matches!(replay,BuiltinToolIpcResponse::Envelope{ref envelope}if envelope.ok),
+            "same current lease must replay persistent receipt after source removal"
+        );
+        std::fs::write(&avatar_path, &original_avatar).unwrap();
+        let private_avatar = private.join("private-avatar.png");
+        rovai_core::platform::private_storage::create_private_bytes(
+            &private_avatar,
+            &std::fs::read(&avatar_path).unwrap(),
+        )
+        .unwrap();
+        let rejected = core
+            .handle_builtin_tool_ipc(avatar(&private_avatar, version + 1))
+            .await;
+        assert!(
+            matches!(rejected,BuiltinToolIpcResponse::Envelope{ref envelope}if !envelope.ok),
+            "private avatar source must be refused before host decode"
+        );
         std::fs::remove_dir_all(private).unwrap();
-        println!("account_readable_attachment_published=true private_attachment_rejected=true readable_avatar_imported=true private_avatar_rejected=true");
+        println!(
+            "account_readable_attachment_published=true private_attachment_rejected=true readable_avatar_imported=true private_avatar_rejected=true"
+        );
         core.builtin_tool_leases
             .unbind(config.process_id(), &run_id, epoch)
             .await;
@@ -35289,32 +36040,128 @@ done
         );
         drop(bridge);
         assert!(child.tree_is_empty().unwrap());
-        let mut hook_command=tokio::process::Command::new(std::env::current_exe().unwrap());
-        hook_command.args(["--exact","managed_process::windows::account::tests::account_helper_entry","--ignored","--nocapture","--test-threads=1"]).current_dir(&workspace).env("ROVAI_ACCOUNT_TEST_BUILTIN","1").env("ROVAI_ACCOUNT_TEST_HOOK","1").env("ROVAI_ACCOUNT_TEST_CLI",&cli);
-        config.configure_command(&mut hook_command).unwrap();config.configure_account_command(&mut hook_command).unwrap();
-        let account=WindowsAccountLaunch::for_isolation("windows_account").unwrap().unwrap();
-        let instance=crate::command::canonical_json_digest(&json!(core.data_dir.canonicalize().unwrap())).unwrap();
-        let account_outbox_root=account.profile_root.join("rovai-runtime-outbox").join(instance.trim_start_matches("sha256:"));
-        let outbox=account_outbox_root.join("builtin-tools").join(config.process_id()).join("compaction-observation-outbox");
-        let hook_spec=ManagedProcessLaunchSpec::capture(&hook_command,ManagedProcessPurpose::RuntimeHost,ManagedStdinPolicy::Piped,ManagedWindowsArgvDialect::MicrosoftCrt,"synthetic-account-hook-outbox").unwrap().with_windows_account(Some(account.clone())).unwrap();
-        let mut hook=ManagedProcess::spawn(hook_spec).unwrap();
+        let mut hook_command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        hook_command
+            .args([
+                "--exact",
+                "managed_process::windows::account::tests::account_helper_entry",
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .current_dir(&workspace)
+            .env("ROVAI_ACCOUNT_TEST_BUILTIN", "1")
+            .env("ROVAI_ACCOUNT_TEST_HOOK", "1")
+            .env("ROVAI_ACCOUNT_TEST_CLI", &cli);
+        config.configure_command(&mut hook_command).unwrap();
+        config.configure_account_command(&mut hook_command).unwrap();
+        let account = WindowsAccountLaunch::for_isolation("windows_account")
+            .unwrap()
+            .unwrap();
+        let instance =
+            crate::command::canonical_json_digest(&json!(core.data_dir.canonicalize().unwrap()))
+                .unwrap();
+        let account_outbox_root = account
+            .profile_root
+            .join("rovai-runtime-outbox")
+            .join(instance.trim_start_matches("sha256:"));
+        let outbox = account_outbox_root
+            .join("builtin-tools")
+            .join(config.process_id())
+            .join("compaction-observation-outbox");
+        let hook_spec = ManagedProcessLaunchSpec::capture(
+            &hook_command,
+            ManagedProcessPurpose::RuntimeHost,
+            ManagedStdinPolicy::Piped,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "synthetic-account-hook-outbox",
+        )
+        .unwrap()
+        .with_windows_account(Some(account.clone()))
+        .unwrap();
+        let mut hook = ManagedProcess::spawn(hook_spec).unwrap();
         hook.take_stdin().unwrap().write_all(b"G").await.unwrap();
-        assert!(tokio::time::timeout(Duration::from_secs(10),hook.wait()).await.unwrap().unwrap().success());
-        assert!(outbox.is_dir(),"account hook must stage locally even while bridge is unavailable");
-        assert!(std::fs::read_dir(&outbox).unwrap().any(|entry|entry.unwrap().path().extension().is_some_and(|extension|extension=="json")));
-        {let mut database=core.database.lock().await;let result=rovai_core::compaction::reconcile_compaction_observation_outbox(&mut database,&core.data_dir.join("runtime"),None).unwrap();assert!(result.retained>0,"unknown observation must be preserved");}
-        assert!(std::fs::read_dir(&outbox).unwrap().any(|entry|entry.unwrap().path().extension().is_some_and(|extension|extension=="json")),"unknown account outbox records must remain");
-        assert!(hook.tree_is_empty().unwrap());
-        let record_path=std::fs::read_dir(&outbox).unwrap().map(|entry|entry.unwrap().path()).find(|path|path.extension().is_some_and(|extension|extension=="json")).unwrap();
-        let record_bytes=std::fs::read(&record_path).unwrap();
-        core.bind_prepared_native_session(&execution,&binding,"synthetic-session").await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(10), hook.wait())
+                .await
+                .unwrap()
+                .unwrap()
+                .success()
+        );
+        assert!(
+            outbox.is_dir(),
+            "account hook must stage locally even while bridge is unavailable"
+        );
+        assert!(std::fs::read_dir(&outbox).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "json")
+        }));
         {
-            let mut database=core.database.lock().await;
-            database.connection().execute("UPDATE adapter_installation SET adapter_kind='opencode-cli' WHERE id=?1",[&execution.runtime.installation_id]).unwrap();
-            database.connection().execute("UPDATE agent_run SET runtime_adapter_kind='opencode-cli' WHERE id=?1",[&run_id]).unwrap();
-            let policies=crate::compaction::DesiredCompactionDetectorPolicies::from_process_environment();
-            crate::compaction::reconcile_detector_policies(&mut database,&policies).unwrap();
-            crate::compaction::establish_compaction_observer_lease(&mut database,&crate::compaction::EstablishCompactionObserverLease{agent_run_id:&run_id,execution_epoch:epoch,adapter_kind:AdapterKind::OpencodeCli,host_instance_id:"synthetic-account-host",relay_process_id:config.process_id(),native_session_id:"synthetic-session"}).unwrap().expect("current observer must establish");
+            let mut database = core.database.lock().await;
+            let result = rovai_core::compaction::reconcile_compaction_observation_outbox(
+                &mut database,
+                &core.data_dir.join("runtime"),
+                None,
+            )
+            .unwrap();
+            assert!(result.retained > 0, "unknown observation must be preserved");
+        }
+        assert!(
+            std::fs::read_dir(&outbox).unwrap().any(|entry| entry
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "json")),
+            "unknown account outbox records must remain"
+        );
+        assert!(hook.tree_is_empty().unwrap());
+        let record_path = std::fs::read_dir(&outbox)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .unwrap();
+        let record_bytes = std::fs::read(&record_path).unwrap();
+        core.bind_prepared_native_session(&execution, &binding, "synthetic-session")
+            .await
+            .unwrap();
+        {
+            let mut database = core.database.lock().await;
+            database
+                .connection()
+                .execute(
+                    "UPDATE adapter_installation SET adapter_kind='opencode-cli' WHERE id=?1",
+                    [&execution.runtime.installation_id],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET runtime_adapter_kind='opencode-cli' WHERE id=?1",
+                    [&run_id],
+                )
+                .unwrap();
+            let policies =
+                crate::compaction::DesiredCompactionDetectorPolicies::from_process_environment();
+            crate::compaction::reconcile_detector_policies(&mut database, &policies).unwrap();
+            crate::compaction::establish_compaction_observer_lease(
+                &mut database,
+                &crate::compaction::EstablishCompactionObserverLease {
+                    agent_run_id: &run_id,
+                    execution_epoch: epoch,
+                    adapter_kind: AdapterKind::OpencodeCli,
+                    host_instance_id: "synthetic-account-host",
+                    relay_process_id: config.process_id(),
+                    native_session_id: "synthetic-session",
+                },
+            )
+            .unwrap()
+            .expect("current observer must establish");
         }
         // Real account CLI -> dedicated Job-scoped bridge -> production Hook
         // handler. Exit zero alone is enhancement-only, so inspect persisted
@@ -35323,88 +36170,323 @@ done
         // pipe, observer row or staged record is shared across iterations.
         let mut iteration_outboxes = Vec::new();
         for (index, accepted) in [(1usize, true), (2usize, false)] {
-            let iteration_endpoint=rovai_core::builtin_tool_transport::LocalIpcEndpoint::WindowsNamedPipe{name:format!(r"\\.\pipe\rovai-ai-{}-{}",std::process::id(),uuid::Uuid::new_v4())};
-            let iteration_config=BuiltinToolProcessConfigFactory::new(&cli,&iteration_endpoint,&core.data_dir.join("runtime")).create().unwrap();
-            let _iteration_auth=core.builtin_tool_leases.bind(&iteration_config,&run_id,epoch,&binding,&workspace).await.unwrap();
-            let iteration_outbox=account_outbox_root.join("builtin-tools").join(iteration_config.process_id()).join("compaction-observation-outbox");
+            let iteration_endpoint =
+                rovai_core::builtin_tool_transport::LocalIpcEndpoint::WindowsNamedPipe {
+                    name: format!(
+                        r"\\.\pipe\rovai-ai-{}-{}",
+                        std::process::id(),
+                        uuid::Uuid::new_v4()
+                    ),
+                };
+            let iteration_config = BuiltinToolProcessConfigFactory::new(
+                &cli,
+                &iteration_endpoint,
+                &core.data_dir.join("runtime"),
+            )
+            .create()
+            .unwrap();
+            let _iteration_auth = core
+                .builtin_tool_leases
+                .bind(&iteration_config, &run_id, epoch, &binding, &workspace)
+                .await
+                .unwrap();
+            let iteration_outbox = account_outbox_root
+                .join("builtin-tools")
+                .join(iteration_config.process_id())
+                .join("compaction-observation-outbox");
             iteration_outboxes.push(iteration_outbox.clone());
-            let host_instance=format!("synthetic-online-host-{index}");
+            let host_instance = format!("synthetic-online-host-{index}");
             {
-                let mut database=core.database.lock().await;
-                crate::compaction::establish_compaction_observer_lease(&mut database,&crate::compaction::EstablishCompactionObserverLease{agent_run_id:&run_id,execution_epoch:epoch,adapter_kind:AdapterKind::OpencodeCli,host_instance_id:&host_instance,relay_process_id:iteration_config.process_id(),native_session_id:"synthetic-session"}).unwrap().expect("each iteration must establish its own observer lease");
+                let mut database = core.database.lock().await;
+                crate::compaction::establish_compaction_observer_lease(
+                    &mut database,
+                    &crate::compaction::EstablishCompactionObserverLease {
+                        agent_run_id: &run_id,
+                        execution_epoch: epoch,
+                        adapter_kind: AdapterKind::OpencodeCli,
+                        host_instance_id: &host_instance,
+                        relay_process_id: iteration_config.process_id(),
+                        native_session_id: "synthetic-session",
+                    },
+                )
+                .unwrap()
+                .expect("each iteration must establish its own observer lease");
                 if !accepted {
-                    let fenced=crate::compaction::fence_active_observers_for_host(&mut database,AdapterKind::OpencodeCli,&host_instance,"synthetic-account-online-hook-rejected").unwrap();
-                    assert_eq!(fenced,1,"rejected iteration must fence only its own observer");
+                    let fenced = crate::compaction::fence_active_observers_for_host(
+                        &mut database,
+                        AdapterKind::OpencodeCli,
+                        &host_instance,
+                        "synthetic-account-online-hook-rejected",
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        fenced, 1,
+                        "rejected iteration must fence only its own observer"
+                    );
                 }
             }
-            let mut iteration_command=tokio::process::Command::new(std::env::current_exe().unwrap());
-            iteration_command.args(["--exact","managed_process::windows::account::tests::account_helper_entry","--ignored","--nocapture","--test-threads=1"]).current_dir(&workspace).env("ROVAI_ACCOUNT_TEST_BUILTIN","1").env("ROVAI_ACCOUNT_TEST_HOOK","1").env("ROVAI_ACCOUNT_TEST_HOOK_EVENT",format!("synthetic-online-{index}")).env("ROVAI_ACCOUNT_TEST_HOOK_HOST",&host_instance).env("ROVAI_ACCOUNT_TEST_CLI",&cli);
-            iteration_config.configure_command(&mut iteration_command).unwrap();iteration_config.configure_account_command(&mut iteration_command).unwrap();
-            let spec=ManagedProcessLaunchSpec::capture(&iteration_command,ManagedProcessPurpose::RuntimeHost,ManagedStdinPolicy::Piped,ManagedWindowsArgvDialect::MicrosoftCrt,"synthetic-account-online-hook").unwrap().with_windows_account(Some(account.clone())).unwrap();
-            let before: i64=core.database.lock().await.connection().query_row("SELECT COUNT(*) FROM native_session_compaction_observation",[],|row|row.get(0)).unwrap();
-            let mut online=ManagedProcess::spawn(spec).unwrap();
+            let mut iteration_command =
+                tokio::process::Command::new(std::env::current_exe().unwrap());
+            iteration_command
+                .args([
+                    "--exact",
+                    "managed_process::windows::account::tests::account_helper_entry",
+                    "--ignored",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .current_dir(&workspace)
+                .env("ROVAI_ACCOUNT_TEST_BUILTIN", "1")
+                .env("ROVAI_ACCOUNT_TEST_HOOK", "1")
+                .env(
+                    "ROVAI_ACCOUNT_TEST_HOOK_EVENT",
+                    format!("synthetic-online-{index}"),
+                )
+                .env("ROVAI_ACCOUNT_TEST_HOOK_HOST", &host_instance)
+                .env("ROVAI_ACCOUNT_TEST_CLI", &cli);
+            iteration_config
+                .configure_command(&mut iteration_command)
+                .unwrap();
+            iteration_config
+                .configure_account_command(&mut iteration_command)
+                .unwrap();
+            let spec = ManagedProcessLaunchSpec::capture(
+                &iteration_command,
+                ManagedProcessPurpose::RuntimeHost,
+                ManagedStdinPolicy::Piped,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "synthetic-account-online-hook",
+            )
+            .unwrap()
+            .with_windows_account(Some(account.clone()))
+            .unwrap();
+            let before: i64 = core
+                .database
+                .lock()
+                .await
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM native_session_compaction_observation",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let mut online = ManagedProcess::spawn(spec).unwrap();
             let bridge=iteration_config.start_account_bridge(online.account_authority().unwrap(),online.account_filesystem()).unwrap_or_else(|error|panic!("online hook iteration {index} could not start its account bridge: {error:#}"));
             let mut listener=LocalIpcListener::bind(&iteration_endpoint).unwrap_or_else(|error|panic!("online hook iteration {index} could not bind its protected listener: {error:#}"));
-            let serving=core.clone();
-            let server=tokio::spawn(async move{handle_builtin_tool_connection(serving,listener.accept().await.unwrap()).await.unwrap();});
+            let serving = core.clone();
+            let server = tokio::spawn(async move {
+                handle_builtin_tool_connection(serving, listener.accept().await.unwrap())
+                    .await
+                    .unwrap();
+            });
             online.take_stdin().unwrap().write_all(b"G").await.unwrap();
-            assert!(tokio::time::timeout(Duration::from_secs(15),online.wait()).await.unwrap().unwrap().success());
-            tokio::time::timeout(Duration::from_secs(5),server).await.unwrap().unwrap();
-            assert!(online.tree_is_empty().unwrap());drop(bridge);
-            let after:i64=core.database.lock().await.connection().query_row("SELECT COUNT(*) FROM native_session_compaction_observation",[],|row|row.get(0)).unwrap();
-            assert_eq!(after-before,if accepted{1}else{0},"only an accepted online Hook may persist an observation");
-            let staged=std::fs::read_dir(&iteration_outbox).map(|entries|entries.filter(|entry|entry.as_ref().unwrap().path().extension().is_some_and(|ext|ext=="json")).count()).unwrap_or(0);
-            assert_eq!(staged,if accepted{0}else{1},"accepted Hook cleans only its own record; rejected Hook remains staged");
-            core.builtin_tool_leases.unbind(iteration_config.process_id(),&run_id,epoch).await;
+            assert!(
+                tokio::time::timeout(Duration::from_secs(15), online.wait())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .success()
+            );
+            tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(online.tree_is_empty().unwrap());
+            drop(bridge);
+            let after: i64 = core
+                .database
+                .lock()
+                .await
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM native_session_compaction_observation",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(
+                after - before,
+                if accepted { 1 } else { 0 },
+                "only an accepted online Hook may persist an observation"
+            );
+            let staged = std::fs::read_dir(&iteration_outbox)
+                .map(|entries| {
+                    entries
+                        .filter(|entry| {
+                            entry
+                                .as_ref()
+                                .unwrap()
+                                .path()
+                                .extension()
+                                .is_some_and(|ext| ext == "json")
+                        })
+                        .count()
+                })
+                .unwrap_or(0);
+            assert_eq!(
+                staged,
+                if accepted { 0 } else { 1 },
+                "accepted Hook cleans only its own record; rejected Hook remains staged"
+            );
+            core.builtin_tool_leases
+                .unbind(iteration_config.process_id(), &run_id, epoch)
+                .await;
         }
         // Restore the original observer through the product establishment path.
         // The schema CHECK stays authoritative; no fixture writes status columns.
         {
-            let mut database=core.database.lock().await;
-            crate::compaction::fence_active_observers_for_host(&mut database,AdapterKind::OpencodeCli,"synthetic-account-host","synthetic-account-online-hook-complete").unwrap();
-            crate::compaction::establish_compaction_observer_lease(&mut database,&crate::compaction::EstablishCompactionObserverLease{agent_run_id:&run_id,execution_epoch:epoch,adapter_kind:AdapterKind::OpencodeCli,host_instance_id:"synthetic-account-host",relay_process_id:config.process_id(),native_session_id:"synthetic-session"}).unwrap().expect("original observer must be restored through the product path");
+            let mut database = core.database.lock().await;
+            crate::compaction::fence_active_observers_for_host(
+                &mut database,
+                AdapterKind::OpencodeCli,
+                "synthetic-account-host",
+                "synthetic-account-online-hook-complete",
+            )
+            .unwrap();
+            crate::compaction::establish_compaction_observer_lease(
+                &mut database,
+                &crate::compaction::EstablishCompactionObserverLease {
+                    agent_run_id: &run_id,
+                    execution_epoch: epoch,
+                    adapter_kind: AdapterKind::OpencodeCli,
+                    host_instance_id: "synthetic-account-host",
+                    relay_process_id: config.process_id(),
+                    native_session_id: "synthetic-session",
+                },
+            )
+            .unwrap()
+            .expect("original observer must be restored through the product path");
         }
-        for path in iteration_outboxes{let _=std::fs::remove_dir_all(path);}
+        for path in iteration_outboxes {
+            let _ = std::fs::remove_dir_all(path);
+        }
         // Retire only the rejected synthetic record; the original offline one
         // must still be consumed by the reopened production Core below.
-        for entry in std::fs::read_dir(&outbox).unwrap(){let path=entry.unwrap().path();if path!=record_path{std::fs::remove_file(path).unwrap();}}
+        for entry in std::fs::read_dir(&outbox).unwrap() {
+            let path = entry.unwrap().path();
+            if path != record_path {
+                std::fs::remove_file(path).unwrap();
+            }
+        }
         drop(core);
-        let reopened=runtime_resolution_test_core(&root).unwrap();
-        {let mut database=reopened.database.lock().await;
-            let applied=crate::compaction::reconcile_compaction_observation_outbox(&mut database,&reopened.data_dir.join("runtime"),None).unwrap();
-            assert_eq!(applied.applied,1,"reopened Core must apply valid offline event");
-            std::fs::write(&record_path,&record_bytes).unwrap();
-            let duplicate=crate::compaction::reconcile_compaction_observation_outbox(&mut database,&reopened.data_dir.join("runtime"),None).unwrap();
-            assert_eq!(duplicate.duplicates,1,"same event must deduplicate");
+        let reopened = runtime_resolution_test_core(&root).unwrap();
+        {
+            let mut database = reopened.database.lock().await;
+            let applied = crate::compaction::reconcile_compaction_observation_outbox(
+                &mut database,
+                &reopened.data_dir.join("runtime"),
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                applied.applied, 1,
+                "reopened Core must apply valid offline event"
+            );
+            std::fs::write(&record_path, &record_bytes).unwrap();
+            let duplicate = crate::compaction::reconcile_compaction_observation_outbox(
+                &mut database,
+                &reopened.data_dir.join("runtime"),
+                None,
+            )
+            .unwrap();
+            assert_eq!(duplicate.duplicates, 1, "same event must deduplicate");
         }
         assert!(!record_path.exists());
-        let foreign_root=root.join("another-core");std::fs::create_dir_all(&foreign_root).unwrap();
-        let foreign_instance=crate::command::canonical_json_digest(&json!(foreign_root.canonicalize().unwrap())).unwrap();
-        let account=WindowsAccountLaunch::for_isolation("windows_account").unwrap().unwrap();
-        let foreign_outbox=account.profile_root.join("rovai-runtime-outbox").join(foreign_instance.trim_start_matches("sha256:")).join("builtin-tools").join(config.process_id()).join("compaction-observation-outbox");std::fs::create_dir_all(&foreign_outbox).unwrap();let foreign_record=foreign_outbox.join(record_path.file_name().unwrap());std::fs::write(&foreign_record,&record_bytes).unwrap();
-        let protected=rovai_core::platform::private_storage::create_private_directory(&root.join(format!("protected-record-{}",uuid::Uuid::new_v4()))).unwrap();
-        let target=protected.join("synthetic-protected-record.json");rovai_core::platform::private_storage::create_private_bytes(&target,&record_bytes).unwrap();
-        std::fs::hard_link(&target,&record_path).unwrap();
-        {let mut database=reopened.database.lock().await;crate::compaction::reconcile_compaction_observation_outbox(&mut database,&reopened.data_dir.join("runtime"),None).unwrap();}
-        assert!(record_path.exists()&&foreign_record.exists());assert_eq!(std::fs::read(&target).unwrap(),record_bytes);
-        std::fs::remove_file(&record_path).unwrap();std::fs::remove_file(&foreign_record).unwrap();std::fs::remove_file(&target).unwrap();
-        let protected_sentinel=protected.join("synthetic-sentinel.txt");
-        rovai_core::platform::private_storage::create_private_bytes(&protected_sentinel,b"SYNTHETIC_PROTECTED_TREE_UNCHANGED").unwrap();
-        let builtin_tree=account_outbox_root.clone();
-        let displaced=account_outbox_root.with_file_name(format!("synthetic-original-instance-{}",uuid::Uuid::new_v4()));
-        std::fs::rename(&builtin_tree,&displaced).unwrap();
+        let foreign_root = root.join("another-core");
+        std::fs::create_dir_all(&foreign_root).unwrap();
+        let foreign_instance =
+            crate::command::canonical_json_digest(&json!(foreign_root.canonicalize().unwrap()))
+                .unwrap();
+        let account = WindowsAccountLaunch::for_isolation("windows_account")
+            .unwrap()
+            .unwrap();
+        let foreign_outbox = account
+            .profile_root
+            .join("rovai-runtime-outbox")
+            .join(foreign_instance.trim_start_matches("sha256:"))
+            .join("builtin-tools")
+            .join(config.process_id())
+            .join("compaction-observation-outbox");
+        std::fs::create_dir_all(&foreign_outbox).unwrap();
+        let foreign_record = foreign_outbox.join(record_path.file_name().unwrap());
+        std::fs::write(&foreign_record, &record_bytes).unwrap();
+        let protected = rovai_core::platform::private_storage::create_private_directory(
+            &root.join(format!("protected-record-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap();
+        let target = protected.join("synthetic-protected-record.json");
+        rovai_core::platform::private_storage::create_private_bytes(&target, &record_bytes)
+            .unwrap();
+        std::fs::hard_link(&target, &record_path).unwrap();
+        {
+            let mut database = reopened.database.lock().await;
+            crate::compaction::reconcile_compaction_observation_outbox(
+                &mut database,
+                &reopened.data_dir.join("runtime"),
+                None,
+            )
+            .unwrap();
+        }
+        assert!(record_path.exists() && foreign_record.exists());
+        assert_eq!(std::fs::read(&target).unwrap(), record_bytes);
+        std::fs::remove_file(&record_path).unwrap();
+        std::fs::remove_file(&foreign_record).unwrap();
+        std::fs::remove_file(&target).unwrap();
+        let protected_sentinel = protected.join("synthetic-sentinel.txt");
+        rovai_core::platform::private_storage::create_private_bytes(
+            &protected_sentinel,
+            b"SYNTHETIC_PROTECTED_TREE_UNCHANGED",
+        )
+        .unwrap();
+        let builtin_tree = account_outbox_root.clone();
+        let displaced = account_outbox_root.with_file_name(format!(
+            "synthetic-original-instance-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::rename(&builtin_tree, &displaced).unwrap();
         let junction=std::process::Command::new("powershell.exe").args(["-NoProfile","-NonInteractive","-Command","$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $env:ROVAI_TEST_JUNCTION -Target $env:ROVAI_TEST_TARGET | Out-Null"])
             .env("ROVAI_TEST_JUNCTION",&builtin_tree).env("ROVAI_TEST_TARGET",&protected).output().unwrap();
         assert!(junction.status.success());
-        {let mut database=reopened.database.lock().await;assert!(crate::compaction::reconcile_compaction_observation_outbox(&mut database,&reopened.data_dir.join("runtime"),None).is_err());}
-        assert_eq!(std::fs::read(&protected_sentinel).unwrap(),b"SYNTHETIC_PROTECTED_TREE_UNCHANGED");
-        assert_eq!(std::fs::read_dir(&protected).unwrap().count(),1);
-        std::fs::remove_dir(&builtin_tree).unwrap();std::fs::rename(&displaced,&builtin_tree).unwrap();
-        let absent=account_outbox_root.with_file_name(format!("synthetic-absent-instance-{}",uuid::Uuid::new_v4()));std::fs::rename(&builtin_tree,&absent).unwrap();
-        {let mut database=reopened.database.lock().await;crate::compaction::reconcile_compaction_observation_outbox(&mut database,&reopened.data_dir.join("runtime"),None).unwrap();}
-        std::fs::rename(&absent,&builtin_tree).unwrap();
-        println!("online_account_hook_applied=true fenced_hook_rejected_and_retained=true outbox_junction_rejected=true outbox_missing_component_empty=true");
-        println!("real_core_member_list=true old_lease_rejected=true job_empty=true account_hook_outbox_staged=true unknown_retained=true reopened_core_applied=true duplicate_cleaned=true foreign_instance_preserved=true hardlink_rejected=true avatar_source_removed_replayed=true");
+        {
+            let mut database = reopened.database.lock().await;
+            assert!(
+                crate::compaction::reconcile_compaction_observation_outbox(
+                    &mut database,
+                    &reopened.data_dir.join("runtime"),
+                    None
+                )
+                .is_err()
+            );
+        }
+        assert_eq!(
+            std::fs::read(&protected_sentinel).unwrap(),
+            b"SYNTHETIC_PROTECTED_TREE_UNCHANGED"
+        );
+        assert_eq!(std::fs::read_dir(&protected).unwrap().count(), 1);
+        std::fs::remove_dir(&builtin_tree).unwrap();
+        std::fs::rename(&displaced, &builtin_tree).unwrap();
+        let absent = account_outbox_root.with_file_name(format!(
+            "synthetic-absent-instance-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::rename(&builtin_tree, &absent).unwrap();
+        {
+            let mut database = reopened.database.lock().await;
+            crate::compaction::reconcile_compaction_observation_outbox(
+                &mut database,
+                &reopened.data_dir.join("runtime"),
+                None,
+            )
+            .unwrap();
+        }
+        std::fs::rename(&absent, &builtin_tree).unwrap();
+        println!(
+            "online_account_hook_applied=true fenced_hook_rejected_and_retained=true outbox_junction_rejected=true outbox_missing_component_empty=true"
+        );
+        println!(
+            "real_core_member_list=true old_lease_rejected=true job_empty=true account_hook_outbox_staged=true unknown_retained=true reopened_core_applied=true duplicate_cleaned=true foreign_instance_preserved=true hardlink_rejected=true avatar_source_removed_replayed=true"
+        );
     }
 
     // Owns the preference transaction -> invocation gate -> CLI projection seam.
@@ -36978,6 +38060,67 @@ for line in sys.stdin:
 
     #[test]
     fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
+        for (adapter, name) in [
+            (AdapterKind::CopilotCli, "task"),
+            (AdapterKind::QoderCli, "Agent"),
+            (AdapterKind::KimiCodeCli, "TaskOutput"),
+            (AdapterKind::HermesCli, "delegate_task"),
+            (AdapterKind::KiroCli, "subagent"),
+        ] {
+            let input =
+                json!({"prompt":"Read the fixture","mode":"background","agent_id":"native-child"});
+            let receipt = json!({"task_id":"native-task","status":"dispatched"});
+            let (event, payload) = normalize_acp_event(
+                adapter,
+                "session/update",
+                &json!({"update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"native-call","operationId":"scoped-call",
+                "toolName":name,"kind":"execute","status":"completed","rawInput":input,"rawOutput":receipt,
+                "runtimeSource":{"sessionId":"session","promptId":"prompt"}}}),
+            );
+            assert_eq!(event, "runtime.action");
+            assert_eq!(payload["runtimeToolType"], "agent");
+            assert_eq!(payload["toolName"], name);
+            assert_eq!(payload["operationId"], "scoped-call");
+            assert_eq!(
+                serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+                input
+            );
+            assert_eq!(
+                serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
+                receipt
+            );
+            assert_eq!(payload["status"], "completed");
+        }
+        // Kiro names its call in vendor metadata; the terminal drops that
+        // metadata and returns the report as items/Text, not ACP content.
+        let mut display = crate::runtime_subagent::AcpExecutionDisplay::default();
+        let input = json!({"task":"Read the fixture","mode":"blocking","stages":[{"name":"reader","role":"kiro_default"}]});
+        let started = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","rawInput":input,"_meta":{"kiro":{"toolName":"subagent"}}}
+        })).unwrap();
+        let report =
+            json!({"items":[{"Text":"Pipeline completed: 1 stages finished.\nCHILD_REPORT"}]});
+        let completed = display.observe(AdapterKind::KiroCli, "kiro-prompt", &json!({
+            "sessionId":"kiro-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kiro-call",
+                "title":"Spawning agent crew","kind":"other","status":"completed","rawOutput":report}
+        })).unwrap();
+        assert_eq!(
+            started["update"]["operationId"],
+            completed["update"]["operationId"]
+        );
+        let (_, payload) = normalize_acp_event(AdapterKind::KiroCli, "session/update", &completed);
+        assert_eq!(payload["toolName"], "subagent");
+        assert_eq!(payload["runtimeToolType"], "agent");
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+            input
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
+            report
+        );
         for (status, name, omitted, has_patch) in [
             ("completed", "edit", false, true),
             ("completed", "write", false, true),
@@ -37198,7 +38341,7 @@ for line in sys.stdin:
                 assert_eq!(payload["runtimeDiff"]["entries"][0]["oldText"], old_text);
                 let admitted = crate::runtime_diff::admit_runtime_diff(
                     &payload,
-                    std::path::Path::new("/repo"),
+                    std::path::Path::new(if cfg!(windows) { "C:/repo" } else { "/repo" }),
                     Some("command-code-cli"),
                 );
                 let admitted = admitted.unwrap().unwrap();

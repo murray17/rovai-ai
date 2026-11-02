@@ -10,7 +10,7 @@ import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { DatabaseSync } from 'node:sqlite'
 import { composerDocumentForAddress, createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
-import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot } from './lib/runtime-camp-files-root.mjs'
+import { coreDataDirectoryArguments, removeEphemeralRuntimeCampFilesRoot, runtimeCampFilesRootForDataDirectory } from './lib/runtime-camp-files-root.mjs'
 
 if (process.platform === 'win32') throw new Error('This shell fixture requires macOS or Linux')
 const root = resolve(import.meta.dirname, '..')
@@ -20,12 +20,14 @@ const journal = join(fixture, 'prompts.jsonl'), executable = join(fixture, 'copi
 const shutdownText = process.argv.includes('--shutdown-text')
 const historicalStartup = process.argv.includes('--historical-startup')
 const historicalMission = process.argv.includes('--historical-mission')
+const optionalFaults = process.argv.includes('--optional-faults')
 const unexpectedExit = process.argv.includes('--unexpected-exit')
 const stopDuringLaunch = process.argv.includes('--stop-during-launch')
 const pi = process.argv.includes('--pi')
 const adapterKind = pi ? 'pi' : 'copilot-cli'
 assert.ok(!pi || unexpectedExit, '--pi currently exercises unexpected exit only')
 assert.ok(!historicalMission || historicalStartup, '--historical-mission requires --historical-startup')
+assert.ok(!optionalFaults || (historicalStartup && !pi), '--optional-faults requires historical ACP acceptance')
 assert.ok(!stopDuringLaunch || (!unexpectedExit && !historicalStartup && !shutdownText), 'launch stop is a separate scenario')
 let retainedHistoricalFiles = []
 let restoreHistoricalDirectories = []
@@ -157,8 +159,10 @@ try {
       // only its old cleanup ACK, and keep all fault files during acceptance.
       const seed = new DatabaseSync(join(data, 'rovai.sqlite'))
       seed.prepare('UPDATE agent_run SET cancel_acknowledged_at=NULL WHERE id=?').run(first.id)
+      if (optionalFaults) seed.prepare("INSERT INTO runtime_startup_setting(runtime_kind,revision,configuration_json,updated_at) VALUES ('pi',7,?,datetime('now'))").run('{"programPath":42}')
       seed.close()
       await seedHistoricalFaults(native.pid)
+      if (optionalFaults) await seedOptionalFaults()
       core = startCore()
       const openedAt = Date.now()
       assert.ok((await snapshot()).agentRuns.some(run => run.id === first.id))
@@ -205,6 +209,28 @@ try {
         'new work never manufactures a historical cleanup ACK')
     }
     let historicalResourceCleanup = null
+    if (optionalFaults) {
+      const broken = await core.request('runtime.startup.get', { runtimeKind: 'pi' })
+      assert.ok(broken.configuration.configurationError)
+      assert.equal(database.prepare("SELECT configuration_json FROM runtime_startup_setting WHERE runtime_kind='pi'").get().configuration_json, '{"programPath":42}')
+      const sent = await core.request('thread.messages.send', { commandId: crypto.randomUUID(), threadId,
+        content: composerDocumentForAddress({ mode: 'default' }, 'Complete a new task with optional faults still present.'), sourceAttachments: [], quotes: [],
+        replyToThreadMessageId: null, execution: { taskId: null, purpose: 'Combined optional faults', completionRole: 'required' } })
+      assert.equal(sent.commandResult.status, 'accepted', JSON.stringify(sent))
+      const third = await until(async () => (await snapshot()).agentRuns.find(run => run.id !== first.id && run.id !== second.id && run.status === 'succeeded'), 'ordinary task under combined faults')
+      const manifest = (await snapshot()).contextManifests.find(item => item.agentRunId === third.id)
+      assert.equal(manifest.mcpExposure.configStatus, 'invalid')
+      assert.ok(manifest.mcpExposure.warnings.includes('mcp.config_unreadable'))
+      const repairedProgram = join(fixture, 'pi-fixture')
+      await writeFile(repairedProgram, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(join(root, 'scripts/fixtures/missing-completion-acp-runtime.mjs'))} --fixture-pi --fixture-journal ${quote(join(fixture, 'pi-prompts.jsonl'))} "$@"\n`, { mode: 0o700 })
+      await core.request('runtime.startup.save', { runtimeKind: 'pi', expectedRevision: broken.revision,
+        edits: [{ path: ['programPath'], before: null, after: repairedProgram, label: 'program' }] })
+      assert.equal((await core.request('runtime.startup.get', { runtimeKind: 'pi' })).configuration.configurationError, undefined)
+      await core.request('runtime.discovery.rescan', { interactiveShell: false })
+      await core.request('runtime.product.check', { runtimeKind: 'pi' })
+      await until(async () => (await core.request('runtime.installations.list')).find(item => item.adapterKind === 'pi' && item.snapshot?.probeStatus === 'ready'), 'repaired Runtime in the same Core')
+      assert.equal(await readFile(join(data, 'managed-blobs/tmp', 'candidate-data-current-writer'), 'utf8'), 'new file must survive maintenance')
+    }
     if (historicalMission) {
       const mission = await core.request('missions.get', { missionId })
       assert.equal(mission.cleanupAvailable, true, 'historical missing ACK must not hide the cleanup entry')
@@ -222,7 +248,7 @@ try {
       await until(() => database.prepare("SELECT 1 FROM camp_attachment_view_operation WHERE command_id=? AND kind='camp_delete_cleanup' AND status='completed'").get(deletionId), 'historical Thread managed-resource cleanup')
       historicalResourceCleanup = { missionEntryAvailable: true, worktreeRemoved: true, branchRemoved: true, oldAckMissingBeforeDeletion: true, threadDeletionCompleted: true }
     }
-    const report = { passed: true, adapterKind, unexpectedExit, stopDuringLaunch, historicalResourceCleanup, sourceStatus: oldState.status, successorStatus: second.status,
+    const report = { passed: true, adapterKind, unexpectedExit, stopDuringLaunch, optionalFaults, historicalResourceCleanup, sourceStatus: oldState.status, successorStatus: second.status,
       cleanupAcknowledged: !historicalStartup, cleanupMs, appRestarted: historicalStartup,
       databaseModifiedByTest: historicalStartup, historicalFaultFilesRetained: retainedHistoricalFiles.length,
       historicalOpenMs, cleanup: historicalStartup ? core.stderr().split('\n').find(line => line.includes('stage=historical_process_cleanup')) : null }
@@ -289,6 +315,32 @@ async function seedHistoricalFaults(oldPid) {
     await Promise.all(Array.from({ length: 128 }, (_, i) =>
       writeFile(join(owners, `bulk-${offset + i}.json`), '{', { mode: 0o600 })))
   }
+}
+
+async function seedOptionalFaults() {
+  const filesRoot = runtimeCampFilesRootForDataDirectory(data, { homeDirectory: home })
+  const unreadable = join(filesRoot, 'camps/unknown/unreadable')
+  await chmod(join(filesRoot, 'camps'), 0o700).catch(error => { if (error.code !== 'ENOENT') throw error })
+  await mkdir(unreadable, { recursive: true, mode: 0o700 })
+  const retained = [
+    [join(filesRoot, '.runtime-camp-files-root.json'), '{"schemaVersion":1,"oldIdentity":"retained"}'],
+    [join(filesRoot, 'camps/unknown/bad-entry'), 'unrelated original file'],
+    [join(data, 'managed-blobs/tmp', `candidate-intent-${crypto.randomUUID()}.json`), '{broken'],
+    [join(data, 'managed-blobs/tmp', 'candidate-data-current-writer'), 'new file must survive maintenance'],
+    [join(data, 'runtime-private/claude-inputs', `${crypto.randomUUID()}.txt`), 'old Claude input'],
+    [join(data, 'runtime/copilot-cli/external-mcp', 'copilot-mcp-stale.json'), 'old MCP input']
+  ]
+  for (const [path, bytes] of retained) {
+    await mkdir(resolve(path, '..'), { recursive: true, mode: 0o700 })
+    await writeFile(path, bytes, { mode: 0o600 })
+    retainedHistoricalFiles.push([path, bytes])
+  }
+  await chmod(unreadable, 0)
+  await chmod(join(filesRoot, 'camps'), 0o100)
+  restoreHistoricalDirectories.push(unreadable)
+  await writeFile(join(data, 'mcp.json'), '{original unreadable MCP config', { mode: 0o600 })
+  await chmod(join(data, 'mcp.json'), 0)
+  if (process.platform === 'darwin') execFileSync('/usr/bin/chflags', ['uchg', retained.at(-1)[0]])
 }
 
 async function until(read, description) {

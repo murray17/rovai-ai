@@ -142,6 +142,7 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
         rawReference: string(input.rawReference)
       }
     case 'camp_workspace':
+    case 'project_file':
       return {
         kind: input.kind,
         threadId: threadId(input.threadId),
@@ -299,4 +300,11 @@ export function parseRetentionState(value: unknown): FilePreviewRetentionState {
         busy: item.busy, recoverable: item.recoverable }
     })
   }
+}
+
+export function parseSaveTextRequest(value: unknown): import('@contracts').SaveTextFileRequest {
+  const input = record(value)
+  const access = parseGenerationRequest(value)
+  if (typeof input.text !== 'string' || Buffer.byteLength(input.text, 'utf8') > 2 * 1024 * 1024) throw new Error('File exceeds edit limit')
+  return { ...access, text: input.text, expectedVersion: string(input.expectedVersion, 128) }
 }

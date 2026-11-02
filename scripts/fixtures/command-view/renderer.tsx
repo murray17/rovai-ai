@@ -27,8 +27,27 @@ const progress = buildLiveExecutionProgress(evidence.map(item => ({ ...item, cre
 const items = progress.items.filter(item => item.kind === 'tool')
 const reads: string[] = []
 let fail = true
+let agentRevision = 0
+let showAgent = false
+const pendingAgentReads = new Map<number, () => void>()
+const agentInput = JSON.stringify({ description: '读取文件并返回报告', prompt: 'Read fixture.txt', run_in_background: false }, null, 2)
+const agentOutput = (revision: number): string => Array.from({ length: 80 }, (_, i) => `report line ${i}`).join('\n') + `\nREPORT_REVISION_${revision}`
+function agentEvidence(): AgentRunExecutionEvidenceView {
+  return { ...evidence[0], id: 'agent-evidence', eventType: 'runtime.action', kind: 'tool_result',
+    revision: agentRevision, changeSequence: agentRevision, canonical: {
+      ...canonical('agent-call', false), classifierVersion: 'activity-v5', sourceAuthority: 'runtime',
+      credibility: 'runtime_structured', semanticKind: 'tool.agent', toolName: 'Agent', presentationHint: 'Agent', revision: agentRevision
+    }, payload: { toolName: 'Agent', kind: 'other', status: 'completed', input: agentInput,
+      ...(agentRevision === 0 ? { output: agentOutput(0) } : {}) } }
+}
 window.rovai = {
   request: async (method: string, params: { evidenceId: string }) => {
+    if (method === 'agentRunEvidence.getContent' && params.evidenceId === 'agent-evidence') {
+      const revision = agentRevision
+      reads.push(`${params.evidenceId}:${revision}`)
+      if (revision === 1 || revision === 2) await new Promise<void>(resolve => pendingAgentReads.set(revision, resolve))
+      return { payload: { ...agentEvidence().payload as object, output: agentOutput(revision) } }
+    }
     if (method !== 'agentRunEvidence.getContent' || params.evidenceId !== 'shell-evidence') throw new Error('Wrong evidence source')
     reads.push(params.evidenceId)
     if (fail) { fail = false; throw new Error('fixture read failure') }
@@ -38,12 +57,22 @@ window.rovai = {
 const root = createRoot(document.getElementById('root')!)
 function render(theme = 'day'): void {
   document.documentElement.dataset.theme = theme
+  const displayedEvidence = showAgent ? [agentEvidence()] : evidence
+  const displayedItems = showAgent
+    ? buildLiveExecutionProgress(displayedEvidence.map(item => ({ ...item, createdAt: item.occurredAt })), 'fixture-run', { includePublicResults: false }).items.filter(item => item.kind === 'tool')
+    : items
   root.render(<main style={{ padding: 24, maxWidth: 760, margin: 'auto' }}>
     <p>模拟数据 · Command View 隔离验收</p>
-    <ToolActivityGroup threadId="fixture-camp" runId="fixture-run" runStatus="succeeded"
-      liveTail={false} cancelling={false} items={items} completeEvidence={selectCompleteExecutionEvidence(evidence)}
+    <ToolActivityGroup key={showAgent ? 'agent' : 'shell'} threadId="fixture-camp" runId="fixture-run" runStatus="succeeded"
+      liveTail={false} cancelling={false} items={displayedItems}
+      completeEvidence={selectCompleteExecutionEvidence(showAgent && agentRevision === 0 ? [] : displayedEvidence)}
       onFileOpenError={message => { throw new Error(message) }} />
   </main>)
 }
-Object.assign(window, { commandViewFixture: { expected, reads, render } })
+Object.assign(window, { commandViewFixture: { expected, reads, render,
+  showAgent: () => { showAgent = true; render() },
+  updateAgent: (revision: number) => { agentRevision = revision; render() },
+  pendingAgentReads,
+  agentExpected: (revision: number) => `${agentInput}\n${agentOutput(revision)}`
+} })
 render()

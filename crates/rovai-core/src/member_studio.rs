@@ -140,9 +140,15 @@ pub fn create_member(
     authenticated_run: &AuthenticatedTeamToolRun,
     input: MemberCreateInput,
 ) -> Result<MemberCreateOutcome> {
-    create_member_with_avatar_bytes(database,data_dir,authenticated_run,input,None)
+    create_member_with_avatar_bytes(database, data_dir, authenticated_run, input, None)
 }
-pub fn create_member_with_avatar_bytes(database:&mut Database,data_dir:&Path,authenticated_run:&AuthenticatedTeamToolRun,input:MemberCreateInput,avatar_bytes:Option<&[u8]>)->Result<MemberCreateOutcome> {
+pub fn create_member_with_avatar_bytes(
+    database: &mut Database,
+    data_dir: &Path,
+    authenticated_run: &AuthenticatedTeamToolRun,
+    input: MemberCreateInput,
+    avatar_bytes: Option<&[u8]>,
+) -> Result<MemberCreateOutcome> {
     require_direct_user_trigger(database, authenticated_run)?;
     let creation_id = Uuid::parse_str(&input.creation_key)
         .ok()
@@ -172,7 +178,14 @@ pub fn create_member_with_avatar_bytes(database:&mut Database,data_dir:&Path,aut
         .avatar_file
         .as_deref()
         .map(Path::new)
-        .map(|path| match avatar_bytes {Some(bytes)=>crate::member_avatar::import_managed_member_avatar_bytes(data_dir,creation_id,bytes),None=>import_managed_member_avatar(data_dir, creation_id, path)})
+        .map(|path| match avatar_bytes {
+            Some(bytes) => crate::member_avatar::import_managed_member_avatar_bytes(
+                data_dir,
+                creation_id,
+                bytes,
+            ),
+            None => import_managed_member_avatar(data_dir, creation_id, path),
+        })
         .transpose()
         .map_err(map_avatar_error)?
         .map(|summary| summary.avatar_ref);

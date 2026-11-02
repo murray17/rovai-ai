@@ -11,7 +11,7 @@ const CROCKFORD: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
 pub const CAMP_ID_PATTERN: &str = "^rvcamp_[0-7][0123456789abcdefghjkmnpqrstvwxyz]{25}$";
 
-/// The sole durable and public identity of a Rovai Camp.
+/// The sole durable and public identity of a Rovai Thread.
 ///
 /// `ThreadId` accepts only canonical lower-case TypeID spelling whose 128-bit
 /// payload is an RFC-compatible UUIDv7. A parsed value is therefore safe to
@@ -32,7 +32,7 @@ impl ThreadIdParseError {
 
 impl fmt::Display for ThreadIdParseError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "invalid Camp ID: {}", self.reason)
+        write!(formatter, "invalid Thread ID: {}", self.reason)
     }
 }
 
@@ -151,7 +151,7 @@ fn encode_uuid(uuid: Uuid) -> String {
     }
     debug_assert_eq!(value, 0);
     std::str::from_utf8(&suffix)
-        .expect("Camp ID alphabet is ASCII")
+        .expect("Thread ID alphabet is ASCII")
         .to_owned()
 }
 

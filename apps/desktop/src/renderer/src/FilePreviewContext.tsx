@@ -1,9 +1,11 @@
+import { FileEditContext, FileEditDialogs } from './FileEditContext'
 import { uiAttribute } from './interface-language'
 import { memo, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { FilePreviewApi, ResolvedTheme } from '@contracts'
 import { desktopFilePreviewApi } from './desktop-file-preview-api'
 import { FilePreviewLayoutProvider, useOptionalFilePreviewLayout } from './FilePreviewLayout'
+import { ProjectFilesProvider } from './ProjectFilesContext'
 import { FileFindProvider } from './FilePreviewFind'
 import { FilePreviewResources } from './file-preview-resources'
 import { FilePreviewPaneContent } from './FilePreviewPane'
@@ -56,11 +58,13 @@ function PreviewDeck({ resources, anchor, resolvedTheme, missionActivity, regist
     const measure = (): void => {
       const bounds = anchor.getBoundingClientRect()
       if (!bounds.width || !bounds.height || !anchor.clientWidth) return
-      const scale = bounds.width / anchor.clientWidth
+      const container = workspace ?? anchor
+      const containerBounds = container.getBoundingClientRect()
+      const scale = containerBounds.width / container.clientWidth
       // The right edge stays fixed while the split moves. Width already belongs
       // to the layout context; measuring it into state would add a second commit
       // and forced layout to every drag frame.
-      const rect = { right: bounds.right / scale, top: bounds.top / scale, height: bounds.height / scale,
+      const rect = { right: containerBounds.right / scale, top: bounds.top / scale, height: bounds.height / scale,
         fallbackWidth: workspace ? 0 : bounds.width / scale }
       setBounds(previous => previous?.right === rect.right && previous.top === rect.top
         && previous.height === rect.height && previous.fallbackWidth === rect.fallbackWidth ? previous : rect)
@@ -74,9 +78,10 @@ function PreviewDeck({ resources, anchor, resolvedTheme, missionActivity, regist
     return () => { observer.disconnect(); window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true) }
   }, [anchor, workspace])
   // The split context updates before a ResizeObserver delivery on a window resize.
-  const width = workspace && layout ? ((layout.compact || layout.expanded) ? layout.availableWidth : Math.round(layout.width)) : bounds?.fallbackWidth ?? 0
+  const fullWidth = workspace && layout ? ((layout.compact || layout.expanded) ? layout.availableWidth : Math.round(layout.width)) : bounds?.fallbackWidth ?? 0
+  const width = fullWidth - (workspace && layout ? layout.directoryReservedWidth : 0)
   const positioned = bounds && {
-    top: bounds.top, height: bounds.height, width, left: bounds.right - width
+    top: bounds.top, height: bounds.height, width, left: bounds.right - fullWidth
   }
   return <>{[...resources.sessions.values()].map(session => <RetainedPreview key={session.id} session={session}
     resolvedTheme={resolvedTheme} current={resources.isCurrent(session.threadId)} bounds={positioned} resizing={!!layout?.resizing}
@@ -114,11 +119,17 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
   useLayoutEffect(() => { resources.activate(threadId) }, [resources, threadId])
   useEffect(() => {
     const release = resources.retainOwner()
-    const dispose = (): void => resources.dispose()
-    window.addEventListener('beforeunload', dispose)
-    return () => { window.removeEventListener('beforeunload', dispose); release() }
+    const beforeUnload = (event: BeforeUnloadEvent): void => {
+      if (resources.edits.shouldWarnOnUnload()) { event.preventDefault(); event.returnValue = '' }
+    }
+    const online = (): void => { for (const doc of resources.edits.documents.values()) if (doc.unknown) void resources.edits.reconcile(doc) }
+    const unsubscribeConnection = api.onConnectionRestored?.(online)
+    window.addEventListener('beforeunload', beforeUnload)
+    window.addEventListener('online', online)
+    return () => { window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('online', online); unsubscribeConnection?.(); release() }
   }, [resources])
-  return <FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
+  return <FileEditContext.Provider value={resources.edits}><FilePreviewApiContext.Provider value={api}><FilePreviewContext.Provider value={value}>
+    <ProjectFilesProvider api={api.projectFiles} threadId={threadId} preview={value} onConnectionRestored={api.onConnectionRestored}>
     <FilePreviewLayoutProvider threadId={threadId} visible={!!threadId && value.paneVisible} activityMode={value.activeTab?.kind === 'mission_activity'}>
       <FileFindProvider activeTabId={value.activeTabId} visible={!!threadId && value.paneVisible}>
         <ExecutionPreviewHostContext.Provider value={executionHosts}>
@@ -128,7 +139,9 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
         </ExecutionPreviewHostContext.Provider>
       </FileFindProvider>
     </FilePreviewLayoutProvider>
-  </FilePreviewContext.Provider></FilePreviewApiContext.Provider>
+    </ProjectFilesProvider>
+    <FileEditDialogs />
+  </FilePreviewContext.Provider></FilePreviewApiContext.Provider></FileEditContext.Provider>
 }
 
 export function useFilePreview(): FilePreviewContextValue {

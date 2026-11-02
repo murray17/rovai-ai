@@ -77,6 +77,13 @@ export function runtimeAvailabilityPresentation(
       ? presentation('checking')
       : presentation('unknown', uiAttribute('尚未检测到可执行入口。'))
   }
+  if (availability.diagnosticCode === 'runtime_startup_configuration_invalid') {
+    return {
+      status: 'unavailable',
+      label: uiAttribute('配置异常'),
+      detail: uiAttribute('启动设置已损坏，请重新选择程序或恢复自动检测后保存。')
+    }
+  }
 
   switch (availability.status) {
     case 'detecting':

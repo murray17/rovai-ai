@@ -120,9 +120,9 @@ AgentRun projector 在既有 Evidence 遍历中收集同 Run/epoch 来源，归�
 
 ### Read Side 与 Renderer
 
-- Camp open 投影每个 Run 的卡片摘要；Renderer 将卡片锚定到来源 Run 的最后一条公开消息，没有公开消息时才按
+- Thread open 投影每个 Run 的卡片摘要；Renderer 将卡片锚定到来源 Run 的最后一条公开消息，没有公开消息时才按
   `completedAt` 排序。并行 Run 不合并，后完成的 Run 不覆盖先前卡片，也不会被摆到其他 Run 的消息之后；
-- detail RPC 必须同时匹配 `campId + agentRunId + executionEpoch`，不能仅凭 Run ID 或 Managed Blob ID 读取；
+- detail RPC 必须同时匹配 `threadId + agentRunId + executionEpoch`，不能仅凭 Run ID 或 Managed Blob ID 读取；
 - Renderer 卡片默认只显示三行；header 的 `View` 与文件行进入同一独立 Review，文件行预选对应路径。Review
   完整净差异显示 unified diff；exact mutation 显示没有虚假 hunk/行号的片段块；operation history 保留全部
   operation 的时序、计数和原始序号，但不为 operation-only 记录渲染空白占位块；operation-only 文件显示诚实空态；
@@ -193,20 +193,22 @@ read/write/edit 的唯一原生路径可补齐相对 location；共享 normalize
 
 ## 故障边界
 
+临时 Blob intent 恢复不再决定 Core ready。逐条解析与枚举在锁外且有条数、时间、诊断预算；短锁只做引用复核、状态提交和原子交接。周期 GC 在删除前再次复核全部引用及候选状态，选中后重新挂接的 Blob 必须保留；实际删除在锁外。坏记录、无法证明归属或删除失败均保留并继续其他条目，不新建恢复账本。文件变化补投影使用有界候选与逐 Run 短锁，继续发送既有完成通知。
+
 - 文件变化是附加观察能力；Evidence 归一化、投影或 detail blob 失败不能反向改变 Run 终态；
 - 失败只记录安全诊断并允许启动恢复重试，不扫描文件系统补偿；
 - 当前 detail Managed Blob 由 projection row 作为 GC root。重算替换的旧 detail 按解除引用时间进入封闭
-  `file_change_projection` GC candidate；宽限后复核全部 Managed Blob 外键和在途读取再删除。Camp 删除仍遵循
+  `file_change_projection` GC candidate；宽限后复核全部 Managed Blob 外键和在途读取再删除。Thread 删除仍遵循
   既有 Run/Evidence/Blob 引用闭包，历史无标记 Blob 不因本增量扫描；
 - `ROVAI_RUN_TMP` 是可重置的临时交付区；通过 `rovai send --file` 成功发布后的 Managed Attachment 属于独立资源
   合同，临时源路径不因此成为文件变化；
-- 文件变化 Evidence 不进入模型上下文、Runtime Bootstrap、Camp public message 或 Agent built-in 读取面。
+- 文件变化 Evidence 不进入模型上下文、Runtime Bootstrap、Thread public message 或 Agent built-in 读取面。
 
 ## 相关规范
 
 - [Runtime File Change Observation v9](../contracts/runtime-file-change-observation-v9.md)
 - [Execution Evidence 与 Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)
-- [Camp 会话工作区](../ui/components/conversation-workspace.md)
+- [Thread 会话工作区](../ui/components/conversation-workspace.md)
 - [v1.29 决定](../versions/v1.29/decisions.md#v1-29-d08)
 - [V1.29-D13 managed output exclusion](../versions/v1.29/decisions.md#v1-29-d13)
 

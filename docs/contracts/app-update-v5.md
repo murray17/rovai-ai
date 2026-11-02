@@ -45,4 +45,4 @@ headings and the original release text remain unchanged. Both sources continue t
 ## References
 
 - [Desktop App Updates architecture](../architecture/desktop-app-updates.md)
-- [Settings workspace surface brief](../../apps/desktop/.impeccable/surfaces/settings-workspace.md#关于与更新)
+- [Settings workspace surface brief](../ui/surfaces/settings-workspace.md#关于与更新)

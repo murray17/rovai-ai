@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { directExecWrapper, nativeCommandCorePayload, nativeOutputProjection, extractNativeWitnesses } from './qualification-native-witness.mjs'
+import { directExecWrapper, nativeCommandCorePayload, nativeOutputProjection, extractNativeWitnesses, CURRENT_WITNESS_POLICY } from './qualification-native-witness.mjs'
 import { supplementEvaluationContext } from './qualification-evaluation-context.mjs'
 import { digestJson } from './qualification-common.mjs'
 
@@ -95,4 +95,72 @@ test('v4 derives scoped ordering from Core events without inventing whole-host c
   assert.equal(order.eventSequence,4);assert.equal(order.earlierCommandCompletions,0);assert.equal(order.earlierFileChangeEvents,0)
   assert.equal(order.scope,'captured_events_within_same_run_and_epoch_only')
   assert.equal(JSON.stringify(order).includes('private-run'),false)
+})
+
+test('current native capture binds an omitted workdir and distinguishes witnessed empty output from missing output', () => {
+  const f = fixture()
+  f.item.command = 'git diff --check && git diff --exit-code -- protected.txt'
+  f.item.aggregatedOutput = null
+  f.core.payloadDigest = digestJson(nativeCommandCorePayload(f.item))
+  f.rows[0].payload.input = `text(await tools.exec_command({cmd:${JSON.stringify(f.item.command)}}));`
+  f.rows[1].payload.item.command = ['sh', '-c', f.item.command]
+  f.rows[2].payload.output[1].text = JSON.stringify({ output: '', exit_code: 0 })
+  const extract = () => extractNativeWitnesses(f.rows, [f.item], [f.core], f.workspace, [], CURRENT_WITNESS_POLICY)
+  assert.equal(extract()[0].projection.output, '')
+  assert.equal(extractNativeWitnesses(f.rows, [f.item], [f.core], f.workspace).length, 0, 'legacy capture stays unchanged')
+  assert.equal(directExecWrapper(`text((await tools.exec_command({cmd:'git status --short'})).output)`, { defaultWorkdir: f.workspace }).mode, 'text')
+  f.rows[2].payload.output[1].text = JSON.stringify({ output: null, exit_code: 0 })
+  assert.equal(extract().length, 0)
+  f.rows[2].payload.output[1].text = JSON.stringify({ output: '', exit_code: 1 })
+  assert.equal(extract().length, 0)
+  f.rows[2].payload.output[1].text = JSON.stringify({ output: '', exit_code: 0 })
+  f.item.cwd = '/foreign'
+  assert.equal(extract().length, 0)
+})
+
+test('current receipt projections exclude process text and require an output witness for a separated send suffix', () => {
+  const receipt = JSON.stringify({agentAddressingMode:'public_only',deliveryIds:[],effectiveRecipients:[],messageId:'message-1'})
+  const command = "python3 verify.py\nrovai send --public-only --body 'Done.'"
+  const output = `CHECK_OK\n${receipt}\n`
+  const project = (cmd = command, out = output) => nativeOutputProjection(cmd, out, out, CURRENT_WITNESS_POLICY)
+  const separated = project()
+  assert.equal(separated.command, 'python3 verify.py')
+  assert.equal(separated.output, 'CHECK_OK\n')
+  assert.equal(separated.requiresOutputWitness, true)
+  assert.doesNotMatch(JSON.stringify(separated), /message-1|Done\./)
+  const masked = project("git diff --check; git diff --stat; git status --short; rovai send --public-only --body 'Done.'", ` M source.mjs\n${receipt}\n`)
+  assert.equal(masked.command, 'git diff --check; git diff --stat; git status --short')
+  assert.equal(masked.output, ' M source.mjs\n')
+  assert.equal(masked.requiresOutputWitness, true, 'silent intermediate check success is not inferred from the later send')
+  assert.equal(nativeOutputProjection(command, output, output, 'bound-native-command-witness-v2'), null)
+  assert.equal(project(command, `CHECK_OK\n${receipt}\nextra`), null)
+  assert.equal(project(command + '; true'), null)
+  assert.equal(project(command, `${receipt}\n`), null)
+  assert.equal(project("python3 verify.py\nrovai send --to agent_2 --body 'Done.'"), null)
+  const redacted = project("python3 - <<'PY'\nreport={'agentId':'agent_2'}\nprint('CHECK_OK')\nPY", 'CHECK_OK\n')
+  assert.equal(redacted.commandRedacted, true)
+  assert.equal(redacted.requiresOutputWitness, true)
+  assert.doesNotMatch(JSON.stringify(redacted), /agent_2/)
+  assert.equal(project('node verify.mjs', 'agent_2 says CHECK_OK'), null)
+  assert.equal(project("python3 -c \"print('agent_2')\"", ''), null)
+})
+
+test('current lifecycle command projection binds terminal events and rejects changed argv, output and identity', () => {
+  const f = fixture(), command = 'git diff --check'
+  Object.assign(f.item, { command: `/bin/zsh -c '${command}'`, aggregatedOutput: null })
+  f.core.payloadDigest = digestJson(nativeCommandCorePayload(f.item, CURRENT_WITNESS_POLICY))
+  const event = f.rows[1]
+  Object.assign(event.payload.item, { command: ['/bin/zsh', '-c', command], aggregated_output: '' })
+  const extract = () => extractNativeWitnesses([event], [f.item], [f.core], f.workspace, [], CURRENT_WITNESS_POLICY)
+  assert.equal(extract()[0].sourceKind, 'native_terminal_command')
+  const snapshot = {executionEvidence:[f.core],evaluationContext:{policyId:'bounded-evaluation-context-v1',receipts:[],omitted:[],tasks:[],deliveryMessageIds:[]}}
+  assert.equal(JSON.parse(supplementEvaluationContext(snapshot,{state:'captured',records:extract()},[],'f'.repeat(64)).receipts[0].content).output, '')
+  event.payload.item.command[2] = 'false'
+  assert.equal(extract().length, 0)
+  event.payload.item.command[2] = command
+  event.payload.item.aggregated_output = 'FAKE_PASS'
+  assert.equal(extract().length, 0)
+  event.payload.item.aggregated_output = ''
+  event.payload.item.id = 'foreign'
+  assert.equal(extract().length, 0)
 })

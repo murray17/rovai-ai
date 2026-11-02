@@ -1282,7 +1282,7 @@ describe('FilePreviewService', () => {
       pathPresentation: 'external', fileName: 'design.md'
     } } })
     if (!child.ok || child.value.kind !== 'file_preview') return
-    expect(child.value.file).not.toHaveProperty('restoreRequest')
+    expect(child.value.file.restoreRequest).toEqual({ kind: 'camp_workspace', threadId: 'camp-1', rawReference: await realpath(join(outside, 'guides/design.md')) })
     expect(await service.readText(1, {
       handleId: child.value.file.handleId,
       expectedGeneration: child.value.file.contentGeneration

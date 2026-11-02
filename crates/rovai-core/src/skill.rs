@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Component, Path, PathBuf},
     process::Command,
@@ -1095,7 +1095,6 @@ impl SkillLibraryService {
         database: &Database,
         selected_path: &Path,
     ) -> Result<SkillImportInspection> {
-        self.cleanup_expired_staging()?;
         let selected_path = selected_path.canonicalize().with_context(|| {
             format!(
                 "Skill import path does not exist: {}",
@@ -2170,90 +2169,6 @@ impl SkillLibraryService {
             .into_iter()
             .find(|skill| skill.name == name)
             .with_context(|| format!("bundled Skill {name} was not installed"))
-    }
-
-    pub fn cleanup_expired_staging(&self) -> Result<()> {
-        let staging_root = self.root.join(".staging");
-        if !staging_root.exists() {
-            return Ok(());
-        }
-        for entry in fs::read_dir(&staging_root)? {
-            let entry = entry?;
-            let metadata = fs::symlink_metadata(entry.path())?;
-            if !metadata.file_type().is_dir() {
-                continue;
-            }
-            let manifest_path = entry.path().join("inspection.json");
-            let expired = if manifest_path.is_file() {
-                fs::read(&manifest_path)
-                    .ok()
-                    .and_then(|bytes| serde_json::from_slice::<StagingManifest>(&bytes).ok())
-                    .and_then(|manifest| {
-                        DateTime::parse_from_rfc3339(&manifest.expires_at)
-                            .ok()
-                            .map(|value| value.with_timezone(&Utc) <= Utc::now())
-                    })
-                    .unwrap_or(true)
-            } else {
-                metadata
-                    .modified()
-                    .ok()
-                    .and_then(|modified| modified.elapsed().ok())
-                    .is_none_or(|age| age >= STAGING_TTL)
-            };
-            if expired {
-                remove_directory_if_present(&entry.path())?;
-            }
-        }
-        Ok(())
-    }
-
-    pub fn cleanup_orphan_revisions(&self, database: &Database) -> Result<usize> {
-        let managed_revisions = {
-            let mut statement = database
-                .connection()
-                .prepare("SELECT skill_id, id FROM skill_revision")?;
-            statement
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })?
-                .collect::<rusqlite::Result<HashSet<_>>>()?
-        };
-        let mut removed = 0;
-        let revisions_root = self.root.join("revisions");
-        let skill_entries = match fs::read_dir(&revisions_root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-            Err(error) => return Err(error.into()),
-        };
-        for skill_entry in skill_entries {
-            let skill_entry = skill_entry?;
-            let skill_metadata = fs::symlink_metadata(skill_entry.path())?;
-            if !skill_metadata.file_type().is_dir() {
-                continue;
-            }
-            let skill_id = skill_entry.file_name().to_string_lossy().to_string();
-            if Uuid::parse_str(&skill_id).is_err() {
-                continue;
-            }
-            for revision_entry in fs::read_dir(skill_entry.path())? {
-                let revision_entry = revision_entry?;
-                let revision_metadata = fs::symlink_metadata(revision_entry.path())?;
-                if !revision_metadata.file_type().is_dir() {
-                    continue;
-                }
-                let revision_id = revision_entry.file_name().to_string_lossy().to_string();
-                if Uuid::parse_str(&revision_id).is_err()
-                    || managed_revisions.contains(&(skill_id.clone(), revision_id))
-                {
-                    continue;
-                }
-                remove_directory_if_present(&revision_entry.path())?;
-                removed += 1;
-            }
-            let _ = fs::remove_dir(skill_entry.path());
-        }
-        Ok(removed)
     }
 
     pub(crate) fn verify_revision_content(&self, revision: &SkillRevisionView) -> Result<()> {
@@ -5364,33 +5279,6 @@ mod slow_tests {
         assert_eq!(result.result.code, "official_skill_name_conflict");
         remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&source).unwrap();
-        remove_directory_if_present(&data).unwrap();
-    }
-
-    #[test]
-    fn startup_gc_skips_missing_tree_and_removes_only_uuid_shaped_orphans() {
-        let root = temporary_directory("rovai-skill-library");
-        let data = temporary_directory("rovai-skill-db");
-        let database = Database::open(&data).unwrap();
-        let service = SkillLibraryService::new(root.clone()).unwrap();
-        let orphan_skill_id = Uuid::new_v4().to_string();
-        let orphan_revision_id = Uuid::new_v4().to_string();
-        let orphan = root
-            .join("revisions")
-            .join(&orphan_skill_id)
-            .join(&orphan_revision_id);
-        fs::create_dir_all(&orphan).unwrap();
-        fs::write(orphan.join("SKILL.md"), "orphan").unwrap();
-        let unmanaged = root.join("revisions").join("notes").join("keep-me");
-        fs::create_dir_all(&unmanaged).unwrap();
-
-        assert_eq!(service.cleanup_orphan_revisions(&database).unwrap(), 1);
-        assert!(!orphan.exists());
-        assert!(unmanaged.exists());
-        remove_directory_if_present(&root.join("revisions")).unwrap();
-        assert_eq!(service.cleanup_orphan_revisions(&database).unwrap(), 0);
-        assert!(!root.join("revisions").exists());
-        remove_directory_if_present(&root).unwrap();
         remove_directory_if_present(&data).unwrap();
     }
 }

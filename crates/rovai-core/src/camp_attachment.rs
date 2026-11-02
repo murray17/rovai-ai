@@ -280,15 +280,21 @@ pub struct AttachmentPreviewCandidate {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DesktopAttachmentOpenCandidate {
-    attachment_id: String,
+    pub(crate) attachment_id: String,
     camp_id: String,
-    display_name: String,
-    media_type: String,
+    pub(crate) display_name: String,
+    pub(crate) media_type: String,
     byte_size: u64,
-    content_digest: String,
-    path: PathBuf,
+    pub(crate) content_digest: String,
+    pub(crate) path: PathBuf,
     storage_model: AttachmentStorageModel,
     scope_root: PathBuf,
+}
+
+impl DesktopAttachmentOpenCandidate {
+    pub fn attachment_id(&self) -> &str {
+        &self.attachment_id
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -454,6 +460,43 @@ pub fn legacy_attachment_belongs_to_owner(
         | LocalAttachmentOwnerLocator::SingleChatMessage { .. } => false,
     };
     Ok(belongs)
+}
+
+/// Metadata-only lookup for an already-authorized historical message. Actual
+/// preview/Runtime reads use the candidate verifier outside the database lock.
+pub(crate) fn legacy_attachment_source_path(
+    connection: &Connection,
+    camp_id: &str,
+    attachment_id: &str,
+) -> Result<String> {
+    ThreadId::parse(camp_id)?;
+    validate_managed_attachment_id(attachment_id)?;
+    let (name, path): (String, String) = connection.query_row(
+        "SELECT display_name, storage_path FROM message_attachment WHERE camp_id=?1 AND id=?2",
+        params![camp_id, attachment_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    anyhow::ensure!(
+        normalize_display_name(&name)? == name,
+        "Attachment name is not canonical"
+    );
+    let data_dir = Path::new(
+        connection
+            .path()
+            .context("Attachment database has no file path")?,
+    )
+    .parent()
+    .context("Attachment database has no directory")?;
+    anyhow::ensure!(
+        Path::new(&path)
+            == data_dir
+                .join("camp-attachments")
+                .join(camp_id)
+                .join(attachment_id)
+                .join(name),
+        "Attachment path does not match its managed identity"
+    );
+    Ok(path)
 }
 
 #[derive(Debug, Clone)]
@@ -1992,6 +2035,45 @@ impl ThreadAttachmentStore {
     ) -> Result<DesktopAttachmentTarget> {
         let gate = self.authority_ingress_gate(&candidate.camp_id)?;
         let _admission = lock_unpoisoned(&gate);
+        let verified = self.verify_open_candidate(&candidate)?;
+        let open_risk = desktop_attachment_open_risk(
+            &candidate.path,
+            &candidate.display_name,
+            &candidate.media_type,
+            &verified.kind,
+        )?;
+        let attachment_directory = candidate
+            .path
+            .parent()
+            .context("Published Attachment has no managed container")?;
+        set_directory_read_only(attachment_directory)?;
+        Ok(DesktopAttachmentTarget {
+            attachment_id: candidate.attachment_id,
+            display_name: candidate.display_name,
+            kind: verified.kind,
+            media_type: candidate.media_type,
+            path: candidate.path,
+            open_risk,
+            can_show_path: true,
+        })
+    }
+
+    /// Resolve one historical file without mutating its source or touching a View.
+    /// The caller runs this filesystem work outside the Core database mutex.
+    pub fn verify_runtime_read_candidate(
+        &self,
+        candidate: &DesktopAttachmentOpenCandidate,
+    ) -> Result<String> {
+        let gate = self.authority_ingress_gate(&candidate.camp_id)?;
+        let _admission = lock_unpoisoned(&gate);
+        self.verify_open_candidate(candidate)?;
+        Ok(candidate.path.to_string_lossy().into_owned())
+    }
+
+    fn verify_open_candidate(
+        &self,
+        candidate: &DesktopAttachmentOpenCandidate,
+    ) -> Result<RuntimeAttachmentCopyReceipt> {
         let normalized_name = normalize_display_name(&candidate.display_name)?;
         if normalized_name != candidate.display_name {
             anyhow::bail!("Published Attachment display name is not canonical");
@@ -2037,26 +2119,7 @@ impl ThreadAttachmentStore {
         if (verified.kind == "directory") != expected_directory {
             anyhow::bail!("Published Attachment kind does not match its persisted media type");
         }
-        let open_risk = desktop_attachment_open_risk(
-            &candidate.path,
-            &candidate.display_name,
-            &candidate.media_type,
-            &verified.kind,
-        )?;
-        let attachment_directory = candidate
-            .path
-            .parent()
-            .context("Published Attachment has no managed container")?;
-        set_directory_read_only(attachment_directory)?;
-        Ok(DesktopAttachmentTarget {
-            attachment_id: candidate.attachment_id,
-            display_name: candidate.display_name,
-            kind: verified.kind,
-            media_type: candidate.media_type,
-            path: candidate.path,
-            open_risk,
-            can_show_path: true,
-        })
+        Ok(verified)
     }
 
     pub(crate) fn copy_verified_authority_attachment_for_runtime(

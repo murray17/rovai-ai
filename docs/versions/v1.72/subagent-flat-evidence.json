@@ -1,0 +1,1727 @@
+{
+  "observedAt": "2026-11-01",
+  "platform": "macos-arm64",
+  "coreAttemptCount": 25,
+  "runtimeCount": 18,
+  "excluded": [
+    "cline-cli",
+    "cursor-agent"
+  ],
+  "comparisonScope": "toolsEqualInOrder/proseEqual compare the current UI path (authoritative evidence plus live updates) with history. nativeAgentAndChildNotificationsEqual additionally checks native agent/explicit child IDs from notifications alone; Core CLI rows also arrive through authoritative reads.",
+  "nativeGrokProbes": [
+    {
+      "mode": "foreground",
+      "wireSha256": "0bdb61afafacf00ee3516a4a22af7a3c5a6f0eef4626fb6f8646d879db483549"
+    },
+    {
+      "mode": "background",
+      "wireSha256": "6546e71adc2dee254b61092b8d6a89d9a00c1863c030fda59f08009628f02358"
+    }
+  ],
+  "campaigns": [
+    {
+      "label": "initial",
+      "build": {
+        "commit": "710912833b0717d33cb35e027c1cac234193fe40",
+        "sourceDiffSha256": "12ce0063bef96414e583b7268811d881e3e4da2291eabaff0b1cc7c3b8e89864",
+        "binarySha256": "782ff3b7fea2da1154edc215cb7f089d93e5a6b7c54a79f53c01d37e2b45bf19"
+      },
+      "cases": [
+        {
+          "id": "antigravity-app-foreground-1",
+          "kind": "antigravity-app",
+          "mode": "foreground",
+          "elapsedMs": 203000,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 33,
+                "liveTools": 33,
+                "notificationOnlyTools": 32,
+                "blockToolCount": 33
+              },
+              "tools": [
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "manage_subagents",
+                  "status": "completed",
+                  "icon": "tool",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "invoke_subagent",
+                  "status": "running",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "run_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 0,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "claude-code-cli-foreground-1",
+          "kind": "claude-code-cli",
+          "mode": "foreground",
+          "elapsedMs": 78526,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 4,
+                "liveTools": 4,
+                "notificationOnlyTools": 4,
+                "blockToolCount": 4
+              },
+              "tools": [
+                {
+                  "tool": "Agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "Read",
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "codebuddy-cli-foreground-1",
+          "kind": "codebuddy-cli",
+          "mode": "foreground",
+          "version": "2.133.1",
+          "elapsedMs": 35220,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 6,
+                "liveTools": 6,
+                "notificationOnlyTools": 5,
+                "blockToolCount": 6
+              },
+              "tools": [
+                {
+                  "tool": "Agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "Read",
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "codex-cli-background-1",
+          "kind": "codex-cli",
+          "mode": "background",
+          "elapsedMs": 132976,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 5,
+                "liveTools": 5,
+                "notificationOnlyTools": 5,
+                "blockToolCount": 5
+              },
+              "tools": [
+                {
+                  "tool": "subAgentActivity",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "wait",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 3,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "command-code-cli-foreground-1",
+          "kind": "command-code-cli",
+          "mode": "foreground",
+          "version": "1.88.0",
+          "elapsedMs": 41609,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 3,
+                "liveTools": 3,
+                "notificationOnlyTools": 3,
+                "blockToolCount": 3
+              },
+              "tools": [
+                {
+                  "tool": "agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 4,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "copilot-cli-background-1",
+          "kind": "copilot-cli",
+          "mode": "background",
+          "elapsedMs": 45359,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 5,
+                "liveTools": 5,
+                "notificationOnlyTools": 4,
+                "blockToolCount": 5
+              },
+              "tools": [
+                {
+                  "tool": "task",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "read_agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "copilot-cli-foreground-1",
+          "kind": "copilot-cli",
+          "mode": "foreground",
+          "elapsedMs": 33301,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 4,
+                "liveTools": 4,
+                "notificationOnlyTools": 3,
+                "blockToolCount": 4
+              },
+              "tools": [
+                {
+                  "tool": "task",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 2,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "copilot-cli-parallel-1",
+          "kind": "copilot-cli",
+          "mode": "parallel",
+          "elapsedMs": 31552,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 8,
+                "liveTools": 8,
+                "notificationOnlyTools": 7,
+                "blockToolCount": 8
+              },
+              "tools": [
+                {
+                  "tool": "task",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "task",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "read_agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "read_agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "deepseek-harness-foreground-1",
+          "kind": "deepseek-harness",
+          "mode": "foreground",
+          "version": "0.2.1-alpha.1",
+          "elapsedMs": 20781,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 6,
+                "liveTools": 6,
+                "notificationOnlyTools": 6,
+                "blockToolCount": 6
+              },
+              "tools": [
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "subagent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "file-write",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "grok-build-foreground-1",
+          "kind": "grok-build",
+          "mode": "foreground",
+          "version": "grok 1.0.70 (f50904eaee6c)",
+          "elapsedMs": 44296,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 3,
+                "liveTools": 3,
+                "notificationOnlyTools": 3,
+                "blockToolCount": 3
+              },
+              "tools": [
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "tool",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "hermes-cli-background-1",
+          "kind": "hermes-cli",
+          "mode": "background",
+          "version": "Hermes Agent v0.22.4 (2026.9.24) · stable · local 4d04303818b6",
+          "elapsedMs": 53148,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 4,
+                "liveTools": 4,
+                "notificationOnlyTools": 4,
+                "blockToolCount": 4
+              },
+              "tools": [
+                {
+                  "tool": "delegate_task",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "failed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 2,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "kimi-code-cli-background-1",
+          "kind": "kimi-code-cli",
+          "mode": "background",
+          "version": "2.3.3",
+          "elapsedMs": 50086,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 6,
+                "liveTools": 6,
+                "notificationOnlyTools": 5,
+                "blockToolCount": 6
+              },
+              "tools": [
+                {
+                  "tool": "Agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "TaskOutput",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 2,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "kiro-cli-foreground-1",
+          "kind": "kiro-cli",
+          "mode": "foreground",
+          "version": "kiro-cli 2.21.1",
+          "elapsedMs": 10250,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "failed",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 0,
+                "liveTools": 0,
+                "notificationOnlyTools": 0,
+                "blockToolCount": 0
+              },
+              "tools": [],
+              "narrationCount": 0,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": [
+            "runtime_launch_failed"
+          ]
+        },
+        {
+          "id": "minimax-code-cli-background-1",
+          "kind": "minimax-code-cli",
+          "mode": "background",
+          "version": "0.6.12",
+          "elapsedMs": 55867,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 5,
+                "liveTools": 5,
+                "notificationOnlyTools": 5,
+                "blockToolCount": 5
+              },
+              "tools": [
+                {
+                  "tool": "task",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "task_output",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 4,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "opencode-cli-foreground-1",
+          "kind": "opencode-cli",
+          "mode": "foreground",
+          "elapsedMs": 33058,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 5,
+                "liveTools": 5,
+                "notificationOnlyTools": 5,
+                "blockToolCount": 5
+              },
+              "tools": [
+                {
+                  "tool": "subagent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "read",
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "shell",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "shell",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "pi-foreground-1",
+          "kind": "pi",
+          "mode": "foreground",
+          "version": "1.1.0",
+          "elapsedMs": 25504,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 2,
+                "liveTools": 2,
+                "notificationOnlyTools": 2,
+                "blockToolCount": 2
+              },
+              "tools": [
+                {
+                  "tool": "bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "qoder-cli-background-1",
+          "kind": "qoder-cli",
+          "mode": "background",
+          "version": "1.1.76",
+          "elapsedMs": 56387,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "failed",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 2,
+                "liveTools": 2,
+                "notificationOnlyTools": 2,
+                "blockToolCount": 2
+              },
+              "tools": [
+                {
+                  "tool": "Agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": [
+            "runtime_missing_final_output"
+          ]
+        },
+        {
+          "id": "qoder-cli-foreground-1",
+          "kind": "qoder-cli",
+          "mode": "foreground",
+          "version": "1.1.76",
+          "elapsedMs": 33629,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 5,
+                "liveTools": 5,
+                "notificationOnlyTools": 4,
+                "blockToolCount": 5
+              },
+              "tools": [
+                {
+                  "tool": "Agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "Read",
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 2,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "qwen-code-background-1",
+          "kind": "qwen-code",
+          "mode": "background",
+          "version": "0.26.1",
+          "elapsedMs": 64974,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 8,
+                "liveTools": 8,
+                "notificationOnlyTools": 7,
+                "blockToolCount": 8
+              },
+              "tools": [
+                {
+                  "tool": "skill",
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "tool_search",
+                  "status": "completed",
+                  "icon": "tool",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "tool_search",
+                  "status": "completed",
+                  "icon": "tool",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_shell_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_shell_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_shell_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 6,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "trae-cn-cli-background-1",
+          "kind": "trae-cn-cli",
+          "mode": "background",
+          "version": "traecli 0.209.1",
+          "elapsedMs": 68216,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 8,
+                "liveTools": 8,
+                "notificationOnlyTools": 7,
+                "blockToolCount": 8
+              },
+              "tools": [
+                {
+                  "tool": "spawn_agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": null,
+                  "status": "failed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "file-write",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": null,
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 4,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "zcode-app-background-1",
+          "kind": "zcode-app",
+          "mode": "background",
+          "version": "0.17.0",
+          "elapsedMs": 70146,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 5,
+                "liveTools": 5,
+                "notificationOnlyTools": 5,
+                "blockToolCount": 5
+              },
+              "tools": [
+                {
+                  "tool": "Agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "TaskOutput",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "Bash",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 3,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        }
+      ]
+    },
+    {
+      "label": "qwen-notice-fix",
+      "build": {
+        "commit": "710912833b0717d33cb35e027c1cac234193fe40",
+        "sourceDiffSha256": "61492a8083101191374bcb55d17c79490b7e70ff2a998390d57dfc2ed9b518dd",
+        "binarySha256": "a7f0b060a0d68b36464cf95f81a18bb9eaadabe89fabe6067714e5090da459f4"
+      },
+      "cases": [
+        {
+          "id": "qoder-cli-background-1",
+          "kind": "qoder-cli",
+          "mode": "background",
+          "elapsedMs": 46412,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "failed",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 1,
+                "liveTools": 1,
+                "notificationOnlyTools": 1,
+                "blockToolCount": 1
+              },
+              "tools": [
+                {
+                  "tool": "Agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": [
+            "runtime_missing_final_output"
+          ]
+        },
+        {
+          "id": "qwen-code-background-1",
+          "kind": "qwen-code",
+          "mode": "background",
+          "version": "0.26.1",
+          "elapsedMs": 61067,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 7,
+                "liveTools": 7,
+                "notificationOnlyTools": 6,
+                "blockToolCount": 7
+              },
+              "tools": [
+                {
+                  "tool": "skill",
+                  "status": "completed",
+                  "icon": "file-read",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "tool_search",
+                  "status": "completed",
+                  "icon": "tool",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "agent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_shell_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_shell_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "run_shell_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": false
+                }
+              ],
+              "narrationCount": 4,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        }
+      ]
+    },
+    {
+      "label": "grok-mapping-fix",
+      "build": {
+        "commit": "710912833b0717d33cb35e027c1cac234193fe40",
+        "sourceDiffSha256": "5e9d8684e001987d045158cfa636b995eb530a7a35b9c18734ded877cfd47619",
+        "binarySha256": "d3f9c92c67b216ccd977307ee4ed86d30abf4ca5881bbf4b979123d14596672a"
+      },
+      "cases": [
+        {
+          "id": "grok-build-background-1",
+          "kind": "grok-build",
+          "mode": "background",
+          "version": "grok 1.0.70 (f50904eaee6c)",
+          "elapsedMs": 66882,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 4,
+                "liveTools": 4,
+                "notificationOnlyTools": 4,
+                "blockToolCount": 4
+              },
+              "tools": [
+                {
+                  "tool": "spawn_subagent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "get_command_or_subagent_output",
+                  "status": "completed",
+                  "icon": "tool",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "run_terminal_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 2,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        },
+        {
+          "id": "grok-build-foreground-1",
+          "kind": "grok-build",
+          "mode": "foreground",
+          "version": "grok 1.0.70 (f50904eaee6c)",
+          "elapsedMs": 46919,
+          "coreStopped": {
+            "code": 0,
+            "signal": null
+          },
+          "runs": [
+            {
+              "status": "succeeded",
+              "checks": {
+                "toolsEqualInOrder": true,
+                "nativeAgentNotificationsEqual": true,
+                "nativeAgentAndChildNotificationsEqual": true,
+                "proseEqual": true,
+                "uniqueToolRows": true,
+                "sequenceMonotonic": true,
+                "historyTools": 3,
+                "liveTools": 3,
+                "notificationOnlyTools": 3,
+                "blockToolCount": 3
+              },
+              "tools": [
+                {
+                  "tool": "spawn_subagent",
+                  "status": "completed",
+                  "icon": "agent",
+                  "reportMarker": true
+                },
+                {
+                  "tool": "run_terminal_command",
+                  "status": "completed",
+                  "icon": "terminal",
+                  "reportMarker": false
+                },
+                {
+                  "tool": "thread.message.send",
+                  "status": "completed",
+                  "icon": "rovai",
+                  "reportMarker": true
+                }
+              ],
+              "narrationCount": 1,
+              "possibleChildNarration": false
+            }
+          ],
+          "failureCodes": []
+        }
+      ]
+    }
+  ]
+}

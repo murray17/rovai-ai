@@ -59,7 +59,7 @@ Core 只从请求名决定 actor：`channels.lark.*` 以 `lark-channel-host` 执
 
 入站图片与文件也复用共享资源下载器和 Core 持久等待队列。Lark Host 只提交自身 Bot 可处理的 App ID，并使用
 `Domain.Lark` 的消息资源接口下载；完成请求的 `channels.lark.` 方法名由 Profile 生成，Core 从请求名赋予
-`lark-channel-host`，再以 Request 的 provider 和 App 校验。文件导入 Camp 的 `lark/` 子目录并作为 Source Ref
+`lark-channel-host`，再以 Request 的 provider 和 App 校验。文件导入 Thread 的 `lark/` 子目录并作为 Source Ref
 进入原有消息准入与 Agent 输入投影；失败时整条消息停止准入并向用户发送注意力提示。
 
 ## 模型上下文

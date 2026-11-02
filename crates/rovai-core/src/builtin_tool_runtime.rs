@@ -84,9 +84,9 @@ struct BuiltinToolProcessConfigInner {
     #[cfg(windows)]
     current_context: std::sync::Mutex<Option<BuiltinToolCliContext>>,
     #[cfg(windows)]
-    account_filesystem:std::sync::Mutex<Option<rovai_core::managed_process::AccountFilesystem>>,
+    account_filesystem: std::sync::Mutex<Option<rovai_core::managed_process::AccountFilesystem>>,
     #[cfg(windows)]
-    account_required:std::sync::atomic::AtomicBool,
+    account_required: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for BuiltinToolProcessConfigInner {
@@ -165,9 +165,9 @@ impl BuiltinToolProcessConfig {
                 #[cfg(windows)]
                 current_context: std::sync::Mutex::new(None),
                 #[cfg(windows)]
-                account_filesystem:std::sync::Mutex::new(None),
+                account_filesystem: std::sync::Mutex::new(None),
                 #[cfg(windows)]
-                account_required:std::sync::atomic::AtomicBool::new(false),
+                account_required: std::sync::atomic::AtomicBool::new(false),
             }),
         };
         config.write_context(None)?;
@@ -226,11 +226,23 @@ impl BuiltinToolProcessConfig {
 
     #[cfg(windows)]
     pub(crate) fn configure_account_command(&self, command: &mut Command) -> Result<()> {
-        self.inner.account_required.store(true,std::sync::atomic::Ordering::Release);
+        self.inner
+            .account_required
+            .store(true, std::sync::atomic::Ordering::Release);
         // A locator carries no credential: the exact account logon and Job own admission.
-        command.env("ROVAI_ACCOUNT_PROCESS_ID",self.process_id());
-        let instance=crate::command::canonical_json_digest(&json!(self.inner.process_root.ancestors().nth(3).context("account runtime instance unavailable")?.canonicalize()?))?;
-        command.env("ROVAI_ACCOUNT_INSTANCE_KEY",instance.trim_start_matches("sha256:"));
+        command.env("ROVAI_ACCOUNT_PROCESS_ID", self.process_id());
+        let instance = crate::command::canonical_json_digest(&json!(
+            self.inner
+                .process_root
+                .ancestors()
+                .nth(3)
+                .context("account runtime instance unavailable")?
+                .canonicalize()?
+        ))?;
+        command.env(
+            "ROVAI_ACCOUNT_INSTANCE_KEY",
+            instance.trim_start_matches("sha256:"),
+        );
         command.env(
             "ROVAI_ACCOUNT_BUILTIN",
             serde_json::to_string(&json!({
@@ -245,9 +257,13 @@ impl BuiltinToolProcessConfig {
     pub(crate) fn start_account_bridge(
         &self,
         authority: rovai_core::managed_process::AccountProcessAuthority,
-        filesystem:Option<rovai_core::managed_process::AccountFilesystem>,
+        filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
     ) -> Result<AccountBuiltinBridge> {
-        *self.inner.account_filesystem.lock().map_err(|_|anyhow::anyhow!("account filesystem unavailable"))?=filesystem;
+        *self
+            .inner
+            .account_filesystem
+            .lock()
+            .map_err(|_| anyhow::anyhow!("account filesystem unavailable"))? = filesystem;
         use rovai_core::platform::local_ipc::LocalIpcListener;
         let mut listener = LocalIpcListener::bind_account(
             &self.inner.account_bridge_endpoint,
@@ -321,10 +337,16 @@ impl BuiltinToolProcessConfig {
                     && process["processToken"].as_str() == Some(self.process_token()),
                 "account builtin process mismatch"
             );
-            let is_hook=value["kind"]==crate::builtin_tool_transport::COMPACTION_OBSERVATION_IPC_KIND;
+            let is_hook =
+                value["kind"] == crate::builtin_tool_transport::COMPACTION_OBSERVATION_IPC_KIND;
             if is_hook {
-                let hook:crate::builtin_tool_transport::CompactionHookIpcRequest=serde_json::from_value(value.clone())?;
-                anyhow::ensure!(hook.ipc_protocol_version==crate::builtin_tool_transport::COMPACTION_HOOK_IPC_PROTOCOL_VERSION,"account Hook version mismatch");
+                let hook: crate::builtin_tool_transport::CompactionHookIpcRequest =
+                    serde_json::from_value(value.clone())?;
+                anyhow::ensure!(
+                    hook.ipc_protocol_version
+                        == crate::builtin_tool_transport::COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
+                    "account Hook version mismatch"
+                );
             }
             if !is_hook && !account_builtin_input_supported(&value)? {
                 let response =
@@ -401,7 +423,7 @@ pub(crate) struct AuthorizedBuiltinToolInvocation {
     pub native_binding: BuiltinToolBindingCredential,
     pub run_tmp: PathBuf,
     #[cfg(windows)]
-    pub account_filesystem:Option<rovai_core::managed_process::AccountFilesystem>,
+    pub account_filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
 }
 
 #[derive(Debug, Clone)]
@@ -421,7 +443,7 @@ struct ActiveLease {
     execution_root: String,
     run_tmp: PathBuf,
     #[cfg(windows)]
-    account_filesystem:Option<rovai_core::managed_process::AccountFilesystem>,
+    account_filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
     replay: HashMap<String, ReplayEntry>,
     replay_order: VecDeque<String>,
 }
@@ -501,7 +523,13 @@ impl BuiltinToolLeaseRegistry {
                 execution_root: execution_root.to_string(),
                 run_tmp,
                 #[cfg(windows)]
-                account_filesystem:config.inner.account_filesystem.lock().map_err(|_|anyhow::anyhow!("account filesystem unavailable"))?.as_ref().map(|filesystem|filesystem.for_run()),
+                account_filesystem: config
+                    .inner
+                    .account_filesystem
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("account filesystem unavailable"))?
+                    .as_ref()
+                    .map(|filesystem| filesystem.for_run()),
                 replay: HashMap::new(),
                 replay_order: VecDeque::new(),
             };
@@ -578,19 +606,35 @@ impl BuiltinToolLeaseRegistry {
         refreshed
     }
 
-    pub(crate) async fn unbind(&self,process_id:&str,agent_run_id:&str,execution_epoch:i64) {
-        let retired={
-            let _gate=self.invocation_gate.lock().await;
-            let mut processes=self.processes.lock().await;
-            let Some(process)=processes.get_mut(process_id) else{return;};
-            if !process.active.as_ref().is_some_and(|active|active.agent_run_id==agent_run_id&&active.execution_epoch==execution_epoch){return;}
-            let active=process.active.take().unwrap();
-            if let Err(error)=process.config.write_context(None){eprintln!("failed to fence Built-in Tool context: {error:#}");}
-            let retired_path=match process.config.retire_run_tmp(){Ok(path)=>path,Err(error)=>{eprintln!("failed to retire Built-in Tool Run tmp: {error:#}");None}};
-            (active,retired_path)
+    pub(crate) async fn unbind(&self, process_id: &str, agent_run_id: &str, execution_epoch: i64) {
+        let retired = {
+            let _gate = self.invocation_gate.lock().await;
+            let mut processes = self.processes.lock().await;
+            let Some(process) = processes.get_mut(process_id) else {
+                return;
+            };
+            if !process.active.as_ref().is_some_and(|active| {
+                active.agent_run_id == agent_run_id && active.execution_epoch == execution_epoch
+            }) {
+                return;
+            }
+            let active = process.active.take().unwrap();
+            if let Err(error) = process.config.write_context(None) {
+                eprintln!("failed to fence Built-in Tool context: {error:#}");
+            }
+            let retired_path = match process.config.retire_run_tmp() {
+                Ok(path) => path,
+                Err(error) => {
+                    eprintln!("failed to retire Built-in Tool Run tmp: {error:#}");
+                    None
+                }
+            };
+            (active, retired_path)
         };
         #[cfg(windows)]
-        if let Some(filesystem)=retired.0.account_filesystem.as_ref(){let _=filesystem.close_run().await;}
+        if let Some(filesystem) = retired.0.account_filesystem.as_ref() {
+            let _ = filesystem.close_run().await;
+        }
         schedule_retired_run_tmp_cleanup(retired.1.into_iter().collect());
     }
 
@@ -614,7 +658,13 @@ impl BuiltinToolLeaseRegistry {
         // The last config owner may recursively remove its process root. Keep
         // that Drop outside the global invocation/process guards as well.
         #[cfg(windows)]
-        if let Some(filesystem)=process.active.as_ref().and_then(|active|active.account_filesystem.as_ref()){let _=filesystem.close_run().await;}
+        if let Some(filesystem) = process
+            .active
+            .as_ref()
+            .and_then(|active| active.account_filesystem.as_ref())
+        {
+            let _ = filesystem.close_run().await;
+        }
         drop(process);
         schedule_retired_run_tmp_cleanup(retired_run_tmp.into_iter().collect());
     }
@@ -624,15 +674,17 @@ impl BuiltinToolLeaseRegistry {
             let _gate = self.invocation_gate.lock().await;
             let mut processes = self.processes.lock().await;
             let mut fenced = 0;
-            let mut scopes:Vec<()> = Vec::new();
+            let mut scopes: Vec<()> = Vec::new();
             #[cfg(windows)]
-            let mut scopes:Vec<rovai_core::managed_process::AccountFilesystem>=Vec::new();
+            let mut scopes: Vec<rovai_core::managed_process::AccountFilesystem> = Vec::new();
             let mut retired_run_tmps = Vec::with_capacity(processes.len());
             for process in processes.values_mut() {
-                if let Some(active)=process.active.take() {
+                if let Some(active) = process.active.take() {
                     fenced += 1;
                     #[cfg(windows)]
-                    if let Some(filesystem)=active.account_filesystem{scopes.push(filesystem);}
+                    if let Some(filesystem) = active.account_filesystem {
+                        scopes.push(filesystem);
+                    }
                 }
                 if let Err(error) = process.config.write_context(None) {
                     eprintln!("failed to fence Built-in Tool context: {error:#}");
@@ -648,7 +700,9 @@ impl BuiltinToolLeaseRegistry {
             (fenced, retired_run_tmps, scopes)
         };
         #[cfg(windows)]
-        for filesystem in scopes {let _=filesystem.close_run().await;}
+        for filesystem in scopes {
+            let _ = filesystem.close_run().await;
+        }
         schedule_retired_run_tmp_cleanup(retired_run_tmps);
         fenced
     }
@@ -681,11 +735,23 @@ impl BuiltinToolLeaseRegistry {
         }
         #[cfg(windows)]
         if active.account_filesystem.is_none() {
-            let filesystem=process.config.inner.account_filesystem.lock().map_err(|_|run_not_bound())?;
-            active.account_filesystem=filesystem.as_ref().map(|filesystem|filesystem.for_run());
+            let filesystem = process
+                .config
+                .inner
+                .account_filesystem
+                .lock()
+                .map_err(|_| run_not_bound())?;
+            active.account_filesystem = filesystem.as_ref().map(|filesystem| filesystem.for_run());
         }
         #[cfg(windows)]
-        if process.config.inner.account_required.load(std::sync::atomic::Ordering::Acquire)&&active.account_filesystem.is_none(){return Err(run_not_bound());
+        if process
+            .config
+            .inner
+            .account_required
+            .load(std::sync::atomic::Ordering::Acquire)
+            && active.account_filesystem.is_none()
+        {
+            return Err(run_not_bound());
         }
         Ok(AuthorizedBuiltinToolInvocation {
             agent_run_id: active.agent_run_id.clone(),
@@ -693,7 +759,7 @@ impl BuiltinToolLeaseRegistry {
             native_binding: active.native_binding.clone(),
             run_tmp: active.run_tmp.clone(),
             #[cfg(windows)]
-            account_filesystem:active.account_filesystem.clone(),
+            account_filesystem: active.account_filesystem.clone(),
         })
     }
 
@@ -1614,7 +1680,7 @@ fn account_builtin_input_supported(value: &serde_json::Value) -> Result<bool> {
     let operation = crate::thread_compat::canonical_operation(&operation);
     let input = crate::thread_compat::normalize_builtin_input(operation, input)?;
     crate::team_tool_catalog::validate_builtin_tool_input(operation, &input)?;
-    let local_source=false;
+    let local_source = false;
     Ok(!local_source)
 }
 
@@ -1719,7 +1785,9 @@ mod account_bridge_live_tests {
         let authority = child.account_authority().unwrap();
         assert!(!authority.admits(std::process::id()).unwrap());
         assert!(authority.admits(child.id().unwrap()).unwrap());
-        let bridge = config.start_account_bridge(authority,child.account_filesystem()).unwrap();
+        let bridge = config
+            .start_account_bridge(authority, child.account_filesystem())
+            .unwrap();
         let outside = rovai_core::platform::local_ipc::LocalIpcClientStream::connect(
             &config.inner.account_bridge_endpoint,
         )

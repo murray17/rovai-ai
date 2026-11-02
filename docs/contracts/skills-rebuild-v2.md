@@ -4,7 +4,7 @@ contract: skills-rebuild-v2
 authority: skills-source-configuration-selection-and-model-index
 status: accepted
 version: 2
-last_updated: 2026-10-25
+last_updated: 2026-10-31
 ---
 
 # Skills Rebuild v2
@@ -36,3 +36,13 @@ Hermes 已启用或加载；用户可以显式引用某个原生未启用的文�
 用户点击该问题的“清理旧入口”后，`skills.cleanupLegacyEntries` 除处理 v1 的 observation 外，也处理上述 Windows 无记录候选。每个候选在删除前重新检查 root `active`、可访问性、运行中 Run、精确 group 路径和普通目录树；不跟随 reparse point。准入后只删除该 Skill 目录，没有 observation 就不补造或删除数据库记录。其他名称、未登记项目、macOS 链接和普通投影 reconcile 继续遵守 v1。
 
 这九个名称的目录内容可能已被用户修改；用户显式清理仍以名称和路径为准。失败或无法确认的候选保留，并在原有 `LegacySkillCleanupReport` 计数中反映；重复操作不得扩大到未知名称或路径。
+
+## 设置页原生 Skill 正文读取
+
+`nativeSkills.read` 对用户选定的普通文件独立校验并读取，不以整个资源目录可枚举或目标先出现在
+菜单清单为前提。相对路径组件、目标路径链不跟随子链接、canonical 根内约束，以及 1 MiB、
+文本／二进制预览边界保持；目标自身缺失、不可读或类型不支持仍报告错误。
+
+资源菜单最多 512 个文件、8 层目录，单次最多访问 2048 个目录项（含目录及失败条目）；
+达到边界即停止实际遍历，无关目录或条目不可读时跳过。正文入口和当前选中项保留在有界菜单中。
+这是设置页只读展示边界，不改变会话 Skill 选择、模型投递或原生智能体读取行为，不新增缓存或后台扫描。

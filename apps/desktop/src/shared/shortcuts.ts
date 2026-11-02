@@ -9,6 +9,7 @@ export interface ShortcutDefinition {
   editable?: boolean
 }
 export const SHORTCUTS: readonly ShortcutDefinition[] = [
+  { id: 'project-files', name: '显示／隐藏文件目录', group: 'files', binding: 'Mod+Shift+E', editable: true },
   { id: 'execution', name: '展开／收起执行台', group: 'workspace', binding: 'Mod+1', editable: true },
   { id: 'members', name: '打开／收起队员', group: 'workspace', binding: 'Mod+2', editable: true },
   { id: 'dm', name: '打开／收起单聊', group: 'workspace', binding: 'Mod+3', editable: true },
@@ -25,6 +26,7 @@ export const SHORTCUTS: readonly ShortcutDefinition[] = [
   { id: 'forward', name: '前进', group: 'navigation', binding: 'Mod+]' },
   { id: 'missions', name: '打开使命页', group: 'navigation', binding: null },
   { id: 'automations', name: '打开定时任务页', group: 'navigation', binding: null },
+  { id: 'save-file', name: '保存当前文件', group: 'files', binding: 'Mod+S', editable: true },
   { id: 'find', name: '查找当前内容', group: 'files', binding: 'Mod+F', editable: true },
   { id: 'next', name: '下一个查找结果', group: 'files', binding: 'Mod+G', editable: true },
   { id: 'previous', name: '上一个查找结果', group: 'files', binding: 'Mod+Shift+G', editable: true },
@@ -68,6 +70,18 @@ export function shortcutKeyParts(binding: string | null, platform: NodeJS.Platfo
 }
 export function parseShortcutPreferences(value: unknown, platform: NodeJS.Platform): ShortcutPreferences | null {
   if (!record(value) || !exact(value, ['schemaVersion', 'bindings', 'mouse', 'sendMode']) || value.schemaVersion !== 2 || !record(value.bindings) || !record(value.mouse)) return null
+  // Remove the retired action without resetting unrelated keyboard or mouse preferences.
+  const bindings = { ...value.bindings }
+  delete bindings['quick-open']
+  const mouse = { ...value.mouse }
+  for (const side of SHORTCUT_MOUSE_SIDES) if (mouse[side] === 'quick-open') mouse[side] = null
+  // Catalog additions keep existing custom bindings. A previously assigned chord wins.
+  for (const id of ['project-files'] as const) if (!Object.hasOwn(bindings, id)) {
+    const binding = SHORTCUTS.find(row => row.id === id)!.binding
+    bindings[id] = Object.values(bindings).includes(binding) ? null : binding
+  }
+  value = { ...value, bindings, mouse }
+  if (!record(value) || !record(value.bindings) || !record(value.mouse)) return null
   if (!exact(value.bindings, SHORTCUTS.map(row => row.id)) || !exact(value.mouse, SHORTCUT_MOUSE_SIDES)) return null
   if (value.sendMode !== 'enter' && value.sendMode !== 'primary-enter') return null
   const used = new Set<string>()

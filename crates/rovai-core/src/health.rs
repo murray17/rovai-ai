@@ -4910,6 +4910,13 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapab
 IFS= read -r authenticate || exit 1
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
 IFS= read -r session || exit 1
+case "$session" in
+  *'"additionalDirectories":[]'*) ;;
+  *)
+    printf '%s\n' '{"jsonrpc":"2.0","id":3,"error":{"code":-32602,"message":"Invalid params","data":"additionalDirectories is not supported: a session works only in its cwd"}}'
+    exit 0
+    ;;
+esac
 printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"grok-session","models":{"currentModelId":"minimax-m3","availableModels":[{"modelId":"minimax-m3","name":"MiniMax M3"}]}}}'
 while IFS= read -r ignored; do :; done
 "#,

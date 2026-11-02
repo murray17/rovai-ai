@@ -3,7 +3,7 @@ document_type: contract
 contract: windows-private-storage-v2
 status: accepted
 source_version: v1.15
-last_updated: 2026-10-29
+last_updated: 2026-10-31
 ---
 
 # Windows Private Storage v2
@@ -86,6 +86,19 @@ WRITE_DAC，不自动修权；继承权限、额外 ACE、非当前 owner 本身
 
 不修改通用 `prepare_private_directory` / private-file APIs 的严格语义。凭据、MCP/Skill 等专门边界继续各自合同；
 历史 Server token 读取仍核对 token 文件的私有 ACL，但不要求其父目录符合模板。Web token 继续沿用上述已有例外。
+
+## MCP snapshot directories
+
+MCP root, Run and retained snapshot/epoch directories use the ordinary data-directory admission
+policy: their effective access decides availability, without requiring a protected DACL template,
+READ_CONTROL solely to inspect the parent ACL, or WRITE_DAC to repair it. Reads do not recreate
+missing directories. Native path, local fixed NTFS, type/reparse and stable identity checks remain.
+
+New staging directories and canonical files are still private at creation. Publication retains
+the non-replacing native atomic directory move, and canonical-file reads retain private-file
+ACL and identity checks. Broadening a directory does not authorize an invalid or replaced file.
+This is scoped to MCP snapshot directories; general private-directory admission is unchanged.
+See [MCP snapshot storage](input-snapshot-storage-v1.md#mcp-snapshot-storage-layout).
 
 ## References
 

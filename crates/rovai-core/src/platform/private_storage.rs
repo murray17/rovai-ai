@@ -142,6 +142,13 @@ pub(crate) fn prepare_data_directory(path: &Path) -> Result<PathBuf> {
     }
 }
 
+/// Inspects an existing data directory without creating it or imposing a DACL
+/// template. Read/reuse paths must not recreate a missing snapshot directory.
+#[cfg(windows)]
+pub(crate) fn admit_data_directory(path: &Path) -> Result<PathBuf> {
+    windows::admit_data_directory(path)
+}
+
 pub(crate) fn open_data_read_write_file(path: &Path) -> Result<File> {
     #[cfg(windows)]
     {
@@ -294,6 +301,13 @@ pub(crate) fn open_private_read_write_file(path: &Path) -> Result<File> {
 
 pub fn open_private_read_file(path: &Path) -> Result<File> {
     open_private_read_file_platform(path)
+}
+
+/// Retained MCP files keep their private-file policy, while a copied/restored
+/// parent directory is admitted by actual access rather than its DACL shape.
+#[cfg(windows)]
+pub(crate) fn open_private_read_file_in_data_directory(path: &Path) -> Result<File> {
+    windows::open_private_read_file_in_data_directory(path)
 }
 
 /// The Windows Web credential exception retains path/identity admission. This
@@ -647,6 +661,11 @@ mod windows {
             }
             Err(error) => return Err(error.into()),
         }
+        admit_data_directory(path)
+    }
+
+    pub(super) fn admit_data_directory(path: &Path) -> Result<PathBuf> {
+        validate_native_absolute_path(path)?;
         let handle = open_data_path(path, ExpectedObjectKind::Directory)?;
         admit_volume(path)?;
         let identity = file_identity(&handle)?;
@@ -865,7 +884,18 @@ mod windows {
             )
         })?;
         let admitted_parent = admit_private_directory(parent)?;
-        let parent_handle = open_path(&admitted_parent, ExpectedObjectKind::Directory)?;
+        read_private_file_from_parent(path, &admitted_parent)
+    }
+
+    pub(super) fn open_private_read_file_in_data_directory(path: &Path) -> Result<File> {
+        validate_native_absolute_path(path)?;
+        let parent = path.parent().context("private file has no parent")?;
+        let admitted_parent = admit_data_directory(parent)?;
+        read_private_file_from_parent(path, &admitted_parent)
+    }
+
+    fn read_private_file_from_parent(path: &Path, admitted_parent: &Path) -> Result<File> {
+        let parent_handle = open_data_path(admitted_parent, ExpectedObjectKind::Directory)?;
         let parent_identity = file_identity(&parent_handle)?;
         let handle = open_existing_private_file(path, GENERIC_READ)?;
         let identity = inspect_handle(&handle, ExpectedObjectKind::File)?;
@@ -1127,7 +1157,9 @@ mod windows {
         let parent = source
             .parent()
             .context("private staging directory has no parent")?;
-        admit_private_directory(parent)?;
+        // The staging directory and its files are private; the existing parent
+        // may have ordinary permissions after a copy or restore.
+        admit_data_directory(parent)?;
         let source_handle = open_path(source, ExpectedObjectKind::Directory)?;
         verify_private_acl(
             &source_handle,
@@ -1180,7 +1212,7 @@ mod windows {
             )
         })?;
         if parent.exists() {
-            let parent_handle = open_path(parent, ExpectedObjectKind::Directory)?;
+            let parent_handle = open_data_path(parent, ExpectedObjectKind::Directory)?;
             inspect_handle(&parent_handle, ExpectedObjectKind::Directory)?;
             admit_volume(parent)?;
         } else {

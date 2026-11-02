@@ -6,7 +6,7 @@ import { UiText, uiAttribute } from './interface-language'
 
 function subsystemLabel(id: string): string {
   const labels: Record<string, string> = {
-    skills: 'Skill Library',
+    skills: 'Skills',
     mcp: 'MCP 配置',
     attachments: '附件服务',
     maintenance: '后台维护',

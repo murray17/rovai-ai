@@ -10,6 +10,7 @@ import test from 'node:test'
 import { composerDocumentForAddress } from './create-configured-camp.mjs'
 import {
   coreDataDirectoryArguments,
+  runtimeCampFilesRootForDataDirectory,
   removeEphemeralRuntimeCampFilesRoot
 } from './runtime-camp-files-root.mjs'
 
@@ -31,6 +32,19 @@ test('Thread output directories follow Pending presence and preserve zero-messag
     await core.ready
     await core.settled()
     const agent = (await core.request('members.list')).find(profile => profile.presence === 'present')
+    const legacyRoot = runtimeCampFilesRootForDataDirectory(dataDir)
+    await mkdir(legacyRoot, { recursive: true, mode: 0o700 })
+    await writeFile(join(legacyRoot, '.staging'), 'retain malformed historical staging')
+    const missionRequest = { commandId: randomUUID(), command: {
+      title: 'Mission without legacy View', description: 'No Runtime launch',
+      projectBindingKind: 'directory', projectPath: fixture,
+      memberAgentIds: [agent.agentId], defaultLeadAgentId: agent.agentId
+    } }
+    const mission = await core.request('missions.create', missionRequest)
+    assert.equal(mission.status, 'applied')
+    assert.equal((await core.request('missions.create', missionRequest)).payload.missionId, mission.payload.missionId)
+    assert.equal(await readFile(join(legacyRoot, '.staging'), 'utf8'), 'retain malformed historical staging')
+    await rm(join(legacyRoot, '.staging'))
     const threads = []
     for (const [activationState, present] of [['active', false], ['pending', false], ['pending', true]]) {
       const created = await core.request('threads.create', {
@@ -52,7 +66,7 @@ test('Thread output directories follow Pending presence and preserve zero-messag
     core = startCore(dataDir, skillRoot, mcpPath)
     await core.ready
     await core.settled()
-    await assert.rejects(lstat(emptyPending.outputRoot), { code: 'ENOENT' })
+    assert.ok(await lstat(emptyPending.source), 'background retirement preserves files without per-file ownership proof')
     assert.ok(core.notifications.some(event => event.method === 'navigation.invalidated'
       && event.params.reason === 'camps.discardPending' && event.params.threadId === emptyPending.threadId))
     await assert.rejects(core.request('host.thread.attachmentOutputRoot', { threadId: emptyPending.threadId }))
@@ -104,7 +118,8 @@ exit 1
   try {
     await core.ready
     await core.settled()
-    await core.request('runtime.product.ensure', { runtimeKind: 'codex-cli' })
+    await core.request('runtime.startup.save', { runtimeKind: 'codex-cli', expectedRevision: 0, configuration: { programPath: fakeCodex, environment: [] } })
+    await core.request('runtime.startup.inspect', { runtimeKind: 'codex-cli', configuration: { programPath: fakeCodex, environment: [] } })
     let sandboxExit = null
     const deadline = Date.now() + 10000
     while (Date.now() < deadline) {
@@ -127,11 +142,11 @@ exit 1
 // cannot prove that a healthy authority remains reachable after a filesystem error.
 test('optional startup failures preserve authority RPC and can recover without restarting Core', async (t) => {
   for (const scenario of [
-    { id: 'mcp', path: 'mcp.json', kind: 'directory', method: 'mcp.config.get' },
-    { id: 'skills', path: 'managed-skill-library/.staging', kind: 'file', method: 'skills.list' },
-    { id: 'runtime.claude-code-cli', path: 'runtime-private', kind: 'file' },
-    { id: 'runtime.grok-build', path: 'runtime/grok-build/external-mcp', kind: 'file' },
-    { id: 'maintenance', path: 'runtime/mcp', kind: 'file' }
+    { id: 'mcp', path: 'mcp.json', kind: 'directory', state: 'degraded', method: 'mcp.config.get' },
+    { id: 'skills', path: 'managed-skill-library/.staging', kind: 'file', state: 'ready' },
+    { id: 'runtime.claude-code-cli', path: 'runtime-private', kind: 'file', state: 'degraded' },
+    { id: 'runtime.grok-build', path: 'runtime/grok-build/external-mcp', kind: 'file', state: 'ready' },
+    { id: 'maintenance', path: 'runtime/mcp', kind: 'file', state: 'ready' }
   ]) {
     await t.test(scenario.id, async () => {
       const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-startup-availability-')))
@@ -160,16 +175,13 @@ test('optional startup failures preserve authority RPC and can recover without r
         'Main receives the authority assessment before Runtime storage admission')
         assert.ok(frame.subsystems.some((entry) => entry.state === 'initializing'), 'authority ready precedes optional initialization')
         const statuses = await core.settled()
-        assert.equal(statuses.find((entry) => entry.id === scenario.id)?.state, 'degraded')
+        assert.equal(statuses.find((entry) => entry.id === scenario.id)?.state, scenario.state)
         assert.ok((await core.request('members.list')).length > 0)
         assert.ok(await core.request('navigation.snapshot'))
         if (scenario.method) {
-          await assert.rejects(core.request(scenario.method), (error) =>
-            error.code === 'subsystem_unavailable'
-            && error.kind === 'infrastructure_failure'
-            && error.retryable === true
-            && error.details.subsystem === scenario.id
-          )
+          const configuration = await core.request(scenario.method)
+          assert.ok(configuration.fileIssue, 'management reads retain the actual file issue')
+          assert.equal(configuration.path, mcpPath)
         }
         assert.equal(core.process.exitCode, null, 'a local initializer failure must not kill Core')
         await rename(faultPath, `${faultPath}.retained`)
@@ -474,7 +486,7 @@ test('authority recovery errors produce a retryable refusal rather than a crash 
 // The shipped Host must migrate before profile-dependent RPCs become available.
 // Fresh-database health checks cannot detect missing additive upgrade steps.
 test('chat schema upgrades before member reads and diagnostics on an existing authority', { timeout: 240_000 }, async (t) => {
-  for (const source of [208, 209, 210, 'tools211', 'navigation211', 'both211', 'navigation212']) {
+  for (const source of [219, 220, 221, 'tools222', 'navigation222', 'both222', 'navigation223']) {
     await t.test('migration ' + source, async () => {
       const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-chat-admission-')))
       const dataDir = process.platform === 'win32'
@@ -497,14 +509,15 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         const threadId = created.payload.threadId
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
-        if (!['navigation211', 'both211', 'navigation212'].includes(source)) {
+        writer.exec('DROP TRIGGER IF EXISTS agent_run_input_v43_only_insert; DELETE FROM schema_migration WHERE version=224; UPDATE rovai_data_contract SET projection_schema_version=169 WHERE singleton=1;')
+        if (!['navigation222', 'both222', 'navigation223'].includes(source)) {
           writer.exec(
             "DROP INDEX camp_navigation_window_idx; ALTER TABLE camp DROP COLUMN navigation_is_chat_bot;" +
             "CREATE INDEX camp_navigation_window_idx ON camp (CASE WHEN project_binding_kind = 'directory' THEN 'directory:' || project_path ELSE 'quick-chat' END, COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id) WHERE deletion_operation_id IS NULL;"
           )
         }
-        writer.exec('DELETE FROM schema_migration WHERE version=212')
-        if (!['tools211', 'both211'].includes(source)) writer.exec(
+        writer.exec('DELETE FROM schema_migration WHERE version=223')
+        if (!['tools222', 'both222'].includes(source)) writer.exec(
           'DROP TABLE channel_chat_target_grant;' +
           'DROP TABLE channel_chat_tool_request;' +
           'DROP TABLE channel_chat_input;' +
@@ -514,34 +527,34 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
           'ALTER TABLE channel_chat_outbound DROP COLUMN item_id;' +
           'ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id;' +
           'ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch;' +
-          'DELETE FROM schema_migration WHERE version=211;'
+          'DELETE FROM schema_migration WHERE version=222;'
         )
-        if (source < 210) {
+        if (source < 221) {
           writer.exec(
             'DROP TABLE channel_chat_conversation;' +
             'ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled;' +
             'ALTER TABLE agent_profile DROP COLUMN chat_materials_path;' +
             'ALTER TABLE conversation DROP COLUMN permission_override_json;' +
-            'DELETE FROM schema_migration WHERE version=210;'
+            'DELETE FROM schema_migration WHERE version=221;'
           )
         }
-        if (source === 208) {
+        if (source === 219) {
           writer.exec(
             'DROP TABLE channel_chat_outbound; DROP TABLE channel_chat_item;' +
             'DROP TABLE channel_chat_turn; DROP TABLE channel_chat_message;' +
             'DROP TABLE channel_chat_credential; DROP TABLE channel_chat_bot;' +
-            'DELETE FROM schema_migration WHERE version=209;'
+            'DELETE FROM schema_migration WHERE version=220;'
           )
         }
-        if (source !== 208) {
+        if (source !== 219) {
           writer.exec("INSERT INTO channel_chat_message(id,provider,app_id,chat_id,conversation_kind,author_external_id,author_name,body,external_message_id,dedupe_key,received_at) VALUES('retained-inbound','feishu','fixture-app','fixture-chat','p2p','ou_fixture','Fixture','Retained chat body','retained-external','retained-key',1)")
         }
-        if (source === 'navigation211') writer.exec("INSERT INTO schema_migration VALUES(211,'retained-navigation-receipt')")
-        if (source === 'navigation212') writer.exec("INSERT INTO schema_migration VALUES(212,'retained-navigation-receipt')")
-        if (source === 'both211') writer.exec("UPDATE schema_migration SET applied_at='retained-combined-receipt' WHERE version=211")
+        if (source === 'navigation222') writer.exec("INSERT INTO schema_migration VALUES(222,'retained-navigation-receipt')")
+        if (source === 'navigation223') writer.exec("INSERT INTO schema_migration VALUES(223,'retained-navigation-receipt')")
+        if (source === 'both222') writer.exec("UPDATE schema_migration SET applied_at='retained-combined-receipt' WHERE version=222")
         if (typeof source === 'string') {
           writer.prepare("INSERT INTO channel_chat_conversation VALUES('feishu','fixture-app','fixture-chat',?,0)").run(threadId)
-          if (source !== 'tools211') writer.prepare('UPDATE camp SET navigation_is_chat_bot=1 WHERE id=?').run(threadId)
+          if (source !== 'tools222') writer.prepare('UPDATE camp SET navigation_is_chat_bot=1 WHERE id=?').run(threadId)
         }
         writer.close()
         writer = null
@@ -556,11 +569,11 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
         assert.equal(writer.prepare('SELECT title FROM camp WHERE id=?').get(threadId).title, 'Upgrade preserved thread')
-        if (source !== 208) assert.equal(writer.prepare("SELECT body FROM channel_chat_message WHERE id='retained-inbound'").get().body, 'Retained chat body')
-        const receipts = writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (209,210,211,212) ORDER BY version').all()
-        assert.deepEqual(receipts.map(row => row.version), [209, 210, 211, 212])
-        if (source === 'navigation211' || source === 'navigation212') assert.equal(receipts.find(row => row.version === 212).applied_at, 'retained-navigation-receipt')
-        if (source === 'both211') assert.equal(receipts.find(row => row.version === 211).applied_at, 'retained-combined-receipt')
+        if (source !== 219) assert.equal(writer.prepare("SELECT body FROM channel_chat_message WHERE id='retained-inbound'").get().body, 'Retained chat body')
+        const receipts = writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (220,221,222,223) ORDER BY version').all()
+        assert.deepEqual(receipts.map(row => row.version), [220, 221, 222, 223])
+        if (source === 'navigation222' || source === 'navigation223') assert.equal(receipts.find(row => row.version === 223).applied_at, 'retained-navigation-receipt')
+        if (source === 'both222') assert.equal(receipts.find(row => row.version === 222).applied_at, 'retained-combined-receipt')
         writer.close()
         writer = null
         core = startCore(dataDir, skillRoot, mcpPath)
@@ -568,10 +581,11 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         assert.deepEqual(await core.request('members.list'), before)
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
-        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (209,210,211,212) ORDER BY version').all(), receipts)
-        // A recorded migration with a missing column is corruption, not an old source.
+        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (220,221,222,223) ORDER BY version').all(), receipts)
+        // An incomplete historical upgrade source is corruption, not an old source.
+        writer.exec('DELETE FROM schema_migration WHERE version=224; UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1;')
         if (typeof source === 'string') writer.exec('DROP INDEX camp_navigation_window_idx')
-        else if (source === 210) writer.exec('DROP TABLE channel_chat_target_grant')
+        else if (source === 221) writer.exec('DROP TABLE channel_chat_target_grant')
         else writer.exec('ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled')
         writer.close()
         writer = null
@@ -579,10 +593,10 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         await assert.rejects(core.ready, error => error.startupStatus === 'blocked' || error.startupStatus === 'failed')
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
-        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (209,210,211,212) ORDER BY version').all(), receipts)
+        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (220,221,222,223) ORDER BY version').all(), receipts)
         const missing = typeof source === 'string'
           ? writer.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name='camp_navigation_window_idx'").get()
-          : source === 210
+          : source === 221
           ? writer.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name='channel_chat_target_grant'").get()
           : writer.prepare("SELECT COUNT(*) AS count FROM pragma_table_info('agent_profile') WHERE name='chat_bot_enabled'").get()
         assert.equal(missing.count, 0)
@@ -616,6 +630,7 @@ test('a startup retry cannot initialize a disappeared authority', async () => {
 })
 
 function startCore(dataDir, skillRoot, mcpPath, extraArgs = [], environment = {}) {
+  console.error(`Automatic isolated Core acceptance: data=${dataDir}; skills=${skillRoot}; MCP=${mcpPath}`)
   const spawnOptions = { cwd: repository, stdio: ['pipe', 'pipe', 'pipe'] }
   if (Object.keys(environment).length > 0) {
     spawnOptions.env = { ...process.env, ...environment }
@@ -713,7 +728,7 @@ function startCore(dataDir, skillRoot, mcpPath, extraArgs = [], environment = {}
 
 // RPC -> immutable search snapshot -> child environment -> restart is the owner
 // seam. Input-name cases stay in runtime_startup's unit matrix.
-test('startup settings keep drafts private and persist only the selected Runtime environment', { skip: process.platform === 'win32', timeout: 90_000 }, async () => {
+test('startup settings keep drafts private and persist only the selected Runtime shared environment', { skip: process.platform === 'win32', timeout: 90_000 }, async () => {
   const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-runtime-startup-settings-')))
   const dataDir = join(fixture, 'data')
   const defaultProgram = join(fixture, 'default-codex')
@@ -735,22 +750,45 @@ exit 1
     const runtimeKind = 'codex-cli'
     const initial = await core.request('runtime.startup.get', { runtimeKind })
     assert.equal(initial.revision, 0)
-    const configuration = { programPath: selectedProgram, environment: [{ name: 'STARTUP_TEST_VALUE', value: 'draft-private-value' }] }
-    const inspected = await core.request('runtime.startup.inspect', { runtimeKind, configuration })
+    const configuration = { programPath: selectedProgram, environment: [] }
+    const commonEnvironment = { expectedRevision: 0, json: JSON.stringify({ STARTUP_TEST_VALUE: 'draft-private-value' }) }
+    const inspected = await core.request('runtime.startup.inspect', { runtimeKind, configuration, commonEnvironment })
     assert.equal(inspected.status, 'recognized')
     assert.equal(await readFile(marker, 'utf8'), 'draft-private-value')
     assert.equal((await core.request('runtime.startup.get', { runtimeKind })).revision, 0)
-    const checked = await core.request('runtime.startup.check', { runtimeKind, configuration })
-    assert.equal(checked.status, 'authentication_required')
+    const checked = await core.request('runtime.startup.check', { runtimeKind, configuration, commonEnvironment })
+    assert.equal(checked.status, 'check_failed', 'a fixture that closes the protocol is not a healthy Runtime')
     assert.equal((await core.request('runtime.startup.get', { runtimeKind })).revision, 0)
     assert.ok(!JSON.stringify(core.notifications).includes('draft-private-value'))
-    configuration.environment[0].value = 'saved-private-value'
-    const saved = await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration })
+    commonEnvironment.json = JSON.stringify({ STARTUP_TEST_VALUE: 'saved-private-value' })
+    const saved = await core.request('runtime.startup.save', { runtimeKind, edits: [{ path: ['programPath'], before: null, after: selectedProgram, label: 'program' }], commonEnvironment })
     assert.equal(saved.revision, 1)
+    await core.request('runtime.startup.inspect', { runtimeKind, configuration })
     assert.equal(await readFile(marker, 'utf8'), 'saved-private-value')
-    assert.equal((await core.request('runtime.startup.get', { runtimeKind: 'pi' })).configuration.environment.length, 0)
+    assert.deepEqual((await core.request('runtime.startup.get', { runtimeKind: 'pi' })).commonEnvironment.environment, {})
     assert.equal((await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration })).revision, 1, 'retrying the same write is idempotent')
-    await assert.rejects(core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration: { ...configuration, environment: [] } }))
+    await assert.rejects(core.request('runtime.startup.save', { runtimeKind, expectedRevision: 0, configuration: { programPath: null, environment: [] } }))
+    // Two settings windows: the first keeps its repair draft while the second
+    // advances the damaged record. The conflict response must enable a retry.
+    const database = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
+    try {
+      database.exec('PRAGMA ignore_check_constraints=ON')
+      database.prepare(`INSERT INTO runtime_startup_setting(runtime_kind, revision, configuration_json, updated_at)
+        VALUES ('pi', 7, '{broken', ?) ON CONFLICT(runtime_kind) DO UPDATE SET
+        revision=7, configuration_json='{broken'`).run(new Date().toISOString())
+      const firstWindow = await core.request('runtime.startup.get', { runtimeKind: 'pi' })
+      assert.ok(firstWindow.configuration.configurationError)
+      database.exec("UPDATE runtime_startup_setting SET revision=8 WHERE runtime_kind='pi'")
+      const repair = { runtimeKind: 'pi', expectedRevision: firstWindow.revision,
+        edits: [{ path: ['programPath'], before: null, after: null, label: 'program' }] }
+      const conflict = await core.request('runtime.startup.save', repair)
+      assert.equal(conflict.status, 'conflict')
+      assert.equal(conflict.latest.revision, 8)
+      assert.equal(conflict.conflicts.length, 1)
+      const repaired = await core.request('runtime.startup.save', { ...repair, expectedRevision: conflict.latest.revision })
+      assert.equal(repaired.revision, 9)
+      assert.equal(repaired.configuration.configurationError, undefined)
+    } finally { database.close() }
     await core.close()
     core = startCore(dataDir, join(dataDir, 'managed-skill-library'), join(dataDir, 'mcp.json'), [], environment)
     await core.ready
@@ -761,7 +799,7 @@ exit 1
     const health = await core.request('runtime.discovery.rescan', {})
     assert.equal(health.runtimeAvailability.find(item => item.runtimeKind === runtimeKind).discovery.discoveryStatus, 'missing', 'an invalid explicit path does not fall back to the old/default program')
     await core.request('runtime.startup.save', { runtimeKind, expectedRevision: 1, configuration: { programPath: null, environment: [] } })
-    const restored = await core.request('health.check')
+    const restored = await core.request('runtime.discovery.rescan', { interactiveShell: false })
     assert.equal(restored.runtimeAvailability.find(item => item.runtimeKind === runtimeKind).discovery.executablePath, defaultProgram)
     assert.ok(!JSON.stringify([...core.notifications, restored]).includes('saved-private-value'))
     assert.equal(process.env.STARTUP_TEST_VALUE, undefined)

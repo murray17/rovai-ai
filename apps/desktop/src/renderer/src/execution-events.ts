@@ -34,7 +34,13 @@ export function groupExecutionEventsByRunId(
       && (blockState(event.payload).status !== 'streaming'
         || Number(blockState(event.payload).textLength) >= Number(blockState(previous.payload).textLength))
     if (!previous || newer || (!older && blockUpdate) || (authoritative && !older)) {
-      eventsById.set(event.id, event)
+      eventsById.set(event.id, {
+        ...event,
+        sequence: previous?.sequence ?? event.sequence,
+        // Legacy live events do not carry a sequence. Even for those, result
+        // updates must retain the invocation's first recorded position.
+        createdAt: previous && previous.createdAt < event.createdAt ? previous.createdAt : event.createdAt
+      })
     }
   }
 
@@ -46,8 +52,22 @@ export function groupExecutionEventsByRunId(
   }
 
   return new Map([...grouped.entries()].map(([runId, eventsById]) => {
-    const events = [...eventsById.values()]
-    events.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    const sequence = (event: LiveRuntimeEvent): number | undefined => event.sequence ?? event.canonical?.firstEvidenceSequence
+    const recorded = [...eventsById.values()].filter(event => sequence(event) != null)
+      .sort((left, right) => sequence(left)! - sequence(right)!)
+    const legacy = [...eventsById.values()].filter(event => sequence(event) == null)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    // Keep the durable order even when old, unsequenced notifications coexist.
+    // Comparing some pairs by sequence and others by time is not transitive.
+    const events: LiveRuntimeEvent[] = []
+    let nextLegacy = 0
+    for (const event of recorded) {
+      while (nextLegacy < legacy.length && legacy[nextLegacy].createdAt < event.createdAt) {
+        events.push(legacy[nextLegacy++])
+      }
+      events.push(event)
+    }
+    events.push(...legacy.slice(nextLegacy))
     return [runId, events]
   }))
 }

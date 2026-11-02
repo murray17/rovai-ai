@@ -64,9 +64,8 @@ use crate::{
         RuntimeCompatibilityKey, RuntimeProcessHost,
     },
     runtime_mcp::{
-        EphemeralMcpConfigFile, external_acp_server, remove_stale_mcp_configs,
-        write_ephemeral_additive_mcp_config, write_ephemeral_copilot_config,
-        write_ephemeral_grok_mcp_plugin,
+        EphemeralMcpConfigFile, external_acp_server, write_ephemeral_additive_mcp_config,
+        write_ephemeral_copilot_config, write_ephemeral_grok_mcp_plugin,
     },
 };
 
@@ -690,6 +689,7 @@ struct AcpPromptObservation {
     delivery_id: String,
     assistant_suffix: AcpAssistantSuffixCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
+    execution_display: crate::runtime_subagent::AcpExecutionDisplay,
     unsupported_interaction: bool,
     questionnaire_request_ids: BTreeSet<String>,
     native_usage_message_ids: BTreeSet<String>,
@@ -704,6 +704,7 @@ impl AcpPromptObservation {
             delivery_id,
             assistant_suffix: AcpAssistantSuffixCollector::default(),
             observed_tools: HashMap::new(),
+            execution_display: crate::runtime_subagent::AcpExecutionDisplay::default(),
             unsupported_interaction: false,
             questionnaire_request_ids: BTreeSet::new(),
             native_usage_message_ids: BTreeSet::new(),
@@ -1836,7 +1837,12 @@ impl AcpHost {
             bail!("Runtime launch policy rejected Agent execution");
         }
         let selected_account = WindowsAccountLaunch::for_isolation(&workspace.isolation)?;
-        if selected_account.is_some() && matches!(frozen_runtime.adapter_kind, AdapterKind::CodebuddyCli | AdapterKind::GrokBuild) {
+        if selected_account.is_some()
+            && matches!(
+                frozen_runtime.adapter_kind,
+                AdapterKind::CodebuddyCli | AdapterKind::GrokBuild
+            )
+        {
             validate_account_native_mcp_projection(external_mcp_servers)?;
         }
         let mut private_config =
@@ -1856,10 +1862,18 @@ impl AcpHost {
 
         let host_instance_id = uuid::Uuid::new_v4().to_string();
         let mut grok_configuration = if frozen_runtime.adapter_kind == AdapterKind::GrokBuild {
-            Some(if let Some(account)=&selected_account {
-                let home=account.profile_root.join(".grok");
-                load_grok_native_configuration_mode(&home,&home.join("config.toml"),&home.join(".env"),&rovai_core::runtime_discovery::runtime_environment(AdapterKind::GrokBuild),true)?
-            }else{load_grok_native_configuration()?})
+            Some(if let Some(account) = &selected_account {
+                let home = account.profile_root.join(".grok");
+                load_grok_native_configuration_mode(
+                    &home,
+                    &home.join("config.toml"),
+                    &home.join(".env"),
+                    &rovai_core::runtime_discovery::runtime_environment(AdapterKind::GrokBuild),
+                    true,
+                )?
+            } else {
+                load_grok_native_configuration()?
+            })
         } else {
             None
         };
@@ -1890,8 +1904,10 @@ impl AcpHost {
         if frozen_runtime.adapter_kind == AdapterKind::HermesCli {
             crate::hermes::configure_command(&mut command)?;
         }
-        if let Some(account)=&selected_account && frozen_runtime.adapter_kind==AdapterKind::GrokBuild {
-            command.env("GROK_HOME",account.profile_root.join(".grok"));
+        if let Some(account) = &selected_account
+            && frozen_runtime.adapter_kind == AdapterKind::GrokBuild
+        {
+            command.env("GROK_HOME", account.profile_root.join(".grok"));
         }
         let ephemeral_config = configure_runtime_command(
             &mut command,
@@ -1908,7 +1924,9 @@ impl AcpHost {
                 .map(BuiltinToolProcessConfig::run_tmp),
         )
         .context("failed to configure ACP Runtime command")?;
-        if selected_account.is_some() && let Some(configuration) = grok_configuration.take() {
+        if selected_account.is_some()
+            && let Some(configuration) = grok_configuration.take()
+        {
             apply_grok_native_configuration(&mut command, configuration);
         }
         let mut command_bootstrap_nonce =
@@ -1983,7 +2001,11 @@ impl AcpHost {
                     .into_iter()
                     .collect::<Vec<_>>()
             } else if frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli {
-                ephemeral_config.as_ref().map(|config| config.path().to_path_buf()).into_iter().collect()
+                ephemeral_config
+                    .as_ref()
+                    .map(|config| config.path().to_path_buf())
+                    .into_iter()
+                    .collect()
             } else {
                 Vec::new()
             },
@@ -2033,14 +2055,16 @@ impl AcpHost {
         let child = startup.child.as_mut().expect("startup owns child");
         #[cfg(windows)]
         let account_builtin_bridge = match (child.account_authority(), builtin_tools.as_ref()) {
-            (Some(authority), Some(config)) => match config.start_account_bridge(authority, child.account_filesystem()) {
-                Ok(bridge) => Some(bridge),
-                Err(error) => {
-                    let _ = child.force_terminate_tree();
-                    let _ = child.wait().await;
-                    return Err(error);
+            (Some(authority), Some(config)) => {
+                match config.start_account_bridge(authority, child.account_filesystem()) {
+                    Ok(bridge) => Some(bridge),
+                    Err(error) => {
+                        let _ = child.force_terminate_tree();
+                        let _ = child.wait().await;
+                        return Err(error);
+                    }
                 }
-            },
+            }
             _ => None,
         };
         #[cfg(target_os = "macos")]
@@ -3411,7 +3435,12 @@ impl AcpHost {
         Ok(())
     }
 
-    async fn settle_loading_replay(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
+    async fn settle_loading_replay(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        wait_for_history: bool,
+    ) -> Result<()> {
         let response_received_at = Instant::now();
         loop {
             let wait_for = {
@@ -3430,12 +3459,18 @@ impl AcpHost {
                 else {
                     bail!("ACP Session loading route failed Host/Run fencing");
                 };
-                let grace_remaining = ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE
-                    .saturating_sub(response_received_at.elapsed());
-                let quiet_remaining = last_event_at.map_or(Duration::ZERO, |last_event_at| {
-                    ACP_HISTORY_RESTORE_QUIET_PERIOD.saturating_sub(last_event_at.elapsed())
-                });
-                let required_wait = grace_remaining.max(quiet_remaining);
+                // A successful resume does not replay history. Both restore methods
+                // still pass the same exact owner/phase transition above.
+                let required_wait = if wait_for_history {
+                    let grace_remaining = ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE
+                        .saturating_sub(response_received_at.elapsed());
+                    let quiet_remaining = last_event_at.map_or(Duration::ZERO, |last_event_at| {
+                        ACP_HISTORY_RESTORE_QUIET_PERIOD.saturating_sub(last_event_at.elapsed())
+                    });
+                    grace_remaining.max(quiet_remaining)
+                } else {
+                    Duration::ZERO
+                };
                 if required_wait.is_zero() {
                     route.phase = AcpSessionPhase::Ready;
                     return Ok(());
@@ -5055,7 +5090,12 @@ pub(crate) fn build_acp_new_session_params(
         adapter_kind,
         AdapterKind::CursorAgent | AdapterKind::DeepseekHarness | AdapterKind::MinimaxCodeCli
     ) {
-        params["additionalDirectories"] = json!(additional_directories);
+        // Grok 1.0.70 accepts cwd-only sessions and rejects non-empty extra roots.
+        params["additionalDirectories"] = if adapter_kind == AdapterKind::GrokBuild {
+            json!([])
+        } else {
+            json!(additional_directories)
+        };
     }
     if let Some(rules) = native_rules {
         params["_meta"] = json!({"rules": rules});
@@ -5316,12 +5356,12 @@ impl AcpRuntime {
             continuation,
             new_session_native_rules,
         )?;
-        let (session_id, prebound_session) = match continuation {
+        let (session_id, restore_method) = match continuation {
             AcpSessionContinuation::ReuseSameHost => (
                 existing_session_id
                     .context("same-Host ACP continuation has no Session ID")?
                     .to_string(),
-                false,
+                None,
             ),
             AcpSessionContinuation::Resume | AcpSessionContinuation::HistoryRestore => {
                 let existing_session_id =
@@ -5439,7 +5479,7 @@ impl AcpRuntime {
                     return Err(anyhow::anyhow!(reason).context(AcpSessionRestoreError));
                 }
                 *self.session_result.write().await = Some(result);
-                (existing_session_id.to_string(), true)
+                (existing_session_id.to_string(), Some(method))
             }
             AcpSessionContinuation::New => {
                 let params = build_acp_new_session_params(
@@ -5456,7 +5496,7 @@ impl AcpRuntime {
                     .and_then(Value::as_str)
                     .context("ACP Session response did not include sessionId")?
                     .to_string();
-                (session_id, false)
+                (session_id, None)
             }
         };
         if self.session_result.read().await.is_none()
@@ -5707,7 +5747,7 @@ impl AcpRuntime {
                     .await?;
             }
         }
-        self.finish_session_attachment(&session_id, prebound_session)
+        self.finish_session_attachment(&session_id, restore_method)
             .await?;
         Ok(session_id)
     }
@@ -5715,11 +5755,11 @@ impl AcpRuntime {
     async fn finish_session_attachment(
         &self,
         session_id: &str,
-        prebound_session: bool,
+        restore_method: Option<&str>,
     ) -> Result<()> {
-        if prebound_session {
+        if let Some(method) = restore_method {
             self.host
-                .settle_loading_replay(session_id, &self.owner)
+                .settle_loading_replay(session_id, &self.owner, method == "session/load")
                 .await?;
         } else {
             self.host
@@ -6376,6 +6416,17 @@ impl AcpRuntime {
         observation.images.observe(self.host.adapter_kind, message)
     }
 
+    /// Enrich only execution display facts inside the existing Prompt fence.
+    pub async fn execution_display_params(&self, prompt: &str, params: &Value) -> Option<Value> {
+        let mut observation = self.active_observation.lock().await;
+        let observation = observation
+            .as_mut()
+            .filter(|state| state.prompt_id == prompt)?;
+        observation
+            .execution_display
+            .observe(self.adapter_kind(), prompt, params)
+    }
+
     pub async fn observe_message(
         &self,
         native_prompt_id: &str,
@@ -6436,6 +6487,8 @@ impl AcpRuntime {
             observation.unsupported_interaction = true;
         }
         if session_update == Some("agent_message_chunk")
+            && crate::runtime::is_root_output(params)
+            && crate::runtime::is_root_output(update)
             && let Some(text) = update.pointer("/content/text").and_then(Value::as_str)
         {
             let message_id = update
@@ -6447,7 +6500,10 @@ impl AcpRuntime {
                 .assistant_suffix
                 .observe_assistant_chunk(message_id, text);
         }
-        if matches!(session_update, Some("tool_call" | "tool_call_update")) {
+        if matches!(session_update, Some("tool_call" | "tool_call_update"))
+            && crate::runtime::is_root_output(params)
+            && crate::runtime::is_root_output(update)
+        {
             observation.assistant_suffix.observe_tool_activity();
         }
         if !matches!(session_update, Some("tool_call" | "tool_call_update")) {
@@ -6460,9 +6516,14 @@ impl AcpRuntime {
             update.get("status").and_then(Value::as_str),
             Some("completed" | "failed")
         );
+        let observation_key = if params["runtimeRootOutput"] == false {
+            update["operationId"].as_str().unwrap_or(native_item_id)
+        } else {
+            native_item_id
+        };
         let observed = observation
             .observed_tools
-            .entry(native_item_id.to_string())
+            .entry(observation_key.to_string())
             .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
@@ -6516,7 +6577,7 @@ impl AcpRuntime {
         }
         let observed = observation
             .observed_tools
-            .remove(native_item_id)
+            .remove(observation_key)
             .unwrap_or_default();
         let Some(mut completion) = completed_action(self.host.adapter_kind, params)? else {
             return Ok(None);
@@ -6623,7 +6684,15 @@ impl AcpRuntime {
             .await
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)
-            .and_then(|observation| observation.observed_tools.get(native_item_id))
+            .and_then(|observation| {
+                let key = observation
+                    .execution_display
+                    .unique_call_id(native_item_id)?;
+                observation
+                    .observed_tools
+                    .get(key)
+                    .or_else(|| observation.observed_tools.get(native_item_id))
+            })
             .map(|observed| ObservedAcpToolContext {
                 native_kind: observed.native_kind.clone(),
                 raw_input: observed.raw_input.clone(),
@@ -6904,17 +6973,6 @@ impl AcpCliRuntimeAdapter {
         let kind = self.kind;
         if !launchable_acp_adapter(kind) {
             bail!("{} is not a launchable ACP Adapter", kind.as_str());
-        }
-        if matches!(
-            kind,
-            AdapterKind::CopilotCli
-                | AdapterKind::GrokBuild
-                | AdapterKind::KiroCli
-                | AdapterKind::QoderCli
-                | AdapterKind::CodebuddyCli
-                | AdapterKind::QwenCode
-        ) {
-            remove_stale_mcp_configs(&self.private_runtime_dir)?;
         }
         Ok(())
     }
@@ -7280,6 +7338,9 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli {
         compatibility["nativeBackgroundPolicy"] = json!("disabled-v1");
     }
+    if frozen_runtime.adapter_kind == AdapterKind::QoderCli {
+        compatibility["nativeBackgroundPolicy"] = json!("agent-sessions-disabled-v1");
+    }
     if frozen_runtime.adapter_kind == AdapterKind::QwenCode {
         compatibility["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
     }
@@ -7296,9 +7357,21 @@ pub(crate) fn runtime_compatibility_digest(
             .context("Runtime compatibility payload must be an object")?;
         compatibility.insert(
             "grokNativeConfigurationDigest".to_string(),
-            json!(if let Some(account)=WindowsAccountLaunch::for_isolation(&workspace.isolation)? {
-                let home=account.profile_root.join(".grok");load_grok_native_configuration_mode(&home,&home.join("config.toml"),&home.join(".env"),&rovai_core::runtime_discovery::runtime_environment(AdapterKind::GrokBuild),true)?.compatibility_digest
-            }else{grok_native_configuration_compatibility_digest()?}),
+            json!(
+                if let Some(account) = WindowsAccountLaunch::for_isolation(&workspace.isolation)? {
+                    let home = account.profile_root.join(".grok");
+                    load_grok_native_configuration_mode(
+                        &home,
+                        &home.join("config.toml"),
+                        &home.join(".env"),
+                        &rovai_core::runtime_discovery::runtime_environment(AdapterKind::GrokBuild),
+                        true,
+                    )?
+                    .compatibility_digest
+                } else {
+                    grok_native_configuration_compatibility_digest()?
+                }
+            ),
         );
         compatibility.insert(
             "grokNativeRulesRevision".to_string(),
@@ -7528,16 +7601,27 @@ fn prepare_private_host_config(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn validate_account_native_mcp_projection(servers: &BTreeMap<String, McpServerDefinition>) -> Result<()> {
+fn validate_account_native_mcp_projection(
+    servers: &BTreeMap<String, McpServerDefinition>,
+) -> Result<()> {
     // File projection has no secret classification metadata. Admit the narrow
     // local program + file-arguments form instead of copying arbitrary values.
     for definition in servers.values() {
-        let McpServerDefinition::Stdio { command, args, env, .. } = definition else {
+        let McpServerDefinition::Stdio {
+            command, args, env, ..
+        } = definition
+        else {
             bail!("account MCP file projection does not support authenticated HTTP configuration");
         };
-        anyhow::ensure!(env.is_empty() && Path::new(command).is_absolute() && Path::new(command).is_file()
-            && args.iter().all(|arg| Path::new(arg).is_absolute() && Path::new(arg).is_file()),
-            "account MCP file projection requires a local program, file arguments and no explicit environment; literal credentials are not copied");
+        anyhow::ensure!(
+            env.is_empty()
+                && Path::new(command).is_absolute()
+                && Path::new(command).is_file()
+                && args
+                    .iter()
+                    .all(|arg| Path::new(arg).is_absolute() && Path::new(arg).is_file()),
+            "account MCP file projection requires a local program, file arguments and no explicit environment; literal credentials are not copied"
+        );
     }
     Ok(())
 }
@@ -7702,6 +7786,8 @@ fn configure_runtime_command(
                 && workspace.access == "read_only";
             match runtime.adapter_kind {
                 AdapterKind::QoderCli => {
+                    // Keep native Agent calls synchronous after env overlays.
+                    command.env("QODER_ENABLE_AGENT_SESSIONS", "0");
                     command.arg("--permission-mode").arg(if legacy_read_only {
                         "dont_ask"
                     } else {
@@ -7873,7 +7959,9 @@ fn configure_runtime_command(
             // Formal AgentRun hosts inherit the user's official Grok Home and
             // config.toml. Only environment names referenced by that native
             // configuration are resolved from $GROK_HOME/.env for this child.
-            if workspace.isolation!="windows_account" {configure_grok_native_environment(command)?;}
+            if workspace.isolation != "windows_account" {
+                configure_grok_native_environment(command)?;
+            }
             return Ok(plugin);
         }
         AdapterKind::CodexCli
@@ -8048,40 +8136,72 @@ fn grok_environment_value(raw: &str, path: &Path, line: usize) -> Result<String>
     Ok(value.to_string())
 }
 
-fn read_grok_config_text(path:&Path,account_mode:bool)->Result<Option<String>> {
+fn read_grok_config_text(path: &Path, account_mode: bool) -> Result<Option<String>> {
     #[cfg(not(windows))]
-    anyhow::ensure!(!account_mode, "Windows account configuration requires Windows");
+    anyhow::ensure!(
+        !account_mode,
+        "Windows account configuration requires Windows"
+    );
     #[cfg(windows)]
     if account_mode {
-            use std::io::Read;
-            let file=match crate::local_attachment_snapshot::open_resolved_file_without_following(path){
-                Ok(file)=>file,Err(error)if error.chain().any(|cause|cause.downcast_ref::<std::io::Error>().is_some_and(|error|error.kind()==std::io::ErrorKind::NotFound))=>return Ok(None),Err(error)=>return Err(error),
+        use std::io::Read;
+        let file =
+            match crate::local_attachment_snapshot::open_resolved_file_without_following(path) {
+                Ok(file) => file,
+                Err(error)
+                    if error.chain().any(|cause| {
+                        cause
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                    }) =>
+                {
+                    return Ok(None);
+                }
+                Err(error) => return Err(error),
             };
-            let meta=crate::platform::windows_file_tree::inspect_node(&file)?;
-            anyhow::ensure!(meta.number_of_links==1&&meta.fingerprint.size<=1024*1024,"account Grok config must be bounded single-link file");
-            let mut bytes=Vec::new();file.take(1024*1024+1).read_to_end(&mut bytes)?;anyhow::ensure!(bytes.len()<=1024*1024,"account Grok config too large");
-            return Ok(Some(String::from_utf8(bytes)?));
+        let meta = crate::platform::windows_file_tree::inspect_node(&file)?;
+        anyhow::ensure!(
+            meta.number_of_links == 1 && meta.fingerprint.size <= 1024 * 1024,
+            "account Grok config must be bounded single-link file"
+        );
+        let mut bytes = Vec::new();
+        file.take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        anyhow::ensure!(bytes.len() <= 1024 * 1024, "account Grok config too large");
+        return Ok(Some(String::from_utf8(bytes)?));
     }
-    match std::fs::read_to_string(path){Ok(text)=>Ok(Some(text)),Err(error)if error.kind()==std::io::ErrorKind::NotFound=>Ok(None),Err(error)=>Err(error.into())}
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(Some(text)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
 }
 
 fn read_grok_environment_file(
     path: &Path,
     allowed_keys: &BTreeSet<String>,
-    account_mode:bool,
+    account_mode: bool,
 ) -> Result<(BTreeMap<String, String>, Option<String>)> {
     #[cfg(unix)]
     match std::fs::metadata(path) {
         Ok(metadata) => {
             use std::os::unix::fs::PermissionsExt;
-            anyhow::ensure!(metadata.is_file(), "Grok Build environment source is not a file");
-            anyhow::ensure!(metadata.permissions().mode() & 0o077 == 0,
-                "Grok Build environment source must not be accessible by group or others");
+            anyhow::ensure!(
+                metadata.is_file(),
+                "Grok Build environment source is not a file"
+            );
+            anyhow::ensure!(
+                metadata.permissions().mode() & 0o077 == 0,
+                "Grok Build environment source must not be accessible by group or others"
+            );
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((BTreeMap::new(), None)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((BTreeMap::new(), None));
+        }
         Err(error) => return Err(error.into()),
     }
-    let Some(contents)=read_grok_config_text(path,account_mode)? else{return Ok((BTreeMap::new(),None));};
+    let Some(contents) = read_grok_config_text(path, account_mode)? else {
+        return Ok((BTreeMap::new(), None));
+    };
     let mut values = BTreeMap::new();
     let mut observed_keys = BTreeSet::new();
     for (index, raw_line) in contents.lines().enumerate() {
@@ -8128,10 +8248,22 @@ fn load_grok_native_configuration_from_paths(
     environment_path: &Path,
     inherited_environment: &BTreeMap<String, String>,
 ) -> Result<GrokNativeConfiguration> {
-    load_grok_native_configuration_mode(home,config_path,environment_path,inherited_environment,false)
+    load_grok_native_configuration_mode(
+        home,
+        config_path,
+        environment_path,
+        inherited_environment,
+        false,
+    )
 }
-fn load_grok_native_configuration_mode(home:&Path,config_path:&Path,environment_path:&Path,inherited_environment:&BTreeMap<String,String>,account_mode:bool)->Result<GrokNativeConfiguration>{
-    let config_contents=read_grok_config_text(config_path,account_mode)?;
+fn load_grok_native_configuration_mode(
+    home: &Path,
+    config_path: &Path,
+    environment_path: &Path,
+    inherited_environment: &BTreeMap<String, String>,
+    account_mode: bool,
+) -> Result<GrokNativeConfiguration> {
+    let config_contents = read_grok_config_text(config_path, account_mode)?;
     let config = match config_contents.as_deref() {
         Some(contents) => toml::from_str::<toml::Value>(contents).with_context(|| {
             format!(
@@ -8156,7 +8288,7 @@ fn load_grok_native_configuration_mode(home:&Path,config_path:&Path,environment_
         .collect();
     let (credential_keys, injected_keys) = collect_grok_model_environment_keys(&config)?;
     let (file_environment, environment_contents) =
-        read_grok_environment_file(environment_path, &injected_keys,account_mode)?;
+        read_grok_environment_file(environment_path, &injected_keys, account_mode)?;
     let environment = injected_keys
         .iter()
         .filter_map(|key| {
@@ -8636,16 +8768,40 @@ mod windows_path_tests {
     // Synthetic links and bounds cannot be established by the Unix config owner.
     #[test]
     fn account_grok_config_reads_reject_links_and_preserve_missing_semantics() {
-        let root=std::env::current_dir().unwrap().join("target").join(format!("account-grok-config-links-{}",uuid::Uuid::new_v4()));
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join(format!(
+                "account-grok-config-links-{}",
+                uuid::Uuid::new_v4()
+            ));
         std::fs::create_dir_all(&root).unwrap();
-        let config_path=root.join("config.toml");
-        std::fs::write(&config_path, r#"[model.synthetic]
+        let config_path = root.join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"[model.synthetic]
 api_key = "synthetic-only"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         #[cfg(windows)]
         {
-            assert!(read_grok_config_text(&root.join("absent/child/config.toml"), true).unwrap().is_none());
-            assert!(load_grok_native_configuration_mode(&root, &config_path, &root.join(".env"), &BTreeMap::new(), true).unwrap().byok_configured);
+            assert!(
+                read_grok_config_text(&root.join("absent/child/config.toml"), true)
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(
+                load_grok_native_configuration_mode(
+                    &root,
+                    &config_path,
+                    &root.join(".env"),
+                    &BTreeMap::new(),
+                    true
+                )
+                .unwrap()
+                .byok_configured
+            );
             let linked_file = root.join("linked-config.toml");
             std::fs::hard_link(&config_path, &linked_file).unwrap();
             assert!(read_grok_config_text(&linked_file, true).is_err());
@@ -8655,15 +8811,30 @@ api_key = "synthetic-only"
             let status = std::process::Command::new("powershell.exe")
                 .args(["-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; New-Item -ItemType Junction -Path $env:ROVAI_TEST_JUNCTION -Target $env:ROVAI_TEST_TARGET | Out-Null"])
                 .env("ROVAI_TEST_JUNCTION", &junction).env("ROVAI_TEST_TARGET", &root).output().unwrap();
-            assert!(status.status.success(), "synthetic junction fixture creation failed");
+            assert!(
+                status.status.success(),
+                "synthetic junction fixture creation failed"
+            );
             for leaf in ["config.toml", "missing-config.toml"] {
-                assert!(read_grok_config_text(&junction.join(leaf), true).is_err(), "junction must be rejected before leaf lookup");
+                assert!(
+                    read_grok_config_text(&junction.join(leaf), true).is_err(),
+                    "junction must be rejected before leaf lookup"
+                );
             }
-            assert!(load_grok_native_configuration_mode(&root, &config_path, &junction.join("config.toml"), &BTreeMap::new(), true).is_err());
+            assert!(
+                load_grok_native_configuration_mode(
+                    &root,
+                    &config_path,
+                    &junction.join("config.toml"),
+                    &BTreeMap::new(),
+                    true
+                )
+                .is_err()
+            );
             assert_eq!(std::fs::read(&config_path).unwrap(), protected_bytes);
             std::fs::remove_dir(&junction).unwrap();
-            let oversized=root.join("oversized.toml");
-            std::fs::write(&oversized, vec![b'x'; 1024*1024+1]).unwrap();
+            let oversized = root.join("oversized.toml");
+            std::fs::write(&oversized, vec![b'x'; 1024 * 1024 + 1]).unwrap();
             assert!(read_grok_config_text(&oversized, true).is_err());
         }
         std::fs::remove_dir_all(&root).unwrap();
@@ -9963,7 +10134,9 @@ mod route_policy_tests {
                 .count(),
             1
         );
-        assert_eq!(params["additionalDirectories"].as_array().unwrap().len(), 2);
+        assert_eq!(params["cwd"], "/workspace");
+        assert_eq!(params["mcpServers"], json!([]));
+        assert_eq!(params["additionalDirectories"], json!([]));
 
         let additional_directories = ["/attachments".to_string(), "/run-tmp".to_string()];
         let resume = build_acp_resume_session_params(
@@ -9990,6 +10163,35 @@ mod route_policy_tests {
             other["additionalDirectories"],
             json!(["/attachments", "/run-tmp"])
         );
+        let mcp_servers = [json!({"name":"example", "command":"example-mcp", "args":[], "env":[]})];
+        for kind in [
+            AdapterKind::GrokBuild,
+            AdapterKind::QwenCode,
+            AdapterKind::CursorAgent,
+            AdapterKind::DeepseekHarness,
+            AdapterKind::MinimaxCodeCli,
+        ] {
+            let params = build_acp_new_session_params(
+                kind,
+                "/workspace",
+                &mcp_servers,
+                &additional_directories,
+                None,
+            );
+            assert_eq!(params["cwd"], "/workspace");
+            assert_eq!(params["mcpServers"], json!(mcp_servers));
+            assert!(params.get("_meta").is_none());
+            match kind {
+                AdapterKind::GrokBuild => assert_eq!(params["additionalDirectories"], json!([])),
+                AdapterKind::QwenCode => {
+                    assert_eq!(
+                        params["additionalDirectories"],
+                        json!(additional_directories)
+                    );
+                }
+                _ => assert!(params.get("additionalDirectories").is_none()),
+            }
+        }
     }
 
     #[test]
@@ -12190,7 +12392,6 @@ done
         std::fs::remove_dir_all(root).unwrap();
     }
 
-
     #[cfg(unix)]
     #[test]
     fn grok_environment_source_rejects_group_readable_secrets() {
@@ -12647,6 +12848,7 @@ while IFS= read -r ignored; do :; done
                     }],
                     custom_api_snapshot: None,
                     common_environment_unavailable: false,
+                    configuration_error: None,
                 },
             );
         crate::runtime_discovery::with_runtime_configuration(
@@ -14589,11 +14791,12 @@ for line in sys.stdin:
     async fn history_restore_replay_is_quarantined_and_only_current_prompt_accepts_input() {
         // Command uses the same transport and goes straight to native restore;
         // the fixture deliberately has no session/list response.
-        for (kind, control_outcome) in [
-            (AdapterKind::TraeCnCli, "end_turn"),
-            (AdapterKind::CommandCodeCli, "end_turn"),
-            (AdapterKind::CommandCodeCli, "error"),
-            (AdapterKind::CommandCodeCli, "cancelled"),
+        for (kind, control_outcome, resume_fallback) in [
+            (AdapterKind::TraeCnCli, "end_turn", false),
+            (AdapterKind::TraeCnCli, "end_turn", true),
+            (AdapterKind::CommandCodeCli, "end_turn", false),
+            (AdapterKind::CommandCodeCli, "error", false),
+            (AdapterKind::CommandCodeCli, "cancelled", false),
         ] {
             let root = std::env::temp_dir().join(format!(
                 "rovai-acp-resume-quarantine-{}",
@@ -14607,6 +14810,19 @@ for line in sys.stdin:
             } else {
                 json!({"jsonrpc":"2.0","id":4,"result":{"stopReason":control_outcome,"usage":{"totalTokens":999999}}})
             };
+            let fallback_response = if resume_fallback {
+                format!(
+                    r#"printf '%s\n' '{{"jsonrpc":"2.0","id":2,"error":{{"code":-32601,"message":"resume unavailable"}}}}'
+IFS= read -r load || exit 1
+printf '%s\n' "$load" >> '{}'
+"#,
+                    protocol_log.display()
+                )
+            } else {
+                String::new()
+            };
+            let restore_response_id = if resume_fallback { 3 } else { 2 };
+            let first_prompt_id = restore_response_id + 1;
             make_executable(
                 &executable,
                 &format!(
@@ -14619,10 +14835,11 @@ printf '%s\n' "$initialize" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
 IFS= read -r resume || exit 1
 printf '%s\n' "$resume" >> '{}'
+{fallback_response}
 printf '%s\n' '{{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{{"sessionId":"session-old","toolCall":{{"toolCallId":"historical-tool"}},"options":[]}}}}'
 IFS= read -r quarantined_permission || exit 1
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
-prompt_id=3
+printf '%s\n' '{{"jsonrpc":"2.0","id":{restore_response_id},"result":{{"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
+prompt_id={first_prompt_id}
 if [ -n "$ROVAI_COMMAND_CODE_BOOTSTRAP_ROOT" ]; then
   IFS= read -r mode || exit 1
   printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{}}}}'
@@ -14701,7 +14918,7 @@ while IFS= read -r ignored; do :; done
                 .start_or_resume_session(
                     Some("session-old"),
                     AcpSessionCapabilities {
-                        can_resume: false,
+                        can_resume: resume_fallback,
                         can_load_history: true,
                     },
                     "runtime_default",
@@ -14797,11 +15014,81 @@ while IFS= read -r ignored; do :; done
                 }) if message.get("method").and_then(Value::as_str)
                     == Some("rovai/acp_prompt_completed")
             ));
+            if kind == AdapterKind::TraeCnCli && !resume_fallback {
+                // Poll only the post-RPC attachment transition with uncontended locks.
+                // Resume must finish without registering a timer; load must remain pending.
+                // This observes the wait directly, without wall-clock performance assertions.
+                for (method, immediate) in [("session/resume", true), ("session/load", false)] {
+                    host.bind_session(
+                        &session_id,
+                        &runtime.owner,
+                        AcpSessionPhase::loading_replay(),
+                    )
+                    .await
+                    .unwrap();
+                    let mut attachment = std::pin::pin!(
+                        runtime.finish_session_attachment(&session_id, Some(method))
+                    );
+                    let polled = std::future::poll_fn(|cx| {
+                        std::task::Poll::Ready(std::future::Future::poll(attachment.as_mut(), cx))
+                    })
+                    .await;
+                    assert_eq!(polled.is_ready(), immediate, "{method}: {polled:?}");
+                    if let std::task::Poll::Ready(result) = polled {
+                        result.unwrap();
+                    }
+                }
+                for invalid in ["owner", "epoch", "protocol", "ready"] {
+                    host.bind_session(
+                        &session_id,
+                        &runtime.owner,
+                        AcpSessionPhase::loading_replay(),
+                    )
+                    .await
+                    .unwrap();
+                    {
+                        let mut routes = host.routes.write().await;
+                        let route = routes.get_mut(&session_id).unwrap();
+                        match invalid {
+                            "owner" => route.owner.agent_run_id = "another-run".into(),
+                            "epoch" => route.owner.execution_epoch += 1,
+                            "protocol" => {
+                                route.phase = AcpSessionPhase::ProtocolViolated {
+                                    reason: "test violation".into(),
+                                }
+                            }
+                            _ => route.phase = AcpSessionPhase::Ready,
+                        }
+                    }
+                    assert!(
+                        runtime
+                            .finish_session_attachment(&session_id, Some("session/resume"))
+                            .await
+                            .is_err()
+                    );
+                    if invalid == "protocol" {
+                        assert!(matches!(
+                            host.routes.read().await[&session_id].phase,
+                            AcpSessionPhase::ProtocolViolated { .. }
+                        ));
+                    }
+                    host.routes.write().await.remove(&session_id);
+                }
+                assert!(
+                    runtime
+                        .finish_session_attachment(&session_id, Some("session/resume"))
+                        .await
+                        .is_err()
+                );
+            }
             host.shutdown().await;
 
             let protocol = std::fs::read_to_string(&protocol_log).unwrap();
             assert!(protocol.contains("\"method\":\"session/load\""));
-            assert!(!protocol.contains("\"method\":\"session/resume\""));
+            assert_eq!(
+                protocol.contains("\"method\":\"session/resume\""),
+                resume_fallback
+            );
             assert!(!protocol.contains("\"method\":\"session/list\""));
             std::fs::remove_dir_all(root).unwrap();
         }
@@ -14809,12 +15096,30 @@ while IFS= read -r ignored; do :; done
 
     #[tokio::test]
     async fn history_restore_protocol_anomalies_fail_closed() {
-        for (case_name, restore_response, expected_error) in [
-            ("invalid-json", "not-json-history", "invalid protocol JSON"),
+        for (case_name, restore_response, expected_error, can_resume) in [
+            (
+                "invalid-json",
+                "not-json-history",
+                "invalid protocol JSON",
+                false,
+            ),
+            (
+                "resume-invalid-json",
+                "not-json-history",
+                "invalid protocol JSON",
+                true,
+            ),
             (
                 "different-session-id",
                 r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-other"}}"#,
                 "different Session ID",
+                false,
+            ),
+            (
+                "resume-different-session-id",
+                r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-other"}}"#,
+                "different Session ID",
+                true,
             ),
         ] {
             let root = std::env::temp_dir().join(format!(
@@ -14872,7 +15177,7 @@ while IFS= read -r ignored; do :; done
                 .start_or_resume_session(
                     Some("session-old"),
                     AcpSessionCapabilities {
-                        can_resume: false,
+                        can_resume,
                         can_load_history: true,
                     },
                     "runtime_default",
@@ -14896,7 +15201,7 @@ while IFS= read -r ignored; do :; done
                 let routes = host.routes.read().await;
                 assert!(!routes.contains_key("session-other"));
                 assert!(routes.keys().all(|session_id| session_id == "session-old"));
-                if case_name == "different-session-id" {
+                if case_name.ends_with("different-session-id") {
                     assert!(matches!(
                         routes.get("session-old").map(|route| &route.phase),
                         Some(AcpSessionPhase::ProtocolViolated { .. })
@@ -16672,6 +16977,94 @@ while IFS= read -r ignored; do :; done
             assert!(!args.iter().any(|arg| *arg == "--available-tools="));
         }
 
+        // Qoder disables background Agent sessions at launch, retaining the
+        // existing Native Session identity and ordinary synchronous Agent tool.
+        let mut qoder = frozen.clone();
+        qoder.adapter_kind = AdapterKind::QoderCli;
+        qoder.permissions.adapter_kind = AdapterKind::QoderCli;
+        qoder.permissions.values = json!({"permission_mode":"bypass_permissions"});
+        let qoder_digest = runtime_compatibility_digest(
+            &qoder,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            &attachment_authorization,
+        )
+        .unwrap();
+        let mut qoder_inputs = old_inputs.clone();
+        qoder_inputs["adapterKind"] = json!(AdapterKind::QoderCli);
+        qoder_inputs
+            .as_object_mut()
+            .unwrap()
+            .remove("nativeQuestionnairePolicy");
+        assert_ne!(
+            qoder_digest,
+            Some(canonical_json_digest(&qoder_inputs).unwrap())
+        );
+        qoder_inputs["nativeBackgroundPolicy"] = json!("agent-sessions-disabled-v1");
+        assert_eq!(
+            qoder_digest,
+            Some(canonical_json_digest(&qoder_inputs).unwrap())
+        );
+        let unchanged = freeze_native_session_compatibility(qoder.clone(), &workspace).unwrap();
+        assert_eq!(
+            unchanged.binding_compatibility_digest,
+            qoder.binding_compatibility_digest
+        );
+        assert_eq!(
+            unchanged.native_session_compatibility_key,
+            qoder.native_session_compatibility_key
+        );
+        for with_mcp in [false, true] {
+            let mut command = Command::new(&executable);
+            command.env("QODER_ENABLE_AGENT_SESSIONS", "1");
+            command.env("PROCESS_ONLY", "preserved");
+            let servers = if with_mcp {
+                BTreeMap::from([(
+                    "fixture".into(),
+                    McpServerDefinition::StreamableHttp {
+                        url: "https://mcp.invalid/example".into(),
+                        headers: BTreeMap::new(),
+                    },
+                )])
+            } else {
+                BTreeMap::new()
+            };
+            let mcp = configure_runtime_command(
+                &mut command,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &qoder,
+                false,
+                &servers,
+                &root,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                mcp.is_some(),
+                with_mcp,
+                "policy precedes the MCP early return"
+            );
+            for (key, value) in [
+                ("QODER_ENABLE_AGENT_SESSIONS", "0"),
+                ("PROCESS_ONLY", "preserved"),
+            ] {
+                assert_eq!(
+                    command
+                        .as_std()
+                        .get_envs()
+                        .find(|(name, _)| *name == key)
+                        .unwrap()
+                        .1
+                        .unwrap(),
+                    value
+                );
+            }
+        }
+
         // Only the V2 launch policy changes; V1 and native Session identity
         // retain their existing compatibility inputs.
         for (runtime, policy) in [(&v1, None), (&v2, Some("deny-question-v1"))] {
@@ -18429,8 +18822,13 @@ mod windows_account_live_tests {
             .clone()
             .expect("installed Runtime required");
         if kind == AdapterKind::GrokBuild {
-            let requested = PathBuf::from(std::env::var_os("ROVAI_GROK_BIN").expect("explicit Grok acceptance program"));
-            assert_eq!(std::fs::canonicalize(&executable).unwrap(), std::fs::canonicalize(requested).unwrap());
+            let requested = PathBuf::from(
+                std::env::var_os("ROVAI_GROK_BIN").expect("explicit Grok acceptance program"),
+            );
+            assert_eq!(
+                std::fs::canonicalize(&executable).unwrap(),
+                std::fs::canonicalize(requested).unwrap()
+            );
             println!("grok_selected_task_program=true");
         }
         rovai_core::runtime_discovery::discover_runtime_version(&mut found, &search).await;
@@ -18474,7 +18872,9 @@ mod windows_account_live_tests {
                 schema_version: 1,
                 values: if kind == AdapterKind::CodebuddyCli {
                     json!({"permission_mode":"bypassPermissions"})
-                } else if kind==AdapterKind::GrokBuild {json!({"permission_mode":"bypassPermissions"})}else{
+                } else if kind == AdapterKind::GrokBuild {
+                    json!({"permission_mode":"bypassPermissions"})
+                } else {
                     json!({"permission":"allow"})
                 },
             },
@@ -18499,9 +18899,13 @@ mod windows_account_live_tests {
         .unwrap();
         let (incoming, mut receiver) = mpsc::unbounded_channel();
         let projection_test = std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_PROJECTIONS").is_some();
-        let external_mcp_servers: BTreeMap<String, McpServerDefinition> = if projection_test && kind == AdapterKind::CodebuddyCli {
-            serde_json::from_slice(&std::fs::read(fixture.join("mcp-servers.json")).unwrap()).unwrap()
-        } else { BTreeMap::new() };
+        let external_mcp_servers: BTreeMap<String, McpServerDefinition> =
+            if projection_test && kind == AdapterKind::CodebuddyCli {
+                serde_json::from_slice(&std::fs::read(fixture.join("mcp-servers.json")).unwrap())
+                    .unwrap()
+            } else {
+                BTreeMap::new()
+            };
         let host = AcpHost::spawn(
             workspace.path(),
             &workspace,
@@ -18533,7 +18937,10 @@ mod windows_account_live_tests {
                     detail.contains("EPERM"),
                     detail.contains("Host exited")
                 );
-                println!("product_start_error_safe={:?}",sanitize_public_runtime_error(&detail,&[(fixture.as_path(),"<fixture>")]));
+                println!(
+                    "product_start_error_safe={:?}",
+                    sanitize_public_runtime_error(&detail, &[(fixture.as_path(), "<fixture>")])
+                );
                 panic!("real product start did not qualify; no host fallback");
             }
         };
@@ -18622,23 +19029,27 @@ mod windows_account_live_tests {
                             let plugin_readable = if kind == AdapterKind::CodebuddyCli {
                                 let ephemeral = host.ephemeral_config.lock().await;
                                 match (host.account_filesystem.as_ref(), ephemeral.as_ref()) {
-                                    (Some(filesystem), Some(config)) => match filesystem.projected_path(config.path()) {
-                                        Some(path) => filesystem.read_text(path).await.is_ok(),
-                                        None => false,
-                                    },
+                                    (Some(filesystem), Some(config)) => {
+                                        match filesystem.projected_path(config.path()) {
+                                            Some(path) => filesystem.read_text(path).await.is_ok(),
+                                            None => false,
+                                        }
+                                    }
                                     _ => false,
                                 }
-                            } else { match (host.account_filesystem.as_ref(), plugin) {
-                                (Some(filesystem), Some(path)) => {
-                                    match filesystem.projected_path(&path) {
-                                        Some(projected) => {
-                                            filesystem.read_text(projected).await.is_ok()
+                            } else {
+                                match (host.account_filesystem.as_ref(), plugin) {
+                                    (Some(filesystem), Some(path)) => {
+                                        match filesystem.projected_path(&path) {
+                                            Some(projected) => {
+                                                filesystem.read_text(projected).await.is_ok()
+                                            }
+                                            None => false,
                                         }
-                                        None => false,
                                     }
+                                    _ => false,
                                 }
-                                _ => false,
-                            }};
+                            };
                             println!(
                                 "mcp_actual_tool_calls={} account_plugin_readable={}",
                                 calls, plugin_readable
@@ -18661,7 +19072,8 @@ mod windows_account_live_tests {
                                 "session/request_permission" => logical
                                     .respond(
                                         request_id.clone(),
-                                        legacy_approval_result(kind, &message["params"], true).unwrap(),
+                                        legacy_approval_result(kind, &message["params"], true)
+                                            .unwrap(),
                                     )
                                     .await
                                     .unwrap(),
@@ -18854,8 +19266,17 @@ mod windows_account_live_tests {
                 );
             }
             let marker = format!("SYNTHETIC_{}", uuid::Uuid::new_v4().simple());
-            let prompt = if matches!(kind,AdapterKind::OpencodeCli|AdapterKind::CodebuddyCli) && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_LIFECYCLE").is_some() {
-                format!("Remember this synthetic marker for later: {marker}. Reply exactly {}. Do not use tools.",if kind==AdapterKind::CodebuddyCli{"CODEBUDDY_ACCOUNT_OK"}else{"OPENCODE_ACCOUNT_OK"})
+            let prompt = if matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CodebuddyCli)
+                && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_LIFECYCLE").is_some()
+            {
+                format!(
+                    "Remember this synthetic marker for later: {marker}. Reply exactly {}. Do not use tools.",
+                    if kind == AdapterKind::CodebuddyCli {
+                        "CODEBUDDY_ACCOUNT_OK"
+                    } else {
+                        "OPENCODE_ACCOUNT_OK"
+                    }
+                )
             } else if kind == AdapterKind::OpencodeCli {
                 format!(
                     "Remember this synthetic marker for later: {marker}. Reply exactly OPENCODE_ACCOUNT_OK. Do not use tools."
@@ -18898,12 +19319,22 @@ mod windows_account_live_tests {
                 false
             }).await;
             println!("product_prompt_deadline_completed={}", completed.is_ok());
-            if kind==AdapterKind::CodebuddyCli && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_DEBUG_FLUSH").is_some(){tokio::time::sleep(Duration::from_secs(3)).await;}
+            if kind == AdapterKind::CodebuddyCli
+                && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_DEBUG_FLUSH").is_some()
+            {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
             let observed_reply = logical.final_agent_message(&prompt_id).await;
             logical.detach().await;
-            if matches!(kind,AdapterKind::OpencodeCli|AdapterKind::CodebuddyCli)
+            if matches!(kind, AdapterKind::OpencodeCli | AdapterKind::CodebuddyCli)
                 && std::env::var_os("ROVAI_ACCOUNT_ACCEPTANCE_LIFECYCLE").is_some()
-                && observed_reply.as_ref().is_some_and(|reply|reply.contains(if kind==AdapterKind::CodebuddyCli{"CODEBUDDY_ACCOUNT_OK"}else{"OPENCODE_ACCOUNT_OK"}))
+                && observed_reply.as_ref().is_some_and(|reply| {
+                    reply.contains(if kind == AdapterKind::CodebuddyCli {
+                        "CODEBUDDY_ACCOUNT_OK"
+                    } else {
+                        "OPENCODE_ACCOUNT_OK"
+                    })
+                })
             {
                 let hot_owner = AcpRuntimeOwner {
                     agent_run_id: "synthetic-live-hot-run".into(),
@@ -18979,8 +19410,16 @@ mod windows_account_live_tests {
                     .start_or_resume_session_with_native_rules(
                         Some(&session_id),
                         capabilities,
-                        if kind==AdapterKind::CodebuddyCli {"explicit"}else{"runtime_default"},
-                        if kind==AdapterKind::CodebuddyCli {"custom-local:gpt-6.1-sol"}else{"opencode-cli://runtime-default"},
+                        if kind == AdapterKind::CodebuddyCli {
+                            "explicit"
+                        } else {
+                            "runtime_default"
+                        },
+                        if kind == AdapterKind::CodebuddyCli {
+                            "custom-local:gpt-6.1-sol"
+                        } else {
+                            "opencode-cli://runtime-default"
+                        },
                         &json!({}),
                         &BTreeMap::new(),
                         None,
@@ -19090,9 +19529,13 @@ mod windows_account_live_tests {
                     "real chat must complete end_turn"
                 );
                 assert!(
-                    observed_reply
-                        .as_ref()
-                        .is_some_and(|reply| reply.contains(if kind==AdapterKind::CodebuddyCli {"CODEBUDDY_ACCOUNT_OK"}else{"OPENCODE_ACCOUNT_OK"})),
+                    observed_reply.as_ref().is_some_and(|reply| reply.contains(
+                        if kind == AdapterKind::CodebuddyCli {
+                            "CODEBUDDY_ACCOUNT_OK"
+                        } else {
+                            "OPENCODE_ACCOUNT_OK"
+                        }
+                    )),
                     "real chat requires the exact expected observed reply"
                 );
             }

@@ -69,7 +69,7 @@ export interface ExecutionMetricsScope {
   expandedRunIds: ReadonlySet<string>
 }
 
-/** One mounted Camp/agent reader: bounded cache, one request, coalesced invalidation and finite tails. */
+/** One mounted Thread/agent reader: bounded cache, one request, coalesced invalidation and finite tails. */
 export class ExecutionMetricsReader {
   private scope: ExecutionMetricsScope = { visible: false, runs: [], visibleRunIds: new Set(), expandedRunIds: new Set() }
   private scopeKey = ''

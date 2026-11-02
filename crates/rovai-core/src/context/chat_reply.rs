@@ -244,25 +244,64 @@ mod tests {
         );
         assert!(!baseline.to_string().contains("untrusted"));
         let long_name = "长名界".repeat(300);
-        c.execute("UPDATE channel_chat_message SET author_name=?1 WHERE id='in1'",[&long_name]).unwrap();
-        let long = project(&c,"chat",&input(&["one"]),None).unwrap().unwrap();
-        assert_eq!(long["inputs"][0]["sender"]["displayName"],long_name);
-        let mut section=String::new();
-        append_json_section(&mut section,"CHAT_REPLY_CONTEXT",&long).unwrap();
-        assert!(section.len()>section.chars().count());
-        let facts=RenderedRunFacts{references:vec![],payload_json:"{}".into()};
-        let run_input=input(&["one"]);
-        let work_context=project(&c,"work",&run_input,None).unwrap();
-        let work_bytes=render_payload(RenderPayloadInput{collaboration_state:None,self_active_tasks:None,shared_conversation:None,run_facts:&facts,workspace:None,additional_skills:None,a2a_guidance:None,single_chat_guidance:None,chat_reply_context:work_context.as_ref(),current_input:None,run_input:Some(&run_input)}).unwrap();
-        let mut old_work=String::new();
-        append_json_section(&mut old_work,"RUN_INPUT",&run_input).unwrap();
-        assert_eq!(work_bytes,old_work);
-        let current=json!({"source":{"type":"user"},"body":"unchanged"});
-        let non_batch=render_payload(RenderPayloadInput{collaboration_state:None,self_active_tasks:None,shared_conversation:None,run_facts:&facts,workspace:None,additional_skills:None,a2a_guidance:None,single_chat_guidance:None,chat_reply_context:None,current_input:Some(&current),run_input:None}).unwrap();
-        let mut old_non_batch=String::new();
-        append_json_section(&mut old_non_batch,"CURRENT_INPUT",&current).unwrap();
-        assert_eq!(non_batch,old_non_batch);
-        c.execute("UPDATE channel_chat_message SET author_name='Visitor' WHERE id='in1'",[]).unwrap();
+        c.execute(
+            "UPDATE channel_chat_message SET author_name=?1 WHERE id='in1'",
+            [&long_name],
+        )
+        .unwrap();
+        let long = project(&c, "chat", &input(&["one"]), None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(long["inputs"][0]["sender"]["displayName"], long_name);
+        let mut section = String::new();
+        append_json_section(&mut section, "CHAT_REPLY_CONTEXT", &long).unwrap();
+        assert!(section.len() > section.chars().count());
+        let facts = RenderedRunFacts {
+            references: vec![],
+            payload_json: "{}".into(),
+        };
+        let run_input = input(&["one"]);
+        let work_context = project(&c, "work", &run_input, None).unwrap();
+        let work_bytes = render_payload(RenderPayloadInput {
+            collaboration_state: None,
+            self_active_tasks: None,
+            shared_conversation: None,
+            run_facts: &facts,
+            workspace: None,
+            additional_skills: None,
+            a2a_guidance: None,
+            single_chat_guidance: None,
+            chat_reply_context: work_context.as_ref(),
+            current_input: None,
+            run_input: Some(&run_input),
+        })
+        .unwrap();
+        let mut old_work = String::new();
+        append_json_section(&mut old_work, "RUN_INPUT", &run_input).unwrap();
+        assert_eq!(work_bytes, old_work);
+        let current = json!({"source":{"type":"user"},"body":"unchanged"});
+        let non_batch = render_payload(RenderPayloadInput {
+            collaboration_state: None,
+            self_active_tasks: None,
+            shared_conversation: None,
+            run_facts: &facts,
+            workspace: None,
+            additional_skills: None,
+            a2a_guidance: None,
+            single_chat_guidance: None,
+            chat_reply_context: None,
+            current_input: Some(&current),
+            run_input: None,
+        })
+        .unwrap();
+        let mut old_non_batch = String::new();
+        append_json_section(&mut old_non_batch, "CURRENT_INPUT", &current).unwrap();
+        assert_eq!(non_batch, old_non_batch);
+        c.execute(
+            "UPDATE channel_chat_message SET author_name='Visitor' WHERE id='in1'",
+            [],
+        )
+        .unwrap();
         assert!(
             project(&c, "work", &input(&["one"]), None)
                 .unwrap()

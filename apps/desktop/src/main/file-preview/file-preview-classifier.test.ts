@@ -19,6 +19,7 @@ describe('classifyFilePreview', () => {
       .toBe('paged_text')
     expect(classifyFilePreview('/repo/report.pdf', 10, Buffer.from('%PDF')).kind).toBe('system')
     expect(classifyFilePreview('/repo/data.bin', 2, Buffer.from([0xff, 0xfe])).kind).toBe('system')
+    expect(classifyFilePreview('/repo/data.xyz', 3, Buffer.from([0, 1, 2])).kind).toBe('system')
   })
 
   it('requires confirmation for executable file types', () => {

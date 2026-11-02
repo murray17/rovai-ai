@@ -60,7 +60,7 @@ TRAE 进程继续执行，不增加 Probe 或失败诊断进程。
 | ADR | 已更新 | [ADR-0192](decisions.md#adr-0192)冻结目的化启动权限、TRAE 静态检测和同一真实进程验证边界。 |
 | Contracts | 已更新 | [Runtime Launch and Verification v1](../../contracts/runtime-launch-and-verification-v1.md)定义启动目的、`installed_unverified`、nullable version 与状态迁移。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录静态 Installation、执行期验证和 Ready 保留规则。 |
-| UI | 已更新 | [Member workspace brief](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)与[Settings workspace brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)加入“已安装/首次运行验证”和“重新扫描安装”语义。 |
+| UI | 已更新 | [Member workspace brief](../../ui/surfaces/member-workspace.md)与[Settings workspace brief](../../ui/surfaces/settings-workspace.md)加入“已安装/首次运行验证”和“重新扫描安装”语义。 |
 | Runtime Activity | 确认无需更新 | 启动检查与 capability snapshot 不是 Canonical Runtime Activity；AgentRun 事件、Tool/Approval/Message 映射均未变化。 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)区分 v0.83 历史 Probe 证据与当前执行期再验证规则。 |
 | Documentation routing | 已更新 | [文档导航](../../README.md)、ADR CURRENT、Contract 与 Architecture 索引路由到新边界。 |

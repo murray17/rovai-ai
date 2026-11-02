@@ -42,8 +42,8 @@ export function renderRunLifecycle() {
     + pill(815, 256, 352, '同一 Conversation 按序接续', T.ding, 20);
 
   const capability = phase(s, 373, 168, '2', 'claim 队首批次，创建并冻结 Run', T.ding,
-    ['Scheduler 原子 claim · 冻结输入、配置与工作目录', '校验 Skill 投影 · 准备 MCP Projection'],
-    '本轮可用能力', ['SkillExposureSnapshot', '可发现的 Skills · 已配置的 MCP Servers']);
+    ['Mission 工作区先准备 · claim 重验并冻结', '冻结输入、配置、Skill 选择与完整预算'],
+    '本轮能力来源', ['Skill Selection · MCP 配置', '工具箱与原生来源 · 已配置的 MCP Servers']);
 
   const session = phase(s, 563, 295, '3', '取得 Host，绑定本轮执行', T.gugu,
     ['Runtime Fleet.acquire · 匹配兼容范围与配置'],
@@ -64,11 +64,11 @@ export function renderRunLifecycle() {
     + label(836, 811, '轮换 Lease · Rovai CLI 绑定本轮身份', 20, { color: T.gugu.main });
 
   const context = phase(s, 880, 209, '4', '物化输入，交给本轮执行', T.green,
-    ['Context Profile → Model Context Projection', 'ContextManifest → Runtime Input Delivery'],
+    ['复用 claim 内容 · 重验来源与附件可用性', 'ContextManifest → Runtime Input Delivery'],
     '送入本轮的模型上下文')
     + [
-      ['同伴 · 自身责任 · 公共历史', T.gugu],
-      ['运行事实 · 工作区', T.teal],
+      ['同伴 · 可选自身任务', T.gugu],
+      ['执行事实 · 工作区 · Skills', T.teal],
       ['完整有序 RUN_INPUT', T.cheese],
     ].map(([name, tone], i) => rect(814, 942 + i * 43, 644, 34, '#fff', tone.border, 8)
       + label(834, 966 + i * 43, name, 18, { color: tone.main, weight: 600 })).join('');

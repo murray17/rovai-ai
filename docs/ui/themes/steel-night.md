@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-10-25
+last_updated: 2026-10-30
 ---
 
 # Steel Night
@@ -28,7 +28,7 @@ Dark. `color-scheme: dark`.
 最深 Canvas 承载 rail 和主 surface，raised/input 再上提一级。会话与 Inspector 使用相邻但可辨的
 石墨表面及强分隔线。普通内容保持平面，只有真正浮层使用更深阴影。
 
-控件、品牌、状态、身份和 Memory 的色彩职责继承 [DESIGN.md](../../../DESIGN.md#colors)。
+色彩职责、控件边界与共享交互继承 [DESIGN.md](../../../DESIGN.md)。
 
 ## Complete semantic token assignments
 
@@ -124,8 +124,7 @@ Dark. `color-scheme: dark`.
 
 ### Conversation controls
 
-These local tokens cover sidebar selection, Composer and the execution/task/member controls.
-Rail and selected surfaces stay unchanged; status, identity and evidence keep their own colors.
+Action tokens serve shared controls across the App; the `conversation-` prefix does not limit their scope.
 
 | Token | Value |
 |---|---:|
@@ -143,6 +142,7 @@ Rail and selected surfaces stay unchanged; status, identity and evidence keep th
 | `--neutral-selected` | `#292e32` |
 | `--neutral-hover` | `#23292e` |
 | `--conversation-action` | `#e5e5e7` |
+| `--conversation-action-ink` | `#e5e5e7` |
 | `--conversation-action-hover` | `#ffffff` |
 | `--conversation-action-contrast` | `#171719` |
 | `--conversation-control-line` | `#767a7e` |
@@ -241,8 +241,8 @@ Night 为相同十个格式家族提供独立亮度值；它们只表达文件�
 | `--dialog-field-line` | `#3b434a` |
 | `--dialog-field-line-hover` | `#697983` |
 
-Labels use regular weight. Fields retain a 1px border, input surface and visible focus outline;
-higher contrast preferences use the stronger control line and ink. Import MCP source JSON reuses
+Labels use regular weight. Fields retain a 1px border and input surface; focus follows
+[DESIGN.md](../../../DESIGN.md#components). Higher contrast preferences use the stronger control line and ink. Import MCP source JSON reuses
 `--conversation-code-block-canvas`, with no extra left margin.
 
 ### Shared aliases and geometry
@@ -267,9 +267,9 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 | `--conversation-user-message-max-width` | `690px` |
 | `--conversation-user-message-width-offset` | `36px`; viewport `<= 1080px` 时为 `18.667px`，紧凑会话列为 `16px` |
 
-## Brand, semantic, identity, and evidence color rules
+## Message and evidence rendering
 
-Inherit [DESIGN.md](../../../DESIGN.md#colors). Inline code, Shell results and fenced evidence use their
+Inline code, Shell results and fenced evidence use their
 respective code tokens. Conversation prose, process copy and Markdown files use the dedicated
 `--conversation-inline-code-canvas`, `--conversation-code-block-canvas` and `--conversation-code-line` layer;
 release notes and Tool results keep shared SafeMarkdown defaults.
@@ -280,12 +280,7 @@ and its matching 1px border allocation; private Agent narrative stays transparen
 
 Normal text must meet 4.5:1; control boundaries and non-text state indicators must meet 3:1.
 Focus behavior follows the [accessibility baseline](../qa/accessibility.md).
-All semantic labels and eight identity tokens are verified on their production Night surfaces.
-
-## Prohibited substitutions
-
-Do not mechanically invert Day, reduce the palette to monochrome Steel, or
-add dark-only component markup and behavior.
+Verify semantic labels and all eight identity tokens on their production Night surfaces.
 
 ## Implementation source
 
@@ -295,5 +290,4 @@ overridden there intentionally inherit shared geometry and aliases from `:root`.
 
 ## Visual verification
 
-Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md), including
-first-paint system resolution and switching themes while Draft, focus, selection and overlays are active.
+Run the Renderer theme-token tests and the shared [theme matrix](../qa/theme-matrix.md).

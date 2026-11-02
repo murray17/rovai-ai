@@ -20,7 +20,7 @@ admission 与目标投影读取持续显示同一品牌画布，不能在交接�
 
 主卡片统一显示“暂时无法打开会话”，提供“重新打开”与“导出诊断”。不按 Core、SQLite、migration 或内部错误类型
 切换标题，不显示原始 message/code、路径、备份、合同版本或复制页数。技术原因留在 Supervisor 与诊断中；不能显示
-Camp、队员、Memory、最近项目或这些对象的空态，也不承诺部分事务已提交后整个文件仍与升级前字节相同。
+Thread、队员、Memory、最近项目或这些对象的空态，也不承诺部分事务已提交后整个文件仍与升级前字节相同。
 
 Windows `preparing_windows_data_root` 的“重新打开”仍由 Main 使用原参数 relaunch Desktop，不在 ready 后重新绑定
 sessionData；独立壳层偏好不会覆盖正式工作区偏好。产品恢复面与其他启动失败使用同一文案。
@@ -49,7 +49,7 @@ Desktop/App/platform 与完整 Supervisor snapshot，不尝试调用 Core diagno
 
 ## Full Core feature degradation
 
-authority ready 后的 `coreSubsystems` 降级显示为正常工作区底部的紧凑状态区，不替换整个 App、Camp 或任务页面。
+authority ready 后的 `coreSubsystems` 降级显示为正常工作区底部的紧凑状态区，不替换整个 App、Thread 或任务页面。
 它明确记录仍可使用，按功能给出真实原因、可展开详情和“重试受影响功能”；busy 时禁用重复提交，错误以 alert 展示。
 恢复在同一 Core generation 完成，状态区撤出但权威树不重挂载；失败不能伪装成空 Skill/MCP 列表。使用既有 day/night
 tokens、自然换行和有界滚动，在最小窗口与放大视口下保留键盘恢复入口。

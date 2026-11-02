@@ -788,7 +788,7 @@ CLI 35、slow 309；workspace all-target check、Clippy、fmt 和固定 main bas
 
 
 用户以 PR #345 / `077bf78e64c76e934c45675ddb55e05165a2c49f` 提交补充静态审阅后，已核对实际
-本地与远端提交一致。已交付三项材料：[行为差异表](../../ui/host-web-parity.md#一张行为差异表)、
+本地与远端提交一致。已交付三项材料：[行为差异表](https://github.com/murray17/rovai-ai/blob/0479da42f66e0f1a390d8bbe07e0d575b1ca0bfd/docs/ui/host-web-parity.md#一张行为差异表)、
 生产 React 组件的宽屏可点击稿（同页说明构建与验收）、[一页复用/调用说明](frontend-reuse.md)。
 用户已通过方向评审，直接推进下表，不再扩展模拟稿或替换已有 Rust Host/Axum。
 

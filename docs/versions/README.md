@@ -5,7 +5,7 @@ current_version: v1.72
 last_updated: 2026-09-27
 ---
 
-# Rovai-ai 版本记录
+# Rovai AI 版本记录
 
 `docs/versions/` 保存版本目标、版本内设计过程、实施计划、验收记录、决定理由和发布范围。开始使用前先阅读[文档导航](../README.md)；跨版本当前约束由 Architecture、Contracts、Context、UI 和 Development 直接拥有，决定治理见[版本决策](../decisions/README.md)。
 

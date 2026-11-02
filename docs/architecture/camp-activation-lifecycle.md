@@ -5,42 +5,42 @@ status: accepted
 last_updated: 2026-10-21
 ---
 
-# Camp Activation Lifecycle
+# Thread Activation Lifecycle
 
 ## Component authority
 
 | Component | Responsibility |
 | --- | --- |
 | Rust Host / Core | Stores the shared one-click preference and saved default member/Lead configuration under the instance data root; see [Host Web v2](../contracts/host-web-v2.md#shared-creation-preferences). |
-| Electron Main | Imports legacy creation preferences once through Core and adapts local presentation preferences; it does not store Camp activation or public Composer content. |
+| Electron Main | Imports legacy creation preferences once through Core and adapts local presentation preferences; it does not store Thread activation or public Composer content. |
 | Renderer | Chooses `pending` for a valid one-click entry and `active` for the explicit Dialog. Saves ordinary one-click input per Thread locally, then acknowledges meaningful presence with Core. AI member-creation drafts keep their window-local overlay. |
-| Core collaboration service | Validates creation structure, persists Camp activation, guards pre-activation mutation/discard, and activates a Pending Camp in the first accepted public-message transaction. |
-| Navigation / Read Model | Lists Active Camps and Pending Camps marked for the verified client, including group totals/pages. Renderer may overlay meaningful AI member-creation drafts within one window. |
-| SQLite startup recovery | Removes untouched empty Pending Camps only when no client presence marker exists. It never reconstructs public Composer input. |
+| Core collaboration service | Validates creation structure, persists Thread activation, guards pre-activation mutation/discard, and activates a Pending Thread in the first accepted public-message transaction. |
+| Navigation / Read Model | Lists Active Threads and Pending Threads marked for the verified client, including group totals/pages. Renderer may overlay meaningful AI member-creation drafts within one window. |
+| SQLite startup recovery | Removes untouched empty Pending Threads only when no client presence marker exists. It never reconstructs public Composer input. |
 
 ## State flow
 
 ```text
 one-click entry
-  -> camps.create(pending)
+  -> threads.create(pending)
   -> current Renderer opens an empty local Composer
      -> save meaningful input locally, then acknowledge Core client presence
           draft row appears; repeated new entries retain separate Thread IDs
      -> send rejected/failed: local input remains
      -> send accepted transaction:
-          invited members + Active + camp.activated + CampMessage + waiting Deliveries + presence removal
+          invited members + Active + camp.activated + ThreadMessage + waiting Deliveries + presence removal
      -> switch / refresh / close before send:
           saved local input can be selected from the client's draft row
-          truly empty Pending Camp stays hidden and is eligible for guarded cleanup
+          truly empty Pending Thread stays hidden and is eligible for guarded cleanup
 
 explicit Dialog
-  -> camps.create(active)
-  -> durable zero-message Camp
+  -> threads.create(active)
+  -> durable zero-message Thread
 ```
 
 The first accepted send is the only Pending-to-Active transition. It validates the one frozen local send snapshot and,
-in one Core transaction, activates the Camp, publishes the message and creates target Deliveries. A rejection or
-rollback leaves the Camp Pending and does not clear the mounted Renderer input. User inline first input may
+in one Core transaction, activates the Thread, publishes the message and creates target Deliveries. A rejection or
+rollback leaves the Thread Pending and does not clear the mounted Renderer input. User inline first input may
 invite present outsider Member Atoms in that same transaction. A local savepoint also rolls back tentative invitations
 on a business rejection before the gateway persists its receipt. Shared membership writes own generation, lifetime
 and member-added events; a second first-send contender sees the committed activation and follows Active admission.
@@ -52,16 +52,16 @@ activation trigger; the trigger's deletion rolls back with a failed first-send t
 
 ## Invariants
 
-- A Pending Camp cannot have an accepted public message; its first accepted public send activates it atomically.
+- A Pending Thread cannot have an accepted public message; its first accepted public send activates it atomically.
 - Active never transitions back to Pending.
 - Ordinary one-click drafts are independently navigable on their originating client; project identity is not a draft key.
-- `camps.discardPending` and startup cleanup may delete only an otherwise untouched empty Pending Camp with no client marker.
+- `threads.discardPending` and startup cleanup may delete only an otherwise untouched empty Pending Thread with no client marker.
 - Saved draft rows do not change Main Window Session's Active-only automatic restoration contract.
 - Single Chat's private Draft/Pending lifecycle is independent and unchanged.
 
 ## References
 
-- [Camp lifecycle invariants](foundational-invariants.md#camp-lifecycle)
+- [Thread lifecycle invariants](foundational-invariants.md#camp-lifecycle)
 - [Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)
 - [Camp Composer Draft v18](../contracts/camp-composer-draft-v18.md)
 

@@ -6,7 +6,7 @@ last_updated: 2026-08-16
 
 # 核心模型上下文变更治理
 
-Native Session Bootstrap 与 AgentRun Dynamic Context 是 Rovai-ai 的核心模型输入合同。它们决定模型在
+Native Session Bootstrap 与 AgentRun Dynamic Context 是 Rovai AI 的核心模型输入合同。它们决定模型在
 一个 Native Session 中稳定看到什么，以及每个 AgentRun 开始时精确看到什么。任何需求只要改变这些
 输入的字节、结构、选择、语义或可复现证据，就必须先经过独立变更说明和开发者二次确认；普通需求描述、
 初次同意或实现者自己的判断不能替代该门槛。

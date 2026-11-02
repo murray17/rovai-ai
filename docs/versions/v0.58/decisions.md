@@ -313,7 +313,7 @@ show the same default-all policy for both origins while preserving their identit
 - [v0.58 overview](README.md)
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](../v0.37/decisions.md#adr-0105)
 - [ADR-0150: Evidence-First Agent Codebase Analysis Bundled Skill](../v0.52/decisions.md#adr-0150)
-- [Skill settings UI strategy](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Skill settings UI strategy](../../ui/surfaces/settings-workspace.md)
 - [Domain terminology](../../../CONTEXT.md)
 <!-- legacy-adr-body:end id=ADR-0158 -->
 <!-- legacy-adr:end id=ADR-0158 -->
@@ -426,7 +426,7 @@ Upstream improvements and security fixes are not automatic; maintainers must rev
 - [ADR-0105: Runtime-Group Assigned Rovai Skill Delivery](../v0.37/decisions.md#adr-0105)
 - [ADR-0150: Evidence-First Agent Codebase Analysis Bundled Skill](../v0.52/decisions.md#adr-0150)
 - [ADR-0158: Default-All Runtime Delivery for Managed Skills](decisions.md#adr-0158)
-- [Skill settings UI strategy](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
+- [Skill settings UI strategy](../../ui/surfaces/settings-workspace.md)
 - [Domain terminology](../../../CONTEXT.md)
 - [`tasteful-ui` source](https://github.com/murray17/rovai-ai/blob/b86ab21ab1c16d40df707ef25560ab14f09ece21/skills/tasteful-ui/SKILL.md)
 - [Pinned upstream repository](https://github.com/DonkeyKing01/tasteful-ui-skill/tree/159ccd47a320f3a7bd0289d07366d422211895a1/tasteful-ui)

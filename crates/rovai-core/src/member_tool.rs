@@ -230,11 +230,15 @@ pub fn update_member(
     run: &AuthenticatedTeamToolRun,
     input: MemberUpdateInput,
 ) -> Result<CommandExecution> {
-    update_member_with_avatar_bytes(database,data_dir,run,input,None)
+    update_member_with_avatar_bytes(database, data_dir, run, input, None)
 }
-pub fn replay_member_update(database:&mut Database,run:&AuthenticatedTeamToolRun,input:MemberUpdateInput)->Result<Option<CommandExecution>> {
+pub fn replay_member_update(
+    database: &mut Database,
+    run: &AuthenticatedTeamToolRun,
+    input: MemberUpdateInput,
+) -> Result<Option<CommandExecution>> {
     input.validate()?;
-    authorize_member_target(database.connection(),run,&input.agent_id,true)?;
+    authorize_member_target(database.connection(), run, &input.agent_id, true)?;
     let prepared_avatar_ref = input
         .avatar_file
         .as_ref()
@@ -260,11 +264,16 @@ pub fn replay_member_update(database:&mut Database,run:&AuthenticatedTeamToolRun
         },
     };
     let gateway = DomainCommandGateway::default();
-    gateway.replay_if_recorded(database,&envelope)
+    gateway.replay_if_recorded(database, &envelope)
 }
 
-
-pub fn update_member_with_avatar_bytes(database:&mut Database,data_dir:&Path,run:&AuthenticatedTeamToolRun,input:MemberUpdateInput,avatar_bytes:Option<&[u8]>)->Result<CommandExecution> {
+pub fn update_member_with_avatar_bytes(
+    database: &mut Database,
+    data_dir: &Path,
+    run: &AuthenticatedTeamToolRun,
+    input: MemberUpdateInput,
+    avatar_bytes: Option<&[u8]>,
+) -> Result<CommandExecution> {
     input.validate()?;
     authorize_member_target(database.connection(), run, &input.agent_id, true)?;
     // Bind an upload to the existing immutable asset format using this same
@@ -305,14 +314,20 @@ pub fn update_member_with_avatar_bytes(database:&mut Database,data_dir:&Path,run
             return Err(invalid_image().into());
         }
         match avatar_bytes {
-            Some(bytes)=>crate::member_avatar::prepare_member_avatar_bytes(data_dir,Uuid::parse_str(&envelope.payload.input.request_id)?,bytes,envelope.payload.input.crop(),recorded.is_some()),
-            None=>prepare_member_avatar(
-            data_dir,
-            Uuid::parse_str(&envelope.payload.input.request_id)?,
-            path,
-            envelope.payload.input.crop(),
-            recorded.is_some(),
-        )
+            Some(bytes) => crate::member_avatar::prepare_member_avatar_bytes(
+                data_dir,
+                Uuid::parse_str(&envelope.payload.input.request_id)?,
+                bytes,
+                envelope.payload.input.crop(),
+                recorded.is_some(),
+            ),
+            None => prepare_member_avatar(
+                data_dir,
+                Uuid::parse_str(&envelope.payload.input.request_id)?,
+                path,
+                envelope.payload.input.crop(),
+                recorded.is_some(),
+            ),
         }
         .map_err(|error| {
             if error

@@ -6,7 +6,7 @@ status: accepted
 last_updated: 2026-10-13
 ---
 
-# 动态 Camp 队员关系架构
+# 动态 Thread 队员关系架构
 
 字段级合同见 [Camp Membership v3](../contracts/camp-membership-v3.md)，决定理由见
 [v1.29 决策记录](../versions/v1.29/decisions.md)与[零成员会话决定](../versions/v1.72/decisions.md#v1-72-d39)。
@@ -29,7 +29,7 @@ User Desktop command / trusted System hint
              formal terminal settlement
 ```
 
-Camp 聚合拥有 active set、membership generation 和 Default Lead；CampMember 行拥有一个 Agent 在该 Camp 的
+Thread 聚合拥有 active set、membership generation 和 Default Lead；ThreadMember 行拥有一个 Agent 在该 Thread 的
 关系历史与单调 version。AgentProfile Presence 是独立轴。Renderer、外部 channel 和 Runtime 都不能直接改表或
 从可见行推导授权。
 
@@ -37,7 +37,7 @@ Camp 聚合拥有 active set、membership generation 和 Default Lead；CampMemb
 
 添加命令只改变成员集合和 generation。它不预建 Conversation、Run 或私有 Session。Scheduler/Context builder
 在以后新接受的 Run 上读取当时 active members，并继续产生 Collaboration State v2；旧 Run 保持原冻结 bytes。
-曾离开的 Agent 再次添加会获得同一 CampMember 行的新 version，但产品语义仍是普通添加。它可以保留历史和
+曾离开的 Agent 再次添加会获得同一 ThreadMember 行的新 version，但产品语义仍是普通添加。它可以保留历史和
 兼容的 Native Session 连续性，却不恢复旧参与期的 waiting Delivery、Run、approval 或临时权限；只有重新加入后
 新发布并投递给它的消息才会启动工作。对已经 active 的成员，
 相同 capability overrides 是 no-op，不同 overrides 是显式 conflict；add 不兼任能力更新或 lifetime rotation。
@@ -55,16 +55,16 @@ Cutover transaction 先验证 expected generation/version，再结束关系、�
 
 每个 affected Run 直接调用统一终态 helper；reconciliation 的 target/settled 计数相等，
 status/completed_at 同事务完成。Runtime 后台清理与审计无关。同轮无关 Run 继续，ChannelTurnRequest 保持
-原历史状态只读；成员移除不调用 Camp-wide abort，也不取消无关 ChannelDelivery。
+原历史状态只读；成员移除不调用 Thread-wide abort，也不取消无关 ChannelDelivery。
 
 ## 外部同步
 
-外部 roster 事件只是命令来源提示。System adapter 先证明 allowlisted component、Camp-bound namespace/binding
+外部 roster 事件只是命令来源提示。System adapter 先证明 allowlisted component、Thread-bound namespace/binding
 和 exact next reconciliation generation，再进入同一 add/remove transaction。来源水位与领域效果原子提交；
 事件乱序、重放、跳代或错 namespace 都不会改变成员关系。
 
 ## Read side 与 Renderer
 
 [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)投影当前 generation、成员 version 与历史尚未完成的
-reconciliation；新 cutover 已同事务完成，不产生持续收口等待。Renderer 使用权威 removal preview 解释影响，以 exact values 提交；成功后重读 Camp，不在本地
+reconciliation；新 cutover 已同事务完成，不产生持续收口等待。Renderer 使用权威 removal preview 解释影响，以 exact values 提交；成功后重读 Thread，不在本地
 模拟关系。最后成员允许移出；空会话保留历史与本地草稿，显示邀请入口且没有隐式接收者。添加候选来自当前 present 且不在 active set 的 AgentProfile。首位加入者恢复 Default Lead，不自动发送输入或重分配已释放 Task。永久移除预览逐会话展示空会话/队长交接影响，非终态 Run 仍阻止全局移除。

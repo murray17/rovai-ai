@@ -3,6 +3,10 @@ export const MIN_CONVERSATION_WIDTH = 420
 export const MIN_FILE_PREVIEW_WIDTH = 420
 export const FILE_PREVIEW_SPLIT_MIN_WIDTH = MIN_CONVERSATION_WIDTH + MIN_FILE_PREVIEW_WIDTH + 1
 export const FILE_PREVIEW_RATIO_STORAGE_KEY = 'rovai.file-preview.preferred-ratio'
+export const DEFAULT_DIRECTORY_WIDTH = 228
+export const MIN_DIRECTORY_WIDTH = 200
+export const MAX_DIRECTORY_WIDTH = 480
+export const MIN_DIRECTORY_READING_WIDTH = 320
 
 export function filePreviewSplitMinWidth(_activityMode = false): number {
   return FILE_PREVIEW_SPLIT_MIN_WIDTH

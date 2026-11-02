@@ -130,7 +130,7 @@ Day/Night 展开与折叠截图核对了按钮中心 y=20、原会话标题及�
   读事务内返回整个窗口。Renderer 删除 offset 分页对象缓存，只保留展示数量和展开状态。
 - 查看更多立即重读完整前缀；通知、轮询与 focus 继续刷新该窗口。失败保留已确认数量，旧范围响应由
   window reader 隔离，收起再展开不复用旧 Camp 状态。当前边界见
-  [Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md#visible-camp-windows)。
+  [Desktop Navigation Refresh](../../architecture/desktop-navigation-refresh.md#visible-thread-windows)。
 - Rust 沿用 `read_model::slow_tests` 的分组事务 owner，扩展默认、分组独立范围、最小值与超出总数矩阵，
   不新增或删除独立 Rust 测试。旧测试改名反映新合同；最小命令为
   `cargo test -p rovai-core --features slow-tests --lib navigation_groups_camps_and_reads_requested_prefixes_with_default_five`。

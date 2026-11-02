@@ -539,16 +539,16 @@ const RUN_FILE_EVIDENCE_SQL: &str = r#"
 
 fn legacy_file_activity_key_sql(has_operation_id: bool) -> String {
     let operation = if has_operation_id {
-        "operation_id=?7"
+        "operation_id=?8"
     } else {
-        "?7 IS NULL"
+        "?8 IS NULL"
     };
     format!(
         r#"SELECT operation_id,classifier_version FROM canonical_runtime_activity
         WHERE agent_run_id=?1 AND execution_epoch=?2 AND {operation}
-          AND classifier_version IN (?3,?4,?5,?6)
-          AND EXISTS(SELECT 1 FROM json_each(source_evidence_ids_json) WHERE value=?8)
-        ORDER BY CASE classifier_version WHEN ?3 THEN 0 WHEN ?4 THEN 1 WHEN ?5 THEN 2 ELSE 3 END
+          AND classifier_version IN (?3,?4,?5,?6,?7)
+          AND EXISTS(SELECT 1 FROM json_each(source_evidence_ids_json) WHERE value=?9)
+        ORDER BY CASE classifier_version WHEN ?3 THEN 0 WHEN ?4 THEN 1 WHEN ?5 THEN 2 WHEN ?6 THEN 3 ELSE 4 END
         LIMIT 1"#
     )
 }
@@ -605,6 +605,7 @@ fn run_activity_authorizes_file(
             }
             if ![
                 canonical_activity::CLASSIFIER_VERSION,
+                canonical_activity::V4_CLASSIFIER_VERSION,
                 canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                 canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                 canonical_activity::LEGACY_CLASSIFIER_VERSION,
@@ -635,6 +636,7 @@ fn run_activity_authorizes_file(
                             agent_run_id,
                             execution_epoch,
                             canonical_activity::CLASSIFIER_VERSION,
+                            canonical_activity::V4_CLASSIFIER_VERSION,
                             canonical_activity::PREVIOUS_CLASSIFIER_VERSION,
                             canonical_activity::INTERMEDIATE_CLASSIFIER_VERSION,
                             canonical_activity::LEGACY_CLASSIFIER_VERSION,
@@ -1341,6 +1343,66 @@ mod tests {
             std::fs::read_to_string(&external_file).unwrap(),
             "external\n"
         );
+        let blobs = ManagedBlobStore::new(&data_dir);
+        let history = || {
+            serde_json::to_value(
+                super::read_run_file_changes(&database, &blobs, "preview-camp", "preview-run", 1)
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        let original_history = history();
+        // The existing source owner now verifies the actual write seam, including outside the Run root.
+        for (relative, evidence_file_id) in &evidence {
+            let path = if Path::new(relative).is_absolute() {
+                PathBuf::from(relative)
+            } else {
+                execution_root.join(relative)
+            }
+            .canonicalize()
+            .unwrap();
+            let source = json!({"kind":"run_evidence","threadId":"preview-camp","agentRunId":"preview-run",
+                "executionEpoch":1,"evidenceFileId":evidence_file_id,"action":"open_current"});
+            let access = |text, expected_version| crate::file_edit::EditRequest {
+                source: source.clone(),
+                path: path.clone(),
+                text,
+                expected_version,
+            };
+            let target = resolve_open_current(&database, &data_dir, evidence_file_id);
+            let read = crate::file_edit::execute(access(None, None), Some(target.clone()), false);
+            assert_eq!(read["ok"], true, "{read}");
+            let saved = crate::file_edit::execute(
+                access(
+                    Some("edited current\n".into()),
+                    Some(read["value"]["version"].as_str().unwrap().into()),
+                ),
+                Some(target),
+                true,
+            );
+            assert_eq!(saved["ok"], true, "{saved}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "edited current\n");
+            let historical = ResolvedFilePreviewSource::EvidenceReview {
+                camp_id: "preview-camp".into(),
+                agent_run_id: "preview-run".into(),
+                execution_epoch: 1,
+                evidence_file_id: evidence_file_id.clone(),
+            };
+            assert_eq!(
+                crate::file_edit::execute(access(Some("bad".into()), None), Some(historical), true)
+                    ["ok"],
+                false
+            );
+        }
+        assert_eq!(
+            history(),
+            original_history,
+            "editing current files does not rewrite historical evidence"
+        );
+        assert_eq!(
+            std::fs::read_to_string(project_root.join("src/shared.ts")).unwrap(),
+            "project\n"
+        );
         clean_run_workspace_fixture(database, data_dir, root);
     }
 
@@ -1380,6 +1442,64 @@ mod tests {
         assert_eq!(source_kind, "run_activity_file");
         assert_eq!(Path::new(&root_path), execution_root);
         assert_eq!(raw_reference, "src/generated.ts");
+
+        // Upgrade keeps v4 history in every supported storage layout.
+        for storage in 1..=4 {
+            let path = format!("src/history-{storage}.ts");
+            let historical = crate::execution_evidence::with_operation_storage_for_test(
+                storage,
+                || {
+                    ExecutionEvidenceService.record_runtime_event(
+                    &mut database, &ManagedBlobStore::new(&data_dir), "preview-run", 1, "runtime.action",
+                    &json!({"toolCallId":format!("history-{storage}"),"status":"completed","kind":"read",
+                        "runtimeFileOperation":{"adapterKind":"opencode-cli","protocolFamily":"acp-v1",
+                            "sourceEventKind":"session/update.tool_call_update.completed","operationKind":"read","path":path}}),
+                ).unwrap().unwrap().id.clone()
+                },
+            );
+            database.connection().execute(
+                "UPDATE canonical_runtime_activity SET classifier_version='activity-v4'
+                 WHERE agent_run_id='preview-run' AND EXISTS(SELECT 1 FROM json_each(source_evidence_ids_json) WHERE value=?1)",
+                [&historical],
+            ).unwrap();
+            database.connection().execute(
+                "UPDATE agent_run_execution_evidence SET activity_meta_json=json_set(activity_meta_json,'$.classifierVersion','activity-v4') WHERE id=?1",
+                [&historical],
+            ).unwrap();
+            assert!(
+                resolve_run_activity_file(
+                    &database,
+                    &data_dir,
+                    "preview-run",
+                    1,
+                    &historical,
+                    &path
+                )
+                .is_some(),
+                "v4 storage {storage} must keep its file preview"
+            );
+            if storage == 1 {
+                database
+                    .connection()
+                    .execute(
+                        "UPDATE agent_run_execution_evidence SET operation_id=NULL WHERE id=?1",
+                        [&historical],
+                    )
+                    .unwrap();
+                assert!(
+                    resolve_run_activity_file(
+                        &database,
+                        &data_dir,
+                        "preview-run",
+                        1,
+                        &historical,
+                        &path
+                    )
+                    .is_some(),
+                    "append-only v4 history must resolve by its exact source evidence"
+                );
+            }
+        }
 
         for (run_id, epoch, candidate_evidence, path) in [
             ("other-run", 1, evidence_id.as_str(), "src/generated.ts"),

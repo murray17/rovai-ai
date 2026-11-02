@@ -69,13 +69,13 @@ Rovai 只管理 ACP 连接，不通过共享 Gateway 的退出或强杀宣称原
 [Hermes 合同](../contracts/hermes-managed-runtime-v1.md#用户明确处理未知执行)。
 
 Run 可以先进入失败或取消终态；当前 Core 仍精确持有该 Run/epoch 且隔离未确认时，
-`(CampId, AgentId)` lane 的后继输入保持 Delivery，等待 Adapter 确认后再 claim。
+`(ThreadId, AgentId)` lane 的后继输入保持 Delivery，等待 Adapter 确认后再 claim。
 
 共享 execution root 的保护只在故障窗口生效：当前 Core 仍精确持有的执行未清理时，暂缓同 root 的新 dispatch；正常执行之间不因
 共享 root 建立日常互斥。没有输出、撤销 Core 写权限、用户确认或新 Session 都不是清理证明。cleanup 完成后，Scheduler
 按普通 FIFO 规则继续；unknown 后默认使用新 Native Session，除非 Adapter 已能证明旧 native turn 结束。
 
-这是一条失败后的临时调度门禁，不是 Camp pause、工作区锁管理器或新的暂停/恢复产品。
+这是一条失败后的临时调度门禁，不是 Thread pause、工作区锁管理器或新的暂停/恢复产品。
 
 工作区准备、消息领取、共享 root 和任务 dispatch 共用同一判断：既有 launch/Fleet/one-shot 内存所有权中
 有匹配的 Run/epoch，且业务终态、请求过清理、ACK 缺失。重启后的旧 ACK 缺失、文件不可读或身份未知本身不是活跃冲突，

@@ -21,15 +21,15 @@ conversation/step 的结构化 generatedMedia；最终仍由响应中的 step ty
 不读 transcript 正文，不扫描 brain、workspace 或 generated_images。真实 wire 与验收边界见
 [v1.37 图片验收](../versions/v1.37/runtime-image-acceptance.md)。
 
-Camp Snapshot/Open 的唯一图片 metadata 查询先过滤 `public_display_source` 闭合集，再执行既有同摘要附件
+Thread Snapshot/Open 的唯一图片 metadata 查询先过滤 `public_display_source` 闭合集，再执行既有同摘要附件
 过滤与 Run/epoch 分组。历史及当前未确认来源的行保留但不进入 Renderer；因此实时刷新、重开和终态无消息兜底
-使用同一集合。Main 仍只转发 opaque id 的 Camp-scoped 读取；共享 Gallery 在实际显示前用浏览器 decoder 验证
+使用同一集合。Main 仍只转发 opaque id 的 Thread-scoped 读取；共享 Gallery 在实际显示前用浏览器 decoder 验证
 内容，失败仅该图不可用。没有文件预览面板、Root Grant、文件复制框架或第二套权限 UI。文件路径允许目录外
 位置和符号链接；普通文件及真实图片解码是读取链的必要检查。
 
 Renderer 在当前进程内以实际 Blob 大小维护 128 MiB 的已解码 payload 缓存，Object URL 仍由每个 Tile
 独立创建和释放。消息附件命中缓存后不再读取；任意 Runtime 图片命中后先使用缓存内容，再后台复用同一
-进行中 Promise 调用既有 Camp-scoped 接口，不区分稳定路径和 ManagedBlob。请求异常保留旧图，正常返回
+进行中 Promise 调用既有 Thread-scoped 接口，不区分稳定路径和 ManagedBlob。请求异常保留旧图，正常返回
 不可用或新内容解码失败则清除缓存；成功候选解码后无空白替换。该缓存不持久化，也不保证 Chromium
 保留内部解码结果。
 
@@ -43,12 +43,12 @@ Renderer 在来源 Run 尚未公开发言且未终态时保留已准入图片等
 合进正文后的同一图片区，按原比例和 160–240px 响应式单元呈现；用户消息 variant 在正文前使用 72px 方形
 缩略图，只有缩略图允许 `cover`。图片与普通文件先稳定分区并保持各自内部顺序，永不混排在同一内容行。
 
-显式文件发送继续由 `rovai send --file` 创建不可变 Camp Attachment，再由既有飞书 Outbox/Host 上传。
+显式文件发送继续由 `rovai send --file` 创建不可变 Thread Attachment，再由既有飞书 Outbox/Host 上传。
 该链不读取 Runtime 图片来源标记，收紧自动投影不会改变显式图片附件。图片观察不会调用这条发布链，也不增加
-CampMessage 或 AgentRun。飞书原生消息和附件可独立重试；这次不扩展钉钉附件、登录、发布或 Stream 行为。
+ThreadMessage 或 AgentRun。飞书原生消息和附件可独立重试；这次不扩展钉钉附件、登录、发布或 Stream 行为。
 
 接口与限额见 [Runtime Images v5](../contracts/runtime-images-v5.md)、投影见
 [Camp Open Projection v25](../contracts/camp-open-projection-v25.md)、展示见
-[Camp 会话工作区](../ui/components/conversation-workspace.md#runtime-图片与消息图片)。混合保存的理由见
+[Thread 会话工作区](../ui/components/conversation-workspace.md#runtime-图片与消息图片)。混合保存的理由见
 [V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)，原生生图闭合集与历史 fail-closed 的理由见
 [V1.53-D01](../versions/v1.53/decisions.md#v1-53-d01)。

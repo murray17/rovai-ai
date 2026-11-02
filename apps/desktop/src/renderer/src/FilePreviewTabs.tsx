@@ -1,3 +1,5 @@
+import { useFileEdits } from './FileEditContext'
+import { fileEditDirty } from './file-edit-store'
 import { useShortcutAction } from './ShortcutProvider'
 import { useThreadClient } from './camp-client'
 import { prefersReducedMotion } from './reduced-motion'
@@ -5,6 +7,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import { useFilePreview, useFilePreviewApi, canDownloadFile } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
+import { ProjectFileIcon, DirectoryTreeIcon } from './ProjectFileIcon'
 import { Icon } from './MissionControls'
 import { ExecutionIcon } from './ExecutionIcons'
 import { previewTabLabel, previewTabLabels, previewTabPresentation } from './file-preview-tab-presentation'
@@ -33,6 +36,7 @@ function revealTab(strip: HTMLDivElement, tab: HTMLElement): void {
 }
 
 export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {}): React.JSX.Element | null {
+  const edits = useFileEdits()
   const language = useInterfaceLanguage()
   const client = useThreadClient()
   const api = useFilePreviewApi()
@@ -111,8 +115,10 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
 
   useEffect(() => {
     if (compact && paneVisible) {
+      const back = listRef.current?.closest('.file-preview-tabs')?.querySelector<HTMLButtonElement>('.file-preview-return')
       const target = listRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')
-        ?? listRef.current?.closest('.file-preview-tabs')?.querySelector<HTMLButtonElement>('.file-preview-return')
+        ?? (back?.offsetWidth ? back : listRef.current?.closest('.app-shell-camp, .mission-workspace-host')
+          ?.querySelector<HTMLButtonElement>('.file-preview-toggle[aria-controls="file-preview-pane"]'))
       target?.focus({ preventScroll: true })
     }
   }, [compact, paneVisible])
@@ -186,13 +192,16 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     } catch (error) { announce(error instanceof Error ? error.message : uiAttribute('文件操作失败，请重试。')) }
   }
 
-  const closeAndRestoreFocus = (index: number): void => {
+  const closeAndRestoreFocus = async (index: number): Promise<void> => {
     const tab = tabs[index]
     if (!tab) return
     const neighbor = tabs[index + 1] ?? tabs[index - 1]
-    close(tab.id)
-    if (neighbor) focusTab(neighbor.id)
-    else focusConversation()
+    await close(tab.id)
+    window.requestAnimationFrame(() => {
+      if (document.getElementById(tabDomId(tab.id))) return
+      if (neighbor) focusTab(neighbor.id)
+      else focusConversation()
+    })
   }
 
   useEffect(() => client.onClosePreviewRequested?.(() => {
@@ -277,11 +286,12 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
           onWheel={() => { arrowScrollTarget.current = null }}
           onPointerDown={() => { arrowScrollTarget.current = null }}
         >
-          {tabs.length === 0 && <span className="file-preview-tabs-empty"><UiText zh={"文件预览"} /></span>}
+          {tabs.length === 0 && <span className="file-preview-tabs-empty"><UiText zh={"文件与变更"} /></span>}
           {tabs.map((tab, index) => {
             const active = tab.id === activeTabId
             const label = tabLabels.get(tab.id) ?? previewTabLabel(tab, language)
             const { displayPath, fileName, icon } = previewTabPresentation(tab, language)
+            const dirty = fileEditDirty(edits?.get(tab.id))
             const hasExternalUpdate = tab.kind === 'file' && tab.hasExternalUpdate
             const statusLabel = tab.kind !== 'file' ? ''
               : tab.loadState === 'missing' ? uiAttribute('，找不到文件')
@@ -318,7 +328,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   className="file-preview-tab-activate"
                   type="button"
                   role="tab"
-                  aria-label={`${label}${statusLabel}${hasExternalUpdate ? uiAttribute("，有更新") : ''}`}
+                  aria-label={`${label}${dirty ? uiAttribute("，未保存") : ""}${statusLabel}${hasExternalUpdate ? uiAttribute("，有更新") : ''}`}
                   aria-selected={active}
                   aria-controls={panelDomId(tab.id)}
                   tabIndex={active ? 0 : -1}
@@ -328,14 +338,15 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   onClick={() => activate(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                 >
-                  {tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
+                  {tab.kind === 'file_picker' ? <DirectoryTreeIcon className="file-preview-tab-icon" /> : tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
                     <ExecutionIcon className="icon file-preview-execution-icon" />
-                  ) : <FilePreviewTabIcon
+                  ) : tab.kind === 'file' ? <ProjectFileIcon fileName={fileName} /> : <FilePreviewTabIcon
                     kind={icon}
-                    fileType={tab.kind === 'file' ? tab.file?.kind : 'file_change'}
+                    fileType="file_change"
                   />}
                   <span className="file-preview-tab-label">{label}</span>
-                  {hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
+                  {dirty && <i className="file-preview-tab-dirty" title={uiAttribute("未保存")} aria-hidden="true" />}
+                  {!dirty && hasExternalUpdate && <i className="file-preview-tab-update" aria-hidden="true" />}
                 </button>
                 <button
                   className="file-preview-tab-close"

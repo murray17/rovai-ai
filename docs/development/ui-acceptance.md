@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-10-12
+last_updated: 2026-10-30
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -47,7 +47,7 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
   --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
 
-`capture-desktop.mjs` 支持的主题、窗口、Runtime、Camp 和管理 selector 以脚本顶部的
+`capture-desktop.mjs` 支持的主题、窗口、Runtime、Thread 和管理 selector 以脚本顶部的
 环境变量读取为准。通用尺寸示例：
 
 ```bash
@@ -74,7 +74,7 @@ node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/compact"
 自动化验收仍使用隔离 `userData`；不能把这个参数当作操作日常 App 或发真实飞书消息的默认授权。
 
 预览只复用指定已发布队员的现有长连接，向该 App 冻结且本机已记录的 Owner 发送。不会创建应用、改变发布配置、启动
-第二条 WebSocket、运行示例 command，或写入 Camp、Message、Turn、Run、Outbox/console fixture。它只读 Core 当前数据目录
+第二条 WebSocket、运行示例 command，或写入 Thread、Message、Turn、Run、Outbox/console fixture。它只读 Core 当前数据目录
 中 exact Bot/Owner identity，不读取 credential payload；发送使用 Main 已有的 SDK client。
 
 模拟 timeline 和已脱敏页面只保存在 Main 内存，所有卡片明确标为预览。每次翻页核对可信 callback operator、App、消息 ID、
@@ -82,34 +82,26 @@ node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/compact"
 viewVersion，不产生 Core 命令或 pump；真实 execution console 和项目卡继续走原来的 Core 授权。预览在 App 退出后失效，
 不能把此入口的验收当作真实 Run 的 Core seal/admission/恢复证明。
 
-## Windows 验收入口（设计已接受、工具待实现）
+## Windows 验收入口
 
-当前 `package.json` 尚无可运行的 Windows package/accept 命令，下面是实现验收合同，不是可复制命令。脚本和
-NSIS 落地后，命令名必须以 `package.json#scripts` 为真源，并在同一改动更新本文。
+Windows 构建使用 `pnpm package:windows:x64`；安装与关闭验收使用
+`pnpm accept:windows:installer` 和 `pnpm accept:windows:installer-shutdown`。
+运行平台、参数及发布步骤见 [Windows 打包与验收](packaging-windows.md)，命令以 `package.json#scripts` 为准。
 
 Windows lane 使用与生产 `%LOCALAPPDATA%\Rovai AI` 同构但完全隔离的绝对 data root，分别隔离 Core、Electron
-User Data、Session Data、Logs、CrashDumps 和 Skill Library；它必须拒绝日常目录、junction/symlink 别名、UNC、
-network/removable/non-NTFS 目标。验收覆盖 unpacked App 与 installed App，且不能共享 fixture。
+User Data、Session Data、Logs、CrashDumps 和 Skill 文件目录；拒绝日常目录、junction/symlink 别名、UNC、
+network/removable/non-NTFS 目标。unpacked App 与 installed App 使用不同 fixture。
 
-自动化至少证明 hidden title strip、四个顶层菜单入口与受限 native submenu 路由、WCO/rail 双主题同色、
-受控 Renderer drag region、8px Windows 侧栏顶部留白、平台快捷键/Explorer 文案、Runtime Platform Admission
-与 Availability 正交、历史 Runtime 子对象精确保留、Forced Colors DOM/CSS 和 IME composition 不误提交。
-真实客户端 OS 另外覆盖：
-
-- Windows 10 22H2、Windows 11，`1040×700`、`1440×920`，100/125/150/200% display scale 与 200% page zoom；
-- 顶层菜单与原生 submenu、Snap、最大化/还原、Alt+Space、多屏不同 DPI、Day/Night/System、High Contrast/Forced Colors；
-- keyboard-only、NVDA、中文 IME、Explorer、local NTFS storage blocker；
-- clean install、运行中 App upgrade、schema-incompatible downgrade、默认保留数据和显式删除数据的 uninstall。
-
-固定 Windows Server runner 只提供 compile/package/automated evidence，不证明上述客户端 UI。完整边界见
-[Windows Interaction Delta](../ui/windows-interaction-delta.md)和
-[Windows x64 构建、打包与发布设计](packaging-windows.md)。
+自动化与真实客户端分别执行 [Windows 交互矩阵](../ui/windows-interaction-delta.md#7-可访问性与真机矩阵)，
+主题覆盖遵循[全部配色矩阵](../ui/qa/theme-matrix.md)。固定 Windows Server runner 只提供构建、打包和自动化证据，
+不能证明客户端原生菜单、DPI、Snap、NVDA、IME 或安装卸载体验。
 
 ## 独立 UI 验收
 
-`pnpm review:remote-connection` 构建可离线打开的设置交互稿；`pnpm test:remote-connection-review`
-使用独立 Chrome profile 对照生产设置页的几何与主题、检查状态和键盘交互，不启动 Core/Runtime。
-该命令验证设计稿，不替代实际 Web 接入验收。范围和复验说明见[远程连接设置稿](../ui/host-remote-connection.md)。
+`pnpm review:remote-connection` 构建离线设置交互稿；`pnpm test:remote-connection-review`
+使用独立 Chrome profile 验证[远程连接](../ui/host-remote-connection.md)的几何、状态与键盘交互，不启动 Core/Runtime。
+`pnpm test:host-web` 验证实际授权、附件与命令回执；`pnpm test:host-web-live` 验证真实 Desktop/Web 页面。
+模拟交互稿不能替代实际 Web 接入、网络与身份隔离验收。
 
 以下 package scripts 自行创建或要求隔离 fixture，不调用模型：
 
@@ -131,18 +123,10 @@ pnpm accept:onboarding-ui
 pnpm accept:bootstrap-shell-ui
 ```
 
-它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏（含 Project/Camp 置顶、
-可恢复 Project 移除、跨重启隐藏、Quick Chat 焦点回退与 Core 数据保留）、结构化提及和
-当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
-Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十三 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
-Scheme C 转交 footer，诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏，以及“关于与更新”
-的真实 packaged 版本、内置当前日志与发布日期、确定性禁用网络自动检查、[当前 App Update 合同](../contracts/app-update-v7.md)的 idle 快照，以及 Bootstrap Shell 在未知 authority 下
-保留原文件、隔离业务树、显式重试不消耗 crash budget、Day/Night、1040×700、窄窗口、
-200% 等效布局、reduced motion、键盘焦点和无横向溢出回归。available 到失败的完整状态/动作/fallback 矩阵由 Renderer
-测试覆盖；签名 macOS/Windows 跨版本升级仍属于各平台 Release qualification。
-当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、八个设置页、
-队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。
-具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
+这些入口覆盖对应页面的生产组件或 packaged App；测试 fixture 不能把模拟 Runtime 状态当作原生准入证据。
+行为断言引用[当前组件规范](../ui/components/README.md)与[页面指引](../ui/README.md#页面局部-brief)，
+尺寸、主题、键盘与缩放使用[全部配色矩阵](../ui/qa/theme-matrix.md)。当前交付范围从[版本索引](../versions/README.md)进入。
+具体 Schema/Migration 编号属于 fixture 和版本证据，不作为长期 UI 要求；签名后的跨版本升级另做各平台 Release 验收。
 
 ### 首次训练门禁
 
@@ -154,16 +138,14 @@ pnpm package:mac
 pnpm accept:onboarding-ui
 ```
 
-脚本必须使用全新隔离 `userData` 和 packaged App，在 `1040×700` 下证明：欢迎页无 Skip/步骤导航；
-队员页只有一张当前半身像与四条文字选择；重启分别恢复未完成的队员页和 Runtime 页。Configured 分支
-必须证明真实 Runtime 状态与模型默认值可用，第三页完成后创建 Active Quick Chat `初次集结`，Camp 只有
-所选成员且同一成员是 Default Lead；第四页默认显示三条 `A/B/C` starter，不得被地图偏好遮住或横向
-滚动。点击 starter 后持久 Draft、Composer 焦点与末尾光标正确，CampMessage/AgentRun 数量保持不变；
-再次重启仍保留 completed、同一 Camp 和未发送草稿。Deferred 分支必须使用确定性零 Runtime 隔离环境，
-证明第三页显示三项结果边界、可展开安装说明、“重新扫描 / 进入 Rovai”，Day/Night 无溢出；重新扫描
-返回真实进度，“进入 Rovai”落盘 `completed(runtime_deferred)` 且三个产品身份为空，不新增 onboarding
-成员配置、Camp、Run 或 restore target，重启直接进入普通 App。两分支截图与 JSON report 输出到脚本报告的
-隔离目录。
+使用全新隔离 `userData` 和 packaged App，按[首次训练 UI](../ui/components/first-run-onboarding.md)和
+[First-run Onboarding](../contracts/first-run-onboarding-v7.md)验证 mandatory gate、字段、按钮与恢复行为。
+至少覆盖以下两条路径，并在 `1040×700` 及主题矩阵下保存截图与 JSON report：
+
+- Configured：Runtime/模型使用真实准入状态；分别在队员页和 Runtime 页重启恢复；完成后只创建所选队员的
+  `初次集结`。点击 starter 只写本机草稿并恢复焦点/光标，消息与 Run 数量不变；重启恢复同一会话和未发送草稿。
+- Deferred：使用确定性零 Runtime 环境，验证重新扫描、安装指南和“稍后配置”；保存 deferred 完成状态，
+  不新增 onboarding 队员配置、Thread、Run 或 restore target，重启进入普通 App。
 
 ### 计划内关闭真实 Runtime 门禁
 
@@ -183,25 +165,19 @@ App 退出。macOS 验收按该隔离 App 的精确 PID 通过 `NSRunningApplica
 活跃 Run 实例只负责真实耗时、取消语义与进程回收；多主题截图由同一脚本使用另一份全新隔离数据，在
 Core 首次启动仍进行本地初始化时触发慢退出，以免截图流程反过来拖慢或误判已经足够快的真实退出。
 
-验收必须证明：
+验收依据 [Planned Shutdown v8](../contracts/planned-shutdown-v8.md)、
+[Public Composer](../architecture/camp-composer-draft.md)和[关闭等待面](../ui/components/conversation-workspace.md#thread-顶栏与关闭等待面)：
 
-- 先等待一个已保存 Draft revision，再输入最后一段 Lexical 正文并立即正常退出；同一隔离数据目录重启后必须
-  读回包含最后一段且 revision 已推进的 Core Draft，证明 Renderer fence 发生在 `core.shutdown()` 前；
-- quit preparation 只锁定当前 Composer 且不显示新等待面；Core shutdown 开始后立即阻止全局新界面交互，前
-  400ms 不显示关闭反馈；慢退出显示无操作控件的 accessible busy
-  modal，Day/Night、`1040×700`、200% zoom 与 reduced motion 下标题、条件取消说明和卡片边界均完整，
-  背景不得出现关闭阶段的错误横幅或 Toast；
-- Desktop 等待 Core 自行完成 drain 和子进程真实退出，App 以 `exit 0` 自然结束；只有验收清理失败
-  分支才可对明确记录的隔离进程树发送信号；
-- one-shot Runtime 进程中断不产生 Runtime cancellation acknowledgement：AgentRun 与
-  CampTurn 均无取消 intent、无伪造 terminal source/reason，accepted Runtime Input Delivery
-  保持不变；Core 使用 durable shutdown cycle 把未解决 Run product-fence 为 `cancelled`；
-- 同一隔离数据目录重启后，原 Run 保持相同 execution epoch 与 terminal `cancelled`，
-  不自动恢复或重发，不展示 spinner / recovery blocker，但 accepted input 不确定性继续
-  通过“外部效果待确认”告警展示；
-- 两次 packaged App 退出后，脚本观察到的 Core、Runtime 与 Electron helper 子进程全部被 reap。
+- 先保存草稿，再输入最后一段 Lexical 正文并立即正常退出；同一隔离目录重启后读回包含最后一段的本机快照，
+  证明输入 flush 在 Core shutdown 前完成，不依赖 Core Draft revision。
+- 验证准备阶段与全局锁定的边界、400ms 慢退出反馈、可访问 busy modal，以及关闭期间无错误横幅或 Toast；
+  全部配色、`1040×700`、200% zoom 与 reduced motion 下内容完整。
+- Desktop 等待 Core drain 和子进程真实退出，以 `exit 0` 自然结束；正常流程不能靠强杀通过。
+  不把进程中断伪造为 Runtime cancellation acknowledgement；取消与 accepted-input 不确定性按当前合同留证。
+- 重启后原 Run 保留精确身份和终态，不自动恢复或重发；内部不确定性不生成公屏“外部效果待确认”。
+- 两次退出后 Core、Runtime 与 Electron helper 均被回收。只有验收清理失败分支才可向已记录的隔离进程树发送信号。
 
-成功时脚本输出 JSON report 与 Day/Night、200% zoom、terminal unknown-effect 四张截图；失败时保留
+成功时保留 JSON report、关闭等待面及重启终态截图；失败时保留
 fixture 和截图路径用于排查。可用 `ROVAI_PLANNED_SHUTDOWN_ACCEPT_FIXTURE_ROOT`、
 `ROVAI_PLANNED_SHUTDOWN_ACCEPT_OUTPUT_DIR` 指定绝对隔离位置，用
 `ROVAI_KEEP_PLANNED_SHUTDOWN_FIXTURE=1` 保留成功 fixture；不得指向日常 App 数据目录。
@@ -215,18 +191,18 @@ pnpm package:mac
 pnpm accept:member-lifecycle-ui
 ```
 
-隔离夹具必须证明：队员页继续显示普通 270px 全局侧栏及 Project / Camp 导航；内容区只有一份队员
-名册，默认约 236px，并可显式收至约 76px且记住偏好。名册 Runtime 入口显示 `✓ / ! / …`，不显示
-产品 Logo；点击后精确选择该队员并聚焦运行配置。排序模式显示真实拖拽和键盘把手，并通过既有
-`members.reorder` 持久化。运行配置保持模型、权限和沙箱功能，运行参数默认展开，状态与版本使用
-开放式行内排版而不是灰色卡片。通过全局导航离开时仍要经过现有未保存 Runtime 草稿确认。
-验收同时覆盖 1440×920、1040×700、200% zoom、reduced motion、Forced Colors 和无横向溢出，并
-保留队员半身照、筛选、创建、编辑、Presence 与移除功能。
+布局与交互断言引用[队员页面指引](../ui/surfaces/member-workspace.md)及[队员身份与配置](../ui/components/member-identity.md)。
+验证名册筛选、调宽/折叠、直接重排、Runtime 产品图标与定位、创建/编辑、Presence、移除和离页草稿保护。
+覆盖 `1440×920`、`1040×700`、200% zoom、reduced motion、Forced Colors 及全部配色，不复制另一份尺寸或图标规范。
+
+分区保存、跨队员草稿、冲突、部分成功和键盘焦点另跑 `node --test scripts/lib/member-editor.test.mjs`；
+`ROVAI_KEEP_MEMBER_EDITOR_FIXTURE=1` 可保留截图。批量应用运行配置跑 `pnpm test:member-runtime-apply`，
+覆盖未知回执、版本冲突及手机横竖屏。两者均使用隔离组件 fixture，不调用真实 Runtime 或日常数据。
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v33](../contracts/run-process-detail-surface-v33.md) 与
-[当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
+Renderer 的权威行为见 [Run Process Detail Surface v57](../contracts/run-process-detail-surface-v57.md) 与
+[当前 UI 详规：Thread 执行过程](../ui/components/conversation-workspace.md#thread-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
 ```bash
@@ -244,93 +220,30 @@ Built-in 去重后的命令与输出另由 `pnpm test:command-view` 挂载生产
 
 需要把生产 App 留给人工检查时，可运行
 `node scripts/accept-runtime-activity-ui.mjs "dist/mac-arm64/Rovai AI.app" --preview`。
-它创建同样的隔离 fixture、打开明确标注“模拟数据”的执行 Camp 并等待用户关闭 App；不调用真实模型，
-不执行自动交互矩阵，也不把人工预览报告记为自动验收通过。缺省每次使用新的临时 `userData` 和隔离 Skill Library。
+它创建同样的隔离 fixture、打开明确标注“模拟数据”的执行 Thread 并等待用户关闭 App；不调用真实模型，
+不执行自动交互矩阵，也不把人工预览报告记为自动验收通过。缺省每次使用新的临时 `userData` 和隔离 Skill 文件目录。
 
 头像轨道的 8/12/20 位队员、176px 固定步长、键盘/滚轮、Tooltip、重复精确导航与滚动保留，
-另由 `pnpm test:execution-avatar-rail` 在真实 Electron 中挂载生产 CampWorkspace 验证；该 fixture
+另由 `pnpm test:execution-avatar-rail` 在真实 Electron 中挂载生产 ThreadWorkspace 验证；该 fixture
 使用隔离 `userData`、受控本机数据，不启动 Core 或真实 Runtime。
 
-受控夹具必须至少包含同一队员的多个历史/当前 AgentRun，并证明：
+受控夹具至少包含同一队员的多个历史/当前 Run、8/12/20 位队员、单 Run 15 条以上 Tool operation，
+以及 Claude Bash 公开 command 存在但 output 为 `null` 的情况。按当前 UI owner 覆盖：
 
-- `.run-pulse-chip` 按队员而不是 Run 创建；同一 `data-agent-id` 只出现一个入口，入口数等于有
-  AgentRun 的队员数；
-- 点击入口后 `.execution-drawer` 只显示该 Agent 的所有 Run stage，按创建时间升序保留，并显示
-  独立的 AgentRun/CampTurn 边界、调用来源、A2A 深度（适用时）、Delivery 与证据 disclosure；
-- 打开入口时定位最新 `running`，否则最新 non-terminal，最后最新 terminal Run；一次真实的显式多队员
-  用户发送按 Core `agentRunIds` 顺序打开第一条精确 Run，并证明自动打开后 Composer 仍持有键盘焦点；
-  已经聚焦任意 non-terminal Run 时，新提交不得改选；
-- 聚焦 live Run 且位于 Drawer 底部时，新公开输出跟随到底部；手动上滚后 `data-following-latest=false`，
-  回到底部后恢复，仍在跟随时终态最后输出只定位一次；从其他 Camp、一级页面或应用启动/恢复进入含
-  running Run 的 Camp 时自动展开 `createdAt + id` 最新 Run，queued/waiting/terminal 不触发，且不把 DOM
-  焦点移入执行台；已经停留在同一 workspace 后，后台 A2A、Runtime 事件和 refresh 仍不打开 Drawer、
-  不改选队员/stage、不滚动公共消息时间线或抢焦点；关闭和 Drawer 内 Escape 将焦点返回真实原入口；
-- Drawer 顶边必须存在可聚焦的水平 resize separator；真实鼠标拖拽、方向键、PageUp/PageDown、
-  Home/End、Enter 恢复默认和 ARIA 数值均通过。用户高度在同一 Main Window Session 的收起重开、
-  切换 Agent/Camp 后保持；调整不得改变所选 Agent/stage，sticky-bottom 仍跟随，手动上滚仍暂停；
-  最大高度在 1040×700 与 200% zoom 下不覆盖消息历史、Agent 执行台、Approval Dock 或 Composer；
-- 默认浮层 placement 下标题栏顺序为“执行 / 任务 / 队员”；点击“移到底部”后仅保留“任务 / 队员”，
-  显示底部 Run Pulse/Drawer。再点击“移到浮层”后底部入口消失，恢复首位“执行”入口并自动打开浮层。
-  底部入口保留头像、最多两行名称和带形状的状态标记；浮层内标题与人数同行，入口为不换行的头像轨道，
-  右下角状态符号、浅底选中态和 Hover/Focus Tooltip 可辨。轨道隐藏滚动条，溢出方向显示渐隐与箭头；
-  箭头固定移动四位（176px，末端收敛），滚轮、触控板、`← / → / Home / End` 与精确导航自动显露均通过。
-  队员顺序不随状态改变，切换、刷新与收起重开不重置轨道滚动，详情不显示 resize separator。
-  点击“移到底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
-  focused Run 和底部高度偏好；移动前后必须是同一个 Drawer 与结果 DOM，并按比例保留 Drawer/结果
-  阅读位置、disclosure 和加载状态；任一时刻不存在第二条过程时间线或重复入口；
-- 全新或旧版 General Preferences 没有位置字段时从浮层开始；已保存的合法位置不被默认值覆盖。
-  显式选择浮层后，切换 Camp、进入其他一级页面再返回和完整应用重启都继续由 Inspector 承载；
-  显式移到底部后同一矩阵继续由底部承载；
-  保存中重复点击被拒绝，注入偏好原子写失败后执行台和旧 snapshot 均保持原位并显示可重试错误，恢复
-  Inspector 偏好时首个 Camp meaningful paint 不出现 bottom→inspector 闪跳；
-- placement=inspector 与 Inspector hidden 可以同时成立：进入不含 running Run 的 Camp 和已挂载 workspace
-  的后台事件不强制显示 Inspector，也不临时回退到底部；进入含 running Run 的 Camp 必须显示 Inspector、
-  激活首个“执行”入口，并定位最新 Run。执行入口点击、用户显式“移到浮层”与 Task/停止结果/世界地图等
-  精确导航仍显示 Inspector、激活“执行”并定位目标；
-- Context Delivery/Approval/Activity/Audit Tab、旧 route/state 不得返回；“队员”读取真实
-  CampMember/AgentProfile，并用既有 Core 命令切换一个符合 presence/leave 约束的 Default Lead；
-  Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程；只有 `running` Run 使顶栏执行入口 loading，
-  waiting/recovery_blocked/terminal 不旋转；浮层开合不挤占文件预览或改变主列宽度；
-- Approval Dock 是唯一普通审批决定 surface；顶栏与通知摘要只展开、定位并聚焦 Dock，不改变执行台 placement 或 Run selection；
-  执行、任务与队员浮层在外部点击或焦点移出后仍保持打开，只能通过再次点击当前入口、标题栏关闭按钮或
-  `Esc` 收起，且不强制切换内容。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
-- Drawer 顶栏只为当前聚焦且可停止的 AgentRun 提供一个“停止”按钮；单击必须直接提交、立即进入停止态，
-  不挂载确认 Dialog、“继续运行”动作或第二个提交按钮。Composer 继续拥有唯一 CampTurn Stop；两级停止、
-  Approval Dock 与 Composer 在 `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、
-  可键盘到达且不互相遮挡；
-- `2560×1440` 下 `.composer-box` 与可见 `.composer-route-rail` 都接近 1440px、居中且同轴；Inspector
-  显隐后仍不超过 1440px。`.timeline-track`、Approval/Recovery Dock 与会话宽轨保持约 1040px，
-  `Enter` keycap 位于发送按钮紧邻左侧；用户与所有 Agent 普通正文使用同一开放阅读表面，叙述保持约
-  76ch，代码、表格、Task 和审批等现有结构化内容才可进入既有工件通道，身份色只进入头像、名称或身份点；
-- Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
-  与 Runtime evidence 一致；Claude Bash fixture 必须覆盖 terminal output 为 `null` 的情况，并证明仅凭
-  公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。同一
-  AgentRun 的最大连续 Tool 默认进入收起组，narration、plan 与 diagnostic 必须截断分组；活动组摘要显示
-  最后一条 running/waiting 操作且不同时追加累计数，终态组不把失败或 recorded 冒充成功。running Run 的
-  尾组在 Tool 间隙必须保持“执行中 · <最近一条指令>”和 running 图标，不短暂切成终态，也不重复渲染
-  “正在处理”；真实非 Tool 或 Run 边界到达后才收口。组 summary 与所有 Tool 行都必须保持
-  `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨` 四列；不可展开行保留末轨
-  占位，组图标与摘要文字共享 16px 中心线；Shell、File、Git、Network、Permission、Runtime、Plan、Tool 和 Unknown 使用统一 16px 单色
-  线性 SVG，状态只由右侧带辅助名称的形状表达；打开组只显示完整 Tool chronology，不自动打开任一结果；
-- Shell command disclosure 第一行精确为 `$ ` 加完整 command；公开 output 紧接下一行，不出现“命令 / 输出”
-  标签或空白分隔行。Shell 结果面使用独立主题 token，左边界与 16px Terminal 图标左边界同轴；其他 Tool
-  detail 的颜色和缩进保持不变；
-- 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
-  Built-in 有唯一已确认 Shell 载体时只显示一条 Core Tool，标题保留完整命令，详情保留正文参数与原始输出；
-  无关联时回退公共 `canonicalInput`，缺少输入或仅有 projection 辅助事实时不可展开。混合与不确定关联保留，
-  不凭名称借用其他调用；成功步骤与失败、停止、未知数量分开，分页不声称整轮总量。
-- 超过 7,680 UTF-8 字节的普通 Tool 输出在持久化投影中只保留预算内前缀，超出部分不写入 SQLite、
-  Managed Blob 或详情读取结果；只打开外层 Tool 组仍必须保持零结果 region，打开精确 Tool 行后才按需读取
-  结果，并在固定最大高度的可聚焦结果 region 内渲染。预算内首、中标记存在、预算外末标记不存在，
-  结果下方显示“结果过长，部分内容已省略。”，无完整结果恢复入口或复制按钮。溢出使用内部滚动条，Arrow、
-  Page Up/Down、Space、Home/End 可滚动，Escape 返回对应 summary 且不关闭 Drawer；读取失败保留精确
-  错误与重试，成功后焦点进入结果。`1040×700` 与 200% zoom 下结果、执行台、Approval Dock 和 Composer
-  无横向溢出或相互遮挡；DOM 不存在 standalone“查看完整工具调用”、`.complete-evidence-control` 或
-  raw Payload 展开面。
+| 覆盖类别 | 行为依据 |
+| --- | --- |
+| 按队员聚合、精确 Run 定位、发送后的选择与焦点、进入/后台事件边界 | [Thread 执行过程](../ui/components/conversation-workspace.md#thread-执行过程) |
+| 头像轨道、滚轮/键盘、Drawer 调宽、同 DOM 的位置切换、偏好失败和阅读位置保留 | [Thread 执行过程](../ui/components/conversation-workspace.md#thread-执行过程) |
+| 顶栏入口、浮层关闭、Approval Dock 和精确 Run Stop | [Thread 详情浮层](../ui/components/conversation-workspace.md#thread-详情浮层)与[Task、Approval 与停止](../ui/components/conversation-workspace.md#taskapproval-与停止) |
+| Tool chronology、连续分组、类型/状态图标、Shell 展开、Built-in 去重、结果预算与惰性读取 | [Run Process Detail Surface](../contracts/run-process-detail-surface-v57.md)与[执行过程](../ui/components/conversation-workspace.md#thread-执行过程) |
+
+验证真实焦点、滚动与最终可见位置，不能只检查外层 DOM 存在；精确 Run 停止直接提交，未知结果按原 commandId
+核对且不重复发送。覆盖 `2560×1440`、`1440×920`、`1040×700`、200% zoom、reduced motion 和全部配色。
+fixture 不启动真实 Runtime；真实执行、审批与停止结果由对应 Runtime 验收补齐。
 
 ### Task 详情门禁
 
-Renderer 的权威行为见[当前 UI 详规：Camp 详情浮层](../ui/components/conversation-workspace.md#camp-详情浮层)。
+Renderer 的权威行为见[当前 UI 详规：Thread 详情浮层](../ui/components/conversation-workspace.md#thread-详情浮层)。
 修改 Task 首层入口、空状态、创建/编辑表单、列表或详情后，至少运行：
 
 ```bash
@@ -342,7 +255,7 @@ pnpm accept:task-card-ui
 
 - 标题栏“任务”直接入口打开按需浮层，状态筛选与新建入口可用；不恢复常驻侧栏、独立折叠按钮或解释性空状态；
 - 列表和时间线卡片打开完整只读详情；新建/编辑使用标准 Dialog，标题输入框立即获得焦点；
-- 关闭新建 Dialog 返回原列表并保留草稿，不写入 Task、CampMessage 或其他 Core 状态；跨详情切换和浮层收起
+- 关闭新建 Dialog 返回原列表并保留草稿，不写入 Task、ThreadMessage 或其他 Core 状态；跨详情切换和浮层收起
   后重开草稿仍在；并行修改其他字段后，提交仅写入用户实际编辑的字段；
 - 编辑、取消任务均使用既有任务命令，取消必须填写原因，不启动或停止 AgentRun；
 - Task 创建、五态原卡更新、terminal 详情、字段补丁、审计、Related execution、
@@ -358,24 +271,11 @@ pnpm package:mac
 pnpm accept:runtime-activity-ui
 ```
 
-受控夹具必须证明：消息正文内不存在 `.message-run-origin`；消息下方不存在
-`.delivery-status-list.is-compact`；双收件人按冻结顺序进入唯一 `.message-delivery-footer`；footer
-可见文案为“发送给@队员”，不保留冒号，也不显示“已送达”“处理中”“排队中”“投递失败”、`!`
-或任何 Delivery 状态。每个收件人都带 `@` 并使用飞书式蓝色 Mention；仍可用身份具有
-`role="button"`、`aria-haspopup="dialog"`、Click/Enter/Space 人物信息卡与拖选不误触边界。
-每条可用队员发言的头像与显示名也必须各自为键盘可达的原生按钮，具有精确可访问名称与
-`aria-haspopup="dialog"`，并分别证明鼠标点击、Enter/Space 打开既有人物信息卡、`Esc` 的焦点返回及不导航边界；
-已离开、已移除或不可解析作者不得渲染这两个按钮。
-footer 保持透明、零圆角，短转交折线使用 1px Porcelain/Steel 结构线，且 footer 边界与最后一个
-正文内容元素的垂直间距不超过 4px；验收必须同时证明回复使用对话回折 SVG、回复/复制均有可访问名称，
-用户操作行位于正文右下方，队员操作行位于完整输出左下方并晚于父引用、图片、附件、转交 footer 及锚定的
-`Files Changed` 卡片；键盘聚焦后可见且不覆盖收件人。当前用户消息还须证明右对齐、头像位于右侧、
-浅灰底面按短消息内容自然收窄且最大不超过 Composer 的约三分之二、整条消息 hover 不增加底色，以及超过 20 行时只显示前 19 行与
-第 20 行静态省略号，DOM 中不存在展开/收起按钮或点击状态；复制仍为完整原文。带图片或文件的用户消息还须以短正文证明附件区
-不继承正文宽度，右侧与正文、头像同轴，向左最多延伸至队员头像或姓名轨道。不能只测包含隐藏控件的外层 surface。验收还必须切换到 1040×700，证明 document、timeline
-和 footer 无横向溢出且 footer 留在时间线可视区内；2K 场景还须证明 Composer 扩展不改变 footer
-阅读宽度或复制按钮定位。Run stage 也不得重新显示这些 Delivery 状态标签；
-底层 Delivery、失败码与恢复事实继续保留在原有 Core Read Side。
+按[A2A 会话消息](../ui/components/conversation-workspace.md#a2a-会话消息)验证唯一收件人 footer、身份入口、
+消息操作行、复制/回复与文件分区。fixture 包含双收件人、失效身份、超过 20 行的用户消息、短正文加附件及 Agent 产物。
+检查实际可见按钮和内容；可用身份分别通过鼠标、Enter/Space 打开人物卡，Escape 返回原焦点，拖选不误激活。
+在常规、`1040×700` 与 2K 场景验证 footer、正文、附件和 Composer 的独立宽度及无横向溢出。
+底层 Delivery 事实保留，显示规则以当前 UI 为准，不从旧 fixture 恢复状态标签。
 
 ### 结构化 Mention 门禁
 
@@ -396,38 +296,18 @@ Runtime，继续证明 Picker → 发送 → send-time snapshot → Manifest res
 发送、人物信息卡、原生选区与复制回归。两项 UI 门禁都使用三位带角色的队员和无模型安全 Runtime
 fixture。夹具固定本次 Host 的 Runtime 启动路径，并在退出后核对 Run 实际入口；历史安装快照不替代启动配置。
 静态准入按 `installed_unverified` 且无 blocker 检查，不伪造本次协议验证成功。Thread 使用当前
-`threads.*` API，本机草稿从隔离 Renderer 的 localStorage 读取，不再调用已退役的 Core Draft API。
+`threads.*` API，本机草稿从隔离 Renderer 的 localStorage 读取。
 
-两项 UI 门禁共同证明：
+两项 UI 门禁按[结构化 Mention](../ui/components/structured-mentions.md)和
+[Skills 候选](../ui/components/skills-settings.md#thread-composer-的--候选)覆盖触发、IME、键盘选择、Atom 替换/持久化、
+失效来源、人物卡、焦点返回和复制；不在验收流程重复定义颜色、字号或布局。
 
-- `/` 在空 Composer、正文中的空白（含换行与全角空格）或中文标点后打开真实 Skill 下拉；
-  URL、路径、普通词内斜杠和跨原子 token 的内容不触发。候选读取当前 Thread 全队的工具箱与原生 Skill 来源，
-  菜单位于输入框上方且使用 Porcelain/Steel 层级；日夜主题和窄窗口中不越界，键盘活动项保持可见；
-- Enter 或 Tab 明确选择后，仅将当前 `/query` 替换为原子
-  Composer V2 `skill` Atom，保留前后正文和其他 token，并复用已有空白或补一个普通尾随空格；
-  恢复 Composer 焦点并按 `skillId + nameAtSend` 持久化，可见文本为 `/<skill-name>`，且不会自动发送；
-- 手写、粘贴和旧 Draft 中看似 `/<skill-name>` 的内容始终保持 Text，不按当前 Skill 反解析或升级；
-- Draft 中 Skill 来源后来不在当前候选中时，保留冻结身份并提示来源状态；正文仍可发送，是否提供
-  `SKILL.md` 文件链接以 [Skills Rebuild](../contracts/skills-rebuild-v2.md) 的来源解析为准；
-- Composer Mention 是默认无底色的蓝色、不可拆分原子行内文字，耐久 Draft 与发送后的
-  Structured Content 保持同一稳定身份；
-- 从队员或所有队员候选中选中 Mention 后自动补一个普通空格，光标位于该空格之后；
-  替换范围后已有空白时不重复插入，模型单测覆盖复用与光标位置；
-- 一条消息为三位唯一收件人分别创建 batch AgentRun；按 `inputMessageIds` 与 `anchorMessageId`
-  核对同一条已受理消息，不要求独立领取的 Run 具有同一时间戳或 CampTurn；
-- Composer 和已发送 Member Mention 具有同一飞书式紧凑样式：`display: inline`、透明背景、
-  无边框、`0 1px` 内边距和 3px 圆角；仅 Hover、Focus 或打开态显示轻量蓝色反馈；
-- Composer Atom 保持不可编辑的行内 span；已发送当前队员 Mention 具有 `role="button"`、
-  `aria-haspopup="dialog"` 和精确可访问名称。Composer 点击及已发送 Mention 的单击、Enter、Space
-  打开锚定的非模态人物信息卡，且不出现全局 `.app-toast`；
-- 人物信息卡具有 `role="dialog"`、`aria-modal="false"`，并采用 392px/128px/302px 的
-  布局 2 侧边照结构；展示名称、角色、Presence、运行时、专业职责、工作准则和性格底色；
-- 激活前后 `.camp-workspace` 保持存在且不出现 `.members-view`；点击外部或 `Esc` 关闭，
-  键盘关闭后焦点返回原 Mention；
-- 跨过 Mention 执行真实鼠标拖选可完整包含其可见文本，且不会误触发人物信息卡；普通消息
-  文本也继续支持原生拖选和系统 `Command+C`；
-- 用户消息复制入口仍只在 Hover/Focus 时出现，位于消息正文右下方，复制结果使用当前可见正文；
-- 测试前的系统剪贴板按 flavor 完整恢复，隔离 `userData` 不污染日常 App。
+保留以下验证方法：
+
+- 三位唯一收件人的发送按 `inputMessageIds` 与 `anchorMessageId` 核对受理消息，不要求独立领取的 Run 具有相同时间戳或 ThreadTurn。
+- 真实鼠标跨 Mention 拖选并执行系统复制，确认完整可见文本和不误开人物卡；普通文本也继续支持原生选择。
+- 打开人物卡前后仍停留当前 Thread，不进入队员管理页；分别保存 Composer 与已发送 Mention 的人物卡截图。
+- 测试前的系统剪贴板按全部 flavor 完整恢复；隔离 `userData` 不污染日常 App。
 
 专项脚本成功时输出 JSON 证据并生成 `composer-skill-picker.png`；完整脚本还会生成
 `structured-mentions-composer.png`、`structured-mentions-sent.png`、
@@ -443,12 +323,11 @@ Composer 与历史消息的人物信息卡截图是此交互的必留视觉证�
 | `scripts/accept-new-conversation-ui.mjs` | 新对话 Dialog 与创建流程 | 使用脚本创建的独立 App 数据；精确参数见源码 |
 | `scripts/capture-mcp.mjs` | MCP 设置完整操作链 | 脚本创建临时 Home、来源配置和 `userData` |
 | `scripts/accept-rebuilt-skills-ui.mjs` | 当前 Skills／工具箱隔离验收与截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR`；支持 Day／Night 与 200% 缩放 |
-| `scripts/capture-skills.mjs` | 旧 Skill Library 页面历史截图入口 | 只适用于旧版本 App，不作为当前 Skills 验收证据 |
-| `scripts/capture-camp-inspectors.mjs` | 已有 Camp 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
-| `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Camp 流程 | 必须设置隔离 `userData`；省略或指向日常目录即拒绝启动 |
+| `scripts/capture-camp-inspectors.mjs` | 已有 Thread 的 Inspector 截图 | 必须设置 `ROVAI_CAPTURE_USER_DATA_DIR` |
+| `scripts/capture-desktop.mjs` | 通用页面、Runtime 和 Thread 流程 | 必须设置隔离 `userData`；省略或指向日常目录即拒绝启动 |
 
 当前页面合同见[Skills／工具箱／会话选择](../ui/components/skills-settings.md)。专项脚本给验收 App
-配置独立 `userData`、Skill Library 和临时原生 Home，只读发现一项合成 Codex Skill，并核对正文预览。
+配置独立 `userData`、Skill 文件目录和临时原生 Home，只读发现一项合成 Codex Skill，并核对正文预览。
 它还验证五项工具箱及 `member-studio` 默认队员配置，通过界面切换一次 `campfire` 复选框并恢复；
 分别留下 Skills 与工具箱截图及 JSON 报告。Day 常规比例与 Night 200% 缩放使用两份全新的隔离目录：
 
@@ -465,8 +344,7 @@ ROVAI_CAPTURE_THEME=night ROVAI_CAPTURE_ZOOM_FACTOR=2 \
 
 ## 从明确来源创建只读隔离副本
 
-需要复现已有 Camp 时，先彻底退出 Rovai AI。v0.51 起诊断中心和 v5 导出故意不显示绝对
-SQLite 路径；只使用用户明确提供、Electron 开发日志记录或隔离启动参数已证明的来源路径。然后使用 SQLite
+需要复现已有 Thread 时，先彻底退出 Rovai AI。诊断导出不显示绝对 SQLite 路径；只使用用户明确提供、Electron 开发日志记录或隔离启动参数已证明的来源路径。然后使用 SQLite
 Backup API 创建副本：
 
 ```bash

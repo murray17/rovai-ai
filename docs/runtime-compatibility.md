@@ -1,10 +1,36 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-10-28
+last_updated: 2026-11-01
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-01 Qoder 同步子代理启动策略
+
+macOS arm64、Qoder CLI **1.1.81**、`deepseek/deepseek-v4-flash-pg` 的原生 ACP 对照确认：
+`QODER_ENABLE_AGENT_SESSIONS=1` 返回异步启动回执；设为 `0` 后仍调用普通 Agent，子 Read 完成后报告由同一 Agent 调用返回。
+Rovai 在合并环境后直接注入 `0`，不改全局配置。命名队友和 `/subtask` 同样受限，Bash 后台命令不由此开关管理。
+这是当前版本安装包与真实调用验证的原生开关，尚未列入公开环境变量表；不据此宣称所有历史版本或平台均通过。
+开发 App 补验与回归证据见[实施记录](versions/v1.72/subagent-flat-execution.md#qoder-同步启动策略补验)。
+隔离开发 App 恢复原先失败的同一原生 Session 后成功：模型仍传 `run_in_background:true`，
+但实际 Qoder 进程环境为 `0`，Agent 直接返回子报告，没有异步启动回执；主代理成功发布完成说明。
+原始参数和旧失败均保留，不将关闭后台的通过结果表述为支持异步续跑。
+
+## 2026-11-01 Kiro 登录后子代理与 ZCode 限流后补验
+
+macOS arm64、Kiro CLI **2.37.0** 登录后，隔离开发 App 的真实 `auto` 模型完成原生 `subagent`。
+标准 ACP 起始事件通过 `_meta.kiro.toolName` 给出函数名；同调用终态的 `rawOutput.items[].Text` 返回报告。
+补齐归一化后，真实重跑在同一普通 command 展示参数和含随机文件标记的报告，机器人图标与共用步骤分组已在 App 核对。
+独立 child Session 的 Read/summary 不在本次根调用接入范围；没有据列表通知创建新步骤或复制子正文。
+
+ZCode 内核 **0.17.0**、`new-provider/gpt-6.1-sol` 的先前失败为 Provider 明确返回账号并发上限，
+不是 Agent 工具执行失败；单独串行重跑 Agent 报告及根回合均成功。该已知错误现在映射为现有 `runtime_rate_limited`，
+仅公开固定原因，不转发任意 Provider payload。限流提示用确定性事件回归验证，没有为验错再次制造账号并发。
+
+Qoder CLI **1.1.76** 后台补跑的原生子任务实际完成，但根回合结束与后台通知衔接仍未通过：
+匿名正文被过滤后缺少可确认的最终输出，后续原生发布发生在 Rovai Run 结束后。首次启动未提交的更深原因未确认。
+同步对照保持通过；不将这一后台边界记为已修复。具体 Run 与回归见[补验记录](versions/v1.72/subagent-flat-execution.md#开发-app-问题补验)。
 
 ## 2026-10-28 Hermes 普通开放全部现有平台
 
@@ -1408,10 +1434,17 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 
 Grok continuation 为 compatible same-host Session → exact `session/resume` → 一次 continuity-lost replacement
 `session/new`。Grok 不再声明或选择 `session.load`，`0.2.118` HistoryRestore fallback 已删除；TRAE、Kimi 等
-其他 Runtime 的通用 load 路径不变。新 Session 继续携带 attachment root、Run tmp，并只在
-`session/new._meta.rules` 追加完整 Bootstrap；Grok Resume 固定发送 `additionalDirectories=[]`，不尝试更新
-creation-time roots，也不重新注入 creation-only rules。`grok-build:resume-v1` compatibility key 继续 fence
+其他 Runtime 的通用 load 路径不变。Grok new/resume 均发送 `additionalDirectories=[]`，保留原 `cwd`，并只在
+`session/new._meta.rules` 追加完整 Bootstrap；恢复时不重新注入 creation-only rules。
+macOS arm64 的 `grok 1.0.70 (f50904eaee6c)` 原生对照已确认 new 对非空目录数组返回 `-32602`，
+空数组与省略字段均成功；采用空数组与 resume 一致。该参数对照不替代真实任务、附件或跨 Core 续聊验收，
+也不代表本次完成了 Windows 验证。`grok-build:resume-v1` compatibility key 继续 fence
 官方配置、rules revision、Runtime identity、workspace、model 与 permission，变化时建立新 Session。
+
+本次 `1.0.70` 隔离 Core 实测已通过正式路径的 new，并进入 prompt；本机既有 `gpt-6.1-sol` Responses
+配置随后在 Grok 原生解析阶段报 `unknown variant response.metadata`，ACP 返回 `-32603`。此失败保留为
+独立的原生 Runtime／模型服务兼容阻断；没有替换账号、模型或过滤服务事件来制造成功。真实任务完成、
+附件／Run tmp 工具访问与跨 Core 成功续聊尚未通过，以下 `1.0.5` 的历史完整矩阵不能替代本次结果。
 
 macOS arm64 客户端使用 `grok 1.0.5 (5115b46bc909)`。真实 Deep Probe 在 Ready 前完成
 `session/new → exact-ID session/resume([]) → session/set_model`；Core 与 ACP Host 重启后，Host ID 改变而 Native

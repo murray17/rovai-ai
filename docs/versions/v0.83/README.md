@@ -78,7 +78,7 @@ mode、Session 恢复和 MCP 能力全部按目标安装的实际返回建立，
 | ADR | 已更新 | [ADR-0189](decisions.md#adr-0189)允许严格 presentation-only 的设置页待支持预告，同时保留 executable catalog 的实证准入边界。 |
 | Contracts | 已更新 | TypeScript/Rust closed `AdapterKind` 与 [Diagnostics Center v1](../../contracts/diagnostics-center-v1.md)扩展为全部受支持目录项；DeepSeek 不进入合同。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录 Product Runtime、Availability 与 Settings Preview 的权威分层。 |
-| UI | 已更新 | [Settings workspace brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)记录受支持 Runtime 与 disabled preview 的视觉、交互和状态边界。 |
+| UI | 已更新 | [Settings workspace brief](../../ui/surfaces/settings-workspace.md)记录受支持 Runtime 与 disabled preview 的视觉、交互和状态边界。 |
 | Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)加入 `trae-cn-cli` ACP v1 fine-grained 映射及真实 Probe 证据。 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 TRAE `0.120.52` 的 capability/行为实测，并把 DeepSeek Harness 标为 UI-only preview。 |
 | Documentation routing | 已更新 | [文档导航](../../README.md)增加 Runtime 接入研究/Probe 入口并路由到本版本与长期目录边界。 |

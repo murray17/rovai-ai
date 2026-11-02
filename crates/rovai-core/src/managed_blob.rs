@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::db::Database;
+use crate::{db::Database, maintenance_budget::MaintenanceBudget};
 
 pub(crate) const MAX_BLOB_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -302,20 +302,88 @@ impl ManagedBlobStore {
         Ok(metadata)
     }
 
-    /// Reconciles only temp artifacts owned by replaceable-content writes and collection. The
-    /// caller holds Core's database mutex, so restoration and reference checks cannot race with a
-    /// new authoritative attachment in this process.
-    pub(crate) fn recover_gc_state(&self, database: &mut Database) -> Result<()> {
-        let temporary_dir = self.root.join("tmp");
-        fs::create_dir_all(&temporary_dir)?;
+    /// Enumerate/parse outside the authority lock; only one reference check and
+    /// atomic file handoff use it. Unowned staging is deliberately left alone.
+    pub(crate) fn recover_gc_state(
+        &self,
+        database: &tokio::sync::Mutex<Database>,
+        budget: &mut MaintenanceBudget,
+    ) {
+        let entries = match fs::read_dir(self.root.join("tmp")) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => {
+                budget.report("blob enumeration", error);
+                return;
+            }
+        };
+        if let Err(error) = validate_gc_directory(&self.root)
+            .and_then(|_| validate_gc_directory(&self.root.join("tmp")))
+        {
+            budget.report("Blob recovery target", error);
+            return;
+        }
+        for entry in entries {
+            if !budget.take() {
+                break;
+            }
+            let result = (|| -> Result<()> {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    return Ok(());
+                }
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let intent = if candidate_intent_id(&name).is_some() {
+                    // An intent is tiny. Bound reads even if the file changes after stat.
+                    let mut bytes = Vec::new();
+                    File::open(entry.path())?
+                        .take(16 * 1024 + 1)
+                        .read_to_end(&mut bytes)?;
+                    anyhow::ensure!(bytes.len() <= 16 * 1024, "oversized Blob intent");
+                    let intent: CandidateWriteIntent = serde_json::from_slice(&bytes)?;
+                    anyhow::ensure!(
+                        intent.version == 1 && valid_digest(&intent.digest),
+                        "invalid Blob intent"
+                    );
+                    validate_gc_owner(&intent.owner)?;
+                    chrono::DateTime::parse_from_rfc3339(&intent.created_at)?;
+                    Some(intent)
+                } else {
+                    None
+                };
+                if intent.is_none() && quarantine_digest(&name).is_none() {
+                    return Ok(());
+                }
+                // Do not wait behind user work or a current writer. Its files
+                // remain intact and can be considered by a later maintenance run.
+                let Ok(mut database) = database.try_lock() else {
+                    return Ok(());
+                };
+                let discarded =
+                    self.recover_gc_entry(&mut database, &entry.path(), &name, intent)?;
+                drop(database);
+                for path in discarded {
+                    if let Err(error) = fs::remove_file(path) {
+                        budget.report("blob removal", error);
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                budget.report("blob recovery", error);
+            }
+        }
+    }
 
-        for entry in fs::read_dir(&temporary_dir)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(digest) = name.strip_prefix("gc-").filter(|value| valid_digest(value)) else {
-                continue;
-            };
-            let quarantine = entry.path();
+    fn recover_gc_entry(
+        &self,
+        database: &mut Database,
+        path: &Path,
+        name: &str,
+        intent: Option<CandidateWriteIntent>,
+    ) -> Result<Vec<PathBuf>> {
+        let mut discarded = Vec::new();
+        if let Some(digest) = quarantine_digest(name) {
             let final_path = safe_blob_path(&self.root, digest)?;
             let metadata_exists: bool = database.connection().query_row(
                 "SELECT EXISTS(SELECT 1 FROM managed_blob WHERE sha256 = ?1)",
@@ -323,110 +391,74 @@ impl ManagedBlobStore {
                 |row| row.get(0),
             )?;
             if metadata_exists {
-                if final_path.exists() {
-                    fs::remove_file(&quarantine)?;
-                } else {
-                    if let Some(parent) = final_path.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::rename(&quarantine, &final_path)?;
-                    sync_parent(&final_path)?;
+                if !final_path.try_exists()? {
+                    let parent = final_path.parent().context("Blob parent missing")?;
+                    fs::create_dir_all(parent)?;
+                    validate_gc_directory(parent)?;
+                    fs::rename(path, &final_path)?;
                 }
-            } else {
-                fs::remove_file(&quarantine)?;
+                // A new writer may already have recreated the final path. Do not
+                // discard another potentially recoverable copy based on existence.
+            } else if let Some(path) = quarantine_discard(path)? {
+                discarded.push(path);
             }
+            return Ok(discarded);
         }
-
-        let references = managed_blob_reference_columns(database.connection())?;
-        for entry in fs::read_dir(&temporary_dir)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(intent_id) = candidate_intent_id(&name) else {
-                continue;
-            };
-            let intent: CandidateWriteIntent = serde_json::from_slice(
-                &fs::read(entry.path())
-                    .with_context(|| format!("failed to read Managed Blob intent {name}"))?,
+        let (Some(intent_id), Some(intent)) = (candidate_intent_id(name), intent) else {
+            return Ok(discarded);
+        };
+        let data_path = self
+            .root
+            .join("tmp")
+            .join(format!("candidate-data-{intent_id}"));
+        let final_path = safe_blob_path(&self.root, &intent.digest)?;
+        let blob_id: Option<String> = database
+            .connection()
+            .query_row(
+                "SELECT id FROM managed_blob WHERE sha256 = ?1",
+                [&intent.digest],
+                |row| row.get(0),
             )
-            .with_context(|| format!("Managed Blob intent {name} is invalid"))?;
-            anyhow::ensure!(
-                intent.version == 1,
-                "Managed Blob intent version is unsupported"
-            );
-            anyhow::ensure!(
-                valid_digest(&intent.digest),
-                "Managed Blob intent digest is invalid"
-            );
-            validate_gc_owner(&intent.owner)?;
-            chrono::DateTime::parse_from_rfc3339(&intent.created_at)
-                .context("Managed Blob intent time is invalid")?;
-            let data_path = temporary_dir.join(format!("candidate-data-{intent_id}"));
-            let final_path = safe_blob_path(&self.root, &intent.digest)?;
-            let blob_id: Option<String> = database
-                .connection()
-                .query_row(
-                    "SELECT id FROM managed_blob WHERE sha256 = ?1",
-                    [&intent.digest],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if let Some(blob_id) = blob_id {
-                if !final_path.exists() && data_path.exists() {
-                    if let Some(parent) = final_path.parent() {
-                        fs::create_dir_all(parent)?;
-                    }
-                    fs::rename(&data_path, &final_path)?;
-                    sync_parent(&final_path)?;
-                } else if data_path.exists() {
-                    fs::remove_file(&data_path)?;
-                }
-                if !final_path.exists() {
-                    database.connection().execute(
-                        "UPDATE managed_blob SET state = 'missing', updated_at = ?2 WHERE id = ?1",
-                        params![blob_id, chrono::Utc::now().to_rfc3339()],
-                    )?;
-                } else {
-                    let transaction = database
-                        .connection_mut()
-                        .transaction_with_behavior(TransactionBehavior::Immediate)?;
-                    if blob_is_referenced(&transaction, &references, &blob_id)? {
-                        attach_gc_candidate(&transaction, &blob_id)?;
-                    } else {
-                        transaction.execute(
-                            r#"
-                            UPDATE managed_blob
-                            SET gc_candidate_at = COALESCE(gc_candidate_at, ?2),
-                                gc_candidate_owner = COALESCE(gc_candidate_owner, ?3),
-                                updated_at = ?2
-                            WHERE id = ?1
-                            "#,
-                            params![blob_id, intent.created_at, intent.owner],
-                        )?;
-                    }
-                    transaction.commit()?;
-                }
-            } else {
-                remove_if_exists(&data_path)?;
-                remove_if_exists(&final_path)?;
-            }
-            fs::remove_file(entry.path())?;
+            .optional()?;
+        // A journal without committed metadata is not proof that a content-addressed
+        // file belongs only to this write. Preserve both it and the unknown artifacts.
+        let Some(blob_id) = blob_id else {
+            return Ok(discarded);
+        };
+        if final_path.try_exists()? && data_path.try_exists()? {
+            return Ok(discarded);
         }
-
-        for entry in fs::read_dir(&temporary_dir)? {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if candidate_staging_id(&name).is_some()
-                || candidate_data_id(&name).is_some_and(|intent_id| {
-                    !temporary_dir
-                        .join(format!("candidate-intent-{intent_id}.json"))
-                        .exists()
-                })
-            {
-                remove_if_exists(&entry.path())?;
-            }
+        if !final_path.try_exists()? && data_path.try_exists()? {
+            anyhow::ensure!(
+                fs::symlink_metadata(&data_path)?.is_file(),
+                "Blob candidate is not a regular file"
+            );
+            let parent = final_path.parent().context("Blob parent missing")?;
+            fs::create_dir_all(parent)?;
+            validate_gc_directory(parent)?;
+            fs::rename(&data_path, &final_path)?;
         }
-        sync_parent(&temporary_dir.join("recovered"))?;
-        Ok(())
+        if !final_path.try_exists()? {
+            return Ok(discarded);
+        }
+        let references = managed_blob_reference_columns(database.connection())?;
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if blob_is_referenced(&transaction, &references, &blob_id)? {
+            attach_gc_candidate(&transaction, &blob_id)?;
+        } else {
+            transaction.execute("UPDATE managed_blob SET gc_candidate_at=COALESCE(gc_candidate_at, ?2), gc_candidate_owner=COALESCE(gc_candidate_owner, ?3), updated_at=?2 WHERE id=?1",
+                params![blob_id, intent.created_at, intent.owner])?;
+        }
+        transaction.commit()?;
+        if let Some(path) = quarantine_discard(&data_path)? {
+            discarded.push(path);
+        }
+        if let Some(path) = quarantine_discard(path)? {
+            discarded.push(path);
+        }
+        Ok(discarded)
     }
 
     pub fn read_bytes(&self, database: &Database, blob_id: &str) -> Result<Vec<u8>> {
@@ -581,18 +613,13 @@ impl ManagedBlobStore {
         Ok(collected)
     }
 
-    /// Collects only Blobs explicitly owned by the new replaceable-content paths. The database
-    /// write lock protects reference reattachment and in-process reads while the file is renamed
-    /// out of the readable namespace; all foreign-key references are discovered from the schema.
-    pub(crate) fn collect_gc_candidates_before(
+    pub(crate) fn gc_candidates(
         &self,
-        database: &mut Database,
+        database: &Database,
         detached_before: &str,
         limit: usize,
-    ) -> Result<Vec<String>> {
-        chrono::DateTime::parse_from_rfc3339(detached_before)
-            .context("GC cutoff must be RFC3339")?;
-        self.recover_gc_state(database)?;
+    ) -> Result<Vec<(String, String)>> {
+        chrono::DateTime::parse_from_rfc3339(detached_before)?;
         let candidates = {
             let mut statement = database.connection().prepare(
                 r#"
@@ -610,77 +637,138 @@ impl ManagedBlobStore {
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
-        let references = managed_blob_reference_columns(database.connection())?;
-        let mut collected = Vec::new();
-        for (blob_id, digest) in candidates {
-            let transaction = database
-                .connection_mut()
-                .transaction_with_behavior(TransactionBehavior::Immediate)?;
-            let candidate_at: Option<String> = transaction
-                .query_row(
-                    "SELECT gc_candidate_at FROM managed_blob WHERE id = ?1",
-                    [&blob_id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-            if candidate_at
-                .as_deref()
-                .is_none_or(|value| value >= detached_before)
-            {
-                transaction.commit()?;
-                continue;
-            }
-            if blob_is_referenced(&transaction, &references, &blob_id)? {
-                attach_gc_candidate(&transaction, &blob_id)?;
-                transaction.commit()?;
-                continue;
-            }
+        Ok(candidates)
+    }
 
-            let path = safe_blob_path(&self.root, &digest)?;
-            let quarantine_dir = self.root.join("tmp");
-            fs::create_dir_all(&quarantine_dir)?;
-            let quarantine = quarantine_dir.join(format!("gc-{digest}"));
-            let moved = match fs::rename(&path, &quarantine) {
-                Ok(()) => true,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-                Err(error) => return Err(error.into()),
-            };
-            let deleted = transaction.execute(
-                "DELETE FROM managed_blob WHERE id = ?1 AND gc_candidate_at < ?2",
-                params![blob_id, detached_before],
-            );
-            match deleted {
-                Ok(1) => {
-                    if let Err(error) = transaction.commit() {
-                        if moved {
-                            let _ = fs::rename(&quarantine, &path);
-                        }
-                        return Err(error.into());
-                    }
-                    if moved {
-                        fs::remove_file(&quarantine).with_context(|| {
-                            format!("failed to remove collected Blob {}", quarantine.display())
-                        })?;
-                    }
-                    collected.push(blob_id);
-                }
-                Ok(_) => {
-                    drop(transaction);
-                    if moved {
-                        fs::rename(&quarantine, &path)?;
-                    }
-                }
-                Err(error) => {
-                    drop(transaction);
+    /// One reference recheck and rename under the existing database lock. The
+    /// caller removes the uniquely named quarantine only after releasing it.
+    pub(crate) fn collect_gc_candidate(
+        &self,
+        database: &mut Database,
+        detached_before: &str,
+        blob_id: &str,
+        digest: &str,
+    ) -> Result<Option<(String, Option<PathBuf>)>> {
+        let references = managed_blob_reference_columns(database.connection())?;
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let candidate_at: Option<String> = transaction
+            .query_row(
+                "SELECT gc_candidate_at FROM managed_blob WHERE id = ?1 AND sha256 = ?2 AND gc_candidate_owner IN ('execution_lifecycle', 'file_change_projection', 'camp_deletion')",
+                params![blob_id, digest],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if candidate_at
+            .as_deref()
+            .is_none_or(|value| value >= detached_before)
+        {
+            transaction.commit()?;
+            return Ok(None);
+        }
+        if blob_is_referenced(&transaction, &references, blob_id)? {
+            attach_gc_candidate(&transaction, blob_id)?;
+            transaction.commit()?;
+            return Ok(None);
+        }
+
+        let path = safe_blob_path(&self.root, digest)?;
+        let quarantine_dir = self.root.join("tmp");
+        validate_gc_directory(&self.root)?;
+        fs::create_dir_all(&quarantine_dir)?;
+        validate_gc_directory(&quarantine_dir)?;
+        if let Some(parent) = path.parent().filter(|parent| parent.exists()) {
+            validate_gc_directory(parent)?;
+        }
+        let quarantine = quarantine_dir.join(format!("gc-{digest}-{}", Uuid::new_v4()));
+        let moved = match fs::rename(&path, &quarantine) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        let deleted = transaction.execute(
+            "DELETE FROM managed_blob WHERE id = ?1 AND gc_candidate_at < ?2",
+            params![blob_id, detached_before],
+        );
+        match deleted {
+            Ok(1) => {
+                if let Err(error) = transaction.commit() {
                     if moved {
                         let _ = fs::rename(&quarantine, &path);
                     }
                     return Err(error.into());
                 }
+                return Ok(Some((blob_id.to_owned(), moved.then_some(quarantine))));
+            }
+            Ok(_) => {
+                drop(transaction);
+                if moved {
+                    fs::rename(&quarantine, &path)?;
+                }
+            }
+            Err(error) => {
+                drop(transaction);
+                if moved {
+                    let _ = fs::rename(&quarantine, &path);
+                }
+                return Err(error.into());
+            }
+        }
+        Ok(None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn collect_gc_candidates_before(
+        &self,
+        database: &mut Database,
+        cutoff: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let mut collected = Vec::new();
+        for (id, digest) in self.gc_candidates(database, cutoff, limit)? {
+            if let Some((id, path)) = self.collect_gc_candidate(database, cutoff, &id, &digest)? {
+                if let Some(path) = path {
+                    fs::remove_file(path)?;
+                }
+                collected.push(id);
             }
         }
         Ok(collected)
+    }
+}
+
+fn validate_gc_directory(path: &Path) -> Result<()> {
+    anyhow::ensure!(
+        fs::symlink_metadata(path)?.is_dir(),
+        "Blob cleanup target is not an owned directory"
+    );
+    Ok(())
+}
+
+fn quarantine_digest(name: &str) -> Option<&str> {
+    let tail = name.strip_prefix("gc-")?;
+    let digest = tail.get(..64)?;
+    if valid_digest(digest)
+        && (tail.len() == 64
+            || tail
+                .get(64..)?
+                .strip_prefix('-')
+                .is_some_and(|id| Uuid::parse_str(id).is_ok()))
+    {
+        Some(digest)
+    } else {
+        None
+    }
+}
+
+fn quarantine_discard(path: &Path) -> Result<Option<PathBuf>> {
+    let discarded = path.with_file_name(format!("discard-{}", Uuid::new_v4()));
+    match fs::rename(path, &discarded) {
+        Ok(()) => Ok(Some(discarded)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
     }
 }
 
@@ -879,24 +967,6 @@ fn candidate_intent_id(name: &str) -> Option<&str> {
     Uuid::parse_str(value).ok().map(|_| value)
 }
 
-fn candidate_staging_id(name: &str) -> Option<&str> {
-    let value = name.strip_prefix("candidate-intent-write-")?;
-    Uuid::parse_str(value).ok().map(|_| value)
-}
-
-fn candidate_data_id(name: &str) -> Option<&str> {
-    let value = name.strip_prefix("candidate-data-")?;
-    Uuid::parse_str(value).ok().map(|_| value)
-}
-
-fn remove_if_exists(path: &Path) -> Result<()> {
-    match fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
 fn safe_blob_path(root: &Path, digest: &str) -> Result<PathBuf> {
     if !valid_digest(digest) {
         anyhow::bail!("Managed Blob digest is invalid");
@@ -1060,6 +1130,39 @@ mod tests {
         )
         .unwrap();
         transaction.commit().unwrap();
+        let selected = store
+            .gc_candidates(&database, "2026-09-21T00:00:00Z", 16)
+            .unwrap();
+        assert_eq!(selected.len(), 1);
+        // Selection and removal use separate short locks. A task can attach the
+        // selected Blob between them; the removal transaction must recheck it.
+        let transaction = database.connection_mut().transaction().unwrap();
+        attach_gc_candidate(&transaction, &candidate.id).unwrap();
+        transaction.commit().unwrap();
+        assert!(
+            store
+                .collect_gc_candidate(
+                    &mut database,
+                    "2026-09-21T00:00:00Z",
+                    &selected[0].0,
+                    &selected[0].1
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            store.read_bytes(&database, &candidate.id).unwrap(),
+            b"replaceable"
+        );
+        let transaction = database.connection_mut().transaction().unwrap();
+        detach_gc_candidate(
+            &transaction,
+            &candidate.id,
+            GC_OWNER_EXECUTION_LIFECYCLE,
+            "2026-09-20T00:00:00Z",
+        )
+        .unwrap();
+        transaction.commit().unwrap();
         assert_eq!(
             store
                 .collect_gc_candidates_before(&mut database, "2026-09-21T00:00:00Z", 16,)
@@ -1096,20 +1199,74 @@ mod tests {
         std::fs::create_dir_all(&temporary_dir).unwrap();
         let quarantine = temporary_dir.join(format!("gc-{}", candidate.sha256));
 
+        let broken = temporary_dir.join(format!("candidate-intent-{}.json", Uuid::new_v4()));
+        std::fs::write(&broken, b"{broken").unwrap();
+        let staging = temporary_dir.join(format!("candidate-intent-write-{}", Uuid::new_v4()));
+        std::fs::write(&staging, b"current writer").unwrap();
+        let data = temporary_dir.join(format!("candidate-data-{}", Uuid::new_v4()));
+        std::fs::write(&data, b"uncommitted data").unwrap();
         std::fs::rename(&final_path, &quarantine).unwrap();
-        store.recover_gc_state(&mut database).unwrap();
+        let guard = tokio::sync::Mutex::new(database);
+        let writer = guard.try_lock().unwrap();
+        store.recover_gc_state(
+            &guard,
+            &mut MaintenanceBudget::new(128, std::time::Duration::from_secs(2)),
+        );
+        assert!(
+            quarantine.exists(),
+            "maintenance does not wait for or interfere with a current writer"
+        );
+        assert_eq!(std::fs::read(&data).unwrap(), b"uncommitted data");
+        drop(writer);
+        store.recover_gc_state(
+            &guard,
+            &mut MaintenanceBudget::new(0, std::time::Duration::from_secs(2)),
+        );
+        assert!(
+            quarantine.exists(),
+            "an exhausted allowance does not process a file"
+        );
+        store.recover_gc_state(
+            &guard,
+            &mut MaintenanceBudget::new(128, std::time::Duration::from_secs(2)),
+        );
+        database = guard.into_inner();
         assert_eq!(
             store.read_bytes(&database, &candidate.id).unwrap(),
             b"recoverable"
         );
+        assert_eq!(std::fs::read(&broken).unwrap(), b"{broken");
+        assert_eq!(std::fs::read(&staging).unwrap(), b"current writer");
+        assert_eq!(std::fs::read(&data).unwrap(), b"uncommitted data");
         assert!(!quarantine.exists());
+
+        std::fs::write(&quarantine, b"retained previous copy").unwrap();
+        let guard = tokio::sync::Mutex::new(database);
+        store.recover_gc_state(
+            &guard,
+            &mut MaintenanceBudget::new(128, std::time::Duration::from_secs(2)),
+        );
+        database = guard.into_inner();
+        assert_eq!(
+            std::fs::read(&quarantine).unwrap(),
+            b"retained previous copy"
+        );
+        assert_eq!(
+            store.read_bytes(&database, &candidate.id).unwrap(),
+            b"recoverable"
+        );
 
         std::fs::rename(&final_path, &quarantine).unwrap();
         database
             .connection()
             .execute("DELETE FROM managed_blob WHERE id = ?1", [&candidate.id])
             .unwrap();
-        store.recover_gc_state(&mut database).unwrap();
+        let guard = tokio::sync::Mutex::new(database);
+        store.recover_gc_state(
+            &guard,
+            &mut MaintenanceBudget::new(128, std::time::Duration::from_secs(2)),
+        );
+        database = guard.into_inner();
         assert!(!quarantine.exists());
         assert!(!final_path.exists());
 
@@ -1118,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn gc_recovery_removes_uncommitted_candidate_write_artifacts() {
+    fn gc_recovery_preserves_unknown_and_malformed_candidate_write_artifacts() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-managed-blob-write-recovery-{}",
             Uuid::new_v4()
@@ -1146,9 +1303,14 @@ mod tests {
         )
         .unwrap();
 
-        store.recover_gc_state(&mut database).unwrap();
-        assert!(!intent_path.exists());
-        assert!(!final_path.exists());
+        let guard = tokio::sync::Mutex::new(database);
+        store.recover_gc_state(
+            &guard,
+            &mut MaintenanceBudget::new(128, std::time::Duration::from_secs(2)),
+        );
+        database = guard.into_inner();
+        assert!(intent_path.exists());
+        assert!(final_path.exists());
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

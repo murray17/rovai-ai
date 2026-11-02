@@ -1,74 +1,44 @@
 ---
-document_type: ui-interaction-draft
-authority: desktop-web-interaction-parity-review
-status: draft
-target_version: v1.59
-last_updated: 2026-09-16
+document_type: ui-platform-guidance
+authority: renderer-desktop-web-parity
+last_updated: 2026-10-30
 ---
 
-# Desktop 对照的宽屏 Web 交互验收稿
+# Desktop 与 Web 共用界面
 
-审阅基线为 PR #345 的 `077bf78e64c76e934c45675ddb55e05165a2c49f`；实施前已核对本地 HEAD 与 PR head
-一致、工作树干净。用户已确认本稿方向，当前进入 A–D 实际收敛；Mobile、扩平台、容器和发布优化暂停。
-实际 `apps/web` 已挂载共享生产 BusinessApp/Camp 页面，下面按最新源码更新实现缺口。固定模拟稿保留为组件组合证据，
-不再扩展，也不能代替真实 Host 与两端验收；实际结果见[实施计划](../versions/v1.59/implementation-plan.md)。
-用户随后单独要求的[远程连接设置稿](host-remote-connection.md)只增加该设置菜单的评审材料，不重做本稿的 Camp 场景。
+Desktop 与宽屏 Web 共用 `BusinessApp`、会话、Composer、文件预览和管理页的生产组件、主题 Token 与交互状态。
+平台能力通过显式依赖注入；共享页面不依赖原生全局对象，也不复制业务状态机。
+Host 授权与运输边界由 [Host Web](../contracts/host-web-v4.md)和[统一 Rust Host](../architecture/unified-rust-host.md)拥有。
+手机布局另见 [Mobile WebUI](host-web-mobile.md)。
 
-## 一张行为差异表
+## 共享行为与客户端状态
 
-“Desktop 行为”取自该基线的生产组件与调用路径，不能代替本机全部流程实测。
-G 表示应消除的实现缺口；P 是明确的平台差异；D 只用于用户确认暂停的范围。
-G 不得改写为“Web 不支持”。下面列出的 Host 操作是需要逐项授权的服务入口，不是批量公开内部 RPC 的清单。
+- 页面结构与业务动作遵循对应[组件合同](components/README.md)和[页面指引](README.md#页面局部-brief)。平台适配不能取消权限、版本校验、可用动作或秘密过滤。
+- 公屏与单聊草稿分别遵循 [Public Composer](../architecture/camp-composer-draft.md)和[Single Chat](../architecture/single-chat.md)。不同客户端的编辑、附件和输入焦点互不覆盖，公共与私有内容不串用。
+- 外观、导航与阅读位置按客户端保存；业务事实来自 Host。迟到读取不能覆盖新的页面选择或草稿。
+- 提交中阻止重复操作；未知结果使用原 commandId 核对，不重新派发。断线、认证过期及重新登录保留编辑和原提交，使用[共享连接恢复](host-web-connection-recovery.md)。
+- 审批保留 Runtime 原生选项和权限；文件能力按来源授权，拒绝越权与路径穿越。未知附件绑定结果先核对，不误删文件。
 
-| 页面/动作与分类 | Desktop 生产行为 | 当前 Web 行为 | 应共用组件 | 缺失 Host/Remote 操作 | 允许的平台差异 | 验收方式 |
-| --- | --- | --- | --- | --- | --- | --- |
-| Camp 导航与工作区 · G | 项目/快速对话分组、分页、固定、改名；消息/执行/Composer/队员/任务在同一工作区 | 已复用生产导航、消息、执行、Composer 及其页面协调逻辑；改名/删除已准入，固定与分组继续使用共享导航偏好 | `CampNavigation`、`AppHeader`、`CampWorkspace`、`SafeMarkdown` | Camp 完整 open projection、按权限投影的动作；`camps.enter/open` 与已有分页服务适配 | P：浏览器无原生窗口拖拽/恢复；导航偏好按客户端保存 | 同 fixture、1440×920、日夜主题核对主要操作位置；再用真实 Camp 验证分页和刷新 |
-| 新建 Camp · G/P | 选择工作区和已配置队员、Default Lead，再创建对话；Runtime 配置在队员页完成 | 已复用生产新建 Dialog 与 Host 目录选择；两入口空 Host 的 Runtime 检测、配置和新建 UI 均已验证 | `NewConversationDialog`、`MemberRuntimePicker`、队员配置页 | Host 目录浏览/inspection、creation preflight、`camps.create` 及回执查询 | P：原生目录选择改为浏览 Host 有权访问的目录，仍通过 Core 项目校验 | 空目录 Host 的受信本机初始化后，浏览器完成选择/配置/创建；重试使用原 commandId |
-| Composer 与引用/待发送 · G | 结构化 Mention、回复、引用、附件、revision 校验、待发送编辑与冲突反馈 | 独立草稿、revision、发送及原子移回普通输入框已接通；旧会话显式接管，附件在普通 Composer 中继续上传 | `StructuredMentionComposer`、`CampWorkspace`、`PendingCampInputs`、草稿协调器 | 草稿独立身份及后端归属；现有 draft/pending 服务绑定 client 与 Camp，发送原子消费 | P：缓存与输入焦点属客户端；不跨端同步草稿 | 两标签页不同内容/附件互不覆盖；伪造归属失败；陈旧 revision 不消费新内容；断网按原回执核对 |
-| 私聊 · G | Camp 内独立 Conversation、私有终端与待发送队列 | 生产页面显式注入客户端；独立 Draft/引用/Pending/上传通过 Core 与 HTTP 回归，双浏览器正文/附件及重新登录保留通过 | `SingleChatPanel`、共享 Composer/附件/执行组件 | Conversation 范围的草稿/资源/事件鉴权，open/get/send/end、pending 与回执 | 无第二套私聊规则；客户端状态隔离 | 私聊与公共草稿不串；其他客户端不能读取不属于自己的编辑内容；结束与取消沿用 Core |
-| 执行、停止与审批 · G | 执行台、工具详情、原生选项、提交中、恢复与停止反馈 | 已复用生产执行台和 Host 审批选项；实际浏览器发送、原生审批、产物阅读和停止通过；两入口相同真实场景、执行中 Web 开关与 Host 强杀恢复已验证 | `RunExecutionDisclosure`、`ExecutionToolGroup`、`ApprovalDock`、恢复提示 | 授权 run/evidence、`agentRuns.cancel`、`campTurns.cancel`、`action.approvals.resolve` 与 command result | P：Web 连接状态；不改写 Runtime 原生选项、不放宽权限 | 真 Runtime 请求审批；两客户端竞争只有一个有效决议；丢回执不重派发；停止和恢复有实际结果 |
-| 附件、产物与文件预览 · G/P | source ref、拖放、文件 Tabs、Markdown/代码/图片阅读、系统打开/定位 | source 上传、授权预览/下载、UTF-8 分页、相对文件/图片和变化提示已接通；真实页面相对文件/图片、末行引用及授权 HTTP 分页/变化回归通过 | `AttachmentCard`、`ImageGallery`、`FilePreviewProvider/Pane/Tabs`、`SafeMarkdown` | 临时上传→草稿绑定；未知绑定回执；按资源 locator 授权读取/下载/失效；复用 Core 引用交接 | P：浏览器上传/下载替代系统打开/定位；HTML 复用共享交互预览与源码，使用可信同来源 sandbox 与客户端原生存储；相对资源沿用既有句柄来源能力 | 未绑定清理、未知绑定不误删、失效提示、越权/路径穿越拒绝；源文件不因发送失败或移除引用误删 |
-| 队员/Runtime · G/P | 完整名册、身份表单、原生 Runtime 模型/权限、保存冲突与检查反馈 | 已复用正式名册和 Runtime 表单；浏览器检测/配置、内置肖像与上传/裁剪/保存头像通过 | `MembersView`、`MemberSidebar`、`MemberIdentityEditor`、`MemberRuntimeForm/Parameters` | 成员创建/更新/运行绑定/移除与版本；Runtime 发现/检测/模型目录的安全 DTO | P：在 Host 检测和认证 Runtime；浏览器不能选择自己机器的可执行文件冒充 Host 安装 | 配置后真实创建/发送；检查失败和版本冲突保留编辑；秘密配置不因表单复用而公开 |
-| Task · G | 创建/编辑/指派/状态与验收标准、审计及关联执行 | 正式 TaskPanel 与原授权动作接通；真实浏览器新建/编辑/取消及 Core 读回通过 | `TaskPanel`、`TaskTimelineCard`、任务字段和审计组件 | `tasks.create/update/get/list` 与版本、指派准入、事件刷新 | 无业务差异 | 每项原动作、冲突/失败态、刷新与执行关联；不是“列表有数据”即完成 |
-| Memory · G/P | Library、详情、版本、治理/删除、review 与导出 | 正式 Memory 页面与原查询/变更/review/导出已接入；浏览器新建/修订/停止沿用和读回通过 | `MemoryLibrary` 及内部表单/抽屉 | 原 Memory 查询、变更、review 和导出服务的授权适配 | P：导出下载替代本机保存/定位 | 按原动作逐项验收，含并发变更、scope、错误和刷新 |
-| Automation · G | 工作区模板、定义编辑、执行记录；当前调度驱动在 Rust Host | 正式页面创建/关闭已通过 UI；两入口无浏览器时钟与重启不重复领取通过进程验证 | `AutomationWorkspace` | automations 创建/更新/关闭/删除/运行；Host 时钟与原恢复合同衔接 | P：浏览器关闭不影响 Host 调度；按既有规则处理 missed/overlap | 关闭所有浏览器且不运行 Desktop Main 后仍按规则触发；重启恢复不额外重放 |
-| Skills/MCP · G/P | 导入、详情/内容、分配、启停与编辑 | 正式设置页面已适配；MCP 保存与 Host 目录导入 Skill 经浏览器和 Core 读回验证，秘密过滤/CAS 保留 | 现有 Skills/MCP 设置工作区与成员分配组件 | 逐项开放 library/import/assignment/config 领域操作和脱敏 DTO | P：目录/文件选择改为受授权导入；Host 路径与秘密仍受限 | 完整原动作、冲突/失败/权限与刷新；不能简单取消 `availableActions` 或秘密过滤 |
-| 必要设置 · G/P | 外观、个人资料、执行台偏好及桌面集成 | 生产通用页已显式注入偏好接口；外观与导航偏好按 origin/Owner 保存；Runtime 启动配置、头像、提醒、监控与诊断资源已接入；提醒保存、下载文件和平台能力显示通过 UI 验证 | 生产设置页内业务 sections，主题/profile/偏好适配 | Host 业务设置按需提供；本地偏好留客户端 | P：Web 使用浏览器自己的缩放菜单/快捷键；登录/撤销/连接属 Web；托盘、窗口、更新、Desktop Web 开关留 Desktop | 同一业务设置一致；不同客户端主题/导航偏好不互相覆盖；失效会话和迟到响应可恢复 |
-| Mobile、额外平台、容器/发布优化 · D | 保留既有成果和回归 | 保留当前预览 | 本轮不新增页面或平台结构 | 本轮暂停 | 长期 Server 仍三平台同一实现 | 阶段 1–3 完成后再继续，不以暂停撤销原长期目标 |
+## 平台差异
 
-## 可点击对照稿与范围
+| 交互面 | Web 适配 |
+| --- | --- |
+| 窗口、导航、缩放 | 浏览器 History 接入共享离开检查；使用浏览器缩放。原生拖拽区、窗口、托盘与 Desktop 更新留在 Desktop 能力内。详见 [App Shell](components/app-shell-navigation.md) |
+| 选择工作区 | 浏览 Host 有权访问的目录，提交前成功读取并通过相同 Core 项目校验；失败保留输入。详见[远程连接](host-remote-connection.md) |
+| 附件、文件、Memory 导出 | 浏览器上传/下载适配原生选择、打开和保存；保留原对象身份与授权。发送失败或移除引用不删除用户源文件 |
+| 文件预览 | 共用 Viewer、源码与查找；HTML 宿主策略和相对资源能力遵循文件预览合同。详见[文件预览](components/file-preview.md) |
+| 队员与 Runtime | 检测、认证与模型目录由 Host 提供；浏览器本机可执行文件不代表 Host 安装。冲突或失败保留编辑，秘密不因共用表单而公开 |
+| Skills、工具箱与 MCP | 沿用[当前能力页面](components/README.md)及逐项授权操作；文件选择面向 Host，不公开完整内部 RPC 或原生秘密 |
+| Automation | 调度由 Host 时钟驱动，关闭浏览器不停止调度；重启、错过计划与执行重叠遵循原合同 |
+| 设置与更新 | 客户端偏好与 Host 业务设置分别保存；Desktop 托管与独立 Server 的能力由 Host 投影，见[设置工作区](surfaces/settings-workspace.md) |
 
-运行 `pnpm review:host-web-parity`，打开输出的 `out/review-delivery/host-web-parity/rovai-desktop-web-parity.html`。
-它是可离线打开的构建产物：在固定 1440×920 iframe 中运行生产 React 组件，外部工具栏负责切换
-Desktop/Web、路径、主题和模拟离线，不属于产品导航。没有建立另一套业务页面或组件样式。
-构建源在 [`scripts/fixtures/host-web-parity`](../../scripts/fixtures/host-web-parity/renderer.tsx)，沿用既有 UI fixture/test 体系。
+## 验证
 
-- 已有 Camp：相同固定消息、Composer、执行台、任务/队员入口，可编辑本页草稿、模拟发送。
-- 新建 Camp：生产 Dialog；选择固定授权目录、队员和队长后模拟创建。Runtime 沿用 Desktop 的队员页配置入口，
-  可先关闭新建 Dialog，进入「队员」完成模拟配置，再返回新建；没有另造一套嵌套 Runtime 表单。
-- 运行中/审批：真实生产详情结构与固定 Runtime 原生选项；提交期间禁用重复操作，随后呈现已处理状态。
-- 附件/文件：固定 Markdown 的生产预览；Web 通过资源适配下载固定示例，Desktop 系统动作明确标为模拟。
-- 队员/Runtime：生产名册与运行配置表单，模拟保存；不会探测、更改或认证本机 Runtime。
+按[全部配色矩阵](qa/theme-matrix.md)对照相同页面、数据、状态和视口；验证主要操作位置、键盘、缩放与失败恢复。
+`pnpm test:host-web-parity` 使用独立 Chrome/Electron profile 验证共享组件，不启动 Core/Runtime；缺少浏览器的跳过不计通过。
+`pnpm test:host-web` 验证授权、附件与回执边界，`pnpm test:host-web-live` 验证实际 Desktop/Web 页面。
+具体隔离要求见 [UI 验收流程](../development/ui-acceptance.md)。
 
-所有 mutation 仅作用于当前 iframe 的内存，重置即清空。未覆盖的操作抛出明确错误或在稿外提示，不返回空值
-冒充成功。`window.rovai` 没有被伪造。文件 API 只接受固定示例，不读取真实工作区；原生审批 fixture 不等于
-Host 发出的真实审批。两 iframe 编辑独立不能证明后端草稿归属已完成。
-
-Desktop 基准也是生产组件的受控组合夹具，排除了原生启动、窗口外框和日常数据；不是维护者日常 App 截图。
-旧 Desktop 的运行/退出、真实数据库与 Runtime 验收仍需另行保留。组件/API 迁移说明见
-[复用与调用](../versions/v1.59/frontend-reuse.md)。
-
-## 对照注意与验收记录
-
-源码存在一个现状差异：`DESIGN.md` 与 App Shell 文档描述通用 50px 顶行，但当前生产 CSS
-`.app-shell-camp` 明确使用 38px。首轮 Electron 夹具也测得 38px。本稿复用该生产样式并要求 Web 与 Desktop
-相等，没有为了匹配文档数字修改生产布局；这项文档—实现差异单独记录，不影响“共用同一页面”的目标。
-
-`pnpm test:host-web-parity` 在独立 Chrome/Electron profile 中检查相同 fixture 的视口、页面、主题、
-无原生全局桥接依赖、交互与截图。它不启动 Core/Runtime。测试缺少浏览器时明确跳过，不能计为通过。
-自动点击覆盖本页模拟发送、授权目录/队员选择与新建、工具组/完整结果展开、原生选项提交/处理、
-固定示例下载和 Runtime 配置保存；同时检查独立 HTML 的入口切换、主题、场景和模拟连接状态。
-本轮实际执行结果由版本实施计划记录；此文档本身不构成通过证据。
-
-确认一次上述交互基准后，按 A 共享 Camp → B 真实写入闭环 → C 双 Host 入口一致 → D 逐页业务能力推进。
-按已确认的单 Owner 模型继续验证。第二实体设备、实体睡眠唤醒与其他原生平台独立留证，不将本机通过扩写为三平台发布。
+真实 Host 验收覆盖双客户端草稿隔离、断网后原命令核对、审批竞争、文件来源授权和重启恢复；
+Automation 另验证无浏览器时的调度。模拟 API、组件截图或两个独立 iframe 不能代替这些证据。
+真实 Runtime、原生窗口、实体手机和平台安装升级分别按对应验收流程确认。

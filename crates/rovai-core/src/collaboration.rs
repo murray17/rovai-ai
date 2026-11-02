@@ -1569,12 +1569,13 @@ impl CollaborationService {
     pub fn snapshot_pending_camps_for_startup_cleanup(
         &self,
         database: &Database,
+        created_before: &str,
     ) -> Result<Vec<String>> {
         let mut statement = database
             .connection()
-            .prepare("SELECT id FROM camp WHERE activation_state = 'pending' ORDER BY id")?;
+            .prepare("SELECT id FROM camp WHERE activation_state = 'pending' AND created_at < ?1 ORDER BY id LIMIT 32")?;
         Ok(statement
-            .query_map([], |row| row.get(0))?
+            .query_map([created_before], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?)
     }
 
@@ -7509,7 +7510,7 @@ mod slow_tests {
             "pending-abandoned-create",
         );
         let startup_candidates = service
-            .snapshot_pending_camps_for_startup_cleanup(&database)
+            .snapshot_pending_camps_for_startup_cleanup(&database, &chrono::Utc::now().to_rfc3339())
             .unwrap();
         let new_id = create_pending_camp(
             &service,

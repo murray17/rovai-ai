@@ -70,6 +70,9 @@ fn business_fixture() -> (OwnedTestDatabase, String, String, String) {
             params![active_run, now],
         )
         .unwrap();
+    // Tasks are an instance-owned preference that defaults to off; this fixture
+    // exercises the Task projection, so it opts in first.
+    crate::task_capability::set(connection, true).unwrap();
     connection
         .execute(
             r#"INSERT INTO task (
@@ -842,7 +845,7 @@ fn user_anchor_index_is_complete_lightweight_and_read_only() {
         .unwrap();
     database.connection().execute("UPDATE camp_message SET structured_content_json = '[{\"kind\":\"member_mention\",\"agentId\":\"agent_1\"}]' WHERE id = 'anchor-6'", []).unwrap();
     database.connection().execute("UPDATE camp_message SET structured_content_json = '[]', source_attachments_json = ?1 WHERE id = 'anchor-7'",
-        [json!([{"id":"00000000-0000-4000-8000-000000000001","sourcePath":"/missing/never-read-anchor-file",
+        [json!([{"id":"00000000-0000-4000-8000-000000000001","sourcePath":crate::test_support::absolute_test_path("/missing/never-read-anchor-file"),
             "displayName":"设计稿.html","kind":"file","mediaType":"text/html","observedByteSize":2}]).to_string()]).unwrap();
     database.connection().execute("UPDATE camp_message SET structured_content_json = '[]', quotes_json = ?1 WHERE id = 'anchor-8'",
         [json!([{"version":1,"quoteId":"quote","source":{"scope":"camp","campId":camp_id,"messageId":"source"},

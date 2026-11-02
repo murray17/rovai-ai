@@ -37,12 +37,12 @@
   {
     "id": "08-dynamic-context",
     "title": "从 Session Bootstrap 到每次 Run 的动态上下文",
-    "description": "顶部三层稳定引导：Session Charter、MEMBER_IDENTITY、Memory Entrypoint。下方六层动态上下文：同伴、自身责任、增量公共历史、运行事实、工作区与有序 RUN_INPUT；按 Profile 选择并记录 ContextManifest。"
+    "description": "Bootstrap 包含会话约定、身份、可选团队指引、平台 Skills 与记忆入口。公开动态输入包含条件名册、可选任务、运行事实、条件工作区、附加 Skills 与完整 RUN_INPUT；历史按需读取，Manifest 冻结最终输入。"
   },
   {
     "id": "09-session-context",
     "title": "长会话：稳定引导与持续的动态输入",
-    "description": "普通成员会话以 Bootstrap 和首次动态输入建立；后续 Run 获得新的动态上下文。支持的原生压缩信号触发后，在后续受控输入补送 Bootstrap，继续同一个 Native Session。"
+    "description": "普通成员会话以 Bootstrap 和首次动态输入建立；后续 Run 获得新的动态上下文。Runtime 支持压缩补发时，在后续受控输入补送 Bootstrap，继续同一个 Native Session。"
   },
   {
     "id": "10-memory-governance",

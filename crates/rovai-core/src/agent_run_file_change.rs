@@ -284,17 +284,18 @@ impl AgentRunFileChangeProjector {
         load_card(database, agent_run_id, execution_epoch)
     }
 
-    pub fn recover_terminal_runs(
+    pub(crate) fn terminal_recovery_candidates(
         &self,
-        database: &mut Database,
-        blob_store: &ManagedBlobStore,
-    ) -> Result<usize> {
+        database: &Database,
+        after_run_id: Option<&str>,
+    ) -> Result<Vec<(String, i64)>> {
         let candidates = {
             let mut statement = database.connection().prepare(
                 r#"
                 SELECT agent_run.id, agent_run.execution_epoch
                 FROM agent_run
                 WHERE agent_run.status IN ('succeeded', 'failed', 'cancelled')
+                  AND (?1 IS NULL OR agent_run.id > ?1)
                   AND (
                       NOT EXISTS (
                           SELECT 1 FROM agent_run_file_change_projection AS projection
@@ -318,15 +319,25 @@ impl AgentRunFileChangeProjector {
                       WHERE evidence.agent_run_id = agent_run.id
                         AND evidence.execution_epoch = agent_run.execution_epoch
                   )
-                ORDER BY agent_run.ended_at, agent_run.id
+                ORDER BY agent_run.id LIMIT 8
                 "#,
             )?;
             statement
-                .query_map([], |row| {
+                .query_map([after_run_id], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
+        Ok(candidates)
+    }
+
+    #[cfg(test)]
+    pub fn recover_terminal_runs(
+        &self,
+        database: &mut Database,
+        blob_store: &ManagedBlobStore,
+    ) -> Result<usize> {
+        let candidates = self.terminal_recovery_candidates(database, None)?;
         let mut recovered = 0_usize;
         for (agent_run_id, execution_epoch) in candidates {
             match self.project_terminal_run(database, blob_store, &agent_run_id, execution_epoch) {
@@ -1663,6 +1674,23 @@ mod tests {
     use serde_json::json;
     use uuid::Uuid;
 
+    const TEST_REPOSITORY: &str = if cfg!(windows) { "C:/repo" } else { "/repo" };
+    const OUTSIDE_PATH: &str = if cfg!(windows) {
+        "C:/tmp/rovai-outside/outside-alpha.txt"
+    } else {
+        "/tmp/rovai-outside/outside-alpha.txt"
+    };
+    const ALIASED_OUTSIDE_PATH: &str = if cfg!(windows) {
+        "C:/private/tmp/rovai-outside/outside-alpha.txt"
+    } else {
+        "/private/tmp/rovai-outside/outside-alpha.txt"
+    };
+    const SHARED_OUTSIDE_PATH: &str = if cfg!(windows) {
+        "C:/shared/outside.ts"
+    } else {
+        "/shared/outside.ts"
+    };
+
     fn evidence(sequence: i64, payload: Value) -> SequencedEvidence {
         SequencedEvidence {
             id: format!("evidence-{sequence}"),
@@ -1741,7 +1769,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 full(2, Some("B\n"), Some("C\n")),
@@ -1765,7 +1793,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-27T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[
                     full(1, Some("A\n"), Some("B\n")),
                     full(2, Some("B\n"), Some("A\n"))
@@ -1781,7 +1809,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 full(2, Some("X\n"), Some("C\n")),
@@ -1799,7 +1827,7 @@ mod tests {
 
     #[test]
     fn exact_mutations_remain_chronological_fragments_with_known_totals() {
-        let reported = aggregate_evidence("run-reported", 1, "2026-10-05T00:00:00Z", Path::new("/repo"), &[
+        let reported = aggregate_evidence("run-reported", 1, "2026-10-05T00:00:00Z", Path::new(TEST_REPOSITORY), &[
             evidence(1, json!({"runtimeDiff":{"status":"available","semanticKind":"reported_mutation","entries":[{
                 "semantics":"reported_mutation","path":"src/a.ts","fragments":[{"oldText":"A","newText":"B"},{"oldText":"second","newText":"changed"}]
             }]}})),
@@ -1821,7 +1849,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 evidence(1, json!({"runtimeDiff": {"status": "available", "semanticKind": "exact_mutation", "entries": [{"semantics": "exact_mutation", "path": "src/app.ts", "oldText": "A", "newText": "B"}]}})),
                 evidence(2, json!({"runtimeDiff": {"status": "available", "semanticKind": "exact_mutation", "entries": [{"semantics": "exact_mutation", "path": "src/app.ts", "oldText": "B", "newText": "C"}]}})),
@@ -1845,7 +1873,7 @@ mod tests {
             "run-qoder",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 evidence(
                     1,
@@ -1903,7 +1931,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/app.ts", "changeKind": "add"}}))],
         )
         .unwrap();
@@ -1921,7 +1949,7 @@ mod tests {
                 "run-read",
                 1,
                 "2026-09-06T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -1982,7 +2010,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-28T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -2110,7 +2138,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 evidence(
@@ -2140,7 +2168,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-28T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -2167,7 +2195,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 evidence(
@@ -2197,17 +2225,14 @@ mod tests {
     #[test]
     fn single_terminal_diff_uses_the_matching_file_operation_path_identity() {
         for (diff_path, operation_path) in [
-            (
-                "/private/tmp/rovai-outside/outside-alpha.txt",
-                "/tmp/rovai-outside/outside-alpha.txt",
-            ),
-            ("outside-alpha.txt", "/tmp/rovai-outside/outside-alpha.txt"),
+            (ALIASED_OUTSIDE_PATH, OUTSIDE_PATH),
+            ("outside-alpha.txt", OUTSIDE_PATH),
         ] {
             let projection = aggregate_evidence(
                 "run-1",
                 1,
                 "2026-08-28T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[evidence(
                     1,
                     json!({
@@ -2253,7 +2278,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[evidence(
                 1,
                 json!({
@@ -2277,7 +2302,7 @@ mod tests {
                     },
                     "runtimeFileOperation": {
                         "status": "available",
-                        "path": "/tmp/rovai-outside/outside-alpha.txt",
+                        "path": OUTSIDE_PATH,
                         "changeKind": "update"
                     }
                 }),
@@ -2294,7 +2319,7 @@ mod tests {
         assert_eq!(paths.len(), 3);
         assert!(paths.contains("src/a.ts"));
         assert!(paths.contains("src/b.ts"));
-        assert!(paths.contains("/tmp/rovai-outside/outside-alpha.txt"));
+        assert!(paths.contains(OUTSIDE_PATH));
     }
 
     #[test]
@@ -2303,7 +2328,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-27T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("A\n"), Some("B\n")),
                 evidence(2, json!({"runtimeRunDiff": {"status": "available", "diff": "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-A\n+C\n"}})),
@@ -2325,7 +2350,7 @@ mod tests {
                 "run-1",
                 1,
                 "2026-08-27T00:00:00Z",
-                Path::new("/repo"),
+                Path::new(TEST_REPOSITORY),
                 &[
                     full(1, Some("A\n"), Some("B\n")),
                     evidence(
@@ -2344,7 +2369,7 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 full(1, Some("inside-before\n"), Some("inside-after\n")),
                 evidence(
@@ -2372,7 +2397,7 @@ mod tests {
         .expect("cross-root terminal evidence should remain visible");
 
         assert_eq!(projection.details.card.file_count, 1);
-        assert_eq!(projection.details.files[0].path, "/shared/outside.ts");
+        assert_eq!(projection.details.files[0].path, SHARED_OUTSIDE_PATH);
         assert_eq!(
             projection.details.files[0].presentation_kind,
             "full_net_diff"
@@ -2381,7 +2406,7 @@ mod tests {
             projection.details.files[0].blocks[0]
                 .diff
                 .as_deref()
-                .is_some_and(|diff| diff.contains("--- /shared/outside.ts"))
+                .is_some_and(|diff| diff.contains(&format!("--- {SHARED_OUTSIDE_PATH}")))
         );
     }
 
@@ -2391,10 +2416,10 @@ mod tests {
             "run-1",
             1,
             "2026-08-28T00:00:00Z",
-            Path::new("/repo"),
+            Path::new(TEST_REPOSITORY),
             &[
                 evidence(1, json!({"runtimeFileOperation": {"status": "available", "path": "src/roundtrip.ts", "changeKind": "update"}})),
-                evidence(2, json!({"runtimeFileOperation": {"status": "available", "path": "/shared/outside.ts", "changeKind": "update"}})),
+                evidence(2, json!({"runtimeFileOperation": {"status": "available", "path": SHARED_OUTSIDE_PATH, "changeKind": "update"}})),
                 evidence(3, json!({"runtimeRunDiff": {"status": "available", "diff": "diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-A\n+B\n"}})),
             ],
         )
@@ -2407,7 +2432,7 @@ mod tests {
                 .iter()
                 .map(|file| file.path.as_str())
                 .collect::<Vec<_>>(),
-            vec!["src/app.ts", "/shared/outside.ts"]
+            vec!["src/app.ts", SHARED_OUTSIDE_PATH]
         );
         assert_eq!(projection.details.card.additions, None);
         assert_eq!(projection.details.card.operation_count, 2);
@@ -2807,6 +2832,83 @@ mod tests {
                 .unwrap()
                 .status,
             "no_changes"
+        );
+
+        // A full failed batch must not monopolize every bounded recovery pass.
+        for index in 0..9 {
+            let run = format!("recovery-run-{index:02}");
+            database.connection().execute(
+                r#"INSERT INTO agent_run(
+                    id, camp_turn_id, conversation_id, initial_camp_context_through_sequence,
+                    initial_conversation_context_through_sequence, responsibility_key,
+                    start_reason, purpose, completion_role, effective_config_json, workspace_json,
+                    status, idempotency_key, runtime_adapter_kind, execution_epoch, created_at, started_at, updated_at
+                ) SELECT ?1, camp_turn_id, conversation_id, 0, 0, ?1, start_reason, purpose,
+                    completion_role, effective_config_json, workspace_json, 'running', ?1,
+                    runtime_adapter_kind, execution_epoch, created_at, started_at, updated_at
+                  FROM agent_run WHERE id = 'file-change-run-0'"#, [&run],
+            ).unwrap();
+            ExecutionEvidenceService.record_runtime_event(&mut database, &blob_store, &run, 1, "runtime.action", &json!({
+                "eventId": run, "toolCallId": run, "status": "completed", "kind": "edit",
+                "runtimeFileOperation": { "adapterKind": "qoder-cli", "protocolFamily": "acp-v1",
+                    "sourceEventKind": "session/update.tool_call_update.completed", "operationKind": "write", "path": "recovered.txt" }
+            })).unwrap().unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE agent_run SET status='failed', ended_at=?2 WHERE id=?1",
+                    params![run, now],
+                )
+                .unwrap();
+            if index < 8 {
+                database
+                    .connection()
+                    .execute_batch("PRAGMA ignore_check_constraints=ON")
+                    .unwrap();
+                database.connection().execute(
+                    "UPDATE agent_run_execution_evidence SET operation_id=NULL, content_blob_id=NULL, payload_preview_json='{broken' WHERE agent_run_id=?1",
+                    [&run],
+                ).unwrap();
+                database
+                    .connection()
+                    .execute_batch("PRAGMA ignore_check_constraints=OFF")
+                    .unwrap();
+            }
+        }
+        let first_batch = AgentRunFileChangeProjector
+            .terminal_recovery_candidates(&database, None)
+            .unwrap();
+        assert_eq!(first_batch.len(), 8);
+        for (run, epoch) in &first_batch {
+            assert!(
+                AgentRunFileChangeProjector
+                    .project_terminal_run(&mut database, &blob_store, run, *epoch)
+                    .is_err()
+            );
+        }
+        let cursor = &first_batch.last().unwrap().0;
+        let next_batch = AgentRunFileChangeProjector
+            .terminal_recovery_candidates(&database, Some(cursor))
+            .unwrap();
+        assert_eq!(next_batch, vec![("recovery-run-08".into(), 1)]);
+        assert!(
+            AgentRunFileChangeProjector
+                .project_terminal_run(&mut database, &blob_store, &next_batch[0].0, 1)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            AgentRunFileChangeProjector
+                .terminal_recovery_candidates(&database, Some(&next_batch[0].0))
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            AgentRunFileChangeProjector
+                .terminal_recovery_candidates(&database, None)
+                .unwrap(),
+            first_batch,
+            "wrapping keeps failed records eligible for a later retry"
         );
 
         drop(database);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentRunExecutionEvidenceView } from '@contracts'
 import { groupExecutionEventsByRunId } from './execution-events'
-import { buildLiveExecutionProgress, liveRuntimeEventFromExecutionEvidence } from './ui-model'
+import { buildLiveExecutionProgress, liveRuntimeEventFromExecutionEvidence, liveRuntimeEventFromCore } from './ui-model'
 import { groupConsecutiveToolItems, toolActivityGroupPresentation } from './execution-tool-grouping'
 
 const narration = (revision: number, text: string, status = 'streaming'): AgentRunExecutionEvidenceView => ({
@@ -12,6 +12,44 @@ const narration = (revision: number, text: string, status = 'streaming'): AgentR
 })
 
 describe('restored and live execution progress', () => {
+  it('flattens scoped parent and child calls in first-recorded order across result updates and history', () => {
+    const tool = (id: string, sequence: number, name: string): AgentRunExecutionEvidenceView => ({
+      ...narration(1, ''), id, sequence, kind: 'tool_call', eventType: 'runtime.action', phase: 'started',
+      occurredAt: `2026-10-11T00:00:0${4 - sequence}Z`,
+      canonical: { operationId: id, classifierVersion: 'activity-v5', activityDomain: 'tool',
+        semanticKind: name === 'Agent' ? 'tool.agent' : 'tool.call', toolName: name, presentationHint: name,
+        phase: 'started', outcome: 'unknown', sourceAuthority: 'runtime', credibility: 'runtime_structured',
+        coverageLevel: 'fine_grained', sourceEvidenceIds: [id], firstEvidenceSequence: sequence,
+        lastEvidenceSequence: sequence, revision: 1 },
+      payload: { toolCallId: 'same-native-id', toolName: name, status: 'in_progress', input: '{"prompt":"Read fixture"}' }
+    })
+    const launch = tool('root-call', 1, 'Agent')
+    const child = tool('child-call', 2, 'Read')
+    const later = tool('later-root-call', 3, 'Bash')
+    const complete: AgentRunExecutionEvidenceView = { ...launch, revision: 2, changeSequence: 9, phase: 'completed',
+      canonical: { ...launch.canonical!, phase: 'terminal', outcome: 'succeeded', revision: 2 },
+      payload: { ...launch.payload as object, status: 'completed', output: 'CHILD_REPORT' } }
+    const live = liveRuntimeEventFromCore({ method: 'runtime.action', params: {
+      agentRunId: 'run', evidenceId: complete.id, sequence: complete.sequence, revision: complete.revision,
+      changeSequence: complete.changeSequence, occurredAt: complete.occurredAt, payload: complete.payload, canonical: complete.canonical
+    } }, 'notification', '2030-01-01T00:00:00Z')!
+    const events = groupExecutionEventsByRunId([{ id: 'run' }], [later, child, launch], [live]).get('run')!
+    expect(events.map(event => event.id)).toEqual(['root-call', 'child-call', 'later-root-call'])
+    const progress = buildLiveExecutionProgress(events, 'run')
+    const groups = groupConsecutiveToolItems(progress.items)
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ kind: 'toolGroup', items: [
+      { step: { id: 'root-call', status: 'completed', iconKind: 'agent', detail: '{"prompt":"Read fixture"}\nCHILD_REPORT' } },
+      { step: { id: 'child-call', status: 'running' } },
+      { step: { id: 'later-root-call', status: 'running' } }
+    ] })
+    const history = groupExecutionEventsByRunId([{ id: 'run' }], [complete, child, later], []).get('run')!
+    expect(buildLiveExecutionProgress(history, 'run').items).toEqual(progress.items)
+    const unsequenced = { ...live, id: 'legacy', sequence: null, canonical: null, createdAt: '2026-10-11T00:00:02Z' }
+    const mixed = groupExecutionEventsByRunId([{ id: 'run' }], [later, child, launch], [live, unsequenced]).get('run')!
+    expect(mixed.filter(event => event.id !== 'legacy').map(event => event.id)).toEqual(['root-call', 'child-call', 'later-root-call'])
+
+  })
   it('keeps Steer outside command folds while receipts and preceding commands finish in place', () => {
     const command = (id: string, phase: 'started' | 'completed'): AgentRunExecutionEvidenceView => ({
       ...narration(1, ''), id, eventType: `activity.${phase}`, kind: 'command', phase,

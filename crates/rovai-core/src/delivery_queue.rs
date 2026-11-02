@@ -339,6 +339,28 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
     prepared_workspaces: &BatchWorkspaces,
     active_executions: &[ActiveExecutionKey],
 ) -> Result<Vec<String>> {
+    let chat_isolation = std::env::var("ROVAI_CHAT_ISOLATION").ok();
+    claim_waiting_delivery_batches_with_workspaces_and_chat_isolation(
+        database,
+        limit,
+        prepared_workspaces,
+        active_executions,
+        chat_isolation.as_deref(),
+    )
+}
+
+/// Claim path with an explicit chat isolation request.
+///
+/// The deployment-level ROVAI_CHAT_ISOLATION value is read once by the public
+/// entry point; tests and continuations pass the frozen value directly so a
+/// restarted Host cannot silently drop the isolation a Run was admitted under.
+fn claim_waiting_delivery_batches_with_workspaces_and_chat_isolation(
+    database: &mut Database,
+    limit: i64,
+    prepared_workspaces: &BatchWorkspaces,
+    active_executions: &[ActiveExecutionKey],
+    chat_isolation: Option<&str>,
+) -> Result<Vec<String>> {
     if !(1..=100).contains(&limit) {
         anyhow::bail!("Delivery claim limit must be between 1 and 100");
     }
@@ -480,7 +502,7 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
                     continue;
                 }
             }
-            let workspace = match prepared_workspace {
+            let mut workspace = match prepared_workspace {
                 Some(Ok(prepared)) => Some(prepared.workspace.clone()),
                 _ => batch_workspace_for_claim(&transaction, &camp_id, &project_path)?,
             };
@@ -489,12 +511,12 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
             }
             let cleanup_execution_root = workspace
                 .as_ref()
-                .map(|workspace| workspace.execution_root.as_str())
-                .unwrap_or(project_path.as_str());
+                .map(|workspace| workspace.execution_root.clone())
+                .unwrap_or_else(|| project_path.clone());
             if runtime_cleanup_blocked_since_connection(
                 &transaction,
                 active_executions,
-                RuntimeCleanupScope::ExecutionRoot(cleanup_execution_root),
+                RuntimeCleanupScope::ExecutionRoot(cleanup_execution_root.as_str()),
             )?
             .is_some()
             {
@@ -562,6 +584,24 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
             };
             let effective_config =
                 build_effective_config(&transaction, &conversation_id, &agent_id, &runtime)?;
+            // A non-Mission chat lane freezes its Windows account isolation at claim
+            // time. Continuations inherit the source Run's frozen value instead of the
+            // current deployment environment, so a restarted Host cannot widen a
+            // conversation back to the shared account.
+            if !mission_exists {
+                let isolation = match waiting[0].continuation_source_run_id.as_deref() {
+                    Some(source_id) => transaction.query_row(
+                        "SELECT json_extract(workspace_json, '$.isolation') FROM agent_run WHERE id = ?1",
+                        [source_id],
+                        |row| row.get::<_, Option<String>>(0),
+                    )?,
+                    None => chat_isolation.map(str::to_owned),
+                };
+                if let Some(workspace) = workspace.as_mut() {
+                    workspace
+                        .apply_chat_isolation(runtime.adapter_kind.as_str(), isolation.as_deref());
+                }
+            }
             if mission_exists && prepared_workspace.is_none() {
                 continue;
             }
@@ -605,7 +645,7 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
                 trigger_message_delivery_id: "",
                 effective_config: effective_config.clone(),
                 workspace: serde_json::to_value(workspace.as_ref().cloned().unwrap_or_else(
-                    || AgentRunWorkspace::runtime_managed_path(cleanup_execution_root.to_string()),
+                    || AgentRunWorkspace::runtime_managed_path(cleanup_execution_root.clone()),
                 ))?,
                 charter_delivery_mode: charter_delivery_mode_for_adapter(runtime.adapter_kind),
                 max_payload_bytes,
@@ -632,7 +672,7 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
                     previous_public_boundary,
                     camp_public_tail,
                     &runtime,
-                    std::path::Path::new(cleanup_execution_root),
+                    std::path::Path::new(&cleanup_execution_root),
                     &waiting,
                     &preview,
                     prepared_workspace
@@ -2847,6 +2887,155 @@ mod tests {
     }
 
     #[test]
+    fn chat_isolation_is_preserved_across_non_mission_continuation() {
+        use crate::run_continuation::{ContinueAgentRunCommand, continue_agent_run};
+
+        let mut fixture = Fixture::new();
+        fixture.enqueue("isolated-message", "隔离开关应在 claim 时冻结");
+
+        let source_runs = claim_waiting_delivery_batches_with_workspaces_and_chat_isolation(
+            &mut fixture.database,
+            100,
+            &Default::default(),
+            &[],
+            Some("windows_account"),
+        )
+        .unwrap();
+        assert_eq!(source_runs.len(), 1);
+        let source_run = source_runs[0].clone();
+        let (adapter_kind, source_conversation, workspace_json): (String, String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT runtime_adapter_kind, conversation_id, workspace_json FROM agent_run WHERE id = ?1",
+                [&source_run],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(adapter_kind, "codex-cli");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&workspace_json).unwrap()["isolation"],
+            "windows_account"
+        );
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET status = 'failed', ended_at = datetime('now') WHERE id = ?1",
+                [&source_run],
+            )
+            .unwrap();
+        let continuation = continue_agent_run(
+            &mut fixture.database,
+            &CommandEnvelope {
+                command_id: "continue-isolated-message".into(),
+                actor: ActorRef::User {
+                    user_id: "local_user".into(),
+                },
+                camp_id: Some(fixture.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: ContinueAgentRunCommand {
+                    camp_id: fixture.camp_id.clone(),
+                    agent_run_id: source_run,
+                    use_new_session: false,
+                },
+            },
+        )
+        .unwrap();
+        assert_eq!(continuation.result.code, "agent_run.continuation_requested");
+
+        // A restarted host may not carry the original deployment environment; the
+        // continuation must keep the isolation frozen on its source Run.
+        let continued_runs = claim_waiting_delivery_batches_with_workspaces_and_chat_isolation(
+            &mut fixture.database,
+            100,
+            &Default::default(),
+            &[],
+            None,
+        )
+        .unwrap();
+        assert_eq!(continued_runs.len(), 1);
+        let (continued_conversation, continued_invocation, continued_workspace_json): (
+            String,
+            String,
+            String,
+        ) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT conversation_id, invocation_kind, workspace_json FROM agent_run WHERE id = ?1",
+                [&continued_runs[0]],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(continued_conversation, source_conversation);
+        assert_eq!(continued_invocation, "batch");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&continued_workspace_json).unwrap()["isolation"],
+            "windows_account"
+        );
+    }
+
+    #[test]
+    fn chat_isolation_request_can_explicitly_stay_shared() {
+        let mut fixture = Fixture::new();
+        fixture.enqueue("shared-message", "共享会话不应被隔离");
+
+        let runs = claim_waiting_delivery_batches_with_workspaces_and_chat_isolation(
+            &mut fixture.database,
+            100,
+            &Default::default(),
+            &[],
+            Some("shared"),
+        )
+        .unwrap();
+        assert_eq!(runs.len(), 1);
+        let workspace_json: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT workspace_json FROM agent_run WHERE id = ?1",
+                [&runs[0]],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&workspace_json).unwrap()["isolation"],
+            "shared"
+        );
+    }
+
+    #[test]
+    fn chat_isolation_freezes_only_the_four_windows_adapters() {
+        for adapter in [
+            "claude-code-cli",
+            "codex-cli",
+            "codebuddy-cli",
+            "opencode-cli",
+        ] {
+            let mut workspace = AgentRunWorkspace::runtime_managed_path("/workspace".to_string());
+            workspace.apply_chat_isolation(adapter, Some("windows_account"));
+            assert_eq!(
+                workspace.isolation, "windows_account",
+                "{adapter} should isolate"
+            );
+            // A later claim without a deployment request must not widen a frozen Run.
+            workspace.apply_chat_isolation(adapter, None);
+            assert_eq!(
+                workspace.isolation, "windows_account",
+                "{adapter} should stay frozen"
+            );
+        }
+        for adapter in ["pi", "hermes-cli", ""] {
+            let mut workspace = AgentRunWorkspace::runtime_managed_path("/workspace".to_string());
+            workspace.apply_chat_isolation(adapter, Some("windows_account"));
+            assert_eq!(workspace.isolation, "shared", "{adapter} must stay shared");
+        }
+    }
+
+    #[test]
     fn waiting_deliveries_create_no_run_until_fifo_batch_claim() {
         let mut fixture = Fixture::new();
         let first_delivery_id = fixture.enqueue("message-1", "第一条");
@@ -3913,7 +4102,12 @@ mod tests {
             ("minimax-code-cli", Some("0.6.12"), "acp-v1", None),
             ("hermes-cli", Some("0.22.4"), "acp-v1", None),
             ("hermes-cli", Some("0.23.0"), "acp-v1", None),
-            ("hermes-cli", Some("1.0.0"), "acp-v1", None),
+            (
+                "hermes-cli",
+                Some("1.0.0"),
+                "acp-v1",
+                Some(R::VersionUnverified),
+            ),
             (
                 "hermes-cli",
                 Some("0.22.3"),
@@ -5338,9 +5532,11 @@ mod tests {
             let context = ready.materialize_run(&ready_run);
             assert!(context.rendered_payload.contains("actual-user-branch"));
             assert!(
-                context
-                    .rendered_payload
-                    .contains(ready_worktree.to_str().unwrap())
+                context.rendered_payload.contains(
+                    serde_json::to_string(ready_worktree.to_str().unwrap())
+                        .unwrap()
+                        .trim_matches('"')
+                )
             );
             assert!(!context.rendered_payload.contains("rovai/mission/001"));
         }

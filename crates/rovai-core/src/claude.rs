@@ -40,7 +40,7 @@ use tokio::{
 use crate::{
     builtin_tool_runtime::BuiltinToolProcessConfig,
     claude_control::{self, ClaudeControl, ControlReadGuard},
-    runtime_mcp::{remove_stale_mcp_configs, write_ephemeral_additive_mcp_config},
+    runtime_mcp::write_ephemeral_additive_mcp_config,
 };
 
 const MAX_CAPTURE_BYTES: usize = 2 * 1024 * 1024;
@@ -104,49 +104,6 @@ impl Drop for ClaudeLaunchFile {
             && let Err(error) = std::fs::remove_file(&self.0)
         {
             eprintln!("Claude Code pre-spawn launch file cleanup failed: {error}");
-        }
-    }
-}
-
-fn remove_stale_claude_inputs(private_runtime_dir: &Path) {
-    let directory = private_runtime_dir.join("claude-inputs");
-    if !directory.exists() {
-        return;
-    }
-    let directory =
-        match rovai_core::platform::private_storage::prepare_private_directory(&directory) {
-            Ok(directory) => directory,
-            Err(error) => {
-                eprintln!("Claude Code stale input directory could not be inspected: {error:#}");
-                return;
-            }
-        };
-    let entries = match std::fs::read_dir(&directory) {
-        Ok(entries) => entries,
-        Err(error) => {
-            eprintln!("Claude Code stale inputs could not be listed: {error}");
-            return;
-        }
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                eprintln!("Claude Code stale input entry could not be read: {error}");
-                continue;
-            }
-        };
-        let name = entry.file_name();
-        let Some(stem) = name.to_str().and_then(|name| name.strip_suffix(".txt")) else {
-            continue;
-        };
-        if uuid::Uuid::parse_str(stem).is_err()
-            || !entry.file_type().is_ok_and(|kind| kind.is_file())
-        {
-            continue;
-        }
-        if let Err(error) = std::fs::remove_file(entry.path()) {
-            eprintln!("Claude Code stale input {name:?} could not be removed: {error}");
         }
     }
 }
@@ -374,8 +331,6 @@ impl ClaudeCodeCliRuntimeAdapter {
             )
         })?;
         restrict_directory_permissions(private_runtime_dir)?;
-        remove_stale_mcp_configs(private_runtime_dir)?;
-        remove_stale_claude_inputs(private_runtime_dir);
         Ok(())
     }
 
@@ -2045,6 +2000,9 @@ fn normalize_claude_runtime_events(
             let block_type = block.get("type").and_then(Value::as_str);
             if block_type == Some("text") {
                 validate_claude_stream_session(event, expected_session_id)?;
+                if !root {
+                    return Ok(normalized);
+                }
                 if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
                     state.stream_text_item(index);
                 }
@@ -2150,6 +2108,9 @@ fn normalize_claude_runtime_events(
                 return Ok(normalized);
             };
             validate_claude_stream_session(event, expected_session_id)?;
+            if !root {
+                return Ok(normalized);
+            }
             let index = event
                 .pointer("/event/index")
                 .and_then(Value::as_u64)
@@ -2184,39 +2145,42 @@ fn normalize_claude_runtime_events(
                 return Ok(normalized);
             };
             validate_claude_stream_session(event, expected_session_id)?;
-            let packet_replay = nonempty_string(event.get("uuid"))
-                .is_some_and(|id| state.completed_text_packets.contains_key(&id));
-            if !packet_replay && let Some(id) = event.pointer("/message/id").and_then(Value::as_str)
-            {
-                if state
-                    .native_message_id
-                    .as_deref()
-                    .is_some_and(|previous| previous != id)
+            if root {
+                let packet_replay = nonempty_string(event.get("uuid"))
+                    .is_some_and(|id| state.completed_text_packets.contains_key(&id));
+                if !packet_replay
+                    && let Some(id) = event.pointer("/message/id").and_then(Value::as_str)
                 {
+                    if state
+                        .native_message_id
+                        .as_deref()
+                        .is_some_and(|previous| previous != id)
+                    {
+                        state.reset_text_items();
+                    }
+                    state.native_message_id = Some(id.to_owned());
+                } else if !packet_replay && state.message_text_completed {
+                    state.message_ordinal = state.message_ordinal.saturating_add(1);
+                    state.native_message_id = None;
                     state.reset_text_items();
                 }
-                state.native_message_id = Some(id.to_owned());
-            } else if !packet_replay && state.message_text_completed {
-                state.message_ordinal = state.message_ordinal.saturating_add(1);
-                state.native_message_id = None;
-                state.reset_text_items();
-            }
-            let mut text_items = state.completed_text_items(event, blocks).into_iter();
-            for block in blocks {
-                if block.get("type").and_then(Value::as_str) == Some("text")
-                    && let Some(text) = block.get("text").and_then(Value::as_str)
-                {
-                    state.text_delta_emitted = true;
-                    if !packet_replay {
-                        state.message_text_completed = true;
-                    }
-                    normalized.push(ClaudeCodeRuntimeEvent {
+                let mut text_items = state.completed_text_items(event, blocks).into_iter();
+                for block in blocks {
+                    if block.get("type").and_then(Value::as_str) == Some("text")
+                        && let Some(text) = block.get("text").and_then(Value::as_str)
+                    {
+                        state.text_delta_emitted = true;
+                        if !packet_replay {
+                            state.message_text_completed = true;
+                        }
+                        normalized.push(ClaudeCodeRuntimeEvent {
                         event_type: "agent.text.completed",
                         payload: serde_json::json!({
                             "itemId": text_items.next().context("Claude text packet changed its public block shape")?,
                             "text": text,
                         }),
                     });
+                    }
                 }
             }
             let tool_blocks = blocks
@@ -2363,8 +2327,12 @@ fn normalize_claude_runtime_events(
         }
         _ => {}
     }
-    if !root {
-        for item in &mut normalized {
+    for item in &mut normalized {
+        crate::runtime_subagent::mark_agent_tool(
+            crate::agent_profile::AdapterKind::ClaudeCodeCli,
+            &mut item.payload,
+        );
+        if !root {
             item.payload["runtimeRootOutput"] = serde_json::json!(false);
         }
     }
@@ -2413,6 +2381,15 @@ fn claude_tool_started(
 }
 
 fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Value> {
+    if crate::runtime_subagent::is_agent_tool(
+        crate::agent_profile::AdapterKind::ClaudeCodeCli,
+        tool_name,
+    ) {
+        return input
+            .filter(|input| !input.is_null())
+            .and_then(|input| serde_json::to_string_pretty(input).ok())
+            .map(Value::String);
+    }
     if !tool_name.eq_ignore_ascii_case("bash") {
         return None;
     }
@@ -4247,6 +4224,63 @@ mod tests {
         let emit = |state: &mut ClaudeCodeStreamState, event: Value| {
             normalize_claude_runtime_events(&event, session_id, state).unwrap()
         };
+        // Child packets cannot enter narration or consume the root's text IDs.
+        let mut state = ClaudeCodeStreamState::default();
+        emit(
+            &mut state,
+            json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"message_start","message":{"id":"root-message"}}}),
+        );
+        emit(
+            &mut state,
+            json!({"type":"stream_event","session_id":session_id,
+            "event":{"type":"content_block_start","index":1,"content_block":{"type":"text"}}}),
+        );
+        for event in [
+            json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"child-message"}}}),
+            json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}),
+            json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"child progress"}}}),
+            json!({"type":"assistant","uuid":"child-text-packet","message":{"id":"child-message","content":[{"type":"text","text":"child report"}]}}),
+        ] {
+            let mut event = event;
+            event["session_id"] = json!(session_id);
+            event["parent_tool_use_id"] = json!("parent-agent-call");
+            assert!(emit(&mut state, event).is_empty());
+        }
+        assert!(
+            !state.text_delta_emitted,
+            "child prose must not suppress the root final fallback"
+        );
+        let tools = emit(
+            &mut state,
+            json!({"type":"assistant","session_id":session_id,
+            "parent_tool_use_id":"parent-agent-call","message":{"id":"child-message","content":[
+                {"type":"text","text":"child tool progress"},
+                {"type":"tool_use","id":"child-bash","name":"Bash","input":{"command":"pwd"}}]}}),
+        );
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].event_type, "runtime.action");
+        assert_eq!(tools[0].payload["runtimeRootOutput"], false);
+        let results = emit(
+            &mut state,
+            json!({"type":"user","session_id":session_id,
+            "parent_tool_use_id":"parent-agent-call","message":{"content":[
+                {"type":"tool_result","tool_use_id":"child-bash","is_error":false,"content":"/fixture"}]}}),
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].payload["output"], "/fixture");
+        let root = emit(
+            &mut state,
+            json!({"type":"assistant","session_id":session_id,
+            "message":{"id":"root-message","content":[{"type":"text","text":"root reply"}]}}),
+        );
+        assert_eq!(root.len(), 1);
+        assert_eq!(
+            root[0].payload["itemId"],
+            "claude-text-native:root-message:1"
+        );
+        assert_eq!(root[0].payload["text"], "root reply");
+
         for batched_completion in [false, true] {
             let mut state = ClaudeCodeStreamState::default();
             emit(

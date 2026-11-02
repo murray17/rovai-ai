@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-10-29
+last_updated: 2026-10-30
 ---
 
 # App Shell 与统一侧栏
@@ -35,15 +35,15 @@ last_updated: 2026-10-29
 
 普通侧栏依次显示置顶内容和 Project。每个 Project 行负责展开/折叠，不显示独立折叠图标；
 右侧保留沿用 New Chat 的笔记本与笔图标及三点菜单；两者默认隐藏，悬浮、键盘可见焦点或菜单打开时显示，
-当前 Project 也遵循此规则。Projects 分区的添加目录 `＋` 保留。标题与“查看更多 / 收起”不显示 Camp 数量。当前 Project
-使用中性文字与既有选择底色。选中 Camp 保留 `--surface-selected`，移除左侧竖线；侧栏 `--rail` 底色不变。
+当前 Project 也遵循此规则。Projects 分区的添加目录 `＋` 保留。标题与“查看更多 / 收起”不显示 Thread 数量。当前 Project
+使用中性文字与既有选择底色。选中 Thread 保留 `--surface-selected`，移除左侧竖线；侧栏 `--rail` 底色不变。
 未读提示点使用 `--conversation-unread`，表达未查看回复或用户显式保留的未读提醒。
 Hover 不能是发现行操作的唯一方式。
 
 Sidecar Project 行在升级后保持稳定位置。合法旧偏好第一次进入时按用户当时看到的 Project 顺序冻结；
 之后现有 Project 保持原相对顺序，新发现或重新恢复的 Project 追加到末尾，只有用户主动从本机移除的
 Project 才清理。老 Project 收到新消息、开始或结束 Run、更新活动时间或未读状态时都不能移动行。
-这些活动继续刷新状态反馈；只有已发布的用户消息推进该 Project 内 Camp 的排序与活动时间。刚选择且尚无 Camp 的空 Project
+这些活动继续刷新状态反馈；只有已发布的用户消息推进该 Project 内 Thread 的排序与活动时间。刚选择且尚无 Thread 的空 Project
 同样追加到现有 Project 末尾。
 
 添加目录立即保存到客户端导航偏好；多个空目录在切换和重启后均保留，删除最后一条会话不移除目录。
@@ -52,34 +52,34 @@ Project 才清理。老 Project 收到新消息、开始或结束 Run、更新�
 新建对话／使命沿用现有表单错误提示并保留原选择。用户再次添加即可重新尝试。
 没有项目专属错误横幅、重试操作或临时目录恢复状态；旧项目补齐失败保留原分组，不阻止原本可用的会话操作。
 
-Camp（包括快速对话）按最近一条已发布用户消息排序，桌面用户与飞书、钉钉等渠道的用户同等计入。
-队员公开消息、A2A 消息、工具输出和 Run 状态变化不改变 Camp 的排序时间；运行中与完成未读提示仍正常更新。
-没有用户消息的 Camp 使用创建时间作为稳定初始位置，未发送草稿的编辑或附件准备不推进排序。
+Thread（包括快速对话）按最近一条已发布用户消息排序，桌面用户与飞书、钉钉等渠道的用户同等计入。
+队员公开消息、A2A 消息、工具输出和 Run 状态变化不改变 Thread 的排序时间；运行中与完成未读提示仍正常更新。
+没有用户消息的 Thread 使用创建时间作为稳定初始位置，未发送草稿的编辑或附件准备不推进排序。
 置顶项和已保存的 Project 顺序继续由本机偏好拥有。
 
-Camp 行显示稳定标题和必要状态。右键、三点按钮、Shift+F10 / ContextMenu 键及触屏长按打开同一份菜单，
-提供置顶/取消置顶、标记未读/已读、重命名、复制会话 ID 和删除；复制只写稳定 Camp ID 原文。
+Thread 行显示稳定标题和必要状态。右键、三点按钮、Shift+F10 / ContextMenu 键及触屏长按打开同一份菜单，
+提供置顶/取消置顶、标记未读/已读、重命名、复制会话 ID 和删除；复制只写稳定 Thread ID 原文。
 复制会话 ID、复制项目路径、重命名项目和从侧栏移除项目成功后不显示 Toast，也不增加替代提示；
 失败继续使用原有错误反馈。
-右键不打开 Camp 或折叠 Project。鼠标菜单靠点击位置，三点和键盘菜单靠行末入口，均限制在窗口内；
-Escape、点击外部、滚动或窗口失焦关闭。Escape 关闭时，在菜单释放焦点约束后恢复原 Project/Camp 行的 DOM focus，
-以便继续键盘操作；点击外部、选择命令、滚动或失焦关闭不执行该恢复。Camp 顶栏不得重复这些操作。
+右键不打开 Thread 或折叠 Project。鼠标菜单靠点击位置，三点和键盘菜单靠行末入口，均限制在窗口内；
+Escape、点击外部、滚动或窗口失焦关闭。Escape 关闭时，在菜单释放焦点约束后恢复原 Project/Thread 行的 DOM focus，
+以便继续键盘操作；点击外部、选择命令、滚动或失焦关闭不执行该恢复。Thread 顶栏不得重复这些操作。
 Project 菜单提供 New Chat、置顶、重命名、Reveal in Finder（Windows 使用文件管理器文案）、复制项目路径、移除项目。
 Finder 定位真实目录，由 Desktop Main 校验存在后调用原生系统；目录失效提示重新选择。远程 Web 不提供原生定位项。
-Desktop 与宽屏 WebUI 的置顶 Camp 在标题左侧显示 17px 对话图标；置顶项目标题、置顶项目内 Camp、
-普通项目内 Camp 与独立置顶 Camp 共用文字轴。Project 子 Camp 只用层级缩进，不渲染空图标或左侧状态占位。
-桌面精细指针下，Camp 行右侧按实际状态分配空间：无状态时仅保留 8px 尾部内边距，单一状态保留 32px，
+Desktop 与宽屏 WebUI 的置顶 Thread 在标题左侧显示 17px 对话图标；置顶项目标题、置顶项目内 Thread、
+普通项目内 Thread 与独立置顶 Thread 共用文字轴。Project 子 Thread 只用层级缩进，不渲染空图标或左侧状态占位。
+桌面精细指针下，Thread 行右侧按实际状态分配空间：无状态时仅保留 8px 尾部内边距，单一状态保留 32px，
 未读与运行／打开并存时保留 44px。默认靠最右侧展示未读蓝点与灰色运行环，二者同时成立时并列显示，
 每个状态槽 12×12px，蓝点 7px，槽间距 6px。运行环使用中性 `--conversation-route-accent`。
 悬浮、键盘可见焦点或菜单打开时隐藏整个状态簇，并在最右侧展示三点按钮；离开后恢复，不改变状态事实。
-选中 Camp 不常驻三点入口。无状态行在悬浮、键盘可见焦点或菜单打开时将尾部空间从 8px 扩至 32px，
+选中 Thread 不常驻三点入口。无状态行在悬浮、键盘可见焦点或菜单打开时将尾部空间从 8px 扩至 32px，
 让出三点按钮位置；其他状态行保留对应空间。标题左侧基线不移动。Project 行在按钮隐藏时让名称使用整行，
 仅在同样的交互状态下恢复菜单和新建按钮的位置。
 无 Hover 的触屏使用独立操作位置，MobileUI 继续使用同一状态 DOM、长按与键盘入口，蓝点为 6px，并沿用 20px
 列表会话图标、44px 会话行与 48px Project 行；手机入口由统一左侧抽屉承载，不再显示底栏。
 会话图标统一采用 24×24 画布、1.7 描边的横向圆角气泡与短尾，单线条、无填充、无阴影；其他导航图标不变。
 
-显式标记未读属于本机提醒，当前打开的 Camp 也可以保留；聚焦、悬浮、背景刷新和 Run 结束不清除。
+显式标记未读属于本机提醒，当前打开的 Thread 也可以保留；聚焦、悬浮、背景刷新和 Run 结束不清除。
 显式成功打开完整会话或选择“标记已读”才清除提醒；打开失败或只显示缓存预览必须保留。
 标记已读覆盖操作时已知的新回复，并通过通知模块确认点击边界内的有效中断；之后到达的回复或中断仍产生蓝点。
 本机保存成功后才提交 Core 确认；Core 重试不重复清除本机提醒，不扩大观察范围。不得倒退或伪造真实查看水位。
@@ -92,26 +92,26 @@ Desktop 与宽屏 WebUI 的置顶 Camp 在标题左侧显示 17px 对话图标�
 蓝点合并回复、本机提醒与执行中断提醒三个来源；可访问名称分别描述真实组成，中断用“有未查看的执行中断”。
 精确范围与并发规则见 [Current User Attention v10](../../contracts/current-user-attention-v10.md)。
 
-自动生成的 Camp 标题不把开头连续的真实队员 Mention / 所有队员 Mention 当作标题内容；只保留
-首段正文开始后的文字，正文中后部的 Mention 和手写 `@文字` 继续作为普通标题文字。Camp 行不把
+自动生成的 Thread 标题不把开头连续的真实队员 Mention / 所有队员 Mention 当作标题内容；只保留
+首段正文开始后的文字，正文中后部的 Mention 和手写 `@文字` 继续作为普通标题文字。Thread 行不把
 任何 `@文字` 渲染为身份 Token、人物卡入口或独立点击目标，整行仍只负责打开会话。
 
-渠道 Camp 复用同一自动命名，来源只按 Core 的 `channelSource` 添加 `【飞书私聊】`、`【飞书群聊】`、
+渠道 Thread 复用同一自动命名，来源只按 Core 的 `channelSource` 添加 `【飞书私聊】`、`【飞书群聊】`、
 `【飞书话题】`、`【Lark私聊】`、`【Lark群聊】`、`【Lark话题】`、`【钉钉私聊】` 或 `【钉钉群聊】` 前缀。侧栏/置顶、搜索、最近会话、顶部标题和临时提醒
-统一展示，搜索也可匹配渠道类型。重命名输入框只呈现并提交原始 `camp.title`，前缀不会被写入名称；
-旧 Camp 不批量改名，`/new` 后关闭的旧绑定仍保留来源。字段与命名事务见
+统一展示，搜索也可匹配渠道类型。重命名输入框只呈现并提交原始 `thread.title`，前缀不会被写入名称；
+旧 Thread 不批量改名，`/new` 后关闭的旧绑定仍保留来源。字段与命名事务见
 [Channel Camp Naming v1](../../contracts/channel-camp-naming-v1.md)。既有长标题截断和完整可访问名称保持不变。
 
 删除对话确认只显示标题“删除对话？”，说明保存的附件会一并删除、原始工作区文件和外部引用文件不受影响，并提供
-“取消 / 删除”按钮；提交时短暂显示“正在删除…”。Core 返回 `accepted` 后立即关闭 Dialog、离开当前 Camp 并从全部正常导航分组移除；本窗口派生
+“取消 / 删除”按钮；提交时短暂显示“正在删除…”。Core 返回 `accepted` 后立即关闭 Dialog、离开当前 Thread 并从全部正常导航分组移除；本窗口派生
 tombstone 必须过滤受理前已经发出的迟到 Navigation snapshot，导航刷新或预览释放失败不能恢复该行或推翻受理。
 正常完成不显示阶段、进度、“永久删除完成”或任务区。
 
 后台自动恢复耗尽且确实需要用户介入时，只使用现有局部持久通知“删除未完成，请重试。”和一个“重试”动作；
-重试继续原 operation，Camp 不重新进入列表。同一 `operationId + attentionRevision` 在一个窗口会话只提醒一次，重启后
+重试继续原 operation，Thread 不重新进入列表。同一 `operationId + attentionRevision` 在一个窗口会话只提醒一次，重启后
 未解决事项仍可再次提醒。不使用全局大红条，不向 Renderer 暴露 Runtime stop、数据库删除或资源 cleanup 阶段。
 
-Project 三点菜单依次提供“置顶项目 / 取消置顶项目”“重命名”“移除项目”；刚选择且尚无 Camp 的目录也可重命名。
+Project 三点菜单依次提供“置顶项目 / 取消置顶项目”“重命名”“移除项目”；刚选择且尚无 Thread 的目录也可重命名。
 “重命名项目”沿用通用单字段 Dialog：项目名称、只读工作目录、“取消 / 保存名称”。打开时聚焦并全选原名称；
 名称规范化后非空且最多 80 个 Unicode scalar，同名允许。已有自定义名称时提供“使用目录名”，填回目录名后仍需保存。
 恢复操作清除本机别名，保留原目录名的连续空格和长度，不受自定义名称的 80 字符限制；继续编辑输入则重新按自定义名称校验。
@@ -124,34 +124,34 @@ Project 三点菜单依次提供“置顶项目 / 取消置顶项目”“重命
 Project 的“移除项目”菜单使用红字，确认标题为“从侧栏移除‘项目名’？”，正文为
 “文件、会话记录和正在进行的执行都会保留。重新选择同一目录即可恢复显示。”；
 按钮为“取消 / 移除”，确认按钮使用淡红底红字，提交时显示“正在移除…”。
-该操作只从此设备的导航移除并取消相关置顶，不删除工作目录、Camp 或历史。
-重新选择相同目录可恢复。Core 的访问 ledger 与运行中清理边界由架构/ADR 决定，Renderer 不用
+该操作只从此设备的导航移除并取消相关置顶，不删除工作目录、Thread 或历史。
+重新选择相同目录可恢复。Core 的访问 ledger 与运行中清理边界由当前 Architecture/Contract 决定，Renderer 不用
 隐藏行状态推断目录已经删除。
 
 ## 前进与后退
 
 每个 Desktop 窗口在稳定 App 容器内维护一份内存历史，聊天、设置、记忆、队员与定时任务共享。
 现有文件预览 Tabs 不是独立应用页签，不为它们建立全局导航栈，也不新增多页签系统。
-`NavigationTarget` 只包含页面种类、Camp/队员/记忆 ID、设置栏目及必要筛选参数，不包含正文、组件或页面快照。
+`NavigationTarget` 只包含页面种类、Thread/队员/记忆 ID、设置栏目及必要筛选参数，不包含正文、组件或页面快照。
 当前生产页面由 App 状态渲染；唯一协调器执行 `push / replace / back / forward`，不监听路由反推另一份历史，
 不调用 Chromium 的前进后退。
 
-- 当前实际有效的启动页面是唯一初始记录；恢复上次 Camp 也只恢复这一个起点。
+- 当前实际有效的启动页面是唯一初始记录；恢复上次 Thread 也只恢复这一个起点。
 - 每栈最多 50 条，包含当前页。push 先截断前进分支，再追加；超限删除最早端并同步调整游标。
 - 只忽略当前目的地的重复跳转，A → B → A 保留三个步骤。
-- 会话切换、新建后真正进入空白 Camp、一级页面、设置独立栏目、记忆详情选择和搜索/通知/应用内链接打开另一资源使用 push。
-- 默认选择、删除后的有效页回退、同一会话临时标识正式化使用 replace。当前 Pending Camp 在激活前后沿用相同 Core ID，发送不追加记录。
+- 会话切换、新建后真正进入空白 Thread、一级页面、设置独立栏目、记忆详情选择和搜索/通知/应用内链接打开另一资源使用 push。
+- 默认选择、删除后的有效页回退、同一会话临时标识正式化使用 replace。当前 Pending Thread 在激活前后沿用相同 Core ID，发送不追加记录。
 - 记忆筛选、搜索、排序等原地操作使用 replace；消息收发、配置修改、内容保存、滚动、菜单、详情浮层不追加记录。
 - back/forward 只移动游标，首尾无操作。后退只改变显示位置，不撤销业务数据。
-- Camp 草稿与附件、队员 Runtime 草稿、Automation 自动保存继续使用已有离开保护；拒绝或失败时保留原页面与游标。
+- Thread 草稿与附件、队员 Runtime 草稿、Automation 自动保存继续使用已有离开保护；拒绝或失败时保留原页面与游标。
   连续请求以最新目标为准，快速后退按每次输入计算；旧读取完成不能把页面切回去，不加固定时间防抖。
-  同一 Camp 的重叠离开准备共享保存与交互锁，最后一个使用者才完成释放；取代旧请求后不等待旧读取结束才解锁。
+  同一 Thread 的重叠离开准备共享保存与交互锁，最后一个使用者才完成释放；取代旧请求后不等待旧读取结束才解锁。
   从未实际展示的过期目标不写入历史，重新选择当前页取消尚未完成的离开并保留前进分支。
   待完成的 push 不拥有已提交历史数组；加载期间前后退沿已展示条目移动，连续游标操作继续累计。
 - 页面默认选择、筛选和搜索更新只修正其所属的已展示记录，不取消较新的用户跳转；离开、重访或记录更新后，旧页面回调失效。
   待完成跳转提交时保留等待期间已经生效的页面修正。资源清理后的自动回退同样只修正当前显示，不能取消正在打开的新页面；旧预览的迟到内容不能恢复已清理资源。
-- 一键新建在创建请求开始时保留导航意图；较新的用户导航使旧意图失效。迟到的创建结果只刷新导航列表，不自动进入新 Camp；
-  迟到失败不重新打开创建弹窗。已创建 Camp 保留 Core 生命周期，空白 Pending Camp 仍不因刷新而变成可见列表项。
+- 一键新建在创建请求开始时保留导航意图；较新的用户导航使旧意图失效。迟到的创建结果只刷新导航列表，不自动进入新 Thread；
+  迟到失败不重新打开创建弹窗。已创建 Thread 保留 Core 生命周期，空白 Pending Thread 仍不因刷新而变成可见列表项。
 - 队员历史回放统一退出新增队员和个人资料的显示模式，显示记录指定的队员与栏目；切换显示不丢弃新队员草稿。
 
 普通展开侧栏的窗口左上角依次为侧栏按钮、后退、前进。macOS 沿用红黄绿位置和侧栏按钮
@@ -169,7 +169,6 @@ Desktop 导航快捷键由[快捷键设置](shortcut-settings.md)统一分发，
 历史不写文件、数据库、localStorage 或 sessionStorage，不引入 schema/存储迁移。
 最小化、托盘隐藏、原窗口内普通数据刷新不清空；前端重载、窗口销毁或新的 App 会话重新初始化。
 现有布局和启动位置保存机制独立保留，不把它们扩展成历史恢复。
-未来 WebUI 复用业务入口但连接浏览器历史，本次不实现 WebUI。
 
 回归：`desktop-navigation.test.ts` 验证内存状态与异步提交；`window-navigation.test.ts` 验证宿主来源；
 `pnpm test:navigation-shell` 验证正式组件输入、布局和刷新清空；`pnpm test:startup-presentation`
@@ -183,13 +182,13 @@ Desktop 导航快捷键由[快捷键设置](shortcut-settings.md)统一分发，
 回退省略号。搜索结果的项目名最多占行宽的 32%，给会话标题保留空间。顶部会话标题及其项目面包屑沿用原样。
 
 `CommandOrControl K` 的普通文字输入继续在已加载会话的标题和项目名中忽略大小写过滤，最多显示 12 项。
-去掉首尾空白后，只有通过共享 `isCampId` 完整校验的输入才进入 ID 精确查询；ID 保持 canonical 小写，
+去掉首尾空白后，只有通过共享 `isThreadId` 完整校验的输入才进入 ID 精确查询；ID 保持 canonical 小写，
 不补全片段、不转换大小写，也不在未命中时回退到标题搜索。
 
-完整 ID 经短暂防抖调用 Desktop `navigation.findCamp({ campId })`；Core 再通过 `CampId` 校验，按
-`camp.id` 主键等值读取，返回单个 `NavigationCampTarget`（ID、标题、渠道来源、激活状态、项目绑定类型和路径）或
+完整 ID 经短暂防抖调用 Desktop `navigation.findThread({ threadId })`；Core 再通过 `ThreadId` 校验，按
+ID 等值读取，返回单个 `NavigationThreadTarget`（ID、标题、渠道来源、激活状态、项目绑定类型和路径）或
 `null`。该路径覆盖未进入最近五条列表的旧会话，不加载消息或聚合活动历史，不改变已读状态。
-Active Camp 和带当前 Desktop 客户端 presence 的 Pending Camp 可被查询；空 Pending Camp 与不存在的 ID 返回无结果。
+Active Thread 和带当前 Desktop 客户端 presence 的 Pending Thread 可被查询；空 Pending Thread 与不存在的 ID 返回无结果。
 
 查询期间显示加载反馈，失败与未命中分别呈现；修改输入或关闭搜索后丢弃旧请求结果。方向键选择和回车
 打开沿用现有会话激活入口。普通文字输入不会调用 ID 查询，标题过滤与 ID 查找互斥。
@@ -197,11 +196,11 @@ Active Camp 和带当前 Desktop 客户端 presence 的 Pending Camp 可被查�
 ## Quick Chat 与 Project 分组
 
 “快速对话”在 Renderer 中是 Project 列表末尾的文件夹式投影，底层仍是 `quick_chat`，不创建
-Project 领域实体。它没有 Project 菜单；其 Camp 行与目录 Project 下的 Camp 使用同一行为。
+Project 领域实体。它没有 Project 菜单；其 Thread 行与目录 Project 下的 Thread 使用同一行为。
 产品中文固定使用“快速对话”，英文使用 `Quick Chat`，不恢复“大厅”或 `Lobby`。
 
-Quick Chat 首页不提供 Composer。普通“新对话”先原子创建 Active Camp；一键入口先取得
-Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再原子激活。界面不得用静态
+Quick Chat 首页不提供 Composer。普通“新对话”先原子创建 Active Thread；一键入口先取得
+Core-owned Pending Thread 并进入同一 Composer，第一条消息成功后再原子激活。界面不得用静态
 演示数据伪造日期、阶段或创建结果。
 
 普通一键 Pending 的非空正文、附件、引用或 reply 保存后显示“草稿”行；同一项目可保留多份。切换、刷新和
@@ -221,7 +220,7 @@ Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再�
 目录与名称不进入默认配置。取消或创建失败不保存；偏好保存失败仍进入已创建的对话，并提示到“设置 → 通用”重试。
 用户可在通用设置关闭一键新建。
 
-- 新对话的队员选择仅启用已保存 Runtime 配置且状态为 `ready` / `light_ready` 的队员，两者统一显示绿色「可用」。未保存配置显示「未配置智能体」，其他不可用状态显示「智能体不可用」，均置灰禁选。全选、队长候选及一键新建共用这条规则；智能体暂不可用时打开弹窗确认，不永久作废保存的队伍。
+- 新对话的队员选择、全选、队长候选及一键新建共用[新对话 Dialog](../surfaces/new-conversation-dialog.md#field-order)的可用性规则。
 - 一键新建说明收进选项右侧的「?」提示，支持悬停、焦点、点击与 Escape 关闭；不再显示行内说明或「本次新建成功后生效」。
 
 ## 冷启动反馈
@@ -256,13 +255,13 @@ Main Window Session 必须等待本机偏好读取后冻结恢复目标，不能
 “查看更多”。置顶或取消置顶后通过同一刷新协调器重读所属组，保留该组已经展开的展示数量。
 读取期间保留当前行、按钮显示
 “正在读取…”并禁止重复展开；成功后才展示新范围，失败保留当前数量并允许重试。收起立即回到 5 条，
-再次展开仍须重读。普通项目、置顶项目与快速对话使用相同语义，不以旧分页缓存恢复 Camp 状态。
+再次展开仍须重读。普通项目、置顶项目与快速对话使用相同语义，不以旧分页缓存恢复 Thread 状态。
 后续通知、前台安全刷新和 focus 覆盖整个已展开窗口；后台第六条变化不必提前读取，但进入可见范围前
-必须重新读取。此处的展开仅指 Camp 数量，“点击项目行折叠整个分组”的既有行为不变。
+必须重新读取。此处的展开仅指 Thread 数量，“点击项目行折叠整个分组”的既有行为不变。
 
-Camp 运行开始、取消或终态后，侧栏通过 Core 提交后的失效提示重读完整 Navigation Snapshot；不得等用户
-打开该 Camp，也不得要求重载 Renderer 才清除运行 spinner。多个 Camp 的突发事件由一个全局协调器合并，
-不存在每个 Camp 各自的轮询任务。
+Thread 运行开始、取消或终态后，侧栏通过 Core 提交后的失效提示重读完整 Navigation Snapshot；不得等用户
+打开该 Thread，也不得要求重载 Renderer 才清除运行 spinner。多个 Thread 的突发事件由一个全局协调器合并，
+不存在每个 Thread 各自的轮询任务。
 
 App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；隐藏时暂停，重新聚焦立即刷新。Navigation
 拥有独立恢复状态，队员、Runtime Installation、Memory Review 或本机 Navigation preference 读取失败不得
@@ -291,25 +290,25 @@ App 前台可见时使用约 20 秒低频安全刷新修复偶发丢失事件；
 普通侧栏更新入口使用透明背景、34px 点击高度和 11.5px 状态文字；英文 200px 窄栏可另起一行。
 “关于与更新”行显示同语义、非交互的 11px 状态，图标槽和状态的宽度规则分别归属，不能挤压或重叠。
 下载中同时显示动作与百分比；下载/安装失败显示失败状态，页面才提供对应重试操作。设置页面的局部构图见
-[`settings-workspace` surface brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)。
+[`settings-workspace` surface brief](../surfaces/settings-workspace.md)。
 
 启动设置有未保存的程序路径或通用环境配置时，左侧“返回 App”等应用内离开入口与页内返回复用同一个
 放弃确认。取消保留当前页面与草稿；确认后再导航。切换设置分类仍保留草稿，随后离开 App 设置也须确认。
 
-队员页继续显示普通全局侧栏和 Project / Camp 导航，不再用队员名册覆盖该槽位，也不提供独立的
+队员页继续显示普通全局侧栏和 Project / Thread 导航，不再用队员名册覆盖该槽位，也不提供独立的
 “返回对话 / 返回 App”控件。队员名册位于内容区左侧；用户通过全局侧栏切换页面或会话，所有切换
 继续遵守未保存 Runtime 草稿保护。
 
-当前 Camp Composer 即将因普通导航卸载或被另一 Camp 替换时，App 必须先调用同一个 Camp leave guard，等待附件
-准备、Draft flush 与 mutation queue 完成后再提交目标页面。保存失败保持当前 Camp、正文和可重试交互，不切换到
-设置、记忆、队员、其他 Camp 或因移除当前 Project 返回快速对话。只打开新会话 Dialog、选择/展开 Project 而未
-卸载 Composer 时不构成已完成 leave；创建结果真正激活另一 Camp 时复用同一 guard。组件 cleanup 不承担这次保存。
+当前 Thread Composer 即将因普通导航卸载或被另一 Thread 替换时，App 必须先调用同一个 Thread leave guard，等待附件
+准备、Draft flush 与 mutation queue 完成后再提交目标页面。保存失败保持当前 Thread、正文和可重试交互，不切换到
+设置、记忆、队员、其他 Thread 或因移除当前 Project 返回快速对话。只打开新会话 Dialog、选择/展开 Project 而未
+卸载 Composer 时不构成已完成 leave；创建结果真正激活另一 Thread 时复用同一 guard。组件 cleanup 不承担这次保存。
 
 Automation 工作区即将因全局导航卸载时，App 同样等待该工作区的当前自动保存 flush；失败则保留草稿与当前页面，
 成功后才提交目标页面。
 
 正常 App 退出也复用该 guard，但由 Main quit coordinator 在 Core shutdown 前请求；App Shell 不增加退出状态或 Draft
-保存实现。保存失败时 Main 放弃本次退出，当前 Camp 保持可见且 Composer 恢复交互；成功后才进入既有
+保存实现。保存失败时 Main 放弃本次退出，当前 Thread 保持可见且 Composer 恢复交互；成功后才进入既有
 `runtime.state = shutting_down` 全局等待面。
 
 ### 原生连接设置
@@ -344,7 +343,7 @@ macOS 保留 hidden title bar 与受控 drag region；新对话、设置、队�
 
 全局 rail 默认 270px，按上文规则调宽或完全收起。队员内容区名册默认 256px，可显式收起到 76px。最小 `1040×700` 下内容区自行
 重排，不能让 rail、名册、菜单或主要操作被裁切。
-Project/Camp 行、菜单、临时提醒和设置返回均可键盘操作，Icon-only 控件有可访问名称；选中、展开和
+Project/Thread 行、菜单、临时提醒和设置返回均可键盘操作，Icon-only 控件有可访问名称；选中、展开和
 未读状态不能只靠颜色。Core 真实查看确认只在完整会话已展示、窗口可见且拥有焦点后推进；显式“标记已读”
 只改变本机意图。后台 Snapshot 刷新、设置/记忆页和应用失焦均不得提前清除未读。
 
@@ -357,16 +356,13 @@ App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，�
 
 ## References
 
-- [Camp Workspace 不变量](../../architecture/foundational-invariants.md#camp-workspace)
+- [Thread Workspace 不变量](../../architecture/foundational-invariants.md#camp-workspace)
 - [产品与导航不变量](../../architecture/foundational-invariants.md#product-navigation)
-- [Camp 生命周期不变量](../../architecture/foundational-invariants.md#camp-lifecycle)
-- [v0.57 Project remove 实施计划](../../versions/v0.57/implementation-plan.md)
-- [v0.58 实施计划](../../versions/v0.58/implementation-plan.md)
-- [v0.61 实施计划](../../versions/v0.61/implementation-plan.md)
+- [Thread 生命周期不变量](../../architecture/foundational-invariants.md#camp-lifecycle)
 
 ## Jump search and overlay closure
 
-⌘K / Ctrl+K opens the title/project search or exact lookup by a complete Camp ID, with a small “跳转到对话” title, neutral selected result and “↑ ↓ 选择　↵ 打开　Esc 关闭” footer. Search input has no focus underline or frame; arrows and Enter retain their behavior and respect IME composition. Closing sidebar menus, rename/delete/removal dialogs or settings does not force focus back to the entry button, including after pin mutations; Escape in Project/Camp menus follows the return-to-row rule above. Shared DOM focus for keyboard input and menu navigation remains available.
+⌘K / Ctrl+K opens the title/project search or exact lookup by a complete Thread ID, with a small “跳转到对话” title, neutral selected result and “↑ ↓ 选择　↵ 打开　Esc 关闭” footer. Search input has no focus underline or frame; arrows and Enter retain their behavior and respect IME composition. Closing sidebar menus, rename/delete/removal dialogs or settings does not force focus back to the entry button, including after pin mutations; Escape in Project/Thread menus follows the return-to-row rule above. Shared DOM focus for keyboard input and menu navigation remains available.
 
 ## Web 导航适配
 
@@ -375,6 +371,6 @@ App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，�
 ## 读取范围与后台状态
 
 普通会话切换只加载目标内容、确认其已展示的新完成内容为已读并更新目标行；不读其他分组、使命列表或
-技能目录。状态/改名不重排，成员/排序变化由 Core 返回相关组完整窗口和总数，删除后正确补位。置顶 Camp
+技能目录。状态/改名不重排，成员/排序变化由 Core 返回相关组完整窗口和总数，删除后正确补位。置顶 Thread
 按 ID 定位，查看更多只读所在组。窗口聚焦/低频完整性恢复仍可读取摘要完整快照，后台完成独立更新所属行。
 接口与恢复边界见 [Navigation Read v1](../../contracts/navigation-read-v1.md)。

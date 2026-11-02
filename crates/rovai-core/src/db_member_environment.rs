@@ -255,6 +255,7 @@ mod tests {
         let mut file =
             crate::platform::private_storage::create_private_new_file(&key_path).unwrap();
         std::io::Write::write_all(&mut file, &key).unwrap();
+        drop(file);
         database.migrate(false).unwrap();
         assert_eq!(
             crate::member_environment::get(database.connection(), "agent_1", kind).unwrap()["environment"]

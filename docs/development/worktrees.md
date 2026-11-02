@@ -6,7 +6,7 @@ last_updated: 2026-08-24
 
 # Git Worktree 生命周期与清理
 
-本文规定 Rovai-ai 开发用 Git worktree 的创建、复用、交接和收口纪律。一个逻辑开发工作对应一个
+本文规定 Rovai AI 开发用 Git worktree 的创建、复用、交接和收口纪律。一个逻辑开发工作对应一个
 worktree；仓库使用 Task 或 Issue 时，可以把它作为该工作的稳定记录，但不是使用 worktree 的前提。
 本文适用于人类开发者和 AI Agent。具体创建步骤继续以仓库内 [`worktree` Skill](../../skills/worktree/SKILL.md) 为准；
 本文补充本仓库构建体积较大时必须遵守的磁盘和生命周期边界。

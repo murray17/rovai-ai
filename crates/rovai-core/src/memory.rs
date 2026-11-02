@@ -2914,7 +2914,7 @@ fn validate_agent_mutation<C: DomainCommand>(
     let camp_id = envelope.camp_id.as_deref().ok_or_else(|| {
         rule_violation(
             "memory.run_not_current",
-            "Agent Memory mutation has no Camp",
+            "Agent Memory mutation has no Thread",
         )
     })?;
     let execution_epoch = envelope.execution_epoch.ok_or_else(|| {
@@ -2953,7 +2953,7 @@ fn validate_agent_mutation<C: DomainCommand>(
     if !is_current_camp_member(transaction, camp_id, agent_id)? {
         return Err(rule_violation(
             "memory.run_not_current",
-            "Agent is not a present current Camp member",
+            "Agent is not a present current Thread member",
         ));
     }
     Ok(RevisionActor {
@@ -2975,7 +2975,7 @@ fn agent_identity<C>(envelope: &CommandEnvelope<C>) -> Result<(&str, &str)> {
     Ok((
         agent_id,
         envelope.camp_id.as_deref().ok_or_else(|| {
-            rule_violation("memory.run_not_current", "Agent mutation has no Camp")
+            rule_violation("memory.run_not_current", "Agent mutation has no Thread")
         })?,
     ))
 }
@@ -3049,7 +3049,7 @@ fn agent_add_scope(
             {
                 return Err(rule_violation(
                     "memory.direction_forbidden",
-                    "counterparty must be another present Camp member",
+                    "counterparty must be another present Thread member",
                 ));
             }
             let direction = input.direction.ok_or_else(|| {

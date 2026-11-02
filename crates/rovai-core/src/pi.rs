@@ -317,6 +317,10 @@ impl PiTextState {
                 }).collect();
         }
         let (event_type, mut payload) = normalize_event(message);
+        crate::runtime_subagent::mark_agent_tool(
+            crate::agent_profile::AdapterKind::Pi,
+            &mut payload,
+        );
         if matches!(
             event_type,
             "agent.thought.delta" | "agent.thought.started" | "agent.thought.completed"
@@ -347,7 +351,7 @@ impl PiTextState {
 pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
-    workspace_isolation:&str,
+    workspace_isolation: &str,
     _attachment_authorization: &ThreadOutputDirectory,
 ) -> Result<String> {
     let cwd = cwd

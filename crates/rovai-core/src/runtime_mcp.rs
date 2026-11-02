@@ -49,17 +49,9 @@ pub(crate) fn write_ephemeral_grok_mcp_plugin(
     external_servers: &BTreeMap<String, McpServerDefinition>,
 ) -> Result<EphemeralMcpConfigFile> {
     let parent = private_runtime_dir.join("external-mcp");
-    fs::create_dir_all(&parent).with_context(|| {
-        format!(
-            "failed to create private external MCP directory {}",
-            parent.display()
-        )
-    })?;
-    set_private_directory_permissions(&parent)?;
+    create_private_directory(&parent, true)?;
     let root = parent.join(format!("{GROK_PLUGIN_PREFIX}{}", uuid::Uuid::new_v4()));
-    fs::create_dir(&root)
-        .with_context(|| format!("failed to create Grok MCP plugin {}", root.display()))?;
-    set_private_directory_permissions(&root)?;
+    create_private_directory(&root, false)?;
     let result = (|| -> Result<()> {
         write_private_json(
             &root.join("plugin.json"),
@@ -94,13 +86,7 @@ fn write_ephemeral_mcp_config(
     dialect: NativeFileDialect,
 ) -> Result<EphemeralMcpConfigFile> {
     let directory = private_runtime_dir.join("external-mcp");
-    fs::create_dir_all(&directory).with_context(|| {
-        format!(
-            "failed to create private external MCP directory {}",
-            directory.display()
-        )
-    })?;
-    set_private_directory_permissions(&directory)?;
+    create_private_directory(&directory, true)?;
     let path = directory.join(format!("{prefix}{}{CONFIG_SUFFIX}", uuid::Uuid::new_v4()));
     let servers = external_servers
         .iter()
@@ -210,33 +196,6 @@ fn environment_pairs(values: &BTreeMap<String, String>) -> Vec<Value> {
         .collect()
 }
 
-pub(crate) fn remove_stale_mcp_configs(private_runtime_dir: &Path) -> Result<()> {
-    let directory = private_runtime_dir.join("external-mcp");
-    if !directory.exists() {
-        return Ok(());
-    }
-    set_private_directory_permissions(&directory)?;
-    for entry in fs::read_dir(&directory)
-        .with_context(|| format!("failed to inspect {}", directory.display()))?
-    {
-        let entry = entry?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        let file_type = entry.file_type()?;
-        if file_type.is_file()
-            && (name.starts_with(COPILOT_CONFIG_PREFIX) || name.starts_with(ADDITIVE_CONFIG_PREFIX))
-            && name.ends_with(CONFIG_SUFFIX)
-        {
-            fs::remove_file(entry.path())
-                .with_context(|| format!("failed to remove stale external MCP config {name}"))?;
-        } else if file_type.is_dir() && name.starts_with(GROK_PLUGIN_PREFIX) {
-            fs::remove_dir_all(entry.path())
-                .with_context(|| format!("failed to remove stale Grok MCP plugin {name}"))?;
-        }
-    }
-    Ok(())
-}
-
 pub(crate) struct EphemeralMcpConfigFile {
     path: PathBuf,
     cleanup: EphemeralMcpCleanup,
@@ -266,18 +225,20 @@ impl Drop for EphemeralMcpConfigFile {
     }
 }
 
-fn set_private_directory_permissions(_directory: &Path) -> Result<()> {
+fn create_private_directory(directory: &Path, recursive: bool) -> Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(recursive);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(_directory, fs::Permissions::from_mode(0o700)).with_context(|| {
-            format!(
-                "failed to restrict external MCP directory {}",
-                _directory.display()
-            )
-        })?;
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
     }
-    Ok(())
+    builder.create(directory).with_context(|| {
+        format!(
+            "failed to create private external MCP directory {}",
+            directory.display()
+        )
+    })
 }
 
 #[cfg(test)]
@@ -310,29 +271,63 @@ mod tests {
 
     #[test]
     fn external_configs_are_private_and_removed_on_drop() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-mcp-test-{}", uuid::Uuid::new_v4()));
-        let files = [
-            write_ephemeral_copilot_config(&directory, &external_servers()).unwrap(),
-            write_ephemeral_additive_mcp_config(&directory, &external_servers()).unwrap(),
-        ];
-        for file in files {
-            let path = file.path().to_path_buf();
-            let body = std::fs::read_to_string(&path).unwrap();
-            assert!(body.contains("Bearer secret"));
-            assert!(!body.contains("rovai_team"));
+        for reuse_existing in [false, true] {
+            let directory = std::env::temp_dir()
+                .join(format!("rovai-runtime-mcp-test-{}", uuid::Uuid::new_v4()));
+            let external = directory.join("external-mcp");
+            let retained = external.join("previous-config.json");
+            if reuse_existing {
+                fs::create_dir_all(&external).unwrap();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&external, fs::Permissions::from_mode(0o755)).unwrap();
+                }
+                fs::write(&retained, b"retained configuration").unwrap();
+            }
+            let files = [
+                write_ephemeral_copilot_config(&directory, &external_servers()).unwrap(),
+                write_ephemeral_additive_mcp_config(&directory, &external_servers()).unwrap(),
+            ];
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 assert_eq!(
-                    std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-                    0o600
+                    fs::metadata(&external).unwrap().permissions().mode() & 0o777,
+                    if reuse_existing { 0o755 } else { 0o700 }
                 );
             }
-            drop(file);
-            assert!(!path.exists());
+            for file in files {
+                let path = file.path().to_path_buf();
+                let body = std::fs::read_to_string(&path).unwrap();
+                assert!(body.contains("Bearer secret"));
+                assert!(!body.contains("rovai_team"));
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    assert_eq!(
+                        std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                        0o600
+                    );
+                }
+                drop(file);
+                assert!(!path.exists());
+            }
+            if reuse_existing {
+                assert_eq!(fs::read(&retained).unwrap(), b"retained configuration");
+            }
+            // A real path error must fail delivery, not produce an empty MCP handle.
+            let blocked = directory.join("blocked");
+            fs::create_dir(&blocked).unwrap();
+            fs::write(blocked.join("external-mcp"), b"retain non-directory").unwrap();
+            assert!(write_ephemeral_copilot_config(&blocked, &external_servers()).is_err());
+            assert!(write_ephemeral_additive_mcp_config(&blocked, &external_servers()).is_err());
+            assert_eq!(
+                fs::read(blocked.join("external-mcp")).unwrap(),
+                b"retain non-directory"
+            );
+            std::fs::remove_dir_all(directory).unwrap();
         }
-        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -342,6 +337,23 @@ mod tests {
             uuid::Uuid::new_v4()
         ));
         let external = directory.join("external-mcp");
+        let fresh = write_ephemeral_grok_mcp_plugin(&directory, &external_servers()).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&external).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
+        }
+        let fresh_path = fresh.path().to_path_buf();
+        drop(fresh);
+        assert!(!fresh_path.exists());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&external, fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let legacy = external.join("grok-mcp-plugin-legacy");
         let unrelated = external.join("user-plugin");
         let stale = external.join(format!("{GROK_PLUGIN_PREFIX}abandoned"));
@@ -349,7 +361,8 @@ mod tests {
             fs::create_dir_all(path).unwrap();
             fs::write(path.join(".mcp.json"), b"retained material").unwrap();
         }
-        // Initialization owns the cleanup; no Run completion calls it.
+        // Initialization cannot prove ownership of historical files. Preserve them;
+        // only the live per-task handle removes its own generated plugin.
         #[cfg(feature = "extended-tests")]
         {
             let (incoming, _receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -363,11 +376,10 @@ mod tests {
                 crate::compaction::CompactionDetectorPolicy::Disabled,
             );
             adapter.initialize_storage().unwrap();
-            assert!(!stale.exists());
+            assert!(stale.exists());
         }
-        remove_stale_mcp_configs(&directory).unwrap();
-        assert!(!stale.exists());
-        for path in [&legacy, &unrelated] {
+        assert!(stale.exists());
+        for path in [&legacy, &unrelated, &stale] {
             assert_eq!(
                 fs::read(path.join(".mcp.json")).unwrap(),
                 b"retained material"
@@ -383,6 +395,9 @@ mod tests {
         );
         let manifest = std::fs::read_to_string(root.join("plugin.json")).unwrap();
         let servers = std::fs::read_to_string(root.join(".mcp.json")).unwrap();
+        assert!(create_private_directory(&root, false).is_err());
+        assert!(write_private_json(&root.join(".mcp.json"), &json!({})).is_err());
+        assert_eq!(fs::read_to_string(root.join(".mcp.json")).unwrap(), servers);
         assert!(manifest.contains("rovai-external-mcp"));
         assert!(manifest.contains("1.0.0"));
         assert!(servers.contains("docs"));
@@ -391,6 +406,10 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&external).unwrap().permissions().mode() & 0o777,
+                0o755
+            );
             assert_eq!(
                 std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
                 0o700
@@ -406,6 +425,20 @@ mod tests {
         }
         drop(plugin);
         assert!(!root.exists());
+        for path in [&legacy, &unrelated, &stale] {
+            assert_eq!(
+                fs::read(path.join(".mcp.json")).unwrap(),
+                b"retained material"
+            );
+        }
+        let blocked = directory.join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join("external-mcp"), b"retain non-directory").unwrap();
+        assert!(write_ephemeral_grok_mcp_plugin(&blocked, &external_servers()).is_err());
+        assert_eq!(
+            fs::read(blocked.join("external-mcp")).unwrap(),
+            b"retain non-directory"
+        );
         std::fs::remove_dir_all(directory).unwrap();
     }
 }

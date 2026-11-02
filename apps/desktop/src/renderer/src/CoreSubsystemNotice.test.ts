@@ -17,7 +17,7 @@ describe('Core feature degradation notice', () => {
       error: { code: 'subsystem_initialization_failed', message: 'Staging is not a directory', retryable: true, details: {} }
     }] }))
     expect(markup).toContain('工作区记录仍可使用')
-    expect(markup).toContain('Skill Library')
+    expect(markup).toContain('Skills')
     expect(markup).toContain('Staging is not a directory')
     expect(markup).toContain('重试受影响功能')
     expect(markup).not.toContain('disabled')

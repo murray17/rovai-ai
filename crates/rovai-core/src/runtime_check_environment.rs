@@ -93,7 +93,13 @@ impl Core {
                     summary.generation,
                     &summary.created_at,
                 )?;
-            search.activate_for_runtime_commands();
+            #[cfg(test)]
+            let activate_host_environment = self.runtime_search_capture.is_none();
+            #[cfg(not(test))]
+            let activate_host_environment = true;
+            if activate_host_environment {
+                search.activate_for_runtime_commands();
+            }
             self.native_skill_discovery.invalidate_cache();
         }
         *self.runtime_search_environment.write().await = search.clone();

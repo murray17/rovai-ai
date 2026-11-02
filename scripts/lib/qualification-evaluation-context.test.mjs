@@ -46,6 +46,14 @@ test('verification in a rovai-prefixed temporary workspace and package remains e
   assert.doesNotMatch(JSON.stringify(c.receipts),/private\/tmp/)
 })
 
+test('Git status and hash observations remain available for factual claims without including CLI output', () => {
+  const s = snapshot()
+  s.executionEvidence = [event('git', 'git status --short', '?? report.json'), event('hash', 'shasum -a 256 source.txt', 'abcd source.txt'), event('cli', 'git status --short; rovai send --help', 'PROCESS_SECRET')]
+  const result = buildEvaluationContext(s, boundary)
+  assert.deepEqual(result.receipts.map(row => row.sourceEvidenceId), ['git', 'hash'])
+  assert.doesNotMatch(JSON.stringify(result), /PROCESS_SECRET/)
+})
+
 test('private command capture preserves selected source bytes and digest without broadening Judge evidence', () => {
   const s = snapshot()
   const command = event('ok', 'node check.mjs', 'first output\nlast output')
