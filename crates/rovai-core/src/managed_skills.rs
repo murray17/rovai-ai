@@ -523,6 +523,15 @@ mod tests {
         );
         assert_eq!(index["skills"][0]["desc"], entries[0].desc);
         assert_eq!(managed.root(), canonical);
+        for invalid in [
+            "# Plain",
+            "---\n---\nBody",
+            "---\nname: [broken\n---\nBody",
+            "---\nname: campfire\ndescription: [bad]\n---\n",
+        ] {
+            fs::write(&path, invalid).unwrap();
+            assert!(read_frontmatter(&path, "campfire").is_err());
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

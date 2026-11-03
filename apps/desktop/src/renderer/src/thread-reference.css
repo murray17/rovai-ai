@@ -61,6 +61,10 @@
 .simple-skill-members .member-avatar + .member-avatar { margin-left:-4px; }
 .simple-skill-members > span:not(.member-avatar) { font-size:9px; }
 .simple-skill-error { display:flex; align-items:center; justify-content:space-between; font-size:11px; color:var(--muted); padding:5px 8px; }
+.simple-skill-error:has(details) { flex-wrap:wrap; gap:4px; }
+.simple-skill-error details { order:2; flex-basis:100%; min-width:0; }
+.simple-skill-error summary { cursor:pointer; }
+.simple-skill-error ul { max-height:160px; overflow:auto; margin:6px 0; padding-left:18px; }
 .simple-skill-menu .simple-skill-error button { width:auto; display:block; min-height:24px; padding:3px 6px; font-size:11px; }
 .ref-search-state { display:flex; align-items:center; gap:6px; padding:4px 8px 8px; font-size:11px; color:var(--muted); }
 .ref-search-state svg { width:13px; height:13px; flex:none; }

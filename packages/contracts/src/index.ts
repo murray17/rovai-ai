@@ -3732,9 +3732,16 @@ export interface NativeSkillView {
   adapterKind: AdapterKind
 }
 
+export interface NativeSkillDiagnostic {
+  kind: 'metadata' | 'file_read' | 'directory_read' | 'scan_truncated'
+  path: string
+  message: string
+  skillId?: string
+}
+
 export interface NativeSkillScan {
   skills: NativeSkillView[]
-  errors: string[]
+  diagnostics: NativeSkillDiagnostic[]
 }
 
 export interface ToolboxSkillView {
@@ -3758,6 +3765,7 @@ export interface ComposerSkillCandidate {
 export interface ComposerSkillCandidates {
   skills: ComposerSkillCandidate[]
   errors: string[]
+  diagnostics: NativeSkillDiagnostic[]
 }
 
 export type SkillRevisionSourceType = 'bundled' | 'local_folder' | 'github'
@@ -3809,6 +3817,7 @@ export type SkillContentRequest =
 
 export interface SkillContentView {
   path: string
+  /** Native too_large previews carry a bounded plain-text prefix when readable. */
   content: string | null
   status: 'text' | 'binary' | 'too_large'
   files: { path: string; bytes: number }[]

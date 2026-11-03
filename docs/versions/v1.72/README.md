@@ -11,6 +11,13 @@ last_updated: 2026-11-02
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 原生 Skills 可用性修复（2026-11-02）
+
+按 User 收敛后的最小范围，统一宽松发现与重验、canonical 目录名称缺省、去重结果一致登记，
+原生名称不再套用受管格式；四类轻量诊断支持定位和刷新。受管校验、访问边界与冻结投递不变。
+确认、输入前后差异和验证归[独立说明](model-context-change-native-skills-availability.md)，
+当前规则归 [Skills Rebuild v2](../../contracts/skills-rebuild-v2.md#原生文档接受与诊断)。
+
 ## 专业职责 30,000 字符（2026-11-02）
 
 [R2 独立变更说明](model-context-change-professional-responsibilities-30000.md)合并五点评审与 User 收紧的范围：

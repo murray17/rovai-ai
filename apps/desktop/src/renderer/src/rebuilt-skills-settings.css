@@ -111,3 +111,11 @@
   .rebuilt-skills-content .skill-file-directory { top:auto; bottom:calc(100% - 1px); left:20px; width:min(440px,calc(100% - 40px)); }
   .rebuilt-toolbox-members { padding-inline:20px; }
 }
+
+.native-skill-diagnostics { margin: 8px 0; color: var(--muted); font-size: 12px; }
+.rebuilt-skills-list > .native-skill-diagnostics { flex: none; margin: 0 18px 12px; }
+.native-skill-diagnostics summary { cursor: pointer; overflow-wrap: anywhere; }
+.native-skill-diagnostics ul { margin: 8px 0; padding-left: 20px; max-height: min(220px, 28vh); overflow: auto; }
+.native-skill-diagnostics li + li { margin-top: 8px; }
+.native-skill-diagnostics code { display: block; overflow-wrap: anywhere; }
+.native-skill-diagnostics p { margin: 4px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
