@@ -21,6 +21,8 @@
 .message-selection-actions button:not(.primary-button) { border:0; background:transparent; padding:6px; font:inherit; font-size:12px; color:var(--muted); cursor:pointer; }
 .message-selection-spacer { flex:1; }
 .message-export-dialog .primary-button,.message-selection-actions .primary-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+:root .app-dialog.message-export-dialog .message-export-copy { display:inline-flex; align-items:center; justify-content:center; gap:7px; border-color:var(--line-strong); background:var(--surface-raised); }
+.message-export-copy svg { width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.55; stroke-linecap:round; stroke-linejoin:round; }
 :root .dialog-content.app-dialog.message-export-dialog { width:min(840px,calc(100vw - 32px)); display:flex; flex-direction:column; overflow:hidden; max-height:calc(100dvh - 32px); }
 .message-export-body { display:flex; flex-direction:column; gap:16px; min-height:0; overflow:auto; }
 .message-export-title { display:flex; align-items:center; gap:12px; min-width:0; max-width:100%; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; font-size:13px; cursor:pointer; }

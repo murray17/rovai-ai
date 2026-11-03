@@ -8,6 +8,7 @@ import { CurrentUserAvatar } from './CurrentUserProfile'
 import { MemberAvatar } from './MemberAvatar'
 import { UiText, uiAttribute } from './interface-language'
 import { writeClipboardText } from './clipboard'
+import { CopyIcon } from './CopyIcon'
 import { formatByteSize } from './ui-model'
 import { AgentArtifactIcon, classifyAttachmentDisplay } from './attachment-presentation'
 import { MessageExportContext } from './message-export-context'
@@ -177,7 +178,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
         {error && <p className="message-export-error" role="alert">{error}</p>}
       </AppDialogBody>
       <AppDialogFooter leading={<button type="button" className="quiet-button" disabled={busy} onClick={close}><UiText zh="返回调整" /></button>}>
-        <button type="button" className="quiet-button" disabled={busy} onClick={() => { void writeClipboardText(markdown).then(ok => { setCopied(ok); if (!ok) { setManualCopy(markdown); setError(uiAttribute('复制失败，请手动复制。')) } }) }}>{copied ? uiAttribute('已复制') : uiAttribute('复制文本')}</button>
+        <button type="button" className="quiet-button message-export-copy" disabled={busy} onClick={() => { void writeClipboardText(markdown).then(ok => { setCopied(ok); if (!ok) { setManualCopy(markdown); setError(uiAttribute('复制失败，请手动复制。')) } }) }}><CopyIcon copied={copied} />{copied ? uiAttribute('已复制') : uiAttribute('复制文本')}</button>
         <button type="button" className="primary-button" disabled={busy} aria-busy={busy} onClick={() => void download()}><ExportGlyph />{busy ? uiAttribute('正在生成…') : uiAttribute('下载 {0}', format === 'markdown' ? 'Markdown' : format.toUpperCase())}</button>
       </AppDialogFooter>
       <Dialog.Root open={zoom !== null} onOpenChange={open => { if (!open) setZoom(null) }}><Dialog.Portal>
