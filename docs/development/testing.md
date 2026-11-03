@@ -254,6 +254,15 @@ B 仍以独立输入 ID 路由、物化、提交和 accepted，A 保持未知且
 Adapter 的关闭通道拒绝仍由既有 active-input／Claude control owners 覆盖，未增加 Runtime 探活用例。
 最小命令：`cargo test -p rovai-core --features extended-tests,slow-tests --lib active_input`。
 
+### 冷启动刷新不整类退役
+
+扩展既有 `launch_version_uses_the_frozen_program_without_blocking_ordinary_execution`：替换 Qwen
+程序后，本次启动取得当前指纹，同时同类型的 IdleWarm 和 Busy Host 在释放后仍能实际 acquire 原进程。
+使用现有 Fake Host 控制 Fleet 生命周期；不宣称是真实 CLI 升级验证。Command 原冷启动更新／缺失程序、
+安装禁用与删除反例保留；配置失效继续由 `runtime_configuration_writes_preserve_startups_and_retire_changed_command_hosts` 拥有。
+最小命令：`cargo test -p rovai-core --features extended-tests,slow-tests --lib launch_version_uses_the_frozen_program`。
+其他驻留 Runtime 的检查位置迁移未纳入本次局部改动；其冻结身份与进程获取先后关系仍保持原实现。
+
 ### 新增独立测试
 
 新增一个 Rust `#[test]` 前必须同时满足以下条件：

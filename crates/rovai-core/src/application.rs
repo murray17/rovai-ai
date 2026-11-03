@@ -16301,11 +16301,6 @@ impl Core {
             });
         }
 
-        if frozen_runtime.adapter_kind != AdapterKind::CommandCodeCli {
-            self.runtime_fleet
-                .invalidate_adapter(frozen_runtime.adapter_kind)
-                .await;
-        }
         // Resolve only this installation. No independent protocol process is launched.
         // Refresh the GUI search environment once if its cached paths cannot resolve
         // the entry, so a normal run can recover after an environment repair.
@@ -29337,6 +29332,47 @@ mod tests {
                 };
                 let frozen = candidate.frozen_runtime().unwrap();
                 assert_eq!(frozen.reported_version, None);
+                #[cfg(feature = "extended-tests")]
+                let warm_peers = if adapter == AdapterKind::QwenCode && reported.is_some() {
+                    let mut peers = Vec::new();
+                    for name in ["idle-peer", "busy-peer"] {
+                        let compatibility = runtime_fleet::RuntimeCompatibilityKey::member(
+                            "other-camp",
+                            name,
+                            "original-host-config",
+                        );
+                        let lease = core
+                            .runtime_fleet
+                            .acquire(
+                                runtime_fleet::FleetAcquireRequest {
+                                    agent_run_id: name.into(),
+                                    execution_epoch: 1,
+                                    adapter_kind: adapter,
+                                    compatibility: compatibility.clone(),
+                                },
+                                move || async move {
+                                    Ok(runtime_fleet::fake_runtime_process_host(name))
+                                },
+                            )
+                            .await
+                            .unwrap();
+                        if name == "idle-peer" {
+                            core.runtime_fleet
+                                .release(name, 1, runtime_fleet::FleetReleaseDisposition::Reusable)
+                                .await;
+                        }
+                        peers.push((name, compatibility, lease.process_id));
+                    }
+                    // Disk replacement requires this launch to refresh. Other live
+                    // Hosts of the same adapter must keep their own startup identity.
+                    write_runtime_resolution_executable(
+                        &executable,
+                        "#!/bin/sh\nprintf '1.1.0\\n'\n# replaced program\n",
+                    );
+                    peers
+                } else {
+                    Vec::new()
+                };
                 let (prepared, version) = core
                     .prepare_runtime_for_dispatch(
                         &candidate,
@@ -29347,6 +29383,39 @@ mod tests {
                     .map_err(|failure| failure.error)
                     .unwrap();
                 assert_eq!(prepared.reported_version.as_deref(), reported);
+                assert_eq!(
+                    prepared.executable_fingerprint,
+                    fingerprint_executable(&executable).unwrap()
+                );
+                #[cfg(feature = "extended-tests")]
+                for (name, compatibility, process_id) in warm_peers {
+                    if name == "busy-peer" {
+                        core.runtime_fleet
+                            .release(name, 1, runtime_fleet::FleetReleaseDisposition::Reusable)
+                            .await;
+                    }
+                    let successor = format!("{name}-next");
+                    let lease = core
+                        .runtime_fleet
+                        .acquire(
+                            runtime_fleet::FleetAcquireRequest {
+                                agent_run_id: successor.clone(),
+                                execution_epoch: 1,
+                                adapter_kind: adapter,
+                                compatibility,
+                            },
+                            || async {
+                                panic!("one cold refresh must not retire other healthy Hosts")
+                            },
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(lease.process_id, process_id);
+                    core.runtime_fleet
+                        .release(&successor, 1, runtime_fleet::FleetReleaseDisposition::Stop)
+                        .await;
+                }
+
                 if adapter == AdapterKind::Pi && reported.is_some() {
                     core.database.lock().await.connection().execute_batch(
                         "CREATE TEMP TRIGGER fail_version_cache BEFORE UPDATE OF reported_version
@@ -29378,7 +29447,17 @@ mod tests {
                     .unwrap();
                 let snapshot = installed.snapshot.unwrap();
                 assert_eq!(snapshot.reported_version.as_deref(), reported);
-                assert_eq!(snapshot.probe_status, "light_ready");
+                assert_eq!(
+                    snapshot.probe_status,
+                    if cfg!(feature = "extended-tests")
+                        && adapter == AdapterKind::QwenCode
+                        && reported.is_some()
+                    {
+                        "installed_unverified"
+                    } else {
+                        "light_ready"
+                    }
+                );
                 assert!(snapshot.last_successful_probe_at.is_none());
                 let claimed = ExecutionRuntimeService::default()
                     .claim_agent_run(
