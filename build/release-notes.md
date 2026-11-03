@@ -1,37 +1,39 @@
-# Rovai AI v0.5.6
+# Rovai AI v0.5.7
 
 <!-- lang:zh-CN -->
 
-本次更新将专业职责上限提高到 30,000 字符，支持在会话草稿中浏览项目文件，并修复取消执行、单聊和项目目录的交互问题。
+本次更新新增消息导出和 Mermaid 图表阅读，将工作准则、成长课题的上限提高到 3,000 字符，并修复本机 Skills、执行状态和 Windows Antigravity 的使用问题。
 
-- 【功能】**专业职责上限由 10,000 提高到 30,000 字符。** 可填写更长的角色分工和工作要求。完整输入超出单次执行容量时，会提示精简后重新提交。
-- 【功能】**会话草稿也能浏览项目文件。** 绑定目录后，无需先发送消息激活会话，即可浏览目录并打开文件。
-- 【修复】**修复退出 App 后取消执行入口消失的问题。** 重新进入会话后，仍可查看各队员最近一次取消执行的过程，并手动继续。继续执行或出现新执行后，旧入口自动收起。
-- 【修复】**修复单聊数量必须打开面板后才更新的问题。** 进入会话后会自动读取数量，面板收起时也会同步数量与运行标记；读取过程不阻塞消息显示和输入。
-- 【修复】**修复 Markdown 表格长内容跨列重叠的问题。** 长链接、连续标识符会在单元格内换行，多列表格仍可横向滚动。
-- 【修复】**修复使命预览中文件目录被遮挡、无法点击的问题。** 目录浮层可正常显示和操作；快速对话不再显示无效的目录入口。
-- 【界面】**统一主按钮与单聊代码的主题配色。** 主按钮跟随当前主题，默认浅色主题使用深灰底白字；单聊回复、执行过程和计划说明中的代码样式与公屏保持一致。
-- 【界面】**调整会话顶栏和文件夹图标。** 项目名、分隔符与会话名垂直居中，项目名、目录入口、文件标签和目录行统一使用文件夹图标。
+- 【功能】**支持消息多选与导出。** 可多选公屏中已加载的消息，也可导出选中的文字，预览后保存为 HTML、PNG 或 Markdown。支持修改导出标题，选择保留作者、时间和发送对象等信息。
+- 【功能】**支持直接查看 Mermaid 图表。** Markdown 文件预览及公屏、单聊中的队员回复可显示流程图、时序图等，支持图形与源码切换、复制和大图缩放。流式回复中的完整图块会先行显示，无需等待整条回复结束。
+- 【功能】**工作准则和成长课题分别由 300 提高到 3,000 字符。** 可以填写更完整的做事方式、质量要求和成长方向，保留正文中的换行与格式。
+- 【修复】**完善本机 Skill 的发现、引用和预览。** 说明文件头部信息缺失或异常时，仍可发现和选择可读的 Skill；支持中文、下划线名称筛选，并完善大文件预览及异常提示。
+- 【修复】**修正 Claude Code 的执行结束判断。** 不再因收到结果后等待状态事件而提前报错；空回复、不支持的提问和收尾清理异常不会覆盖已经确认的成功结果。
+- 【修复】**补充消息结果待核对时，不再连带阻塞后续输入。** 通道仍有效时，可以继续发送新的补充消息；待核对的原消息不会被自动重发。
+- 【修复】**减少本机智能体更新造成的执行中断。** 优化 Codex、Pi 等智能体的进程复用，程序文件更新或准备新执行时，避免误回收其他会话仍在使用的进程。
+- 【修复】**修复 Windows 下 Antigravity 执行 Shell 命令失败的问题。** 解决部分程序路径导致正常命令被误报为“Shell Injection Detected”的情况。
+- 【界面】**提醒操作文字跟随当前主题配色。** 修复“查看下一条”仍显示固定蓝色的问题。
 
-感谢 @liangxyz 在 [#706](https://github.com/murray17/rovai-ai/issues/706) 中反馈专业职责长度不足的问题。
+感谢 @liangxyz 在 [#706](https://github.com/murray17/rovai-ai/issues/706) 中反馈角色设定长度不足的问题，@liuqiong0319 反馈本机 Skill 发现问题，以及 @arschlochnop 在 [#979](https://github.com/murray17/rovai-ai/issues/979) 中提出 Mermaid 图表预览需求。
 
-[完整变更](https://github.com/murray17/rovai-ai/compare/v0.5.5...v0.5.6)
+[完整变更](https://github.com/murray17/rovai-ai/compare/v0.5.6...v0.5.7)
 
 ---
 
 <!-- lang:en -->
 
-This release raises the responsibilities limit to 30,000 characters, enables project-file browsing in conversation drafts, and fixes cancelled execution entries, Single Chat, and project-directory interactions.
+This release adds message export and Mermaid diagram reading, raises the working principles and growth topic limits to 3,000 characters each, and fixes native Skills, execution status, and Antigravity on Windows.
 
-- [Feature] **Responsibilities now support 30,000 characters, up from 10,000.** Save longer role descriptions and work requirements. If the complete input exceeds the capacity of one execution, a message asks you to shorten it and resubmit.
-- [Feature] **Browse project files from conversation drafts.** After binding a directory, browse and open its files without first sending a message to activate the conversation.
-- [Fix] **Keep cancelled execution entries after exiting the app.** On returning to a conversation, inspect and manually continue each teammate's latest cancelled execution. The old entry collapses after continuation or a new execution begins.
-- [Fix] **Update the Single Chat count without opening its panel first.** Entering a conversation loads the count automatically. Counts and running indicators also update while the panel is closed, without blocking messages or the composer.
-- [Fix] **Prevent long Markdown table content from overlapping adjacent columns.** Long links and unbroken identifiers wrap inside their cells, while wide tables retain horizontal scrolling.
-- [Fix] **Keep the file directory accessible above Mission previews.** The directory overlay remains visible and clickable. Quick Chat no longer shows an unusable directory entry point.
-- [UI] **Use consistent theme colors for primary buttons and Single Chat code.** Primary buttons follow the active theme, with dark gray and white text in the default light theme. Code in Single Chat replies, execution narration, and plans shares the public conversation's styling.
-- [UI] **Align the conversation header and unify folder icons.** Project names, separators, and conversation names are vertically centered. The project name, directory entry point, file tabs, and directory rows use the same folder icon.
+- [Feature] **Select and export messages.** Select loaded messages in the public conversation, or export selected text, then preview and save it as HTML, PNG, or Markdown. Edit the export title and choose whether to include authors, timestamps, recipients, and other information.
+- [Feature] **Read Mermaid diagrams directly.** Markdown file previews and teammate replies in public conversations and Single Chat can display flowcharts, sequence diagrams, and more. Switch between diagrams and source, copy the source, and zoom into larger diagrams. Complete diagram blocks appear during streaming without waiting for the entire reply to finish.
+- [Feature] **Working principles and growth topic now support 3,000 characters each, up from 300.** Save more detailed working methods, quality requirements, and growth goals while retaining line breaks and formatting.
+- [Fix] **Improve native Skill discovery, selection, and preview.** Readable Skills remain discoverable and selectable when their header metadata is missing or malformed. Filtering supports Chinese characters and underscores, with better large-file previews and diagnostics.
+- [Fix] **Correct Claude Code completion handling.** Waiting for status events after a result no longer causes premature failure. Empty final text, unsupported questionnaires, and cleanup errors do not override a confirmed successful result.
+- [Fix] **A supplemental message awaiting confirmation no longer blocks later inputs.** New supplemental messages can proceed while the channel remains valid. The original unconfirmed message is not automatically resent.
+- [Fix] **Reduce execution interruptions after local Agent updates.** Improve process reuse for Codex, Pi, and other supported Agents. Updating program files or preparing a new execution no longer incorrectly retires processes still serving other conversations.
+- [Fix] **Fix Antigravity Shell command failures on Windows.** Resolve executable path handling that could cause valid commands to be rejected with “Shell Injection Detected”.
+- [UI] **Reminder actions follow the active theme.** Fix the “View next” action retaining a fixed blue color.
 
-Thanks to @liangxyz for reporting the responsibilities length limitation in [#706](https://github.com/murray17/rovai-ai/issues/706).
+Thanks to @liangxyz for reporting role-description length limits in [#706](https://github.com/murray17/rovai-ai/issues/706), @liuqiong0319 for reporting native Skill discovery issues, and @arschlochnop for requesting Mermaid previews in [#979](https://github.com/murray17/rovai-ai/issues/979).
 
-[Full changelog](https://github.com/murray17/rovai-ai/compare/v0.5.5...v0.5.6)
+[Full changelog](https://github.com/murray17/rovai-ai/compare/v0.5.6...v0.5.7)
