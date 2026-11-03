@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 authority: markdown-mermaid-implementation-and-acceptance
 status: complete
-last_updated: 2026-11-02
+last_updated: 2026-11-03
 ---
 
 # Markdown Mermaid 审阅交付
@@ -102,5 +102,8 @@ App 口径为逐个普通文件的逻辑 `st_size` 合计，不计目录块分�
 `node scripts/accept-markdown-mermaid.mjs /absolute/path/to/installed/App.app`。
 设置 `ROVAI_MERMAID_OUTPUT` 可保存截图、离线资源路径、真实 SVG 样例和 JSON 结果。
 
-另提供独立离线 HTML 前后交互稿：以 `a40fe47f2` 为 UI 行为对照，复用安装产物的 DOM、CSS、主题 token 和
-真实 SVG；演示源码、大图、主题、图片重建和重试，明确标注故障为模拟。它不参与构建或替代生产验收。
+另提供独立离线 HTML 前后交互稿：以同步后的 `main`（`22fa81c8f`）为 UI 行为对照，比较本分支
+`faadca7a4`。同一份 Markdown 在 main 中显示为普通代码块，在本分支中自动绘图；main 不展示图形切换、
+大图或渲染重试入口。稿件复用两端的生产样式、现有界面 DOM 和真实 SVG，支持源码与复制、宽图与长图、
+主题和失败回退；预渲染图形与模拟加载失败均有明确说明。1440px / 390px 浏览器验证通过，无外部资源请求。
+它不参与构建或替代生产验收。
