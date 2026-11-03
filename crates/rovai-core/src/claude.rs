@@ -1142,7 +1142,6 @@ impl ClaudeCodeCliRuntimeAdapter {
                     output,
                     &native_session_id,
                     &native_turn_id,
-                    false,
                     &claude_sensitive_paths(request, private_runtime_dir),
                 )
             {
@@ -1209,7 +1208,6 @@ impl ClaudeCodeCliRuntimeAdapter {
             &output,
             &native_session_id,
             &native_turn_id,
-            protocol.has_unsupported_questionnaire(),
             &sensitive_paths,
         )?;
         Ok(ClaudeCodeRunResult {
@@ -1301,7 +1299,6 @@ fn validate_claude_terminal_result(
     output: &ClaudeCodeJsonResult,
     native_session_id: &str,
     native_turn_id: &str,
-    unsupported_questionnaire: bool,
     sensitive_paths: &[(&Path, &str)],
 ) -> Result<String> {
     let observed_session_id = match output.session_id.as_deref() {
@@ -1393,47 +1390,7 @@ fn validate_claude_terminal_result(
             true,
         ));
     }
-    if unsupported_questionnaire {
-        let failure = public_runtime_failure_from_output(
-            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
-            RuntimeFailureOrigin::Compatibility,
-            RuntimeFailurePhase::Terminal,
-            "runtime_questionnaire_unsupported",
-            "原生问卷暂不受支持，未提交答案。请通过 Thread 对话询问用户",
-            None,
-            sensitive_paths,
-            false,
-        );
-        return Err(claude_failure_error(
-            anyhow::anyhow!("Claude Code requested unsupported native user input"),
-            failure,
-            native_session_id,
-            native_turn_id,
-            true,
-        ));
-    }
-    let final_output = output.result.trim().to_string();
-    if final_output.is_empty() {
-        let internal = anyhow::anyhow!("Claude Code success result contained no final output");
-        let failure = public_runtime_failure_from_output(
-            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
-            RuntimeFailureOrigin::Compatibility,
-            RuntimeFailurePhase::Terminal,
-            "runtime_missing_final_output",
-            "Claude Code 最终结果缺少必要内容",
-            Some(&internal.to_string()),
-            sensitive_paths,
-            false,
-        );
-        return Err(claude_failure_error(
-            internal,
-            failure,
-            native_session_id,
-            native_turn_id,
-            true,
-        ));
-    }
-    Ok(final_output)
+    Ok(output.result.trim().to_string())
 }
 
 fn explicit_mcp_config_rejection(stderr: &[u8]) -> bool {
@@ -3049,9 +3006,9 @@ mod tests {
             let contents = match mode {
                 "normal" => format!("{handshake}{normal}"),
                 "exit-cleanup" => format!("{handshake}{normal}Start-Sleep -Seconds 30\n"),
-                "natural-exit" | "natural-failure" | "wait-result" => {
+                "natural-exit" | "natural-failure" | "wait-result" | "empty-success" => {
                     let result = json!({"type":"result","subtype":"success","is_error":false,
-                        "session_id":session_id,"result":"ok"});
+                        "session_id":session_id,"result":if mode == "empty-success" { "" } else { "ok" }});
                     let end = if mode == "wait-result" {
                         format!(
                             "Set-Content -LiteralPath '{}' -Value ready\nStart-Sleep -Seconds 30",
@@ -3099,9 +3056,9 @@ mod tests {
             match mode {
                 "normal" => format!("#!/bin/sh\n{handshake}{normal}"),
                 "exit-cleanup" => format!("#!/bin/sh\n{handshake}{normal}/bin/sleep 30\n"),
-                "natural-exit" | "natural-failure" | "wait-result" => {
+                "natural-exit" | "natural-failure" | "wait-result" | "empty-success" => {
                     let result = json!({"type":"result","subtype":"success","is_error":false,
-                        "session_id":session_id,"result":"ok"});
+                        "session_id":session_id,"result":if mode == "empty-success" { "" } else { "ok" }});
                     let end = if mode == "wait-result" {
                         format!("printf ready > '{}'\n/bin/sleep 30", marker.display())
                     } else if mode == "natural-failure" {
@@ -3315,7 +3272,13 @@ mod tests {
         let adapter = ClaudeCodeCliRuntimeAdapter::new(&root).unwrap();
         // Sequential launches on one adapter must work after normal completion,
         // native exit without idle, and confirmed-end process cleanup.
-        for mode in ["normal", "natural-exit", "exit-cleanup", "natural-failure"] {
+        for mode in [
+            "normal",
+            "natural-exit",
+            "exit-cleanup",
+            "natural-failure",
+            "empty-success",
+        ] {
             let executable = fake_claude_executable(&root, mode, session_id, mode);
             let mut request = fake_claude_request(
                 &workspace,
@@ -3335,7 +3298,11 @@ mod tests {
                     "a real nonzero exit is not cleanup success"
                 );
             } else {
-                assert_eq!(result.unwrap().final_output, "ok", "{mode}");
+                assert_eq!(
+                    result.unwrap().final_output,
+                    if mode == "empty-success" { "" } else { "ok" },
+                    "{mode}"
+                );
             }
             assert!(claude_launch_files(&root).is_empty());
             assert!(adapter.active.lock().unwrap().is_empty());
@@ -3743,14 +3710,9 @@ mod tests {
             total_cost_usd: None,
             model_calls_observed: false,
         };
-        let error = validate_claude_terminal_result(
-            &terminal_failure,
-            session_id,
-            native_turn_id,
-            true,
-            &[],
-        )
-        .expect_err("a structured non-success result should be terminal failure proof");
+        let error =
+            validate_claude_terminal_result(&terminal_failure, session_id, native_turn_id, &[])
+                .expect_err("a structured non-success result should be terminal failure proof");
         let proof = error
             .downcast_ref::<ClaudeCodeDeliveredFailure>()
             .expect("the reliable failure must retain its typed proof");
@@ -3777,9 +3739,8 @@ mod tests {
             session_id: Some("5ade59ac-f87e-4827-8cf2-0e1f3ba720ea".to_string()),
             ..terminal_failure
         };
-        let error =
-            validate_claude_terminal_result(&mismatched, session_id, native_turn_id, true, &[])
-                .expect_err("a different Session must be fenced");
+        let error = validate_claude_terminal_result(&mismatched, session_id, native_turn_id, &[])
+            .expect_err("a different Session must be fenced");
         let proof = error
             .downcast_ref::<ClaudeCodeDeliveredFailure>()
             .expect("the incompatible terminal still proves the requested one-shot turn ended");
@@ -3791,19 +3752,18 @@ mod tests {
             result: "already sent a public message".to_string(),
             ..mismatched
         };
-        let error =
-            validate_claude_terminal_result(&success, session_id, native_turn_id, true, &[])
-                .expect_err("nonempty final text cannot erase an unsupported questionnaire");
         assert_eq!(
-            error
-                .downcast_ref::<ClaudeCodeDeliveredFailure>()
-                .unwrap()
-                .error_code,
-            "runtime_questionnaire_unsupported"
+            validate_claude_terminal_result(&success, session_id, native_turn_id, &[]).unwrap(),
+            "already sent a public message"
         );
-        assert!(
-            validate_claude_terminal_result(&success, session_id, native_turn_id, false, &[],)
-                .is_ok()
+        let empty_success = ClaudeCodeJsonResult {
+            result: " \n".into(),
+            ..success
+        };
+        assert_eq!(
+            validate_claude_terminal_result(&empty_success, session_id, native_turn_id, &[])
+                .unwrap(),
+            ""
         );
     }
 
@@ -5824,21 +5784,24 @@ mod tests {
         let final_result = capture.await.unwrap().unwrap().final_result.unwrap();
         assert_eq!(final_result.result, "last");
         assert_eq!(final_result.usage["output_tokens"], 2);
-        assert!(control.has_unsupported_questionnaire());
-        let error = validate_claude_terminal_result(
-            &final_result,
-            session,
-            "turn",
-            control.has_unsupported_questionnaire(),
-            &[],
-        )
-        .unwrap_err();
+        assert_eq!(
+            validate_claude_terminal_result(&final_result, session, "turn", &[]).unwrap(),
+            "last"
+        );
+        let failed_result = ClaudeCodeJsonResult {
+            subtype: Some("error".into()),
+            is_error: true,
+            result: "later native failure".into(),
+            ..final_result
+        };
+        let error =
+            validate_claude_terminal_result(&failed_result, session, "turn", &[]).unwrap_err();
         assert_eq!(
             error
                 .downcast_ref::<ClaudeCodeDeliveredFailure>()
                 .unwrap()
                 .error_code,
-            "runtime_questionnaire_unsupported"
+            "runtime_terminal_failure"
         );
         let mut responses = String::new();
         input.read_to_string(&mut responses).await.unwrap();
@@ -5995,7 +5958,7 @@ mod tests {
                 "a later error cannot inherit the earlier success"
             );
             assert_eq!(
-                validate_claude_terminal_result(&result, session, "turn", false, &[]).is_err(),
+                validate_claude_terminal_result(&result, session, "turn", &[]).is_err(),
                 later_error
             );
             assert_eq!(
@@ -6264,7 +6227,6 @@ mod tests {
                     &output,
                     session_id,
                     "claude-code:run-1:1",
-                    false,
                     &[],
                 )
                 .expect_err("the later error must determine the terminal outcome");

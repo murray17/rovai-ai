@@ -22,7 +22,8 @@ last_updated: 2026-11-01
 问卷承载用户输入，不能进入执行审批来选择答案。Claude、Copilot、Qwen 在统一正式启动处关闭已验证的
 提问工具；Copilot、Qwen 策略属于 Host 兼容输入，不改变原生会话绑定。Kimi 与 Qwen 的意外请求复用 ACP 当前请求归属、
 Prompt 观察与终态，先识别并取消，再让普通权限进入现有审批。已识别但损坏的问卷也不能自动允许。
-Claude 控制通道拒绝意外问卷并把观察传到现有整轮结果校验；不新增用户回复或自动重跑机制。
+Claude 控制通道拒绝意外问卷并按请求 ID 去重；局部拒绝不覆盖后续原生成功，终态按最后有效结果结算。
+不新增用户回复或自动重跑机制；Claude 结果边界见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#claude-结果与局部问卷拒绝)。
 具体字段与优先级见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)。
 MiniMax 保留现有行为，不以修改用户配置关闭问卷；本轮不扩大到其他适配器。
 

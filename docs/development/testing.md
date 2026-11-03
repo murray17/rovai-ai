@@ -237,6 +237,15 @@ reader/writer owner 另覆盖“写入 → 旧 result → 旧 idle → 后续失
 真实运行中插话复用 `probe-steer-version.mjs` 的单项过滤，与上面的 Run 成功后续发 smoke 分开记账；
 未观察到的原生精确时序保留为验证边界，不据此增加轮次计数、回执门槛或业务超时。
 
+### Claude 空结果与问卷局部拒绝
+
+扩展既有 Claude terminal、reader/control 和进程清理 owners：空 success 可完成，问卷仍拒绝及去重，
+后续成功不被覆盖；原生失败、Session 不匹配与缺少当前最终结果仍失败。
+共享结算扩展 `accepted_send_suppresses_missing_send_recovery_for_recipient_matrix`（slow-tests），
+验证有／无先前公开发送的空 success 都成功、无空消息及无重复发送。
+单聊既有 Pending FIFO owner 以空 success 推进下一条，断言不产生空私聊回复；常规非空终态 owner 保留。
+不新增 Rust 测试函数，不把受控协议／数据库测试表述为真实模型验收。
+
 ### 新增独立测试
 
 新增一个 Rust `#[test]` 前必须同时满足以下条件：

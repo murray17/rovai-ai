@@ -3788,15 +3788,6 @@ impl ExecutionRuntimeService {
             )? {
                 return Ok(rejection);
             }
-            if !has_final_output
-                && (target.invocation_kind == "single_chat"
-                    || !has_current_run_public_send(transaction, &target.agent_run_id, target.execution_epoch)?)
-            {
-                return Ok(rejected(
-                    "agent_run.missing_final_output",
-                    "Empty final output requires a committed public send from this Run and execution epoch",
-                ));
-            }
             if target.invocation_kind == "single_chat" {
                 return persist_single_chat_success(
                     transaction,
@@ -5308,10 +5299,15 @@ fn persist_single_chat_success(
     terminal_reason_code: Option<&str>,
     cleanup_required: bool,
 ) -> Result<CommandHandlerResult> {
-    let final_output_digest = canonical_content_digest(&[StructuredThreadMessageSegment::Text {
-        text: envelope.payload.final_output.clone(),
-    }])?;
-    let final_conversation_message_id = Uuid::new_v4().to_string();
+    let has_final_output = !envelope.payload.final_output.trim().is_empty();
+    let final_output_digest = has_final_output
+        .then(|| {
+            canonical_content_digest(&[StructuredThreadMessageSegment::Text {
+                text: envelope.payload.final_output.clone(),
+            }])
+        })
+        .transpose()?;
+    let final_conversation_message_id = has_final_output.then(|| Uuid::new_v4().to_string());
     let ending_git_observation = envelope
         .payload
         .ending_git_observation
@@ -5321,11 +5317,15 @@ fn persist_single_chat_success(
     let conversation_updated = transaction.execute(
         r#"
         UPDATE conversation
-        SET last_message_sequence = last_message_sequence + 1,
+        SET last_message_sequence = last_message_sequence + ?3,
             version = version + 1, updated_at = ?2
         WHERE id = ?1 AND kind = 'single_chat' AND ended_at IS NULL
         "#,
-        params![target.conversation_id, target.now],
+        params![
+            target.conversation_id,
+            target.now,
+            i64::from(has_final_output)
+        ],
     )?;
     if conversation_updated != 1 {
         return Ok(rejected(
@@ -5333,13 +5333,14 @@ fn persist_single_chat_success(
             "Single Chat ended before its final output arrived",
         ));
     }
-    let message_sequence: i64 = transaction.query_row(
-        "SELECT last_message_sequence FROM conversation WHERE id = ?1",
-        [&target.conversation_id],
-        |row| row.get(0),
-    )?;
-    transaction.execute(
-        r#"
+    if has_final_output {
+        let message_sequence: i64 = transaction.query_row(
+            "SELECT last_message_sequence FROM conversation WHERE id = ?1",
+            [&target.conversation_id],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            r#"
         INSERT INTO conversation_message(
             id, conversation_id, sequence,
             author_type, author_id, source_agent_run_id, body,
@@ -5347,17 +5348,18 @@ fn persist_single_chat_success(
             camp_turn_id, agent_run_id, source_attachments_json, created_at
         ) VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, NULL, NULL, ?7, ?5, '[]', ?8)
         "#,
-        params![
-            final_conversation_message_id,
-            target.conversation_id,
-            message_sequence,
-            target.agent_id,
-            target.agent_run_id,
-            envelope.payload.final_output,
-            target.camp_turn_id,
-            target.now,
-        ],
-    )?;
+            params![
+                final_conversation_message_id,
+                target.conversation_id,
+                message_sequence,
+                target.agent_id,
+                target.agent_run_id,
+                envelope.payload.final_output,
+                target.camp_turn_id,
+                target.now,
+            ],
+        )?;
+    }
     let updated = transaction.execute(
         r#"
         UPDATE agent_run

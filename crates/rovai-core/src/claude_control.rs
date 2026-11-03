@@ -251,10 +251,6 @@ impl ClaudeControl {
             .await
     }
 
-    pub(crate) fn has_unsupported_questionnaire(&self) -> bool {
-        !self.state.lock().unwrap().questionnaire_requests.is_empty()
-    }
-
     /// Routes controls synchronously. Approval waiting happens in Core; this
     /// function never awaits a user decision or a stdin write.
     pub(crate) fn route(&self, frame: &Value) -> Result<bool> {
@@ -723,8 +719,13 @@ mod tests {
                 "deny"
             );
             assert!(
-                !control.has_unsupported_questionnaire(),
-                "foreign input cannot poison this Run"
+                control
+                    .state
+                    .lock()
+                    .unwrap()
+                    .questionnaire_requests
+                    .is_empty(),
+                "foreign requests cannot enter current-request deduplication"
             );
             assert_eq!(
                 received.try_recv().unwrap().payload["code"],
@@ -733,7 +734,6 @@ mod tests {
             question["session_id"] = json!("session");
             control.route(&question).unwrap();
             control.route(&question).unwrap();
-            assert!(control.has_unsupported_questionnaire());
             let denied = writes.try_recv().unwrap().frame.unwrap();
             assert_eq!(denied["response"]["response"]["behavior"], "deny");
             assert!(denied["response"]["response"].get("updatedInput").is_none());
