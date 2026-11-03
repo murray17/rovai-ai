@@ -4016,7 +4016,19 @@ impl ExecutionRuntimeService {
                     "AgentRun version is stale",
                 ));
             }
-            if !matches!(target.status.as_str(), "queued" | "waiting")
+            // Claim increments version, so the existing version check fences epochs.
+            let initializing = target.status == "running"
+                && transaction.query_row(
+                    "SELECT COALESCE(wait_reason='runtime_initializing',0) FROM agent_run WHERE id=?1",
+                    [&target.agent_run_id],
+                    |row| row.get::<_, bool>(0),
+                )?
+                && crate::run_continuation::can_replace_session_before_dispatch(
+                    transaction,
+                    &target.agent_run_id,
+                    target.execution_epoch,
+                )?;
+            if (!matches!(target.status.as_str(), "queued" | "waiting") && !initializing)
                 || target.cancel_requested_at.is_some()
             {
                 return Ok(rejected(
@@ -4104,6 +4116,7 @@ impl ExecutionRuntimeService {
                   AND runtime_rebind_count = 0
                   AND (
                     status = 'queued'
+                    OR (status = 'running' AND wait_reason = 'runtime_initializing')
                     OR (
                       status = 'waiting'
                       AND wait_reason = 'runtime_recovery'

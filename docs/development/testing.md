@@ -261,7 +261,13 @@ Adapter 的关闭通道拒绝仍由既有 active-input／Claude control owners �
 使用现有 Fake Host 控制 Fleet 生命周期；不宣称是真实 CLI 升级验证。Command 原冷启动更新／缺失程序、
 安装禁用与删除反例保留；配置失效继续由 `runtime_configuration_writes_preserve_startups_and_retire_changed_command_hosts` 拥有。
 最小命令：`cargo test -p rovai-core --features extended-tests,slow-tests --lib launch_version_uses_the_frozen_program`。
-其他驻留 Runtime 的检查位置迁移未纳入本次局部改动；其冻结身份与进程获取先后关系仍保持原实现。
+同一 owner 现验证驻留 Adapter 的调度不读程序、冷启动补齐版本／指纹、实际 Host 身份在初始化阶段进入本轮，
+离开初始化阶段后不可改写，并覆盖 OpenCode 首次确定 V2 后仍以原 Binding ID 绑定当前程序证据。
+ZCode 原 native layers owner 覆盖不读取安装包仍可形成 warm 兼容摘要、用户 Provider 配置变化仍生效；
+原 bundle-layout owner 继续验证 cold 所需资源。Codex 的 `run_local_changes_reuse_codex_host_and_host_change_reaps_old_writer` 与
+ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 owner 增加磁盘替换：warm 不调用
+冷启动工厂、沿用原进程身份，配置改变或 Host 退出后的 cold 仍调用准备／拒绝路径。兼容摘要与 Pi 现有 owner
+验证程序版本不再构成复用门槛；不新增真实模型调用或跨平台矩阵。
 
 ### 新增独立测试
 

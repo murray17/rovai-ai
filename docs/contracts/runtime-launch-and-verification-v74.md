@@ -68,9 +68,16 @@ Owner 设置入口仍返回损坏项的版本与明确错误，不能将默认�
 ## 冷启动刷新的失效范围
 
 为本次启动刷新程序身份时，不再调用整类 Adapter 失效，不主动停止或标记退役同类型的其他健康 Host。
-继续由 Fleet 的精确归属、配置兼容性与健康判断决定复用；用户显式禁用／删除安装及必要配置变更的
-原有失效路径保持。Command 的磁盘检查仍只在 Fleet 实际创建进程的分支发生。
-本次刷新不改写已经执行的其他 Run 的冻结身份，不新增驻留能力或自动重跑。
+Codex、Pi 与已有驻留复用的 ACP Adapter 由 Fleet 实际 acquire 决定复用；只有其创建进程分支才检查
+磁盘程序、刷新身份及读取必要版本。健康 Host 保留启动时的程序身份，磁盘升级本身不参与 Host 兼容摘要；
+安装、账号、配置、工作区、MCP 与 Native Binding 的原有兼容约束保持，不能用缓存记录或历史 Ready 代替 acquire。
+ZCode 的 warm 摘要只读取用户配置；随程序发布的安装包与内置 Provider 数据归冷启动文件检查。
+
+实际取得 Host 后，复用现有 Runtime rebind 在 `runtime_initializing` 且尚未 dispatch 输入的边界一次确定
+本轮程序证据。原 version 校验隔离旧 epoch，既有输入提交检查阻止改写执行中的 Run；不新增状态或持久表。
+用户选择的模型、权限及账号不变，不借程序刷新切换 Native Session。停止、安装禁用／删除及必要配置变更
+继续使用原失效路径。Claude、Antigravity，以及完成后关闭 Host 的 Kiro、Cursor、Hermes 保留原启动检查；
+不为它们新增驻留能力。
 
 ## Claude 结果与局部问卷拒绝
 

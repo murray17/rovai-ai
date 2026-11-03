@@ -356,17 +356,11 @@ pub(crate) fn runtime_compatibility_digest(
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
-    let executable = Path::new(&frozen_runtime.executable_path)
-        .canonicalize()
-        .context("failed to resolve qualified Pi executable")?;
     canonical_json_digest(&json!({
         "schemaVersion": 4,
         "adapterKind": AdapterKind::Pi,
         "protocolVersion": PI_PROTOCOL_VERSION,
         "executionRoot": cwd,
-        "executablePath": executable,
-        "reportedVersion": frozen_runtime.reported_version,
-        "executableFingerprint": frozen_runtime.executable_fingerprint,
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "managedExtensionVersion": PI_HOST_EXTENSION_VERSION,
         "managedExtensionDigest": format!("{:x}", Sha256::digest(include_str!("pi/managed-host.ts").as_bytes())),

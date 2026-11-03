@@ -300,6 +300,7 @@ pub(crate) struct PiHost {
     streaming: AtomicBool,
     retire_after_steer: AtomicBool,
     sequence: AtomicU64,
+    launch_runtime: std::sync::OnceLock<FrozenAgentRuntimeConfig>,
     executable_path: PathBuf,
     builtin_tools: Option<BuiltinToolProcessConfig>,
     config_root: PathBuf,
@@ -572,6 +573,7 @@ impl PiHost {
             streaming: AtomicBool::new(false),
             retire_after_steer: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
+            launch_runtime: std::sync::OnceLock::new(),
             executable_path: launch.executable.to_path_buf(),
             builtin_tools: launch.builtin_tools.clone(),
             config_root,
@@ -1348,6 +1350,13 @@ pub struct PiRuntime {
 }
 
 impl PiRuntime {
+    pub fn launch_runtime(&self) -> &FrozenAgentRuntimeConfig {
+        self.host
+            .launch_runtime
+            .get()
+            .expect("Fleet Host has its launch identity")
+    }
+
     pub(crate) fn redact_output(&self, value: &Value) -> Value {
         self.host
             .credential_redactor
@@ -1742,10 +1751,15 @@ impl PiRpcRuntimeAdapter {
         create_private_directory(&self.private_runtime_dir)
     }
 
-    pub async fn ensure_agent_run_runtime(
+    pub async fn ensure_agent_run_runtime<F, Fut>(
         &self,
         request: PiAgentRunRuntimeRequest<'_>,
-    ) -> Result<Arc<PiRuntime>> {
+        prepare_cold: F,
+    ) -> Result<Arc<PiRuntime>>
+    where
+        F: FnOnce(FrozenAgentRuntimeConfig) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<FrozenAgentRuntimeConfig>> + Send + 'static,
+    {
         if request.frozen_runtime.adapter_kind != AdapterKind::Pi {
             bail!("Pi Runtime received a non-Pi AgentRun");
         }
@@ -1810,13 +1824,12 @@ impl PiRpcRuntimeAdapter {
         };
         let locator_root =
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
-        let spawn_executable = PathBuf::from(&request.frozen_runtime.executable_path);
+        let spawn_runtime = request.frozen_runtime.clone();
         let spawn_cwd = request.cwd.to_path_buf();
         let spawn_private_runtime_dir = self.private_runtime_dir.clone();
         let spawn_seed = seed.clone();
         let spawn_incoming = self.incoming.clone();
         let spawn_builtin_tool_factory = request.builtin_tool_factory.clone();
-        let spawn_environment = request.frozen_runtime.environment.clone();
         let spawn_environment_source = rovai_core::member_environment::launch_source();
         let lease = self
             .fleet
@@ -1833,9 +1846,11 @@ impl PiRpcRuntimeAdapter {
                     ),
                 },
                 move || async move {
+                    let spawn_runtime = prepare_cold(spawn_runtime).await?;
+                    let spawn_executable = PathBuf::from(&spawn_runtime.executable_path);
                     let spawn_environment = rovai_core::member_environment::resolve_for_launch(
                         spawn_environment_source,
-                        spawn_environment,
+                        spawn_runtime.environment.clone(),
                     )
                     .await?;
                     let host = PiHost::spawn(PiHostLaunch {
@@ -1850,6 +1865,7 @@ impl PiRpcRuntimeAdapter {
                         builtin_tools: Some(spawn_builtin_tool_factory.create()?),
                     })
                     .await?;
+                    let _ = host.launch_runtime.set(spawn_runtime);
                     Ok(RuntimeProcessHost::Pi(host))
                 },
             )

@@ -40,6 +40,13 @@ fn provider_runtime_paths(executable: &Path) -> Result<Option<ProviderRuntimePat
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => bail!("ZCode bundled Provider Config is unreadable"),
     };
+    Ok(Some(ProviderRuntimePaths {
+        builtin,
+        personal: personal_provider_path()?,
+    }))
+}
+
+fn personal_provider_path() -> Result<PathBuf> {
     let home = crate::runtime_discovery::runtime_home_directory(
         crate::agent_profile::AdapterKind::ZcodeApp,
     )
@@ -51,10 +58,7 @@ fn provider_runtime_paths(executable: &Path) -> Result<Option<ProviderRuntimePat
     .filter(|value| !value.is_empty())
     .map(PathBuf::from)
     .unwrap_or(home);
-    Ok(Some(ProviderRuntimePaths {
-        builtin,
-        personal: base.join(".zcode/v2/provider_config.json"),
-    }))
+    Ok(base.join(".zcode/v2/provider_config.json"))
 }
 
 pub fn is_bundle_executable(path: &Path) -> bool {
@@ -316,6 +320,18 @@ pub struct NativeConfig {
 impl NativeConfig {
     pub fn protocol(&self) -> NativeProtocol {
         self.protocol
+    }
+
+    /// User configuration can change a warm Host; bundled program data is
+    /// checked only by cold launch and remains part of its program identity.
+    pub(crate) fn host_configuration_digest(cwd: &Path) -> Result<String> {
+        let personal = personal_provider_path()?;
+        crate::command::canonical_json_digest(&json!({
+            "legacy": Self::load(cwd)?.digest,
+            "personal": read_native_configuration(&personal)?,
+            "personalPath": personal,
+            "bridge": BRIDGE_REVISION,
+        }))
     }
 
     pub fn load_for_executable(cwd: &Path, executable: &Path) -> Result<Self> {
@@ -1114,6 +1130,31 @@ mod tests {
                 .to_string(),
         )
         .unwrap();
+        let environment = crate::member_environment::LaunchEnvironment {
+            values: Some(std::collections::BTreeMap::from([
+                (
+                    (if cfg!(windows) { "USERPROFILE" } else { "HOME" }).into(),
+                    home.to_string_lossy().into_owned(),
+                ),
+                (
+                    "ZCODE_DATA_BASE_DIR".into(),
+                    home.to_string_lossy().into_owned(),
+                ),
+            ])),
+            overlay: None,
+        };
+        tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(
+            crate::runtime_discovery::with_launch_environment(Some(environment), async {
+                // Warm compatibility needs user configuration, even with no App installed.
+                let before = NativeConfig::host_configuration_digest(&cwd).unwrap();
+                let personal = home.join(".zcode/v2/provider_config.json");
+                fs::create_dir_all(personal.parent().unwrap()).unwrap();
+                fs::write(&personal, r#"{"config":{"defaultModelSelection":{"providerId":"test","modelId":"changed"}}}"#).unwrap();
+                assert_ne!(NativeConfig::host_configuration_digest(&cwd).unwrap(), before);
+                fs::remove_file(personal).unwrap();
+                assert_eq!(NativeConfig::host_configuration_digest(&cwd).unwrap(), before);
+            }),
+        );
         let native = NativeConfig::load_layers(&cwd, &home, &Default::default()).unwrap();
         let model = native.runtime_model(None).unwrap();
         assert_eq!(model["provider"]["apiKey"]["value"], "PRIVATE_CANARY");

@@ -15848,7 +15848,11 @@ impl Core {
                         proposed_binding_id: Some(credential.native_binding_id.clone()),
                         adapter_installation_id: credential.adapter_installation_id.clone(),
                         native_session_id: native_session_id.to_string(),
-                        binding_compatibility_digest: credential
+                        // The acquired Host may have completed program/version
+                        // selection after this credential was prepared. Keep its
+                        // binding ID and previous identity; use this Run's final target.
+                        binding_compatibility_digest: execution
+                            .runtime
                             .binding_compatibility_digest
                             .clone(),
                     },
@@ -16176,9 +16180,9 @@ impl Core {
                 effective_version: None,
             });
         }
-        // Command's process preparation runs only inside Fleet's spawn closure.
-        // Admission above still honors platform policy and disabled/deleted installations.
-        if runtime.adapter_kind == AdapterKind::CommandCodeCli {
+        // Resident adapters select the actual program inside Fleet's spawn closure.
+        // Admission still honors platform policy and disabled/deleted installations.
+        if runtime.adapter_kind.reuses_process() {
             return Ok((runtime, candidate.version));
         }
         match self
@@ -16231,28 +16235,36 @@ impl Core {
             .await
     }
 
-    async fn prepare_acp_cold_runtime(
+    async fn prepare_cold_runtime(
         &self,
         runtime: FrozenAgentRuntimeConfig,
         workspace: &AgentRunWorkspace,
     ) -> std::result::Result<FrozenAgentRuntimeConfig, RuntimeDispatchFailure> {
-        if runtime.adapter_kind != AdapterKind::CommandCodeCli {
+        if !runtime.adapter_kind.reuses_process() {
             return Ok(runtime);
         }
         // Keep the Run's logical choices; select current installation evidence
         // only when Fleet actually needs a new process. No Run/Binding rotation.
-        let runtime = AgentProfileService::default()
+        let rebound = AgentProfileService::default()
             .resolve_rebound_runtime(&*self.database.lock().await, &runtime)
             .map_err(|error| RuntimeDispatchFailure {
                 code: "runtime_configuration_invalid".to_string(),
                 error,
                 effective_version: None,
-            })?
-            .map_err(|blocker| RuntimeDispatchFailure {
-                code: blocker.code,
-                error: anyhow::anyhow!("{}", blocker.payload),
-                effective_version: None,
             })?;
+        let runtime = match rebound {
+            Ok(runtime) => runtime,
+            Err(blocker) if runtime_blocker_is_refreshable(&blocker.code) => {
+                return self.refresh_runtime_for_launch(runtime, workspace).await;
+            }
+            Err(blocker) => {
+                return Err(RuntimeDispatchFailure {
+                    code: blocker.code,
+                    error: anyhow::anyhow!("{}", blocker.payload),
+                    effective_version: None,
+                });
+            }
+        };
         match self
             .inspect_runtime_integrity(&runtime)
             .await
@@ -16261,11 +16273,83 @@ impl Core {
                 error,
                 effective_version: None,
             })? {
-            RuntimeIntegrityPreflight::Verified => self.prepare_runtime_identity(runtime).await,
+            RuntimeIntegrityPreflight::Verified => {
+                let runtime = self.prepare_runtime_identity(runtime).await?;
+                acp::freeze_native_session_compatibility(runtime, workspace).map_err(|error| {
+                    RuntimeDispatchFailure {
+                        code: "runtime_configuration_invalid".into(),
+                        error,
+                        effective_version: None,
+                    }
+                })
+            }
             RuntimeIntegrityPreflight::DriftDetected(_) => {
                 self.refresh_runtime_for_launch(runtime, workspace).await
             }
         }
+    }
+
+    // Finalize program evidence from the Host actually acquired. This is still
+    // initialization: no user input has been dispatched, and logical choices stay frozen.
+    async fn bind_acquired_runtime(
+        &self,
+        execution: &AgentRunExecution,
+        launched: &FrozenAgentRuntimeConfig,
+    ) -> Result<AgentRunExecution> {
+        if !execution.runtime.adapter_kind.reuses_process() {
+            return Ok(execution.clone());
+        }
+        let mut runtime = execution.runtime.clone();
+        anyhow::ensure!(
+            runtime.adapter_kind == launched.adapter_kind
+                && runtime.installation_id == launched.installation_id
+                && runtime.auth_scope == launched.auth_scope,
+            "Acquired Host does not belong to the selected Runtime"
+        );
+        runtime.executable_path = launched.executable_path.clone();
+        runtime.executable_fingerprint = launched.executable_fingerprint.clone();
+        runtime.reported_version = launched.reported_version.clone();
+        runtime.installation_generation = launched.installation_generation;
+        runtime.search_environment_generation = launched.search_environment_generation;
+        runtime.protocol_version = launched.protocol_version.clone();
+        runtime.capabilities = launched.capabilities.clone();
+        runtime = acp::freeze_native_session_compatibility(runtime, &execution.workspace)?;
+        runtime.refresh_config_digest()?;
+        if runtime == execution.runtime {
+            return Ok(execution.clone());
+        }
+        let mut database = self.database.lock().await;
+        let rebound = ExecutionRuntimeService::default().rebind_agent_run_runtime(
+            &mut database,
+            &CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "agent-run-scheduler".into(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: RebindAgentRunRuntimeCommand {
+                    agent_run_id: execution.agent_run_id.clone(),
+                    expected_version: execution.version,
+                    drift_reason: "runtime_host_acquired".into(),
+                    effective_runtime: runtime,
+                },
+            },
+        )?;
+        anyhow::ensure!(
+            rebound.result.status == CommandResultStatus::Applied,
+            "{}: {}",
+            rebound.result.code,
+            rebound.result.payload
+        );
+        ExecutionRuntimeService::default()
+            .load_agent_run_execution(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )?
+            .context("AgentRun changed during Runtime initialization")
     }
 
     async fn refresh_runtime_for_launch(
@@ -16737,18 +16821,33 @@ impl Core {
         launch_permit.check_cancelled()?;
         let runtime = self
             .codex_cli
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                agent_run_id: &execution.agent_run_id,
-                execution_epoch: execution.execution_epoch,
-                camp_id: &execution.camp_id,
-                agent_id: &execution.agent_id,
-                native_binding_id: &initial_binding.native_binding_id,
-                cwd: &execution_root,
-                frozen_runtime: &execution.runtime,
-                runtime_compatibility_digest: &runtime_compatibility_digest,
-                builtin_tool_factory: &builtin_tool_factory,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    camp_id: &execution.camp_id,
+                    agent_id: &execution.agent_id,
+                    native_binding_id: &initial_binding.native_binding_id,
+                    cwd: &execution_root,
+                    frozen_runtime: &execution.runtime,
+                    runtime_compatibility_digest: &runtime_compatibility_digest,
+                    builtin_tool_factory: &builtin_tool_factory,
+                },
+                {
+                    let core = self.clone();
+                    let workspace = execution.workspace.clone();
+                    move |runtime| async move {
+                        core.prepare_cold_runtime(runtime, &workspace)
+                            .await
+                            .map_err(|failure| failure.error.context(failure.code))
+                    }
+                },
+            )
             .await?;
+        let acquired_execution = self
+            .bind_acquired_runtime(execution, runtime.launch_runtime())
+            .await?;
+        let execution = &acquired_execution;
         if !mcp_projection.servers.is_empty() {
             let native_mcp_server_names = runtime
                 .discover_native_mcp_server_names(&execution_root)
@@ -17020,7 +17119,10 @@ impl Core {
         Ok(())
     }
 
-    async fn launch_pi_agent_run(&self, launch: PreparedPiRuntimeLaunch<'_>) -> Result<()> {
+    async fn launch_pi_agent_run(
+        self: &Arc<Self>,
+        launch: PreparedPiRuntimeLaunch<'_>,
+    ) -> Result<()> {
         let PreparedPiRuntimeLaunch {
             execution,
             resume_disposition,
@@ -17078,22 +17180,33 @@ impl Core {
         launch_permit.check_cancelled()?;
         let runtime_result = self
             .pi
-            .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
-                agent_run_id: &execution.agent_run_id,
-                execution_epoch: execution.execution_epoch,
-                camp_id: &execution.camp_id,
-                agent_id: &execution.agent_id,
-                cwd: &execution_root,
-                frozen_runtime: &execution.runtime,
-                runtime_compatibility_digest: &runtime_compatibility_digest,
-                native_session_id: binding_credential.native_session_id.as_deref(),
-                delivery_id: &delivery_id,
-                native_prompt_id: &native_prompt_id,
-                native_binding_id: &binding_credential.native_binding_id,
-                native_binding_generation: binding_credential.native_binding_generation,
-                bootstrap: &session_bootstrap,
-                builtin_tool_factory: &builtin_tool_factory,
-            })
+            .ensure_agent_run_runtime(
+                PiAgentRunRuntimeRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    camp_id: &execution.camp_id,
+                    agent_id: &execution.agent_id,
+                    cwd: &execution_root,
+                    frozen_runtime: &execution.runtime,
+                    runtime_compatibility_digest: &runtime_compatibility_digest,
+                    native_session_id: binding_credential.native_session_id.as_deref(),
+                    delivery_id: &delivery_id,
+                    native_prompt_id: &native_prompt_id,
+                    native_binding_id: &binding_credential.native_binding_id,
+                    native_binding_generation: binding_credential.native_binding_generation,
+                    bootstrap: &session_bootstrap,
+                    builtin_tool_factory: &builtin_tool_factory,
+                },
+                {
+                    let core = self.clone();
+                    let workspace = execution.workspace.clone();
+                    move |runtime| async move {
+                        core.prepare_cold_runtime(runtime, &workspace)
+                            .await
+                            .map_err(|failure| failure.error.context(failure.code))
+                    }
+                },
+            )
             .await;
         let runtime = match runtime_result {
             Ok(runtime) => runtime,
@@ -17148,7 +17261,8 @@ impl Core {
                 launch_permit.check_cancelled()?;
                 let replacement = self
                     .pi
-                    .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
+                    .ensure_agent_run_runtime(
+                        PiAgentRunRuntimeRequest {
                         agent_run_id: &execution.agent_run_id,
                         execution_epoch: execution.execution_epoch,
                         camp_id: &execution.camp_id,
@@ -17163,7 +17277,16 @@ impl Core {
                         native_binding_generation: replacement_binding.native_binding_generation,
                         bootstrap: &replacement_bootstrap,
                         builtin_tool_factory: &builtin_tool_factory,
-                    })
+                        },
+                        {
+                            let core = self.clone();
+                            let workspace = execution.workspace.clone();
+                            move |runtime| async move {
+                                core.prepare_cold_runtime(runtime, &workspace)
+                                    .await.map_err(|failure| failure.error.context(failure.code))
+                            }
+                        },
+                    )
                     .await
                     .with_context(|| {
                         format!(
@@ -17177,6 +17300,10 @@ impl Core {
             }
             Err(error) => return Err(error).context("Pi Native Session activation failed closed"),
         };
+        let acquired_execution = self
+            .bind_acquired_runtime(execution, runtime.launch_runtime())
+            .await?;
+        let execution = &acquired_execution;
         let active_builtin_tools = runtime
             .builtin_tool_process_config()
             .context("Pi Runtime has no Built-in Tool process context")?
@@ -18749,7 +18876,7 @@ impl Core {
                     let core = self.clone();
                     let workspace = execution.workspace.clone();
                     move |runtime| async move {
-                        core.prepare_acp_cold_runtime(runtime, &workspace)
+                        core.prepare_cold_runtime(runtime, &workspace)
                             .await
                             .map_err(|failure| failure.error.context(failure.code))
                     }
@@ -18827,7 +18954,7 @@ impl Core {
                                 let core = self.clone();
                                 let workspace = execution.workspace.clone();
                                 move |runtime| async move {
-                                    core.prepare_acp_cold_runtime(runtime, &workspace)
+                                    core.prepare_cold_runtime(runtime, &workspace)
                                         .await
                                         .map_err(|failure| failure.error.context(failure.code))
                                 }
@@ -18956,7 +19083,7 @@ impl Core {
                             let core = self.clone();
                             let workspace = execution.workspace.clone();
                             move |runtime| async move {
-                                core.prepare_acp_cold_runtime(runtime, &workspace)
+                                core.prepare_cold_runtime(runtime, &workspace)
                                     .await
                                     .map_err(|failure| failure.error.context(failure.code))
                             }
@@ -18993,6 +19120,10 @@ impl Core {
             }
             Err(error) => return Err(error),
         };
+        let acquired_execution = self
+            .bind_acquired_runtime(execution, runtime.launch_runtime())
+            .await?;
+        let execution = &acquired_execution;
         // Freeze Bootstrap against the prepared Binding before recording the
         // native Session ID. Once bound, a missing evidence row is a continuity
         // violation and ContextService must reject materialization.
@@ -29192,17 +29323,27 @@ mod tests {
         // Follow the prepared identity through the production rebind and claim
         // seam. A version-only update used to leave its digest stale and reject
         // ordinary Pi/Qwen runs before a Runtime could even start.
-        for adapter in [AdapterKind::Pi, AdapterKind::QwenCode] {
-            for reported in [Some("1.1.0"), None] {
+        for adapter in [
+            AdapterKind::Pi,
+            AdapterKind::QwenCode,
+            AdapterKind::OpencodeCli,
+        ] {
+            let version = if adapter == AdapterKind::OpencodeCli {
+                "2.0.26"
+            } else {
+                "1.1.0"
+            };
+            for reported in [Some(version), None] {
+                if adapter == AdapterKind::OpencodeCli && reported.is_none() {
+                    continue;
+                }
                 core.runtime_discovery.write().await.clear();
                 let executable = root.join(format!("{}-{}", adapter.as_str(), reported.is_some()));
                 write_runtime_resolution_executable(
                     &executable,
-                    if reported.is_some() {
-                        "#!/bin/sh\nprintf '1.1.0\\n'\n"
-                    } else {
-                        "#!/bin/sh\nexit 1\n"
-                    },
+                    &reported
+                        .map(|version| format!("#!/bin/sh\nprintf '{version}\\n'\n"))
+                        .unwrap_or_else(|| "#!/bin/sh\nexit 1\n".into()),
                 );
                 let camp_id = {
                     let mut database = core.database.lock().await;
@@ -29373,12 +29514,18 @@ mod tests {
                 } else {
                     Vec::new()
                 };
-                let (prepared, version) = core
+                let (admitted, version) = core
                     .prepare_runtime_for_dispatch(
                         &candidate,
-                        frozen,
+                        frozen.clone(),
                         &candidate.execution_workspace(),
                     )
+                    .await
+                    .map_err(|failure| failure.error)
+                    .unwrap();
+                assert_eq!(admitted, frozen, "dispatch does not inspect the program");
+                let prepared = core
+                    .prepare_cold_runtime(admitted, &candidate.execution_workspace())
                     .await
                     .map_err(|failure| failure.error)
                     .unwrap();
@@ -29471,7 +29618,7 @@ mod tests {
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: ClaimAgentRunCommand {
-                                agent_run_id: candidate.agent_run_id,
+                                agent_run_id: candidate.agent_run_id.clone(),
                                 expected_version: version,
                                 lease_owner: "launch-version-test".into(),
                                 lease_seconds: 60,
@@ -29482,6 +29629,78 @@ mod tests {
                     )
                     .unwrap();
                 assert_eq!(claimed.result.code, "agent_run.claimed", "{claimed:?}");
+                let epoch = claimed.result.payload["executionEpoch"].as_i64().unwrap();
+                let execution = ExecutionRuntimeService::default()
+                    .load_agent_run_execution(&database, &candidate.agent_run_id, epoch)
+                    .unwrap()
+                    .unwrap();
+                let credential = TeamToolService::default()
+                    .prepare_binding_credential(
+                        &mut database,
+                        &execution.agent_run_id,
+                        epoch,
+                        false,
+                    )
+                    .unwrap();
+                drop(database);
+                let bound = core
+                    .bind_acquired_runtime(&execution, &prepared)
+                    .await
+                    .unwrap();
+                assert_eq!(bound.runtime.reported_version, prepared.reported_version);
+                assert_eq!(
+                    bound.runtime.executable_fingerprint,
+                    prepared.executable_fingerprint
+                );
+                if adapter == AdapterKind::OpencodeCli {
+                    assert_ne!(
+                        credential.binding_compatibility_digest,
+                        bound.runtime.binding_compatibility_digest
+                    );
+                }
+                core.bind_prepared_native_session(
+                    &bound,
+                    &credential,
+                    &format!("fixture-session-{}", bound.agent_run_id),
+                )
+                .await
+                .unwrap();
+                let actual_binding: String = core
+                    .database
+                    .lock()
+                    .await
+                    .connection()
+                    .query_row(
+                        "SELECT native_binding_id FROM conversation WHERE id=?1",
+                        [&bound.conversation_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(actual_binding, credential.native_binding_id);
+                // Initialization is the only point that may select Host evidence.
+                if bound.runtime != execution.runtime {
+                    core.database
+                        .lock()
+                        .await
+                        .connection()
+                        .execute(
+                            "UPDATE agent_run SET wait_reason=NULL WHERE id=?1",
+                            [&bound.agent_run_id],
+                        )
+                        .unwrap();
+                    let mut other_program = prepared.clone();
+                    other_program.executable_fingerprint = "sha256:later-program".into();
+                    let error = core
+                        .bind_acquired_runtime(&bound, &other_program)
+                        .await
+                        .unwrap_err();
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("agent_run.runtime_rebind_fenced")
+                    );
+                }
+
                 // The fixture creates protected attachment views. Restore only
                 // its known directories so the final test-root cleanup can run.
                 let camps = core.attachment_views.root().join("camps");
@@ -29545,7 +29764,7 @@ mod tests {
         };
         let workspace = AgentRunWorkspace::runtime_managed_path(root.display().to_string());
         assert_eq!(
-            core.prepare_acp_cold_runtime(frozen.clone(), &workspace)
+            core.prepare_cold_runtime(frozen.clone(), &workspace)
                 .await
                 .map_err(|failure| failure.error)
                 .unwrap()
@@ -29554,7 +29773,7 @@ mod tests {
         );
         write_runtime_resolution_executable(&executable, "#!/bin/sh\nprintf '1.89.0\\n'\n");
         let refreshed = core
-            .prepare_acp_cold_runtime(frozen.clone(), &workspace)
+            .prepare_cold_runtime(frozen.clone(), &workspace)
             .await
             .map_err(|failure| failure.error)
             .unwrap();
@@ -29587,7 +29806,7 @@ mod tests {
             );
         }
         let failure = core
-            .prepare_acp_cold_runtime(frozen.clone(), &workspace)
+            .prepare_cold_runtime(frozen.clone(), &workspace)
             .await
             .err()
             .expect("cold launch must reject the missing entry");
@@ -36462,17 +36681,20 @@ for line in sys.stdin:
             let tools = BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &root);
             let runtime = core
                 .codex_cli
-                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                    agent_run_id: &run_id,
-                    execution_epoch: epoch,
-                    camp_id: &camp_id,
-                    agent_id: &execution.agent_id,
-                    native_binding_id: "fixture-binding",
-                    cwd: &workspace,
-                    frozen_runtime: &frozen,
-                    runtime_compatibility_digest: "fixture",
-                    builtin_tool_factory: &tools,
-                })
+                .ensure_agent_run_runtime(
+                    CodexAgentRunRuntimeRequest {
+                        agent_run_id: &run_id,
+                        execution_epoch: epoch,
+                        camp_id: &camp_id,
+                        agent_id: &execution.agent_id,
+                        native_binding_id: "fixture-binding",
+                        cwd: &workspace,
+                        frozen_runtime: &frozen,
+                        runtime_compatibility_digest: "fixture",
+                        builtin_tool_factory: &tools,
+                    },
+                    |runtime| async move { Ok(runtime) },
+                )
                 .await
                 .unwrap();
             runtime
@@ -36573,17 +36795,20 @@ for line in sys.stdin:
             }
             let next = core
                 .codex_cli
-                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                    agent_run_id: "successor",
-                    execution_epoch: 1,
-                    camp_id: &camp_id,
-                    agent_id: &execution.agent_id,
-                    native_binding_id: "fixture-binding",
-                    cwd: &workspace,
-                    frozen_runtime: &frozen,
-                    runtime_compatibility_digest: "fixture",
-                    builtin_tool_factory: &tools,
-                })
+                .ensure_agent_run_runtime(
+                    CodexAgentRunRuntimeRequest {
+                        agent_run_id: "successor",
+                        execution_epoch: 1,
+                        camp_id: &camp_id,
+                        agent_id: &execution.agent_id,
+                        native_binding_id: "fixture-binding",
+                        cwd: &workspace,
+                        frozen_runtime: &frozen,
+                        runtime_compatibility_digest: "fixture",
+                        builtin_tool_factory: &tools,
+                    },
+                    |runtime| async move { Ok(runtime) },
+                )
                 .await
                 .unwrap();
             assert_eq!(next.host_instance_id() == host_id, reusable);
@@ -37036,17 +37261,20 @@ for line in sys.stdin:
             tokio::time::sleep(Duration::from_millis(1700)).await;
             let runtime = core
                 .codex_cli
-                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                    agent_run_id: "late-host",
-                    execution_epoch: 1,
-                    camp_id: "cleanup-camp",
-                    agent_id: "cleanup-agent",
-                    native_binding_id: "fixture-binding",
-                    cwd: &root,
-                    frozen_runtime: &runtime_config,
-                    runtime_compatibility_digest: "cleanup-compatible",
-                    builtin_tool_factory: &builtin_tools,
-                })
+                .ensure_agent_run_runtime(
+                    CodexAgentRunRuntimeRequest {
+                        agent_run_id: "late-host",
+                        execution_epoch: 1,
+                        camp_id: "cleanup-camp",
+                        agent_id: "cleanup-agent",
+                        native_binding_id: "fixture-binding",
+                        cwd: &root,
+                        frozen_runtime: &runtime_config,
+                        runtime_compatibility_digest: "cleanup-compatible",
+                        builtin_tool_factory: &builtin_tools,
+                    },
+                    |runtime| async move { Ok(runtime) },
+                )
                 .await
                 .unwrap();
             drop(late_permit);
