@@ -1030,9 +1030,9 @@ impl ClaudeCodeCliRuntimeAdapter {
         let mut stdout = None;
         let mut stderr = None;
         let mut output_deadline = None;
-        // Only a native-completed session may be terminated for exit cleanup.
-        // Its resulting signal status must not replace the native result.
-        let mut terminated_after_completion = false;
+        // Entering cleanup after native completion is separate from cleanup success.
+        // A partial cleanup error can still follow a delivered termination signal.
+        let mut cleanup_after_completion = false;
         while status.is_none() || stdout.is_none() || stderr.is_none() {
             let deadline = output_deadline;
             let end_deadline = exit_deadline;
@@ -1095,7 +1095,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                 _ = async move { tokio::time::sleep_until(deadline.expect("output deadline is set")).await }, if deadline.is_some() => {
                     if stdout.is_some()
                         && (status.is_some_and(|status: std::process::ExitStatus| status.success())
-                            || terminated_after_completion)
+                            || cleanup_after_completion)
                     {
                         // stdout reached EOF and retains the last result. A stuck
                         // stderr/cleanup handle cannot replace that business outcome.
@@ -1108,9 +1108,12 @@ impl ClaudeCodeCliRuntimeAdapter {
                     if !protocol.native_work_ended() {
                         anyhow::bail!("Claude Code process did not exit after output ended");
                     }
-                    match child.force_terminate_tree() {
-                        Ok(()) => terminated_after_completion = true,
-                        Err(error) => eprintln!("Claude Code completed process cleanup request failed: {error}"),
+                    cleanup_after_completion = true;
+                    let termination = child.force_terminate_tree();
+                    #[cfg(all(test, feature = "extended-tests"))]
+                    let termination = tests::completion_cleanup_result(&request.agent_run_id, termination);
+                    if let Err(error) = termination {
+                        eprintln!("Claude Code completed process cleanup request failed: {error}");
                     }
                     exit_deadline = None;
                     output_deadline = Some(Instant::now() + CLAUDE_CLEANUP_TIMEOUT);
@@ -1125,7 +1128,7 @@ impl ClaudeCodeCliRuntimeAdapter {
         if let Some(output) = stdout.final_result.as_mut() {
             output.result = protocol.redact_text(&output.result);
         }
-        if !terminated_after_completion && !status.is_some_and(|status| status.success()) {
+        if !cleanup_after_completion && !status.is_some_and(|status| status.success()) {
             let status = status.context("Claude Code root status was not collected")?;
             let stderr = stderr.context("Claude Code stderr was not collected")?;
             let raw_stderr = protocol.redact_text(&String::from_utf8_lossy(&stderr.bytes));
@@ -2878,6 +2881,25 @@ mod tests {
     use serde_json::json;
     use tokio::io::AsyncWriteExt;
 
+    // Scoped to one fixture Run, after the real process termination request.
+    static CLEANUP_ERROR_AFTER_SIGNAL: StdMutex<Option<String>> = StdMutex::new(None);
+
+    pub(super) fn completion_cleanup_result(
+        run_id: &str,
+        result: std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let mut fault = CLEANUP_ERROR_AFTER_SIGNAL.lock().unwrap();
+        if fault.as_deref() == Some(run_id) {
+            fault.take();
+            return result.and_then(|()| {
+                Err(std::io::Error::other(
+                    "injected error after termination signal",
+                ))
+            });
+        }
+        result
+    }
+
     async fn remove_claude_fixture(root: &Path) {
         #[cfg(windows)]
         {
@@ -3302,7 +3324,11 @@ mod tests {
                 session_id,
             );
             request.session_bootstrap = Some("中文\nquoted \"text\" 100%".to_string());
+            if mode == "exit-cleanup" {
+                *CLEANUP_ERROR_AFTER_SIGNAL.lock().unwrap() = Some(request.agent_run_id.clone());
+            }
             let result = adapter.run(request).await;
+            assert!(CLEANUP_ERROR_AFTER_SIGNAL.lock().unwrap().is_none());
             if mode == "natural-failure" {
                 assert!(
                     result.is_err(),
@@ -5832,12 +5858,13 @@ mod tests {
                 .is_none()
         );
 
-        // Both write/result orders and both old watchdog branches. Real reader
-        // and writer tasks must survive the silent interval, not just a predicate.
-        for (result_first, report_running, early_ack) in [
-            (false, false, true),
-            (true, false, true),
-            (false, true, false),
+        // Both write/result orders and both old watchdog branches, plus late idle.
+        // Exercise the real reader/writer tasks, not just the completion predicate.
+        for (result_first, report_running, early_ack, late_idle) in [
+            (false, false, true, false),
+            (true, false, true, true),
+            (false, true, false, false),
+            (false, false, true, true),
         ] {
             let (events, mut observed) = mpsc::unbounded_channel();
             let (control, ready, writes) =
@@ -5902,9 +5929,9 @@ mod tests {
                     observed.recv().await.unwrap().event_type,
                     "runtime.fast.observed"
                 );
-            } else {
-                // A previously reported result cannot be paired with a late idle
-                // after the new write. No additional receipt gate is required.
+            }
+            if late_idle {
+                // Exercise idle after the new write for both result arrival orders.
                 let idle = json!({"type":"system","subtype":"session_state_changed",
                     "session_id":session,"state":"idle"});
                 stdout
@@ -5936,15 +5963,20 @@ mod tests {
                     !capture.is_finished(),
                     "silent next work must remain readable"
                 );
-                assert!(
-                    !writer.is_finished(),
-                    "old result/idle must not close new input"
-                );
+                // The late-idle case owns continued reading and final settlement;
+                // native behavior after stdin EOF needs separate live evidence.
+                if !(late_idle && !result_first) {
+                    assert!(
+                        !writer.is_finished(),
+                        "old result/idle must not close new input"
+                    );
+                }
             }
+            let later_error = late_idle && !result_first;
             for frame in [
                 json!({"type":"assistant","session_id":session,"message":{
                     "id":"second","content":[{"type":"text","text":"second done"}]}}),
-                json!({"type":"result","subtype":"success","is_error":false,
+                json!({"type":"result","subtype": if later_error { "error_during_execution" } else { "success" },"is_error":later_error,
                     "result":"second done","session_id":session}),
                 json!({"type":"system","subtype":"session_state_changed",
                     "session_id":session,"state":"idle"}),
@@ -5958,6 +5990,14 @@ mod tests {
             stdout.shutdown().await.unwrap();
             let result = capture.await.unwrap().unwrap().final_result.unwrap();
             assert_eq!(result.result, "second done");
+            assert_eq!(
+                result.is_error, later_error,
+                "a later error cannot inherit the earlier success"
+            );
+            assert_eq!(
+                validate_claude_terminal_result(&result, session, "turn", false, &[]).is_err(),
+                later_error
+            );
             assert_eq!(
                 steering.await.unwrap().is_ok(),
                 early_ack,
