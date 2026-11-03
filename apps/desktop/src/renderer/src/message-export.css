@@ -1,9 +1,7 @@
 .message-composer-selection-slot { position:relative; }
 .message-select-button { display:grid; place-items:center; width:28px; height:28px; border:0; border-radius:6px; background:transparent; color:var(--faint); cursor:pointer; }
-.message-select-button svg,.message-export-entry-button svg,.message-selection-actions svg,.message-export-dialog .primary-button svg { width:16px; height:16px; flex:none; }
+.message-select-button svg,.message-selection-actions svg,.message-export-dialog .primary-button svg { width:16px; height:16px; flex:none; }
 .message-select-button:hover { color:var(--ink); background:var(--neutral-hover); }
-.message-export-entry-button { order:-1; }
-.message-export-entry-fallback { position:absolute; top:6px; right:16px; z-index:4; }
 /* Anchor selection controls to the shared timeline width, not each bubble's width. */
 .message-export-selecting .conversation-bubble[data-message-id]:has(> .message-export-check) { position:relative; width:calc(100% - 28px); max-width:none; margin-left:28px; }
 .message-export-selecting .conversation-bubble:is(.user,.external_principal) > .message-body { justify-self:end; }
@@ -25,7 +23,8 @@
 .message-export-dialog .primary-button,.message-selection-actions .primary-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 :root .dialog-content.app-dialog.message-export-dialog { width:min(840px,calc(100vw - 32px)); display:flex; flex-direction:column; overflow:hidden; max-height:calc(100dvh - 32px); }
 .message-export-body { display:flex; flex-direction:column; gap:16px; min-height:0; overflow:auto; }
-.message-export-title { display:flex; align-items:center; gap:12px; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; font-size:13px; cursor:pointer; }
+.message-export-title { display:flex; align-items:center; gap:12px; min-width:0; max-width:100%; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; font-size:13px; cursor:pointer; }
+.message-export-title > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .message-export-title svg { color:var(--muted); flex:none; }
 .message-export-title-row input { width:100%; padding:6px 8px; border:1px solid var(--dialog-field-line); border-radius:6px; background:var(--input); color:var(--ink); font:inherit; }
 .message-export-formats { display:flex; width:max-content; max-width:100%; border:1px solid var(--line); padding:3px; border-radius:8px; gap:3px; }
@@ -35,8 +34,7 @@
 .message-export-options label { display:flex; align-items:center; gap:6px; cursor:pointer; }
 .message-export-preview { min-height:120px; overflow:auto; border:1px solid var(--line); border-radius:8px; max-height:min(470px,calc(100dvh - 340px)); background:var(--conversation-surface); }
 .message-export-document { overflow-wrap:anywhere; box-sizing:border-box; width:720px; padding:28px; background:var(--conversation-surface); color:var(--ink); font-family:inherit; font-size:13px; line-height:1.65; }
-.message-export-document h2 { font-size:18px; margin:0 0 8px; }
-.message-export-source { color:var(--muted); font-size:11px; margin:0 0 24px; }
+.message-export-document h2 { font-size:18px; margin:0 0 24px; }
 .message-export-entry { display:flex; align-items:flex-start; gap:10px; margin:0 0 24px; }
 .message-export-entry.is-user { flex-direction:row-reverse; }
 .message-export-stack { min-width:0; max-width:100%; flex:1; }

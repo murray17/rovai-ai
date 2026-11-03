@@ -10,6 +10,11 @@ export type MessageExportOptions = { avatars: boolean; authors: boolean; times: 
 export const defaultMessageExportOptions = (format: MessageExportFormat): MessageExportOptions => ({
   avatars: format !== 'markdown', authors: true, times: true, recipients: true
 })
+export function defaultMessageExportTitle(sourceTitle: string): string {
+  const characters = Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(sourceTitle.trim()), part => part.segment)
+  const source = characters.length > 40 ? characters.slice(0, 40).join('').trimEnd() + '…' : characters.join('')
+  return source ? source + ' · ' + uiAttribute('会话片段') : uiAttribute('会话片段')
+}
 export type MessageExportEntry = {
   message: ThreadMessageView; author: string; avatarRef: string | null; recipients: string[]
   markdown: string; reply: string | null; excerpt?: string; runtimeImages?: AgentRunImageView[]; avatarDataUrl?: string | null
@@ -62,8 +67,8 @@ export function exportMessageMarkdown(body: string, content: StructuredThreadMes
       + s.attachmentSummaries.map(a => '\n> ' + literalMarkdown(a.name)).join('')
   }).join(''))
 }
-export function messageExportMarkdown(title: string, source: string, entries: readonly MessageExportEntry[], options: MessageExportOptions): string {
-  return '# ' + literalMarkdown(title) + '\n\n' + literalMarkdown(source) + '\n\n' + entries.map(e => {
+export function messageExportMarkdown(title: string, entries: readonly MessageExportEntry[], options: MessageExportOptions): string {
+  return '# ' + literalMarkdown(title) + '\n\n' + entries.map(e => {
     const heading = [options.authors ? e.author : '', options.times ? e.message.createdAt : ''].filter(Boolean).join(' · ')
     const attachments = e.excerpt !== undefined ? [] : e.message.attachments.map(a => literalMarkdown(
       `${a.previewKind === 'image' ? '图片' : '附件'}：${a.displayName}（${a.mediaType ?? a.kind}${a.byteSize !== null ? `，${a.byteSize} bytes` : ''}）`))

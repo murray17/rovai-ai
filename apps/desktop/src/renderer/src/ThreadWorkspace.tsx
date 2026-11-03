@@ -1,4 +1,4 @@
-import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, ExportGlyph, useMessageExport } from './MessageExport'
+import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { exportMessageMarkdown, type MessageExportEntry } from './message-export'
 import { nativeSkillDiagnosticText } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
@@ -5173,9 +5173,6 @@ export function ThreadWorkspace({
       ...(excerpt === undefined ? {} : { excerpt }) }
   }
   const openSelectedExport = (): void => messageExport.open(messageExport.eligible.filter(m => messageExport.selected.has(m.id)).map(m => exportEntry(m)))
-  const exportEntryButton = <button type="button" className="camp-detail-entry message-export-entry-button" disabled={!messageExport.eligible.length || messageExport.selecting}
-    onClick={() => messageExport.start()} title={uiAttribute('选择消息并导出')}><ExportGlyph /><UiText zh="导出" /></button>
-
   const executionDrawer = executionDrawerProcess ? (
     <ExecutionDrawer
       key={executionDrawerProcess.agentId}
@@ -5295,7 +5292,6 @@ export function ThreadWorkspace({
       }
     }}>
     <section ref={workspaceShellRef} className={`workspace-shell camp-workspace${messageExport.selecting ? ' message-export-selecting' : ''}${replyDetail.messageId ? ' reply-detail-open' : ''}${replyFull ? ' reply-detail-full' : ''}`} style={{ '--reply-detail-width': `${replyWidth}px` } as CSSProperties} data-mobile-panel={mobile && inspectorVisible ? inspectorSurfaceTab : undefined} data-mobile-execution-maximized={mobile && mobileExecutionMaximized || undefined} aria-label={uiAttribute("会话：{0}", String(formatThreadTitle(snapshot.thread, firstRunThreadId)))}>
-      {detailEntryHost ? createPortal(exportEntryButton, detailEntryHost) : <div className="message-export-entry-fallback">{exportEntryButton}</div>}
       <MessageExportDialog key={snapshot.thread.id} threadId={snapshot.thread.id} title={formatThreadTitle(snapshot.thread, firstRunThreadId)}
         entries={messageExport.entries} renderBody={message => renderPublicMessageBody(message, 'export', true)} onClose={messageExport.close} />
       <FilePreviewWorkspace

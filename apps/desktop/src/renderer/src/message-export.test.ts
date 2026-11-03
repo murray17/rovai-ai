@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest'
 import type { ThreadMessageView } from '@contracts'
-import { defaultMessageExportOptions, exportableMessages, exportEntryShowsTime, exportFilename, exportMessageMarkdown, messageExportMarkdown, toggleExportSelection, type MessageExportEntry } from './message-export'
+import { defaultMessageExportOptions, defaultMessageExportTitle, exportableMessages, exportEntryShowsTime, exportFilename, exportMessageMarkdown, messageExportMarkdown, toggleExportSelection, type MessageExportEntry } from './message-export'
 const message = (id: string, sequence: number, extra = {}): ThreadMessageView => ({ id, sequence, authorType: 'agent', withdrawn: false, ...extra } as ThreadMessageView)
 describe('message export boundaries', () => {
   it('enables metadata in all formats, with no Markdown avatar', () => {
     for (const format of ['html', 'png', 'markdown'] as const) expect(defaultMessageExportOptions(format)).toEqual({ avatars: format !== 'markdown', authors: true, times: true, recipients: true })
+  })
+  it('shortens the generated title without splitting emoji or trimming message content', () => {
+    const source = 'a'.repeat(39) + '👩‍💻' + '完整正文'
+    const title = defaultMessageExportTitle(source)
+    expect(title).toBe('a'.repeat(39) + '👩‍💻… · 会话片段')
+    expect(defaultMessageExportTitle('短标题')).toBe('短标题 · 会话片段')
+    const entry = { message: message('a', 1, { createdAt: '2026-11-03T01:00:00Z', attachments: [] }), author: 'Alice', avatarRef: null, recipients: [], markdown: source, reply: null }
+    const text = messageExportMarkdown(title, [entry], defaultMessageExportOptions('markdown'))
+    expect(text).toContain(source)
+    expect(exportFilename(title, 'html')).toBe(title + '.html')
   })
   it('exports only published visible messages in conversation order, never withdrawn or system records', () => {
     expect(exportableMessages([message('last', 4), message('optimistic:pending', 9), message('withdrawn', 2, { withdrawn: true }), message('system', 1, { authorType: 'system' }), message('first', 3), message('mission', 5, { missionStart: {} })]).map(m => m.id)).toEqual(['first', 'last'])
@@ -22,7 +32,8 @@ describe('message export boundaries', () => {
   })
   it('excerpt exports never acquire the source message attachments, reply or recipients', () => {
     const entry = { message: message('a', 1, { createdAt: '2026-11-03T01:00:00Z', attachments: [{ displayName: 'secret-file', mediaType: 'text/plain', kind: 'file', byteSize: 32 }] }), author: 'Alice', avatarRef: null, recipients: ['Bob'], markdown: 'full body', reply: 'reply body', excerpt: 'selected <script>' }
-    const text = messageExportMarkdown('title', 'thread', [entry], defaultMessageExportOptions('markdown'))
+    const text = messageExportMarkdown('title', [entry], defaultMessageExportOptions('markdown'))
+    expect(text).toMatch(/^# title\n\n### Alice/)
     expect(text).toContain('Alice'); expect(text).toContain('2026\\-11\\-03'); expect(text).toContain('selected \\<script\\>')
     for (const absent of ['secret-file', 'full body', 'reply body', 'Bob']) expect(text).not.toContain(absent)
   })
