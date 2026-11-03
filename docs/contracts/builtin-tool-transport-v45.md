@@ -5,7 +5,7 @@ authority: builtin-tool-transport
 status: accepted
 version: 45
 source_version: v1.72
-last_updated: 2026-11-02
+last_updated: 2026-11-03
 ---
 
 # Built-in Tool Transport v45
@@ -26,3 +26,11 @@ Transport/CLI 45、capability builtin_cli.transport.v45、Agent Output 15；IPC 
 内部换行、缩进和合法字符原样保留；空字符串清空，create 省略为空，update 省略保留，null 仍拒绝。
 超限整次身份写入拒绝并保留编辑草稿；CLI/Core 配套交付，不保证旧 CLI 接受新增合法长度。
 命令、字段 shape、授权和投递语义不变，Transport/CLI 45 保持；历史冻结输入与摘要不回填。
+
+## 工作准则与成长课题容量
+
+按[已确认 R1](../versions/v1.72/model-context-change-identity-guidance-3000.md)，`workingPrinciples` 与
+`growthTopic` 各由 300 放宽至 **3,000 Unicode scalar**；create/update schema 引用各自 Core 上限常量。
+这两个字段沿用既有原始字符串 maxLength 校验，再由 Core 按 Rust trim 保存；不套用专业职责的 schema 前规范化。
+create 省略为空、update 省略保留、空串清空、null 拒绝均不变；内部格式和合法字符完整保留。
+字段、授权、幂等与所有版本轴保持，旧冻结输入不回填。CLI/Core 配套交付，旧版本可能拒绝超过 300 的新资料。

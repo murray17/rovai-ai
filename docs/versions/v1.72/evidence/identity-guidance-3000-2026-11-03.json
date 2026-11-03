@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "change": "identity-guidance-3000",
+  "revision": 1,
+  "recordedAt": "2026-11-03T11:44:46.178593+00:00",
+  "baseline": "117a9281dd2adfbb847f6630c5bea809716205af",
+  "confirmation": {
+    "sequence": 28,
+    "messageId": "92cbb97f-71be-4ee4-84f7-9fdb8da10e62"
+  },
+  "limits": {
+    "workingPrinciplesScalars": 3000,
+    "growthTopicScalars": 3000,
+    "professionalResponsibilitiesScalars": 30000,
+    "bootstrapBodyBytes": 262144,
+    "defaultExecutionPayloadBytes": 262144
+  },
+  "preserved": [
+    "Per-entry-point trim and schema validation order",
+    "Public claim and actual-byte reservation",
+    "Existing identity edit and delivery semantics",
+    "Frozen inputs, recovery, versions and storage schema"
+  ],
+  "checks": {
+    "rustWorkspace": {
+      "command": "pnpm test:rust:pr",
+      "passed": 484,
+      "failed": 0,
+      "ignored": 1,
+      "log": "rust-workspace.log"
+    },
+    "targetedRust": {
+      "feature": "slow-tests",
+      "passed": 4,
+      "failed": 0,
+      "discoveredBeforeExecution": true,
+      "owners": [
+        "starter_profile_user_edits_survive_database_reopen",
+        "bootstrap_formatter_has_fixed_three_section_and_identity_field_order",
+        "newly_bound_session_bootstraps_on_its_current_generation",
+        "replacement_binding_bootstrap_keeps_history_on_demand_after_the_accepted_watermark"
+      ]
+    },
+    "frontend": {
+      "command": "pnpm exec vitest run apps/desktop/src/renderer/src/member-identity-draft.test.ts apps/desktop/src/renderer/src/member-identity-save.test.ts",
+      "passed": 8,
+      "failed": 0
+    },
+    "typecheck": "passed",
+    "docsTests": {
+      "passed": 10,
+      "failed": 0
+    },
+    "skillTests": {
+      "passed": 3,
+      "failed": 0
+    },
+    "docsCheck": "passed",
+    "docsDiffGate": "passed",
+    "skillCheck": "passed",
+    "editorFieldScenario": {
+      "status": "passed",
+      "fixture": "scripts/fixtures/member-editor/main.cjs",
+      "case": "disclosure, save failure and retry preserve draft values",
+      "execution": "Existing helper and exact case block in a temporary controller, with a role-draft prerequisite and fresh isolated Electron userData. No Core or Runtime.",
+      "assertions": [
+        "3000 / 3,000 and 3001 / 3,000 counters",
+        "No maxlength truncation",
+        "3001 rejects before profile/avatar mutation",
+        "Full drafts survive disclosure and failed save",
+        "Retry saves both complete 3000-scalar fields and settles the save button"
+      ],
+      "log": "member-editor-guidance-only-r2.log",
+      "controller": "member-editor-guidance-only-r2.cjs",
+      "screenshot": "member-editor-guidance-only-r2/guidance-3000-passed.png"
+    },
+    "fullEditorFixture": {
+      "status": "failed_before_field_scenario",
+      "failure": "Runtime menu check timed out waiting for .member-runtime-menu-item count to equal fixture installations.length + 1 (19).",
+      "scope": "Runtime menu production code and its assertion were not changed or bypassed in the full fixture. The field scenario was executed independently; no full-fixture pass is claimed.",
+      "log": "member-editor.log"
+    }
+  },
+  "testPolicy": {
+    "newRustTestFunctions": 0,
+    "ownersExtended": true
+  },
+  "realModelEvaluationRun": false,
+  "releaseNotes": "Unreleased copy recorded in the version overview; published v0.5.6 notes remain unchanged.",
+  "compatibility": "Older Core/CLI may reject newly saved values above 300 scalars; no downgrade compatibility promised.",
+  "rawEvidenceRoot": "/Users/murray.xue/.rovai/instances/v1-ea1b0333b2d3194639a0b5a284275214dc868bf6ebe8bea219653f7c2cd7a4b3/attachments/rvcamp_01m6ds2wjqf2hvfvqfa6yzpwbz/identity-guidance-3000-validation",
+  "sourceFileSha256": {
+    "crates/rovai-core/src/agent_profile.rs": "706910f5bbea770cb37488bed928da728e36692c4a3129bb3622a70a19c595d7",
+    "crates/rovai-core/src/member_studio.rs": "a060b8d5a470bf2820e96d63c4c1811495a7bbd24e7e9be9ff86efee05cd865f",
+    "apps/desktop/src/renderer/src/member-identity-draft.ts": "54219ae7989d9ec1bbf194eebb559ab0ebfe0282058e2b977cace790968d8dc3",
+    "apps/desktop/src/renderer/src/MemberIdentityEditor.tsx": "7343b3fcdebfd4ff84bfc45a20e66e9edded804cd18345ba6989078037174d6c",
+    "apps/desktop/src/renderer/src/locales/en.json": "7ae41ec681ee3e26297ebeead715b70806b602a1beb99c341e579e34ca95e9a7",
+    "skills/member-studio/references/identity-generation.md": "54e7e8fbf68fff6975c122cef9b8f16870f078ae268481feb4d0e662c58119d2"
+  }
+}

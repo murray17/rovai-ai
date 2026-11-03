@@ -13,9 +13,14 @@ last_updated: 2026-11-03
 
 ## 工作准则与成长课题 3,000 字符（2026-11-03）
 
-已按 User 要求创建独立 worktree，拟将两个字段各从 300 放宽至 3,000，沿用现有清理、冻结与投递规则。
+已按 User 确认将两个字段各从 300 放宽至 3,000，沿用现有清理、冻结与投递规则。
 Bootstrap 正文和默认执行包均保持 256 KiB，无数据库迁移或预算重构。
-范围、既有入口空白差异和定向验证见 [R1 方案](model-context-change-identity-guidance-3000.md)；User 已在 sequence 28 确认，当前实施中。
+范围与既有入口空白差异见 [R1 方案](model-context-change-identity-guidance-3000.md)；User 已在 sequence 28 确认，现已实现。
+Rust 工作区 484 项、存储／上下文定向 4 项、前端 8 项及字段 UI 场景通过；完整编辑器夹具停在既有 Runtime 菜单检查，
+实际范围与限制见[验证证据](evidence/identity-guidance-3000-2026-11-03.json)。未运行真实模型矩阵。
+
+待后续版本发布：工作准则、成长课题上限各提升至 3,000 字符，保留完整正文与内部格式。
+此条作为后续发布说明候选，不改写已经发布的 v0.5.6 发布记录。
 
 ## Markdown Mermaid 审阅（2026-11-03）
 

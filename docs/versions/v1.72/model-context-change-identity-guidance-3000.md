@@ -9,7 +9,7 @@ confirmed_by: User
 confirmed_at: 2026-11-03T11:30:14Z
 authority: confirmed-model-input-change-statement
 implementation_baseline: 117a9281dd2adfbb847f6630c5bea809716205af
-implementation_status: in_progress
+implementation_status: implemented
 last_updated: 2026-11-03
 ---
 
@@ -27,8 +27,8 @@ User 在 sequence 24（`d97d4e7c-9a1c-4f01-8902-e3a0a7a3a812`）要求“那你�
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-identity-guidance-3000`。
 - Branch：`rovai/identity-guidance-3000`。
 - Base：`origin/main`，`117a9281dd2adfbb847f6630c5bea809716205af`。
-- Governance commit：本文件先独立提交，不要求另行先合入主线。
-- Status：`active`，按已确认 R1 在同一 worktree 实施。
+- Governance commit：`fa53dbed9`，本文件及确认记录先独立提交，不要求另行先合入主线。
+- Status：`ready`，已按 R1 实现并验证，保留同一 worktree 供后续交付。
 
 ## 变更前
 
@@ -142,10 +142,27 @@ DOCS_BASE_REF=117a9281dd2adfbb847f6630c5bea809716205af pnpm docs:check:ci
 pnpm skills:check
 ```
 
-## 当前核查结果
+## 实施与验证记录
 
-已从最新 `origin/main` 创建并核对 worktree、分支与基线；确认现有限额及派生 schema，生产实现未修改。
-文档治理测试 10 项通过，diff-aware 决定／链接检查通过；未启动 Core、App 或真实模型。
-`docs:check`／`docs:check:ci` 在版本准入处按预期拒绝此 `pending` 提案；修正章节标题后剩余项仅为
-真实 R1 确认状态、revision、确认人和确认时间，未伪造确认或增加 checker 例外。
-User 在 sequence 28 已确认 R1；当前开始实施上述最小改动，完成后在此记录实际验证结果。
+已完成两个字段的 Core／Renderer 专属常量、工具派生 schema、计数器、双语错误及创建指引更新。
+CLI 不含这两个字段的独立旧限额，生产逻辑无需修改；原 UTF-8 文件输入测试验证两字段及 schema 顺序。
+`context.rs` 仅扩展既有测试，生产 Bootstrap、预算、选批和恢复路径均未修改。没有数据库迁移或版本轴递增。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 默认 Rust workspace | 484 通过、0 失败、1 个原有 opt-in 忽略；含 Core 边界、工具 schema 和 CLI 输入检查 |
+| 受影响 slow-tests owner | 4 项通过：创建／更新／重开读取及超限原子性；格式与转义；组合预算准入／拒绝；替换绑定保留 claim 冻结字段 |
+| Renderer 单元检查 | draft/save 两文件 8 项通过；TypeScript 检查通过 |
+| 隔离编辑器字段场景 | 复用现有 helper 和 `disclosure, save failure and retry preserve draft values` 块单独执行通过；验证两个计数器、无 maxlength 截断、3,001 拒绝、折叠／失败保留及成功重试 |
+| 完整编辑器夹具 | 在既有 Runtime 菜单数量检查处停止，未执行到字段场景；不宣称完整夹具通过，不将运行时菜单修复带入本次范围 |
+| 工程与文档 | rustfmt、差异空白检查、文档门禁与 diff-aware 检查通过；文档测试 10 项、Skill 测试 3 项及 Skill 检查通过 |
+
+没有新增独立 Rust 测试函数；原字段边界 owner 改名为 `member_identity_uses_field_specific_unicode_scalar_limits`，
+保留职责和其他字段的原有断言，增加两字段输入矩阵。其他存储、组包及 UI 断言均扩展已有 owner。
+临时 Electron 控制器只为绕开完整夹具尚未进入本次字段场景的执行障碍，复用原 helper 与完整字段检查块；
+不改断言标准，不作为新增测试框架。其首轮完整夹具失败、独立执行日志和截图均保留。
+
+机器可读结果、命令、源码摘要及原始验收目录见[验证证据](evidence/identity-guidance-3000-2026-11-03.json)。
+本轮未调用真实模型，未运行通用模型矩阵；模型上下文证明来自确定性完整字节及恢复比较。
+下一版本发布说明已登记在版本概览，未改写已发布 v0.5.6 的发布记录。
+按用户现行偏好，完成后提交并推送任务分支，PR 由用户后续明确要求时创建；保留 worktree。

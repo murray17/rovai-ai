@@ -10,8 +10,8 @@ Preserve the user's meaning and label substantive additions as proposals. Draft 
 | Team role | At most 120 characters |
 | Professional responsibilities | At most 30,000 Unicode scalar values after trimming; preserve internal formatting |
 | Personality traits | At most 6, ordered and deduplicated; each 1-16 characters |
-| Working principles | At most 300 characters |
-| Growth topic | At most 300 characters |
+| Working principles | At most 3,000 characters |
+| Growth topic | At most 3,000 characters |
 
 ## Write the fields
 

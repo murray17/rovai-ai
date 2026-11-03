@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-member-identity
 status: accepted
-last_updated: 2026-10-30
+last_updated: 2026-11-03
 ---
 
 # 队员身份与图像
@@ -195,7 +195,10 @@ AI 草稿复用普通会话所有结构，新会话按当前界面语言预填�
 
 专业职责按 trim 后的 Unicode scalar 数显示 `已输入 / 30,000`，不使用 HTML maxlength 替代校验。
 超过上限显示“专业职责最多 30,000 个字符。”并保留草稿；后台同样验证，失败不能部分保存。
-其他身份字段计数/上限与现有布局保持。
+工作准则、成长课题各最多 3,000 个 Unicode scalar，计数器分母均为 `3,000`；沿用现有原始草稿计数，
+提交与校验沿用 JS trim。超限分别显示“工作准则最多 3,000 个字符。”和“成长课题最多 3,000 个字符。”，
+保留完整草稿并定位字段；不使用 HTML maxlength 截断，不开始后续头像提交。其他字段及布局保持。
+两字段的 Core／工具入口继续各自现有首尾空白规则，完整对照见[已确认 R1](../../versions/v1.72/model-context-change-identity-guidance-3000.md)。
 
 ## 永久移除影响
 

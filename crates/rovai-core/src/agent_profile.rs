@@ -5325,6 +5325,8 @@ pub(crate) fn validate_member_identity_input(
 
 pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 30_000;
 pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 30,000 个字符。";
+pub const WORKING_PRINCIPLES_MAX_SCALARS: usize = 3_000;
+pub const GROWTH_TOPIC_MAX_SCALARS: usize = 3_000;
 
 /// ECMAScript String.trim whitespace, matching the existing identity editor.
 /// U+FEFF is trimmed; U+0085 is retained. Interior formatting is untouched.
@@ -5369,12 +5371,16 @@ pub(crate) fn normalize_member_identity(
         normalize_professional_responsibilities(professional_responsibilities)?;
     let working_principles = working_principles.trim().to_string();
     let growth_topic = growth_topic.trim().to_string();
-    for (field, value) in [
-        ("workingPrinciples", &working_principles),
-        ("growthTopic", &growth_topic),
+    for (field, value, max_scalars) in [
+        (
+            "workingPrinciples",
+            &working_principles,
+            WORKING_PRINCIPLES_MAX_SCALARS,
+        ),
+        ("growthTopic", &growth_topic, GROWTH_TOPIC_MAX_SCALARS),
     ] {
-        if value.chars().count() > 300 {
-            anyhow::bail!("AgentProfile {field} must not exceed 300 characters");
+        if value.chars().count() > max_scalars {
+            anyhow::bail!("AgentProfile {field} must not exceed {max_scalars} characters");
         }
     }
     let mut normalized_traits = Vec::with_capacity(personality_traits.len());
@@ -5913,7 +5919,7 @@ fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> Command
 #[cfg(test)]
 // Pure owner: normalization parity and the scalar boundary do not need a database fixture.
 #[test]
-fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
+fn member_identity_uses_field_specific_unicode_scalar_limits() {
     for text in [
         "中".repeat(30_000),
         "😀".repeat(30_000),
@@ -5949,10 +5955,47 @@ fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
     );
     // Historical Rust-normalized FEFF remains readable without a rewrite.
     assert!(validate_stored_member_identity("A", "", "\u{feff}old\u{feff}", &[], "", "").is_ok());
+    for text in [
+        "中".repeat(3_000),
+        "😀".repeat(3_000),
+        "e\u{0301}".repeat(1_500),
+        "\"\\\n\0中😀".repeat(500),
+    ] {
+        let padded = format!(" \u{0085}\r\n{text}\u{3000} ");
+        let normalized = normalize_member_identity("A", "", "", &[], &padded, &padded).unwrap();
+        assert_eq!(normalized.working_principles, text);
+        assert_eq!(normalized.growth_topic, text);
+        validate_stored_member_identity("A", "", "", &[], &text, &text).unwrap();
+        for (field, principles, growth) in [
+            ("workingPrinciples", format!("{text}界"), text.clone()),
+            ("growthTopic", text.clone(), format!("{text}界")),
+        ] {
+            assert_eq!(
+                normalize_member_identity("A", "", "", &[], &principles, &growth)
+                    .unwrap_err()
+                    .to_string(),
+                format!("AgentProfile {field} must not exceed 3000 characters")
+            );
+        }
+    }
+    // These fields keep Rust trim semantics, including historical FEFF content.
+    let normalized =
+        normalize_member_identity("A", "", "", &[], "\u{0085}\n ", "\u{feff}old\u{feff}").unwrap();
+    assert_eq!(normalized.working_principles, "");
+    assert_eq!(normalized.growth_topic, "\u{feff}old\u{feff}");
+    validate_stored_member_identity(
+        "A",
+        "",
+        "",
+        &[],
+        "\u{feff}old\u{feff}",
+        "\u{feff}old\u{feff}",
+    )
+    .unwrap();
     for (role, principles, growth) in [
         ("x".repeat(121), String::new(), String::new()),
-        (String::new(), "x".repeat(301), String::new()),
-        (String::new(), String::new(), "x".repeat(301)),
+        (String::new(), "x".repeat(3_001), String::new()),
+        (String::new(), String::new(), "x".repeat(3_001)),
     ] {
         assert!(normalize_member_identity("A", &role, "", &[], &principles, &growth).is_err());
     }
@@ -9591,13 +9634,61 @@ mod slow_tests {
             .get_profile(&database, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
+        let principles = "😀".repeat(3_000);
+        let growth = "\"\\\n\0中😀".repeat(500);
+        let created = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-long-guidance",
+                    CreateAgentProfileCommand {
+                        working_principles: principles.clone(),
+                        growth_topic: growth.clone(),
+                        ..create_identity("Long guidance", "")
+                    },
+                ),
+            )
+            .unwrap();
+        let created_id = created.result.payload["agentId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for (index, (working_principles, growth_topic)) in [
+            (format!("{principles}界"), growth.clone()),
+            (principles.clone(), format!("{growth}界")),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                service
+                    .update_profile(
+                        &mut database,
+                        &user_command(
+                            &format!("reject-long-guidance-{index}"),
+                            UpdateAgentProfileCommand {
+                                working_principles,
+                                growth_topic,
+                                ..update_identity(&profile, "Must not be saved")
+                            }
+                        ),
+                    )
+                    .is_err()
+            );
+            let unchanged = service.get_profile(&database, "agent_4").unwrap().unwrap();
+            assert_eq!(unchanged.version, profile.version);
+            assert_eq!(unchanged.display_name, profile.display_name);
+            assert_eq!(unchanged.working_principles, profile.working_principles);
+            assert_eq!(unchanged.growth_topic, profile.growth_topic);
+        }
         service
             .update_profile(
                 &mut database,
                 &user_command(
                     "edit-qilu",
                     UpdateAgentProfileCommand {
-                        working_principles: "只在未来 Run 生效。".to_string(),
+                        working_principles: principles.clone(),
+                        growth_topic: growth.clone(),
                         ..update_identity(&profile, &profile.display_name)
                     },
                 ),
@@ -9610,7 +9701,14 @@ mod slow_tests {
             .get_profile(&reopened, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
-        assert_eq!(profile.working_principles, "只在未来 Run 生效。");
+        assert_eq!(profile.working_principles, principles);
+        assert_eq!(profile.growth_topic, growth);
+        let created = service
+            .get_profile(&reopened, &created_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(created.working_principles, principles);
+        assert_eq!(created.growth_topic, growth);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
