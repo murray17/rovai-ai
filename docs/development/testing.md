@@ -246,6 +246,14 @@ reader/writer owner 另覆盖“写入 → 旧 result → 旧 idle → 后续失
 单聊既有 Pending FIFO owner 以空 success 推进下一条，断言不产生空私聊回复；常规非空终态 owner 保留。
 不新增 Rust 测试函数，不把受控协议／数据库测试表述为真实模型验收。
 
+### 补充输入未知后的独立新输入
+
+扩展既有 `active_inputs_preserve_initial_context_and_unsubmitted_sources`：A 提交后回执未知，
+B 仍以独立输入 ID 路由、物化、提交和 accepted，A 保持未知且无法再次 dispatch；错误 epoch 拒绝。
+首条 accepted 前等待、真实终态／取消后的不可提交与未发送回队列反例继续保留。
+Adapter 的关闭通道拒绝仍由既有 active-input／Claude control owners 覆盖，未增加 Runtime 探活用例。
+最小命令：`cargo test -p rovai-core --features extended-tests,slow-tests --lib active_input`。
+
 ### 新增独立测试
 
 新增一个 Rust `#[test]` 前必须同时满足以下条件：

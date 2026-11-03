@@ -3762,6 +3762,90 @@ mod tests {
                                 "ACK unavailable",
                             )
                             .unwrap();
+                        assert!(
+                            crate::steer::active_input_availability(
+                                f.database.connection(),
+                                &run,
+                                1
+                            )
+                            .unwrap()
+                            .ready
+                        );
+                        let next_source =
+                            f.enqueue("fresh-after-unknown", "new independent instruction");
+                        let tx = f.database.connection_mut().transaction().unwrap();
+                        crate::steer::route_user_message(&tx, "fresh-after-unknown", None).unwrap();
+                        tx.commit().unwrap();
+                        let pending =
+                            crate::steer::pending_inputs(f.database.connection()).unwrap();
+                        assert_eq!(pending.len(), 1);
+                        assert_eq!(
+                            pending[0].delivery_id, next_source,
+                            "unknown A must not be retried or block B"
+                        );
+                        let ContextMaterialization::Ready(next_context) = ContextService
+                            .materialize_message_delivery(
+                                &mut f.database,
+                                &crate::managed_blob::ManagedBlobStore::new(&f._directory),
+                                &next_source,
+                                &[],
+                                &request,
+                            )
+                            .unwrap()
+                        else {
+                            panic!("new input must be ready")
+                        };
+                        let next_input = ContextService
+                            .prepare_input_delivery_for_context(
+                                &mut f.database,
+                                &run,
+                                1,
+                                &next_context,
+                            )
+                            .unwrap();
+                        assert_ne!(next_input.id, input.id);
+                        assert!(
+                            !ContextService
+                                .begin_runtime_input_dispatch(
+                                    &mut f.database,
+                                    &next_input.id,
+                                    &run,
+                                    2
+                                )
+                                .unwrap(),
+                            "stale epoch is still rejected"
+                        );
+                        assert!(
+                            ContextService
+                                .begin_runtime_input_dispatch(
+                                    &mut f.database,
+                                    &next_input.id,
+                                    &run,
+                                    1
+                                )
+                                .unwrap()
+                        );
+                        ContextService
+                            .acknowledge_input_delivery(&mut f.database, &next_input.id, "turn")
+                            .unwrap();
+                        assert_eq!(
+                            ContextService
+                                .runtime_input_delivery_status(&f.database, &input.id)
+                                .unwrap()
+                                .as_deref(),
+                            Some("delivery_unknown")
+                        );
+                        assert!(
+                            crate::steer::pending_inputs(f.database.connection())
+                                .unwrap()
+                                .is_empty()
+                        );
+                        assert!(
+                            !ContextService
+                                .begin_runtime_input_dispatch(&mut f.database, &input.id, &run, 1)
+                                .unwrap(),
+                            "unknown input cannot be resent"
+                        );
                     }
                     let version: i64 = f
                         .database

@@ -68,3 +68,11 @@ Hermes 官方 ACP 的稳定 0.x 版本自 0.22.4 起使用 `session/prompt` 的 
 明确未接受则回普通队列；`admitted_turn_failed` 记录接收及 Run 失败；其他不明结果不自动重发。
 已知 Run 结束或取消则禁止新增投递。取消走原生 `session/cancel`，只清理自有 ACP，
 不因接通 Steer 而把共享 Gateway 纳入回收。详见 [Hermes 合同](hermes-managed-runtime-v1.md#session-与输入)。
+
+## 未知回执的单条边界
+
+补充输入的 `delivery_unknown` 仅约束该条输入，不再禁用整轮插话或挡住后续新来源的顺序提交。
+旧输入保持未知且不重发，新消息使用自己的输入 ID 沿既有提交／回执路径结算。
+首条 start 未建立当前绑定的 accepted 证据时仍不提交补充输入；首条未知仍走既有不可用处理。
+Run／epoch、当前 Session 和实际通道检查不变：明确未提交或拒绝可回普通队列，已提交结果不明不可回队列重发。
+未知记录不证明通道健康，具体 Runtime 已关闭或目标失效时仍拒绝／排队；不增加探活或握手。
