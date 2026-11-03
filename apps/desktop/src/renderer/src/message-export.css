@@ -4,7 +4,9 @@
 .message-select-button:hover { color:var(--ink); background:var(--neutral-hover); }
 .message-export-entry-button { order:-1; }
 .message-export-entry-fallback { position:absolute; top:6px; right:16px; z-index:4; }
-.message-export-selecting .conversation-bubble[data-message-id] { position:relative; }
+/* Anchor selection controls to the shared timeline width, not each bubble's width. */
+.message-export-selecting .conversation-bubble[data-message-id]:has(> .message-export-check) { position:relative; width:calc(100% - 28px); max-width:none; margin-left:28px; }
+.message-export-selecting .conversation-bubble:is(.user,.external_principal) > .message-body { justify-self:end; }
 .message-export-selecting .conversation-bubble[data-message-id]::before { content:""; position:absolute; inset:-5px -12px -5px -34px; border-radius:10px; pointer-events:none; }
 .message-export-selecting .conversation-bubble[data-export-selected="true"]::before { background:var(--conversation-selection-surface); }
 .message-export-selecting .conversation-bubble[data-message-id] > :not(.message-export-check) { position:relative; }
@@ -69,5 +71,5 @@
 .message-export-zoom img { max-width:100%; max-height:70dvh; object-fit:contain; }
 .message-quote-selection-toolbar:has(.message-selection-export) { display:flex; gap:0; border:1px solid var(--line-strong); border-radius:8px; background:var(--surface-raised); box-shadow:var(--shadow-float); }
 .message-quote-selection-toolbar:has(.message-selection-export) > button { border:0; box-shadow:none; background:transparent; }
-@media(max-width:760px) { .message-export-selecting .conversation-bubble[data-message-id] { margin-left:28px; }.message-export-selecting .conversation-bubble[data-message-id]::before { left:-28px; }.message-export-check { left:-27px; }.message-export-options { gap:12px; }.message-export-preview { max-height:calc(100dvh - 360px); }.message-selection-dock { padding-inline:12px; } }
+@media(max-width:760px) { .message-export-selecting .conversation-bubble[data-message-id]::before { left:-28px; }.message-export-check { left:-27px; }.message-export-options { gap:12px; }.message-export-preview { max-height:calc(100dvh - 360px); }.message-selection-dock { padding-inline:12px; } }
 @media(pointer:coarse) { .message-select-button { width:40px; height:40px; }.message-export-check { width:40px; left:-35px; } }
