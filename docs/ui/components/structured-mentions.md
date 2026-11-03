@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-10-30
+last_updated: 2026-11-03
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -90,6 +90,8 @@ All Members 候选继续显示广播说明，范围仍是发送时 Thread 中的
 
 `/`、`/rev`、`/review` 只在文本开头、空白、换行、中文标点或明确允许的命令边界之后打开，并与 Member 查询使用
 同一个 128 字符 suffix matcher。`https://example.com/a/b`、`src/components/a/b.ts` 和 `word/review` 不触发。
+查询接受 Unicode 字母、数字、下划线和连字符，例如 `/Native_Name`、`/中文`；含空格的名称可用名称片段检索。
+先按名称与描述筛选，再展示前 50 项，因此未进入空查询前 50 项的候选仍可按名称搜索后选择。
 
 选择候选后用 `skillId + nameAtSend` Atom 替换查询并执行同样的尾随空格规则。`/review` 只是查询/显示形式，
 不是 Skill identity。Skill 不可用时保留 Atom，发送前由 Core 返回明确错误或既定降级结果；Composer 不重绑

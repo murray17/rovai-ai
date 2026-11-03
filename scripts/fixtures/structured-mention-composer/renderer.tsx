@@ -211,6 +211,7 @@ function Harness() {
           })))
         },
         limitSkills(count: number) { setSkills(fixtureSkills.slice(0, count)) },
+        setSkills,
         setSkillCatalogStatus,
         setDisabled,
         setInteractionLocked(locked: boolean) {

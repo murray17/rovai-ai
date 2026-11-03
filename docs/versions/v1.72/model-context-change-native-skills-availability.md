@@ -10,7 +10,7 @@ confirmed_at: 2026-11-02
 authority: confirmed-model-input-change-statement
 implementation_baseline: bd7858afeac1a7b7ada84e1bc27b89bff2668a26
 implementation_status: implemented
-last_updated: 2026-11-02
+last_updated: 2026-11-03
 ---
 
 # 原生 Skills 可用性修复 R1
@@ -95,3 +95,25 @@ Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-native-skills-a
 
 没有 Migration、解析版本轴、别名系统或新的加载状态。未执行真实模型或 Windows/Linux 整机验收；
 上述夹具证明文件候选与输入链接链路，不宣称 Harness 已加载或模型已阅读。
+
+## 输入触发遗漏修复（2026-11-03）
+
+User 在同一 Thread sequence 11（`280b6adc-2b60-4abc-84bc-b815ec3891e9`）指出下划线和中文名称
+在输入触发层仍被拒绝，并明确授权必要修复。既有 Electron 输入夹具复现 `/Native_` 使菜单关闭；
+直接构造 Atom 的名称测试没有覆盖此入口。
+
+修复前：这些名称虽能通过候选过滤及引用校验，按名称输入时却无法保持 Skill 查询；位于前 50 项
+之外、也无可用英文查询片段的中文候选缺少搜索入口。
+修复后：`SKILL_TRIGGER` 接受 Unicode 字母、数字、下划线与连字符；`/Native_Name` 和 `/中文`
+可筛选后显式选择，含空格名称可按片段检索。保持原触发边界、128 字符查询窗口和筛选后 50 项展示上限。
+这是 R1 显式选择链路的遗漏修复，沿用已确认的输入结构与冻结规则，没有新的模型输入语义或版本轴。
+
+回归从空输入框通过真实 `Input.insertText` 输入 `/`，确认第 51 项不在初始 50 项中，再逐段输入
+`Native`、`_`、`Name` 或 `中`、`文`，确认菜单持续打开、候选正确，Enter 选择后保留原 `skillId`
+和 `nameAtSend`，且不会误发送。单元回归同时覆盖 Unicode 数字、连字符和 URL／路径／词尾拒绝边界。
+
+补丁验证（macOS arm64，2026-11-03）：`pnpm typecheck` 通过；trigger、document、skill-picker
+三份定向单测共 16 项通过；`pnpm test:composer-input` 三项集成测试通过，其中真实 Composer
+覆盖 47 个场景。先在旧触发规则上确认新增回归失败，再验证修复通过。`pnpm docs:test`、
+`pnpm docs:check`、以 `eca61454f1f32212f852688d87695884771a8139` 为基线的 `pnpm docs:check:ci`
+通过。补丁仅改一行生产规则；未改动原工作区的 DocumentMarkdown 工作。
