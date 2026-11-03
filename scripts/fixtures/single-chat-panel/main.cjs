@@ -7,6 +7,8 @@ const assertReturnToLatest = require('../assert-return-to-latest.cjs')
 const [renderer, userData, mode] = process.argv.slice(2)
 assert.ok(isAbsolute(renderer) && isAbsolute(userData))
 mkdirSync(userData, { recursive: true })
+mkdirSync(join(userData, 'managed-skill-library'), { recursive: true })
+console.log(JSON.stringify({ channel: 'automatic_acceptance', userData, skillLibraryRoot: join(userData, 'managed-skill-library'), runtime: false }))
 app.setPath('userData', userData)
 app.setPath('sessionData', join(userData, 'session'))
 
@@ -100,6 +102,45 @@ app.whenReady().then(async () => {
   }
 
   try {
+    if (mode === '--mermaid') {
+      await waitFor('!!window.singleChatTest && !!document.querySelector(".single-chat-viewport")')
+      const graph = '.single-chat-agent-response[data-single-chat-run-id="run-running"] .markdown-mermaid'
+      const ready = `document.querySelector(${JSON.stringify(graph)})?.dataset.mermaidState==="ready"`
+      await run('singleChatTest.setMode("narration");window.md="```mermaid\\nflowchart LR\\n";singleChatTest.setMermaidBody(md)')
+      await waitFor(`document.querySelector(${JSON.stringify(graph)})?.dataset.mermaidState==="pending"`)
+      for (const chunk of [' A-->B\n', '`', '``']) {
+        await run(`md+=${JSON.stringify(chunk)};singleChatTest.setMermaidBody(md)`); await settle()
+        assert.equal(await run(`document.querySelector(${JSON.stringify(graph)}).dataset.mermaidState`), 'pending')
+      }
+      await run('md+="\\n";singleChatTest.setMermaidBody(md)'); await waitFor(ready)
+      await run(`window.graphNode=document.querySelector(${JSON.stringify(graph)});graphNode.querySelector('button').click();singleChatTest.setMermaidBody(md,true)`)
+      await waitFor('!!document.querySelector(".single-chat-final .markdown-mermaid")')
+      assert.equal(await run('document.querySelector(".single-chat-final .markdown-mermaid")===graphNode && graphNode.dataset.mermaidView==="source"'), true)
+
+      await run('singleChatTest.setMode("narration");md=singleChatTest.fence(singleChatTest.samples.wide)+"\\n";singleChatTest.setMermaidBody(md)'); await settle(); await waitFor(ready)
+      await run(`window.graphNode=document.querySelector(${JSON.stringify(graph)});if(graphNode.dataset.mermaidView==='source')graphNode.querySelector('button').click()`); await settle()
+      await run(`[...graphNode.querySelectorAll('button')].find(b=>b.textContent==='查看大图').click()`)
+      await waitFor('!!document.querySelector(".markdown-mermaid-dialog img")')
+      await run(`[...document.querySelectorAll('.markdown-mermaid-dialog button')].find(b=>b.textContent==='100%').click()`)
+      await settle()
+      await run(`document.querySelector('.file-preview-image-scroll').scrollLeft=200;window.dialogImage=document.querySelector('.markdown-mermaid-dialog img');window.scrollBefore=document.querySelector('.file-preview-image-scroll').scrollLeft;singleChatTest.setMermaidBody(md,true)`)
+      await waitFor('!!document.querySelector(".single-chat-final .markdown-mermaid")')
+      assert.equal(await run('document.querySelector(".markdown-mermaid-dialog img")===dialogImage && document.querySelector(".file-preview-image-scroll").scrollLeft===scrollBefore'), true)
+      await key('Escape')
+      assert.equal(await run('document.activeElement.textContent'), '查看大图')
+
+      // Hold actual image decoding so no transport/snapshot update accompanies the resize.
+      await run('singleChatTest.setMode("narration");window.decode=HTMLImageElement.prototype.decode;HTMLImageElement.prototype.decode=function(){return new Promise(resolve=>{window.releaseImage=()=>decode.call(this).then(resolve)})};md=singleChatTest.fence(singleChatTest.samples.tall)+"\\n";singleChatTest.setMermaidBody(md)')
+      await waitFor('typeof releaseImage==="function"')
+      await run('window.viewport=document.querySelector(".single-chat-viewport");viewport.scrollTop=viewport.scrollHeight;viewport.dispatchEvent(new Event("scroll"));releaseImage()')
+      await waitFor(ready); await settle(100)
+      assert.ok(await run('viewport.scrollHeight-viewport.clientHeight-viewport.scrollTop<2'), 'Async image keeps following the latest content')
+      await run('HTMLImageElement.prototype.decode=decode;singleChatTest.setMermaidBody("正文\\n\\n".repeat(80)+singleChatTest.fence(singleChatTest.samples.tall)+"\\n")'); await settle(); await waitFor(ready)
+      await run('viewport.scrollTop=100;viewport.dispatchEvent(new Event("scroll"));window.readingTop=viewport.scrollTop;singleChatTest.setMermaidBody("正文\\n\\n".repeat(80)+singleChatTest.fence(singleChatTest.samples.wide)+"\\n")'); await settle(); await waitFor(ready); await settle(100)
+      assert.equal(await run('viewport.scrollTop'), await run('readingTop'))
+      console.log(JSON.stringify({ ok: true, verified: { streaming: true, handoff: true, sourcePreference: true, followingLatest: true, historyPosition: true } }))
+      window.destroy(); app.quit(); return
+    }
     if (mode === '--entry-count') {
       const state = () => run('window.singleChatTest.entryCountState()')
       await waitFor('window.singleChatTest?.entryCountState().count === "1"')
@@ -796,6 +837,7 @@ app.whenReady().then(async () => {
     window.destroy()
     app.quit()
   } catch (error) {
+    if (mode === '--mermaid') console.error(await run(`JSON.stringify({frames:[...document.querySelectorAll('[data-mermaid-renderer]')].map(f=>({connected:f.isConnected,src:f.src,docLength:f.srcdoc.length})),graphs:[...document.querySelectorAll('.markdown-mermaid')].map(g=>g.dataset),resources:performance.getEntriesByType('resource').filter(e=>/mermaid|purify/.test(e.name)).map(e=>({name:e.name,duration:e.duration})),images:[...document.images].filter(i=>i.src.startsWith('blob:')).map(i=>({complete:i.complete,width:i.naturalWidth}))})`))
     console.error(await settle())
     await capture('single-chat-failure')
     throw error

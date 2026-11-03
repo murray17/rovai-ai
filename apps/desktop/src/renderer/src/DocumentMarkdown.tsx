@@ -1,15 +1,15 @@
 import type { ComponentProps } from 'react'
-import { SafeMarkdown, type MarkdownDocumentCodeProps } from './SafeMarkdown'
+import { SafeMarkdown, type MarkdownCodeProps } from './SafeMarkdown'
 import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MarkdownMermaidBlock } from './MarkdownMermaidBlock'
 
-function DocumentCode({ code, languageName, theme }: MarkdownDocumentCodeProps): React.JSX.Element {
+function DocumentCode({ code, languageName, theme }: MarkdownCodeProps): React.JSX.Element {
   return languageName?.toLowerCase() === 'mermaid'
     ? <MarkdownMermaidBlock source={code} theme={theme} />
     : <MarkdownCodeBlock code={code} languageName={languageName} theme={theme} />
 }
 
-/** The document entry owns syntax highlighting and diagrams; messages do not import them. */
-export function DocumentMarkdown(props: Omit<ComponentProps<typeof SafeMarkdown>, 'mode' | 'DocumentCode'>): React.JSX.Element {
-  return <SafeMarkdown {...props} mode="document" DocumentCode={DocumentCode} />
+/** Document highlighting and message diagrams share the same isolated renderer. */
+export function DocumentMarkdown(props: Omit<ComponentProps<typeof SafeMarkdown>, 'mode' | 'CodeBlock' | 'contentComplete'>): React.JSX.Element {
+  return <SafeMarkdown {...props} mode="document" CodeBlock={DocumentCode} />
 }

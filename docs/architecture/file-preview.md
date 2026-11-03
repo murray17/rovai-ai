@@ -249,11 +249,17 @@ Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.r
 
 ## Markdown 图表渲染
 
-`DocumentMarkdown` 作为文档入口向 `SafeMarkdown` 注入模块级代码块组件；稳定的 `pre` renderer 通过
-context 消费它，仅在 document 模式分发。语言名忽略大小写精确为 `mermaid` 时使用 `MarkdownMermaidBlock`，
-其他文档代码继续高亮。message 入口不依赖文档查看器、语法引擎或 Mermaid；执行控制台消费轻量预览 context，
+`DocumentMarkdown` 与消息正文的 `MessageMarkdown` 向 `SafeMarkdown` 注入稳定的代码块组件；模块级
+`pre` renderer 通过 context 消费它。语言名忽略大小写精确为 `mermaid` 时复用 `MarkdownMermaidBlock`，
+其他文档代码继续高亮，普通消息代码保留原有 `pre` 和结构化 children。基础 Markdown 不直接引入图表引擎；执行控制台消费轻量预览 context，
 不间接引入 Provider 和文件查看器。`MarkdownCodeFrame` 继续拥有
 原始代码复制与手动复制回退。图表的局部状态、候选图片解码与 Blob URL 生命周期归展示组件。
+
+消息的围栏准入使用同一次 remark 解析产生的围栏 sequence token，不重复解析整篇正文。
+只有解析器确认的闭合围栏且行结束符已到达，才允许未完成正文绘图；正式完整正文允许 Markdown 的 EOF 隐式闭合。
+元信息按本次解析源码的节点 offset 关联到清洗后的代码块，不添加 HTML 属性白名单。展示投影保留原始行尾；
+正文完成、全文读取和 Run 终态分别判断。`renderReady` 共同约束提交、界面和旧请求失效，未就绪时仅显示源码。
+单聊仅在同一 Run 内正文唯一对应时移动已有正文容器，保留图表实例；没有全局图形缓存或跨消息状态匹配。
 
 `mermaid-renderer` 仅提供 `renderMermaid(source, theme)`，按窗口懒建一个专用 iframe，以 Promise 链串行
 初始化和渲染。Mermaid、DOMPurify 与专用启动脚本作为本地静态资源打包，首次需要时才加载。

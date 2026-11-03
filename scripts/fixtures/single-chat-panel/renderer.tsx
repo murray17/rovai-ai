@@ -17,6 +17,7 @@ import { SingleChatPanel } from '../../../apps/desktop/src/renderer/src/SingleCh
 import { ThreadClientProvider, type ThreadClient } from '../../../apps/desktop/src/renderer/src/camp-client'
 import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desktop-camp-client'
 import '../../../apps/desktop/src/renderer/src/styles.css'
+import { samples, fence } from '../markdown-mermaid/samples.mjs'
 
 const threadId = 'rvcamp_01m1jkkpkzfvgraw1p4r9zfb7v'
 const inputHistoryMode = new URLSearchParams(location.search).has('inputHistory')
@@ -485,6 +486,30 @@ createRoot(document.getElementById('root')!).render(<ThreadClientProvider client
 
 Object.assign(window, {
   singleChatTest: {
+    samples, fence,
+    setMermaidBody(body: string, final = false, status = 'streaming') {
+      if (!currentSnapshot.agentRuns.some(run => run.id === 'run-running')) setMode('narration', false)
+      const next = structuredClone(currentSnapshot)
+      const run = next.agentRuns.find(run => run.id === 'run-running')!
+      run.version++
+      const block = narration('narration-running', run.id, 1, body)
+      block.eventType = 'agent.text.block'
+      block.payload = { blockId: block.id, text: body, textLength: body.length, status }
+      next.executionEvidence = [...next.executionEvidence.filter(item => item.agentRunId !== run.id), block]
+      run.executionEvidenceCount = 1
+      if (final) {
+        run.status = 'succeeded'
+        run.endedAt = '2026-09-03T12:00:26.000Z'
+        run.finalConversationMessageId = 'final-running'
+        next.conversation.activeAgentRunId = null
+        next.conversation.lastMessageSequence = 5
+        next.pendingInputs.executionActive = false
+        next.messages.push({ id: 'final-running', sequence: 5, authorType: 'agent', authorId: 'agent_1',
+          body, attachments: [], agentRunId: run.id, createdAt: run.endedAt })
+      }
+      currentSnapshot = next
+      emitChange()
+    },
     entryCountState: () => ({
       threadId,
       count: document.querySelector('[data-detail="single-chat"] small')?.textContent,

@@ -8,8 +8,9 @@ last_updated: 2026-11-03
 
 # Markdown Mermaid 审阅交付
 
-范围来自 [#979](https://github.com/murray17/rovai-ai/issues/979) 及本轮确认：一次完成文档图表审阅，包含宽图、
-长图、源码、复制、主题、失败回退和手动重试。消息、编辑、图片导出不作为本次完成门槛。
+范围来自 [#979](https://github.com/murray17/rovai-ai/issues/979) 及本轮确认：完成文档和消息图表审阅，包含宽图、
+长图、源码、复制、主题、失败回退和手动重试。消息增量以 `faadca7a43dbd1b0bc74dc18b727438c7befbfd6` 为实施基线，
+逐块闭合后立即出图，不等待整条回复结束。编辑、图片导出及退出应用后的状态恢复不作为完成门槛。
 固定离线加载路径是内部验证顺序，不单独交付缺少阅读交互的基础版。
 
 合并前硬门槛：与 `277b562f178c62b38a8f50dfe81282118566786f` 在同平台、架构、构建与签名配置下比较，
@@ -21,7 +22,7 @@ Core 合同或数据库 Migration。
 
 ## 实现
 
-- `DocumentMarkdown` 向 `SafeMarkdown` 注入稳定文档代码块组件；message 入口不引入文档渲染依赖。
+- `DocumentMarkdown` 和 `MessageMarkdown` 向 `SafeMarkdown` 注入稳定代码块组件；普通消息代码保持原有 children 与样式。
 - 执行控制台从轻量 context 消费预览能力，不再因 Provider 间接打包文件查看器、语法引擎与 Mermaid。
 - `MarkdownMermaidBlock` 拥有请求序号、当前结果和用户视图偏好；候选图片先解码再提交。
 - `mermaid-renderer` 统一串行、身份校验和整代重置；`mermaid-sandbox` 仅执行可信本地资源。
@@ -101,6 +102,51 @@ App 口径为逐个普通文件的逻辑 `st_size` 合计，不计目录块分�
 `pnpm test:markdown-mermaid`、`ROVAI_FILE_PREVIEW_CASE=image-reading pnpm test:file-preview-layout`、
 `node scripts/accept-markdown-mermaid.mjs /absolute/path/to/installed/App.app`。
 设置 `ROVAI_MERMAID_OUTPUT` 可保存截图、离线资源路径、真实 SVG 样例和 JSON 结果。
+
+### 消息与流式增量（2026-11-03）
+
+沿用既有引擎、隔离模块、队列、恢复、大图与共享离线资源。本轮仅泛化代码块插槽、记录现有解析器的围栏 token，
+补充展示层正文完成信息、接入消息调用点，并在单聊添加通用尺寸跟随与同回合正文交接。
+保持 Markdown 原始行尾；全文获取不等于正文完成，未知、中断及截断预览均保守等待显式闭合。
+闭合行末尾尚未收到行结束符时继续显示源码，后续只追加换行即可准入；不采用防抖或新增 Core 字段。
+
+单聊只在同一 Run 内存在唯一、相同正文时复用已挂载容器，最终回复发布不重建图表或大图；
+不跨消息匹配，不增加全局图形缓存。消息布局、复制、Mention、链接、搜索和存储保留原有真源。
+
+新增验证：解析器覆盖反引号、波浪线、不同长度、列表、引用、CR/LF/CRLF、隐式 EOF 与不合法闭合；
+浏览器分批输入实际正文，在未完成状态收到闭合行换行后检查图形已显示，追加其他正文及未完成图块不重绘旧图。
+完整单聊面板验证源码选择、大图实例与滚动位置跨最终回复交接，并延迟真实图片解码验证跟随最新及历史阅读。
+结构化 Mention 位于图块外时，图形视图中的现有复制按钮直接使用该块原始源码；块内的结构化节点保留原 children，
+不把合成占位符交给引擎。未就绪、已闭合、完成和主题变化均不覆盖用户主动选择的源码视图。
+
+本轮实际 DMG、更新 ZIP 与从该 DMG 复制的安装 App 如下。原基线和 `faadca7a4` 使用上轮保留的安装分发产物，
+重新核对精确大小、SHA-256 和签名；与本轮使用同一 macOS 26.6 / arm64、Node 26.12.1、pnpm 11.20.0、
+Electron 43.1.1、electron-builder 26.15.3。锁文件、依赖、Rust 源码与 Cargo.lock 均未改变，使用相同 Release sidecar 字节。
+三者均为 ad-hoc `identity=-`、hardened runtime、未公证，默认 `normal` 压缩（DMG UDZO、ZIP Deflate）。
+App 仍按不跟随符号链接的普通文件逻辑大小统计，均通过 `codesign --verify --deep --strict`。
+
+| 产物 | 原基线 `277b562f1` | 增量基线 `faadca7a4` | 本轮 | 相对原基线 | 相对增量基线 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DMG | 157,619,877 B | 154,640,892 B | 154,632,028 B | −2,987,849 B | −8,864 B |
+| 更新 ZIP | 157,667,231 B | 154,678,297 B | 154,680,625 B | −2,986,606 B | +2,328 B |
+| 安装 App | 410,944,692 B | 402,043,961 B | 402,048,155 B | −8,896,537 B | +4,194 B |
+
+三项均满足相对原基线零净增。引擎、DOMPurify、sandbox 启动脚本及异步模块仍各一份，合计 **5,530,371 B**，
+位于 `Resources/web-ui/assets`，Desktop 的 `desktop.html` 与 Host Web 的 `index.html` 共用；异步模块文件名随构建
+hash 改变，体积仍为 1,334 B。执行控制台仍只有固定 JS/CSS，无引擎引用；ASAR 无文档资源副本或 `out/renderer`。
+
+本轮验收已通过：
+
+- 类型检查；全量 Vitest 264 个文件、3078 项通过、2 项跳过；最终复制修正后相关 56 项重跑通过。
+- Web 与 Electron Mermaid 专项，包括真实分批输入、嵌套列表/引用闭合、未完成与隐式 EOF、旧请求失效、
+  Mention 消息中图形视图复制、源码偏好、错误恢复和原文档阅读回归。
+- 单聊面板、返回最新与 Mermaid 交接三项原生回归；代码复制两项及消息引用专项通过。
+- 最终 DMG 安装 App 与自带 Host Web 正式入口通过：文档 8 张正常图 / 1 张局部失败图；消息 3 张正常图 / 1 张局部失败图，
+  源码、大图、宽度限制、异步出现后的跟随最新及历史阅读位置均通过。完整资源路径仍指向同一安装目录。
+- 默认 Node 测试 365 项通过、2 项跳过；Rust workspace 484 项通过、1 项忽略；Skill 与 Electron sandbox 门禁通过。
+- 文档单测 10 项通过；包含本次修改的受管文件索引快照通过版本、链接和 Decision 门禁，diff-aware base 为同步后的
+  `origin/main`（`393a56f67`）。工作区直接运行 `pnpm test` 会在被忽略的 `docs/prototypes/` 既有断链处中断；
+  后续默认测试阶段分别运行通过。本次没有修改这些原型或为检查器添加例外。
 
 另提供独立离线 HTML 前后交互稿：以同步后的 `main`（`22fa81c8f`）为 UI 行为对照，比较本分支
 `faadca7a4`。同一份 Markdown 在 main 中显示为普通代码块，在本分支中自动绘图；main 不展示图形切换、

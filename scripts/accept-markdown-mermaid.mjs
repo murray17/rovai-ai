@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, realpath, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 import { launchAcceptanceBrowser } from './lib/host-web-browser.mjs'
-import { document as reviewDocument } from './fixtures/markdown-mermaid/samples.mjs'
+import { document as reviewDocument, samples, fence } from './fixtures/markdown-mermaid/samples.mjs'
 
 // Real packaged Desktop and its bundled Web UI, with fresh Core/profile/skills.
 // No model Runtime is started, and the installed daily application is untouched.
@@ -19,10 +20,10 @@ console.log(JSON.stringify({ channel: 'packaged_acceptance', userData: data, ski
 const executable = join(resolve(process.argv[2] ?? join(repository, 'dist/mac-arm64/Rovai AI.app')), 'Contents/MacOS/Rovai AI')
 let desktop, web, threadId
 const request = (method, params = {}) => desktop.evaluate(`window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`)
-const count = status => `document.querySelectorAll('[data-mermaid-state="${status}"]').length`
+const count = status => `document.querySelectorAll('.file-preview-markdown [data-mermaid-state="${status}"]').length`
 const ready = `${count('ready')}===8 && ${count('error')}===1`
 const button = (label, root = 'document') => `[...${root}.querySelectorAll('button')].find(e=>e.textContent===${JSON.stringify(label)})`
-const first = `document.querySelector('.markdown-mermaid')`
+const first = `document.querySelector('.file-preview-markdown .markdown-mermaid')`
 async function openDocument(page) {
   await page.wait(`Boolean(document.querySelector('.camp-nav-open')) && !document.querySelector('.camp-nav-open').closest('[inert]') && document.querySelector('.section-create-button')?.disabled===false`)
   // Select the prepared thread before exercising the document's native controls.
@@ -66,7 +67,7 @@ async function inspect(page, name) {
   await page.click(button('查看源码', first))
   await page.wait(`${first}.dataset.mermaidView==='source'`)
   await page.click(button('查看图形', first))
-  const wide = `document.querySelectorAll('.markdown-mermaid')[6]`
+  const wide = `document.querySelectorAll('.file-preview-markdown .markdown-mermaid')[6]`
   await page.click(button('查看大图', wide))
   await page.wait(`document.querySelector('.markdown-mermaid-dialog img')?.naturalWidth>0`)
   await page.click(button('100%', `document.querySelector('.markdown-mermaid-dialog')`))
@@ -74,6 +75,41 @@ async function inspect(page, name) {
   await page.capture(join(output, `${name}-large.png`))
   await page.key('Escape')
   await page.wait(`!document.querySelector('.markdown-mermaid-dialog')`)
+  assert.deepEqual(page.errors, [])
+}
+
+async function inspectMessages(page, name) {
+  const message = '[data-message-id="mermaid-accept-message"]'
+  const messageReady = `document.querySelectorAll('${message} [data-mermaid-state="ready"]').length===3 && document.querySelectorAll('${message} [data-mermaid-state="error"]').length===1`
+  for (const following of [true, false]) {
+    const hook = await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `
+      window.acceptanceDecodes=[];window.originalImageDecode=HTMLImageElement.prototype.decode;
+      HTMLImageElement.prototype.decode=function(){if(!this.src.startsWith('blob:'))return originalImageDecode.call(this);
+        return new Promise((resolve,reject)=>acceptanceDecodes.push(()=>originalImageDecode.call(this).then(resolve,reject)))};` })
+    const beforeReload = await page.evaluate('performance.timeOrigin')
+    await page.send('Page.reload')
+    await page.wait(`performance.timeOrigin!==${beforeReload} && !!document.querySelector('[data-thread-id="${threadId}"] .camp-nav-open')`, 45_000)
+    await page.wait(`Boolean(document.querySelector('.camp-nav-open')) && !document.querySelector('.camp-nav-open').closest('[inert]') && document.querySelector('.section-create-button')?.disabled===false`, 45_000)
+    await page.evaluate(`document.querySelector('[data-thread-id="${threadId}"] .camp-nav-open').click()`)
+    await page.wait(`document.querySelector('[data-thread-id="${threadId}"]')?.classList.contains('selected')`)
+    await page.wait(`document.querySelectorAll('${message} .markdown-mermaid').length===4 && acceptanceDecodes.length>=3`, 30_000)
+    await page.evaluate(`window.timeline=document.querySelector('.timeline-scroll.camp-timeline');timeline.scrollTop=${following ? 'timeline.scrollHeight' : '100'};timeline.dispatchEvent(new Event('scroll'))`)
+    await page.evaluate('HTMLImageElement.prototype.decode=originalImageDecode;acceptanceDecodes.forEach(release=>release())')
+    await page.wait(messageReady, 30_000)
+    if (following) await page.wait('timeline.scrollHeight-timeline.clientHeight-timeline.scrollTop<2')
+    else assert.ok(Math.abs(await page.evaluate('timeline.scrollTop') - 100) < 2, 'Async public graphs retain history reading position')
+    assert.equal(await page.evaluate('timeline.scrollWidth>timeline.clientWidth'), false)
+    await page.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: hook.identifier })
+  }
+  const block = `document.querySelector('${message} .markdown-mermaid')`
+  await page.evaluate('timeline.scrollTop=timeline.scrollHeight')
+  await page.click(button('查看源码', block))
+  assert.ok((await page.evaluate(`${block}.textContent`)).includes('中文标签'))
+  await page.click(button('查看图形', block))
+  await page.click(button('查看大图', block))
+  await page.wait('!!document.querySelector(".markdown-mermaid-dialog img")')
+  await page.key('Escape')
+  await page.capture(join(output, `${name}-messages.png`))
   assert.deepEqual(page.errors, [])
 }
 try {
@@ -93,15 +129,33 @@ try {
   assert.equal(created.status, 'applied')
   threadId = created.payload.threadId
   assert.equal(typeof threadId, 'string')
+  // Synthetic published messages in this script's newly created, isolated DB.
+  // No agent delivery or model Run is created; all reads use production entries.
+  const db = new DatabaseSync(health.database.path)
+  try {
+    db.exec('PRAGMA busy_timeout=5000; BEGIN IMMEDIATE')
+    const insert = db.prepare(`INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,
+      structured_content_json,address_mode,addressed_agent_ids_json,version,created_at,updated_at)
+      VALUES(?,?,?,'agent',?,?,?,'default','[]',1,?,?)`)
+    for (let sequence=1;sequence<=31;sequence++) {
+      const body = sequence===31 ? [samples.flow,samples.wide,samples.invalid,samples.tall].map(fence).join('\n\n')
+        : `历史正文 ${sequence}。用于核对图形出现时的阅读位置。\n\n这段正文应保持可读。`
+      const time = new Date(Date.UTC(2026,10,3,0,sequence)).toISOString()
+      insert.run(sequence===31?'mermaid-accept-message':`mermaid-history-${sequence}`,threadId,sequence,
+        preflight.initialLeadAgentId,body,JSON.stringify([{kind:'text',text:body}]),time,time)
+    }
+    db.exec('COMMIT')
+  } finally { db.close() }
   await desktop.evaluate(`window.rovai.navigationPreferences.registerProjects([${JSON.stringify(inspected.projectPath)}], false)`)
   console.log('Created isolated review thread')
+  // Observe every production file read before the first published graph mounts.
+  await desktop.send('Page.addScriptToEvaluateOnNewDocument', { source: `window.acceptanceAssetReads=[];const originalAssetFetch=window.fetch;
+    window.fetch=(url,...args)=>{if(/mermaid.min-|purify.min-|mermaid-sandbox-entry-/u.test(String(url)))acceptanceAssetReads.push(String(url));return originalAssetFetch(url,...args)}` })
   const beforeReload = await desktop.evaluate('performance.timeOrigin')
   await desktop.send('Page.reload')
   await desktop.wait(`performance.timeOrigin!==${beforeReload} && Boolean(window.rovai && document.querySelector('.authoritative-workspace'))`, 45_000)
   // Observe local file reads; Chromium does not expose them as ResourceTiming.
   // This forwards every read unchanged and cannot supply or intercept an asset.
-  await desktop.evaluate(`window.acceptanceAssetReads=[];const originalAssetFetch=window.fetch;
-    window.fetch=(url,...args)=>{if(/mermaid.min-|purify.min-|mermaid-sandbox-entry-/u.test(String(url)))acceptanceAssetReads.push(String(url));return originalAssetFetch(url,...args)}`)
   await desktop.evaluate(`window.rovai.appearance.setPreference('day')`)
   await openDocument(desktop)
   await inspect(desktop, 'packaged-desktop')
@@ -122,9 +176,12 @@ try {
   await web.click(`document.querySelector('.web-login button[type=submit]')`)
   await openDocument(web)
   await inspect(web, 'packaged-web')
+  await inspectMessages(desktop, 'packaged-desktop')
+  await inspectMessages(web, 'packaged-web')
   await writeFile(join(output, 'packaged-result.json'), JSON.stringify({ passed: true, executable, root,
     desktop: 'installed web-ui/desktop.html file entry with Electron preload', web: 'same installed web-ui/index.html via Host HTTP',
-    validDiagrams: 8, invalidDiagrams: 1, largeDiagram: true, themeAndFileWatch: true, sourcePreferencePreserved: true, runtime: false }, null, 2) + '\n')
+    validDiagrams: 8, invalidDiagrams: 1, largeDiagram: true, themeAndFileWatch: true, sourcePreferencePreserved: true,
+    messageDiagrams: { valid: 3, invalid: 1, followingLatest: true, historyPosition: true, sourceAndDialog: true }, runtime: false }, null, 2) + '\n')
   console.log('Packaged Desktop and bundled Web Markdown Mermaid acceptance passed')
 } catch (error) {
   const diagnostics = await desktop?.evaluate(`Promise.all([

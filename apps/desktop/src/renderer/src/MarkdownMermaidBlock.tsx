@@ -10,7 +10,7 @@ import { useUiText } from './interface-language'
 type ImageResult = { source: string; theme: ResolvedTheme; url: string }
 type RenderState = { source: string; theme: ResolvedTheme; status: 'loading' | 'ready' | 'error' }
 
-export function MarkdownMermaidBlock({ source, theme }: { source: string; theme: ResolvedTheme }): React.JSX.Element {
+export function MarkdownMermaidBlock({ source, theme, renderReady = true }: { source: string; theme: ResolvedTheme; renderReady?: boolean }): React.JSX.Element {
   const t = useUiText()
   const sequence = useRef(0)
   const expandButton = useRef<HTMLButtonElement>(null)
@@ -19,14 +19,15 @@ export function MarkdownMermaidBlock({ source, theme }: { source: string; theme:
   const [view, setView] = useState<'diagram' | 'source'>('diagram')
   const [retry, setRetry] = useState(0)
   const [expanded, setExpanded] = useState(false)
-  const image = result?.source === source ? result : null
-  const status = renderState.source === source && renderState.theme === theme ? renderState.status : 'loading'
+  const image = renderReady && result?.source === source ? result : null
+  const status = !renderReady ? 'pending' : renderState.source === source && renderState.theme === theme ? renderState.status : 'loading'
 
   // Submitted results belong to React's committed display, separately from candidates.
   useEffect(() => () => { if (result) URL.revokeObjectURL(result.url) }, [result])
   useEffect(() => { setExpanded(false) }, [source])
   useEffect(() => {
     const current = ++sequence.current
+    if (!renderReady) { setResult(null); return }
     let candidate: string | null = null
     let timer: ReturnType<typeof setTimeout> | undefined
     const valid = () => sequence.current === current
@@ -61,7 +62,7 @@ export function MarkdownMermaidBlock({ source, theme }: { source: string; theme:
       clearTimeout(timer)
       if (candidate) { URL.revokeObjectURL(candidate); candidate = null }
     }
-  }, [source, theme, retry])
+  }, [source, theme, retry, renderReady])
 
   const failImage = (): void => {
     sequence.current += 1

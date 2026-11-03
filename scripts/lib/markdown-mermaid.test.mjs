@@ -41,6 +41,7 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
   for (const host of ['web', 'desktop']) await t.test(host, async () => {
     const profile = join(root, host, 'user-data')
     await mkdir(join(profile, 'managed-skill-library'), { recursive: true })
+    console.log(JSON.stringify({ channel: 'automatic_acceptance', host, userData: profile, skillLibraryRoot: join(profile, 'managed-skill-library'), runtime: false }))
     const browser = await launchAcceptanceBrowser({
       executable: host === 'desktop' ? electron : (process.env.ROVAI_TEST_CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
       args: host === 'desktop'
@@ -67,6 +68,12 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       await b.wait('!!document.querySelector("pre")')
       assert.equal(await b.evaluate('!!document.querySelector(".markdown-mermaid, [data-mermaid-renderer]")'), false)
       assert.equal(await b.evaluate('performance.getEntriesByType("resource").some(e=>e.name.includes("mermaid-sandbox"))'), false)
+      await b.evaluate('mermaidFixture.setChat(true);mermaidFixture.setSource("```mermaid\\ngraph TD\\n A-->B")')
+      await b.wait('document.querySelector(".markdown-mermaid")?.dataset.mermaidState==="pending"')
+      await pause(80)
+      assert.equal(await b.evaluate('!!document.querySelector("[data-mermaid-renderer]")'), false, 'An open streaming block does not start the engine')
+      assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid").textContent.includes("正在绘制")'), false)
+      await b.evaluate('mermaidFixture.setChat(false)')
       if (host === 'desktop') {
         // The first local read never settles. A new generation must read again.
         await b.evaluate(`window.originalFetch=window.fetch; window.originalTimeout=window.setTimeout; window.scriptReads=0;
@@ -166,6 +173,64 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       await b.evaluate('heldDecode()'); await pause(100)
       assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid-image").src'), current)
       assert.equal(await b.evaluate('liveURLs.has(document.querySelector(".markdown-mermaid-image").src)'), true)
+
+      // Mention projection outside a graph must not make copy depend on hidden pre.
+      await b.evaluate('mermaidFixture.setChat(true);mermaidFixture.setComplete(true);mermaidFixture.setInlineMention(true);mermaidFixture.setSource("MENTION\\n\\n"+mermaidFixture.fence(mermaidFixture.samples.flow))'); await ready()
+      assert.equal(await b.evaluate('!!document.querySelector(".markdown-mermaid-image") && !document.querySelector(".markdown-mermaid pre")'), true)
+      await b.click('document.querySelector(".markdown-code-copy")')
+      await b.wait('document.querySelector(".markdown-code-copy").dataset.copyState === "copied"')
+      assert.equal(await b.evaluate('navigator.clipboard.readText()'), await b.evaluate('mermaidFixture.samples.flow+"\\n"'))
+      await b.evaluate('mermaidFixture.setInlineMention(false)')
+
+      // Feed actual chunks: the closing line is not committed until its newline.
+      await b.evaluate('mermaidFixture.setChat(true);mermaidFixture.setComplete(false);window.stream="```mermaid\\n";mermaidFixture.setSource(stream)')
+      const renders = await b.evaluate('svgSources.length')
+      for (const chunk of ['flowchart TD\n', ' A[实时] --> B[已闭合]\n', '`', '``', '  ']) {
+        await b.evaluate(`stream+=${JSON.stringify(chunk)};mermaidFixture.setSource(stream)`)
+        assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid").dataset.mermaidState'), 'pending')
+      }
+      await pause(100)
+      assert.equal(await b.evaluate('svgSources.length'), renders)
+      await b.evaluate('stream+="\\n";mermaidFixture.setSource(stream)'); await ready()
+      assert.equal(await b.evaluate('svgSources.length'), renders + 1, 'Graph appears before body completion')
+      await b.evaluate('window.streamBlock=document.querySelector(".markdown-mermaid");window.streamURL=document.querySelector(".markdown-mermaid-image").src')
+      await button('查看源码')
+      for (const chunk of ['\n后续解释还在生成。\n\n', '```js\nconsole.log(1)\n```\n\n', '~~~mermaid\nsequenceDiagram\n A->>B: 未完成']) {
+        await b.evaluate(`stream+=${JSON.stringify(chunk)};mermaidFixture.setSource(stream)`)
+      }
+      await pause(100)
+      assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid")===streamBlock && streamBlock.dataset.mermaidView==="source"'), true)
+      assert.equal(await b.evaluate('svgSources.length'), renders + 1, 'Appending prose and an unfinished second graph does not redraw the first')
+      assert.equal(await b.evaluate('document.querySelectorAll("[data-mermaid-state=pending]").length'), 1)
+      await b.evaluate('mermaidFixture.setTheme("day")'); await ready()
+      assert.equal(await b.evaluate('streamBlock.dataset.mermaidView'), 'source')
+      await b.evaluate('mermaidFixture.setComplete(true)')
+      await b.wait('document.querySelectorAll("[data-mermaid-state=ready]").length===2')
+      assert.equal(await b.evaluate('streamBlock.dataset.mermaidView'), 'source')
+      await b.capture(join(evidence, `${host}-streaming.png`))
+
+      for (const [opening, closing] of [
+        ['> ```mermaid\n> graph TD\n> A-->B\n', '> ```'],
+        ['> 1. ~~~~mermaid\n>    graph TD\n>    A-->B\n', '>    ~~~~~']
+      ]) {
+        await b.evaluate(`mermaidFixture.setComplete(false);mermaidFixture.setSource(${JSON.stringify(opening)})`)
+        await b.wait('document.querySelector(".markdown-mermaid").dataset.mermaidState==="pending"')
+        for (let count = 1; count <= closing.length; count++) {
+          await b.evaluate(`mermaidFixture.setSource(${JSON.stringify(opening + closing.slice(0, count))})`)
+          assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid").dataset.mermaidState'), 'pending')
+        }
+        await b.evaluate(`mermaidFixture.setSource(${JSON.stringify(opening + closing + '\r\n')})`); await ready()
+      }
+
+      // Removing readiness invalidates a held result even when code text is equal.
+      await b.evaluate(`window.heldDecode=null;HTMLImageElement.prototype.decode=function(){HTMLImageElement.prototype.decode=originalDecode;return new Promise(resolve=>{window.heldDecode=resolve})};
+        mermaidFixture.setComplete(false);mermaidFixture.setSource("\x60\x60\x60mermaid\\ngraph LR\\n A-->B\\n\x60\x60\x60\\n")`)
+      await b.wait('typeof heldDecode === "function"')
+      await b.evaluate('mermaidFixture.setSource("```mermaid\\ngraph LR\\n A-->B\\n")')
+      await b.wait('document.querySelector(".markdown-mermaid").dataset.mermaidState==="pending"')
+      await b.evaluate('heldDecode()'); await pause(100)
+      assert.equal(await b.evaluate('!!document.querySelector(".markdown-mermaid-image")'), false)
+      await b.evaluate('mermaidFixture.setChat(false)')
 
       // Real engine, reachable server, product CSP. There is no request-aborting test hook.
       const url = origin + '/leak/' + host

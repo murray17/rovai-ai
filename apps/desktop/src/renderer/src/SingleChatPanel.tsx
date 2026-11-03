@@ -8,6 +8,9 @@ import { ThreadPanelCollapseButton, ThreadPanelDismissHint, useThreadPanelDismis
 import { newCommandId } from '../../shared/command-id'
 import { RunningText } from './RunningText'
 import { useRuntimePhase } from './useRuntimePhase'
+import { useOptionalFilePreview } from './file-preview-context'
+import { MessageMarkdown } from './MessageMarkdown'
+import { ExecutionNarration } from './ExecutionNarration'
 import { revealMessageQuote } from './message-quote-reveal'
 import { ReturnToLatest } from './ReturnToLatest'
 import { MessageQuotes, MessageQuoteSelectionToolbar } from './MessageQuotes'
@@ -343,6 +346,16 @@ export function SingleChatRunHistory({
   onNotify?(message: string): void
 }): React.JSX.Element {
   const runtime = useRuntimePhase(threadId, run)
+  const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
+  // The portal container belongs to this run and this exact narration identity.
+  // Moving its host at final publication preserves the mounted diagram/viewer.
+  const [bodyHosts] = useState(() => new Map<string, HTMLDivElement>())
+  const bodyHost = (key: string): HTMLDivElement | null => {
+    if (typeof document === 'undefined') return null
+    let host = bodyHosts.get(key)
+    if (!host) { host = document.createElement('div'); bodyHosts.set(key, host) }
+    return host
+  }
   const terminal = !NON_TERMINAL_RUNS.has(run.status)
   const stopping = !terminal && (cancelling || run.cancelRequestedAt !== null)
   const [open, setOpen] = useState(!terminal)
@@ -357,11 +370,19 @@ export function SingleChatRunHistory({
   const processItems = useMemo(() => {
     const events = evidence.map(liveRuntimeEventFromExecutionEvidence)
     return buildLiveExecutionProgress(events, run.id, { textMode: 'complete' }).items
-      .filter((item: ExecutionProgressItem) => item.kind !== 'narration'
-        || !finalMessage
-        || item.body.trim() !== finalMessage.body.trim())
-  }, [evidence, finalMessage, run.id])
-  const grouped = useMemo(() => groupConsecutiveToolItems(processItems), [processItems])
+  }, [evidence, run.id])
+  const narration = processItems.filter(item => item.kind === 'narration')
+  const matches = finalMessage?.agentRunId === run.id ? narration.filter(item => item.body.trim() === finalMessage.body.trim()) : []
+  const handoff = matches.length === 1 ? matches[0] : null
+  const grouped = useMemo(() => groupConsecutiveToolItems(processItems.filter(item => item.key !== handoff?.key)), [processItems, handoff?.key])
+  const narrationEvidence = new Map(evidence.map(item => [`narration:${item.id}`, item]))
+  const narrationBody = (item: Extract<ExecutionProgressItem, { kind: 'narration' }>) => <ExecutionNarration
+    threadId={threadId} evidence={narrationEvidence.get(item.key)} preview={item.body}
+    Body={MessageMarkdown} theme={theme} contentComplete={item.key === handoff?.key || item.contentComplete === true} />
+  const bodySlot = (item: Extract<ExecutionProgressItem, { kind: 'narration' }>) => {
+    const host = bodyHost(item.key)
+    return host ? <div ref={element => { if (element && host.parentElement !== element) element.append(host) }} /> : narrationBody(item)
+  }
   const completeEvidence = useMemo(
     () => selectCompletePresentableExecutionEvidence(evidence),
     [evidence]
@@ -396,7 +417,7 @@ export function SingleChatRunHistory({
       />
     }
     if (item.kind === 'narration') {
-      return <div className="single-chat-narration" key={item.key}><SafeMarkdown>{item.body}</SafeMarkdown></div>
+      return <div className="single-chat-narration" key={item.key}>{bodySlot(item)}</div>
     }
     if (item.kind === 'plan') {
       return <div className="process-plan live-progress-plan" key={item.key}>
@@ -453,8 +474,14 @@ export function SingleChatRunHistory({
         </details>
         {finalMessage && <>
           <hr className="single-chat-final-rule" />
-          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={run.threadTurnId}><SafeMarkdown>{finalMessage.body}</SafeMarkdown></div>
+          <div className="single-chat-final" data-single-chat-message-id={finalMessage.id} data-message-quote-body={finalMessage.id} data-quote-owner={`single_chat:${conversationId}`} data-notification-run-id={terminal ? run.id : undefined} data-notification-turn-id={run.threadTurnId}>
+            {handoff ? bodySlot(handoff) : <MessageMarkdown theme={theme}>{finalMessage.body}</MessageMarkdown>}
+          </div>
         </>}
+        {narration.map(item => {
+          const host = bodyHost(item.key)
+          return host ? createPortal(narrationBody(item), host, item.key) : null
+        })}
       </div>
     </section>
   )
@@ -1102,6 +1129,18 @@ export function SingleChatPanel({
     const viewport = viewportRef.current
     if (viewport) viewport.scrollTop = viewport.scrollHeight
   }, [currentSnapshot?.conversation.id, currentSnapshot?.conversation.lastMessageSequence, activeRun?.executionEvidenceCount, sending, visible])
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current
+    const transcript = viewport?.querySelector('.single-chat-transcript')
+    if (!visible || !viewport || !transcript || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (followLatestRef.current) viewport.scrollTop = viewport.scrollHeight
+    })
+    observer.observe(transcript)
+    observer.observe(viewport)
+    return () => observer.disconnect()
+  }, [currentSnapshot?.conversation.id, visible])
 
   useEffect(() => {
     if (!onVisibleNotificationSources) return
