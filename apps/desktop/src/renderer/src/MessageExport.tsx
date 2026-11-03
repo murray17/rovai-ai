@@ -13,7 +13,7 @@ import { AgentArtifactIcon, classifyAttachmentDisplay } from './attachment-prese
 import { MessageExportContext } from './message-export-context'
 import {
   defaultMessageExportOptions, downloadMessageExport, exportableMessages, exportDocumentPNG,
-  exportFilename, messageExportMarkdown, snapshotExportDocument, standaloneExportHTML, toggleExportSelection,
+  exportEntryShowsTime, exportFilename, messageExportMarkdown, snapshotExportDocument, standaloneExportHTML, toggleExportSelection,
   type MessageExportEntry, type MessageExportFormat, type MessageExportOptions
 } from './message-export'
 import './message-export.css'
@@ -23,7 +23,7 @@ export function ExportGlyph(): React.JSX.Element {
 }
 export function MessageSelectButton({ onSelect }: { onSelect(): void }): React.JSX.Element {
   return <button className="message-select-button" type="button" title={uiAttribute('选择多条消息')} aria-label={uiAttribute('选择多条消息')} onClick={onSelect}>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="m8 12 3 3 5-6" /></svg>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 5h8M13 12h8M13 19h8m-18-2 2 2 4-4M3 7l2 2 4-4" /></svg>
   </button>
 }
 export function useMessageExport(threadId: string, messages: readonly ThreadMessageView[]) {
@@ -103,7 +103,9 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
 }): React.JSX.Element {
   const [format, setFormat] = useState<MessageExportFormat>('html')
   const [settings, setSettings] = useState<Record<MessageExportFormat, MessageExportOptions>>(() => ({ html: defaultMessageExportOptions('html'), png: defaultMessageExportOptions('png'), markdown: defaultMessageExportOptions('markdown') }))
-  const [title, setTitle] = useState(sourceTitle + ' · ' + uiAttribute('会话片段'))
+  const [customTitle, setCustomTitle] = useState<string | null>(null)
+  const defaultTitle = sourceTitle + ' · ' + uiAttribute('会话片段')
+  const title = customTitle ?? defaultTitle
   const [renaming, setRenaming] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const [manualCopy, setManualCopy] = useState<string | null>(null), [zoom, setZoom] = useState<string | null>(null), [copied, setCopied] = useState(false)
   const trigger = useRef<HTMLElement | null>(null)
@@ -114,7 +116,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
   useEffect(() => {
     reader.current?.querySelectorAll<HTMLElement>('button:not(.markdown-code-copy), a:not([href^="https://"]):not([href^="http://"])').forEach(node => { node.tabIndex = -1 })
   }, [entries, format, options])
-  const name = title.trim() || sourceTitle
+  const name = title.trim() || defaultTitle
   const markdown = entries ? messageExportMarkdown(name, sourceTitle, entries, options) : ''
   const close = () => { if (!busy) onClose() }
   const download = async () => {
@@ -126,7 +128,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
       if (format === 'markdown') blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
       else {
         if (!reader.current) return
-        const captured = await snapshotExportDocument(reader.current, control.signal)
+        const captured = await snapshotExportDocument(reader.current, control.signal, format)
         blob = format === 'png' ? await exportDocumentPNG(captured) : new Blob([standaloneExportHTML(name, captured)], { type: 'text/html;charset=utf-8' })
       }
       control.signal.throwIfAborted(); downloadMessageExport(blob, exportFilename(name, format))
@@ -141,7 +143,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
       onEscapeKeyDown={event => { if (busy || zoom) { event.preventDefault(); if (zoom) setZoom(null) } }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
       <AppDialogHeader title={uiAttribute('导出预览')} description={uiAttribute('预览并导出选中的消息')} hideDescription closeDisabled={busy} />
       <AppDialogBody className="message-export-body">
-        <div className="message-export-title-row">{renaming ? <input autoFocus value={title} maxLength={100} aria-label={uiAttribute('导出标题')} disabled={busy} onChange={e => setTitle(e.target.value)} onBlur={() => setRenaming(false)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); setRenaming(false) } }} />
+        <div className="message-export-title-row">{renaming ? <input autoFocus value={title} maxLength={100} aria-label={uiAttribute('导出标题')} disabled={busy} onChange={e => setCustomTitle(e.target.value)} onBlur={() => setRenaming(false)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); setRenaming(false) } }} />
           : <button type="button" className="message-export-title" aria-label={uiAttribute('修改导出标题')} disabled={busy} onClick={() => setRenaming(true)}>{name}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L20 8a2 2 0 0 0-5-5L4 15z" /></svg></button>}</div>
         <div className="message-export-formats" role="group" aria-label={uiAttribute('导出格式')}>
           {(['png', 'html', 'markdown'] as const).map(f => <button key={f} type="button" aria-pressed={f === format} disabled={busy} onClick={() => { setFormat(f); setError(null); setManualCopy(null) }}>{f === 'png' ? uiAttribute('图片 PNG') : f === 'html' ? uiAttribute('网页 HTML') : 'Markdown'}</button>)}
@@ -152,11 +154,11 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
         <div className="message-export-preview" tabIndex={0} aria-label={uiAttribute('导出内容预览')}>
           {format === 'markdown' ? <pre className="message-export-markdown">{markdown}</pre> : <MessageExportContext.Provider value={true}>
             <article ref={reader} className="message-export-document" data-export-format={format}><h2>{name}</h2><p className="message-export-source">{sourceTitle}</p>
-              {entries?.map(e => <section className={`message-export-entry${e.message.authorType === 'agent' ? '' : ' is-user'}${options.avatars ? ' has-avatar' : ''}`} key={e.message.id}>
+              {entries?.map((e, index) => <section className={`message-export-entry${e.message.authorType === 'agent' ? '' : ' is-user'}${options.avatars ? ' has-avatar' : ''}`} key={e.message.id}>
                 {options.avatars && (e.message.authorType === 'user'
                   ? <CurrentUserAvatar profile={{ displayName: e.author, avatarDataUrl: e.avatarDataUrl ?? null }} className="local-message-avatar" />
                   : <MemberAvatar agentId={e.message.authorId} avatarRef={e.avatarRef} displayName={e.author} size="list" decorative />)}
-                <div className="message-export-stack"><div className="message-export-meta">{options.authors && <strong>{e.author}</strong>}{options.times && <time>{new Date(e.message.createdAt).toLocaleString()}</time>}</div>
+                <div className="message-export-stack"><div className="message-export-meta">{options.authors && <strong>{e.author}</strong>}{options.times && exportEntryShowsTime(e, entries[index + 1]) && <time>{new Date(e.message.createdAt).toLocaleString()}</time>}</div>
                   <div className="message-export-bubble" onClickCapture={event => {
                     const target = event.target as Element
                     if (format !== 'html' || (!target.closest('.markdown-code-copy') && !target.closest('a[href^="https://"],a[href^="http://"]'))) { event.preventDefault(); event.stopPropagation() }

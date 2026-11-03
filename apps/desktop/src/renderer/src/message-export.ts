@@ -3,6 +3,7 @@ import DOMPurify from 'dompurify'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import type { Root, RootContent } from 'mdast'
+import { uiAttribute } from './interface-language'
 
 export type MessageExportFormat = 'html' | 'png' | 'markdown'
 export type MessageExportOptions = { avatars: boolean; authors: boolean; times: boolean; recipients: boolean }
@@ -12,6 +13,11 @@ export const defaultMessageExportOptions = (format: MessageExportFormat): Messag
 export type MessageExportEntry = {
   message: ThreadMessageView; author: string; avatarRef: string | null; recipients: string[]
   markdown: string; reply: string | null; excerpt?: string; runtimeImages?: AgentRunImageView[]; avatarDataUrl?: string | null
+  /** Frozen adjacency from the source timeline; never inferred from selected entries. */
+  nextGroupedMessageId?: string | null
+}
+export function exportEntryShowsTime(entry: MessageExportEntry, next?: MessageExportEntry): boolean {
+  return entry.excerpt !== undefined || !next || next.excerpt !== undefined || entry.nextGroupedMessageId !== next.message.id
 }
 export function exportableMessages(messages: readonly ThreadMessageView[]): ThreadMessageView[] {
   return messages.filter(m => !m.withdrawn && !m.id.startsWith('optimistic:') && !m.missionStart
@@ -84,13 +90,36 @@ const readDataURL = (blob: Blob): Promise<string> => new Promise((resolve, rejec
   reader.onerror = () => reject(reader.error)
   reader.readAsDataURL(blob)
 })
-/** Snapshot only the export reader. Never walk the timeline, execution cards or application shell. */
-export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSignal): Promise<HTMLElement> {
+class ExportResourcePendingError extends Error {
+  constructor() { super(uiAttribute('图片仍在加载，请稍后重试。')) }
+}
+const layoutDimensions = /^(?:(?:min-|max-)?(?:width|height|inline-size|block-size)|grid-template-(?:columns|rows)|grid-auto-(?:columns|rows))$/
+function taskMarker(input: HTMLInputElement, style: CSSStyleDeclaration): HTMLElement {
+  const marker = document.createElement('span'), svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+  marker.className = 'message-export-task-marker' + (input.checked ? ' is-complete' : '')
+  marker.setAttribute('role', 'img'); marker.setAttribute('aria-label', input.checked ? uiAttribute('已完成') : uiAttribute('未完成'))
+  Object.assign(marker.style, { display: 'inline-flex', verticalAlign: 'middle', width: style.width, height: style.height, margin: style.margin })
+  svg.setAttribute('viewBox', '0 0 16 16'); svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%'); svg.setAttribute('aria-hidden', 'true')
+  const rect = document.createElementNS(svg.namespaceURI, 'rect')
+  const accent = style.getPropertyValue('--conversation-action').trim()
+  for (const [key, value] of Object.entries({ x: '1', y: '1', width: '14', height: '14', rx: '3', fill: input.checked ? accent : 'none', stroke: input.checked ? accent : style.getPropertyValue('--conversation-control-line').trim() })) rect.setAttribute(key, value)
+  svg.append(rect)
+  if (input.checked) {
+    const check = document.createElementNS(svg.namespaceURI, 'path')
+    for (const [key, value] of Object.entries({ d: 'm4 8 3 3 5-6', fill: 'none', stroke: style.getPropertyValue('--conversation-action-contrast').trim(), 'stroke-width': '1.7', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' })) check.setAttribute(key, value)
+    svg.append(check)
+  }
+  marker.append(svg); return marker
+}
+/** Only the export reader is captured. HTML retains fluid layout; PNG freezes the 720px reader. */
+export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSignal, format: 'html' | 'png' = 'html'): Promise<HTMLElement> {
+  const pending = '[data-export-pending="true"], .member-avatar--loading'
   const deadline = Date.now() + 10_000
-  while (root.querySelector('[data-export-pending="true"], .member-avatar--loading') && Date.now() < deadline) {
+  while (root.querySelector(pending) && Date.now() < deadline) {
     signal?.throwIfAborted(); await pause(30)
   }
   signal?.throwIfAborted()
+  if (root.querySelector(pending)) throw new ExportResourcePendingError()
   await Promise.race([document.fonts.ready, pause(2000)])
   const clone = root.cloneNode(true) as HTMLElement
   const originals = [root, ...root.querySelectorAll<HTMLElement>('*')]
@@ -98,18 +127,26 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
   for (let i = 0; i < originals.length; i++) {
     signal?.throwIfAborted()
     const from = originals[i], to = copies[i], style = getComputedStyle(from)
+    const fixedSize = format === 'png' || from.matches('.member-avatar,.local-message-avatar') || from.closest('svg')
+    if (!fixedSize) to.removeAttribute('style')
     for (const key of style) {
       const value = style.getPropertyValue(key)
+      if (!fixedSize && layoutDimensions.test(key)) continue
       if (!key.startsWith('--') && !value.includes('url(') && !key.startsWith('animation') && !key.startsWith('transition')) to.style.setProperty(key, value)
     }
+    if (!fixedSize) { to.style.minWidth = '0'; to.style.maxWidth = '100%' }
     for (const attr of [...to.attributes]) {
       if (attr.name.startsWith('on') || attr.name.startsWith('data-') || ['id', 'tabindex', 'title', 'aria-controls', 'aria-describedby', 'aria-haspopup', 'aria-expanded', 'srcset', 'srcdoc'].includes(attr.name)) to.removeAttribute(attr.name)
     }
     if (['button', 'link'].includes(to.getAttribute('role') ?? '')) to.removeAttribute('role')
+    if (from instanceof HTMLInputElement && from.type === 'checkbox' && from.closest('.safe-markdown .task-list-item')) {
+      to.replaceWith(taskMarker(from, style)); continue
+    }
     if (from instanceof HTMLImageElement) {
       try {
-        await Promise.race([from.decode(), pause(5000)])
+        const state = await Promise.race([from.decode().then(() => 'ready'), pause(5000).then(() => 'pending')])
         signal?.throwIfAborted()
+        if (state === 'pending') throw new ExportResourcePendingError()
         if (!from.complete || !from.naturalWidth) throw new Error('image_unavailable')
         if (rasterDataURL.test(from.src)) to.setAttribute('src', from.src)
         else {
@@ -125,13 +162,26 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
             to.setAttribute('src', canvas.toDataURL('image/png')); canvas.width = canvas.height = 0
           }
         }
-      } catch {
+        if (format === 'html') {
+          to.style.width = to.style.height = from.closest('.member-avatar,.local-message-avatar') ? '100%' : 'auto'
+          to.style.maxWidth = '100%'
+        }
+      } catch (error) {
         signal?.throwIfAborted()
+        if (error instanceof ExportResourcePendingError) throw error
         to.replaceWith(document.createTextNode(from.alt || '图片不可用'))
       }
     }
   }
-  clone.style.position = 'static'; clone.style.margin = '0'; clone.style.maxHeight = 'none'; clone.style.height = `${Math.ceil(root.scrollHeight)}px`; clone.style.overflow = 'visible'
+  clone.style.position = 'static'; clone.style.margin = '0'; clone.style.maxHeight = 'none'; clone.style.overflow = 'visible'
+  clone.style.height = format === 'png' ? `${Math.ceil(root.scrollHeight)}px` : 'auto'
+  clone.style.width = format === 'png' ? '720px' : 'min(720px, 100%)'
+  if (format === 'html') {
+    clone.querySelectorAll<HTMLElement>('.markdown-table-frame').forEach(node => { node.style.gridTemplateColumns = 'minmax(0, 1fr)' })
+    // Computed grid tracks are pixel lengths. Restore the relative reference
+    // tracks so its icon and title stay together as the document gets narrower.
+    clone.querySelectorAll<HTMLElement>('.ref-message-link').forEach(node => { node.style.gridTemplateColumns = 'auto minmax(0, 1fr) auto' })
+  }
   clone.querySelectorAll('script,iframe,object,embed,form,input,textarea,video,audio,.markdown-code-copy,.markdown-table-copy,.sr-only').forEach(n => n.remove())
   clone.querySelectorAll('button,a').forEach(node => {
     if (node.tagName === 'A' && /^https?:\/\//i.test(node.getAttribute('href') ?? '')) {

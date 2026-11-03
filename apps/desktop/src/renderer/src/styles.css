@@ -3546,18 +3546,22 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .safe-markdown .markdown-file-reference code { color: inherit; }
 .safe-markdown pre code { padding: 0; background: transparent; font-size: inherit; }
 .conversation-bubble :is(.final-copy, .message-bubble) .safe-markdown code,
+.message-export-bubble .safe-markdown code,
 .execution-drawer .safe-markdown code,
 .single-chat-agent-response :is(.single-chat-final, .single-chat-narration, .process-plan) .safe-markdown code,
 .file-preview-markdown .safe-markdown code { padding: 1px 4px; border-radius: 6px; background: var(--conversation-inline-code-canvas); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .conversation-bubble :is(.final-copy, .message-bubble) .safe-markdown pre,
+.message-export-bubble .safe-markdown pre,
 .execution-drawer .safe-markdown pre,
 .single-chat-agent-response :is(.single-chat-final, .single-chat-narration, .process-plan) .safe-markdown pre,
 .file-preview-markdown .safe-markdown pre { padding: 11px 12px; }
 .conversation-bubble :is(.final-copy, .message-bubble) .safe-markdown,
+.message-export-bubble .safe-markdown,
 .execution-drawer .safe-markdown,
 .single-chat-agent-response :is(.single-chat-final, .single-chat-narration, .process-plan) .safe-markdown,
 .file-preview-markdown .safe-markdown { --markdown-code-line: var(--conversation-code-line); --markdown-code-canvas: var(--conversation-code-block-canvas); --markdown-code-radius: 8px; }
 .conversation-bubble :is(.final-copy, .message-bubble) .safe-markdown pre code,
+.message-export-bubble .safe-markdown pre code,
 .execution-drawer .safe-markdown pre code,
 .single-chat-agent-response :is(.single-chat-final, .single-chat-narration, .process-plan) .safe-markdown pre code,
 .file-preview-markdown .safe-markdown pre code { padding: 0; border-radius: 0; background: transparent; }

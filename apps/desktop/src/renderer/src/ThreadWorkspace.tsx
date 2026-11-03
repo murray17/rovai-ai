@@ -5148,11 +5148,22 @@ export function ThreadWorkspace({
       onActivateSkillMention={openSkillPreview} onFileReference={onFileReference} />
   }
 
+  const groupingMessage = (message: ThreadMessageView): ThreadMessageView => ({
+    ...message,
+    threadTurnId: message.threadTurnId
+      ?? (message.sourceAgentRunId ? runById.get(message.sourceAgentRunId)?.threadTurnId : null)
+      ?? null
+  })
+  const publicMessagesJoin = (message: ThreadMessageView, next: ThreadMessageView): boolean =>
+    shortPublicMessages.has(message.id) && samePublicMessageSegment(groupingMessage(message), groupingMessage(next))
   const exportEntry = (message: ThreadMessageView, excerpt?: string): MessageExportEntry => {
     const names = new Map(messageMentionNames.map(member => [member.agentId, member.displayName]))
     const parent = message.replyToThreadMessageId ? replyParentById.get(message.replyToThreadMessageId) : null
     const quoted = (message.quotes ?? []).map(q => `${q.authorAtCapture?.displayName ?? ''}：${q.text}`)
+    const index = presenceTimeline.findIndex(item => item.kind === 'camp_message' && item.message.id === message.id)
+    const next = index >= 0 ? presenceTimeline[index + 1] : undefined
     return { message: structuredClone(message), author: campMessageAuthorLabel(message, memberById, currentUserName),
+      nextGroupedMessageId: next?.kind === 'camp_message' && publicMessagesJoin(message, next.message) ? next.message.id : null,
       avatarRef: memberById.get(message.authorId)?.avatarRef ?? null,
       avatarDataUrl: message.authorType === 'user' ? currentUserProfile.avatarDataUrl : null,
       runtimeImages: presenceTimeline.flatMap(item => item.kind === 'camp_message' && item.message.id === message.id ? item.runtimeImageGroups.flatMap(group => group.images) : []),
@@ -5691,18 +5702,10 @@ export function ThreadWorkspace({
                     && previousMessageAuthorKey === messageAuthorKey
                   const previousItem = presenceTimeline[timelineIndex - 1]
                   const nextItem = presenceTimeline[timelineIndex + 1]
-                  const groupingMessage = (message: ThreadMessageView): ThreadMessageView => ({
-                    ...message,
-                    threadTurnId: message.threadTurnId
-                      ?? (message.sourceAgentRunId ? runById.get(message.sourceAgentRunId)?.threadTurnId : null)
-                      ?? null
-                  })
                   const isGroupContinuation = previousItem?.kind === 'camp_message'
-                    && shortPublicMessages.has(previousItem.message.id)
-                    && samePublicMessageSegment(groupingMessage(previousItem.message), groupingMessage(campMessage))
+                    && publicMessagesJoin(previousItem.message, campMessage)
                   const joinsNextMessage = nextItem?.kind === 'camp_message'
-                    && shortPublicMessages.has(campMessage.id)
-                    && samePublicMessageSegment(groupingMessage(campMessage), groupingMessage(nextItem.message))
+                    && publicMessagesJoin(campMessage, nextItem.message)
                   const messageTime = messageTimeParts(campMessage.createdAt, interfaceLanguage, messageTimeDate)
                   const messageTimestamp = !joinsNextMessage && messageTime ? (
                     <time className="message-action-time" dateTime={campMessage.createdAt} tabIndex={0}

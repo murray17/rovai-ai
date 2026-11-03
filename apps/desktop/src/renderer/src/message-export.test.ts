@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ThreadMessageView } from '@contracts'
-import { defaultMessageExportOptions, exportableMessages, exportFilename, exportMessageMarkdown, messageExportMarkdown, toggleExportSelection } from './message-export'
+import { defaultMessageExportOptions, exportableMessages, exportEntryShowsTime, exportFilename, exportMessageMarkdown, messageExportMarkdown, toggleExportSelection, type MessageExportEntry } from './message-export'
 const message = (id: string, sequence: number, extra = {}): ThreadMessageView => ({ id, sequence, authorType: 'agent', withdrawn: false, ...extra } as ThreadMessageView)
 describe('message export boundaries', () => {
   it('enables metadata in all formats, with no Markdown avatar', () => {
@@ -34,4 +34,11 @@ describe('message export boundaries', () => {
     expect(result).not.toContain('private-id')
   })
   it('never lets a title create a filesystem path', () => expect(exportFilename('../a/b:<x>', 'markdown')).toBe('.._a_b__x_.md'))
+  it('shows the final selected timestamp only when the source timeline really joins the selected neighbours', () => {
+    const entries = ['a', 'b', 'c'].map((id, i) => ({ message: message(id, i + 1), nextGroupedMessageId: ['b', 'c', null][i] } as MessageExportEntry))
+    expect(entries.map((entry, i) => exportEntryShowsTime(entry, entries[i + 1]))).toEqual([false, false, true])
+    expect(exportEntryShowsTime(entries[0], entries[2])).toBe(true)
+    expect(exportEntryShowsTime({ ...entries[0], nextGroupedMessageId: null }, entries[1])).toBe(true)
+    expect(exportEntryShowsTime({ ...entries[0], excerpt: '选文' }, entries[1])).toBe(true)
+  })
 })

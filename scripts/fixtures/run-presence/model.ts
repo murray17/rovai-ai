@@ -247,7 +247,7 @@ function localSend(body: string, recipients = [aid(0)], draft?: any) {
 }
 const executionReadMode = new URLSearchParams(location.search).get('executionRead')
 const invalidationListeners = new Set<() => void>()
-const controls = { steerReview: false, holdContinue: false, holdStop: false, holdDispatch: false, holdContinuationProjection: false, holdEntrySnapshot: false,
+const controls = { holdExportImage: false, steerReview: false, holdContinue: false, holdStop: false, holdDispatch: false, holdContinuationProjection: false, holdEntrySnapshot: false,
   failNextExecutionPage: executionReadMode === 'fail', holdExecutionPage: executionReadMode === 'hold',
   holdExecutionChanges: false, liveEvidence: false,
   holdSourceRead: false, failNextSourceRead: false, wrongSourceOwner: false,
@@ -270,6 +270,8 @@ export const model = {
     const first = makeMessage('export-user', 1, '@爱丽丝 请整理消息。')
     first.content = [{ kind: 'member_mention', agentId: aid(0) }, { kind: 'text', text: ' 请整理消息。' }, { kind: 'thread_reference', threadId: 'private-thread-id', titleAtSend: '关联讨论' }, { kind: 'mission_reference', missionId: 'private-mission-id', titleAtSend: '关联使命' }]
     const second = makeMessage('export-code', 2, '[@药师寺惠](https://example.com) 普通网页。\n\n```diff\n-old\n+new\n```\n\n| 内容 | 结果 |\n| --- | --- |\n| 文件 | 完整 |\n\n<script>window.exportInjected=1</script>', 0)
+    second.body += '\n\n`inline()`\n\n- [x] 完成实现\n- [ ] 等待验收\n\n' + '[长链接' + 'url'.repeat(70) + '](https://example.com/long)'
+    second.content = [{ kind: 'text', text: second.body }]
     second.addressedAgentIds = [aid(1)]
     second.attachments = [{ id: 'export-file', displayName: '报告.pdf', kind: 'file', fileCount: null, mediaType: 'application/pdf', byteSize: 4200, previewKind: 'none', availability: 'available' },
       { id: 'export-image', displayName: '图片.png', kind: 'file', fileCount: null, mediaType: 'image/png', byteSize: 256, previewKind: 'image', availability: 'available' },
@@ -278,6 +280,16 @@ export const model = {
     const withdrawn = makeMessage('export-withdrawn', 4, '不应导出的撤回内容'); withdrawn.withdrawn = true
     update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, title: '消息导出' }, messages: [first, second, third, withdrawn], agentRuns: [], agentRunFileChanges: [], agentRunImages: [], messageDeliveries: [], executionEvidence: [] },
       draft: { ...state.draft, body: '保留的草稿', content: { version: 2, segments: [{ kind: 'text', text: '保留的草稿' }] } } })
+  },
+  showExportPendingCase() {
+    this.showExportCase(); controls.holdExportImage = true
+    update({ snapshot: { ...state.snapshot, messages: state.snapshot.messages.map((message: any) => message.id === 'export-code'
+      ? { ...message, attachments: message.attachments.map((attachment: any) => attachment.id === 'export-image' ? { ...attachment, id: 'export-image-pending' } : attachment) } : message) } })
+  },
+  showExportGroupCase() {
+    this.showExportCase()
+    const messages = [1, 2, 3].map(sequence => ({ ...makeMessage(`export-group-${sequence}`, sequence, `连续消息 ${sequence}。`, 0), threadTurnId: 'export-same-turn' }))
+    update({ snapshot: { ...state.snapshot, messages } })
   },
   showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false) {
     this.setScenario('stream'); halt()
@@ -532,7 +544,8 @@ export const model = {
   client: { ...backing.client,
     composerAttachments: { ...backing.client.composerAttachments, async preview(locator: any) {
       if (locator.attachmentRefId === 'export-missing') return { availability: 'missing', preview: null }
-      if (locator.attachmentRefId === 'export-image') {
+      if (locator.attachmentRefId === 'export-image' || locator.attachmentRefId === 'export-image-pending') {
+        while (locator.attachmentRefId === 'export-image-pending' && controls.holdExportImage) await new Promise(resolve => setTimeout(resolve, 20))
         const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 100
         const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#a2c6ad'; ctx.fillRect(0, 0, 160, 100); ctx.fillStyle = '#173b25'; ctx.fillText('Embedded original', 12, 48)
         const blob = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'))

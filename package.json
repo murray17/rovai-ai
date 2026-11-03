@@ -50,6 +50,7 @@
     "test:windows-close": "node --test scripts/lib/windows-window-close.test.mjs",
     "test:feishu-login": "node --test scripts/lib/feishu-login-integration.test.mjs",
     "test:dingtalk-login": "node --test scripts/lib/dingtalk-login-presentation.test.mjs",
+    "accept:message-export": "node scripts/accept-message-export.mjs",
     "test:message-export-ui": "node --test scripts/lib/message-export.test.mjs",
     "test:message-quotes": "node --test scripts/lib/message-quotes.test.mjs",
     "test:message-anchors": "node --test scripts/lib/message-anchors.test.mjs",

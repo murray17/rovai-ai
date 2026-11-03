@@ -4290,5 +4290,6 @@
   "正在生成…": "Generating…",
   "关闭图片": "Close image",
   "放大图片": "Enlarge image",
-  "复制文本": "Copy text"
+  "复制文本": "Copy text",
+  "图片仍在加载，请稍后重试。": "Images are still loading. Please try again shortly."
 }

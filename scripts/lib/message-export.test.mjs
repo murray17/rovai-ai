@@ -19,7 +19,8 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
   const b = await launchAcceptanceBrowser({ executable: chrome, args: ['--headless=new', `--user-data-dir=${join(root, 'profile')}`, '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--remote-debugging-port=0', ...(process.platform === 'linux' ? ['--no-sandbox'] : []), 'about:blank'] })
   const click = async selector => { await b.click(`document.querySelector(${JSON.stringify(selector)})`); await pause(100) }
   const button = async (scope, text) => { await b.click(`[...document.querySelectorAll(${JSON.stringify(scope + ' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)})`); await pause(100) }
-  const open = async () => { await click('.message-selection-actions .primary-button'); await b.wait('!!document.querySelector(".message-export-document")') }
+  const open = async () => { await click('.message-selection-actions .primary-button'); await b.wait('!!document.querySelector(".message-export-dialog")') }
+  const codeStyle = scope => b.evaluate(`(()=>{const root=document.querySelector(${JSON.stringify(scope)}),pre=root.querySelector('pre'),frame=root.querySelector('.markdown-code-frame'),inline=root.querySelector('p code');const style=e=>{const s=getComputedStyle(e);return [s.backgroundColor,s.borderRadius,s.padding,s.borderColor]};return {pre:style(pre),frame:style(frame),inline:style(inline)}})()`)
   const downloaded = async (count, label) => {
     await button('.message-export-dialog', label)
     await b.wait(`window.__downloads.length===${count}`, 25_000)
@@ -28,6 +29,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
   try {
     await b.send('Page.navigate', { url: pathToFileURL(join(root, 'rovai-teammate-presence.html')).href + '?export=1&pure=1' })
     await b.wait('!!window.__presence && !!document.querySelector("[data-message-id=export-code]")')
+    await b.evaluate('__presence.renameThread("同步标题")')
     await b.evaluate(`window.__downloads=[];const originalURL=URL.createObjectURL.bind(URL),blobs=new Map();URL.createObjectURL=blob=>{const url=originalURL(blob);blobs.set(url,blob);return url};const originalClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download){window.__downloads.push({name:this.download,blob:blobs.get(this.href)});return}originalClick.call(this)}`)
     const draft = await b.evaluate('document.querySelector("[contenteditable=true]").textContent')
     await click('.message-export-entry-button')
@@ -45,9 +47,16 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
       await b.capture(join(root, `selection-${theme}.png`))
     }
     await b.evaluate('__presence.setTheme("day")'); await open()
+    assert.match(await b.evaluate('document.querySelector(".message-export-title").textContent'), /^同步标题/)
     assert.deepEqual(await b.evaluate('[...document.querySelectorAll(".message-export-options input")].map(e=>e.checked)'), [true, true, true, true])
     assert.equal(await b.evaluate('document.querySelector(".message-export-dialog").textContent.includes("导出规则")'), false)
     await b.wait('!!document.querySelector(".message-export-image") && !document.querySelector("[data-export-pending=true]")')
+    for (const theme of ['day', 'night']) {
+      await b.evaluate(`__presence.setTheme('${theme}')`); await pause(120)
+      assert.deepEqual(await codeStyle('.message-export-document'), await codeStyle('[data-message-id=export-code]'), theme + ': code block and inline code share conversation styles')
+    }
+    await b.evaluate('__presence.setTheme("day")'); await pause(120)
+    const sourceCodeStyle = await codeStyle('[data-message-id=export-code]')
     await b.capture(join(root, 'preview.png'))
     for (const [width, height] of [[375, 812], [844, 390]]) {
       await b.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); await pause(120)
@@ -58,7 +67,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
       await b.capture(join(root, `preview-${width}.png`))
     }
     await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
-    assert.match(await downloaded(1, '下载 HTML'), /\.html$/)
+    assert.match(await downloaded(1, '下载 HTML'), /^同步标题.*\.html$/)
     const html = await b.evaluate('__downloads[0].blob.text()')
     for (const excluded of ['private-thread-id', 'private-mission-id', '不应导出的撤回内容', 'blob:', 'onerror=', 'window.exportInjected']) assert.ok(!html.includes(excluded), excluded)
     for (const included of ['data:image/png;base64,', '报告.pdf', '缺失.png', '原图不可用', 'https://example.com', '关联讨论', '关联使命', '-old', '+new', '发送给']) assert.ok(html.includes(included), included)
@@ -88,7 +97,40 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     assert.equal(await b.evaluate('document.querySelector("[contenteditable=true]").textContent'), draft)
     assert.equal(await b.evaluate('!!document.querySelector(".message-selection-dock")'), false)
 
+    await b.evaluate('__presence.showExportGroupCase()')
+    await b.wait('document.querySelectorAll("[data-message-id].is-group-continuation").length===2')
+    await click('.message-export-entry-button'); await button('.message-selection-dock', '全选已加载'); await open()
+    await button('.message-export-dialog', '网页 HTML')
+    assert.equal(await b.evaluate('document.querySelectorAll(".message-export-meta time").length'), 1)
+    assert.equal(await b.evaluate('!!document.querySelector(".message-export-entry:last-child time")'), true, 'Original conversation groups show the last timestamp')
+    await button('.message-export-dialog', '返回调整'); await button('.message-selection-dock', '清空')
+    await click('[data-message-id=export-group-1] input'); await click('[data-message-id=export-group-3] input'); await open()
+    assert.equal(await b.evaluate('document.querySelectorAll(".message-export-meta time").length'), 2, 'Skipping the middle message breaks the exported group')
+    await click('.message-export-title')
+    await b.evaluate('document.querySelector(".message-export-title-row input").select()')
+    await b.send('Input.insertText', { text: '自定义导出' }); await b.key('Enter')
+    await b.evaluate('__presence.renameThread("再次变更")')
+    await button('.message-export-dialog', '返回调整'); await open()
+    assert.equal(await b.evaluate('document.querySelector(".message-export-title").textContent'), '自定义导出')
+    assert.equal(await downloaded(4, '下载 HTML'), '自定义导出.html')
+    await button('.message-export-dialog', '返回调整'); await b.key('Escape')
+
+    await b.evaluate('__presence.showExportPendingCase()'); await pause(120)
+    await click('.message-export-entry-button'); await button('.message-selection-dock', '全选已加载'); await open()
+    await button('.message-export-dialog', '下载 HTML')
+    await b.wait('document.querySelector(".message-export-error")?.textContent.includes("图片仍在加载")', 15_000)
+    assert.equal(await b.evaluate('__downloads.length'), 4, 'Pending images cannot produce a successful download')
+    assert.equal(await b.evaluate('document.querySelectorAll(".message-export-check input:checked").length'), 3)
+    await b.evaluate('__presence.controls.holdExportImage=false')
+    await b.wait('!document.querySelector(".message-export-document [data-export-pending=true]") && !!document.querySelector(".message-export-image")')
+    await downloaded(5, '下载 HTML')
+    assert.ok((await b.evaluate('__downloads[4].blob.text()')).includes('data:image/png;base64,'))
+    await button('.message-export-dialog', '返回调整'); await b.key('Escape')
+    await b.evaluate('__presence.showExportCase()'); await pause(120)
+
     // Native text selection offers export as a sibling to quote; only that text is captured.
+    await b.evaluate(`document.querySelector('[data-message-id=export-code] .safe-markdown').scrollIntoView({block:'start',behavior:'instant'})`)
+    await pause(180)
     await b.evaluate(`(()=>{const root=document.querySelector('[data-message-id=export-code] .safe-markdown'),walk=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n;while(n=walk.nextNode()){if(n.textContent.includes('普通网页。')){const start=n.textContent.indexOf('普通网页。'),r=document.createRange();r.setStart(n,start);r.setEnd(n,start+5);getSelection().removeAllRanges();getSelection().addRange(r);document.dispatchEvent(new Event('selectionchange'));break}}})()`)
     await b.wait('!!document.querySelector(".message-selection-export")')
     await click('.message-selection-export')
@@ -113,6 +155,16 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     assert.equal(await b.evaluate('!!window.exportInjected'), false)
     assert.equal(await b.evaluate('[...document.querySelectorAll("article a")].every(e=>/^https?:/.test(e.href))'), true)
     assert.equal(await b.evaluate('[...document.querySelectorAll("article img")].every(e=>e.complete&&e.naturalWidth>0)'), true)
+    assert.deepEqual(await b.evaluate('[...document.querySelectorAll(".message-export-task-marker")].map(e=>e.classList.contains("is-complete"))'), [true, false])
+    assert.equal(await b.evaluate('document.querySelectorAll("article input").length'), 0)
+    assert.deepEqual(await codeStyle('article'), sourceCodeStyle)
+    for (const width of [375, 720, 1440]) {
+      await b.send('Emulation.setDeviceMetricsOverride', { width, height: 920, deviceScaleFactor: 1, mobile: false }); await pause(120)
+      const geometry = await b.evaluate(`(()=>{const a=document.querySelector('article').getBoundingClientRect(),last=document.querySelector('.message-export-entry:last-child').getBoundingClientRect();return {scroll:document.documentElement.scrollWidth,width:innerWidth,bottom:a.bottom,last:last.bottom}})()`)
+      assert.ok(geometry.scroll <= width && geometry.bottom >= geometry.last, 'Standalone HTML reflows without clipping or horizontal page scrolling: ' + JSON.stringify(geometry))
+      assert.equal(await b.evaluate(`Array.from(document.querySelectorAll('article .ref-message-link')).every(ref=>{const icon=ref.querySelector('svg')?.getBoundingClientRect(),label=ref.querySelector('.reference-token-label')?.getBoundingClientRect();return !!icon&&!!label&&icon.top<label.bottom&&label.top<icon.bottom})`), true, 'Reference icons stay on the same line as their titles')
+      await b.capture(join(root, `standalone-${width}.png`))
+    }
     await click('article .message-export-image')
     assert.equal(await b.evaluate('document.querySelector("dialog").open'), true)
     await b.key('Escape')
