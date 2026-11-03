@@ -20,6 +20,7 @@ import { model, profiles, scenarios, installations } from './model'
 import { conversationRunPresenceTimeline } from '../../../apps/desktop/src/renderer/src/conversation-run-presence'
 import { liveRuntimeEventFromExecutionEvidence } from '../../../apps/desktop/src/renderer/src/ui-model'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { snapshotExportDocument, exportDocumentPNG } from '../../../apps/desktop/src/renderer/src/message-export'
 const projectedTimeline = (snapshot: any) => conversationRunPresenceTimeline(campConversationTimeline(snapshot.messages,
   snapshot.turns, snapshot.agentRuns, snapshot.tasks, snapshot.agentRunFileChanges, snapshot.agentRunImages, snapshot.memberCreations), snapshot.agentRuns)
 const projectedPresence = (snapshot: any) => projectedTimeline(snapshot).flatMap(item => item.kind === 'run_presence' ? [{ ...item.slot, status: item.slot.run.status }] : [])
@@ -52,6 +53,7 @@ function Glyph({ kind }: { kind: string }) {
 
 function Workbench() {
   const state = useSyncExternalStore(model.subscribe, model.get)
+  useEffect(() => { if (params.has('export')) model.showExportCase() }, [])
   useEffect(() => { if (params.has('replies')) model.showReplyCase(params.get('replies') === 'long') }, [])
   const [proposal, setProposal] = useState(params.get('baseline') !== '1')
   const [controls, setControls] = useState(params.get('pure') !== '1')
@@ -108,9 +110,10 @@ function Workbench() {
       lastActivityGlobalSequence: 10, totalCount: 4, recentThreads: [current,
         ...['消息投递与恢复', '会话工作区优化', '发布前检查'].map((title, i) => ({ ...current, id: `demo-thread-${i}`, title, marker: 'none' }))] }] }
   useEffect(() => {
-    Object.assign(window, { __presence: { setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal, setMemberName, setIdentityFields,
+    Object.assign(window, { __presence: { snapshotExportDocument, exportDocumentPNG, setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal, setMemberName, setIdentityFields, navigateThread: setOtherThread,
       setLanguage: (language: 'zh-CN' | 'en') => changeInterfaceLanguage(languageTestApi, language),
-      getState: model.get, showReplyCase: model.showReplyCase.bind(model), withdrawReply: model.withdrawReply, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
+      getState: model.get, showExportCase: model.showExportCase.bind(model), showExportPendingCase: model.showExportPendingCase.bind(model), showExportGroupCase: model.showExportGroupCase.bind(model), renameThread: model.rename,
+      showReplyCase: model.showReplyCase.bind(model), withdrawReply: model.withdrawReply, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
       showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setMemberAvailability: model.setMemberAvailability,
       showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
         const s = model.get().snapshot

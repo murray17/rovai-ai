@@ -1,3 +1,5 @@
+import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, ExportGlyph, useMessageExport } from './MessageExport'
+import { exportMessageMarkdown, type MessageExportEntry } from './message-export'
 import { nativeSkillDiagnosticText } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
 import { isReferenceAtom, isReferenceSegment, projectReference } from './thread-reference'
@@ -2605,6 +2607,7 @@ export function ThreadWorkspace({
     runSourceNavigation.messages, anchoredMessages, anchorNavigation.navigation.windowMessages(), optimisticMessages, snapshot.messages
   ).filter(message => !message.missionStart),
   [runSourceNavigation.messages, anchoredMessages, anchorNavigation.window, anchorNavigation.anchors, anchorNavigation.navigation, optimisticMessages, snapshot.messages])
+  const messageExport = useMessageExport(snapshot.thread.id, visibleThreadMessages)
   const normalStart = messageHistory?.oldestLoadedSequence ?? snapshot.messages[0]?.sequence ?? null
   const anchorWindowEnd = anchorNavigation.window?.messages.at(-1)?.sequence ?? null
   const hasAnchorGap = normalStart !== null && anchorWindowEnd !== null && anchorWindowEnd < normalStart
@@ -2738,7 +2741,7 @@ export function ThreadWorkspace({
   }, [effectiveComposerDraft, composerSkillCatalog.status, composerSkills, snapshot.thread.id])
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
-  const composerInteractionDisabled = draftLoadState.state !== 'ready'
+  const composerInteractionDisabled = messageExport.selecting || draftLoadState.state !== 'ready'
     || routingMutating
     || composerSubmitting
   const composerSendDisabled = composerSendIsDisabled({
@@ -5121,7 +5124,7 @@ export function ThreadWorkspace({
     || conversationFindTotal <= 0
 
   // Share message semantics with the timeline; only the reader's outer layout differs.
-  const renderPublicMessageBody = (message: ThreadMessageView, context: 'timeline' | 'reply', forceExpanded = false): JSX.Element => {
+  const renderPublicMessageBody = (message: ThreadMessageView, context: 'timeline' | 'reply' | 'export', forceExpanded = false): JSX.Element => {
     const onFileReference: FileReferenceActivation = (rawReference, source, target) => {
       if (!filePreview) return
       if (context === 'reply') closeReplyDetails()
@@ -5137,13 +5140,41 @@ export function ThreadWorkspace({
         onFileReference={onFileReference} />
     }
     return <TruncatedStructuredMessageBody body={message.body} content={message.content} members={snapshot.members}
-      pendingMemberProfiles={pendingMemberProfiles} leadingRecipientAgentId={defaultRecipientMentionAgentId(message)}
+      pendingMemberProfiles={pendingMemberProfiles} leadingRecipientAgentId={context === 'export' ? null : defaultRecipientMentionAgentId(message)}
       truncate={context === 'timeline' && (message.authorType === 'user' || message.authorType === 'external_principal')}
       forceExpanded={forceExpanded} renderLeadingCurrentUserMarkdown={message.authorType === 'agent'}
       onActivateCurrentUserMention={openCurrentUserProfilePopover} onActivateMemberMention={openMemberProfilePopover}
       onActivateAllMembersMention={(trigger, focusPanel) => openAllMembersMentionPopover('history', message.addressedAgentIds, trigger, focusPanel)}
       onActivateSkillMention={openSkillPreview} onFileReference={onFileReference} />
   }
+
+  const groupingMessage = (message: ThreadMessageView): ThreadMessageView => ({
+    ...message,
+    threadTurnId: message.threadTurnId
+      ?? (message.sourceAgentRunId ? runById.get(message.sourceAgentRunId)?.threadTurnId : null)
+      ?? null
+  })
+  const publicMessagesJoin = (message: ThreadMessageView, next: ThreadMessageView): boolean =>
+    shortPublicMessages.has(message.id) && samePublicMessageSegment(groupingMessage(message), groupingMessage(next))
+  const exportEntry = (message: ThreadMessageView, excerpt?: string): MessageExportEntry => {
+    const names = new Map(messageMentionNames.map(member => [member.agentId, member.displayName]))
+    const parent = message.replyToThreadMessageId ? replyParentById.get(message.replyToThreadMessageId) : null
+    const quoted = (message.quotes ?? []).map(q => `${q.authorAtCapture?.displayName ?? ''}：${q.text}`)
+    const index = presenceTimeline.findIndex(item => item.kind === 'camp_message' && item.message.id === message.id)
+    const next = index >= 0 ? presenceTimeline[index + 1] : undefined
+    return { message: structuredClone(message), author: campMessageAuthorLabel(message, memberById, currentUserName),
+      nextGroupedMessageId: next?.kind === 'camp_message' && publicMessagesJoin(message, next.message) ? next.message.id : null,
+      avatarRef: memberById.get(message.authorId)?.avatarRef ?? null,
+      avatarDataUrl: message.authorType === 'user' ? currentUserProfile.avatarDataUrl : null,
+      runtimeImages: presenceTimeline.flatMap(item => item.kind === 'camp_message' && item.message.id === message.id ? item.runtimeImageGroups.flatMap(group => group.images) : []),
+      recipients: message.addressedAgentIds.map(id => names.get(id) ?? uiAttribute('不可用队员')),
+      markdown: exportMessageMarkdown(message.body, message.content, names, currentUserName),
+      reply: [parent ? `${uiAttribute('回复')} ${campMessageAuthorLabel(parent, memberById, currentUserName)} · ${exportMessageMarkdown(parent.body, parent.content, names, currentUserName).replace(/\\([\\`*_{}\[\]()<>#+.!|~-])/g, '$1').slice(0, 240)}` : '', ...quoted].filter(Boolean).join('\n') || null,
+      ...(excerpt === undefined ? {} : { excerpt }) }
+  }
+  const openSelectedExport = (): void => messageExport.open(messageExport.eligible.filter(m => messageExport.selected.has(m.id)).map(m => exportEntry(m)))
+  const exportEntryButton = <button type="button" className="camp-detail-entry message-export-entry-button" disabled={!messageExport.eligible.length || messageExport.selecting}
+    onClick={() => messageExport.start()} title={uiAttribute('选择消息并导出')}><ExportGlyph /><UiText zh="导出" /></button>
 
   const executionDrawer = executionDrawerProcess ? (
     <ExecutionDrawer
@@ -5263,7 +5294,10 @@ export function ThreadWorkspace({
         navigateUserAnchor(messageId)
       }
     }}>
-    <section ref={workspaceShellRef} className={`workspace-shell camp-workspace${replyDetail.messageId ? ' reply-detail-open' : ''}${replyFull ? ' reply-detail-full' : ''}`} style={{ '--reply-detail-width': `${replyWidth}px` } as CSSProperties} data-mobile-panel={mobile && inspectorVisible ? inspectorSurfaceTab : undefined} data-mobile-execution-maximized={mobile && mobileExecutionMaximized || undefined} aria-label={uiAttribute("会话：{0}", String(formatThreadTitle(snapshot.thread, firstRunThreadId)))}>
+    <section ref={workspaceShellRef} className={`workspace-shell camp-workspace${messageExport.selecting ? ' message-export-selecting' : ''}${replyDetail.messageId ? ' reply-detail-open' : ''}${replyFull ? ' reply-detail-full' : ''}`} style={{ '--reply-detail-width': `${replyWidth}px` } as CSSProperties} data-mobile-panel={mobile && inspectorVisible ? inspectorSurfaceTab : undefined} data-mobile-execution-maximized={mobile && mobileExecutionMaximized || undefined} aria-label={uiAttribute("会话：{0}", String(formatThreadTitle(snapshot.thread, firstRunThreadId)))}>
+      {detailEntryHost ? createPortal(exportEntryButton, detailEntryHost) : <div className="message-export-entry-fallback">{exportEntryButton}</div>}
+      <MessageExportDialog key={snapshot.thread.id} threadId={snapshot.thread.id} title={formatThreadTitle(snapshot.thread, firstRunThreadId)}
+        entries={messageExport.entries} renderBody={message => renderPublicMessageBody(message, 'export', true)} onClose={messageExport.close} />
       <FilePreviewWorkspace
       >
         <RevealNotificationConversation active={!!notificationFocus?.active
@@ -5668,18 +5702,10 @@ export function ThreadWorkspace({
                     && previousMessageAuthorKey === messageAuthorKey
                   const previousItem = presenceTimeline[timelineIndex - 1]
                   const nextItem = presenceTimeline[timelineIndex + 1]
-                  const groupingMessage = (message: ThreadMessageView): ThreadMessageView => ({
-                    ...message,
-                    threadTurnId: message.threadTurnId
-                      ?? (message.sourceAgentRunId ? runById.get(message.sourceAgentRunId)?.threadTurnId : null)
-                      ?? null
-                  })
                   const isGroupContinuation = previousItem?.kind === 'camp_message'
-                    && shortPublicMessages.has(previousItem.message.id)
-                    && samePublicMessageSegment(groupingMessage(previousItem.message), groupingMessage(campMessage))
+                    && publicMessagesJoin(previousItem.message, campMessage)
                   const joinsNextMessage = nextItem?.kind === 'camp_message'
-                    && shortPublicMessages.has(campMessage.id)
-                    && samePublicMessageSegment(groupingMessage(campMessage), groupingMessage(nextItem.message))
+                    && publicMessagesJoin(campMessage, nextItem.message)
                   const messageTime = messageTimeParts(campMessage.createdAt, interfaceLanguage, messageTimeDate)
                   const messageTimestamp = !joinsNextMessage && messageTime ? (
                     <time className="message-action-time" dateTime={campMessage.createdAt} tabIndex={0}
@@ -5763,11 +5789,16 @@ export function ThreadWorkspace({
                       className={messageClasses}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
+                      data-export-selected={messageExport.selecting && messageExport.selected.has(campMessage.id) || undefined}
                       data-camp-turn-id={campMessage.threadTurnId ?? sourceRun?.threadTurnId}
                       aria-label={uiAttribute("{0}，{1}，第{2}条消息", String(author), String(messageClockTime(campMessage.createdAt)), String(campMessage.sequence))}
                       tabIndex={-1}
                       style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
                     >
+                      {messageExport.selecting && messageExport.eligible.some(m => m.id === campMessage.id) && <label className="message-export-check" data-quote-exclude>
+                        <input type="checkbox" checked={messageExport.selected.has(campMessage.id)} onChange={() => undefined}
+                          onClick={event => messageExport.toggle(campMessage.id, event.shiftKey)} aria-label={uiAttribute('选择 {0} 的消息', author)} />
+                      </label>}
                       {campMessage.authorType === 'agent' && (authorProfileAvailable
                         ? (
                             <MessageAuthorProfileTrigger
@@ -5858,6 +5889,7 @@ export function ThreadWorkspace({
                                 ) : undefined}
                                 onReply={humanAuthored ? undefined : handleReply}
                                 onCopy={handleCopy}
+                                onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                               >
                                 <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={revealQuote} />
 
@@ -5928,6 +5960,7 @@ export function ThreadWorkspace({
                                     className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                                     onReply={handleReply}
                                     onCopy={handleCopy}
+                                    onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                                   />
                                 )}
                               </div>
@@ -5988,6 +6021,7 @@ export function ThreadWorkspace({
                           className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                           onReply={handleReply}
                           onCopy={handleCopy}
+                          onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                         />
                       </div>
                     )
@@ -6278,7 +6312,10 @@ export function ThreadWorkspace({
             />
           )}
 
+          <div className="message-composer-selection-slot">
+          <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
           <form
+        style={{ visibility: messageExport.selecting ? 'hidden' : undefined }} inert={messageExport.selecting}
         className={[
           'composer',
           attachmentDragState ? 'is-dragging-attachments' : ''
@@ -6352,6 +6389,10 @@ export function ThreadWorkspace({
           ownerKey={`thread:${snapshot.thread.id}`}
           messages={visibleThreadMessages}
           disabled={composerInteractionDisabled}
+          onExport={selection => {
+            const message = messageExport.eligible.find(m => m.id === selection.messageId)
+            if (message) messageExport.open([exportEntry(message, selection.text)])
+          }}
           onAdd={async (selection) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote({ type: 'add', selection })) }}
         />
         <div className="composer-box">
@@ -6657,6 +6698,7 @@ export function ThreadWorkspace({
         </div>
         </div>
           </form>
+          </div>
         </div>
         {attachmentDragState && (
           <div
@@ -10023,6 +10065,7 @@ function MessageSurface({
   actionAfter,
   onReply,
   onCopy,
+  onSelect,
   onWithdraw,
   withdrawing = false,
   children
@@ -10034,6 +10077,7 @@ function MessageSurface({
   actionAfter?: React.ReactNode
   onReply?(modality: ReplyFocusModality): void
   onCopy(): void
+  onSelect?(): void
   onWithdraw?(): void
   withdrawing?: boolean
   children: React.ReactNode
@@ -10048,6 +10092,7 @@ function MessageSurface({
             copied={copied}
             onReply={onReply}
             onCopy={onCopy}
+            onSelect={onSelect}
             onWithdraw={onWithdraw}
             withdrawing={withdrawing}
           />
@@ -10065,6 +10110,7 @@ function MessageActions({
   className,
   onReply,
   onCopy,
+  onSelect,
   onWithdraw,
   withdrawing = false
 }: {
@@ -10074,6 +10120,7 @@ function MessageActions({
   className?: string
   onReply?(modality: ReplyFocusModality): void
   onCopy(): void
+  onSelect?(): void
   onWithdraw?(): void
   withdrawing?: boolean
 }): JSX.Element {
@@ -10114,6 +10161,7 @@ function MessageActions({
           <MessageReplyIcon />
         </button>
       )}
+      {onSelect && <MessageSelectButton onSelect={onSelect} />}
       {timeAfter && timestamp}
     </div>
   )

@@ -4,6 +4,7 @@ import * as Popover from '@radix-ui/react-popover'
 import type { MessageQuoteAction, MessageQuoteSelection, MessageQuoteSnapshot } from '@contracts'
 import { readMessageQuoteSelection } from './message-quote-selection'
 import { readErrorMessage } from './error-message'
+import { ExportGlyph } from './MessageExport'
 import { UiText, uiAttribute } from './interface-language'
 
 export function quoteErrorMessage(error: unknown): string {
@@ -146,18 +147,19 @@ export function MessageQuotes({ quotes, onReveal, onMutate, onEmptyFocus, disabl
 }
 
 type Candidate = NonNullable<ReturnType<typeof readMessageQuoteSelection>>
-export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onAdd }: {
+export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onAdd, onExport }: {
   ownerKey: string
   messages: { id: string; body: string; authorType: string }[]
   disabled: boolean
   onAdd(selection: MessageQuoteSelection): Promise<void>
+  onExport?(selection: MessageQuoteSelection): void
 }): JSX.Element | null {
   const [candidate, setCandidate] = useState<Candidate | null>(null)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-  const latest = useRef({ messages, onAdd, disabled })
-  latest.current = { messages, onAdd, disabled }
+  const latest = useRef({ messages, onAdd, disabled, onExport })
+  latest.current = { messages, onAdd, disabled, onExport }
   const dismissed = useRef<Range | null>(null)
   useEffect(() => {
     let dragging = false
@@ -180,7 +182,7 @@ export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onA
           ?? next.range.getBoundingClientRect()
         const viewport = next.root.closest('.conversation-timeline, .single-chat-viewport')?.getBoundingClientRect()
         if (!rect.width || rect.bottom < Math.max(0, viewport?.top ?? 0) || rect.top > Math.min(window.innerHeight, viewport?.bottom ?? window.innerHeight)) { setCandidate(null); return }
-        setPosition({ x: Math.max(8, Math.min(window.innerWidth - 100, rect.right - 50)), y: Math.max(8, Math.min(window.innerHeight - 44, rect.bottom + 7)) })
+        setPosition({ x: Math.max(8, Math.min(window.innerWidth - (latest.current.onExport ? 190 : 100), rect.right - (latest.current.onExport ? 140 : 50))), y: Math.max(8, Math.min(window.innerHeight - 44, rect.bottom + 7)) })
         setCandidate(next); setError(null)
       })
     }
@@ -229,6 +231,10 @@ export function MessageQuoteSelectionToolbar({ ownerKey, messages, disabled, onA
         dismissed.current = candidate.range; setCandidate(null)
       }).catch((nextError: unknown) => setError(quoteErrorMessage(nextError))).finally(() => setBusy(false))
     }}><QuoteGlyph />{busy ? uiAttribute("引用中…") : uiAttribute("引用")}</button>
+    {onExport && <button type="button" className="message-selection-export" disabled={busy} onPointerDown={event => event.preventDefault()} onClick={() => {
+      if (!candidate.root.isConnected || candidate.root.dataset.quoteOwner !== ownerKey || !candidate.selection.messageId) return
+      latest.current.onExport?.(candidate.selection); dismissed.current = candidate.range; setCandidate(null)
+    }}><ExportGlyph /><UiText zh="导出选文" /></button>}
     {error && <div className="message-quote-selection-error" role="alert">{error}</div>}
   </div>, document.body)
 }

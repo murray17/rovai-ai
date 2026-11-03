@@ -104,6 +104,7 @@ Canvas、rail、conversation、raised/input 通过明度建立深色层级。
 | `--memory-muted` | `#b6b6b6` |
 | `--memory-input-line` | `#444444` |
 | `--neutral-selected` | `#352728` |
+| `--conversation-selection-surface` | `#2a2a2a` |
 | `--neutral-hover` | `#303030` |
 | `--conversation-action` | `#cd3434` |
 | `--conversation-action-ink` | `#e6e6e6` |

@@ -104,6 +104,7 @@ last_updated: 2026-10-25
 | `--memory-muted` | `#626262` |
 | `--memory-input-line` | `#dedede` |
 | `--neutral-selected` | `#e9e9e4` |
+| `--conversation-selection-surface` | `#e9e9e9` |
 | `--neutral-hover` | `#eeeeea` |
 | `--conversation-action` | `#303733` |
 | `--conversation-action-ink` | `#303733` |
