@@ -46,7 +46,7 @@ export function ReadonlyCodeViewer({
   const readingLineRef = useRef(readingLine)
   readingLineRef.current = readingLine
   const previousThemeRef = useRef(theme)
-  const themeAnchorRef = useRef<{ theme: ResolvedTheme; view: EditorView; position: number } | null>(null)
+  const themeAnchorRef = useRef<{ theme: ResolvedTheme; view: EditorView; position: number; scrollLeft: number } | null>(null)
   const [editor, setEditor] = useState<EditorView | null>(null)
   const scheduledTargetRef = useRef<{
     view: EditorView
@@ -155,19 +155,26 @@ export function ReadonlyCodeViewer({
     // A virtualized editor may still have old layout estimates during theme reconfiguration.
     // Resolve the rendered line through its DOM position instead of estimated screen coordinates.
     const anchor = visibleLine ? view.posAtDOM(visibleLine) : view.lineBlockAtHeight(view.scrollDOM.scrollTop).from
-    themeAnchorRef.current = { theme, view, position: anchor }
+    themeAnchorRef.current = { theme, view, position: anchor, scrollLeft: view.scrollDOM.scrollLeft }
     return undefined
   }, [theme])
 
   useEffect(() => {
     const anchor = themeAnchorRef.current
     if (!anchor || anchor.theme !== theme) return undefined
+    let horizontalFrame = 0
     const frame = window.requestAnimationFrame(() => {
       if (viewRef.current === anchor.view && anchor.view.dom.isConnected) {
         anchor.view.dispatch({ effects: EditorView.scrollIntoView(anchor.position, { y: 'start', yMargin: 0 }) })
+        // CodeMirror scrolls to the line start in its next measurement. Restore x after that scroll.
+        horizontalFrame = window.requestAnimationFrame(() => {
+          if (themeAnchorRef.current === anchor && viewRef.current === anchor.view && anchor.view.dom.isConnected) {
+            anchor.view.scrollDOM.scrollLeft = anchor.scrollLeft
+          }
+        })
       }
     })
-    return () => window.cancelAnimationFrame(frame)
+    return () => { window.cancelAnimationFrame(frame); window.cancelAnimationFrame(horizontalFrame) }
   }, [theme])
 
   return (

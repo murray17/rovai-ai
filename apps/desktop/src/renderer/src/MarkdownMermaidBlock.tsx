@@ -75,8 +75,10 @@ export function MarkdownMermaidBlock({ source, theme, renderReady = true }: { so
     setRenderState({ source, theme, status: 'error' })
   }
   const sourceMode = !image || view === 'source'
+  const canExpand = image !== null || (renderReady && status === 'error' && source.length > 0)
   const openReader = (trigger: HTMLButtonElement): void => {
     opener.current = trigger
+    if (sourceMode) setView('source')
     setExpanded(true)
   }
   const viewSwitch = <FilePreviewViewSwitch sourceMode={sourceMode} previewDisabled={!image}
@@ -88,7 +90,7 @@ export function MarkdownMermaidBlock({ source, theme, renderReady = true }: { so
       <span className="markdown-mermaid-title">Mermaid</span>
       <div className="markdown-mermaid-actions">
         {viewSwitch}
-        <button ref={expandButton} type="button" className="file-action-button" disabled={!image}
+        <button ref={expandButton} type="button" className="file-action-button" disabled={!canExpand}
           aria-label={expandLabel} title={expandLabel} onClick={event => openReader(event.currentTarget)}>
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12 3h5v5M17 3l-6 6M8 17H3v-5M3 17l6-6" /></svg>
         </button>
@@ -105,7 +107,7 @@ export function MarkdownMermaidBlock({ source, theme, renderReady = true }: { so
           <img className="markdown-mermaid-image" src={image.url} alt={t('Mermaid 图表')} onError={failImage} />
         </button>
       : <div className="markdown-mermaid-source"><MarkdownCodeBlock code={source} languageName="mermaid" theme={theme} /></div>}
-    <Dialog.Root open={expanded && image !== null} onOpenChange={setExpanded}>
+    <Dialog.Root open={expanded && renderReady && renderState.source === source} onOpenChange={setExpanded}>
       <Dialog.Portal><Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
         <AppDialogContent className="markdown-mermaid-dialog" width="large" tone="neutral"
           data-quote-exclude data-file-find-exclude

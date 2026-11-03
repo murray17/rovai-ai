@@ -61,6 +61,35 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       const setSample = name => b.evaluate(`mermaidFixture.setSource(mermaidFixture.fence(mermaidFixture.samples.${name}))`)
       const ready = () => b.wait(`document.querySelector('.markdown-mermaid')?.dataset.mermaidState === 'ready'`)
       const error = () => b.wait(`document.querySelector('.markdown-mermaid')?.dataset.mermaidState === 'error'`)
+      const readerChecks = { sourceTheme: [], keyboardFocus: [], failedSource: [] }
+      const tab = async () => {
+        for (const type of ['keyDown', 'keyUp']) await b.send('Input.dispatchKeyEvent', { type, key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+      }
+      const visibleFocus = async label => {
+        const focus = await b.evaluate(`(() => { const e=document.activeElement; const style=getComputedStyle(e); return {
+          label:e.getAttribute('aria-label'),visible:e.matches(':focus-visible'),outline:style.outlineStyle,width:parseFloat(style.outlineWidth)}})()`)
+        assert.equal(focus.label, label)
+        assert.equal(focus.visible, true)
+        assert.equal(focus.outline, 'solid')
+        assert.equal(focus.width, 2, 'Keyboard focus must have a visible outline')
+        readerChecks.keyboardFocus.push(focus)
+      }
+      const expandFailedSource = async reason => {
+        const count = await b.evaluate('svgSources.length')
+        await button('展开源码')
+        await b.wait('!!document.querySelector(".markdown-mermaid-dialog .cm-content")')
+        assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid").dataset.mermaidView'), 'source')
+        assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid-reader-source").dataset.active'), 'true')
+        assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid-dialog [aria-label=查看图形]").disabled'), true)
+        assert.equal(await b.evaluate('!!document.querySelector(".markdown-mermaid-reader-image img")'), false)
+        await b.click('document.querySelector(".markdown-mermaid-dialog .markdown-code-copy")')
+        await b.wait('document.querySelector(".markdown-mermaid-dialog .markdown-code-copy").dataset.copyState==="copied"')
+        assert.equal(await b.evaluate('navigator.clipboard.readText()'), await b.evaluate('document.querySelector(".markdown-mermaid pre").textContent'))
+        assert.equal(await b.evaluate('svgSources.length'), count, 'Reading failed source must not retry rendering')
+        await b.key('Escape'); await b.wait('!document.querySelector(".markdown-mermaid-dialog")')
+        await b.wait('document.activeElement?.getAttribute("aria-label")==="展开源码"')
+        readerChecks.failedSource.push({ reason, expanded: true, copied: true, rerendered: false, focusReturned: true })
+      }
 
       assert.equal(await b.evaluate('!!document.querySelector("[data-mermaid-renderer]")'), false)
       assert.equal(await b.evaluate('performance.getEntriesByType("resource").some(e=>e.name.includes("mermaid-sandbox"))'), false)
@@ -73,6 +102,7 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       await pause(80)
       assert.equal(await b.evaluate('!!document.querySelector("[data-mermaid-renderer]")'), false, 'An open streaming block does not start the engine')
       assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid").textContent.includes("正在绘制")'), false)
+      assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid [aria-label=展开源码]").disabled'), true)
       await b.evaluate('mermaidFixture.setChat(false)')
       if (host === 'desktop') {
         // The first local read never settles. A new generation must read again.
@@ -119,6 +149,43 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       await button('查看图形')
       assert.ok(!(await b.evaluate('mermaidFixture.findText()')).includes('graph LR'))
 
+      // Theme restoration must retain both axes in the source reader, not only the image.
+      const longSource = 'flowchart TD\n A[开始] --> B[完成]\n' + Array.from({ length: 100 }, (_, i) => `%% ${i}: ${'long Mermaid source '.repeat(15)}`).join('\n')
+      assert.ok(Buffer.byteLength(longSource) < 32_000)
+      readerChecks.sourceBytes = Buffer.byteLength(longSource)
+      await b.evaluate(`mermaidFixture.setTheme('day');mermaidFixture.setSource(mermaidFixture.fence(${JSON.stringify(longSource)}))`); await ready()
+      await button('查看源码'); await button('展开源码')
+      await b.wait('document.querySelector(".markdown-mermaid-reader-source .cm-scroller")?.scrollHeight>1000')
+      await b.evaluate('window.sourceEditor=document.querySelector(".markdown-mermaid-reader-source .cm-editor");window.sourceScroll=sourceEditor.querySelector(".cm-scroller");sourceScroll.scrollTop=800;sourceScroll.scrollLeft=240')
+      await pause(100)
+      const sourceReading = () => b.evaluate(`(() => {const line=[...sourceEditor.querySelectorAll('.cm-line')].find(e=>e.getBoundingClientRect().bottom>sourceScroll.getBoundingClientRect().top);return {left:sourceScroll.scrollLeft,line:line?.textContent}})()`)
+      const sourcePosition = await sourceReading()
+      assert.equal(sourcePosition.left, 240)
+      for (const theme of ['night', 'day']) {
+        await b.evaluate(`mermaidFixture.setTheme(${JSON.stringify(theme)})`); await ready(); await pause(100)
+        assert.equal(await b.evaluate('sourceEditor===document.querySelector(".markdown-mermaid-reader-source .cm-editor")'), true)
+        const after = await sourceReading()
+        assert.deepEqual(after, sourcePosition, 'Theme replacement retains the source line and horizontal offset')
+        readerChecks.sourceTheme.push({ theme, before: sourcePosition.left, after: after.left, visibleLineRetained: after.line === sourcePosition.line })
+      }
+      await b.capture(join(evidence, `${host}-source-theme.png`))
+      await b.key('Escape'); await b.wait('!document.querySelector(".markdown-mermaid-dialog")')
+      await setSample('graph'); await ready(); await button('查看图形')
+
+      // Real Tab navigation checks visible styling as well as the focus target.
+      await b.evaluate('document.querySelector(".markdown-mermaid [aria-label=查看图形]").focus()')
+      for (const label of ['查看源码', '查看大图', '查看 Mermaid 大图']) { await tab(); await visibleFocus(label) }
+      await b.capture(join(evidence, `${host}-image-focus.png`))
+      await b.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' })
+      await b.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+      await b.wait('!!document.querySelector(".markdown-mermaid-dialog")')
+      await b.evaluate('document.querySelector(".markdown-mermaid-dialog [aria-label=查看图形]").focus()')
+      for (const label of ['查看源码', '关闭大图']) { await tab(); await visibleFocus(label) }
+      await b.evaluate('Promise.all(document.getAnimations().filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})))')
+      await b.capture(join(evidence, `${host}-dialog-focus.png`))
+      await b.key('Escape'); await b.wait('!document.querySelector(".markdown-mermaid-dialog")')
+      await b.evaluate('mermaidFixture.setTheme("night")'); await ready()
+
       // Same decoded URL in the dialog, full overflow access and keyboard closure.
       for (const name of ['wide', 'tall']) {
         await setSample(name); await ready()
@@ -151,6 +218,7 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
           await b.wait('document.activeElement===document.querySelector(".markdown-code-manual textarea")')
           assert.equal(await b.evaluate('document.querySelector(".markdown-code-manual textarea").value'), await b.evaluate('mermaidFixture.samples.wide+"\\n"'))
           await b.evaluate('navigator.clipboard.writeText=originalWrite;document.execCommand=originalExec')
+          await b.evaluate('Promise.all(document.getAnimations().filter(animation=>animation.effect?.getTiming().iterations!==Infinity).map(animation=>animation.finished.catch(()=>{})))')
           await b.key('Escape'); await b.wait('!document.querySelector(".markdown-code-manual")')
           await b.wait('document.activeElement===document.querySelector(".markdown-mermaid-dialog .markdown-code-copy")')
         }
@@ -196,8 +264,11 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       await b.evaluate('window.originalDecode=HTMLImageElement.prototype.decode;HTMLImageElement.prototype.decode=()=>Promise.reject(Error("decode"))')
       await setSample('flow'); await error()
       assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid pre").textContent'), await b.evaluate('mermaidFixture.samples.flow+"\\n"'))
+      await expandFailedSource('decode')
       await b.evaluate('HTMLImageElement.prototype.decode=originalDecode')
       await button('重试'); await ready()
+      assert.equal(await b.evaluate('document.querySelector(".markdown-mermaid").dataset.mermaidView'), 'source', 'Expanding failed source records the source preference through recovery')
+      await setSample('invalid'); await error(); await expandFailedSource('syntax')
 
       // Lose one generation's frame, without a CPU-hanging graph or network interception.
       await b.evaluate(`window.originalTimeout=window.setTimeout; window.setTimeout=(fn,ms,...args)=>originalTimeout(fn,ms===15000?100:ms,...args);
@@ -205,6 +276,7 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       await setSample('graph'); await error()
       await b.evaluate('window.setTimeout=originalTimeout')
       await button('重试'); await ready()
+      await button('查看图形')
 
       // A superseded decode can only dispose its own candidate.
       await b.evaluate(`window.heldDecode=null;HTMLImageElement.prototype.decode=function(){HTMLImageElement.prototype.decode=originalDecode;return new Promise(resolve=>{window.heldDecode=resolve})}`)
@@ -294,11 +366,12 @@ test('production Mermaid reading, recovery and resource boundary on Web and Elec
       assert.deepEqual(leaks, [])
       assert.equal(await b.evaluate('attacks'), 0)
       await b.evaluate('mermaidFixture.setSource(mermaidFixture.fence("x".repeat(50001)))'); await error()
+      await expandFailedSource('length-limit')
       const edges = 'flowchart TD\n' + Array.from({ length: 501 }, (_, i) => `A${i}-->A${i+1}`).join('\n')
       assert.equal(await b.evaluate(`mermaidFixture.render(${JSON.stringify(edges)},'day').then(()=>false,()=>true)`), true)
       await b.evaluate('mermaidFixture.setMounted(false)'); await b.wait('liveURLs.size===0')
       assert.deepEqual(b.errors, [])
-      await writeFile(join(evidence, `${host}-result.json`), JSON.stringify({ host, passed: true, externalRequests: leaks, version: '12.2.0' }, null, 2))
+      await writeFile(join(evidence, `${host}-result.json`), JSON.stringify({ host, passed: true, externalRequests: leaks, version: '12.2.0', readerChecks }, null, 2))
     } finally { await b.close() }
   })
 })

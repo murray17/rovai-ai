@@ -83,6 +83,15 @@ async function inspect(page, name) {
   await page.capture(join(output, `${name}-large.png`))
   await page.key('Escape')
   await page.wait(`!document.querySelector('.markdown-mermaid-dialog')`)
+  const failed = `document.querySelector('.file-preview-markdown [data-mermaid-state="error"]')`
+  await page.click(button('展开源码', failed))
+  await page.wait('document.querySelector(".markdown-mermaid-reader-source")?.dataset.active==="true"')
+  assert.equal(await page.evaluate('document.querySelector(".markdown-mermaid-dialog [aria-label=查看图形]").disabled'), true)
+  await page.wait('document.querySelector(".markdown-mermaid-reader-source .cm-content")?.textContent.includes("未闭合")')
+  await page.capture(join(output, `${name}-failed-source.png`))
+  await page.key('Escape')
+  await page.wait(`!document.querySelector('.markdown-mermaid-dialog')`)
+  await page.wait('document.activeElement?.getAttribute("aria-label")==="展开源码"')
   assert.deepEqual(page.errors, [])
 }
 
@@ -188,7 +197,7 @@ try {
   await inspectMessages(web, 'packaged-web')
   await writeFile(join(output, 'packaged-result.json'), JSON.stringify({ passed: true, executable, root,
     desktop: 'installed web-ui/desktop.html file entry with Electron preload', web: 'same installed web-ui/index.html via Host HTTP',
-    validDiagrams: 8, invalidDiagrams: 1, largeDiagram: true, themeAndFileWatch: true, sourcePreferencePreserved: true,
+    validDiagrams: 8, invalidDiagrams: 1, largeDiagram: true, failedSourceExpanded: true, themeAndFileWatch: true, sourcePreferencePreserved: true,
     messageDiagrams: { valid: 3, invalid: 1, followingLatest: true, historyPosition: true, sourceAndDialog: true }, runtime: false }, null, 2) + '\n')
   console.log('Packaged Desktop and bundled Web Markdown Mermaid acceptance passed')
 } catch (error) {
