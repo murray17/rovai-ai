@@ -2636,6 +2636,21 @@ mod tests {
                     .count(),
                 30_000
             );
+            let file_args = ["--input-file".into(), path.to_str().unwrap().into()];
+            for field in ["workingPrinciples", "growthTopic"] {
+                let text = "中😀e\u{0301}\"\\\n\0".repeat(375);
+                input[field] = json!(text);
+                std::fs::write(&path, input.to_string()).unwrap();
+                let parsed = parse_and_validate_operation_input(&description, &file_args).unwrap();
+                assert_eq!(parsed[field], input[field]);
+                for overlong in [format!("{text}界"), format!(" {text}")] {
+                    input[field] = json!(overlong);
+                    std::fs::write(&path, input.to_string()).unwrap();
+                    assert!(parse_and_validate_operation_input(&description, &file_args).is_err());
+                }
+                input[field] = json!("");
+            }
+            std::fs::remove_file(&path).unwrap();
         }
         let view = builtin_tool_description("memory.view", true).unwrap();
         let help = operation_help_text(&view);
