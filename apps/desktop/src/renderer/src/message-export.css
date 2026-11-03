@@ -23,7 +23,7 @@
 .message-export-dialog .primary-button,.message-selection-actions .primary-button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 :root .dialog-content.app-dialog.message-export-dialog { width:min(840px,calc(100vw - 32px)); display:flex; flex-direction:column; overflow:hidden; max-height:calc(100dvh - 32px); }
 .message-export-body { display:flex; flex-direction:column; gap:16px; min-height:0; overflow:auto; }
-.message-export-title { display:flex; align-items:center; gap:12px; min-width:0; max-width:min(560px,100%); border:0; padding:0; background:transparent; color:var(--ink); font:inherit; font-size:13px; cursor:pointer; }
+.message-export-title { display:flex; align-items:center; gap:12px; min-width:0; max-width:100%; border:0; padding:0; background:transparent; color:var(--ink); font:inherit; font-size:13px; cursor:pointer; }
 .message-export-title > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .message-export-title svg { color:var(--muted); flex:none; }
 .message-export-title-row input { width:100%; padding:6px 8px; border:1px solid var(--dialog-field-line); border-radius:6px; background:var(--input); color:var(--ink); font:inherit; }

@@ -54,8 +54,9 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     const longTitle = '同步标题：这是一段很长的会话标题，用来确认导出预览只保留编辑标题和内容标题，第三行重复来源不再出现，同时原始消息正文保持完整。'
     await b.evaluate(`__presence.renameThread(${JSON.stringify(longTitle)})`); await pause(120)
     const shortTitle = longTitle.slice(0, 40) + '… · 会话片段'
-    const titleGeometry = await b.evaluate(`(()=>{const e=document.querySelector('.message-export-title > span');return {text:e.textContent,tooltip:e.title,heading:document.querySelector('.message-export-document h2').textContent}})()`)
+    const titleGeometry = await b.evaluate(`(()=>{const e=document.querySelector('.message-export-title > span');return {text:e.textContent,tooltip:e.title,clipped:e.scrollWidth>e.clientWidth,heading:document.querySelector('.message-export-document h2').textContent}})()`)
     assert.equal(titleGeometry.text, shortTitle); assert.equal(titleGeometry.heading, shortTitle)
+    assert.equal(titleGeometry.clipped, false, 'The shortened title fits the desktop editor row')
     assert.equal(titleGeometry.tooltip, '', 'There is no full-title hover expansion')
     await b.capture(join(root, 'long-title.png'))
     await click('.message-export-title')
