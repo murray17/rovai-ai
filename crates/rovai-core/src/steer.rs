@@ -138,7 +138,7 @@ pub fn active_input_availability(
         EXISTS(SELECT 1 FROM runtime_input_delivery i WHERE i.agent_run_id=r.id AND i.execution_epoch=r.execution_epoch
             AND i.input_kind='start' AND i.status='accepted' AND i.native_binding_id=c.native_binding_id
             AND i.native_binding_generation=c.native_binding_generation),
-        EXISTS(SELECT 1 FROM runtime_input_delivery i WHERE i.agent_run_id=r.id AND i.execution_epoch=r.execution_epoch AND i.status='delivery_unknown')
+        EXISTS(SELECT 1 FROM runtime_input_delivery i WHERE i.agent_run_id=r.id AND i.execution_epoch=r.execution_epoch AND i.input_kind='start' AND i.status='delivery_unknown')
         FROM agent_run r JOIN conversation c ON c.id=r.conversation_id WHERE r.id=?1", [run_id], |r|Ok((
             r.get::<_,Option<String>>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?,
             r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,Option<i64>>(5)?,
@@ -267,7 +267,7 @@ pub struct PendingInput {
     pub execution_epoch: i64,
 }
 
-/// One source per execution, in existing Delivery order. Ambiguity fences later inputs.
+/// Submit in Delivery order. An unknown supplement stays separate from later inputs.
 pub fn pending_inputs(connection: &Connection) -> Result<Vec<PendingInput>> {
     let mut query = connection.prepare("SELECT d.id,r.id,r.execution_epoch FROM camp_message_delivery d
         JOIN agent_run r ON r.id=d.claimed_agent_run_id
@@ -281,7 +281,9 @@ pub fn pending_inputs(connection: &Connection) -> Result<Vec<PendingInput>> {
               WHERE m.source_delivery_id=d.id AND (i.status<>'prepared' OR i.dispatch_started_at IS NOT NULL))
           AND NOT EXISTS(SELECT 1 FROM camp_message_delivery earlier
               WHERE earlier.claimed_agent_run_id=r.id AND earlier.requested_mode='steer'
-                AND earlier.status='claimed' AND earlier.queue_sequence<d.queue_sequence)
+                AND earlier.status='claimed' AND earlier.queue_sequence<d.queue_sequence
+                AND NOT EXISTS(SELECT 1 FROM context_manifest m JOIN runtime_input_delivery i ON i.context_manifest_id=m.id
+                    WHERE m.source_delivery_id=earlier.id AND i.input_kind='steer' AND i.status='delivery_unknown'))
         ORDER BY d.queue_sequence,d.id")?;
     Ok(query
         .query_map([], |r| {

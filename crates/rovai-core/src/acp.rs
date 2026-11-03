@@ -1441,7 +1441,7 @@ struct QueuedSteeringInput {
 pub(crate) struct AcpHost {
     credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     adapter_kind: AdapterKind,
-    reported_version: Option<String>,
+    launch_runtime: FrozenAgentRuntimeConfig,
     opencode_program_identity: Option<String>,
     client_terminal_mode: AcpClientTerminalMode,
     client_terminal_bridge: Option<AcpClientTerminalBridge>,
@@ -2025,7 +2025,7 @@ impl AcpHost {
                 .as_ref()
                 .map(|env| env.redactor()),
             adapter_kind: frozen_runtime.adapter_kind,
-            reported_version: frozen_runtime.reported_version.clone(),
+            launch_runtime: frozen_runtime.clone(),
             opencode_program_identity: if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
                 Some(crate::opencode_compat::program_identity(frozen_runtime)?)
             } else {
@@ -2138,8 +2138,9 @@ impl AcpHost {
             // readiness budget, and the subsequent official ACP import/handshake.
             Duration::from_secs(90)
         } else if host.adapter_kind == AdapterKind::OpencodeCli
-            && crate::opencode_compat::Generation::from_version(host.reported_version.as_deref())
-                == Some(crate::opencode_compat::Generation::V1)
+            && crate::opencode_compat::Generation::from_version(
+                host.launch_runtime.reported_version.as_deref(),
+            ) == Some(crate::opencode_compat::Generation::V1)
         {
             // V1 installs plugin dependencies during catalog discovery. If that
             // process exits first, its native lock expires after 60 seconds.
@@ -2157,7 +2158,7 @@ impl AcpHost {
                     && let Some(version) =
                         result.pointer("/agentInfo/version").and_then(Value::as_str)
                     && crate::opencode_compat::Generation::require(
-                        host.reported_version.as_deref(),
+                        host.launch_runtime.reported_version.as_deref(),
                     )?
                     .conflicts_with(version)
                 {
@@ -3836,8 +3837,9 @@ impl AcpHost {
         display_owner: Option<AcpRuntimeOwner>,
     ) {
         if self.adapter_kind == AdapterKind::OpencodeCli
-            && crate::opencode_compat::Generation::from_version(self.reported_version.as_deref())
-                != Some(crate::opencode_compat::Generation::V2)
+            && crate::opencode_compat::Generation::from_version(
+                self.launch_runtime.reported_version.as_deref(),
+            ) != Some(crate::opencode_compat::Generation::V2)
         {
             return;
         }
@@ -4073,14 +4075,15 @@ impl AcpHost {
         (self.is_alive()
             && !self.protocol_violated.load(Ordering::Acquire)
             && self.opencode_program_identity.as_deref() == Some(identity))
-        .then(|| self.reported_version.clone())
+        .then(|| self.launch_runtime.reported_version.clone())
         .flatten()
     }
 
     fn is_opencode_v2(&self) -> bool {
         self.adapter_kind == AdapterKind::OpencodeCli
-            && crate::opencode_compat::Generation::from_version(self.reported_version.as_deref())
-                == Some(crate::opencode_compat::Generation::V2)
+            && crate::opencode_compat::Generation::from_version(
+                self.launch_runtime.reported_version.as_deref(),
+            ) == Some(crate::opencode_compat::Generation::V2)
     }
 
     async fn project_opencode_child_update(&self, message: &Value) -> Option<Value> {
@@ -6562,8 +6565,12 @@ impl AcpRuntime {
         self.host.adapter_kind
     }
 
+    pub fn launch_runtime(&self) -> &FrozenAgentRuntimeConfig {
+        &self.host.launch_runtime
+    }
+
     pub fn reported_version(&self) -> Option<&str> {
-        self.host.reported_version.as_deref()
+        self.host.launch_runtime.reported_version.as_deref()
     }
 
     pub fn execution_epoch(&self) -> i64 {
@@ -6579,7 +6586,7 @@ impl AcpRuntime {
             | AdapterKind::TraeCnCli => true,
             AdapterKind::OpencodeCli => {
                 crate::opencode_compat::Generation::from_version(
-                    self.host.reported_version.as_deref(),
+                    self.host.launch_runtime.reported_version.as_deref(),
                 ) != Some(crate::opencode_compat::Generation::V2)
             }
             _ => false,
@@ -7169,11 +7176,7 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::QwenCode {
         compatibility["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
     }
-    if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli
-        && crate::opencode_compat::Generation::from_version(
-            frozen_runtime.reported_version.as_deref(),
-        ) == Some(crate::opencode_compat::Generation::V2)
-    {
+    if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
         compatibility["nativeQuestionnairePolicy"] = json!("deny-question-v1");
     }
     if is_grok {
@@ -7200,11 +7203,7 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
         compatibility["nativeQuestionnairePolicy"] = json!("deny-ask-user-question-v1");
         compatibility["zcodeNativeConfigurationDigest"] = json!(
-            crate::zcode::NativeConfig::load_for_executable(
-                &execution_root,
-                Path::new(&frozen_runtime.executable_path),
-            )?
-            .digest
+            crate::zcode::NativeConfig::host_configuration_digest(&execution_root)?
         );
     }
     canonical_json_digest(&compatibility).map(Some)
@@ -7276,11 +7275,7 @@ pub(crate) fn freeze_native_session_compatibility(
     }
     if adapter_kind == AdapterKind::ZcodeApp {
         compatibility["zcodeNativeConfigurationDigest"] = json!(
-            crate::zcode::NativeConfig::load_for_executable(
-                &execution_root,
-                Path::new(&frozen_runtime.executable_path),
-            )?
-            .digest
+            crate::zcode::NativeConfig::host_configuration_digest(&execution_root)?
         );
     }
     let compatibility_digest = canonical_json_digest(&compatibility)?;
@@ -14986,6 +14981,29 @@ while IFS= read -r ignored; do :; done
         receive_through_prompt_completion(&mut receiver).await;
         adapter.complete_agent_run("agent-run-one", 1).await;
 
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if std::fs::read_to_string(&invocation_log)
+                    .unwrap()
+                    .lines()
+                    .any(|line| line.ends_with("models --json"))
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("initial catalog observation reached the old program");
+        let previous = root.join("traecli-previous");
+        std::fs::rename(&executable, &previous).unwrap();
+        make_executable(
+            &executable,
+            &(std::fs::read_to_string(&previous).unwrap() + "\n# upgraded\n"),
+        );
+        let mut upgraded = frozen.clone();
+        upgraded.executable_fingerprint = "sha256:upgraded".into();
+        upgraded.reported_version = Some("9.0.0".into());
         let blocked_root = root.join("blocked-runtime-root");
         std::fs::write(&blocked_root, "not a directory").unwrap();
         let warm_factory = BuiltinToolProcessConfigFactory::new(&cli, &endpoint, &blocked_root);
@@ -14998,7 +15016,7 @@ while IFS= read -r ignored; do :; done
                 "fixture-binding",
                 &workspace,
                 PermissionSemantics::RuntimeManagedV2,
-                &frozen,
+                &upgraded,
                 &warm_factory,
                 &BTreeMap::new(),
                 "sha256:mcp",
@@ -15014,6 +15032,14 @@ while IFS= read -r ignored; do :; done
             .await
             .unwrap();
         assert_eq!(second.host_instance_id(), first_host);
+        assert_eq!(
+            second.launch_runtime().reported_version,
+            frozen.reported_version
+        );
+        assert_eq!(
+            second.launch_runtime().executable_fingerprint,
+            frozen.executable_fingerprint
+        );
         assert_eq!(cold_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(
             second.builtin_tool_process_config().unwrap().context_path(),
@@ -16504,7 +16530,7 @@ while IFS= read -r ignored; do :; done
             v2.native_session_compatibility_key,
             patch.native_session_compatibility_key
         );
-        assert_ne!(v2.host_config_digest, patch.host_config_digest);
+        assert_eq!(v2.host_config_digest, patch.host_config_digest);
         opencode.reported_version = None;
         assert!(freeze_native_session_compatibility(opencode, &workspace).is_err());
         let first = runtime_compatibility_digest(
@@ -16729,9 +16755,12 @@ while IFS= read -r ignored; do :; done
             }
         }
 
-        // Only the V2 launch policy changes; V1 and native Session identity
-        // retain their existing compatibility inputs.
-        for (runtime, policy) in [(&v1, None), (&v2, Some("deny-question-v1"))] {
+        // Host policy is independent of the disk program's current generation.
+        // The acquired Host keeps its native Session and launch dialect.
+        for (runtime, policy) in [
+            (&v1, Some("deny-question-v1")),
+            (&v2, Some("deny-question-v1")),
+        ] {
             let digest = runtime_compatibility_digest(
                 runtime,
                 &workspace,
