@@ -1,6 +1,7 @@
 import { createReviewModel } from '../../../scripts/fixtures/host-web-parity/model'
 import { initial, run as runTemplate, agents as agentTemplates, initialDraft, installations } from '../../../scripts/fixtures/host-web-parity/data'
 export { installations }
+const exportAvatarRef = 'rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000'
 
 export const profiles = ['爱丽丝', '奥黛丽', '雾切响子', '药师寺惠'].map((name, i) => ({
   ...structuredClone(agentTemplates[i % 2]), agentId: `presence-member-${i}`, displayName: name,
@@ -271,6 +272,7 @@ export const model = {
     first.content = [{ kind: 'member_mention', agentId: aid(0) }, { kind: 'text', text: ' 请整理消息。' }, { kind: 'thread_reference', threadId: 'private-thread-id', titleAtSend: '关联讨论' }, { kind: 'mission_reference', missionId: 'private-mission-id', titleAtSend: '关联使命' }]
     const second = makeMessage('export-code', 2, '[@药师寺惠](https://example.com) 普通网页。\n\n```diff\n-old\n+new\n```\n\n| 内容 | 结果 |\n| --- | --- |\n| 文件 | 完整 |\n\n<script>window.exportInjected=1</script>', 0)
     second.body += '\n\n`inline()`\n\n- [x] 完成实现\n- [ ] 等待验收\n\n' + '[长链接' + 'url'.repeat(70) + '](https://example.com/long)'
+    second.body += '\n\n```js\nconst longLine = "' + 'visible-code-'.repeat(24) + '";\n```'
     second.content = [{ kind: 'text', text: second.body }]
     second.addressedAgentIds = [aid(1)]
     second.attachments = [{ id: 'export-file', displayName: '报告.pdf', kind: 'file', fileCount: null, mediaType: 'application/pdf', byteSize: 4200, previewKind: 'none', availability: 'available' },
@@ -278,7 +280,8 @@ export const model = {
       { id: 'export-missing', displayName: '缺失.png', kind: 'file', fileCount: null, mediaType: 'image/png', byteSize: 100, previewKind: 'image', availability: 'missing' }]
     const third = makeMessage('export-reply', 3, '最后一条消息。', 1); third.replyToThreadMessageId = first.id
     const withdrawn = makeMessage('export-withdrawn', 4, '不应导出的撤回内容'); withdrawn.withdrawn = true
-    update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, title: '消息导出' }, messages: [first, second, third, withdrawn], agentRuns: [], agentRunFileChanges: [], agentRunImages: [], messageDeliveries: [], executionEvidence: [] },
+    update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, title: '消息导出' }, messages: [first, second, third, withdrawn], agentRuns: [], agentRunFileChanges: [], agentRunImages: [], messageDeliveries: [], executionEvidence: [],
+      members: state.snapshot.members.map((member: any) => member.agentId === aid(0) ? { ...member, avatarRef: exportAvatarRef } : member) },
       draft: { ...state.draft, body: '保留的草稿', content: { version: 2, segments: [{ kind: 'text', text: '保留的草稿' }] } } })
   },
   showExportPendingCase() {
@@ -542,6 +545,15 @@ export const model = {
   async changeLead(agentId: string) { update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, defaultLeadAgentId: agentId }, members: state.snapshot.members.map((m: any) => ({ ...m, isDefaultLead: m.agentId === agentId })) } }) },
   fileApi: backing.fileApi,
   client: { ...backing.client,
+    memberAvatars: { ...backing.client.memberAvatars, async read(avatarRef: string, rendition: any) {
+      if (avatarRef !== exportAvatarRef) return backing.client.memberAvatars.read(avatarRef, rendition)
+      const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 200
+      const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#c223a7'; ctx.fillRect(0, 0, 400, 200)
+      ctx.fillStyle = '#e5a01b'; ctx.fillRect(150, 50, 100, 100)
+      const blob = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'))
+      const crop = { centerX: .5, centerY: .5, size: .5 }
+      return { mediaType: 'image/png', bytes: new Uint8Array(await blob.arrayBuffer()), width: 400, height: 200, crop, displayCrop: crop }
+    } },
     composerAttachments: { ...backing.client.composerAttachments, async preview(locator: any) {
       if (locator.attachmentRefId === 'export-missing') return { availability: 'missing', preview: null }
       if (locator.attachmentRefId === 'export-image' || locator.attachmentRefId === 'export-image-pending') {

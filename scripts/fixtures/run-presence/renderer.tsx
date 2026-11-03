@@ -20,6 +20,7 @@ import { model, profiles, scenarios, installations } from './model'
 import { conversationRunPresenceTimeline } from '../../../apps/desktop/src/renderer/src/conversation-run-presence'
 import { liveRuntimeEventFromExecutionEvidence } from '../../../apps/desktop/src/renderer/src/ui-model'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { snapshotExportDocument, exportDocumentPNG } from '../../../apps/desktop/src/renderer/src/message-export'
 const projectedTimeline = (snapshot: any) => conversationRunPresenceTimeline(campConversationTimeline(snapshot.messages,
   snapshot.turns, snapshot.agentRuns, snapshot.tasks, snapshot.agentRunFileChanges, snapshot.agentRunImages, snapshot.memberCreations), snapshot.agentRuns)
 const projectedPresence = (snapshot: any) => projectedTimeline(snapshot).flatMap(item => item.kind === 'run_presence' ? [{ ...item.slot, status: item.slot.run.status }] : [])
@@ -109,7 +110,7 @@ function Workbench() {
       lastActivityGlobalSequence: 10, totalCount: 4, recentThreads: [current,
         ...['消息投递与恢复', '会话工作区优化', '发布前检查'].map((title, i) => ({ ...current, id: `demo-thread-${i}`, title, marker: 'none' }))] }] }
   useEffect(() => {
-    Object.assign(window, { __presence: { setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal, setMemberName, setIdentityFields, navigateThread: setOtherThread,
+    Object.assign(window, { __presence: { snapshotExportDocument, exportDocumentPNG, setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal, setMemberName, setIdentityFields, navigateThread: setOtherThread,
       setLanguage: (language: 'zh-CN' | 'en') => changeInterfaceLanguage(languageTestApi, language),
       getState: model.get, showExportCase: model.showExportCase.bind(model), showExportPendingCase: model.showExportPendingCase.bind(model), showExportGroupCase: model.showExportGroupCase.bind(model), renameThread: model.rename,
       showReplyCase: model.showReplyCase.bind(model), withdrawReply: model.withdrawReply, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,

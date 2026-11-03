@@ -21,6 +21,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
   const button = async (scope, text) => { await b.click(`[...document.querySelectorAll(${JSON.stringify(scope + ' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)})`); await pause(100) }
   const open = async () => { await click('.message-selection-actions .primary-button'); await b.wait('!!document.querySelector(".message-export-dialog")') }
   const codeStyle = scope => b.evaluate(`(()=>{const root=document.querySelector(${JSON.stringify(scope)}),pre=root.querySelector('pre'),frame=root.querySelector('.markdown-code-frame'),inline=root.querySelector('p code');const style=e=>{const s=getComputedStyle(e);return [s.backgroundColor,s.borderRadius,s.padding,s.borderColor]};return {pre:style(pre),frame:style(frame),inline:style(inline)}})()`)
+  const avatarGeometry = scope => b.evaluate(`(()=>{const s=getComputedStyle(document.querySelector(${JSON.stringify(scope)}).querySelector('.member-avatar img'));return [s.width,s.height,s.left,s.top,s.maxWidth]})()`)
   const downloaded = async (count, label) => {
     await button('.message-export-dialog', label)
     await b.wait(`window.__downloads.length===${count}`, 25_000)
@@ -57,6 +58,37 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     }
     await b.evaluate('__presence.setTheme("day")'); await pause(120)
     const sourceCodeStyle = await codeStyle('[data-message-id=export-code]')
+    await b.wait('!!document.querySelector(".message-export-document .member-avatar img") && !document.querySelector(".message-export-document .member-avatar--loading")')
+    const sourceAvatarGeometry = await avatarGeometry('.message-export-document')
+    const avatarSize = await b.evaluate('document.querySelector(".message-export-document .member-avatar img").parentElement.clientWidth')
+    assert.ok(avatarSize > 0)
+    assert.deepEqual(sourceAvatarGeometry, [avatarSize * 4 + 'px', avatarSize * 2 + 'px', avatarSize * -1.5 + 'px', avatarSize * -.5 + 'px', 'none'], 'Production MemberAvatar applies the saved crop inside its border')
+
+    // A fresh Blob is mounted and captured in the same browser task, before it
+    // has intrinsic dimensions. Exercise the real snapshot, sanitizer and PNG.
+    const freshImage = await b.evaluate(`(async()=>{
+      await document.fonts.ready;
+      const root=document.querySelector('.message-export-document'),original=root.querySelector('.message-export-image');
+      const canvas=document.createElement('canvas');canvas.width=400;canvas.height=200;
+      const ctx=canvas.getContext('2d');ctx.fillStyle='#00c76f';ctx.fillRect(0,0,400,200);
+      const source=await new Promise(resolve=>canvas.toBlob(resolve,'image/png')),url=URL.createObjectURL(source);
+      const img=new Image();img.className=original.className;img.src=url;original.replaceWith(img);
+      try{
+        const before=img.getBoundingClientRect();
+        const snapshot=await __presence.snapshotExportDocument(root,undefined,'png');
+        const captured=snapshot.querySelector('.message-export-image');
+        const blob=await __presence.exportDocumentPNG(snapshot);window.__freshPNG=blob;
+        const bitmap=await createImageBitmap(blob),pixels=document.createElement('canvas');pixels.width=bitmap.width;pixels.height=bitmap.height;
+        const context=pixels.getContext('2d');context.drawImage(bitmap,0,0);
+        const data=context.getImageData(0,0,pixels.width,pixels.height).data;let green=0;
+        for(let i=0;i<data.length;i+=4)if(data[i]===0&&data[i+1]===199&&data[i+2]===111&&data[i+3]===255)green++;
+        bitmap.close();return {before:[before.width,before.height],captured:[captured.style.width,captured.style.height],cardHeight:parseFloat(captured.parentElement.style.height),green};
+      }finally{img.replaceWith(original);URL.revokeObjectURL(url)}
+    })()`)
+    assert.deepEqual(freshImage.before, [0, 0], 'The first export starts before image layout')
+    assert.deepEqual(freshImage.captured, ['400px', '200px'])
+    assert.ok(freshImage.cardHeight >= 200 && freshImage.green >= 319000, 'The first PNG includes the entire new image and its parent card: ' + JSON.stringify(freshImage))
+    await writeFile(join(root, 'fresh-image.png'), Buffer.from(await b.evaluate('(async()=>Array.from(new Uint8Array(await __freshPNG.arrayBuffer())))()')))
     await b.capture(join(root, 'preview.png'))
     for (const [width, height] of [[375, 812], [844, 390]]) {
       await b.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }); await pause(120)
@@ -162,15 +194,32 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
       await b.send('Emulation.setDeviceMetricsOverride', { width, height: 920, deviceScaleFactor: 1, mobile: false }); await pause(120)
       const geometry = await b.evaluate(`(()=>{const a=document.querySelector('article').getBoundingClientRect(),last=document.querySelector('.message-export-entry:last-child').getBoundingClientRect();return {scroll:document.documentElement.scrollWidth,width:innerWidth,bottom:a.bottom,last:last.bottom}})()`)
       assert.ok(geometry.scroll <= width && geometry.bottom >= geometry.last, 'Standalone HTML reflows without clipping or horizontal page scrolling: ' + JSON.stringify(geometry))
+      assert.deepEqual(await avatarGeometry('article'), sourceAvatarGeometry, 'Saved avatar crop survives HTML reflow at ' + width)
+      const codeLayout = await b.evaluate(`(()=>{
+        const frame=[...document.querySelectorAll('.markdown-code-frame')].find(e=>e.textContent.includes('visible-code-'));
+        const pre=frame.querySelector('pre'),button=frame.querySelector('button[data-copy-code]'),p=pre.getBoundingClientRect(),b=button.getBoundingClientRect();
+        return {separate:p.right<=b.left,scrollable:pre.scrollWidth>pre.clientWidth,button:[b.width,b.height],outside:!pre.contains(button)};
+      })()`)
+      assert.deepEqual(codeLayout, { separate: true, scrollable: true, button: [28, 28], outside: true }, 'Long code and its copy action occupy separate areas at ' + width)
       assert.equal(await b.evaluate(`Array.from(document.querySelectorAll('article .ref-message-link')).every(ref=>{const icon=ref.querySelector('svg')?.getBoundingClientRect(),label=ref.querySelector('.reference-token-label')?.getBoundingClientRect();return !!icon&&!!label&&icon.top<label.bottom&&label.top<icon.bottom})`), true, 'Reference icons stay on the same line as their titles')
       await b.capture(join(root, `standalone-${width}.png`))
     }
+    // Verify both clipboard success and the selectable-text fallback without
+    // touching the user's system clipboard or replacing download handling.
+    await b.evaluate(`Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{window.__copiedCode=text}}})`)
+    await click('.markdown-code-frame:last-child button[data-copy-code]')
+    const copiedCode = await b.evaluate('__copiedCode')
+    assert.match(copiedCode, /^const longLine = "visible-code-/)
+    assert.equal(await b.evaluate('document.querySelector(".markdown-code-frame:last-child button[data-copy-code]").getAttribute("aria-label")'), '已复制代码')
+    await b.evaluate('navigator.clipboard.writeText=async()=>{throw Error("denied")}')
+    await click('.markdown-code-frame:last-child button[data-copy-code]')
+    assert.equal(await b.evaluate('getSelection().getRangeAt(0).cloneContents().textContent'), copiedCode)
     await click('article .message-export-image')
     assert.equal(await b.evaluate('document.querySelector("dialog").open'), true)
     await b.key('Escape')
     assert.equal(await b.evaluate('document.querySelector("dialog").open'), false)
     assert.deepEqual(b.errors, [])
-    console.log(JSON.stringify({ result: 'passed', png, evidence: process.env.ROVAI_KEEP_EXPORT_FIXTURE === '1' ? root : undefined }))
+    console.log(JSON.stringify({ result: 'passed', png, freshImage, avatar: sourceAvatarGeometry, evidence: process.env.ROVAI_KEEP_EXPORT_FIXTURE === '1' ? root : undefined }))
   } catch (error) {
     await b.capture(join(root, 'failure.png'))
     console.error(JSON.stringify({ error: error.message, body: await b.evaluate('document.body.innerText.slice(-5000)'), errors: b.errors, evidence: root }))

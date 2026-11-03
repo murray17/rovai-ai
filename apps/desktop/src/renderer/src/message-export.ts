@@ -121,13 +121,33 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
   signal?.throwIfAborted()
   if (root.querySelector(pending)) throw new ExportResourcePendingError()
   await Promise.race([document.fonts.ready, pause(2000)])
+  const unavailableImages = new Set<HTMLImageElement>()
+  // Intrinsic image sizes affect every ancestor. Decode the whole reader before
+  // freezing any geometry, including attachment cards and the document height.
+  await Promise.all([...root.querySelectorAll('img')].map(async img => {
+    try {
+      const state = await Promise.race([img.decode().then(() => 'ready'), pause(5000).then(() => 'pending')])
+      signal?.throwIfAborted()
+      if (state === 'pending') throw new ExportResourcePendingError()
+      if (!img.complete || !img.naturalWidth) throw new Error('image_unavailable')
+    } catch (error) {
+      signal?.throwIfAborted()
+      if (error instanceof ExportResourcePendingError) throw error
+      unavailableImages.add(img)
+    }
+  }))
+  // A hidden window may throttle animation frames; computed-style reads below
+  // still flush layout once decoding has completed.
+  await Promise.race([new Promise(resolve => requestAnimationFrame(resolve)), pause(50)])
+  signal?.throwIfAborted()
   const clone = root.cloneNode(true) as HTMLElement
   const originals = [root, ...root.querySelectorAll<HTMLElement>('*')]
   const copies = [clone, ...clone.querySelectorAll<HTMLElement>('*')]
   for (let i = 0; i < originals.length; i++) {
     signal?.throwIfAborted()
     const from = originals[i], to = copies[i], style = getComputedStyle(from)
-    const fixedSize = format === 'png' || from.matches('.member-avatar,.local-message-avatar') || from.closest('svg')
+    const avatar = from.closest('.member-avatar,.local-message-avatar')
+    const fixedSize = format === 'png' || avatar || from.closest('svg') || from.matches('.markdown-code-copy')
     if (!fixedSize) to.removeAttribute('style')
     for (const key of style) {
       const value = style.getPropertyValue(key)
@@ -135,6 +155,10 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
       if (!key.startsWith('--') && !value.includes('url(') && !key.startsWith('animation') && !key.startsWith('transition')) to.style.setProperty(key, value)
     }
     if (!fixedSize) { to.style.minWidth = '0'; to.style.maxWidth = '100%' }
+    if (format === 'html' && from.matches('.markdown-code-frame')) {
+      const corner = from.querySelector<HTMLElement>(':scope > .markdown-code-corner')
+      if (corner) to.style.gridTemplateColumns = `minmax(0, 1fr) ${corner.getBoundingClientRect().width}px`
+    }
     for (const attr of [...to.attributes]) {
       if (attr.name.startsWith('on') || attr.name.startsWith('data-') || ['id', 'tabindex', 'title', 'aria-controls', 'aria-describedby', 'aria-haspopup', 'aria-expanded', 'srcset', 'srcdoc'].includes(attr.name)) to.removeAttribute(attr.name)
     }
@@ -144,10 +168,7 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
     }
     if (from instanceof HTMLImageElement) {
       try {
-        const state = await Promise.race([from.decode().then(() => 'ready'), pause(5000).then(() => 'pending')])
-        signal?.throwIfAborted()
-        if (state === 'pending') throw new ExportResourcePendingError()
-        if (!from.complete || !from.naturalWidth) throw new Error('image_unavailable')
+        if (unavailableImages.has(from) || !from.complete || !from.naturalWidth) throw new Error('image_unavailable')
         if (rasterDataURL.test(from.src)) to.setAttribute('src', from.src)
         else {
           // Attachment/avatar blobs come through the existing read boundary. Keep
@@ -162,8 +183,8 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
             to.setAttribute('src', canvas.toDataURL('image/png')); canvas.width = canvas.height = 0
           }
         }
-        if (format === 'html') {
-          to.style.width = to.style.height = from.closest('.member-avatar,.local-message-avatar') ? '100%' : 'auto'
+        if (format === 'html' && !avatar) {
+          to.style.width = to.style.height = 'auto'
           to.style.maxWidth = '100%'
         }
       } catch (error) {
@@ -182,8 +203,10 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
     // tracks so its icon and title stay together as the document gets narrower.
     clone.querySelectorAll<HTMLElement>('.ref-message-link').forEach(node => { node.style.gridTemplateColumns = 'auto minmax(0, 1fr) auto' })
   }
-  clone.querySelectorAll('script,iframe,object,embed,form,input,textarea,video,audio,.markdown-code-copy,.markdown-table-copy,.sr-only').forEach(n => n.remove())
+  clone.querySelectorAll('script,iframe,object,embed,form,input,textarea,video,audio,.markdown-table-copy,.sr-only').forEach(n => n.remove())
+  if (format === 'png') clone.querySelectorAll('.markdown-code-copy').forEach(n => n.remove())
   clone.querySelectorAll('button,a').forEach(node => {
+    if (format === 'html' && node.matches('.markdown-code-corner > button.markdown-code-copy')) return
     if (node.tagName === 'A' && /^https?:\/\//i.test(node.getAttribute('href') ?? '')) {
       node.setAttribute('target', '_blank'); node.setAttribute('rel', 'noopener noreferrer'); return
     }
@@ -197,11 +220,29 @@ export async function snapshotExportDocument(root: HTMLElement, signal?: AbortSi
 }
 const escapeHTML = (s: string) => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
 // Trusted, fixed script; message content is never interpolated into executable code.
-const exportScript = `document.addEventListener('click',async e=>{const b=e.target.closest('[data-copy-code]');if(b){const t=b.parentElement.querySelector('code')?.textContent??'';try{await navigator.clipboard.writeText(t);b.textContent='已复制'}catch{const r=document.createRange();r.selectNodeContents(b.parentElement.querySelector('code'));getSelection().removeAllRanges();getSelection().addRange(r);b.textContent='请复制已选代码'}return}const im=e.target.closest('img');if(im&&!im.closest('.member-avatar,.local-message-avatar')){const d=document.querySelector('dialog');d.querySelector('img').src=im.src;d.showModal()}});document.querySelector('dialog').addEventListener('click',e=>e.currentTarget.close());`
+const exportScript = `const copyIcons=new WeakMap();document.addEventListener('click',async e=>{
+  const b=e.target.closest('[data-copy-code]');
+  if(b){
+    const code=b.closest('.markdown-code-frame')?.querySelector('pre code');if(!code)return;
+    const label='复制代码',svg=b.querySelector('svg');if(svg&&!copyIcons.has(b))copyIcons.set(b,svg.innerHTML);const icon=copyIcons.get(b);
+    try{
+      await navigator.clipboard.writeText(code.textContent??'');b.title='已复制代码';
+      if(svg)svg.innerHTML='<path d="m5 12 4 4L19 6"></path>';
+      setTimeout(()=>{if(svg)svg.innerHTML=icon;b.title=label;b.setAttribute('aria-label',label)},1800);
+    }catch{
+      const r=document.createRange();r.selectNodeContents(code);getSelection().removeAllRanges();getSelection().addRange(r);b.title='请复制已选代码';
+    }
+    b.setAttribute('aria-label',b.title);return;
+  }
+  const im=e.target.closest('img');if(im&&!im.closest('.member-avatar,.local-message-avatar')){const d=document.querySelector('dialog');d.querySelector('img').src=im.src;d.showModal()}
+});document.querySelector('dialog').addEventListener('click',e=>e.currentTarget.close());`
 export function standaloneExportHTML(title: string, root: HTMLElement): string {
   const copy = root.cloneNode(true) as HTMLElement
-  copy.querySelectorAll('pre:has(code)').forEach(pre => { const b = document.createElement('button'); b.type = 'button'; b.dataset.copyCode = ''; b.textContent = '复制代码'; pre.prepend(b) })
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-rovai-export'; base-uri 'none'; form-action 'none'"><title>${escapeHTML(title)}</title><style>body{margin:0;display:flex;justify-content:center;background:${root.style.backgroundColor};color:${root.style.color};font-family:system-ui}body>article{max-width:100%}pre{position:relative}button[data-copy-code]{position:absolute;right:8px;top:8px;border:1px solid currentColor;border-radius:4px;background:inherit;color:inherit;cursor:pointer;padding:4px 8px}dialog{max-width:95vw;max-height:95vh;padding:0;border:0}dialog img{display:block;max-width:95vw;max-height:95vh;object-fit:contain}dialog::backdrop{background:#000b}</style></head><body>${copy.outerHTML}<dialog aria-label="放大图片"><img alt="点击关闭图片"></dialog><script nonce="rovai-export">${exportScript}</script></body></html>`
+  copy.querySelectorAll<HTMLButtonElement>('.markdown-code-corner > button.markdown-code-copy').forEach(button => {
+    button.type = 'button'; button.dataset.copyCode = ''; button.disabled = false
+    button.setAttribute('aria-busy', 'false'); button.setAttribute('aria-label', '复制代码'); button.title = '复制代码'
+  })
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-rovai-export'; base-uri 'none'; form-action 'none'"><title>${escapeHTML(title)}</title><style>body{margin:0;display:flex;justify-content:center;background:${root.style.backgroundColor};color:${root.style.color};font-family:system-ui}body>article{max-width:100%}dialog{max-width:95vw;max-height:95vh;padding:0;border:0}dialog img{display:block;max-width:95vw;max-height:95vh;object-fit:contain}dialog::backdrop{background:#000b}</style></head><body>${copy.outerHTML}<dialog aria-label="放大图片"><img alt="点击关闭图片"></dialog><script nonce="rovai-export">${exportScript}</script></body></html>`
 }
 export async function exportDocumentPNG(root: HTMLElement): Promise<Blob> {
   const width = 720, height = Math.ceil(root.getBoundingClientRect().height || parseFloat(root.style.height))
