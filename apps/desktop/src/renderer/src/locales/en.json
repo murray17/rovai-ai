@@ -1782,6 +1782,7 @@
   "正文暂不可读：": "Content temporarily unreadable:",
   "正在读取正文…": "Reading content...",
   "该文件较大，暂不支持正文预览。": "The file is too large and does not support content preview.",
+  "该文件较大，仅显示开头的纯文本（最多 256 KiB）。完整内容请查看原文件。": "This file is large. Only the beginning is shown as plain text (up to 256 KiB). View the original file for the complete content.",
   "该文件不是文本文件。": "The file is not a text file.",
   "选择一项 Skill 查看正文。": "Select a Skill to view its content.",
   "为队员配置多人协作常用的 Skills 与工具。": "Configure skills and tools commonly used for team collaboration for teammates.",

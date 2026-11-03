@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skills
 authority: current-skills-source-configuration-and-delivery-boundaries
 status: accepted
-last_updated: 2026-11-02
+last_updated: 2026-11-03
 ---
 
 # Skills 来源、配置与模型投递
@@ -38,7 +38,8 @@ Renderer / 结构化 SkillMention(skillId, nameAtSend)
 
 原生发现与来源重验共用宽松文档读取：元数据问题不排除可读文档，名称缺省稳定取 canonical
 文件所属目录名；候选去重后的同一结果用于登记。原生名称不受受管目录命名格式限制。读取失败、
-可恢复元数据问题和扫描截断以轻量诊断交给列表与选择器，均不注入模型。具体正文、错误与预算边界
+可恢复元数据问题以轻量诊断交给列表与选择器，均不注入模型。原生发现完整枚举既定范围，
+不以目录条目数截断；文件预览可作有界的大文件降级，资源菜单的递归保护保持。具体正文、错误与预算边界
 由 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md#原生文档接受与诊断)拥有；不改变受管校验、
 缓存权威、投递版本轴或已有冻结 Selection／Resolution／Manifest 的恢复。
 

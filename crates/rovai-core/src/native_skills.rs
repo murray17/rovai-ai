@@ -7,6 +7,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     ffi::OsString,
     fs,
+    io::Read,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
@@ -29,10 +30,10 @@ use crate::skill::{SkillContentFile, SkillContentView};
 
 const DIRECTORY_CACHE_CAPACITY: usize = 128;
 const DIRECTORY_CACHE_TTL: Duration = Duration::from_secs(300);
-const MAX_SCAN_ENTRIES_PER_ROOT: usize = 512;
 const MAX_NATIVE_PREVIEW_FILES: usize = 512;
 const MAX_NATIVE_PREVIEW_ENTRIES: usize = 2048;
-const MAX_NATIVE_PREVIEW_BYTES: u64 = 1024 * 1024;
+const MAX_NATIVE_PREVIEW_BYTES: u64 = 4 * 1024 * 1024;
+const NATIVE_LARGE_PREVIEW_BYTES: usize = 256 * 1024;
 
 /// Read an exact file under a previously validated native Skill directory.
 /// Linked children are omitted so a dropdown cannot grant access outside it.
@@ -66,18 +67,42 @@ pub fn read_native_skill_content(root: &Path, selected: &str) -> Result<SkillCon
         selected_file.starts_with(root),
         "Native Skill file left its source directory"
     );
-    let (status, content) = if metadata.len() > MAX_NATIVE_PREVIEW_BYTES {
-        ("too_large", None)
+    let read_limit = if metadata.len() > MAX_NATIVE_PREVIEW_BYTES {
+        NATIVE_LARGE_PREVIEW_BYTES as u64
     } else {
-        let bytes = fs::read(selected_file)?;
-        if bytes.contains(&0) {
-            ("binary", None)
-        } else {
-            match String::from_utf8(bytes) {
-                Ok(text) => ("text", Some(text)),
-                Err(_) => ("binary", None),
+        MAX_NATIVE_PREVIEW_BYTES
+    };
+    let mut bytes = Vec::new();
+    // One extra byte detects growth beyond the full-preview limit without an
+    // unbounded read. Large files only supply a bounded plain-text prefix.
+    fs::File::open(selected_file)?
+        .take(read_limit + 1)
+        .read_to_end(&mut bytes)?;
+    let large =
+        metadata.len() > MAX_NATIVE_PREVIEW_BYTES || bytes.len() as u64 > MAX_NATIVE_PREVIEW_BYTES;
+    let clipped = large && bytes.len() > NATIVE_LARGE_PREVIEW_BYTES;
+    if large {
+        bytes.truncate(NATIVE_LARGE_PREVIEW_BYTES);
+    }
+    let text = if bytes.contains(&0) {
+        None
+    } else {
+        match std::str::from_utf8(&bytes) {
+            Ok(text) => Some(text),
+            // A byte boundary may split the final UTF-8 character; do not
+            // replace invalid sequences or silently repair ordinary files.
+            Err(error) if clipped && error.error_len().is_none() => {
+                std::str::from_utf8(&bytes[..error.valid_up_to()]).ok()
             }
+            Err(_) => None,
         }
+    };
+    let (status, content) = match text {
+        Some(text) => (
+            if large { "too_large" } else { "text" },
+            Some(text.to_owned()),
+        ),
+        None => ("binary", None),
     };
 
     // Keep the selected document and entry point reachable even in a partial menu.
@@ -800,7 +825,7 @@ fn scan_root(
     seen: &mut HashSet<PathBuf>,
     scan: &mut NativeSkillScan,
 ) {
-    use NativeSkillDiagnosticKind::{DirectoryRead, FileRead, ScanTruncated};
+    use NativeSkillDiagnosticKind::{DirectoryRead, FileRead};
     let items = match fs::read_dir(root) {
         Ok(items) => items,
         Err(error) if missing_path(root, &error) => return,
@@ -810,16 +835,7 @@ fn scan_root(
             return;
         }
     };
-    for (index, item) in items.enumerate() {
-        // Observe a further entry before reporting truncation: exactly 512 is complete.
-        if index >= MAX_SCAN_ENTRIES_PER_ROOT {
-            scan.diagnostics.push(NativeSkillDiagnostic::new(
-                ScanTruncated,
-                root,
-                "Scan results are incomplete: directory entry limit reached (512)",
-            ));
-            break;
-        }
+    for item in items {
         let item = match item {
             Ok(item) => item,
             Err(error) => {
@@ -1081,8 +1097,31 @@ mod tests {
             .set_len(MAX_NATIVE_PREVIEW_BYTES + 1)
             .unwrap();
         let large = read_native_skill_content(&skill, "large.txt").unwrap();
-        assert_eq!(large.status, "too_large");
+        assert_eq!(large.status, "binary");
         assert!(large.content.is_none());
+        for size in [1024 * 1024 + 1, MAX_NATIVE_PREVIEW_BYTES as usize] {
+            let source = "a".repeat(size);
+            fs::write(skill.join("ordinary.txt"), &source).unwrap();
+            let view = read_native_skill_content(&skill, "ordinary.txt").unwrap();
+            assert_eq!(view.status, "text");
+            assert_eq!(view.content.as_deref(), Some(source.as_str()));
+        }
+        let mut source = "a".repeat(MAX_NATIVE_PREVIEW_BYTES as usize + 1);
+        let boundary = NATIVE_LARGE_PREVIEW_BYTES - 1;
+        source.replace_range(boundary..boundary + 3, "中");
+        fs::write(skill.join("large.txt"), &source).unwrap();
+        let large = read_native_skill_content(&skill, "large.txt").unwrap();
+        assert_eq!(large.status, "too_large");
+        assert_eq!(large.content.as_deref(), Some(&source[..boundary]));
+        assert_eq!(fs::read_to_string(skill.join("large.txt")).unwrap(), source);
+        // Invalid UTF-8 inside the prefix is still binary, unlike a character
+        // split by the preview boundary.
+        let mut invalid = source.into_bytes();
+        invalid[4] = 0xff;
+        fs::write(skill.join("large.txt"), invalid).unwrap();
+        let invalid = read_native_skill_content(&skill, "large.txt").unwrap();
+        assert_eq!(invalid.status, "binary");
+        assert!(invalid.content.is_none());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink(skill.join("SKILL.md"), skill.join("local-link.md"))
@@ -1726,7 +1765,14 @@ mod tests {
                 Some(source)
             );
         }
-        fs::write(&entry, "a".repeat(MAX_NATIVE_PREVIEW_BYTES as usize + 1)).unwrap();
+        fs::write(
+            &entry,
+            format!(
+                "---\nname: canonical_name\ndescription: Large native document\n---\n{}",
+                "a".repeat(MAX_NATIVE_PREVIEW_BYTES as usize + 1)
+            ),
+        )
+        .unwrap();
         assert!(
             read_native_skill(
                 &entry,
@@ -1736,12 +1782,10 @@ mod tests {
             )
             .is_ok()
         );
-        assert_eq!(
-            read_native_skill_content(&document.canonicalize().unwrap(), "SKILL.md")
-                .unwrap()
-                .status,
-            "too_large"
-        );
+        let preview =
+            read_native_skill_content(&document.canonicalize().unwrap(), "SKILL.md").unwrap();
+        assert_eq!(preview.status, "too_large");
+        assert_eq!(preview.content.unwrap().len(), NATIVE_LARGE_PREVIEW_BYTES);
         for bytes in [b"text\0binary".as_slice(), &[0xff]] {
             fs::write(&entry, bytes).unwrap();
             let result = scan_directory(&document, AdapterKind::CodexCli);
@@ -1809,24 +1853,28 @@ mod tests {
             }
             assert!(result.skills.iter().any(|skill| skill.name == "good"));
         }
-        let budget = fixture.join("budget");
-        fs::create_dir(&budget).unwrap();
-        for index in 0..MAX_SCAN_ENTRIES_PER_ROOT {
-            fs::write(budget.join(format!("{index}.txt")), "not a Skill").unwrap();
+        let complete = fixture.join("complete-discovery");
+        fs::create_dir(&complete).unwrap();
+        for index in 0..600 {
+            fs::write(complete.join(format!("{index}.txt")), "not a Skill").unwrap();
+            let directory = complete.join(format!("skill-{index}"));
+            fs::create_dir(&directory).unwrap();
+            fs::write(directory.join("SKILL.md"), "# Native document").unwrap();
         }
-        assert!(
-            scan_directory(&budget, AdapterKind::CodexCli)
-                .diagnostics
-                .is_empty()
-        );
-        fs::write(budget.join("extra.txt"), "not a Skill").unwrap();
-        let result = scan_directory(&budget, AdapterKind::CodexCli);
-        assert!(result.skills.is_empty());
-        assert_eq!(result.diagnostics.len(), 1);
-        assert_eq!(
-            result.diagnostics[0].kind,
-            NativeSkillDiagnosticKind::ScanTruncated
-        );
+        fs::create_dir_all(complete.join(".system/bundled")).unwrap();
+        fs::write(complete.join(".system/bundled/SKILL.md"), "# Bundled").unwrap();
+        fs::create_dir_all(complete.join("unrelated/nested")).unwrap();
+        fs::write(
+            complete.join("unrelated/nested/SKILL.md"),
+            "# Outside discovery scope",
+        )
+        .unwrap();
+        let result = scan_directory(&complete, AdapterKind::CodexCli);
+        assert_eq!(result.skills.len(), 601);
+        assert!(result.diagnostics.is_empty());
+        assert!(result.skills.iter().any(|skill| skill.name == "skill-599"));
+        assert!(result.skills.iter().any(|skill| skill.name == "bundled"));
+        assert!(!result.skills.iter().any(|skill| skill.name == "nested"));
         fs::remove_dir_all(fixture).unwrap();
     }
 

@@ -54,7 +54,7 @@ Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (value
 const longPreviewPath = 'references/project-specific-workflows/acceptance-and-review/long-file-name-long-file-name-long-file-name-checklist.md'
 const previewPaths = [
   'SKILL.md', 'LICENSE', 'agents/openai.yaml', 'assets/icon.png', 'references/guide.md',
-  'references/large.md', 'notes/guide.md', longPreviewPath,
+  'references/large.md', 'references/oversized.md', 'notes/guide.md', longPreviewPath,
   ...Array.from({ length: 4 }, (_, index) => `references/check-${index + 1}.md`)
 ]
 const nativeSkills = ['ui-ux-pro-max', 'design-review'].map((name, index) => ({
@@ -79,6 +79,9 @@ let config = {
 }
 const text =
   '---\nname: ui-ux-pro-max\ndescription: UI design guidance\n---\n\n# 界面设计与实现\n\n从已有界面出发，让每个操作清晰、直接。\n\n## 使用方式\n\n1. 理解当前页面的主要任务。\n2. 保留熟悉的视觉风格和交互。\n3. 检查键盘操作、窄窗口和深色模式。\n\n## 设计原则\n\n- 主要内容优先，低频信息按需展开。\n- 原生 Skills 保持只读。\n- 工具箱按队员配置。'
+const ordinaryLargeText = '# 常规大文档\n\n' + '可直接查看的内容。'.repeat(48_000) + '\n\n完整文档结束。'
+const largePrefixHeader = '---\nname: oversized-document\n---\n# Large document\n\n'
+const largePrefix = largePrefixHeader + 'x'.repeat(256 * 1024 - largePrefixHeader.length)
 Object.assign(window, {
   rovai: {
     onEvent: () => () => {},
@@ -104,11 +107,13 @@ Object.assign(window, {
       if (method === 'nativeSkills.read') {
         const paths = params.skillId === 'native-2' ? ['SKILL.md'] : previewPaths
         const status = params.path === 'assets/icon.png' ? 'binary'
-          : params.path === 'references/large.md' ? 'too_large' : 'text'
+          : params.path === 'references/oversized.md' ? 'too_large' : 'text'
         const result = {
           path: params.path,
           status,
-          content: status !== 'text' ? null : nativeContent ?? (params.skillId === 'native-2' ? '# 单文件 Skill\n\n独立的说明内容。' :
+          content: status === 'binary' ? null : status === 'too_large' ? largePrefix
+            : params.path === 'references/large.md' ? ordinaryLargeText
+            : nativeContent ?? (params.skillId === 'native-2' ? '# 单文件 Skill\n\n独立的说明内容。' :
             params.path === 'SKILL.md'
               ? text +
                 '\n\n' +
@@ -117,7 +122,8 @@ Object.assign(window, {
                   (_, i) => '## 参考段落 ' + (i + 1) + '\n\n内容与操作位于同一工作区。'
                 ).join('\n\n')
               : params.path === 'agents/openai.yaml' ? 'interface:\n  display_name: "Fixture Skill"\n' : '参考内容。'),
-          files: paths.map(path => ({ path, bytes: 500 }))
+          files: paths.map(path => ({ path, bytes: path === 'references/oversized.md' ? 32 * 1024 * 1024
+            : path === 'references/large.md' ? new TextEncoder().encode(ordinaryLargeText).length : 500 }))
         }
         if (contentHold?.path === params.path) await contentHold.wait
         if (contentFailure === params.path) {

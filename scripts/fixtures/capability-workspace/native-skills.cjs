@@ -13,17 +13,16 @@ module.exports = async ({ run, click, key, settle, capture, snapshot, window }) 
   await require('./file-navigation.cjs')({ run, click, key, settle, capture, window })
   await click('刷新')
   assert.equal(await run("window.capabilityTest.requests.filter(r => r.method === 'nativeSkills.list').at(-1).params.refresh"), true)
-  // Metadata issues remain selectable; real failures and incomplete scans keep their own labels.
+  // Metadata issues remain selectable; real failures keep their own labels.
   const diagnostics = [
     { kind: 'metadata', path: '/fixture/native/ui-ux-pro-max/SKILL.md', message: 'name must be a string', skillId: 'native-1' },
     { kind: 'file_read', path: '/fixture/native/blocked/SKILL.md', message: 'Permission denied' },
-    { kind: 'directory_read', path: '/fixture/locked', message: 'Directory access denied' },
-    { kind: 'scan_truncated', path: '/fixture/many', message: 'Directory entry limit reached (512)' }
+    { kind: 'directory_read', path: '/fixture/locked', message: 'Directory access denied' }
   ]
   await run(`window.capabilityTest.setNativeDiagnostics(${JSON.stringify(diagnostics)})`)
   await click('刷新')
   assert.equal(await run("document.querySelector('aside.rebuilt-skills-list').querySelectorAll('.rebuilt-skill-row').length"), 2)
-  assert.ok((await snapshot()).text.includes('扫描结果不完整'))
+  assert.ok(!(await snapshot()).text.includes('扫描结果不完整'))
   assert.ok(!(await snapshot()).text.includes('部分来源暂不可读'))
   await run("document.querySelector('aside .native-skill-diagnostics summary').click()")
   await click('复制诊断')

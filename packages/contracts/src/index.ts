@@ -3817,6 +3817,7 @@ export type SkillContentRequest =
 
 export interface SkillContentView {
   path: string
+  /** Native too_large previews carry a bounded plain-text prefix when readable. */
   content: string | null
   status: 'text' | 'binary' | 'too_large'
   files: { path: string; bytes: number }[]
