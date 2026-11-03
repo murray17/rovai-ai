@@ -8144,7 +8144,7 @@ html[lang="en"] .runtime-parameter-picker-menu:has(.permission-menu-guidance) { 
 .notification-heads-up-source > span { overflow: hidden; text-overflow: ellipsis; }
 .notification-heads-up-source > b { flex: 0 0 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; font-weight: inherit; }
 .notification-heads-up-summary .notification-heads-up-open { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
-.notification-heads-up-summary .notification-heads-up-open > span:last-child { color: var(--brand-ink); }
+.notification-heads-up-summary .notification-heads-up-open > span:last-child { color: var(--conversation-action-ink); }
 .single-chat-popover .approval-dock { position: static; flex-shrink: 0; width: auto; margin: 8px 12px; }
 @media (prefers-reduced-motion: reduce) { .notification-heads-up { animation: none; } }
 .notification-heads-up-close { width: 28px; height: 28px; margin-top: 7px; border: 0; border-radius: 6px; color: var(--faint); background: transparent; cursor: pointer; }
