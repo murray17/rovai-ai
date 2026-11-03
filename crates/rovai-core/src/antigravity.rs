@@ -576,6 +576,8 @@ impl AntigravityAppRuntimeAdapter {
                 ManagedWindowsArgvDialect::MicrosoftCrt,
                 format!("agent-run:{}:antigravity-app", request.agent_run_id),
             )?;
+            #[cfg(windows)]
+            let spec = spec.with_windows_compatible_executable_path()?;
             ManagedProcess::spawn(spec)
         })();
         let native_metrics_root = native_metrics::root_for_command(command.as_std());

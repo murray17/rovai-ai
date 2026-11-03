@@ -306,7 +306,7 @@ fn update_digest_with_windows_path(digest: &mut Sha256, path: &Path) {
     digest.update([0, 0]);
 }
 
-fn windows_process_visible_path(path: PathBuf) -> PathBuf {
+pub(crate) fn windows_process_visible_path(path: PathBuf) -> PathBuf {
     let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
     let verbatim = r"\\?\".encode_utf16().collect::<Vec<_>>();
     let verbatim_unc = r"\\?\UNC\".encode_utf16().collect::<Vec<_>>();
