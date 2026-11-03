@@ -21,8 +21,20 @@ describe('professional responsibilities draft', () => {
     expect(identityCommand(draft, null).professionalResponsibilities).toBe(draft.professionalResponsibilities)
     draft.professionalResponsibilities = ' \uFEFF\n'
     expect(identityCommand(draft, null).professionalResponsibilities).toBe('')
-    for (const [field, length] of [['teamRole', 121], ['workingPrinciples', 301], ['growthTopic', 301]] as const) {
+    for (const [field, length] of [['teamRole', 121], ['workingPrinciples', 3_001], ['growthTopic', 3_001]] as const) {
       expect(identityDraftIssue({ ...draft, [field]: '中'.repeat(length) }, null, [])?.field).toBe(field)
+    }
+    for (const [field, label] of [['workingPrinciples', '工作准则'], ['growthTopic', '成长课题']] as const) {
+      for (const text of ['中'.repeat(3_000), '😀'.repeat(3_000), 'e\u0301'.repeat(1_500), '"\\\n\0中😀'.repeat(500)]) {
+        const valid = { ...draft, [field]: ` \uFEFF${text}\n ` }
+        expect(identityDraftIssue(valid, null, [])).toBeNull()
+        expect(identityCommand(valid, null)[field]).toBe(text)
+        const overlong = { ...valid, [field]: `${text}界` }
+        expect(identityDraftIssue(overlong, null, [])).toEqual({ field, message: `${label}最多 3,000 个字符。` })
+        expect(overlong[field]).toBe(`${text}界`)
+      }
+      expect(identityCommand({ ...draft, [field]: ' \uFEFF\n' }, null)[field]).toBe('')
+      expect(identityCommand({ ...draft, [field]: '\u0085a\n  b\u0085' }, null)[field]).toBe('\u0085a\n  b\u0085')
     }
   })
 })
