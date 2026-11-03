@@ -4246,5 +4246,11 @@
   "正在绘制图表": "Rendering diagram",
   "图表暂时无法渲染": "Unable to render this diagram",
   "Mermaid 图表": "Mermaid diagram",
+  "图表视图": "Diagram view",
+  "展开源码": "Expand source",
+  "查看 Mermaid 大图": "Enlarge Mermaid diagram",
+  "关闭大图": "Close enlarged view",
+  "正在更新图形": "Updating diagram",
+  "切换图形与源码。图形可缩放，方向键滚动，Escape 关闭。": "Switch between diagram and source. Zoom the diagram, scroll with arrow keys, and press Escape to close.",
   "使用缩放按钮查看细节，方向键滚动图形。": "Use zoom controls to inspect details and arrow keys to scroll."
 }

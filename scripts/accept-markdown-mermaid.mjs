@@ -22,7 +22,7 @@ let desktop, web, threadId
 const request = (method, params = {}) => desktop.evaluate(`window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)})`)
 const count = status => `document.querySelectorAll('.file-preview-markdown [data-mermaid-state="${status}"]').length`
 const ready = `${count('ready')}===8 && ${count('error')}===1`
-const button = (label, root = 'document') => `[...${root}.querySelectorAll('button')].find(e=>e.textContent===${JSON.stringify(label)})`
+const button = (label, root = 'document') => `[...${root}.querySelectorAll('button')].find(e=>e.textContent===${JSON.stringify(label)}||e.getAttribute('aria-label')===${JSON.stringify(label)})`
 const first = `document.querySelector('.file-preview-markdown .markdown-mermaid')`
 async function openDocument(page) {
   await page.wait(`Boolean(document.querySelector('.camp-nav-open')) && !document.querySelector('.camp-nav-open').closest('[inert]') && document.querySelector('.section-create-button')?.disabled===false`)
@@ -72,6 +72,14 @@ async function inspect(page, name) {
   await page.wait(`document.querySelector('.markdown-mermaid-dialog img')?.naturalWidth>0`)
   await page.click(button('100%', `document.querySelector('.markdown-mermaid-dialog')`))
   assert.equal(await page.evaluate(`(()=>{const e=document.querySelector('.file-preview-image-scroll');return e.scrollWidth>e.clientWidth})()`), true)
+  await page.evaluate('document.querySelector(".file-preview-image-scroll").scrollLeft=350')
+  const imageUrl = await page.evaluate('document.querySelector(".markdown-mermaid-dialog img").src')
+  await page.click(button('查看源码', `document.querySelector('.markdown-mermaid-dialog')`))
+  await page.wait('!!document.querySelector(".markdown-mermaid-reader-source .cm-content")')
+  await page.capture(join(output, `${name}-large-source.png`))
+  await page.click(button('查看图形', `document.querySelector('.markdown-mermaid-dialog')`))
+  assert.equal(await page.evaluate('document.querySelector(".file-preview-image-scroll").scrollLeft'), 350)
+  assert.equal(await page.evaluate('document.querySelector(".markdown-mermaid-dialog img").src'), imageUrl)
   await page.capture(join(output, `${name}-large.png`))
   await page.key('Escape')
   await page.wait(`!document.querySelector('.markdown-mermaid-dialog')`)

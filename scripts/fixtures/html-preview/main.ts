@@ -166,8 +166,13 @@ app.whenReady().then(async () => {
     await new Promise(resolve=>setTimeout(resolve,50))
   }
   const rawSource=await readFile(join(root,'history.html'),'utf8')
+  await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-view-switch [aria-label="查看源码"]').click()`)
+  const sourceStillSelected=await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-view-switch [aria-label="查看源码"]').getAttribute('aria-pressed') === 'true'`)
   await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-view-switch [aria-label="交互预览"]').click()`)
   const retained=await historyFrame.executeJavaScript('window.fixtureKept')
+  await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-view-switch [aria-label="交互预览"]').click()`)
+  const previewStillSelected=await run(`document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-view-switch [aria-label="交互预览"]').getAttribute('aria-pressed') === 'true'`)
+  cases.push({name:'selected view actions are idempotent',ok:sourceStillSelected && previewStillSelected,evidence:{sourceStillSelected,previewStillSelected}})
   cases.push({name:'author source and preserved interactive document',ok:sourceText.trim()===rawSource.trim() && !sourceText.includes('data-rovai-preview-diagnostic') && retained===73,evidence:{exactSource:sourceText.trim()===rawSource.trim(),retained}})
   cases.push(...await feedbackAcceptance(window, userData, root))
   await run(`window.previewAcceptance.activate(window.previewAcceptance.tabs.find(tab=>tab.file?.fileName==='history.html').id)`)

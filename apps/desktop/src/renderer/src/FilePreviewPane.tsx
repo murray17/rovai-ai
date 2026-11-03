@@ -355,7 +355,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   const editor = showEditor && active && doc && edits ? <EditableCodeViewer key={doc.key} doc={doc} store={edits} theme={resolvedTheme} target={tab.file?.target} /> : null
   const editActions = <div className="file-preview-edit-actions">
     {sourceSwitch && <FilePreviewViewSwitch interactive={tab.content?.kind === 'html'} sourceMode={!!tab.htmlSourceMode}
-      onChange={() => toggleHtmlSource(tab.id)} />}
+      onChange={source => { if (source !== !!tab.htmlSourceMode) toggleHtmlSource(tab.id) }} />}
     {doc && fileEditDirty(doc) && <button type="button" className="file-action-button" disabled={doc.saving}
       title={uiAttribute('保存（{0}）', saveShortcut)} aria-label={uiAttribute('保存（{0}）', saveShortcut)} aria-busy={doc.saving}
       onClick={() => void edits?.save(doc)}><DialogControlIcon name="save" /></button>}

@@ -27,7 +27,8 @@ export function ReadonlyCodeViewer({
   theme,
   readingLine,
   onReadingLine,
-  findScopeLabel = ''
+  findScopeLabel = '',
+  registerFileFind = true
 }: {
   fileName: string
   text: string
@@ -37,6 +38,8 @@ export function ReadonlyCodeViewer({
   readingLine?: number
   onReadingLine?(line: number): void
   findScopeLabel?: string
+  /** Standalone dialog readers must not join a surrounding file's search scope. */
+  registerFileFind?: boolean
 }): React.JSX.Element {
   const interfaceLanguage = useInterfaceLanguage()
   const viewRef = useRef<EditorView | null>(null)
@@ -95,7 +98,7 @@ export function ReadonlyCodeViewer({
   }, [editor, text, startLine])
 
   const findAdapter = useMemo(() => editor ? codeFileFindAdapter(editor, findScopeLabel) : null, [editor, text, findScopeLabel])
-  useFileFindAdapter(findAdapter)
+  useFileFindAdapter(registerFileFind ? findAdapter : null)
 
   const extensions = useMemo(() => sourceReaderExtensions({
     ariaLabel: uiAttribute("{0} 内容", String(fileName)),

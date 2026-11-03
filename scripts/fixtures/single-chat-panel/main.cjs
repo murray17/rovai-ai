@@ -113,13 +113,13 @@ app.whenReady().then(async () => {
         assert.equal(await run(`document.querySelector(${JSON.stringify(graph)}).dataset.mermaidState`), 'pending')
       }
       await run('md+="\\n";singleChatTest.setMermaidBody(md)'); await waitFor(ready)
-      await run(`window.graphNode=document.querySelector(${JSON.stringify(graph)});graphNode.querySelector('button').click();singleChatTest.setMermaidBody(md,true)`)
+      await run(`window.graphNode=document.querySelector(${JSON.stringify(graph)});graphNode.querySelector('[aria-label="查看源码"]').click();singleChatTest.setMermaidBody(md,true)`)
       await waitFor('!!document.querySelector(".single-chat-final .markdown-mermaid")')
       assert.equal(await run('document.querySelector(".single-chat-final .markdown-mermaid")===graphNode && graphNode.dataset.mermaidView==="source"'), true)
 
       await run('singleChatTest.setMode("narration");md=singleChatTest.fence(singleChatTest.samples.wide)+"\\n";singleChatTest.setMermaidBody(md)'); await settle(); await waitFor(ready)
-      await run(`window.graphNode=document.querySelector(${JSON.stringify(graph)});if(graphNode.dataset.mermaidView==='source')graphNode.querySelector('button').click()`); await settle()
-      await run(`[...graphNode.querySelectorAll('button')].find(b=>b.textContent==='查看大图').click()`)
+      await run(`window.graphNode=document.querySelector(${JSON.stringify(graph)});if(graphNode.dataset.mermaidView==='source')graphNode.querySelector('[aria-label="查看图形"]').click()`); await settle()
+      await run(`graphNode.querySelector('[aria-label="查看大图"]').click()`)
       await waitFor('!!document.querySelector(".markdown-mermaid-dialog img")')
       await run(`[...document.querySelectorAll('.markdown-mermaid-dialog button')].find(b=>b.textContent==='100%').click()`)
       await settle()
@@ -127,7 +127,7 @@ app.whenReady().then(async () => {
       await waitFor('!!document.querySelector(".single-chat-final .markdown-mermaid")')
       assert.equal(await run('document.querySelector(".markdown-mermaid-dialog img")===dialogImage && document.querySelector(".file-preview-image-scroll").scrollLeft===scrollBefore'), true)
       await key('Escape')
-      assert.equal(await run('document.activeElement.textContent'), '查看大图')
+      assert.equal(await run('document.activeElement.getAttribute("aria-label")'), '查看大图')
 
       // Hold actual image decoding so no transport/snapshot update accompanies the resize.
       await run('singleChatTest.setMode("narration");window.decode=HTMLImageElement.prototype.decode;HTMLImageElement.prototype.decode=function(){return new Promise(resolve=>{window.releaseImage=()=>decode.call(this).then(resolve)})};md=singleChatTest.fence(singleChatTest.samples.tall)+"\\n";singleChatTest.setMermaidBody(md)')

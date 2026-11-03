@@ -97,6 +97,12 @@ export function MarkdownCodeFrame({ code, children }: {
             className="markdown-code-manual"
             data-quote-exclude
             data-file-find-exclude
+            onEscapeKeyDown={event => {
+              // Consume Escape here even while an enclosing reader's layer is settling.
+              event.preventDefault()
+              event.stopImmediatePropagation()
+              setManualCode(null)
+            }}
             onOpenAutoFocus={(event) => {
               event.preventDefault()
               inputRef.current?.focus()

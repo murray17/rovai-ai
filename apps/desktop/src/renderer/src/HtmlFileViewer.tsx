@@ -133,7 +133,8 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
       {updateAction}
       {feedback}
       <div className="file-preview-html-actions">
-        {(pathControl || downloadAction) && <FilePreviewViewSwitch interactive sourceMode={sourceMode} onChange={() => toggleHtmlSource(tab.id)} />}
+        {(pathControl || downloadAction) && <FilePreviewViewSwitch interactive sourceMode={sourceMode}
+          onChange={source => { if (source !== sourceMode) toggleHtmlSource(tab.id) }} />}
         {downloadAction}
       </div>
     </div>}

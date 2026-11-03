@@ -9554,14 +9554,45 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
 .file-preview-saved-preview { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
 .file-preview-saved-preview[hidden] { display: none; }
 
-/* Mermaid shares the code frame's source and copy affordance. */
-.markdown-mermaid { min-width: 0; overflow: hidden; }
-.markdown-mermaid-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-height: 40px; padding: 6px 10px; color: var(--file-muted); font-size: 12px; }
-.markdown-mermaid-toolbar button { min-height: 28px; border: 0; border-radius: 5px; padding: 2px 7px; color: var(--file-ink); background: transparent; cursor: pointer; }
-.markdown-mermaid-toolbar button:hover, .markdown-mermaid-toolbar button[aria-pressed="true"] { background: var(--file-selected); }
-.safe-markdown .markdown-mermaid > pre { margin: 0; border: 0; background: transparent; }
-.safe-markdown .markdown-mermaid-image { display: block; width: auto; height: auto; max-width: 100%; max-height: none; margin: 0 auto; padding: 12px; background: var(--file-canvas); }
-.dialog-content.app-dialog.markdown-mermaid-dialog { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(1200px, calc(100vw - 32px)); height: min(860px, calc(100dvh - 32px)); max-height: none; padding: 0; overflow: hidden; }
-.markdown-mermaid-dialog .app-dialog-header { padding: 16px 20px; }
+/* Mermaid shares the code frame's copy action and the file reader's view controls. */
+.markdown-code-frame:has(> .markdown-mermaid) { display: block; overflow: hidden; }
+.markdown-mermaid { min-width: 0; }
+.markdown-mermaid-toolbar { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 46px 4px 12px; border-bottom: 1px solid var(--markdown-code-line); }
+.markdown-mermaid-title { min-width: 0; color: var(--muted); font-size: 11.5px; font-weight: 500; }
+.markdown-mermaid-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.markdown-mermaid .file-action-button, .markdown-mermaid-dialog .file-action-button { transform: none; }
+.markdown-mermaid .file-action-button:focus-visible, .markdown-mermaid-dialog .file-action-button:focus-visible { outline: 0; }
+.markdown-code-frame:has(> .markdown-mermaid) > .markdown-code-corner { position: absolute; top: 6px; right: 6px; margin: 0; padding: 0; z-index: 1; }
+.markdown-code-frame:has(> .markdown-mermaid) > .markdown-code-corner .markdown-code-copy,
+.markdown-mermaid-dialog > .markdown-code-frame > .markdown-code-corner .markdown-code-copy { width: 32px; height: 32px; border-radius: 6px; color: var(--muted); }
+.markdown-code-frame:has(> .markdown-mermaid) > .markdown-code-corner .markdown-code-copy:hover,
+.markdown-mermaid-dialog .markdown-code-copy:hover { background: var(--neutral-hover); color: var(--ink); }
+.markdown-mermaid-feedback { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--markdown-code-line); color: var(--muted); font-size: 11px; line-height: 1.6; }
+.markdown-mermaid-feedback.error { color: var(--danger); }
+.markdown-mermaid-image-trigger { display: grid; place-items: center; width: 100%; padding: 12px; border: 0; background: var(--file-canvas); cursor: zoom-in; transform: none !important; }
+.safe-markdown .markdown-mermaid-image { display: block; max-width: 100%; max-height: 360px; width: auto; height: auto; padding: 0; margin: 0; object-fit: contain; border-radius: 0; box-shadow: none; }
+.markdown-mermaid-source { max-height: 360px; min-height: 64px; overflow: auto; }
+.safe-markdown .markdown-mermaid-source > pre { min-width: max-content; min-height: 64px; margin: 0; padding: 12px 14px; border: 0; border-radius: 0; background: transparent; color: var(--evidence-ink); font-size: 12px; line-height: 1.65; }
+.dialog-content.app-dialog.markdown-mermaid-dialog { display: grid; grid-template-rows: minmax(0, 1fr); width: min(1200px, calc(100vw - 32px)); height: min(860px, calc(100dvh - 32px)); max-height: none; padding: 0; overflow: hidden; background: var(--file-canvas); border-color: var(--file-line); }
+.markdown-mermaid-dialog > .markdown-code-frame { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; margin: 0; border: 0; border-radius: 0; background: var(--file-canvas); color: var(--file-ink); --muted: var(--file-muted); --ink: var(--file-ink); --surface-muted: var(--file-selected); --neutral-hover: var(--file-hover); }
+.markdown-mermaid-dialog .markdown-mermaid-dialog-header { display: flex; align-items: center; gap: 8px; min-height: 48px; margin: 0; padding: 6px 10px 6px 16px; border-bottom: 1px solid var(--file-line); }
+.markdown-mermaid-dialog-header .app-dialog-title { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.markdown-mermaid-copy-slot { width: 32px; flex: none; }
+.markdown-mermaid-dialog > .markdown-code-frame > .markdown-code-corner { position: absolute; top: 8px; right: 48px; z-index: 2; margin: 0; padding: 0; }
+.markdown-mermaid-reader { display: grid; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
+.markdown-mermaid-reader-image, .markdown-mermaid-reader-source { grid-area: 1 / 1; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.markdown-mermaid-reader [data-active="false"] { visibility: hidden; pointer-events: none; }
+.markdown-mermaid-reader-source .file-preview-code { height: 100%; }
 .markdown-mermaid-dialog .file-preview-image-stage { height: 100%; }
-@media (pointer: coarse) { .markdown-mermaid-toolbar button { min-height: 36px; } }
+@media (max-width: 767px), (pointer: coarse) {
+  .markdown-mermaid-toolbar { padding-right: 52px; min-height: 56px; }
+  .markdown-mermaid .file-action-button, .markdown-mermaid-dialog .file-action-button { width: 44px; min-width: 44px; height: 44px; }
+  .markdown-mermaid-actions { gap: 4px; }
+  .markdown-code-frame:has(> .markdown-mermaid) > .markdown-code-corner .markdown-code-copy,
+  .markdown-mermaid-dialog > .markdown-code-frame > .markdown-code-corner .markdown-code-copy { width: 44px; height: 44px; }
+  .markdown-mermaid-dialog .markdown-mermaid-actions { gap: 2px; }
+  .markdown-mermaid-copy-slot { width: 44px; }
+  .markdown-mermaid-dialog > .markdown-code-frame > .markdown-code-corner { right: 56px; }
+  .markdown-mermaid-dialog-header .app-dialog-title { font-size: 12px; }
+  .markdown-mermaid-dialog .markdown-mermaid-dialog-header { padding-left: 12px; }
+}
