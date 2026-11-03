@@ -11,6 +11,12 @@ last_updated: 2026-11-03
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 工作准则与成长课题 3,000 字符（2026-11-03）
+
+已按 User 要求创建独立 worktree，拟将两个字段各从 300 放宽至 3,000，沿用现有清理、冻结与投递规则。
+Bootstrap 正文和默认执行包均保持 256 KiB，无数据库迁移或预算重构。
+范围、既有入口空白差异和定向验证见 [R1 方案](model-context-change-identity-guidance-3000.md)；User 已在 sequence 28 确认，当前实施中。
+
 ## Markdown Mermaid 审阅（2026-11-03）
 
 Issue #979 在文件与消息正文中交付自动绘图、源码/图形切换与完整复制、大图缩放和滚动、局部失败及手动重试。
