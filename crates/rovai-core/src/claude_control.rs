@@ -13,14 +13,13 @@ use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
-    sync::{Notify, mpsc, oneshot},
+    sync::{mpsc, oneshot},
     time::Duration,
 };
 
 use crate::claude::ClaudeCodeRuntimeEvent;
 
 pub(crate) const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(60);
-pub(crate) const RUN_END_TIMEOUT: Duration = Duration::from_secs(600);
 pub(crate) const EXIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 struct PendingPermission {
@@ -48,7 +47,6 @@ struct ControlState {
     has_result: bool,
     turn_in_progress: bool,
     tasks: HashSet<String>,
-    end_wait_started_at: Option<tokio::time::Instant>,
 }
 
 impl ControlState {
@@ -56,14 +54,6 @@ impl ControlState {
         if let Some(waker) = self.input_writer.take() {
             waker.wake();
         }
-    }
-
-    fn refresh_end_wait(&mut self) {
-        self.end_wait_started_at = (self.has_result
-            && !self.turn_in_progress
-            && self.tasks.is_empty()
-            && self.pending.is_empty())
-        .then(tokio::time::Instant::now);
     }
 
     fn run_ended(&self) -> bool {
@@ -91,7 +81,6 @@ pub(crate) struct ClaudeControl {
     initialization: Mutex<Option<oneshot::Sender<std::result::Result<Value, String>>>>,
     state: Mutex<ControlState>,
     writer: mpsc::UnboundedSender<ControlWrite>,
-    changed: Notify,
     events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
 }
 
@@ -115,7 +104,6 @@ impl ClaudeControl {
             initialization: Mutex::new(Some(initialized)),
             state: Mutex::new(ControlState::default()),
             writer,
-            changed: Notify::new(),
             events,
         });
         let ready = async move {
@@ -379,7 +367,6 @@ impl ClaudeControl {
                             .collect(),
                     },
                 );
-                state.refresh_end_wait();
                 drop(state);
                 self.emit(
                     "claude.permission_request",
@@ -391,14 +378,7 @@ impl ClaudeControl {
             Some("control_cancel_request") => {
                 let id = nonempty(frame.get("request_id"))
                     .context("Claude control cancellation has no request_id")?;
-                let removed = {
-                    let mut state = self.state.lock().unwrap();
-                    let removed = state.pending.remove(id).is_some();
-                    if removed {
-                        state.refresh_end_wait();
-                    }
-                    removed
-                };
+                let removed = self.state.lock().unwrap().pending.remove(id).is_some();
                 if removed {
                     self.emit_cancel(id);
                 }
@@ -467,7 +447,6 @@ impl ClaudeControl {
                         .filter(|s| matches!(*s, "idle" | "running" | "requires_action"))
                         .context("Claude Code emitted an unsupported session state")?;
                     state.session_state = Some(value.to_string());
-                    state.refresh_end_wait();
                 }
                 Some("task_started")
                     if matches!(
@@ -477,13 +456,11 @@ impl ClaudeControl {
                 {
                     if let Some(id) = nonempty(frame.get("task_id")) {
                         state.tasks.insert(id.to_string());
-                        state.refresh_end_wait();
                     }
                 }
                 Some("task_notification") => {
                     if let Some(id) = nonempty(frame.get("task_id")) {
                         state.tasks.remove(id);
-                        state.refresh_end_wait();
                     }
                 }
                 Some("task_updated")
@@ -494,7 +471,6 @@ impl ClaudeControl {
                 {
                     if let Some(id) = nonempty(frame.get("task_id")) {
                         state.tasks.remove(id);
-                        state.refresh_end_wait();
                     }
                 }
                 _ => {}
@@ -505,38 +481,18 @@ impl ClaudeControl {
         if kind == Some("result") {
             state.has_result = true;
             state.turn_in_progress = false;
-            state.refresh_end_wait();
         } else if matches!(kind, Some("assistant" | "stream_event"))
             && frame.get("parent_tool_use_id").is_none_or(Value::is_null)
         {
             state.turn_in_progress = true;
-            state.refresh_end_wait();
         }
         state.wake_input_writer();
         drop(state);
         self.maybe_close()
     }
 
-    pub(crate) fn run_end_deadline(&self) -> Option<tokio::time::Instant> {
-        let state = self.state.lock().unwrap();
-        if state.closed
-            || state.turn_in_progress
-            || !state.pending.is_empty()
-            || !state.tasks.is_empty()
-        {
-            return None;
-        }
-        state.end_wait_started_at.map(|at| {
-            at + if state.session_state.is_none() {
-                EXIT_TIMEOUT
-            } else {
-                RUN_END_TIMEOUT
-            }
-        })
-    }
-
-    pub(crate) async fn wait_for_state_change(&self) {
-        self.changed.notified().await;
+    pub(crate) fn native_work_ended(&self) -> bool {
+        self.state.lock().unwrap().run_ended()
     }
 
     fn maybe_close(&self) -> Result<()> {
@@ -568,13 +524,11 @@ impl ClaudeControl {
                 let _ = pending.receipt.send(Err(error));
             }
             state.wake_input_writer();
-            state.end_wait_started_at = None;
             state.pending.drain().map(|(id, _)| id).collect::<Vec<_>>()
         };
         for id in ids {
             self.emit_cancel(&id);
         }
-        self.changed.notify_one();
         if let Some(sender) = self.initialization.lock().unwrap().take() {
             let _ = sender.send(Err("Claude Code disconnected before initialization".into()));
         }
@@ -680,11 +634,10 @@ pub(crate) async fn write_control_stream<W: AsyncWrite + Unpin>(
                                     return Err(std::io::ErrorKind::WriteZero.into());
                                 }
                                 state.steering.get_mut(id).unwrap().write_started = true;
-                                // Require a fresh native idle after new input.
-                                // Writing a frame does not itself prove native work.
+                                // Invalidate the previously observed result/idle together.
+                                // A delayed old idle alone cannot close this new input.
                                 state.session_state = None;
-                                state.refresh_end_wait();
-                                control.changed.notify_one();
+                                state.has_result = false;
                                 Ok(Some(count))
                             }))
                         }
@@ -713,8 +666,6 @@ pub(crate) async fn write_control_stream<W: AsyncWrite + Unpin>(
         if let Some(id) = write.permission_request_id.as_ref() {
             let mut state = control.state.lock().unwrap();
             state.pending.remove(id);
-            state.refresh_end_wait();
-            control.changed.notify_one();
         }
         if let Some(ack) = write.acknowledged {
             let _ = ack.send(result.as_ref().map(|_| ()).map_err(ToString::to_string));
@@ -918,10 +869,10 @@ mod tests {
             );
         }
         control.observe(&json!({"type":"result"})).unwrap();
-        tokio::time::advance(RUN_END_TIMEOUT + Duration::from_secs(1)).await;
+        tokio::time::advance(Duration::from_secs(601)).await;
         assert!(
-            control.run_end_deadline().is_none(),
-            "user Approval pauses the end timer"
+            !control.state.lock().unwrap().run_ended(),
+            "pending user Approval keeps stdin open"
         );
         let allow = json!({"behavior":"allow","updatedInput":{"command":"rovai send --public-only --body same"}});
         let mut remember = allow.clone();
@@ -1011,10 +962,10 @@ mod tests {
             control.observe(&json!({"type":"system","subtype":"task_started","task_type":"local_agent","task_id":id})).unwrap();
         }
         control.observe(&json!({"type":"result"})).unwrap();
-        tokio::time::advance(RUN_END_TIMEOUT + Duration::from_secs(1)).await;
+        tokio::time::advance(Duration::from_secs(601)).await;
         assert!(
-            control.run_end_deadline().is_none(),
-            "tracked tasks pause the end timer"
+            !control.state.lock().unwrap().run_ended(),
+            "tracked tasks keep stdin open"
         );
         line.clear();
         assert!(
@@ -1024,11 +975,11 @@ mod tests {
             "an early result must not close stdin"
         );
         control.observe(&json!({"type":"system","subtype":"task_updated","task_id":"background-patch","patch":{"status":"completed"}})).unwrap();
-        assert!(control.run_end_deadline().is_none());
+        assert!(!control.state.lock().unwrap().run_ended());
         control.observe(&json!({"type":"system","subtype":"task_notification","task_id":"background-notification"})).unwrap();
-        assert!(control.run_end_deadline().unwrap() > tokio::time::Instant::now());
+        assert!(!control.state.lock().unwrap().run_ended());
         control.observe(&json!({"type":"assistant"})).unwrap();
-        assert!(control.run_end_deadline().is_none());
+        assert!(!control.state.lock().unwrap().run_ended());
         control.observe(&json!({"type":"result"})).unwrap();
         line.clear();
         assert!(
@@ -1139,7 +1090,7 @@ mod tests {
         control
             .observe(&json!({"type":"assistant","session_id":"queued-session"}))
             .unwrap();
-        tokio::time::advance(RUN_END_TIMEOUT + Duration::from_secs(1)).await;
+        tokio::time::advance(Duration::from_secs(601)).await;
         poll_fn(|cx| {
             assert!(queued.as_mut().poll(cx).is_pending());
             assert!(next.as_mut().poll(cx).is_pending());
@@ -1267,7 +1218,7 @@ mod tests {
                     );
                 }
                 assert!(
-                    control.run_end_deadline().is_none(),
+                    !control.state.lock().unwrap().run_ended(),
                     "background task is still active"
                 );
                 assert!(!control.state.lock().unwrap().closed);

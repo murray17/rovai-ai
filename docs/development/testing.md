@@ -215,6 +215,22 @@ Codex 原认证 fixture 同时拥有普通 Schema 有／无 Fast 字段时的进
 仅一个 app-server，Fast 专用 experimental 导出为零；普通导出顺带取得或同程序已有的正向证据保留。
 安装变化、超时归属、进程清理与 Fast 保存／实际参数映射继续运行原 owner，不另建计数或性能测试框架。
 
+### Claude 收尾简化
+
+Claude 收尾简化扩展既有 `claude::tests::native_permissions_do_not_block_stdout_or_replace_the_last_result`
+reader/writer owner：覆盖 result／插话的两种顺序、提前回执、写入后的迟到 idle、30 秒及 601 秒虚拟等待，
+并分别结算最终结果和缺失回执。该 owner 在修复前会被原 10／600 秒读流分支中断。
+`later_claude_result_controls_failure_and_invalid_frames_still_fail` 增加新前台活动后无 result 的 EOF，
+防止借用旧成功；原权限、后台任务、错误与脱敏 case 保留。`claude_control::tests` 只退役已删除计时的
+断言，保留串行写入、关闭与取消边界。没有新增或删除 Rust 测试函数。
+进程 owner `launch_files_are_removed_after_a_normal_claude_exit` 覆盖同一 Adapter 的连续执行、缺少 idle
+的自然退出、真实非零退出及确认结束后的退出清理；`interrupt_during_stdin_write_keeps_files_until_the_tree_is_reaped`
+补充等待 idle 时停止、停止清理完成后再执行。最低命令为
+`cargo test -p rovai-core --features extended-tests --lib claude`；默认 workspace 回归仍需通过。
+真实连续交互沿用 `node scripts/smoke-claude-runtime.mjs` 的隔离 Core／Skill／MCP，不能以仅出现首条文本代替终态。
+该入口显式读取所需模型目录，配置辅助函数接受成员静态 `installed_unverified`，仍校验原生探测 `ready`。
+实际等待连续两条 Run 成功、取消终态及停止后新提交消息成功，并输出 Run ID；不把静态配置状态当作执行验证。
+
 ### 新增独立测试
 
 新增一个 Rust `#[test]` 前必须同时满足以下条件：

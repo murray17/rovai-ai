@@ -824,14 +824,19 @@ impl ClaudeCodeCliRuntimeAdapter {
         .await;
         let cleanup = resources
             .finish(
-                result.is_err(),
+                result
+                    .as_ref()
+                    .map_or(true, |result| !result.cleanup_confirmed),
                 cleanup_deadline.unwrap_or_else(|| Instant::now() + CLAUDE_CLEANUP_TIMEOUT),
             )
             .await;
         match cleanup {
             Ok(()) => {
                 *owned = None;
-                result
+                result.map(|mut result| {
+                    result.cleanup_confirmed = true;
+                    result
+                })
             }
             Err(error) => {
                 eprintln!(
@@ -1025,6 +1030,9 @@ impl ClaudeCodeCliRuntimeAdapter {
         let mut stdout = None;
         let mut stderr = None;
         let mut output_deadline = None;
+        // Only a native-completed session may be terminated for exit cleanup.
+        // Its resulting signal status must not replace the native result.
+        let mut terminated_after_completion = false;
         while status.is_none() || stdout.is_none() || stderr.is_none() {
             let deadline = output_deadline;
             let end_deadline = exit_deadline;
@@ -1034,12 +1042,6 @@ impl ClaudeCodeCliRuntimeAdapter {
                     child.force_terminate_tree().context("failed to stop Claude Code before closing input")?;
                     anyhow::bail!("Claude Code process was interrupted");
                 },
-                _ = async move { tokio::time::sleep_until(deadline.expect("output deadline is set")).await }, if deadline.is_some() => {
-                    anyhow::bail!("Claude Code output collectors did not finish after root exit");
-                }
-                _ = async move { tokio::time::sleep_until(end_deadline.expect("exit deadline is set")).await }, if end_deadline.is_some() && status.is_none() => {
-                    anyhow::bail!("Claude Code process did not exit after session end");
-                }
                 written = &mut tasks.stdin, if !stdin_closed => {
                     written.context("Claude Code stdin writer failed")??;
                     stdin_closed = true;
@@ -1084,21 +1086,48 @@ impl ClaudeCodeCliRuntimeAdapter {
                     protocol.fence_active_input();
                     tasks.stdin.abort();
                     stdin_closed = true;
-                    child.force_terminate_tree().context("failed to terminate Claude Code descendants after root exit")?;
+                    if let Err(error) = child.force_terminate_tree() {
+                        eprintln!("Claude Code descendant cleanup request failed: {error}");
+                    }
+                    output_deadline = Some(Instant::now() + CLAUDE_CLEANUP_TIMEOUT);
+                    *cleanup_deadline = output_deadline;
+                }
+                _ = async move { tokio::time::sleep_until(deadline.expect("output deadline is set")).await }, if deadline.is_some() => {
+                    if stdout.is_some()
+                        && (status.is_some_and(|status: std::process::ExitStatus| status.success())
+                            || terminated_after_completion)
+                    {
+                        // stdout reached EOF and retains the last result. A stuck
+                        // stderr/cleanup handle cannot replace that business outcome.
+                        eprintln!("Claude Code cleanup handles remain open after final stdout");
+                        break;
+                    }
+                    anyhow::bail!("Claude Code output collectors did not finish after root exit");
+                }
+                _ = async move { tokio::time::sleep_until(end_deadline.expect("exit deadline is set")).await }, if end_deadline.is_some() && status.is_none() => {
+                    if !protocol.native_work_ended() {
+                        anyhow::bail!("Claude Code process did not exit after output ended");
+                    }
+                    match child.force_terminate_tree() {
+                        Ok(()) => terminated_after_completion = true,
+                        Err(error) => eprintln!("Claude Code completed process cleanup request failed: {error}"),
+                    }
+                    exit_deadline = None;
                     output_deadline = Some(Instant::now() + CLAUDE_CLEANUP_TIMEOUT);
                     *cleanup_deadline = output_deadline;
                 }
             }
         }
-        let status = status.expect("Claude Code root status was collected");
+        let cleanup_confirmed = status.is_some() && stderr.is_some();
         let mut stdout = stdout.expect("Claude Code stdout was collected");
         // Only final display/error text is scrubbed. Session IDs and parsed
         // protocol state have already been consumed unchanged.
         if let Some(output) = stdout.final_result.as_mut() {
             output.result = protocol.redact_text(&output.result);
         }
-        let stderr = stderr.expect("Claude Code stderr was collected");
-        if !status.success() {
+        if !terminated_after_completion && !status.is_some_and(|status| status.success()) {
+            let status = status.context("Claude Code root status was not collected")?;
+            let stderr = stderr.context("Claude Code stderr was not collected")?;
             let raw_stderr = protocol.redact_text(&String::from_utf8_lossy(&stderr.bytes));
             let exit_diagnostic = format!(
                 "Claude Code process exited with {} (stderrBytes={}, stderrDigest={})",
@@ -1192,7 +1221,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                     "model_calls_observed": output.model_calls_observed,
                 })
             }),
-            cleanup_confirmed: true,
+            cleanup_confirmed,
         })
     }
 }
@@ -1504,16 +1533,7 @@ where
     let mut buffer = [0_u8; 16 * 1024];
     let mut state = ClaudeCodeStreamState::default();
     loop {
-        let deadline = protocol
-            .as_ref()
-            .and_then(|protocol| protocol.run_end_deadline());
-        let read = tokio::select! {
-            read = reader.read(&mut buffer) => read?,
-            _ = async { protocol.as_ref().expect("control channel is present").wait_for_state_change().await }, if protocol.is_some() => continue,
-            _ = async { tokio::time::sleep_until(deadline.expect("run end deadline is set")).await }, if deadline.is_some() => {
-                anyhow::bail!("Claude Code did not report a complete idle session after its result");
-            }
-        };
+        let read = reader.read(&mut buffer).await?;
         if read == 0 {
             break;
         }
@@ -1638,6 +1658,15 @@ fn process_claude_stream_line(
         }
         state.acceptance_emitted = true;
         acceptance_observed.store(true, Ordering::Release);
+    }
+    if matches!(
+        event.get("type").and_then(Value::as_str),
+        Some("assistant" | "stream_event")
+    ) && event.get("parent_tool_use_id").is_none_or(Value::is_null)
+    {
+        // A later foreground segment needs its own terminal result. EOF must
+        // not promote an earlier segment's success over unfinished new work.
+        state.final_result = None;
     }
     for runtime_event in normalize_claude_runtime_events(&event, expected_session_id, state)? {
         if let Some(sender) = runtime_events {
@@ -2997,6 +3026,24 @@ mod tests {
             );
             let contents = match mode {
                 "normal" => format!("{handshake}{normal}"),
+                "exit-cleanup" => format!("{handshake}{normal}Start-Sleep -Seconds 30\n"),
+                "natural-exit" | "natural-failure" | "wait-result" => {
+                    let result = json!({"type":"result","subtype":"success","is_error":false,
+                        "session_id":session_id,"result":"ok"});
+                    let end = if mode == "wait-result" {
+                        format!(
+                            "Set-Content -LiteralPath '{}' -Value ready\nStart-Sleep -Seconds 30",
+                            marker.display()
+                        )
+                    } else if mode == "natural-failure" {
+                        "exit 7".into()
+                    } else {
+                        "exit 0".into()
+                    };
+                    format!(
+                        "{handshake}$prompt = [Console]::ReadLine()\n[Console]::WriteLine('{result}')\n{end}\n"
+                    )
+                }
                 "blocked" => format!(
                     "{handshake}Set-Content -LiteralPath '{}' -Value ready\nStart-Sleep -Seconds 30\n{normal}",
                     marker.display()
@@ -3029,6 +3076,21 @@ mod tests {
             );
             match mode {
                 "normal" => format!("#!/bin/sh\n{handshake}{normal}"),
+                "exit-cleanup" => format!("#!/bin/sh\n{handshake}{normal}/bin/sleep 30\n"),
+                "natural-exit" | "natural-failure" | "wait-result" => {
+                    let result = json!({"type":"result","subtype":"success","is_error":false,
+                        "session_id":session_id,"result":"ok"});
+                    let end = if mode == "wait-result" {
+                        format!("printf ready > '{}'\n/bin/sleep 30", marker.display())
+                    } else if mode == "natural-failure" {
+                        "exit 7".into()
+                    } else {
+                        "exit 0".into()
+                    };
+                    format!(
+                        "#!/bin/sh\n{handshake}IFS= read -r prompt\nprintf '%s\\n' '{result}'\n{end}\n"
+                    )
+                }
                 "blocked" => format!(
                     "#!/bin/sh\n{handshake}printf ready > '{}'\n/bin/sleep 30\n{normal}",
                     marker.display()
@@ -3228,19 +3290,30 @@ mod tests {
     async fn launch_files_are_removed_after_a_normal_claude_exit() {
         let (root, workspace) = claude_fixture();
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
-        let executable = fake_claude_executable(&root, "normal", session_id, "normal");
         let adapter = ClaudeCodeCliRuntimeAdapter::new(&root).unwrap();
-        let mut request = fake_claude_request(
-            &workspace,
-            &executable,
-            uuid::Uuid::new_v4().to_string(),
-            session_id,
-        );
-        request.session_bootstrap = Some("中文\nquoted \"text\" 100%".to_string());
-        let result = adapter.run(request).await.unwrap();
-        assert_eq!(result.final_output, "ok");
-        assert!(claude_launch_files(&root).is_empty());
-        assert!(adapter.active.lock().unwrap().is_empty());
+        // Sequential launches on one adapter must work after normal completion,
+        // native exit without idle, and confirmed-end process cleanup.
+        for mode in ["normal", "natural-exit", "exit-cleanup", "natural-failure"] {
+            let executable = fake_claude_executable(&root, mode, session_id, mode);
+            let mut request = fake_claude_request(
+                &workspace,
+                &executable,
+                uuid::Uuid::new_v4().to_string(),
+                session_id,
+            );
+            request.session_bootstrap = Some("中文\nquoted \"text\" 100%".to_string());
+            let result = adapter.run(request).await;
+            if mode == "natural-failure" {
+                assert!(
+                    result.is_err(),
+                    "a real nonzero exit is not cleanup success"
+                );
+            } else {
+                assert_eq!(result.unwrap().final_output, "ok", "{mode}");
+            }
+            assert!(claude_launch_files(&root).is_empty());
+            assert!(adapter.active.lock().unwrap().is_empty());
+        }
         remove_claude_fixture(&root).await;
     }
 
@@ -3401,6 +3474,35 @@ mod tests {
             assert!(adapter.active.lock().unwrap().is_empty());
             remove_claude_fixture(&root).await;
         }
+        let (root, workspace) = claude_fixture();
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let executable = fake_claude_executable(&root, "wait-result", session_id, "wait-result");
+        let adapter = Arc::new(ClaudeCodeCliRuntimeAdapter::new(&root).unwrap());
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let request = fake_claude_request(&workspace, &executable, run_id.clone(), session_id);
+        let task = tokio::spawn({
+            let adapter = adapter.clone();
+            async move { adapter.run(request).await }
+        });
+        wait_for_claude_fixture(|| root.join("wait-result.started").exists()).await;
+        assert!(adapter.interrupt(&run_id, 1).await);
+        let error = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("interrupted"));
+        assert!(adapter.active.lock().unwrap().is_empty());
+        let executable = fake_claude_executable(&root, "after-stop", session_id, "normal");
+        let request = fake_claude_request(
+            &workspace,
+            &executable,
+            uuid::Uuid::new_v4().to_string(),
+            session_id,
+        );
+        assert_eq!(adapter.run(request).await.unwrap().final_output, "ok");
+        assert!(adapter.active.lock().unwrap().is_empty());
+        remove_claude_fixture(&root).await;
     }
 
     #[tokio::test]
@@ -5598,7 +5700,7 @@ mod tests {
 
     // This seam owns sustained stdout reading while native Approval is pending;
     // the writer-only tests cannot prove ordinary parsing continues.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn native_permissions_do_not_block_stdout_or_replace_the_last_result() {
         use tokio::io::{AsyncBufReadExt, BufReader};
         let session = "0bdd2166-d420-40c6-94be-70b93eb290c5";
@@ -5729,6 +5831,139 @@ mod tests {
                 .get("updatedInput")
                 .is_none()
         );
+
+        // Both write/result orders and both old watchdog branches. Real reader
+        // and writer tasks must survive the silent interval, not just a predicate.
+        for (result_first, report_running, early_ack) in [
+            (false, false, true),
+            (true, false, true),
+            (false, true, false),
+        ] {
+            let (events, mut observed) = mpsc::unbounded_channel();
+            let (control, ready, writes) =
+                ClaudeControl::new(session.into(), "acceptEdits".into(), None);
+            let (stdin, output) = tokio::io::duplex(8192);
+            let mut input = BufReader::new(output);
+            let writer = tokio::spawn(claude_control::write_control_stream(
+                stdin,
+                control.clone(),
+                writes,
+            ));
+            control.initialize().await.unwrap();
+            let mut line = String::new();
+            input.read_line(&mut line).await.unwrap();
+            let init: Value = serde_json::from_str(&line).unwrap();
+            control
+                .route(&json!({"type":"control_response","response":{
+                "subtype":"success","request_id":init["request_id"],"response":{}}}))
+                .unwrap();
+            ready.await.unwrap();
+            control.send_prompt("first").await.unwrap();
+            line.clear();
+            input.read_line(&mut line).await.unwrap();
+            let (mut stdout, reader) = tokio::io::duplex(8192);
+            let capture = tokio::spawn(capture_claude_stream(
+                reader,
+                session.into(),
+                "turn".into(),
+                None,
+                Some(events),
+                Arc::new(AtomicBool::new(false)),
+                Some(control.clone()),
+            ));
+            let early = json!({"type":"result","subtype":"success","is_error":false,
+                "result":"first","session_id":session});
+            if result_first {
+                stdout
+                    .write_all(format!("{early}\n").as_bytes())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    observed.recv().await.unwrap().event_type,
+                    "runtime.fast.observed"
+                );
+            }
+            let steering = tokio::spawn({
+                let control = control.clone();
+                async move { control.steer("next-input", "second").await }
+            });
+            line.clear();
+            input.read_line(&mut line).await.unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&line).unwrap()["uuid"],
+                "next-input"
+            );
+            if !result_first {
+                stdout
+                    .write_all(format!("{early}\n").as_bytes())
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    observed.recv().await.unwrap().event_type,
+                    "runtime.fast.observed"
+                );
+            } else {
+                // A previously reported result cannot be paired with a late idle
+                // after the new write. No additional receipt gate is required.
+                let idle = json!({"type":"system","subtype":"session_state_changed",
+                    "session_id":session,"state":"idle"});
+                stdout
+                    .write_all(format!("{idle}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            if early_ack {
+                let replay = json!({"type":"user","session_id":session,
+                    "uuid":"next-input","isReplay":true});
+                stdout
+                    .write_all(format!("{replay}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            if report_running {
+                let running = json!({"type":"system","subtype":"session_state_changed",
+                    "session_id":session,"state":"running"});
+                stdout
+                    .write_all(format!("{running}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            tokio::task::yield_now().await;
+            for seconds in [30, 601] {
+                tokio::time::advance(Duration::from_secs(seconds)).await;
+                tokio::task::yield_now().await;
+                assert!(
+                    !capture.is_finished(),
+                    "silent next work must remain readable"
+                );
+                assert!(
+                    !writer.is_finished(),
+                    "old result/idle must not close new input"
+                );
+            }
+            for frame in [
+                json!({"type":"assistant","session_id":session,"message":{
+                    "id":"second","content":[{"type":"text","text":"second done"}]}}),
+                json!({"type":"result","subtype":"success","is_error":false,
+                    "result":"second done","session_id":session}),
+                json!({"type":"system","subtype":"session_state_changed",
+                    "session_id":session,"state":"idle"}),
+            ] {
+                stdout
+                    .write_all(format!("{frame}\n").as_bytes())
+                    .await
+                    .unwrap();
+            }
+            writer.await.unwrap().unwrap();
+            stdout.shutdown().await.unwrap();
+            let result = capture.await.unwrap().unwrap().final_result.unwrap();
+            assert_eq!(result.result, "second done");
+            assert_eq!(
+                steering.await.unwrap().is_ok(),
+                early_ack,
+                "Run completion and an unknown supplemental receipt settle independently"
+            );
+        }
     }
 
     #[tokio::test]
@@ -5957,6 +6192,11 @@ mod tests {
                     "session_id": "5ade59ac-f87e-4827-8cf2-0e1f3ba720ea"
                 }),
             ),
+            (
+                "unfinished foreground",
+                json!({"type":"assistant","session_id":session_id,"message":{
+                    "id":"next","content":[{"type":"text","text":"partial next work"}]}}),
+            ),
         ];
         for (case, last) in cases {
             let wire = format!("{early}\n{last}\n");
@@ -5971,6 +6211,13 @@ mod tests {
                 None,
             )
             .await;
+            if case == "unfinished foreground" {
+                assert!(
+                    captured.unwrap().final_result.is_none(),
+                    "EOF after new work must not reuse the previous success"
+                );
+                continue;
+            }
             if case == "terminal error" {
                 let output = captured.unwrap().final_result.unwrap();
                 let failure = validate_claude_terminal_result(
