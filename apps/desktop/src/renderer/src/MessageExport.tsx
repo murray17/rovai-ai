@@ -12,7 +12,7 @@ import { formatByteSize } from './ui-model'
 import { AgentArtifactIcon, classifyAttachmentDisplay } from './attachment-presentation'
 import { MessageExportContext } from './message-export-context'
 import {
-  defaultMessageExportOptions, downloadMessageExport, exportableMessages, exportDocumentPNG,
+  defaultMessageExportOptions, defaultMessageExportTitle, downloadMessageExport, exportableMessages, exportDocumentPNG,
   exportEntryShowsTime, exportFilename, messageExportMarkdown, snapshotExportDocument, standaloneExportHTML, toggleExportSelection,
   type MessageExportEntry, type MessageExportFormat, type MessageExportOptions
 } from './message-export'
@@ -104,7 +104,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
   const [format, setFormat] = useState<MessageExportFormat>('html')
   const [settings, setSettings] = useState<Record<MessageExportFormat, MessageExportOptions>>(() => ({ html: defaultMessageExportOptions('html'), png: defaultMessageExportOptions('png'), markdown: defaultMessageExportOptions('markdown') }))
   const [customTitle, setCustomTitle] = useState<string | null>(null)
-  const defaultTitle = sourceTitle + ' · ' + uiAttribute('会话片段')
+  const defaultTitle = defaultMessageExportTitle(sourceTitle)
   const title = customTitle ?? defaultTitle
   const [renaming, setRenaming] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const [manualCopy, setManualCopy] = useState<string | null>(null), [zoom, setZoom] = useState<string | null>(null), [copied, setCopied] = useState(false)
@@ -117,7 +117,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
     reader.current?.querySelectorAll<HTMLElement>('button:not(.markdown-code-copy), a:not([href^="https://"]):not([href^="http://"])').forEach(node => { node.tabIndex = -1 })
   }, [entries, format, options])
   const name = title.trim() || defaultTitle
-  const markdown = entries ? messageExportMarkdown(name, sourceTitle, entries, options) : ''
+  const markdown = entries ? messageExportMarkdown(name, entries, options) : ''
   const close = () => { if (!busy) onClose() }
   const download = async () => {
     if (busy || !entries?.length) return
@@ -144,7 +144,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
       <AppDialogHeader title={uiAttribute('导出预览')} description={uiAttribute('预览并导出选中的消息')} hideDescription closeDisabled={busy} />
       <AppDialogBody className="message-export-body">
         <div className="message-export-title-row">{renaming ? <input autoFocus value={title} maxLength={100} aria-label={uiAttribute('导出标题')} disabled={busy} onChange={e => setCustomTitle(e.target.value)} onBlur={() => setRenaming(false)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); setRenaming(false) } }} />
-          : <button type="button" className="message-export-title" aria-label={uiAttribute('修改导出标题')} disabled={busy} onClick={() => setRenaming(true)}>{name}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L20 8a2 2 0 0 0-5-5L4 15z" /></svg></button>}</div>
+          : <button type="button" className="message-export-title" aria-label={uiAttribute('修改导出标题')} disabled={busy} onClick={() => setRenaming(true)}><span>{name}</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L20 8a2 2 0 0 0-5-5L4 15z" /></svg></button>}</div>
         <div className="message-export-formats" role="group" aria-label={uiAttribute('导出格式')}>
           {(['png', 'html', 'markdown'] as const).map(f => <button key={f} type="button" aria-pressed={f === format} disabled={busy} onClick={() => { setFormat(f); setError(null); setManualCopy(null) }}>{f === 'png' ? uiAttribute('图片 PNG') : f === 'html' ? uiAttribute('网页 HTML') : 'Markdown'}</button>)}
         </div>
@@ -153,7 +153,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
         </div>
         <div className="message-export-preview" tabIndex={0} aria-label={uiAttribute('导出内容预览')}>
           {format === 'markdown' ? <pre className="message-export-markdown">{markdown}</pre> : <MessageExportContext.Provider value={true}>
-            <article ref={reader} className="message-export-document" data-export-format={format}><h2>{name}</h2><p className="message-export-source">{sourceTitle}</p>
+            <article ref={reader} className="message-export-document" data-export-format={format}><h2>{name}</h2>
               {entries?.map((e, index) => <section className={`message-export-entry${e.message.authorType === 'agent' ? '' : ' is-user'}${options.avatars ? ' has-avatar' : ''}`} key={e.message.id}>
                 {options.avatars && (e.message.authorType === 'user'
                   ? <CurrentUserAvatar profile={{ displayName: e.author, avatarDataUrl: e.avatarDataUrl ?? null }} className="local-message-avatar" />

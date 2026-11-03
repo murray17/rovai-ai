@@ -43,7 +43,8 @@ PNG 像素中确有图片、缺图卡片、超长失败、元信息开关、日/
 Skill 库和合成消息；确认数据库位于隔离目录后才写入样本。不拦截链接点击或 Blob API，通过 Electron
 实际下载链路保存 HTML / PNG / Markdown，检查落盘字节与内容。没有真实模型 Run，也不安装或重启日常 App。
 
-新增界面入口纳入既有 `App.test.ts` 顶栏结构断言；引用语义继续由 `pnpm test:message-quotes` 拥有。
+消息操作栏保留多选入口，会话顶栏不再提供导出按钮；引用语义继续由 `pnpm test:message-quotes` 拥有。
+预览保留标题编辑入口和文档标题，三种格式移除重复来源行；默认会话名截为前 40 个字素并加省略号，编辑和导出使用同一短标题，正文完整保留。
 类型、全量 Vitest、桌面构建、主题/英文词表和通用文档治理作为交付检查，不将模拟 transport 误作真实 Runtime 证据。
 
 本轮 `pnpm typecheck`、全量 `pnpm exec vitest run`（265 文件、3086 项通过、2 项跳过）、

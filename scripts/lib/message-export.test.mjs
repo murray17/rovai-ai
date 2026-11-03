@@ -32,8 +32,9 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     await b.wait('!!window.__presence && !!document.querySelector("[data-message-id=export-code]")')
     await b.evaluate('__presence.renameThread("同步标题")')
     await b.evaluate(`window.__downloads=[];const originalURL=URL.createObjectURL.bind(URL),blobs=new Map();URL.createObjectURL=blob=>{const url=originalURL(blob);blobs.set(url,blob);return url};const originalClick=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download){window.__downloads.push({name:this.download,blob:blobs.get(this.href)});return}originalClick.call(this)}`)
+    assert.equal(await b.evaluate('!!document.querySelector(".message-export-entry-button, .message-export-entry-fallback")'), false, 'Export starts from message actions, without a header entry')
     const draft = await b.evaluate('document.querySelector("[contenteditable=true]").textContent')
-    await click('.message-export-entry-button')
+    await click('.message-select-button')
     assert.equal(await b.evaluate('document.querySelectorAll(".message-export-check").length'), 3)
     await click('[data-message-id=export-user] .message-export-check input')
     await b.evaluate(`document.querySelector('[data-message-id=export-reply] .message-export-check input').dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true}))`)
@@ -49,6 +50,17 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     }
     await b.evaluate('__presence.setTheme("day")'); await open()
     assert.match(await b.evaluate('document.querySelector(".message-export-title").textContent'), /^同步标题/)
+    assert.equal(await b.evaluate('!!document.querySelector(".message-export-source")'), false, 'The repeated source title is absent')
+    const longTitle = '同步标题：这是一段很长的会话标题，用来确认导出预览只保留编辑标题和内容标题，第三行重复来源不再出现，同时原始消息正文保持完整。'
+    await b.evaluate(`__presence.renameThread(${JSON.stringify(longTitle)})`); await pause(120)
+    const shortTitle = longTitle.slice(0, 40) + '… · 会话片段'
+    const titleGeometry = await b.evaluate(`(()=>{const e=document.querySelector('.message-export-title > span');return {text:e.textContent,tooltip:e.title,heading:document.querySelector('.message-export-document h2').textContent}})()`)
+    assert.equal(titleGeometry.text, shortTitle); assert.equal(titleGeometry.heading, shortTitle)
+    assert.equal(titleGeometry.tooltip, '', 'There is no full-title hover expansion')
+    await b.capture(join(root, 'long-title.png'))
+    await click('.message-export-title')
+    assert.equal(await b.evaluate('document.querySelector(".message-export-title-row input").value'), shortTitle, 'Editing starts with the actual shortened title')
+    await b.key('Enter')
     assert.deepEqual(await b.evaluate('[...document.querySelectorAll(".message-export-options input")].map(e=>e.checked)'), [true, true, true, true])
     assert.equal(await b.evaluate('document.querySelector(".message-export-dialog").textContent.includes("导出规则")'), false)
     await b.wait('!!document.querySelector(".message-export-image") && !document.querySelector("[data-export-pending=true]")')
@@ -99,7 +111,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
       await b.capture(join(root, `preview-${width}.png`))
     }
     await b.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 920, deviceScaleFactor: 1, mobile: false })
-    assert.match(await downloaded(1, '下载 HTML'), /^同步标题.*\.html$/)
+    assert.equal(await downloaded(1, '下载 HTML'), shortTitle + '.html', 'Downloaded filename uses the shortened title')
     const html = await b.evaluate('__downloads[0].blob.text()')
     for (const excluded of ['private-thread-id', 'private-mission-id', '不应导出的撤回内容', 'blob:', 'onerror=', 'window.exportInjected']) assert.ok(!html.includes(excluded), excluded)
     for (const included of ['data:image/png;base64,', '报告.pdf', '缺失.png', '原图不可用', 'https://example.com', '关联讨论', '关联使命', '-old', '+new', '发送给']) assert.ok(html.includes(included), included)
@@ -131,7 +143,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
 
     await b.evaluate('__presence.showExportGroupCase()')
     await b.wait('document.querySelectorAll("[data-message-id].is-group-continuation").length===2')
-    await click('.message-export-entry-button'); await button('.message-selection-dock', '全选已加载'); await open()
+    await click('.message-select-button'); await button('.message-selection-dock', '全选已加载'); await open()
     await button('.message-export-dialog', '网页 HTML')
     assert.equal(await b.evaluate('document.querySelectorAll(".message-export-meta time").length'), 1)
     assert.equal(await b.evaluate('!!document.querySelector(".message-export-entry:last-child time")'), true, 'Original conversation groups show the last timestamp')
@@ -148,7 +160,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     await button('.message-export-dialog', '返回调整'); await b.key('Escape')
 
     await b.evaluate('__presence.showExportPendingCase()'); await pause(120)
-    await click('.message-export-entry-button'); await button('.message-selection-dock', '全选已加载'); await open()
+    await click('.message-select-button'); await button('.message-selection-dock', '全选已加载'); await open()
     await button('.message-export-dialog', '下载 HTML')
     await b.wait('document.querySelector(".message-export-error")?.textContent.includes("图片仍在加载")', 15_000)
     assert.equal(await b.evaluate('__downloads.length'), 4, 'Pending images cannot produce a successful download')
@@ -172,7 +184,7 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     assert.equal(await b.evaluate('document.querySelectorAll(".message-export-attachment").length'), 0)
     await button('.message-export-dialog', '返回调整')
 
-    await click('.message-export-entry-button')
+    await click('.message-select-button')
     await button('.message-selection-dock', '全选已加载')
     await open()
     await b.evaluate('__presence.navigateThread({id:"another-thread",title:"其他会话"})')
