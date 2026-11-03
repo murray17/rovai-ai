@@ -110,7 +110,12 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const origin = started.origin
     const shellForAssets = await fetch(`${origin}/`)
     assert.equal(shellForAssets.headers.get('cache-control'), 'no-store')
-    const assetUrl = (await shellForAssets.text()).match(/src="(\/assets\/[^"]+\.js)"/)[1]
+    const entryScript = (await shellForAssets.text()).match(/<script\b[^>]*\bsrc="([^"]+\.js)"[^>]*>/)
+    assert.ok(entryScript, 'the built Web shell includes its JavaScript entry')
+    const assetLocation = new URL(entryScript[1], origin + '/')
+    assert.equal(assetLocation.origin, origin)
+    const assetUrl = assetLocation.pathname
+    assert.match(assetUrl, /^\/assets\/[^/]+\.js$/)
     assert.equal((await fetch(origin + assetUrl)).headers.get('cache-control'), 'public, max-age=31536000, immutable')
     for (const name of ['plain.js', 'unlisted-Abcdef12.js', 'missing-Abcdef12.js']) {
       assert.equal((await fetch(`${origin}/assets/${name}`)).headers.get('cache-control'), 'no-store')
