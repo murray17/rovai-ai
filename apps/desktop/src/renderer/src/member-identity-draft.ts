@@ -14,7 +14,7 @@ export type IdentityDraft = {
   growthTopic: string
 }
 
-export const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS = 10_000
+export const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS = 30_000
 
 export const EMPTY_IDENTITY: IdentityDraft = {
   displayName: '',
@@ -74,7 +74,7 @@ export function identityDraftIssue(
   if (unicodeScalarLength(draft.professionalResponsibilities.trim()) > PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS) {
     return {
       field: 'professionalResponsibilities',
-      message: uiAttribute('专业职责最多 10,000 个字符。')
+      message: uiAttribute('专业职责最多 30,000 个字符。')
     }
   }
   if (

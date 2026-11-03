@@ -925,7 +925,8 @@ export function renderSkillMenu(
         })}</div>)}
     </div>
     {(refreshFailed || errors.length > 0 || status === 'error') && <div className="simple-skill-error" role={refreshFailed || status === 'error' ? 'alert' : 'status'}>
-      <span>{uiAttribute(refreshFailed ? '刷新失败，保留上次结果' : status === 'error' ? '请重试' : '部分来源暂不可读')}</span>
+      <span>{uiAttribute(refreshFailed ? '刷新失败，保留上次结果' : status === 'error' ? '请重试' : '来源诊断')}</span>
+      {errors.length > 0 && <details><summary>{uiAttribute('查看详情')}</summary><ul>{errors.map((error, index) => <li key={index} style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{error}</li>)}</ul></details>}
       {onRefresh && <button type="button" disabled={refreshing} onMouseDown={e => e.preventDefault()} onClick={onRefresh}>{uiAttribute(refreshing ? '刷新中…' : '重试')}</button>}
     </div>}
   </div>

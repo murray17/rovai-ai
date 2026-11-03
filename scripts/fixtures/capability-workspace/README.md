@@ -10,7 +10,8 @@ The runner creates temporary userData and removes only that directory. Set
 
 Native Skills coverage includes refresh, read-only controls, file search, duplicate names in distinct
 folders, long paths, focus and keyboard navigation, sticky controls, binary/large files, read retry,
-late responses across files and Skills, day/night layouts, narrow/wide windows and 200% zoom.
+late responses across files and Skills, full text above 1 MiB, bounded plain-text prefixes for oversized
+files, day/night layouts, narrow/wide windows and 200% zoom.
 The toolbox covers member selection, failed-save rollback, retry with the same command identity,
 filtered bulk changes that preserve other members, and its reading dialog.
 

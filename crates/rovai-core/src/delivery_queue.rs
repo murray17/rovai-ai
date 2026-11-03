@@ -3762,6 +3762,90 @@ mod tests {
                                 "ACK unavailable",
                             )
                             .unwrap();
+                        assert!(
+                            crate::steer::active_input_availability(
+                                f.database.connection(),
+                                &run,
+                                1
+                            )
+                            .unwrap()
+                            .ready
+                        );
+                        let next_source =
+                            f.enqueue("fresh-after-unknown", "new independent instruction");
+                        let tx = f.database.connection_mut().transaction().unwrap();
+                        crate::steer::route_user_message(&tx, "fresh-after-unknown", None).unwrap();
+                        tx.commit().unwrap();
+                        let pending =
+                            crate::steer::pending_inputs(f.database.connection()).unwrap();
+                        assert_eq!(pending.len(), 1);
+                        assert_eq!(
+                            pending[0].delivery_id, next_source,
+                            "unknown A must not be retried or block B"
+                        );
+                        let ContextMaterialization::Ready(next_context) = ContextService
+                            .materialize_message_delivery(
+                                &mut f.database,
+                                &crate::managed_blob::ManagedBlobStore::new(&f._directory),
+                                &next_source,
+                                &[],
+                                &request,
+                            )
+                            .unwrap()
+                        else {
+                            panic!("new input must be ready")
+                        };
+                        let next_input = ContextService
+                            .prepare_input_delivery_for_context(
+                                &mut f.database,
+                                &run,
+                                1,
+                                &next_context,
+                            )
+                            .unwrap();
+                        assert_ne!(next_input.id, input.id);
+                        assert!(
+                            !ContextService
+                                .begin_runtime_input_dispatch(
+                                    &mut f.database,
+                                    &next_input.id,
+                                    &run,
+                                    2
+                                )
+                                .unwrap(),
+                            "stale epoch is still rejected"
+                        );
+                        assert!(
+                            ContextService
+                                .begin_runtime_input_dispatch(
+                                    &mut f.database,
+                                    &next_input.id,
+                                    &run,
+                                    1
+                                )
+                                .unwrap()
+                        );
+                        ContextService
+                            .acknowledge_input_delivery(&mut f.database, &next_input.id, "turn")
+                            .unwrap();
+                        assert_eq!(
+                            ContextService
+                                .runtime_input_delivery_status(&f.database, &input.id)
+                                .unwrap()
+                                .as_deref(),
+                            Some("delivery_unknown")
+                        );
+                        assert!(
+                            crate::steer::pending_inputs(f.database.connection())
+                                .unwrap()
+                                .is_empty()
+                        );
+                        assert!(
+                            !ContextService
+                                .begin_runtime_input_dispatch(&mut f.database, &input.id, &run, 1)
+                                .unwrap(),
+                            "unknown input cannot be resent"
+                        );
                     }
                     let version: i64 = f
                         .database
@@ -5891,7 +5975,7 @@ mod tests {
             .connection()
             .execute(
                 "UPDATE agent_profile SET professional_responsibilities=?1 WHERE id='agent_1'",
-                ["😀".repeat(9_000)],
+                ["😀".repeat(30_000)],
             )
             .unwrap();
         let accept_and_finish =
@@ -5999,6 +6083,21 @@ mod tests {
                 )
                 .is_err()
         );
+        // A requirement arriving after claim must fit the already reserved wrapper.
+        fixture
+            .database
+            .connection()
+            .execute_batch(
+                r#"
+            INSERT INTO bootstrap_redelivery_requirement(
+                conversation_id, native_binding_id, native_binding_generation, adapter_kind,
+                requested_revision, acknowledged_revision, created_at, updated_at
+            ) SELECT id, native_binding_id, native_binding_generation, 'opencode-cli',
+                1, 0, datetime('now'), datetime('now') FROM conversation
+                WHERE id='delivery-queue-agent-1';
+        "#,
+            )
+            .unwrap();
         add_memory(&mut fixture, "indexed-after-claim");
         fixture
             .database
@@ -6014,6 +6113,12 @@ mod tests {
             DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
         );
         assert!(context.bootstrap_in_runtime_payload);
+        assert!(
+            context
+                .runtime_payload
+                .contains("[ROVAI_BOOTSTRAP_REDELIVERY reason=")
+        );
+        assert!(context.runtime_payload.contains(&"😀".repeat(30_000)));
         assert!(context.runtime_payload.contains("indexed-before-claim"));
         assert!(!context.runtime_payload.contains("indexed-after-claim"));
         assert!(!context.runtime_payload.contains("role-after-claim"));
@@ -6079,13 +6184,41 @@ mod tests {
             !unchanged.bootstrap_in_runtime_payload,
             "reserving bytes must not force a resend"
         );
+        accept_and_finish(&mut fixture, &unchanged_run, &unchanged);
+        fixture.enqueue("cold-resume-fallback", &body);
+        let fallback_run = claim_waiting_delivery_batches(&mut fixture.database, 1)
+            .unwrap()
+            .remove(0);
+        // Model the replacement binding established after a failed cold resume,
+        // after claim but before any business input has been delivered.
+        fixture.database.connection().execute_batch(r#"
+            UPDATE conversation SET native_session_id='replacement-session',
+                native_binding_id='replacement-binding', native_binding_generation=native_binding_generation+1,
+                native_charter_digest=NULL WHERE id='delivery-queue-agent-1';
+            UPDATE agent_profile SET professional_responsibilities='edited-after-fallback-claim'
+                WHERE id='agent_1';
+        "#).unwrap();
+        let fallback = fixture.materialize_with_mode(
+            &fallback_run,
+            CharterDeliveryMode::FirstPayload,
+            DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+        );
+        assert!(fallback.bootstrap_in_runtime_payload);
+        assert!(fallback.runtime_payload.contains(&"😀".repeat(30_000)));
+        assert!(
+            !fallback
+                .runtime_payload
+                .contains("edited-after-fallback-claim")
+        );
+        assert!(fallback.runtime_payload.contains(&body));
+        assert!(fallback.runtime_payload.len() <= DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES);
         let mut separate = Fixture::new();
         separate
             .database
             .connection()
             .execute(
                 "UPDATE agent_profile SET professional_responsibilities=?1 WHERE id='agent_1'",
-                ["😀".repeat(9_000)],
+                ["😀".repeat(30_000)],
             )
             .unwrap();
         separate.enqueue("separate-system-layer", &"中".repeat(80_000));

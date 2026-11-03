@@ -52,9 +52,9 @@
       "file": "wechat-group.png",
       "kind": "user-provided-community-qr",
       "width": 1104,
-      "height": 1604,
-      "sha256": "809a4dda7a76e133fb15e7aa05b8ea94a1814e0f98da8d914ccdecc14d77c122",
-      "note": "Original image provided for public README use on 2026-10-15; printed expiry is before 2026-10-22. File bytes are unmodified. Live validity was not tested."
+      "height": 1552,
+      "sha256": "cd5d3ad302402bd01e9adffc03d68c19df651fe96364fa27d56586b1ea05b32d",
+      "note": "Original image provided for public README use on 2026-11-03. File bytes are unmodified. Live validity was not tested."
     }
   ],
   "diagram": {

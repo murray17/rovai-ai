@@ -71,7 +71,10 @@ use crate::{
 pub const CONTEXT_FORMATTER_VERSION: i64 = AGENT_RUN_CONTEXT_FORMATTER_VERSION;
 pub const DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES: usize = 256 * 1024;
 const MIN_CONTEXT_PAYLOAD_BYTES: usize = 8 * 1024;
-pub const MAX_SESSION_BOOTSTRAP_BYTES: usize = 128 * 1024;
+pub const MAX_SESSION_BOOTSTRAP_BYTES: usize = 256 * 1024;
+// Historical message_delivery preflight keeps its original selection budget.
+// This fixed reserve is independent of current Adapter body admission.
+const LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES: usize = 128 * 1024;
 fn run_facts_schema_version(manifest_version: i64, invocation_kind: &str) -> i64 {
     if invocation_kind == "batch" {
         match manifest_version {
@@ -1778,7 +1781,7 @@ impl ContextService {
         // the dynamic bytes themselves remain frozen here and are never
         // re-selected on retry/recovery.
         let reserve = if run_snapshot_adapter_kind(&snapshot)? == AdapterKind::HermesCli {
-            MAX_SESSION_BOOTSTRAP_BYTES + hermes_rules::envelope("update", "").len() + 2
+            LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES + hermes_rules::envelope("update", "").len() + 2
         } else {
             bootstrap_payload_reserve(
                 request.charter_delivery_mode,
@@ -3801,9 +3804,9 @@ fn render_bootstrap_redelivery_overlay(bootstrap: &str) -> String {
 
 fn bootstrap_payload_reserve(mode: CharterDeliveryMode, required: bool, redelivery: bool) -> usize {
     if redelivery {
-        MAX_SESSION_BOOTSTRAP_BYTES + render_bootstrap_redelivery_overlay("").len() + 2
+        LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES + render_bootstrap_redelivery_overlay("").len() + 2
     } else if mode == CharterDeliveryMode::FirstPayload && required {
-        MAX_SESSION_BOOTSTRAP_BYTES + 2
+        LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES + 2
     } else {
         0
     }
@@ -9488,14 +9491,20 @@ mod slow_tests {
                 assert_eq!(
                     bootstrap_payload_reserve(mode, required, false),
                     if mode == CharterDeliveryMode::FirstPayload && required {
-                        MAX_SESSION_BOOTSTRAP_BYTES + 2
+                        128 * 1024 + 2
                     } else {
                         0
                     }
                 );
                 assert_eq!(
                     bootstrap_payload_reserve(mode, required, true),
-                    MAX_SESSION_BOOTSTRAP_BYTES + render_bootstrap_redelivery_overlay("").len() + 2
+                    128 * 1024 + render_bootstrap_redelivery_overlay("").len() + 2
+                );
+                assert!(
+                    DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES
+                        - bootstrap_payload_reserve(mode, required, true)
+                        > 120 * 1024,
+                    "the enlarged body cap must leave the legacy small-input budget intact"
                 );
             }
         }
@@ -12962,7 +12971,7 @@ mod slow_tests {
     #[test]
     fn redelivery_overlay_is_frozen_at_prepare_and_acknowledges_only_its_revision() {
         let mut fixture = fixture();
-        let long_responsibilities = "😀".repeat(10_000);
+        let long_responsibilities = "😀".repeat(30_000);
         fixture
             .database
             .connection()
@@ -14401,13 +14410,38 @@ mod slow_tests {
             )
             .unwrap();
         // Worst JSON expansion: each valid scalar becomes six serialized bytes.
-        let long_responsibilities = "\0".repeat(10_000);
+        let long_responsibilities = "\0".repeat(30_000);
         fixture
             .database
             .connection()
             .execute(
                 "UPDATE agent_profile SET professional_responsibilities=?1 WHERE id='agent_1'",
                 [&long_responsibilities],
+            )
+            .unwrap();
+        crate::memory::MemoryService::default()
+            .create(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "capacity-memory-entrypoint".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::memory::CreateMemoryCommand {
+                        scope: MemoryScopeKind::Hearth,
+                        kind: crate::memory::MemoryKind::Preference,
+                        body: "MEMORY_BODY_MUST_NOT_ENTER_BOOTSTRAP_INDEX".to_string(),
+                        retrieval_keys: vec!["capacity-index".to_string()],
+                        companion_agent_id: None,
+                        relationship_agent_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                },
             )
             .unwrap();
         bind_fixture_feishu_channel(&fixture);
@@ -14462,6 +14496,7 @@ mod slow_tests {
             1
         );
         assert!(!prepared.rendered_payload.contains("TEAM_GUIDANCE"));
+        assert!(prepared.runtime_payload.contains("capacity-index"));
         assert!(
             fixture
                 .database
@@ -16849,6 +16884,16 @@ mod slow_tests {
     #[test]
     fn replacement_binding_bootstrap_keeps_history_on_demand_after_the_accepted_watermark() {
         let mut fixture = fixture();
+        let long_responsibilities = "😀".repeat(30_000);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET professional_responsibilities=?1 WHERE id='agent_1'",
+                [&long_responsibilities],
+            )
+            .unwrap();
+        freeze_fixture_claim(&mut fixture);
         let context = ContextService;
         let runtime = ExecutionRuntimeService::default();
         let store = ManagedBlobStore::new(&fixture.directory);
@@ -17113,7 +17158,7 @@ mod slow_tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET display_name = '替换会话狐狸' WHERE id = 'agent_1'",
+                "UPDATE agent_profile SET display_name = '替换会话狐狸', professional_responsibilities='edited-after-claim' WHERE id = 'agent_1'",
                 [],
             )
             .unwrap();
@@ -17179,6 +17224,16 @@ mod slow_tests {
                 .starts_with("[SESSION_CHARTER]")
         );
         assert!(replacement_context.bootstrap_in_runtime_payload);
+        assert!(
+            replacement_context
+                .runtime_payload
+                .contains(&long_responsibilities)
+        );
+        assert!(
+            !replacement_context
+                .runtime_payload
+                .contains("edited-after-claim")
+        );
         assert!(
             replacement_context
                 .runtime_payload

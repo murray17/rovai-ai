@@ -69,9 +69,11 @@ const markdownSource = [
   'const Preview = ({ title }: { title: string }) => <main>{title}</main>',
   '```',
   '',
-  '| 项目 | 说明 |',
-  '| --- | --- |',
-  `| 宽表格 | ${'wideTableColumn'.repeat(40)} |`,
+  // This owner needs a genuinely wide table. Long text in a two-column table
+  // now wraps inside its cell and must not be used to force horizontal overflow.
+  `| ${Array.from({ length: 8 }, (_, index) => `ColumnNumber${index + 1}`).join(' | ')} |`,
+  `| ${Array.from({ length: 8 }, () => '---').join(' | ')} |`,
+  `| 宽表格 | ${Array.from({ length: 7 }, (_, index) => `ValueNumber${index + 1}`).join(' | ')} |`,
   '',
   '## 后续阅读',
   '',

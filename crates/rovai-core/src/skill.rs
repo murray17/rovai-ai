@@ -3582,6 +3582,16 @@ fn unquote_yaml_scalar(value: &str) -> &str {
     value
 }
 
+/// Native document labels are not managed directory names.
+pub(crate) fn validate_skill_reference_name(skill_id: &str, name: &str) -> Result<()> {
+    if skill_id.starts_with("native:") {
+        anyhow::ensure!(!name.trim().is_empty(), "Native Skill name is empty");
+        Ok(())
+    } else {
+        validate_skill_name(name)
+    }
+}
+
 pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
     if name.is_empty() || name.len() > 64 {
         anyhow::bail!("Skill name must contain between 1 and 64 characters");

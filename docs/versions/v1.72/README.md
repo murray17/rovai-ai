@@ -20,6 +20,24 @@ Issue #979 在文件与消息正文中交付自动绘图、源码/图形切换�
 [图表阅读 UI](../../ui/components/file-preview.md#markdown-图表阅读)；实现、生产验收及资源体积见
 [交付记录](markdown-mermaid.md)。
 
+## 原生 Skills 可用性修复（2026-11-02）
+
+按 User 收敛后的最小范围，统一宽松发现与重验、canonical 目录名称缺省、去重结果一致登记，
+原生名称不再套用受管格式；四类轻量诊断支持定位和刷新。受管校验、访问边界与冻结投递不变。
+确认、输入前后差异和验证归[独立说明](model-context-change-native-skills-availability.md)，
+当前规则归 [Skills Rebuild v2](../../contracts/skills-rebuild-v2.md#原生文档接受与诊断)。
+
+## 专业职责 30,000 字符（2026-11-02）
+
+[R2 独立变更说明](model-context-change-professional-responsibilities-30000.md)合并五点评审与 User 收紧的范围：
+职责 30,000 scalar、相关 Bootstrap 正文 256 KiB、执行包默认 256 KiB；保留现有 claim，隔离旧分派固定预留。
+文内列出最小改动、版本轴不变的依据、内容保留、定向回归及复用 12 Case Gate 的边界。
+已完成字段扩容、正文上限及旧预留解耦；工程与定向回归、OpenCode／Command Code 实跑通过。
+User 后续要求停止通用模型矩阵，已停止并留证；Cline 实跑受现有平台资格限制。
+结果见 [R2 实施记录](model-context-change-professional-responsibilities-30000.md#实施与验收记录2026-11-02)与
+[验收证据](evidence/professional-responsibilities-30000-2026-11-02.json)。User 已授权 [PR #987](https://github.com/murray17/rovai-ai/pull/987) 合入 main；
+smoke 摘要匹配补齐同一条 accepted 投递约束，构造数据与既有证据复核通过，未重跑真实模型。
+
 ## 取消执行条统一保留（2026-11-02）
 
 公开取消 Run 的会话执行条与继续入口改为按 `cancelled` 状态判断，覆盖 App 退出与其他取消原因。

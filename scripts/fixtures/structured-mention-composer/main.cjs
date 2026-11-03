@@ -644,6 +644,44 @@ app.whenReady().then(async () => {
       ])
     })
 
+    await run('typed native Skill names remain searchable beyond the first 50 candidates', async () => {
+      const commonSkills = Array.from({ length: 50 }, (_, index) => ({
+        id: `skill-common-${index}`, name: `ordinary-${index}`, description: 'General skill',
+        origin: 'official', source: 'toolbox'
+      }))
+      for (const { id, name, queryParts } of [
+        { id: 'native:underscore', name: 'Native_Name', queryParts: ['Native', '_', 'Name'] },
+        { id: 'native:chinese', name: '中文 技能', queryParts: ['中', '文'] }
+      ]) {
+        await reset('')
+        const skills = [...commonSkills, {
+          id, name, description: '原生技能', origin: 'official', source: 'native', sourceScope: 'user'
+        }]
+        await evaluate(`window.composerTest.setSkills(${JSON.stringify(skills)})`)
+        await frames()
+        await insert('/')
+        const unfiltered = await state(false)
+        assert.equal(unfiltered.menuKind, 'skill')
+        assert.equal(unfiltered.options.length, 50)
+        assert.ok(!unfiltered.options.includes(name), 'The native target starts at position 51')
+
+        for (const text of queryParts) {
+          await insert(text)
+          const filtered = await state(false)
+          assert.equal(filtered.menuKind, 'skill', `Typing ${filtered.text} must keep the menu open`)
+          assert.deepEqual(filtered.options, [name])
+        }
+        assert.equal((await state(false)).text, `/${queryParts.join('')}`)
+        await key('Enter', 13)
+        const selected = await expectSegments([
+          { kind: 'atom', atom: { type: 'skill', skillId: id, nameAtSend: name } },
+          { kind: 'text', text: ' ' }
+        ])
+        assert.equal(selected.submitCount, 0, 'Enter selects the Skill without sending')
+        assert.equal(selected.localStatus.hasUnavailableAtom, false)
+      }
+    })
+
     await run('Typeahead consumes Enter synchronously while the Skill Catalog is loading', async () => {
       await reset('请 ')
       await insert('/work')

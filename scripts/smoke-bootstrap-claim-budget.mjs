@@ -1,7 +1,7 @@
 // Real OpenCode acceptance. All Core data, Skills, MCP and project files are isolated.
 // Usage: node scripts/smoke-bootstrap-claim-budget.mjs <empty-absolute-root> <core-executable> [--baseline]
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -31,9 +31,13 @@ try {
     runtimeCacheDirectory: join(fixture, 'cache'), mcpConfigPath: join(data, 'mcp.json') })
   await core.request('health.check')
   const profile = await core.request('members.get', { agentId: 'agent_1' })
+  const prefix = '处理明确的隔离验收指令。以下是无须解读的容量填充：'
+  const duties = prefix + '😀'.repeat((baseline ? 10_000 : 30_000) - Array.from(prefix).length)
+  report.responsibilityScalars = Array.from(duties).length
+  report.responsibilitiesSha256 = createHash('sha256').update(duties).digest('hex')
   const saved = await core.request('members.update', { commandId: randomUUID(), command: {
     agentId: 'agent_1', expectedVersion: profile.version, displayName: profile.displayName,
-    teamRole: '容量验收', professionalResponsibilities: '处理明确的隔离验收指令。以下是无须解读的容量填充：' + '😀'.repeat(9_000),
+    teamRole: '容量验收', professionalResponsibilities: duties,
     personalityTraits: [], workingPrinciples: '只操作当前验收目录，按消息要求完成并公开报告。', growthTopic: '' } })
   assert.equal(saved.status, 'applied')
   await core.request('runtime.discovery.rescan', { interactiveShell: false })
@@ -99,6 +103,16 @@ try {
     assert.equal(resumed.native_session_id, binding.native_session_id)
     assert.equal(resumed.native_binding_generation, binding.native_binding_generation)
     report.nativeSessionPreserved = true
+    report.claims = []
+    for (const run of [second, third]) {
+      const row = database.prepare('SELECT context_json FROM agent_run_claim_context WHERE agent_run_id=?').get(run.id)
+      const claim = JSON.parse(row.context_json)
+      assert.equal(claim.memberIdentity.professionalResponsibilities, duties)
+      await writeFile(join(fixture, `${run.id}-claim.json`), row.context_json)
+      report.claims.push({ runId: run.id, bytes: Buffer.byteLength(row.context_json), sha256: createHash('sha256').update(row.context_json).digest('hex') })
+    }
+    report.deliveries = database.prepare('SELECT id,agent_run_id,status,native_binding_id,native_binding_generation,runtime_request_digest FROM runtime_input_delivery WHERE agent_run_id IN (SELECT id FROM agent_run WHERE camp_id=?)').all(threadId)
+
     report.manifests = database.prepare('SELECT context_manifest_version,context_delivery_profile_version FROM context_manifest WHERE agent_run_id IN (SELECT id FROM agent_run WHERE camp_id=?) ORDER BY created_at').all(threadId)
   }
   report.runs = runs().map(run => ({ ...run, inputCount: inputCount(run) }))

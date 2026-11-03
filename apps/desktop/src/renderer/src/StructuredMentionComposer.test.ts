@@ -191,7 +191,9 @@ describe('StructuredMentionComposer V2', () => {
     expect(failed).toContain('aria-label="/analyze-agent-codebase, Project Skill, linked teammate: 新洛可"')
     expect(failed).not.toContain('，')
     const partial = render(false)
-    expect(partial).toContain('Some sources are temporarily unavailable')
+    expect(partial).toContain('Source diagnostics')
+    expect(partial).toContain('provider unavailable')
+    expect(partial).toContain('View details')
     expect(partial).not.toContain('Refresh failed.')
   })
 

@@ -1010,7 +1010,11 @@ fn validate_selection_snapshot(snapshot: &SkillSelectionSnapshot) -> Result<()> 
         {
             anyhow::bail!("AgentRun Skill selection has an invalid Skill ID");
         }
-        crate::skill::validate_skill_name(&entry.name_at_send)?;
+        if snapshot.schema_version == 2 && entry.source == Some(SkillSource::Native) {
+            crate::skill::validate_skill_reference_name(&entry.skill_id, &entry.name_at_send)?;
+        } else {
+            crate::skill::validate_skill_name(&entry.name_at_send)?;
+        }
         let position = (entry.first_message_index, entry.first_segment_index);
         if !seen.insert(entry.skill_id.as_str())
             || previous_position.is_some_and(|previous| position <= previous)

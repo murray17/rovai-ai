@@ -22,7 +22,8 @@ last_updated: 2026-11-01
 问卷承载用户输入，不能进入执行审批来选择答案。Claude、Copilot、Qwen 在统一正式启动处关闭已验证的
 提问工具；Copilot、Qwen 策略属于 Host 兼容输入，不改变原生会话绑定。Kimi 与 Qwen 的意外请求复用 ACP 当前请求归属、
 Prompt 观察与终态，先识别并取消，再让普通权限进入现有审批。已识别但损坏的问卷也不能自动允许。
-Claude 控制通道拒绝意外问卷并把观察传到现有整轮结果校验；不新增用户回复或自动重跑机制。
+Claude 控制通道拒绝意外问卷并按请求 ID 去重；局部拒绝不覆盖后续原生成功，终态按最后有效结果结算。
+不新增用户回复或自动重跑机制；Claude 结果边界见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#claude-结果与局部问卷拒绝)。
 具体字段与优先级见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)。
 MiniMax 保留现有行为，不以修改用户配置关闭问卷；本轮不扩大到其他适配器。
 
@@ -224,7 +225,8 @@ V1/V2 未知且无法确定必需配置时报告初始化错误；握手冲突�
 Host 的程序指纹与 Native Session 的协议／存储来源分别判断，普通补丁更新不自动丢弃会话。
 权限保留一般 allow/ask/deny 与 Shell、Skill 放行例外，V2 用原生有序规则覆盖 build/plan，
 全局和这两个 Agent 的规则末尾统一拒绝 `question`，由原生过滤模型工具集合；V1 不变。
-其他自定义／子 agent 仍有原生规则。问卷策略只进入 V2 Host compatibility，不改变会话绑定。
+其他自定义／子 agent 仍有原生规则。问卷策略保留在 Host compatibility；代际行为由取得的 Host
+启动身份决定，不按磁盘版本变化强制退役，也不改变会话绑定。
 细节与测试边界见
 [OpenCode V1/V2 实施记录](../versions/v1.72/opencode-v1-v2-implementation.md)。
 
@@ -245,7 +247,9 @@ Windows 沿用 Registry／PATH 规则；只采集 PATH，失败仍走既有回�
 清空同一程序已有的版本。设置与队员配置统一使用 Core 的版本投影，不各自回退历史快照。
 这不新增检查、轮询、运行准入或第二套持久缓存；字段规则见 [Runtime Launch v64](../contracts/runtime-launch-and-verification-v64.md)。
 
-配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台、目标及文件身份后启动真实 Host。
+配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台与目标；已有驻留能力的 Adapter 由 Fleet
+实际取得健康且兼容的 Host，磁盘文件身份只在创建进程分支检查。取得的 Host 启动身份在首次输入前进入本轮，
+磁盘升级不改写执行中 Run，也不单独退役健康 Host；精确边界见当前 Runtime 启动合同。
 真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
 默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
 运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。

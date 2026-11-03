@@ -230,6 +230,13 @@ impl AdapterKind {
         }
     }
 
+    /// These adapters return completed Hosts to Fleet for another Run.
+    pub fn reuses_process(self) -> bool {
+        matches!(self, Self::CodexCli | Self::Pi)
+            || (self.uses_acp()
+                && !matches!(self, Self::KiroCli | Self::CursorAgent | Self::HermesCli))
+    }
+
     pub fn uses_acp(self) -> bool {
         matches!(
             self,
@@ -1708,11 +1715,11 @@ impl AgentProfileService {
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
-        // A live Command Host is admitted by its installation identity. Disk
-        // entry observations belong to the Fleet's cold startup branch.
-        let command = runtime.adapter_kind == AdapterKind::CommandCodeCli;
+        // A resident Host is admitted by installation identity. Disk entry
+        // observations belong to Fleet's actual cold startup branch.
+        let resident = runtime.adapter_kind.reuses_process();
         if adapter_kind != runtime.adapter_kind.as_str()
-            || (!command
+            || (!resident
                 && (executable_path != runtime.executable_path
                     || generation != runtime.installation_generation
                     || executable_fingerprint.as_deref()
@@ -1723,7 +1730,7 @@ impl AgentProfileService {
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
-        if !command && path_state != "valid" {
+        if !resident && path_state != "valid" {
             return Ok(Some(runtime_blocker(
                 "runtime_path_invalid",
                 json!({
@@ -5316,8 +5323,8 @@ pub(crate) fn validate_member_identity_input(
     Ok(())
 }
 
-pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 10_000;
-pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 10,000 个字符。";
+pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 30_000;
+pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 30,000 个字符。";
 
 /// ECMAScript String.trim whitespace, matching the existing identity editor.
 /// U+FEFF is trimmed; U+0085 is retained. Interior formatting is untouched.
@@ -5908,10 +5915,10 @@ fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> Command
 #[test]
 fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
     for text in [
-        "中".repeat(10_000),
-        "😀".repeat(10_000),
-        "e\u{0301}".repeat(5_000),
-        "\"\n\u{0000}中😀".repeat(2_000),
+        "中".repeat(30_000),
+        "😀".repeat(30_000),
+        "e\u{0301}".repeat(15_000),
+        "\"\n\u{0000}中😀".repeat(6_000),
     ] {
         let padded = format!(" \u{feff}\r\n{text}\u{3000} ");
         // A final newline/control may be content; padding is normalized before counting.
@@ -5920,7 +5927,7 @@ fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
             normalize_professional_responsibilities(&padded).unwrap(),
             expected
         );
-        let too_long = format!("中{}", "😀".repeat(10_000));
+        let too_long = format!("中{}", "😀".repeat(30_000));
         assert_eq!(
             normalize_professional_responsibilities(&too_long)
                 .unwrap_err()
@@ -5980,11 +5987,25 @@ mod slow_tests {
                 AdapterKind::CursorAgent,
                 AdapterKind::KimiCodeCli,
                 AdapterKind::MinimaxCodeCli,
+                AdapterKind::HermesCli,
                 AdapterKind::GrokBuild,
                 AdapterKind::DeepseekHarness,
                 AdapterKind::ZcodeApp,
             ]
         );
+        for kind in AdapterKind::ALL {
+            assert_eq!(
+                kind.reuses_process(),
+                matches!(kind, AdapterKind::CodexCli | AdapterKind::Pi)
+                    || (acp_adapters.contains(&kind)
+                        && !matches!(
+                            kind,
+                            AdapterKind::KiroCli
+                                | AdapterKind::CursorAgent
+                                | AdapterKind::HermesCli
+                        ))
+            );
+        }
     }
 
     #[test]
@@ -9109,7 +9130,8 @@ mod slow_tests {
                 .runtime_dispatch_blocker(&database, &frozen)
                 .unwrap()
                 .map(|blocker| blocker.code),
-            Some("runtime_path_invalid".to_string())
+            None,
+            "disk availability is checked only if Fleet must create a process"
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

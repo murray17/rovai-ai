@@ -156,7 +156,7 @@ hash 改变，体积仍为 1,334 B。执行控制台仍只有固定 JS/CSS，无
 
 ### 图表阅读交互落实（2026-11-03）
 
-在 `b64cce588` 上落实确认后的交互稿，并补齐 `7d044a3bc` 的评审反馈。块头部保留 Mermaid 标题，复用文件视图图标切换，
+以下记录对应主线整合前的功能提交 `12f418005`。在 `b64cce588` 上落实确认后的交互稿，并补齐 `7d044a3bc` 的评审反馈。块头部保留 Mermaid 标题，复用文件视图图标切换，
 图形、源码、展开和复制常驻；点击图形也可打开大图。正文图形和源码区高度上限为 360px，
 大图内复用 `ReadonlyCodeViewer`、`PreviewImage` 和 `MarkdownCodeFrame`，切换时保留两个视口的局部阅读状态。
 生成中主动选择源码仍优先；准入失效关闭当前大图，恢复准入后不自动重新打开。
@@ -204,3 +204,22 @@ hash 改变，体积仍为 1,334 B。执行控制台仍只有固定 JS/CSS，无
   复现同两项失败：`runs History initialization and a query-addressed nested canvas independently` 与
   `recovers diagnostic loss without replacing the page`。前者涉及既有路径/诊断动作与刷新断言，后者涉及诊断恢复。
   本轮不修改这些断言或扩大 HTML 预览实现，不能将完整 HTML 专项表述为全部通过。
+
+### main 整合构建（2026-11-03）
+
+[PR #995](https://github.com/murray17/rovai-ai/pull/995) 整合主线 `d547dfe81`，保留主线原生 Skill 的诊断、
+大文件纯文本前缀与版本记录；完整 Markdown 仍接入共享 DocumentMarkdown。英文词条合并保留两侧内容。
+使用主线 0.5.6 版本与当前源码重新执行 `core:build:macos:arm64`，重建 Release Host / CLI，再构建和打包两端。
+平台、工具链、签名、压缩与 App 逻辑大小口径保持上文一致；此处使用新主线二进制，不复用 0.5.5 的 sidecar。
+
+| 产物 | 0.5.6 整合构建 | 相对原基线 `277b562f1` | 相对 `faadca7a4` |
+| --- | ---: | ---: | ---: |
+| DMG | 154,669,697 B | −2,950,180 B | +28,805 B |
+| 更新 ZIP | 154,726,018 B | −2,941,213 B | +47,721 B |
+| 安装 App | 402,206,429 B | −8,738,263 B | +162,468 B |
+
+三项仍满足原基线零净增。引擎及相关脚本仍各一份、共 5,530,371 B；ASAR 无渲染器/引擎副本，
+执行控制台只有原 JS/CSS 入口且无引擎资源引用。DMG 安装副本通过深度严格签名验证。
+整合后的类型检查、默认测试、Rust workspace、文档门禁、Mermaid Web/Electron 专项及 Skill 工作区专项通过。
+从新 DMG 安装的 Desktop 及其同目录 Host Web 正式入口通过，覆盖文档/消息图表、失败源码展开、
+大图阅读、主题更新与公屏跟随/历史位置。验收使用独立数据和 Skill 目录，无真实模型 Runtime。

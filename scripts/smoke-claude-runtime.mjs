@@ -33,6 +33,7 @@ try {
 
   core = startCore(dataDir)
   await core.request('health.check')
+  await core.request('runtime.modelCatalog.open', { runtimeKind: 'claude-code-cli', waitForRefresh: true })
   const installation = await configureProductRuntime(
     core.request,
     'claude-code-cli',
@@ -403,6 +404,26 @@ try {
     throw new Error('Claude Code cancelled Bash descendant still created its delayed file')
   }
 
+  const afterStop = await sendThreadMessage(
+    core.request,
+    cancellationCampId,
+    'Reply with exactly ROVAI_CLAUDE_AFTER_STOP and nothing else. Do not call tools.',
+    { taskId: null, purpose: 'Verify the next message after stop.', completionRole: 'required' }
+  )
+  if (afterStop.commandResult?.status !== 'accepted') {
+    throw new Error(`Claude Code post-stop intake failed: ${JSON.stringify(afterStop)}`)
+  }
+  camp = await waitFor(async () => {
+    const value = await core.request('threads.snapshot', { threadId: cancellationCampId })
+    const response = value.messages.find((message) =>
+      message.sourceAgentRunId && message.body.includes('ROVAI_CLAUDE_AFTER_STOP'))
+    return value.agentRuns.some((run) =>
+      run.id === response?.sourceAgentRunId && run.status === 'succeeded') ? value : null
+  }, 'Claude Code message after stop')
+  const afterStopResponse = camp.messages.find((message) =>
+    message.sourceAgentRunId && message.body.includes('ROVAI_CLAUDE_AFTER_STOP'))
+  const afterStopRun = camp.agentRuns.find((run) => run.id === afterStopResponse.sourceAgentRunId)
+
   let approvalSmoke = null
   if (process.env.ROVAI_CLAUDE_APPROVAL_SMOKE === '1') {
     profile = await core.request('members.get', { agentId: 'agent_1' })
@@ -439,6 +460,10 @@ try {
     nativeSessionId,
     nativeSessionContinued: true,
     conversationId: firstRun.conversationId,
+    consecutiveRuns: [
+      { id: firstRun.id, status: firstRun.status, marker: 'ROVAI_CLAUDE_RUN_ONE' },
+      { id: secondRun.id, status: secondRun.status, marker: 'ROVAI_CLAUDE_RUN_TWO' }
+    ],
     narrationProjected: true,
     commandOutput: {
       marker: commandMarker,
@@ -455,9 +480,11 @@ try {
       hasSyntheticHunkHeader: exactEditProjectionEntry.diff.includes('@@')
     },
     cancellation: {
+      runId: cancellationRunId,
       status: camp.agentRuns.find((agentRun) => agentRun.id === cancellationRunId)?.status,
       actionStarted: true,
-      delayedFileCreated: false
+      delayedFileCreated: false,
+      nextRun: { id: afterStopRun.id, status: afterStopRun.status, marker: 'ROVAI_CLAUDE_AFTER_STOP' }
     },
     approvalSmoke,
     teamToolAdvertised: true

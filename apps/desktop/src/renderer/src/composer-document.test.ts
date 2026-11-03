@@ -114,6 +114,12 @@ describe('ComposerDocument V2', () => {
   })
 
   it('validates the V2 envelope, Atom identities and Skill snapshot names', () => {
+    for (const nameAtSend of ['Native_Name', '中文 技能', 'n'.repeat(80)]) {
+      for (const skillId of ['native:registered', 'rovai:managed']) {
+        expect(validateComposerDocument({ version: 2, segments: [{ kind: 'atom', atom: { type: 'skill', skillId, nameAtSend } }] }))
+          .toBe(skillId.startsWith('native:'))
+      }
+    }
     expect(validateComposerDocument({ version: 2, segments: [] })).toBe(true)
     expect(validateComposerDocument({ version: 1, segments: [] })).toBe(false)
     expect(validateComposerDocument({

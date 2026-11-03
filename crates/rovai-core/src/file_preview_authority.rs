@@ -1016,6 +1016,18 @@ mod tests {
         assert!(
             matches!(resolve_skill_preview_source(&database, &data_dir, &request).unwrap(), Some(ResolvedFilePreviewSource::FileTarget { source_kind, .. }) if source_kind == "skill_reference")
         );
+        for text in [
+            "# Plain",
+            "---\nname: [broken\n---\nBody",
+            "---\nname: unclosed",
+        ] {
+            std::fs::write(&entry, text).unwrap();
+            assert!(
+                resolve_skill_preview_source(&database, &data_dir, &request)
+                    .unwrap()
+                    .is_some()
+            );
+        }
         let mut changed = request.clone();
         changed.raw_reference = Some("other.md".to_string());
         assert!(

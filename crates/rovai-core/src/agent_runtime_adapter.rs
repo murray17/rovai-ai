@@ -1912,11 +1912,6 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
-            "executablePath": input.executable_path,
-            "entrypointKind": runtime_entrypoint_kind(input.executable_path),
-            "executableFingerprint": input.executable_fingerprint,
-            "reportedVersion": input.reported_version,
-            "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -3555,11 +3550,6 @@ fn resolve_pi_runtime(
     let host_config_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
         "installationId": input.installation_id,
-        "executablePath": input.executable_path,
-        "entrypointKind": runtime_entrypoint_kind(input.executable_path),
-        "executableFingerprint": input.executable_fingerprint,
-        "reportedVersion": input.reported_version,
-        "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
         "authScope": input.auth_scope,
         "protocolVersion": protocol_version,
         "managedExtension": "rovai-pi-host-v8",
@@ -3647,19 +3637,22 @@ fn resolve_session_runtime(
         binding_compatibility["opencodeGeneration"] = json!(2);
     }
     let binding_compatibility_digest = canonical_json_digest(&binding_compatibility)?;
-    let host_config_digest = canonical_json_digest(&json!({
+    let mut host_config = json!({
         "adapterKind": expected_kind,
         "installationId": input.installation_id,
-        "executablePath": input.executable_path,
-        "entrypointKind": runtime_entrypoint_kind(input.executable_path),
-        "executableFingerprint": input.executable_fingerprint,
-        "reportedVersion": input.reported_version,
-        "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
         "authScope": input.auth_scope,
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
         "hostPermissions": scoped_values(RuntimeOptionScope::Host)?,
-    }))?;
+    });
+    if !expected_kind.reuses_process() {
+        host_config["executablePath"] = json!(input.executable_path);
+        host_config["entrypointKind"] = json!(runtime_entrypoint_kind(input.executable_path));
+        host_config["executableFingerprint"] = json!(input.executable_fingerprint);
+        host_config["reportedVersion"] = json!(input.reported_version);
+        host_config["runtimeEntrypoint"] = runtime_entrypoint_compatibility(&input)?;
+    }
+    let host_config_digest = canonical_json_digest(&host_config)?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
         binding_compatibility_digest: Some(binding_compatibility_digest),
@@ -4543,13 +4536,13 @@ mod tests {
             resolved.binding_compatibility_digest,
             upgraded_host.binding_compatibility_digest
         );
-        assert_ne!(
-            resolved.host_config_digest,
-            upgraded_host.host_config_digest
+        assert_eq!(
+            resolved.host_config_digest, upgraded_host.host_config_digest,
+            "disk replacement does not retire a healthy Host"
         );
-        assert_ne!(
+        assert_eq!(
             resolved.host_config_digest, changed_reported_version.host_config_digest,
-            "reported version must fence the Runtime Host configuration"
+            "the acquired Host retains its startup version"
         );
         assert_eq!(
             resolved.binding_compatibility_digest, changed_session_key.binding_compatibility_digest,
