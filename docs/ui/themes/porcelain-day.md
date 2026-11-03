@@ -140,6 +140,7 @@ Action tokens serve shared controls across the App; the `conversation-` prefix d
 | `--memory-muted` | `#626262` |
 | `--memory-input-line` | `#dedede` |
 | `--neutral-selected` | `#eeeef0` |
+| `--conversation-selection-surface` | `#efefef` |
 | `--neutral-hover` | `#f3f3f4` |
 | `--conversation-action` | `#2b2b2c` |
 | `--conversation-action-ink` | `#2b2b2c` |

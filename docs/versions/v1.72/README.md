@@ -11,6 +11,14 @@ last_updated: 2026-11-03
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 消息导出（2026-11-03）
+
+按 User 确认的中性灰多选方案，在现有公开会话接入整条消息/选文导出、HTML/PNG/Markdown 预览与下载。
+HTML/PNG 的头像、作者、时间、发送对象默认开启；Markdown 无头像，其余默认开启。复用当前主题和消息正文，
+不导出独立 Diff Card 或执行记录，不改变消息存储、寻址与模型上下文。
+当前规则见[会话工作区](../../ui/components/conversation-workspace.md#消息导出)，实施与验证见
+[交付记录](message-export-implementation.md)。
+
 ## Markdown Mermaid 审阅（2026-11-03）
 
 Issue #979 在文件与消息正文中交付自动绘图、源码/图形切换与完整复制、大图缩放和滚动、局部失败及手动重试。

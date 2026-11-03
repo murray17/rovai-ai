@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-02
+last_updated: 2026-11-03
 ---
 
 # Thread 会话工作区
@@ -31,6 +31,39 @@ last_updated: 2026-11-02
 字段与状态见 [Public Message/Delivery 架构](../../architecture/public-a2a-message-delivery.md)、
 [Public Composer 架构](../../architecture/camp-composer-draft.md)和
 [Camp History v17](../../contracts/camp-history-v17.md)。
+
+## 消息导出
+
+会话顶栏“导出”与消息操作栏“选择多条消息”进入同一多选状态。仅选择当前已加载的已发布公开消息，
+按消息序号输出；撤回、乐观 Pending、系统记录与 Mission 起始记录不参与。支持单选、Shift 范围选择、
+全选已加载、清空、取消与 Escape。接收新消息不自动扩大选择，不额外补载全部历史。
+切换 Thread 清除选择和预览，返回原 Thread 不恢复旧状态。
+
+选中使用复选框和中性灰行底色（`--conversation-selection-surface`），不用蓝色选中底色。
+复选框使用既有 `--conversation-action` 与对比色，随主题变化。底部工具栏只覆盖 Composer 区域，
+Composer 保持挂载，退出后恢复草稿。选文浮条在“引用”旁提供“导出选文”；仅输出捕获的文字和作者/时间等
+可选元信息，不携带源消息的其余正文、附件、回复或发送对象。
+
+预览提供标题编辑、PNG / HTML / Markdown、包含信息和下载；返回调整保留当前选择与各格式选项。
+HTML 与 PNG 默认勾选头像、作者、时间、发送对象；Markdown 不提供头像，其余三项默认勾选。
+关闭发送对象仅隐藏独立的“发送给”元信息，正文显式 Mention 保留；派生的默认接收者前缀不视作正文。
+正式功能跟随当前 App 主题，不增加外观切换、内容计数/缺图汇总小字或“导出规则”入口。
+
+| 内容 | HTML | PNG | Markdown |
+| --- | --- | --- | --- |
+| 显式成员 Mention | 保留现有外观，静态 | 保留外观 | `@名称` |
+| 普通 HTTP(S) 网页链接 | 可跳转，独立新页 | 链接外观 | Markdown 链接 |
+| Thread / Mission 引用 | 静态标签与图标 | 保留外观 | 标题，不带内部定位 ID |
+| 文件路径引用 | 静态文件名/路径与图标 | 保留外观 | 原名称或路径文本 |
+| 文件附件 | 名称、类型、大小的静态卡片，不打包文件内容 | 卡片外观 | 文件名与基本信息 |
+| 图片附件/关联输出图片 | 从现有受控读取链路内嵌原图，可放大；失效时在卡片内标记 | 图片内容 | 图片名称与基本信息 |
+| 代码块 | 保留现有代码格式，可复制；Mermaid 保留围栏源码 | 保留代码格式 | 原代码围栏 |
+| 回复/引用 | 只读摘要，不跳转 | 保留摘要 | 引用文字 |
+
+独立 Diff Card / Files Changed、执行过程、回执、日志与内部路由字段不导出；正文中的 `diff` 围栏保留。
+HTML 仅从独立导出阅读面生成，清洗内容、内联样式和安全栅格图片；仅允许固定的复制/图片放大脚本，
+不依赖远端资源或本地应用路径。PNG 使用同一阅读面以 2 倍分辨率生成，720px 阅读宽度、最高 8192px；
+超过上限保留当前状态并建议减少消息或改用 HTML，不静默截断。下载失败保留选择与预览；复制失败提供可选文本。
 
 ## 回复详情
 
