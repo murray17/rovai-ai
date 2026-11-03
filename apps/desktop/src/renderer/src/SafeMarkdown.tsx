@@ -1,4 +1,4 @@
-import { createContext, isValidElement, useContext, useEffect, useState, useLayoutEffect, useMemo, useRef, type JSX, type ReactNode } from 'react'
+import { createContext, isValidElement, useContext, useEffect, useState, useLayoutEffect, useMemo, useRef, type ComponentType, type JSX, type ReactNode } from 'react'
 import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeRaw from 'rehype-raw'
@@ -10,7 +10,6 @@ import { WebLink } from './WebLink'
 import { isWebUrl } from '../../web-url'
 import { remarkRepairCjkUrlTail } from './remark-repair-cjk-url-tail'
 import { parseFileReference } from '../../file-preview-reference'
-import { MarkdownCodeBlock } from './MarkdownCodeBlock'
 import { MarkdownCodeFrame } from './MarkdownCodeFrame'
 import { MarkdownTableFrame } from './MarkdownTableFrame'
 import {
@@ -19,11 +18,40 @@ import {
 } from './safe-markdown-model'
 import type { FilePreviewBinaryContent, FilePreviewOperationResult, ResolvedTheme } from '@contracts'
 import { UiText, uiAttribute } from './interface-language'
+import { remarkMermaidFences, type MermaidBlocks } from './remark-mermaid-fences'
 
 type MarkdownTreeNode = MarkdownNode
 
 const LeadingMarkdownContentContext = createContext<ReactNode>(null)
 const InlineMarkdownContentContext = createContext<Readonly<Record<string, ReactNode>>>({})
+export type MarkdownCodeProps = {
+  code: string; languageName?: string; theme: ResolvedTheme; children?: ReactNode
+  renderReady: boolean
+}
+const MarkdownCodeContext = createContext<{
+  mode: 'message' | 'document'; theme: ResolvedTheme; literalCopy: boolean
+  CodeBlock?: ComponentType<MarkdownCodeProps>
+  blocks?: MermaidBlocks; contentComplete: boolean
+}>({
+  mode: 'message', theme: 'day', literalCopy: true, contentComplete: true
+})
+
+// Module identity is stable across body and theme changes, preserving block state.
+function MarkdownPre({ children, node }: { children?: ReactNode; node?: { position?: { start: { offset?: number } } } }): JSX.Element {
+  const { theme, literalCopy, CodeBlock, blocks, contentComplete } = useContext(MarkdownCodeContext)
+  const block = markdownCodeBlock(children)
+  if (!block) return <pre>{children}</pre>
+  const parsed = blocks?.get(node?.position?.start.offset ?? -1)
+  // A trusted inline Mention must retain its original React children. Never
+  // send synthetic placeholder text to Mermaid or replace structured content.
+  const preserveChildren = parsed && block.code !== parsed.source + '\n'
+  return <MarkdownCodeFrame code={literalCopy || (parsed && !preserveChildren) ? block.code : undefined}>
+    {CodeBlock && !preserveChildren
+      ? <CodeBlock code={parsed ? parsed.source + '\n' : block.code} languageName={block.languageName} theme={theme}
+          renderReady={contentComplete || parsed?.fenceClosed === true}>{children}</CodeBlock>
+      : <pre>{children}</pre>}
+  </MarkdownCodeFrame>
+}
 
 function InlineMarkdownContent({ token }: { token: string }): JSX.Element {
   return <>{useContext(InlineMarkdownContentContext)[token]}</>
@@ -150,6 +178,8 @@ export function SafeMarkdown({
   inlineContent,
   inlineLeadingContent = true,
   mode = 'message',
+  CodeBlock,
+  contentComplete = true,
   theme = 'day'
 }: {
   children: string
@@ -165,6 +195,9 @@ export function SafeMarkdown({
   inlineContent?: Readonly<Record<string, ReactNode>>
   inlineLeadingContent?: boolean
   mode?: 'message' | 'document'
+  /** Entry-owned code rendering; the base and execution console stay lightweight. */
+  CodeBlock?: ComponentType<MarkdownCodeProps>
+  contentComplete?: boolean
   theme?: ResolvedTheme
 }): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -175,6 +208,7 @@ export function SafeMarkdown({
   const fileReferencesEnabled = Boolean(onFileReference)
   const hasLeadingContent = leadingContent !== undefined && leadingContent !== null
   const inlineContentKeys = JSON.stringify(Object.keys(inlineContent ?? {}))
+  const blocks = useMemo<MermaidBlocks>(() => new Map(), [children])
 
   useEffect(() => {
     if (!headingTarget) return undefined
@@ -211,6 +245,7 @@ export function SafeMarkdown({
     return (
       <Markdown
         remarkPlugins={[
+          ...(CodeBlock ? [[remarkMermaidFences, { blocks }] as [typeof remarkMermaidFences, { blocks: MermaidBlocks }]] : []),
           [remarkGfm, { singleTilde: false }],
           remarkCjkFriendly,
           [remarkCjkFriendlyStrikethrough, { singleTilde: false }],
@@ -247,17 +282,7 @@ export function SafeMarkdown({
               </p>
             )
           },
-          pre({ children: preChildren }) {
-            const block = markdownCodeBlock(preChildren)
-            if (!block) return <pre>{preChildren}</pre>
-            return (
-              <MarkdownCodeFrame code={inlineContentKeys === '[]' ? block.code : undefined}>
-                {mode === 'document'
-                  ? <MarkdownCodeBlock code={block.code} languageName={block.languageName} theme={theme} />
-                  : <pre>{preChildren}</pre>}
-              </MarkdownCodeFrame>
-            )
-          },
+          pre: MarkdownPre,
           table({ children: tableChildren }) {
             return <MarkdownTableFrame>{tableChildren}</MarkdownTableFrame>
           },
@@ -324,7 +349,7 @@ export function SafeMarkdown({
         {children}
       </Markdown>
     )
-  }, [children, fileReferencesEnabled, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, mode, theme])
+  }, [children, fileReferencesEnabled, localImageUrl, localImageContent, hasLeadingContent, inlineLeadingContent, inlineContentKeys, mode, theme, CodeBlock, blocks])
 
   return (
     <LeadingMarkdownContentContext.Provider value={leadingContent}>
@@ -337,7 +362,9 @@ export function SafeMarkdown({
             className ?? ''
           ].filter(Boolean).join(' ')}
         >
-          {markdown}
+          <MarkdownCodeContext.Provider value={{ mode, theme, literalCopy: inlineContentKeys === '[]', CodeBlock, blocks, contentComplete }}>
+            {markdown}
+          </MarkdownCodeContext.Provider>
         </div>
       </InlineMarkdownContentContext.Provider>
     </LeadingMarkdownContentContext.Provider>

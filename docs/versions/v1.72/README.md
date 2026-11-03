@@ -6,10 +6,19 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-02
+last_updated: 2026-11-03
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Markdown Mermaid 审阅（2026-11-03）
+
+Issue #979 在文件与消息正文中交付自动绘图、源码/图形切换与完整复制、大图缩放和滚动、局部失败及手动重试。
+流式正文按已完整到达的闭合围栏立即出图，同回合明确对应的单聊最终回复保留图表阅读状态。
+复用现有图片展示与代码复制，在专用受限 iframe 内离线渲染和清洗，不新增后端协议；执行控制台保持轻量。
+当前边界见[文件预览架构](../../architecture/file-preview.md#markdown-图表渲染)与
+[图表阅读 UI](../../ui/components/file-preview.md#markdown-图表阅读)；实现、生产验收及资源体积见
+[交付记录](markdown-mermaid.md)。
 
 ## 原生 Skills 可用性修复（2026-11-02）
 

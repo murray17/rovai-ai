@@ -8,6 +8,7 @@ import { FilePreviewTabs } from './FilePreviewTabs'
 import { useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react'
 import { MarkdownFilePreview } from './MarkdownFilePreview'
+import { PreviewImage } from './PreviewImage'
 import { FileFindScope } from './FilePreviewFind'
 import { FileFindDomAdapter } from './FileFindDomAdapter'
 import { HtmlViewer } from './HtmlFileViewer'
@@ -133,64 +134,12 @@ function fileSizeLabel(size: number): string {
 
 function ImageViewer({ tab }: { tab: FilePreviewTabModel }): React.JSX.Element {
   const content = tab.content?.kind === 'image' ? tab.content : null
-  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null)
   const { saveReading } = useFilePreview()
-  const [scale, setScale] = useState<number | null>(tab.reading?.imageScale ?? null)
-  const [imageError, setImageError] = useState(false)
-
-  useEffect(() => {
-    setDimensions(null)
-    setScale(tab.reading?.imageScale ?? null)
-    setImageError(false)
-  }, [content?.url])
-
   if (!content) return <div className="file-preview-empty-content" />
-  if (imageError) {
-    return (
-      <div className="file-preview-error" role="alert">
-        <strong><UiText zh={"无法显示图片"} /></strong>
-        <span><UiText zh={"可以从文件标签页菜单使用系统默认应用打开。"} /></span>
-      </div>
-    )
-  }
-  const effectiveScale = scale ?? 1
-  const scaledStyle = scale !== null && dimensions
-    ? {
-        width: dimensions.width * effectiveScale,
-        height: dimensions.height * effectiveScale,
-        maxWidth: 'none',
-        maxHeight: 'none'
-      }
-    : undefined
-  const changeScale = (factor: number): void => {
-    const next = Math.min(8, Math.max(.1, (scale ?? 1) * factor))
-    setScale(next); saveReading(tab.id, { imageScale: next })
-  }
-  return (
-    <div className="file-preview-image-stage">
-      <img
-        src={content.url}
-        alt={tab.presentation.fileName}
-        draggable={false}
-        style={scaledStyle}
-        onLoad={(event) => setDimensions({
-          width: event.currentTarget.naturalWidth,
-          height: event.currentTarget.naturalHeight
-        })}
-        onError={() => setImageError(true)}
-      />
-      <div className="file-preview-image-info" aria-live="polite">
-        {dimensions ? `${dimensions.width} × ${dimensions.height} · ` : ''}{tab.file ? fileSizeLabel(tab.file.size) : ''}
-        {scale === null ? '' : ` · ${Math.round(effectiveScale * 100)}%`}
-      </div>
-      <div className="file-preview-image-controls" aria-label={uiAttribute("图片缩放")}>
-        <button type="button" aria-label={uiAttribute("缩小")} onClick={() => changeScale(.8)}>−</button>
-        <button type="button" onClick={() => { setScale(null); saveReading(tab.id, { imageScale: null }) }}><UiText zh={"适应"} /></button>
-        <button type="button" onClick={() => setScale(1)}>100%</button>
-        <button type="button" aria-label={uiAttribute("放大")} onClick={() => changeScale(1.25)}>＋</button>
-      </div>
-    </div>
-  )
+  return <PreviewImage src={content.url} alt={tab.presentation.fileName}
+    errorHint={uiAttribute('可以从文件标签页菜单使用系统默认应用打开。')}
+    info={tab.file ? fileSizeLabel(tab.file.size) : ''} initialScale={tab.reading?.imageScale ?? null}
+    onScale={imageScale => saveReading(tab.id, { imageScale })} />
 }
 
 function OpeningIndicator(): React.JSX.Element | null {
@@ -406,7 +355,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
   const editor = showEditor && active && doc && edits ? <EditableCodeViewer key={doc.key} doc={doc} store={edits} theme={resolvedTheme} target={tab.file?.target} /> : null
   const editActions = <div className="file-preview-edit-actions">
     {sourceSwitch && <FilePreviewViewSwitch interactive={tab.content?.kind === 'html'} sourceMode={!!tab.htmlSourceMode}
-      onChange={() => toggleHtmlSource(tab.id)} />}
+      onChange={source => { if (source !== !!tab.htmlSourceMode) toggleHtmlSource(tab.id) }} />}
     {doc && fileEditDirty(doc) && <button type="button" className="file-action-button" disabled={doc.saving}
       title={uiAttribute('保存（{0}）', saveShortcut)} aria-label={uiAttribute('保存（{0}）', saveShortcut)} aria-busy={doc.saving}
       onClick={() => void edits?.save(doc)}><DialogControlIcon name="save" /></button>}
@@ -540,7 +489,7 @@ function ReadingPanel({ tab, children }: { tab: import('./FilePreviewContext').P
       }
       const body = node.querySelector<HTMLElement>('.file-preview-markdown, .file-preview-content, .agent-run-file-review-scroll, .mission-activity-document')
       if (body) { body.scrollTop = reading.scrollTop ?? 0; body.scrollLeft = reading.scrollLeft ?? 0 }
-      const image = node.querySelector<HTMLElement>('.file-preview-image-stage')
+      const image = node.querySelector<HTMLElement>('.file-preview-image-scroll')
       if (image) { image.scrollTop = reading.imageScrollTop ?? 0; image.scrollLeft = reading.imageScrollLeft ?? 0 }
       restoring.current = false
       observer.disconnect()
@@ -553,7 +502,7 @@ function ReadingPanel({ tab, children }: { tab: import('./FilePreviewContext').P
     if (restoring.current || !root.current?.clientHeight || !(event.target instanceof HTMLElement)) return
     const node = event.target
     if (node.classList.contains('cm-scroller')) saveReading(tab.id, { codeScrollTop: node.scrollTop, codeScrollLeft: node.scrollLeft })
-    else if (node.classList.contains('file-preview-image-stage')) saveReading(tab.id, { imageScrollTop: node.scrollTop, imageScrollLeft: node.scrollLeft })
+    else if (node.classList.contains('file-preview-image-scroll')) saveReading(tab.id, { imageScrollTop: node.scrollTop, imageScrollLeft: node.scrollLeft })
     else if ((node.classList.contains('file-preview-markdown') || node.classList.contains('file-preview-content') || node.classList.contains('agent-run-file-review-scroll') || node.classList.contains('mission-activity-document'))) saveReading(tab.id, { scrollTop: node.scrollTop, scrollLeft: node.scrollLeft })
   }}>{children}</div>
 }

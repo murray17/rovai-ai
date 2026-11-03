@@ -180,6 +180,7 @@ import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { mentionCandidateRuntime } from './mention-runtime'
 import { SafeMarkdown } from './SafeMarkdown'
+import { MessageMarkdown } from './MessageMarkdown'
 import { AgentMessageContent } from './AgentMessageContent'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
@@ -10177,6 +10178,7 @@ export function TruncatedStructuredMessageBody({
   const messageBody = (
     <StructuredMessageBody
       body={displayBody}
+      contentComplete={displayFullMessage}
       content={displayContent}
       members={members}
       pendingMemberProfiles={pendingMemberProfiles}
@@ -10227,6 +10229,7 @@ export function AgentMessageMarkdownBody({
   onActivateMemberMention(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
 }): JSX.Element {
+  const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
   // Only authoritative leading tokens form a recipient prefix. Literal @names
   // stay Markdown text; the Renderer never derives addressing from the body.
   let prefixLength = 0
@@ -10238,7 +10241,7 @@ export function AgentMessageMarkdownBody({
     ? structuredThreadContentMarkdownText(content.slice(prefixLength), [...pendingMemberProfiles, ...members])
     : body
   if (!content || prefixLength === 0) {
-    return <SafeMarkdown onFileReference={onFileReference}>{body}</SafeMarkdown>
+    return <MessageMarkdown theme={theme} onFileReference={onFileReference}>{body}</MessageMarkdown>
   }
 
   const hasBody = markdownBody.trim().length > 0
@@ -10256,14 +10259,14 @@ export function AgentMessageMarkdownBody({
   return (
     <div className="member-mention-markdown-body" data-inline-body={inlineBody}>
       {hasBody ? (
-        <SafeMarkdown
+        <MessageMarkdown theme={theme}
           className="member-mention-markdown-content"
           leadingContent={prefix}
           inlineLeadingContent={inlineBody}
           onFileReference={onFileReference}
         >
           {markdownBody}
-        </SafeMarkdown>
+        </MessageMarkdown>
       ) : prefix}
     </div>
   )
@@ -10276,6 +10279,7 @@ export function StructuredMessageBody({
   pendingMemberProfiles = EMPTY_PENDING_MEMBER_PROFILES,
   leadingRecipientAgentId,
   inline = false,
+  contentComplete = true,
   renderLeadingCurrentUserMarkdown = false,
   onActivateCurrentUserMention,
   onActivateMemberMention,
@@ -10289,6 +10293,7 @@ export function StructuredMessageBody({
   pendingMemberProfiles?: readonly PendingMemberMentionProfile[]
   leadingRecipientAgentId?: string | null
   inline?: boolean
+  contentComplete?: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateCurrentUserMention?(trigger: HTMLElement, focusPanel: boolean): void
   onActivateMemberMention?(
@@ -10300,6 +10305,7 @@ export function StructuredMessageBody({
   onActivateSkillMention?(skillId: string, trigger: HTMLElement): void
   onFileReference?: FileReferenceActivation
 }): JSX.Element {
+  const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
   const memberById = new Map(members.map((member) => [member.agentId, member]))
   const pendingProfileById = new Map(pendingMemberProfiles.map((profile) => [profile.agentId, profile]))
   const mentionNames = [...pendingMemberProfiles, ...members]
@@ -10329,9 +10335,9 @@ export function StructuredMessageBody({
           {markdownBody.length > 0 ? ' ' : ''}
         </span>
         {markdownBody.length > 0 && (
-          <SafeMarkdown className="current-user-markdown-content" onFileReference={onFileReference}>
+          <MessageMarkdown theme={theme} contentComplete={contentComplete} className="current-user-markdown-content" onFileReference={onFileReference}>
             {markdownBody}
-          </SafeMarkdown>
+          </MessageMarkdown>
         )}
       </div>
     )
@@ -10349,7 +10355,7 @@ export function StructuredMessageBody({
       }
       return token + (index === 0 && content.length > 1 ? ' ' : '')
     }).join('')
-    return <SafeMarkdown onFileReference={onFileReference} inlineContent={inlineContent}>{markdown}</SafeMarkdown>
+    return <MessageMarkdown theme={theme} contentComplete={contentComplete} onFileReference={onFileReference} inlineContent={inlineContent}>{markdown}</MessageMarkdown>
   }
   const Tag = inline ? 'span' : 'p'
   return (
@@ -10852,6 +10858,7 @@ function RunExecutionContent({
   onLoadHistoricalEvidence(): Promise<void>
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
   const client = useThreadClient()
   const mobile = useMobileLayout()
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
@@ -10925,11 +10932,13 @@ function RunExecutionContent({
   const finalKey = finalBody ? comparableMessageText(finalBody) : null
   const processItems = useMemo(() => (effectiveProgress?.items ?? []).map((item) =>
     item.kind === 'narration' && narrationBodies.has(item.key)
-      ? { ...item, body: narrationBodies.get(item.key)! }
+      ? { ...item, body: narrationBodies.get(item.key)!, contentComplete: narrationEvidence.some(evidence =>
+          item.key === `narration:${evidence.id}` && !evidence.outputTruncated
+          && (evidence.payload as { status?: string }).status === 'completed') }
       : item
   ).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
-  ), [effectiveProgress?.items, finalKey, narrationBodies])
+  ), [effectiveProgress?.items, finalKey, narrationBodies, narrationEvidence])
   const groupedProcessItems = useMemo(() => {
     if (!windowedEvidence) return groupConsecutiveToolItems(processItems)
     return windowPage.blocks.flatMap((block): GroupedExecutionProgressItem[] => {
@@ -11076,8 +11085,8 @@ function RunExecutionContent({
         if (item.kind === 'narration') {
           return (
             <div className={`process-copy stream-${item.kind}`} key={item.key} data-execution-item-key={item.key}>
-              {windowedEvidence ? <ExecutionNarration threadId={threadId} evidence={narrationByKey.get(item.key)} preview={item.body} />
-                : <SafeMarkdown>{item.body}</SafeMarkdown>}
+              {windowedEvidence ? <ExecutionNarration threadId={threadId} evidence={narrationByKey.get(item.key)} preview={item.body} Body={MessageMarkdown} theme={theme} contentComplete={item.contentComplete} />
+                : <MessageMarkdown theme={theme} contentComplete={item.contentComplete === true}>{item.body}</MessageMarkdown>}
             </div>
           )
         }

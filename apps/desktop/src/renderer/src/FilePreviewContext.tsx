@@ -11,10 +11,11 @@ import { FileFindProvider } from './FilePreviewFind'
 import { FilePreviewResources } from './file-preview-resources'
 import { FilePreviewPaneContent } from './FilePreviewPane'
 import type { FilePreviewContextValue, FilePreviewSession } from './file-preview-controller'
+import { FilePreviewContext } from './file-preview-context'
+export { useFilePreview, useOptionalFilePreview } from './file-preview-context'
 export * from './file-preview-controller'
 
 const FilePreviewApiContext = createContext<FilePreviewApi | null>(null)
-const FilePreviewContext = createContext<FilePreviewContextValue | null>(null)
 const PreviewHostContext = createContext<((element: HTMLDivElement | null) => void) | null>(null)
 const ExecutionPreviewHostContext = createContext<ReadonlyMap<string, HTMLDivElement>>(new Map())
 
@@ -147,12 +148,6 @@ export function FilePreviewProvider({ threadId, resolvedTheme, api: providedApi,
   </FilePreviewContext.Provider></FilePreviewApiContext.Provider></FileEditContext.Provider>
 }
 
-export function useFilePreview(): FilePreviewContextValue {
-  const value = useContext(FilePreviewContext)
-  if (!value) throw new Error('FilePreviewProvider is unavailable')
-  return value
-}
-export function useOptionalFilePreview(): FilePreviewContextValue | null { return useContext(FilePreviewContext) }
 export function useFilePreviewApi(): FilePreviewApi {
   const api = useContext(FilePreviewApiContext)
   if (!api) throw new Error('FilePreviewApi is unavailable')

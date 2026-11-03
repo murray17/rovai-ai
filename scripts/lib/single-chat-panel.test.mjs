@@ -20,6 +20,7 @@ test('Single Chat input history preserves drafts and sends preview as a new pend
 
 test('production Single Chat panel preserves private conversation layout and terminal disclosure', { timeout: 90_000 }, t => runFixture(t))
 test('Single Chat return to latest keeps reading and pressed geometry stable', { timeout: 90_000 }, t => runFixture(t, '--return-latest'))
+test('Single Chat streaming Mermaid retains its viewer at final handoff and respects reading position', { timeout: 90_000 }, t => runFixture(t, '--mermaid'))
 test('Single Chat pending withdrawal recovers a lost receipt and fences navigation', { timeout: 90_000 }, t => runFixture(t, '--pending-return'))
 test('Single Chat literal links and native textarea gestures preserve editing and recovery', { timeout: 90_000 }, t => runFixture(t, '--web-links'))
 
@@ -63,6 +64,10 @@ async function runFixture(t, mode = '--panel') {
     assert.ok(reportLine, `Single Chat native UI report was missing:\n${output}`)
     const report = JSON.parse(reportLine)
     assert.equal(report.ok, true)
+    if (mode === '--mermaid') {
+      assert.deepEqual(report.verified, { streaming: true, handoff: true, sourcePreference: true, followingLatest: true, historyPosition: true })
+      return
+    }
     if (mode === '--entry-count') {
       assert.deepEqual(report.verified, {
         initialCount: true, closedPanelEvents: true, invalidation: true,
