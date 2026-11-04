@@ -1,39 +1,27 @@
-# Rovai AI v0.5.7
+# Rovai AI v0.5.8
 
 <!-- lang:zh-CN -->
 
-本次更新新增消息导出和 Mermaid 图表阅读，将工作准则、成长课题的上限提高到 3,000 字符，并修复本机 Skills、执行状态和 Windows Antigravity 的使用问题。
+本次更新补齐 CodeBuddy 的推理强度设置，修复 Windows 下部分智能体升级后信息未更新、DeepSeek Harness 加载 MCP 时无法启动的问题，并调整本机 Skills 的异常提示。
 
-- 【功能】**支持消息多选与导出。** 可多选公屏中已加载的消息，也可导出选中的文字，预览后保存为 HTML、PNG 或 Markdown。支持修改导出标题，选择保留作者、时间和发送对象等信息。
-- 【功能】**支持直接查看 Mermaid 图表。** Markdown 文件预览及公屏、单聊中的队员回复可显示流程图、时序图等，支持图形与源码切换、复制和大图缩放。流式回复中的完整图块会先行显示，无需等待整条回复结束。
-- 【功能】**工作准则和成长课题分别由 300 提高到 3,000 字符。** 可以填写更完整的做事方式、质量要求和成长方向，保留正文中的换行与格式。
-- 【修复】**完善本机 Skill 的发现、引用和预览。** 说明文件头部信息缺失或异常时，仍可发现和选择可读的 Skill；支持中文、下划线名称筛选，并完善大文件预览及异常提示。
-- 【修复】**修正 Claude Code 的执行结束判断。** 不再因收到结果后等待状态事件而提前报错；空回复、不支持的提问和收尾清理异常不会覆盖已经确认的成功结果。
-- 【修复】**补充消息结果待核对时，不再连带阻塞后续输入。** 通道仍有效时，可以继续发送新的补充消息；待核对的原消息不会被自动重发。
-- 【修复】**减少本机智能体更新造成的执行中断。** 优化 Codex、Pi 等智能体的进程复用，程序文件更新或准备新执行时，避免误回收其他会话仍在使用的进程。
-- 【修复】**修复 Windows 下 Antigravity 执行 Shell 命令失败的问题。** 解决部分程序路径导致正常命令被误报为“Shell Injection Detected”的情况。
-- 【界面】**提醒操作文字跟随当前主题配色。** 修复“查看下一条”仍显示固定蓝色的问题。
+感谢 @caoshuisi 在 Issue #997 中反馈智能体升级识别和 CodeBuddy 推理强度问题，以及 @arschlochnop 在 Issue #1007 中反馈 DeepSeek Harness 启动问题。
 
-感谢 @liangxyz 在 [#706](https://github.com/murray17/rovai-ai/issues/706) 中反馈角色设定长度不足的问题，@liuqiong0319 反馈本机 Skill 发现问题，以及 @arschlochnop 在 [#979](https://github.com/murray17/rovai-ai/issues/979) 中提出 Mermaid 图表预览需求。
-
-[完整变更](https://github.com/murray17/rovai-ai/compare/v0.5.6...v0.5.7)
+- 【功能】**CodeBuddy 支持选择推理强度。** 在队员设置中，可根据所选模型提供的档位进行配置，队员摘要和消息中的强度显示同步更新。
+- 【修复】**修复 Windows 下部分智能体升级后仍沿用旧信息的问题。** 通过标准 npm、pnpm 入口安装的智能体，重新检测时可以正确识别程序包变化，避免因启动脚本未变而继续使用旧的模型与能力信息。
+- 【修复】**修复 DeepSeek Harness 启用原生 MCP 后无法启动的问题。** 适配新版加载接口，解决 DSH 0.2.0-rc.2 的初始化失败，同时保留对旧版接口的支持。
+- 【修复】**减少本机 Skills 扫描中的无效报错。** 目标已不存在的符号链接会自动跳过，不再提示文件读取失败；权限不足、循环链接等实际读取问题仍会提示。
+- 【交互】**调整 Skill 异常提示的显示位置。** 可正常使用的 Skill，其说明信息异常仅在详情中显示，减少列表和输入框选择器中的干扰；复制路径失败时，在按钮旁提示，已加载的正文仍可继续查看。
 
 ---
 
 <!-- lang:en -->
 
-This release adds message export and Mermaid diagram reading, raises the working principles and growth topic limits to 3,000 characters each, and fixes native Skills, execution status, and Antigravity on Windows.
+This release adds CodeBuddy reasoning intensity controls, fixes stale information after some Agent upgrades on Windows and DeepSeek Harness startup with native MCP, and refines native Skill diagnostics.
 
-- [Feature] **Select and export messages.** Select loaded messages in the public conversation, or export selected text, then preview and save it as HTML, PNG, or Markdown. Edit the export title and choose whether to include authors, timestamps, recipients, and other information.
-- [Feature] **Read Mermaid diagrams directly.** Markdown file previews and teammate replies in public conversations and Single Chat can display flowcharts, sequence diagrams, and more. Switch between diagrams and source, copy the source, and zoom into larger diagrams. Complete diagram blocks appear during streaming without waiting for the entire reply to finish.
-- [Feature] **Working principles and growth topic now support 3,000 characters each, up from 300.** Save more detailed working methods, quality requirements, and growth goals while retaining line breaks and formatting.
-- [Fix] **Improve native Skill discovery, selection, and preview.** Readable Skills remain discoverable and selectable when their header metadata is missing or malformed. Filtering supports Chinese characters and underscores, with better large-file previews and diagnostics.
-- [Fix] **Correct Claude Code completion handling.** Waiting for status events after a result no longer causes premature failure. Empty final text, unsupported questionnaires, and cleanup errors do not override a confirmed successful result.
-- [Fix] **A supplemental message awaiting confirmation no longer blocks later inputs.** New supplemental messages can proceed while the channel remains valid. The original unconfirmed message is not automatically resent.
-- [Fix] **Reduce execution interruptions after local Agent updates.** Improve process reuse for Codex, Pi, and other supported Agents. Updating program files or preparing a new execution no longer incorrectly retires processes still serving other conversations.
-- [Fix] **Fix Antigravity Shell command failures on Windows.** Resolve executable path handling that could cause valid commands to be rejected with “Shell Injection Detected”.
-- [UI] **Reminder actions follow the active theme.** Fix the “View next” action retaining a fixed blue color.
+Thanks to @caoshuisi for reporting Agent upgrade detection and CodeBuddy reasoning intensity issues in Issue #997, and @arschlochnop for reporting the DeepSeek Harness startup issue in Issue #1007.
 
-Thanks to @liangxyz for reporting role-description length limits in [#706](https://github.com/murray17/rovai-ai/issues/706), @liuqiong0319 for reporting native Skill discovery issues, and @arschlochnop for requesting Mermaid previews in [#979](https://github.com/murray17/rovai-ai/issues/979).
-
-[Full changelog](https://github.com/murray17/rovai-ai/compare/v0.5.6...v0.5.7)
+- [Feature] **Choose CodeBuddy reasoning intensity.** Teammate settings now offer the levels provided by the selected model. Teammate summaries and messages display the same configured intensity.
+- [Fix] **Detect package changes for some Agent upgrades on Windows.** When checked again, Agents installed through standard npm or pnpm command wrappers can detect package changes even if the wrapper itself is unchanged, preventing reuse of stale model and capability information.
+- [Fix] **Restore DeepSeek Harness startup with native MCP enabled.** Support the newer Loader lifecycle interface to fix initialization failures in DSH 0.2.0-rc.2 while retaining support for the older interface.
+- [Fix] **Avoid unnecessary native Skill scan errors.** Symbolic links whose targets no longer exist are skipped instead of being reported as file read failures. Permission errors, link loops, and other actual read failures remain visible.
+- [UX] **Show Skill diagnostics where they apply.** Recovered metadata warnings for usable Skills appear only in their details, reducing notices in the list and composer picker. A failed path copy is shown beside the button without hiding the loaded document.
