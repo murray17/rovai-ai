@@ -1,10 +1,43 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-01
+last_updated: 2026-11-04
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-04 DSH 原生 MCP 生命周期接口兼容
+
+[Issue #1007](https://github.com/murray17/rovai-ai/issues/1007) 的故障是 Loader 新版移除 Entry 的
+`_await()` 后，Rovai 仍无条件调用旧接口。修复只在原有等待函数内分派：完成 `refresh()` 后，
+优先使用旧 `_await()`；否则使用 `fiber.await()` 并确认 `FiberState.ACTIVE`（Cordis 4.0.4 为 `2`）。
+旧接口保留原有等待语义；新 Fiber 分支在生命周期接口不可用或等待结束后非 ACTIVE 时，
+不发布 `rovaiDshReady`。两条路径的启动异常均原样传播，不在等待失败后切换接口重试。
+默认容错的原生 MCP 按自身策略完成激活即可继续，不要求一定已有工具；严格启动失败仍阻断就绪。
+
+macOS arm64、Node **26.13.0**，固定官方 npm 发布包及实际解析依赖，在独立 `DSH_HOME`、Agent Home、
+临时工作目录和隔离 Core data/Skills/MCP 下完成以下对照：
+
+| 路径 | DSH / MCP client | Cordis | Loader | 实测结果 |
+| --- | --- | --- | --- | --- |
+| 新接口 | 0.2.0-rc.2 | 4.0.4 | 1.0.5 | 原代码复现 `_await is not a function`；修复后 ACP v1 initialize 成功，ready 时 `mcp__startup_fixture__echo` 已注册 |
+| 旧接口 | 0.1.5-rc.2 | 4.0.2 | 1.0.3 | 实际存在 `_await()`，修复后 ACP v1 initialize 与原生 MCP 工具注册通过 |
+
+真实启动共 **10 个场景通过**：新版原代码失败对照、修复后正常 MCP、受控延迟工具发现、严格连接失败、
+默认容错连接失败、无原生 MCP、缺必需服务，以及旧版 MCP；另以新构建 Core 分别创建新旧 DSH 的受管 Host。
+延迟发现释放前未发布 ready、未返回 ACP initialize；释放后工具注册与握手成功。
+严格失败保留 fixture 的原始拒绝原因；容错失败允许 ACTIVE 且零工具的插件继续；缺服务的 PENDING 明确失败。
+
+Core 交付验收使用 `cargo build -p rovai-core --bin rovai-core` 的新二进制；只读观察器核对就绪时的工具和
+实际生命周期接口，并核对 Core 经 `include_str!` 写出的 Bootstrap SHA-256 与源码一致：
+`25b01c7d20737514d5e12c36797059c082d070897f4398dc1d3be165c9f7a56f`。
+两个受管 Host 都完成 ACP initialize 与 `session/new`；验收 transport 在 `session/prompt` 进入 DSH 前拦住正文，
+未发送模型请求，结束后回收本次 Core/Host/MCP。`BOOTSTRAP_REVISION` 保持不变，通过新 Core 与新 Host 加载修复。
+
+确定性回归：`node --test scripts/lib/dsh-host.test.mjs` **17/17 通过**，覆盖新旧延迟、旧接口优先、
+refresh/等待异常、缺接口、非 ACTIVE、多 MCP 和容错策略；修改前新版用例复现原故障。
+本次只证明上述平台和依赖组合的启动/工具就绪，不包含 Issue 的 Node 24.2.0、真实模型、Desktop 或其他平台验收。
+现有 ACP initialize 45 秒期限保持；首轮 MCP 请求一直不返回时仍可能先触发 Host 超时。
 
 ## 2026-11-01 Qoder 同步子代理启动策略
 
