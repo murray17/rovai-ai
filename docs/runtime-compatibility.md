@@ -11,7 +11,8 @@ last_updated: 2026-11-04
 [Issue #1007](https://github.com/murray17/rovai-ai/issues/1007) 的故障是 Loader 新版移除 Entry 的
 `_await()` 后，Rovai 仍无条件调用旧接口。修复只在原有等待函数内分派：完成 `refresh()` 后，
 优先使用旧 `_await()`；否则使用 `fiber.await()` 并确认 `FiberState.ACTIVE`（Cordis 4.0.4 为 `2`）。
-未知接口、未激活及原始启动异常均不发布 `rovaiDshReady`，等待失败不换接口重试。
+旧接口保留原有等待语义；新 Fiber 分支在生命周期接口不可用或等待结束后非 ACTIVE 时，
+不发布 `rovaiDshReady`。两条路径的启动异常均原样传播，不在等待失败后切换接口重试。
 默认容错的原生 MCP 按自身策略完成激活即可继续，不要求一定已有工具；严格启动失败仍阻断就绪。
 
 macOS arm64、Node **26.13.0**，固定官方 npm 发布包及实际解析依赖，在独立 `DSH_HOME`、Agent Home、
