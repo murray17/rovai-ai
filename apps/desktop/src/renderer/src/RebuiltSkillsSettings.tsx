@@ -9,7 +9,7 @@ import { RuntimeGlyph } from './MemberRuntimePicker'
 import { SkillIdentityMark } from './SkillIdentityMark'
 import { DocumentMarkdown } from './DocumentMarkdown'
 import { skillReadingContent } from './skill-reading-content'
-import { nativeSkillDiagnosticLabel, nativeSkillDiagnosticText } from './native-skill-diagnostics'
+import { isNativeSkillMetadataFallback, nativeSkillDiagnosticLabel, nativeSkillDiagnosticText } from './native-skill-diagnostics'
 import { SkillFileNavigation } from './SkillFileNavigation'
 import { adapterLabel, visibleProductRuntimes } from './runtime-products'
 import { readErrorMessage } from './error-message'
@@ -31,6 +31,7 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
   const [raw, setRaw] = useState(false)
   const [contentError, setContentError] = useState<string | null>(null)
   const [contentRevision, setContentRevision] = useState(0)
+  const [pathCopyFailed, setPathCopyFailed] = useState(false)
   const [query, setQuery] = useState('')
   const [detailVisible, setDetailVisible] = useState(false)
   const listRequest = useRef(0)
@@ -59,6 +60,7 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
     return () => { listRequest.current += 1 }
   }, [load])
   const selected = scan?.skills.find((skill) => skill.id === selectedId) ?? null
+  useEffect(() => setPathCopyFailed(false), [selected?.id])
   useEffect(() => {
     if (!selected) { setContent(null); setContentError(null); return }
     let cancelled = false
@@ -73,8 +75,10 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
     `${skill.name} ${skill.description} ${skill.entryPath}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())
   ), [scan, query])
   const copyPath = async (skill: NativeSkillView): Promise<void> => {
+    setPathCopyFailed(false)
+    // A clipboard failure affects only this action, never the loaded content.
     try { await navigator.clipboard.writeText(skill.entryPath) }
-    catch (reason) { setContentError(readErrorMessage(reason)) }
+    catch { setPathCopyFailed(true) }
   }
   return <div className="rebuilt-skills-page">
     <header className="rebuilt-skills-header">
@@ -96,7 +100,7 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
         <div className="rebuilt-skills-toolbar"><strong>Skills</strong><span>{scan?.skills.length ?? '—'}<UiText zh={" 项"} /></span></div>
         <label className="rebuilt-skills-search"><span className="sr-only"><UiText zh={"搜索 Skills"} /></span><input type="search" placeholder={uiAttribute("搜索 Skill")} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
         {error && <div className="rebuilt-skills-error" role="alert"><UiText zh={"执行端暂不可读："} />{error}<button type="button" onClick={() => void load(true)}><UiText zh={"重试"} /></button></div>}
-        <NativeSkillDiagnostics diagnostics={scan?.diagnostics ?? []} />
+        <NativeSkillDiagnostics diagnostics={scan?.diagnostics.filter((diagnostic) => !isNativeSkillMetadataFallback(diagnostic)) ?? []} />
         {loading && !scan && <p className="rebuilt-skills-empty"><UiText zh={"正在读取 Skills…"} /></p>}
         {!loading && scan && scan.skills.length === 0 && <p className="rebuilt-skills-empty"><UiText zh={"这个智能体尚未发现 Skills。"} /></p>}
         {scan && visible.length === 0 && scan.skills.length > 0 && <p className="rebuilt-skills-empty"><UiText zh={"没有匹配的 Skill。"} /></p>}
@@ -105,7 +109,7 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
       {separator}
       <section id={`${id}-detail`} className={`rebuilt-skills-detail ${detailVisible ? 'is-detail-visible' : ''}`} aria-label={uiAttribute("Skill 预览")}>
         <button type="button" className="rebuilt-skills-back" onClick={() => setDetailVisible(false)}><UiText zh={"返回列表"} /></button>
-        {selected ? <><header><h2>{selected.name}</h2><p>{selected.description}</p><div className="rebuilt-skill-source"><span title={selected.entryPath}>{selected.entryPath}</span><button type="button" onClick={() => void copyPath(selected)} aria-label={uiAttribute("复制 Skill 路径")}><UiText zh={"复制路径"} /></button></div><NativeSkillDiagnostics diagnostics={scan?.diagnostics.filter((diagnostic) => diagnostic.skillId === selected.id) ?? []} /></header><div className="rebuilt-skills-content"><SkillFileNavigation files={files} path={filePath} onSelect={(path) => { setFilePath(path); setRaw(false) }}>
+        {selected ? <><header><h2>{selected.name}</h2><p>{selected.description}</p><div className="rebuilt-skill-source"><span title={selected.entryPath}>{selected.entryPath}</span><button type="button" onClick={() => void copyPath(selected)} aria-label={uiAttribute("复制 Skill 路径")}><UiText zh={"复制路径"} /></button>{pathCopyFailed && <em role="alert"><UiText zh="未能复制路径，请重试。" /></em>}</div><NativeSkillDiagnostics diagnostics={scan?.diagnostics.filter((diagnostic) => diagnostic.skillId === selected.id) ?? []} /></header><div className="rebuilt-skills-content"><SkillFileNavigation files={files} path={filePath} onSelect={(path) => { setFilePath(path); setRaw(false) }}>
           {/\.(?:md|markdown)$/iu.test(filePath) && content?.status !== 'too_large' && <div className="capability-view-modes" role="group" aria-label={uiAttribute("Skill 预览方式")}><button type="button" aria-pressed={!raw} onClick={() => setRaw(false)}><UiText zh={"阅读"} /></button><button type="button" aria-pressed={raw} onClick={() => setRaw(true)}><UiText zh={"源码"} /></button></div>}
         </SkillFileNavigation>{contentError ? <div className="rebuilt-skills-error" role="alert"><UiText zh={"正文暂不可读："} />{contentError}<button type="button" onClick={() => setContentRevision((revision) => revision + 1)}><UiText zh={"重试"} /></button></div>
           : content === null ? <p className="rebuilt-skills-empty"><UiText zh={"正在读取正文…"} /></p>
@@ -123,14 +127,15 @@ export function NativeSkillsSettings({ health = null }: { health?: RuntimeStatus
 function NativeSkillDiagnostics({ diagnostics }: { diagnostics: NativeSkillDiagnostic[] }): React.JSX.Element | null {
   const [copyError, setCopyError] = useState<string | null>(null)
   if (!diagnostics.length) return null
-  const summary = [...new Set(diagnostics.map((diagnostic) => nativeSkillDiagnosticLabel(diagnostic.kind)))].join(' · ')
+  const summary = [...new Set(diagnostics.map(nativeSkillDiagnosticLabel))].join(' · ')
   return <details className="native-skill-diagnostics">
     <summary>{summary} ({diagnostics.length})</summary>
     <ul>{diagnostics.map((diagnostic, index) => <li key={index}>
-      <strong>{nativeSkillDiagnosticLabel(diagnostic.kind)}</strong>
+      <strong>{nativeSkillDiagnosticLabel(diagnostic)}</strong>
       <code>{diagnostic.path}</code><p>{diagnostic.message}</p>
     </li>)}</ul>
-    {diagnostics.some((diagnostic) => diagnostic.kind === 'metadata') && <p><UiText zh="相关 Skill 仍可使用。修改文件后刷新可更新诊断。" /></p>}
+    {diagnostics.some(isNativeSkillMetadataFallback) && <p><UiText zh="部分信息使用了回退值，Skill 仍可使用。修改文件后刷新可更新。" /></p>}
+    {diagnostics.some((diagnostic) => diagnostic.kind === 'metadata' && !diagnostic.skillId) && <p><UiText zh="当前列表可能未应用部分禁用设置。修复配置后刷新可更新。" /></p>}
     <button type="button" className="rebuilt-skill-action" onClick={() => {
       setCopyError(null)
       void navigator.clipboard.writeText(diagnostics.map(nativeSkillDiagnosticText).join('\n\n'))

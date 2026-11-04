@@ -16,6 +16,7 @@ module.exports = async ({ run, click, key, settle, capture, snapshot, window }) 
   // Metadata issues remain selectable; real failures keep their own labels.
   const diagnostics = [
     { kind: 'metadata', path: '/fixture/native/ui-ux-pro-max/SKILL.md', message: 'name must be a string', skillId: 'native-1' },
+    { kind: 'metadata', path: '/fixture/codex/config.toml', message: 'TOML parse error' },
     { kind: 'file_read', path: '/fixture/native/blocked/SKILL.md', message: 'Permission denied' },
     { kind: 'directory_read', path: '/fixture/locked', message: 'Directory access denied' }
   ]
@@ -25,10 +26,26 @@ module.exports = async ({ run, click, key, settle, capture, snapshot, window }) 
   assert.ok(!(await snapshot()).text.includes('扫描结果不完整'))
   assert.ok(!(await snapshot()).text.includes('部分来源暂不可读'))
   await run("document.querySelector('aside .native-skill-diagnostics summary').click()")
+  // Recovered document metadata stays in its Skill details; config uncertainty stays visible.
+  const listDiagnostics = await run("document.querySelector('aside .native-skill-diagnostics').textContent")
+  assert.ok(!listDiagnostics.includes('name must be a string') && !listDiagnostics.includes('仍可使用'))
+  assert.ok(listDiagnostics.includes('禁用配置无法解析') && listDiagnostics.includes('未应用部分禁用设置'))
   await click('复制诊断')
   const copied = await run('window.capabilityTest.copiedDiagnostic()')
   assert.ok(copied.includes('/fixture/locked') && copied.includes('Directory access denied'))
-  assert.ok(await run("document.querySelector('.rebuilt-skills-detail .native-skill-diagnostics').textContent.includes('name must be a string')"))
+  const detailDiagnostics = await run("document.querySelector('.rebuilt-skills-detail .native-skill-diagnostics').textContent")
+  assert.ok(detailDiagnostics.includes('name must be a string') && detailDiagnostics.includes('回退值'))
+  assert.ok(!detailDiagnostics.includes('config.toml'))
+  // A clipboard failure only reports the copy action and keeps the loaded content.
+  await run('window.capabilityTest.failClipboard(true)')
+  await click('复制 Skill 路径')
+  assert.ok(await run("document.querySelector('.rebuilt-skill-source [role=alert]').textContent.includes('未能复制路径')"))
+  assert.ok(!(await snapshot()).text.includes('正文暂不可读'))
+  assert.equal(await run("Boolean(document.querySelector('.capability-reading, .capability-source-code'))"), true)
+  await capture('native-skills-copy-path-error')
+  await run('window.capabilityTest.failClipboard(false)')
+  await click('复制 Skill 路径')
+  assert.equal(await run("document.querySelector('.rebuilt-skill-source [role=alert]')"), null)
   await capture('native-skills-diagnostics')
   await run('window.capabilityTest.setNativeDiagnostics([])')
   await click('刷新')
