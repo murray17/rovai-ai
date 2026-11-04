@@ -194,6 +194,20 @@ owner，而不是继续增加平行 fixture 和断言。
 
 ### 单项 Runtime 检查减重
 
+Issue #997 扩展既有 `windows_command_shim_content_changes_compatibility_fingerprint`，通过真实发现入口
+验证 npm/pnpm 包升级但包装脚本内容和文件属性不变、旧证据拒收、重复发现身份稳定及损坏 manifest/bin
+不回退弱身份。`identity_checked_probe_discards_updated_results_and_keeps_stable_errors` 扩展至 Windows，
+验证只在 Probe 期间更新包也沿用 Superseded；起始 manifest 缺失后 Probe 成功时，恢复新包仍被
+现有候选身份的发布前复核拒收，恢复原包则允许通过。普通初始路径错误保持 Stable(Err)，不扩大重试。
+原自定义脚本与 Codex 原生目标 owner 保持。
+CodeBuddy 的逐模型/旧 Session 档位扩展 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`；
+消息强度扩展 `model_metadata_uses_frozen_options_and_default_only_observation`。新增独立 Rust 测试函数为零，
+仅使用临时静态文件和现有纯函数/Probe future，不建立数据库或真实 Runtime fixture。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib grouped_acp_models`、
+`cargo test -p rovai-core --features extended-tests --lib identity_checked_probe` 与
+`cargo test -p rovai-core --lib read_model::message_model::`；Windows 额外运行
+`cargo test -p rovai-core --lib windows_command_shim_content_changes_compatibility_fingerprint`。
+
 `runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_complete_options`
 拥有 MiniMax 的新健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
 目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功

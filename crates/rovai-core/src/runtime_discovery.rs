@@ -3277,6 +3277,78 @@ mod windows_tests {
             let second = executable_fingerprint(&shim).unwrap();
             assert_ne!(first, second, "{extension} content must fence snapshots");
         }
+        for pnpm in [false, true] {
+            let package_root = root.join(if pnpm { "pnpm" } else { "npm" });
+            let (shim, manifest) =
+                crate::runtime_discovery_windows::tests::node_package_shim(&package_root, pnpm);
+            let search = test_search(1, Vec::new());
+            let candidates = || {
+                search.candidates_with_override(
+                    AdapterKind::CodebuddyCli,
+                    std::iter::empty(),
+                    Some(shim.clone()),
+                )
+            };
+            let (first, verified) = discover_runtime_entry_from_candidates(
+                AdapterKind::CodebuddyCli,
+                &search,
+                candidates(),
+                None,
+            );
+            let verified = verified.unwrap();
+            let previous_identity = verified.executable_file_identity().clone();
+            let previous_fingerprint = first.executable_fingerprint.clone().unwrap();
+            assert!(verified.is_current());
+            assert_eq!(
+                first.executable_path.as_deref(),
+                Some(
+                    runtime_visible_path(shim.canonicalize().unwrap())
+                        .to_str()
+                        .unwrap()
+                )
+            );
+            let upgraded = fs::read_to_string(&manifest)
+                .unwrap()
+                .replace("1.0.0", "2.0.0");
+            fs::write(&manifest, &upgraded).unwrap();
+            assert_eq!(
+                crate::agent_runtime_adapter::observe_executable_file_identity(&shim).unwrap(),
+                previous_identity
+            );
+            assert!(
+                !verified.is_current(),
+                "package-only updates must fence delayed discovery"
+            );
+            let (updated, current) = discover_runtime_entry_from_candidates(
+                AdapterKind::CodebuddyCli,
+                &search,
+                candidates(),
+                Some((
+                    first.executable_path.as_deref().unwrap(),
+                    &previous_fingerprint,
+                    &previous_identity,
+                )),
+            );
+            assert_ne!(updated.executable_fingerprint, first.executable_fingerprint);
+            assert!(current.unwrap().is_current());
+            let (stable, _) = discover_runtime_entry_from_candidates(
+                AdapterKind::CodebuddyCli,
+                &search,
+                candidates(),
+                None,
+            );
+            assert_eq!(
+                stable.executable_fingerprint,
+                updated.executable_fingerprint
+            );
+            fs::write(&manifest, "invalid manifest").unwrap();
+            assert!(executable_fingerprint(&shim).is_err());
+            fs::write(&manifest, upgraded.replace("bin/codebuddy", "bin/other")).unwrap();
+            assert!(
+                executable_fingerprint(&shim).is_err(),
+                "declared bin must match the wrapper target"
+            );
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

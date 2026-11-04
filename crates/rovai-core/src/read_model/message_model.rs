@@ -75,6 +75,8 @@ pub(super) fn project_model(
         "effort"
     } else if adapter_kind == "pi" {
         "thinking_level"
+    } else if adapter_kind == "codebuddy-cli" {
+        "thought_level"
     } else {
         "reasoning_effort"
     };
@@ -121,6 +123,13 @@ mod tests {
                 None,
                 Some("claude-model"),
                 Some("max"),
+            ),
+            (
+                "codebuddy-cli",
+                json!({"source":"explicit","modelId":"codebuddy-model","options":{"thought_level":"high","reasoning_effort":"wrong-option"}}),
+                None,
+                Some("codebuddy-model"),
+                Some("high"),
             ),
             (
                 "codex-cli",

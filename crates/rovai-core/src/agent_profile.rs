@@ -1131,13 +1131,13 @@ impl VerifiedDiscoveredRuntimeEntry {
     }
 
     pub fn is_current(&self) -> bool {
-        crate::agent_runtime_adapter::observe_executable_file_identity(Path::new(
-            &self.entry.executable_path,
-        ))
-        .is_ok_and(|identity| identity == self.identity)
-            && crate::runtime_discovery::entrypoint_locator_identity_is_current(
-                self.entry.entrypoint_locator_identity.as_ref(),
-            )
+        crate::agent_runtime_adapter::executable_identity_is_current(
+            Path::new(&self.entry.executable_path),
+            &self.identity,
+            &self.entry.executable_fingerprint,
+        ) && crate::runtime_discovery::entrypoint_locator_identity_is_current(
+            self.entry.entrypoint_locator_identity.as_ref(),
+        )
     }
 
     /// Static discovery performs one stable read, or reuses the identity already
@@ -1149,24 +1149,19 @@ impl VerifiedDiscoveredRuntimeEntry {
         entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
         previous: Option<(&str, &ExecutableFileIdentity)>,
     ) -> Result<Self> {
-        use crate::agent_runtime_adapter::{
-            executable_fingerprint, observe_executable_file_identity,
-        };
+        use crate::agent_runtime_adapter::{executable_fingerprint, observe_executable_identity};
         let path = Path::new(&executable_path);
-        let before = observe_executable_file_identity(path)?;
-        // Windows command shims retain their full dependency verification.
-        let reusable = !path.extension().is_some_and(|extension| {
-            cfg!(windows)
-                && matches!(
-                    extension.to_str().map(str::to_ascii_lowercase).as_deref(),
-                    Some("cmd" | "bat")
-                )
-        });
-        let fingerprint = match previous.filter(|(_, identity)| reusable && *identity == &before) {
-            Some((fingerprint, _)) => fingerprint.to_owned(),
-            None => executable_fingerprint(path)?,
+        let before = observe_executable_identity(path)?;
+        // Dependency-bearing entries always reuse the freshly captured digest,
+        // never just their unchanged wrapper metadata.
+        let fingerprint = match before.dependency_fingerprint.as_ref() {
+            Some(fingerprint) => fingerprint.clone(),
+            None => match previous.filter(|(_, identity)| *identity == &before.file_identity) {
+                Some((fingerprint, _)) => fingerprint.to_owned(),
+                None => executable_fingerprint(path)?,
+            },
         };
-        let after = observe_executable_file_identity(path)?;
+        let after = observe_executable_identity(path)?;
         anyhow::ensure!(
             before == after,
             "Runtime entry changed during installation discovery"
@@ -1185,7 +1180,7 @@ impl VerifiedDiscoveredRuntimeEntry {
                 executable_fingerprint: fingerprint,
                 entrypoint_locator_identity,
             },
-            identity: after,
+            identity: after.file_identity,
         })
     }
 }

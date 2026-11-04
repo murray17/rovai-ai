@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-member-identity
 status: accepted
-last_updated: 2026-11-03
+last_updated: 2026-11-04
 ---
 
 # 队员身份与图像
@@ -89,6 +89,10 @@ GIF 保持动画；各 `MemberAvatar` 用同一取景区域显示原动画。旧
 
 Pi 的可调模型显示“思考强度”与“跟随 Pi 原生设置”；无覆盖且已知只有 off/空档位或能力未知时隐藏字段。
 清除只删除 override，不重置 Session 原生值。Pi 目录按独立观察身份展示，不受旧健康失败限制；切模不发起逐模型探测。
+
+CodeBuddy 的“推理强度”使用原生 `thought_level`，候选值来自 Core 的该模型选项，沿用现有选择控件。
+没有候选但有已存值时仍可显示和清除；目录更新不覆盖草稿，摘要与消息强度显示使用同一键。
+原生响应归属与兼容规则见 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#codebuddy-原生档位)。
 
 目录缓存状态沿用 Core 投影，Renderer 不自行计算 TTL。同一环境和身份的过期目录仍可用于选择。
 读取失败显示“模型与参数尚未核对”，保留当前模型、参数与有效缓存；未枚举的已存值显示“尚未核对 · 值”，

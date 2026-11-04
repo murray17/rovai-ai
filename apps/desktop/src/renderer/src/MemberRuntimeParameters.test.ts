@@ -336,6 +336,21 @@ describe('member runtime parameters', () => {
     expect(markup).toContain(`aria-label="${label}，${value}，推荐"`)
   })
 
+  it('renders CodeBuddy native thought levels and preserves a saved value when options are unavailable', () => {
+    const installation = runtimeInstallation('codebuddy-cli')
+    const draft = {
+      ...draftFromDefaults(installation.memberRuntimeDefaults!),
+      model: { mode: 'explicit' as const, modelId: 'runtime/model', options: { thought_level: 'high' } }
+    }
+    const render = () => renderToStaticMarkup(createElement(MemberRuntimeParameters, {
+      adapterKind: 'codebuddy-cli', installation, draft, disabled: false, onChange: () => undefined
+    }))
+    expect(render()).toContain('aria-label="推理强度，High"')
+    installation.snapshot!.models[0].options = []
+    expect(render()).toContain('尚未核对 · high')
+    expect(draft.model.options).toEqual({ thought_level: 'high' })
+  })
+
   it('does not present an approval mode for native Pi tool execution', () => {
     const installation = runtimeInstallation('pi')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
@@ -510,7 +525,7 @@ function runtimeInstallation(kind: AdapterKind): AdapterInstallation {
         options: kind === 'kiro-cli' || kind === 'antigravity-app'
           ? []
           : [{
-              key: kind === 'claude-code-cli' ? 'effort' : 'reasoning_effort',
+              key: kind === 'claude-code-cli' ? 'effort' : kind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort',
               label: 'Effort',
               valueType: 'enum',
               values: [{ value: 'high', label: 'High' }],
