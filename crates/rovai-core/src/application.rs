@@ -31739,6 +31739,42 @@ done
             .await;
             assert!(matches!(replaced, IdentityCheckedProbe::Superseded));
             assert_eq!(observe_executable_file_identity(&shim).unwrap(), observed);
+
+            // The outer check captures a candidate before entering the Probe
+            // wrapper. A missing initial manifest must not let a recovered,
+            // different package cross that candidate's final verification.
+            let candidate = crate::agent_profile::VerifiedDiscoveredRuntimeEntry::discover(
+                AdapterKind::CodebuddyCli,
+                canonical_runtime_path(&shim).to_string_lossy().into_owned(),
+                InstallationSource::Manual,
+                None,
+                None,
+            )
+            .unwrap();
+            let original_package = std::fs::read_to_string(&manifest).unwrap();
+            for package_changed in [false, true] {
+                std::fs::remove_file(&manifest).unwrap();
+                assert!(observe_executable_identity(&shim).is_err());
+                let recovered = run_identity_checked_probe(&shim, async {
+                    let restored = if package_changed {
+                        original_package.replace("2.0.0", "3.0.0")
+                    } else {
+                        original_package.clone()
+                    };
+                    std::fs::write(&manifest, restored).unwrap();
+                    Ok::<_, anyhow::Error>("recovered-probe-success")
+                })
+                .await;
+                assert!(matches!(recovered, IdentityCheckedProbe::Stable(Ok(_))));
+                // This is the same verification called by verify_runtime_entry
+                // before any successful Probe is allowed to reach SQL commit.
+                let final_entry = candidate
+                    .entry()
+                    .clone()
+                    .verify(Some(candidate.executable_file_identity()));
+                assert_eq!(final_entry.is_ok(), !package_changed);
+                assert_eq!(observe_executable_file_identity(&shim).unwrap(), observed);
+            }
         }
 
         std::fs::remove_dir_all(directory).unwrap();
