@@ -345,7 +345,8 @@ app
       'runtime menu has every admitted product icon and keyboard focus return',
       async () => {
         await click(`${active}[data-member-runtime-select]`)
-        const menuCount = await run('window.memberFixture.installations.length + 1')
+        // This fixture has no platform admission, so Hermes stays undisclosed.
+        const menuCount = await run('window.memberFixture.installations.filter(item => item.adapterKind !== "hermes-cli").length + 1')
         await wait(
           `document.querySelectorAll(".member-runtime-menu-item").length === ${menuCount}`
         )
@@ -355,6 +356,7 @@ app
         assert.equal(labels[0], '暂不配置')
         assert.equal(labels.at(-1), 'PI')
         assert.ok(!labels.includes('Cursor Agent'))
+        assert.ok(!labels.includes('Hermes Agent'))
         assert.equal(
           await run(
             'document.querySelectorAll(".member-runtime-menu-item .member-runtime-glyph").length'
