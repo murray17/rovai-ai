@@ -1,6 +1,6 @@
 import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { exportMessageMarkdown, type MessageExportEntry } from './message-export'
-import { nativeSkillDiagnosticText } from './native-skill-diagnostics'
+import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
 import { isReferenceAtom, isReferenceSegment, projectReference } from './thread-reference'
 import { ReplyDetails } from './ReplyDetails'
@@ -6584,7 +6584,7 @@ export function ThreadWorkspace({
               pendingInviteIds={pendingInviteIds}
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
-              skillCatalogErrors={[...composerSkillCatalog.candidates.errors, ...(composerSkillCatalog.candidates.diagnostics ?? []).map(nativeSkillDiagnosticText)]}
+              skillCatalogErrors={[...composerSkillCatalog.candidates.errors, ...nativeSkillCatalogNotices(composerSkillCatalog.candidates.diagnostics ?? [])]}
               skillCatalogRefreshFailed={composerSkillCatalog.refreshFailed}
               skillCatalogRefreshing={skillCatalogRefreshing}
               onNeedSkills={() => refreshSkillCatalogRef.current?.()}

@@ -49,7 +49,8 @@ let nativeContent: string | null = null
 let nativeListHold: { wait: Promise<void>; release: () => void } | null = null
 let releaseNativeList: (() => void) | undefined
 let copiedDiagnostic = ''
-Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (value: string) => { copiedDiagnostic = value } } })
+let clipboardFailure = false
+Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (value: string) => { if (clipboardFailure) throw new Error('Clipboard denied'); copiedDiagnostic = value } } })
 
 const longPreviewPath = 'references/project-specific-workflows/acceptance-and-review/long-file-name-long-file-name-long-file-name-checklist.md'
 const previewPaths = [
@@ -321,6 +322,7 @@ Object.assign(window, {
     setNativeDiagnostics: (value: NativeSkillDiagnostic[]) => { nativeDiagnostics = value },
     setNativeContent: (value: string | null) => { nativeContent = value },
     copiedDiagnostic: () => copiedDiagnostic,
+    failClipboard: (value: boolean) => { clipboardFailure = value },
     holdNativeList: () => {
       let release = () => {}
       const wait = new Promise<void>((resolve) => { release = resolve })

@@ -456,13 +456,27 @@ impl NativeSkillDiscoveryRequest<'_> {
                 });
             }
         }
+        let mut disabled_ids = HashSet::new();
         scan.skills.retain(|skill| {
             let path = Path::new(&skill.canonical_path);
-            !disabled_names.contains(&skill.name)
+            let enabled = !disabled_names.contains(&skill.name)
                 && !disabled_paths.contains(path)
                 && path
                     .parent()
-                    .is_none_or(|folder| !disabled_paths.contains(folder))
+                    .is_none_or(|folder| !disabled_paths.contains(folder));
+            if !enabled {
+                disabled_ids.insert(skill.id.clone());
+            }
+            enabled
+        });
+        // Recoverable metadata of explicitly disabled entries is not actionable;
+        // read failures stay reported because they never produced an entry.
+        scan.diagnostics.retain(|diagnostic| {
+            diagnostic.kind != NativeSkillDiagnosticKind::Metadata
+                || diagnostic
+                    .skill_id
+                    .as_ref()
+                    .is_none_or(|id| !disabled_ids.contains(id))
         });
         scan.skills.sort_by(|left, right| {
             left.name
@@ -1585,6 +1599,54 @@ mod tests {
                 .len(),
             1
         );
+
+        // A disabled entry's recoverable metadata is not reported; a broken
+        // disable config and real read failures still are.
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: review\ndescription: [list]\n---\nBody\n",
+        )
+        .unwrap();
+        let blocked = home.join(".agents/skills/blocked");
+        fs::create_dir_all(&blocked).unwrap();
+        fs::create_dir(blocked.join("SKILL.md")).unwrap();
+        let enabled = discovery
+            .discover(AdapterKind::CodexCli, None, true, true, &configuration)
+            .unwrap();
+        assert_eq!(enabled.skills.len(), 1);
+        assert!(enabled.diagnostics.iter().any(|item| {
+            item.kind == NativeSkillDiagnosticKind::Metadata
+                && item.skill_id.as_deref() == Some(enabled.skills[0].id.as_str())
+        }));
+        fs::write(
+            codex_home.join("config.toml"),
+            "[[skills.config]]\nname = \"review\"\nenabled = false\n",
+        )
+        .unwrap();
+        let disabled = discovery
+            .discover(AdapterKind::CodexCli, None, true, false, &configuration)
+            .unwrap();
+        assert!(disabled.skills.is_empty());
+        assert!(
+            !disabled
+                .diagnostics
+                .iter()
+                .any(|item| item.kind == NativeSkillDiagnosticKind::Metadata)
+        );
+        assert!(disabled.diagnostics.iter().any(|item| {
+            item.kind == NativeSkillDiagnosticKind::FileRead
+                && item.path.ends_with("blocked/SKILL.md")
+        }));
+        fs::write(codex_home.join("config.toml"), "[skills\n").unwrap();
+        let broken = discovery
+            .discover(AdapterKind::CodexCli, None, true, false, &configuration)
+            .unwrap();
+        assert_eq!(broken.skills.len(), 1);
+        assert!(broken.diagnostics.iter().any(|item| {
+            item.kind == NativeSkillDiagnosticKind::Metadata
+                && item.skill_id.is_none()
+                && item.path.ends_with("config.toml")
+        }));
         fs::remove_dir_all(fixture).unwrap();
     }
 
