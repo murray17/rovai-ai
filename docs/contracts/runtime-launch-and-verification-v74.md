@@ -4,7 +4,7 @@ name: Runtime Launch and Verification
 version: v74
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-03
+last_updated: 2026-11-04
 ---
 
 # Runtime Launch and Verification v74
@@ -24,6 +24,27 @@ last_updated: 2026-11-03
 完整响应无法读取、没有可用目录或查询失败时，不推进目录成功时间，不清空已有有效目录、模型或参数。
 沿用现有缓存身份与失效规则；同一身份下的健康检查即使没有目录也不覆盖有效目录。读取目录的成功
 与原生 Session 可用分别判断，不凭目录缺少默认项或当前模型否定可用 Session。
+
+### CodeBuddy 原生档位
+
+CodeBuddy 模型选项保留原生键 `thought_level`。逐模型 `_meta.effortOptions` 的 `value` 为保存和下发值，
+`name` 为显示名称；明确的空列表不以其他来源补齐。该字段缺少时，只为 Session 当前选中的模型提取
+已有 `configOptions.id=thought_level`，不得复制到其他模型。没有数据不猜测，也不补入默认覆盖值。
+此转换不新增 Probe 或模型切换；已保存值沿用现有保留和透传语义。队员摘要、消息投影与 Renderer
+一致读取该原生键，公开消息字段仍为 `reasoningEffort`，不改变已有配置或数据库 shape。
+
+## Windows 标准包装入口的包身份
+
+已明确识别的标准 npm/pnpm `.cmd` 在原启动脚本与系统解释器身份上追加目标包的规范路径和有界
+`package.json` 内容摘要，并核对包声明 bin 与脚本目标一致。只读取静态文件，不绕过原 `.cmd` 启动，
+不从 manifest 代替 CLI 自报版本，也不扫描整个 node_modules。此身份覆盖正常包版本/manifest 与路径
+变化，不声明覆盖同一 manifest 下任意内部文件的替换。
+
+采集、快速复用判断和发现/检查/目录发布前复核使用同一包身份；不能因 `.cmd` 属性未变跳过依赖核验。
+包在操作期间变化或无法复核时沿用既有 Superseded/错误路径，不把旧结果归给新包。未知自定义
+`.cmd/.bat` 保持原行为；已识别标准包的身份读取失败不得静默回退到旧弱指纹证明未变。
+不新增检测触发、进程、后台任务、缓存、数据表、全局运行门禁或健康 Warm Host 退役策略；
+指纹变化后的版本补读和能力/目录失效继续遵循原规则。Codex 的原生目标解析保持独立。
 
 ## 明确配置由原生 Runtime 接受
 

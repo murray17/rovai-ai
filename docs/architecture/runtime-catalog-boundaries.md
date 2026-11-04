@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-01
+last_updated: 2026-11-04
 ---
 
 # Runtime Catalog Boundaries
@@ -240,6 +240,10 @@ Windows 沿用 Registry／PATH 规则；只采集 PATH，失败仍走既有回�
 手动 rescan 保留未知或变化程序的有界版本补读，不执行认证或协议深检；单项检查只检查选中的 Runtime。
 发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
 安装记录不伪造 Ready、认证或能力；旧健康证据只供主动诊断和模型 Picker 参考，已知版本的展示复用单独判断。
+
+Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统一采集，发现、检查和目录发布前复核
+复用同一证据。包变化沿既有失效与 Superseded 路径处理；具体字段与边界见
+[Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#windows-标准包装入口的包身份)。
 
 已知程序版本复用现有快照保存，独立于健康状态：本次静态发现未读取版本或版本读取失败时，Core
 仅在 Installation 路径与当前发现一致、非空 executable fingerprint 匹配时复用已知版本。
@@ -634,6 +638,8 @@ Host＋通用＋队员环境按 [v68](../contracts/runtime-launch-and-verificati
 当前 Host。会话重置通过既有 native binding 身份隔离，原生配置与协议兼容判断继续保留，不新增环境摘要。
 CodeBuddy 的显式模型通过 Host 启动参数 `--model` 选择，因此它参与进程兼容；Runtime-default
 不传该参数，Session/Turn 选项变化不因完整 Run 配置摘要而重启 Host。
+CodeBuddy 的原生档位在现有目录、编辑器、参数透传和消息投影间使用一致的 `thought_level`；
+逐模型来源和旧版 Session 响应的兼容边界见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#codebuddy-原生档位)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否

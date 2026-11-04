@@ -153,6 +153,28 @@ pub struct ExecutableFileIdentity {
     pub file_id: Option<String>,
 }
 
+/// One observation for discovery/probe fencing. Ordinary files retain their
+/// metadata fast path; command shims also bind their statically read dependencies.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ExecutableIdentityObservation {
+    pub(crate) file_identity: ExecutableFileIdentity,
+    pub(crate) dependency_fingerprint: Option<String>,
+}
+
+pub(crate) fn executable_identity_is_current(
+    path: &Path,
+    expected_file: &ExecutableFileIdentity,
+    expected_fingerprint: &str,
+) -> bool {
+    observe_executable_identity(path).is_ok_and(|observed| {
+        observed.file_identity == *expected_file
+            && observed
+                .dependency_fingerprint
+                .as_deref()
+                .is_none_or(|fingerprint| fingerprint == expected_fingerprint)
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecutableIntegrityStatus {
     Unchanged,
@@ -161,6 +183,10 @@ pub enum ExecutableIntegrityStatus {
 }
 
 pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIdentity> {
+    Ok(observe_executable_identity(path)?.file_identity)
+}
+
+pub(crate) fn observe_executable_identity(path: &Path) -> Result<ExecutableIdentityObservation> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let file = File::open(&canonical)
         .with_context(|| format!("failed to open {}", canonical.display()))?;
@@ -184,9 +210,13 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
         );
     }
     #[cfg(windows)]
-    if is_command_shim {
-        capture_windows_command_shim(&canonical)?;
-    }
+    let dependency_fingerprint = if is_command_shim {
+        Some(capture_windows_command_shim(&canonical)?.compatibility_fingerprint())
+    } else {
+        None
+    };
+    #[cfg(not(windows))]
+    let dependency_fingerprint = None;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -259,10 +289,13 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
     } else {
         file_id
     };
-    Ok(ExecutableFileIdentity {
-        byte_size: metadata.len(),
-        modified_at_unix_nanos,
-        file_id,
+    Ok(ExecutableIdentityObservation {
+        file_identity: ExecutableFileIdentity {
+            byte_size: metadata.len(),
+            modified_at_unix_nanos,
+            file_id,
+        },
+        dependency_fingerprint,
     })
 }
 
@@ -306,20 +339,23 @@ pub fn verify_executable_integrity(
     verified_identity: Option<&ExecutableFileIdentity>,
     expected_fingerprint: &str,
 ) -> Result<ExecutableIntegrityStatus> {
-    let observed = observe_executable_file_identity(path)?;
-    #[cfg(windows)]
-    let requires_full_dependency_check = command_shim_extension(path).is_some();
-    #[cfg(not(windows))]
-    let requires_full_dependency_check = false;
-    if !requires_full_dependency_check && verified_identity == Some(&observed) {
+    let observed = observe_executable_identity(path)?;
+    if observed.dependency_fingerprint.is_none()
+        && verified_identity == Some(&observed.file_identity)
+    {
         return Ok(ExecutableIntegrityStatus::Unchanged);
     }
-    let current_fingerprint = executable_fingerprint(path)?;
-    let observed_after = observe_executable_file_identity(path)?;
+    let current_fingerprint = match observed.dependency_fingerprint.as_deref() {
+        Some(fingerprint) => fingerprint.to_owned(),
+        None => executable_fingerprint(path)?,
+    };
+    let observed_after = observe_executable_identity(path)?;
     if observed_after != observed || current_fingerprint != expected_fingerprint {
         return Ok(ExecutableIntegrityStatus::Changed);
     }
-    Ok(ExecutableIntegrityStatus::Reverified(observed_after))
+    Ok(ExecutableIntegrityStatus::Reverified(
+        observed_after.file_identity,
+    ))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2959,6 +2995,40 @@ pub fn acp_model_catalog_for_adapter(
                 .then_with(|| left.display_name.cmp(&right.display_name))
         });
     }
+    if adapter_kind == AdapterKind::CodebuddyCli {
+        let current = acp_runtime_model_id_from_session(session_result);
+        let session_option = session_result["configOptions"]
+            .as_array()
+            .and_then(|options| {
+                options
+                    .iter()
+                    .find(|option| option["id"] == "thought_level")
+            })
+            .and_then(acp_model_option)
+            .map(|mut option| {
+                option.default_value = None;
+                option
+            });
+        for model in &mut models {
+            // Newer CodeBuddy reports per-model efforts. Older Sessions only
+            // describe the selected model; never broadcast that option catalog.
+            let advertised = model
+                .runtime_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.get("effortOptions"))
+                .and_then(Value::as_array);
+            let option = if let Some(choices) = advertised {
+                acp_model_option(&json!({
+                    "id": "thought_level", "name": "Deep Thinking", "options": choices,
+                }))
+            } else if current.as_deref() == Some(model.id.as_str()) {
+                session_option.clone()
+            } else {
+                None
+            };
+            model.options = option.into_iter().collect();
+        }
+    }
     Ok(normalize_model_catalog(models))
 }
 
@@ -4323,6 +4393,50 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|model| model.is_default)
+        );
+        let native = json!({"models":{"currentModelId":"current","availableModels":[
+            {"modelId":"current","_meta":{"effortOptions":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}},
+            {"modelId":"other","_meta":{"effortOptions":[{"value":"max","name":"Max"}]}},
+            {"modelId":"unknown"}
+        ]},"configOptions":[{"id":"thought_level","currentValue":"high","options":[{"value":"enabled","name":"On (default)"},{"value":"disabled","name":"Off"}]}]});
+        let catalog = acp_model_catalog_for_adapter(AdapterKind::CodebuddyCli, &native).unwrap();
+        let current = catalog.iter().find(|model| model.id == "current").unwrap();
+        assert_eq!(current.options[0].key, "thought_level");
+        assert_eq!(
+            current.options[0].values,
+            [choice("low", "Low"), choice("high", "High")]
+        );
+        assert_eq!(current.options[0].default_value, None);
+        assert_eq!(
+            catalog
+                .iter()
+                .find(|model| model.id == "other")
+                .unwrap()
+                .options[0]
+                .values,
+            [choice("max", "Max")]
+        );
+        assert!(
+            catalog
+                .iter()
+                .find(|model| model.id == "unknown")
+                .unwrap()
+                .options
+                .is_empty()
+        );
+        let mut legacy = native.clone();
+        legacy["models"]["availableModels"][0]["_meta"] = json!({});
+        let catalog = acp_model_catalog_for_adapter(AdapterKind::CodebuddyCli, &legacy).unwrap();
+        assert_eq!(
+            catalog[0].options[0].values,
+            [choice("enabled", "On (default)"), choice("disabled", "Off")]
+        );
+        assert_eq!(catalog[0].options[0].default_value, None);
+        legacy["models"]["availableModels"][0]["_meta"]["effortOptions"] = json!([]);
+        assert!(
+            acp_model_catalog_for_adapter(AdapterKind::CodebuddyCli, &legacy).unwrap()[0]
+                .options
+                .is_empty()
         );
     }
 

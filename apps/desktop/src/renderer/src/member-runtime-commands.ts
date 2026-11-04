@@ -36,7 +36,7 @@ export async function submitMemberRuntimeConfiguration(
 export class MemberRuntimeCommandError extends Error {
   constructor(readonly code: string, payload?: StoredCommandResult['payload']) {
     const option = payload ? stringField(payload, 'option') : null
-    const label = option && ({ reasoning_effort: '推理强度', effort: '推理强度', thinking_level: '思考深度' } as Record<string, string>)[option]
+    const label = option && ({ reasoning_effort: '推理强度', thought_level: '推理强度', effort: '推理强度', thinking_level: '思考深度' } as Record<string, string>)[option]
     super(label && (code === 'runtime_model_option_invalid' || code === 'runtime_model_option_unknown')
       ? uiAttribute("所选模型不支持当前「{0}」设置，请调整该参数。填写内容已保留。", uiAttribute(label))
       : commandCodeLabel(code))

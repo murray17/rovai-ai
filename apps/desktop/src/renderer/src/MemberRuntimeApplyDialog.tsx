@@ -30,7 +30,7 @@ const permissionLabels: Record<string, string> = {
   sandbox: '终端沙箱', dangerously_skip_permissions: '自动通过权限请求'
 }
 const optionLabels: Record<string, string> = {
-  reasoning_effort: '推理强度', effort: '思考强度', thinking_level: '思考深度'
+  reasoning_effort: '推理强度', thought_level: '推理强度', effort: '思考强度', thinking_level: '思考深度'
 }
 const liveMembers = (members: AgentProfile[], sourceId: string): AgentProfile[] =>
   members.filter(member => member.agentId !== sourceId && member.presence !== 'removed' && member.removedAt === null)

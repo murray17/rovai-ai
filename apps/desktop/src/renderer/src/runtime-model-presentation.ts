@@ -53,7 +53,8 @@ export function memberRuntimeConfigurationPresentation(
   const model = modelDescriptor?.displayName.trim() || modelSelection.modelId
   const effortKey = configuration.adapterKind === 'claude-code-cli'
     ? 'effort'
-    : configuration.adapterKind === 'pi' ? 'thinking_level' : 'reasoning_effort'
+    : configuration.adapterKind === 'pi' ? 'thinking_level'
+      : configuration.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
   const effortDescriptor = modelDescriptor?.options.find((option) => option.key === effortKey) ?? null
   const rawEffort = modelSelection.options[effortKey]
   const effort = effortDescriptor || typeof rawEffort === 'string'
@@ -92,7 +93,8 @@ export function messageRuntimeModelPresentation(
     ? installation.snapshot?.models.find(candidate => candidate.id === model.modelId)
     : null
   const effortKey = model.adapterKind === 'claude-code-cli' ? 'effort'
-    : model.adapterKind === 'pi' ? 'thinking_level' : 'reasoning_effort'
+    : model.adapterKind === 'pi' ? 'thinking_level'
+      : model.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
   const choices = descriptor?.options.find(option => option.key === effortKey)?.values ?? []
   return {
     model: descriptor?.displayName.trim() || model.modelId || uiAttribute('智能体默认'),

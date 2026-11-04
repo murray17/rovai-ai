@@ -80,7 +80,7 @@ use rovai_core::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         PiProbeObservation, executable_fingerprint as fingerprint_executable,
-        observe_executable_file_identity, verify_executable_integrity,
+        executable_identity_is_current, observe_executable_identity, verify_executable_integrity,
     },
     authority_migration::{
         AuthorityMigrationProgress, AuthorityMigrationRunner, trace_startup_stage,
@@ -2175,10 +2175,10 @@ async fn run_identity_checked_probe<T>(
     executable_path: &Path,
     probe: impl Future<Output = Result<T>>,
 ) -> IdentityCheckedProbe<T> {
-    let before = observe_executable_file_identity(executable_path).ok();
+    let before = observe_executable_identity(executable_path).ok();
     let result = probe.await;
     let superseded = before.as_ref().is_some_and(|before| {
-        observe_executable_file_identity(executable_path)
+        observe_executable_identity(executable_path)
             .map(|after| after != *before)
             .unwrap_or(true)
     });
@@ -4326,13 +4326,19 @@ impl Core {
         // file work off the async executor and outside the global database lock.
         let executable_path = installation.executable_path.clone();
         let locator = target.locator.clone();
+        let expected_identity = recorded_identity.clone();
         let observed = tokio::task::spawn_blocking(move || {
             if !rovai_core::runtime_discovery::entrypoint_locator_identity_is_current(
                 locator.as_ref(),
             ) {
                 return None;
             }
-            observe_executable_file_identity(Path::new(&executable_path)).ok()
+            executable_identity_is_current(
+                Path::new(&executable_path),
+                &expected_identity.1,
+                &expected_identity.0,
+            )
+            .then_some(expected_identity.1)
         })
         .await
         .context("Runtime supervisor file identity worker failed")?;
@@ -4935,8 +4941,7 @@ impl Core {
             health::refresh_model_catalog(&path, kind).await
         })
         .await;
-        let identity_current = observe_executable_file_identity(&path).ok().as_ref()
-            == Some(&identity)
+        let identity_current = executable_identity_is_current(&path, &identity, fingerprint)
             && rovai_core::runtime_discovery::entrypoint_locator_identity_is_current(
                 observation.entrypoint_locator_identity.as_ref(),
             );
@@ -5074,7 +5079,7 @@ impl Core {
         let Some(_update) = self.runtime_check_update_guard(&search).await else {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         };
-        if observe_executable_file_identity(path).ok().as_ref() != Some(&identity) {
+        if !executable_identity_is_current(path, &identity, fingerprint) {
             let mut database = self.database.lock().await;
             service.mark_runtime_integrity_changed(
                 &mut database,
@@ -28374,6 +28379,8 @@ fn parse_mcp_config_path_from(args: impl IntoIterator<Item = String>) -> Result<
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests {
     use super::*;
+    #[cfg(any(windows, feature = "slow-tests"))]
+    use crate::agent_runtime_adapter::observe_executable_file_identity;
     #[cfg(feature = "slow-tests")]
     use std::fs;
 
@@ -31631,13 +31638,14 @@ done
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn identity_checked_probe_discards_updated_results_and_keeps_stable_errors() {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
 
         fn write_executable(path: &Path, body: &[u8]) {
             std::fs::write(path, body).unwrap();
+            #[cfg(unix)]
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
 
@@ -31646,7 +31654,11 @@ done
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
-        let executable = directory.join("fake-runtime");
+        let executable = directory.join(if cfg!(windows) {
+            "fake-runtime.exe"
+        } else {
+            "fake-runtime"
+        });
         write_executable(&executable, b"#!/bin/sh\nexit 0\n");
 
         let replacement = directory.join("replacement");
@@ -31711,6 +31723,23 @@ done
             Some(now + RUNTIME_PROBE_UPDATE_RETRY_DELAY)
         );
         assert_eq!(runtime_probe_update_retry_at(full_deadline, now), None);
+
+        #[cfg(windows)]
+        {
+            let (shim, manifest) =
+                crate::runtime_discovery_windows::tests::node_package_shim(&directory, false);
+            let observed = observe_executable_file_identity(&shim).unwrap();
+            let replaced = run_identity_checked_probe(&shim, async {
+                let package = std::fs::read_to_string(&manifest)
+                    .unwrap()
+                    .replace("1.0.0", "2.0.0");
+                std::fs::write(&manifest, package).unwrap();
+                Ok::<_, anyhow::Error>("obsolete-package-result")
+            })
+            .await;
+            assert!(matches!(replaced, IdentityCheckedProbe::Superseded));
+            assert_eq!(observe_executable_file_identity(&shim).unwrap(), observed);
+        }
 
         std::fs::remove_dir_all(directory).unwrap();
     }
