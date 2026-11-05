@@ -1319,6 +1319,7 @@ impl AcpRpcError {
                 data.as_str()
                     .or_else(|| data.get("error").and_then(Value::as_str))
                     .or_else(|| data.get("details").and_then(Value::as_str))
+                    .or_else(|| data.get("message").and_then(Value::as_str))
             })
             .and_then(|detail| sanitize_public_runtime_error(detail, &[]))
             .filter(|detail| detail != &message);
@@ -1364,6 +1365,25 @@ impl AcpRpcError {
             message,
             provider_detail,
         }
+    }
+
+    pub(crate) fn from_prompt_result(kind: AdapterKind, result: &Value) -> Option<Self> {
+        if kind != AdapterKind::CodebuddyCli || result.get("stopReason")?.as_str()? != "refusal" {
+            return None;
+        }
+        // CodeBuddy wraps model-request errors in a successful ACP response.
+        // Read only its terminal error envelope, never arbitrary update metadata.
+        let raw = result
+            .pointer("/_meta/codebuddy.ai~1errorMessage")?
+            .as_str()?;
+        if raw.len() > 64 * 1024 {
+            return None;
+        }
+        let error: Value = serde_json::from_str(raw).ok()?;
+        if error.get("message")?.as_str()?.trim().is_empty() {
+            return None;
+        }
+        Some(Self::from_response(&error))
     }
 
     // Called only for a correlated session/resume or session/load response.
@@ -10227,8 +10247,52 @@ mod tests {
         );
 
         for data in [
+            json!({"details": "401 Invalid API key", "message": "shorter message"}),
+            json!({"message": "401 Invalid API key", "private": "must remain private"}),
+        ] {
+            let result = json!({
+                "stopReason": "refusal",
+                "_meta": {"codebuddy.ai/errorMessage": json!({
+                    "code": -32603, "message": "Internal error", "data": data
+                }).to_string()}
+            });
+            let error =
+                AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).unwrap();
+            assert_eq!(
+                error.diagnostic(),
+                "ACP error -32603: Internal error: 401 Invalid API key"
+            );
+            assert!(AcpRpcError::from_prompt_result(AdapterKind::TraeCnCli, &result).is_none());
+            for reason in ["end_turn", "cancelled", "unknown"] {
+                let mut result = result.clone();
+                result["stopReason"] = json!(reason);
+                assert!(
+                    AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).is_none()
+                );
+            }
+        }
+
+        for raw in [
+            Value::Null,
+            json!({"message": "not a serialized envelope"}),
+            json!("not JSON"),
+            json!("[]"),
+            json!(r#"{"message":null}"#),
+            json!(r#"{"message":"  "}"#),
+            json!(
+                json!({"message":"must remain private", "padding":" ".repeat(64 * 1024)})
+                    .to_string()
+            ),
+        ] {
+            let result = json!({"stopReason":"refusal", "_meta":{"codebuddy.ai/errorMessage":raw}});
+            assert!(AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).is_none());
+        }
+
+        for data in [
             json!("provider failed with api_key=must-not-leak"),
             json!({ "error": "provider failed with api_key=must-not-leak" }),
+            json!({ "details": "provider failed with api_key=must-not-leak" }),
+            json!({ "message": "provider failed with api_key=must-not-leak" }),
         ] {
             let redacted_detail = AcpRpcError::from_response(&json!({
                 "code": -32603,
@@ -10245,6 +10309,8 @@ mod tests {
             json!({ "detail": "must remain private" }),
             json!({ "error": { "message": "must remain private" } }),
             json!({ "error": ["must remain private"] }),
+            json!({ "message": { "error": "must remain private" } }),
+            json!({ "details": ["must remain private"] }),
             json!(["must remain private"]),
             json!(42),
             json!(false),

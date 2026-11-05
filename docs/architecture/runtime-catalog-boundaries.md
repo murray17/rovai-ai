@@ -346,11 +346,14 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 公开 detail 必须先脱敏、去控制字符并有界化，不能包含 Prompt、用户消息、Tool input 或完整 Tool output。
 
 ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界 message。通用 ACP Host 还可以从
-精确白名单标量路径提取 Provider detail；接受字符串 `error.data`，或对象中的字符串 `error.data.error`，
+精确白名单标量路径提取 Provider detail；依次接受字符串 `error.data`、`error.data.error`、
+`error.data.details`、`error.data.message`，
 并在进入诊断或公开 failure 前复用统一的路径、凭据、控制字符和长度清洗。其他对象字段、非字符串值及完整原始对象一律忽略，
 不能由各 Adapter 自行扩展或把原始 `error.data` 交给 Renderer。Prompt activity 与 matching response 已证明
 输入 accepted 时，公开 failure 的 retryable 必须为 false，不能用 Provider 可重试分类覆盖 Core 的防重放门禁。
-字段与历史读取规则见 [Runtime Launch v71](../contracts/runtime-launch-and-verification-v71.md)。
+CodeBuddy matching Prompt 的 `refusal` 可从原生 `_meta["codebuddy.ai/errorMessage"]` JSON 字符串
+提取同一错误封装，复用上述解析与公开 failure；成功与取消不使用这段元数据。
+字段与历史读取规则见 [Runtime Launch v76](../contracts/runtime-launch-and-verification-v76.md)。
 
 `runtime` 只表示 Runtime/Provider 明确报错；协议、参数和输出格式问题是 `compatibility`，executable/cwd/
 权限/附件目录问题是 `environment`，只有明确 Core 状态、持久化或配置生成证据才能是 `rovai`，否则为

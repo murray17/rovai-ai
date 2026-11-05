@@ -24988,6 +24988,10 @@ async fn persist_acp_prompt_completion(
     };
     let error_detail = response_error
         .map(str::to_string)
+        .or_else(|| {
+            acp::AcpRpcError::from_prompt_result(adapter_kind, params.get("result")?)
+                .map(|error| error.to_string())
+        })
         .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}"));
     let mut public_failure = (planned_outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(

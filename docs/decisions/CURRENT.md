@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-11-02
+last_updated: 2026-11-04
 ---
 
 # 当前规范与决定理由导航
@@ -47,6 +47,9 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 模型目录兼容与原生配置接受：当前规范为 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md)
 及[目录边界](../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实)；实施和验证见
 [当前版本记录](../versions/v1.72/implementation-plan.md#模型目录兼容与原生执行2026-10-29)。
+
+CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contracts/runtime-launch-and-verification-v76.md)、
+[公开 Runtime failure](../architecture/runtime-catalog-boundaries.md#内部诊断与公开-runtime-failure)。
 
 ## Public Thread 消息与多输入 AgentRun
 
