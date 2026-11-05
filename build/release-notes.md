@@ -1,27 +1,31 @@
-# Rovai AI v0.5.8
+# Rovai AI v0.5.9
 
 <!-- lang:zh-CN -->
 
-本次更新补齐 CodeBuddy 的推理强度设置，修复 Windows 下部分智能体升级后信息未更新、DeepSeek Harness 加载 MCP 时无法启动的问题，并调整本机 Skills 的异常提示。
+本次更新支持从侧栏导出完整会话，减少打开和切换会话时的查询开销，并修复执行状态显示和智能体收尾时的误判。
 
-感谢 @caoshuisi 在 Issue #997 中反馈智能体升级识别和 CodeBuddy 推理强度问题，以及 @arschlochnop 在 Issue #1007 中反馈 DeepSeek Harness 启动问题。
+感谢 @caoshuisi 在 Issue #1012 中反馈 Pi 执行结束后被误判为失败，以及 CodeBuddy 报错原因不明确的问题。
 
-- 【功能】**CodeBuddy 支持选择推理强度。** 在队员设置中，可根据所选模型提供的档位进行配置，队员摘要和消息中的强度显示同步更新。
-- 【修复】**修复 Windows 下部分智能体升级后仍沿用旧信息的问题。** 通过标准 npm、pnpm 入口安装的智能体，重新检测时可以正确识别程序包变化，避免因启动脚本未变而继续使用旧的模型与能力信息。
-- 【修复】**修复 DeepSeek Harness 启用原生 MCP 后无法启动的问题。** 适配新版加载接口，解决 DSH 0.2.0-rc.2 的初始化失败，同时保留对旧版接口的支持。
-- 【修复】**减少本机 Skills 扫描中的无效报错。** 目标已不存在的符号链接会自动跳过，不再提示文件读取失败；权限不足、循环链接等实际读取问题仍会提示。
-- 【交互】**调整 Skill 异常提示的显示位置。** 可正常使用的 Skill，其说明信息异常仅在详情中显示，减少列表和输入框选择器中的干扰；复制路径失败时，在按钮旁提示，已加载的正文仍可继续查看。
+- 【功能】**支持从侧栏导出完整会话。** 在会话菜单选择「导出会话」，无需先滚动加载历史消息，即可预览并保存为 HTML、PNG 或 Markdown。需要导出片段时可多选消息，选中文字后的浮条仅提供引用。
+- 【界面】**优化手机端的导出预览。** 长按会话可打开导出菜单，HTML 预览随屏幕宽度排版，底部按钮更便于触控。
+- 【性能】**减少打开和切换会话时对无关历史的扫描。** 执行数量、执行列表和文件变更按当前会话读取。部分旧版执行卡片及其文件变更会从公屏的相应列表中移除，历史消息和原始记录仍保存在数据库中。
+- 【修复】**重新执行后，消息回执会跟随最新状态。** 执行失败或手动停止后再次执行，回执会随新一轮更新，「查看执行」也会打开新一轮的记录。同时修复没有投递或执行记录却误显示「待处理」的问题。
+- 【修复】**修复智能体正常结束却被判为失败的问题。** Pi、Codex、Antigravity 及部分 ACP 智能体明确返回成功时，即使没有最后一条文字回复，执行也会正常结束。
+- 【修复】**CodeBuddy 执行卡片会显示具体报错。** 模型请求失败时，如果 CodeBuddy 返回了鉴权失败、请求参数有误等详情，可直接在执行卡片中查看。
+- 【交互】**项目收起后再展开，从第一页显示会话。** 普通项目、置顶项目和快速对话均先显示 5 条未置顶会话，可点击「查看更多」继续加载。
 
 ---
 
 <!-- lang:en -->
 
-This release adds CodeBuddy reasoning intensity controls, fixes stale information after some Agent upgrades on Windows and DeepSeek Harness startup with native MCP, and refines native Skill diagnostics.
+This release adds full conversation export, reduces the amount of history scanned when opening or switching conversations, and fixes how execution status and Agent completion are reported.
 
-Thanks to @caoshuisi for reporting Agent upgrade detection and CodeBuddy reasoning intensity issues in Issue #997, and @arschlochnop for reporting the DeepSeek Harness startup issue in Issue #1007.
+Thanks to @caoshuisi for reporting Pi runs being marked as failed after completion and unclear CodeBuddy errors in Issue #1012.
 
-- [Feature] **Choose CodeBuddy reasoning intensity.** Teammate settings now offer the levels provided by the selected model. Teammate summaries and messages display the same configured intensity.
-- [Fix] **Detect package changes for some Agent upgrades on Windows.** When checked again, Agents installed through standard npm or pnpm command wrappers can detect package changes even if the wrapper itself is unchanged, preventing reuse of stale model and capability information.
-- [Fix] **Restore DeepSeek Harness startup with native MCP enabled.** Support the newer Loader lifecycle interface to fix initialization failures in DSH 0.2.0-rc.2 while retaining support for the older interface.
-- [Fix] **Avoid unnecessary native Skill scan errors.** Symbolic links whose targets no longer exist are skipped instead of being reported as file read failures. Permission errors, link loops, and other actual read failures remain visible.
-- [UX] **Show Skill diagnostics where they apply.** Recovered metadata warnings for usable Skills appear only in their details, reducing notices in the list and composer picker. A failed path copy is shown beside the button without hiding the loaded document.
+- [Feature] **Export a full conversation from the sidebar.** Choose “Export thread” from the conversation menu to preview and save the conversation as HTML, PNG, or Markdown without scrolling back to load older messages. To export an excerpt, select multiple messages. The text-selection toolbar now offers only quoting.
+- [UI] **Improve export preview on phones.** Long-press a conversation to open the export menu. The HTML preview fits the screen width, and the buttons are easier to tap.
+- [Performance] **Scan less unrelated history when opening or switching conversations.** Run counts, run lists, and file changes are read for the current conversation. Some older run cards and their file changes are removed from these lists. Messages and original records are retained in the database.
+- [Fix] **Show the latest run status after retrying.** After a failed or manually stopped run is retried, the message receipt follows the new attempt and “View run” opens it. Receipts no longer show “Pending” when there is no delivery or run record.
+- [Fix] **Recognize successful runs without a final text reply.** When Pi, Codex, Antigravity, or a supported ACP Agent reports success, the run can complete without a final chat message.
+- [Fix] **Show the error details returned by CodeBuddy.** When a model request fails, the run card shows available details, such as an authentication error or invalid request parameters.
+- [UX] **Show the first page of conversations when a group is reopened.** Regular projects, pinned projects, and Quick Chat initially show five unpinned conversations. Use “Show more” to load additional entries.
