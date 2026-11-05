@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-04
+last_updated: 2026-11-05
 ---
 
 # Thread 会话工作区
@@ -1546,6 +1546,8 @@ Agent Markdown 的中文标点与相邻中文使用 CJK 兼容强调解析；代
 公开 batch Run 的失败／停止卡片沿用现有布局，在折叠操作旁提供 24×24 的纯图标按钮。
 title 和 aria-label 为“继续执行”，键盘可达。续做新请求不产生公屏系统消息，也不进入消息历史、搜索与定位；已生成的记录保留原样。waiting 请求和新 Run 使用
 现有时间线／执行区；原卡片终态与输出不变，受理后仍可再次点击，各次 Run 不显示关联状态。
+普通用户消息的处理回执按每位接收者跟随同一输入的最新执行或继续请求；受理后显示待处理，领取后跟随新 Run，
+成功后收起。合批中的每条原输入同步更新，旧 Delivery 的失败不覆盖新状态；Steer 仍表示原次投递的接收结果。
 会话自动选择遵循下节规则；无恢复向导。合同见
 [Run Process Detail Surface v47](../../contracts/run-process-detail-surface-v47.md)。
 

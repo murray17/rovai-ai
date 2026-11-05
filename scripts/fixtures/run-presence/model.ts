@@ -538,7 +538,8 @@ export const model = {
     halt()
     const runId = `retry-run-${++serial}`, deliveryId = `retry-delivery-${serial}`
     extraDeliveries.push({ ...delivery(deliveryId, source.inputMessageIds[0], source.agentId, null),
-      continuationRequest: true, sourceAgentRunId: id, inputMessageIds: [...source.inputMessageIds] })
+      continuationRequest: true, sourceAgentRunId: id, inputMessageIds: [...source.inputMessageIds],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
     retries.set(id, { status: 'pending', runId, deliveryId }); refresh()
     scheduleRetry(source, runId, deliveryId)
     return deliveryId
