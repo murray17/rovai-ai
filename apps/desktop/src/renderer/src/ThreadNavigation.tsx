@@ -322,6 +322,11 @@ export function ThreadNavigation({
 
   const toggleProjectGroup = (groupKey: string): void => {
     setCollapsedProjectGroups((current) => toggleNavigationGroup(current, groupKey))
+    if (collapsedProjectGroups.has(groupKey)
+      || loadingGroupsRef.current.has(groupKey)
+      || (groupLimits[groupKey] ?? NAVIGATION_INITIAL_VISIBLE_CAMPS) > NAVIGATION_INITIAL_VISIBLE_CAMPS) {
+      collapseGroupThreads(groupKey)
+    }
   }
 
   const togglePin = async (
