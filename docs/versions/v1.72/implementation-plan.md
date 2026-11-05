@@ -52,12 +52,22 @@ User 在本 Thread sequence 8 明确要求删除内置公开查询的旧 Turn �
 
 扩展既有 `thread_runs::read_tests` 两个 owner：公开 scope 的正反向运行状态、当前失败记录与旧 waiting/failed/succeeded
 记录隔离；50,000 个当前 Run 的纳秒排序、队列聚合、分页接缝和深页保持，并验证同 Thread 的 50,000 个旧 Run
-加其他 Thread 的 50,000 个 Run 不增加候选 SQL 工作量、禁止读取 camp_turn。继续使用内存 SQLite fixture，
-没有新增 Rust 测试函数、Core/Runtime 进程或模型调用。
+加其他 Thread 的 50,000 个 Run 不增加候选 SQL 工作量、禁止读取 camp_turn。
 
-验证：`cargo test -p rovai-core --features extended-tests --lib thread_runs:: -- --nocapture` 4 项通过。
+User sequence 10 指出的生产形态约束由同组 fixture 补齐：当前 Run 全部使用 batch，
+带非空 camp_id／anchor／public tail、空 camp_turn_id，终态补 ended_at；旧 Run 保持 direct 与空 camp_id。
+内存表加入归属 CHECK，当前 batch 的公开投影同步验证冻结输入。规模 owner 仍只测候选 SQL，
+不为 50,000 个 Run 构造不参与查询的完整执行链。
+
+新增 `production_schema_reads_batch_inputs_and_excludes_turn_only_runs`，作为生产 schema 与候选／冻结输入读取的
+唯一集成 owner。它通过真实建 Thread／投递 claim 路径生成两个合法 batch，验证非法 direct 归属、batch
+挂 Turn、缺 camp_id／anchor／tail 均被生产 CHECK 拒绝；合法 batch 可读取、旧 waiting Run 排除且存储不变、
+读取零写入。原内存 owner 无法证明生产约束，因此单独使用临时完整数据库；没有 Core/Runtime 进程或模型调用。
+本轮 Rust 测试函数从 4 项增为 5 项，保留原排序、分页、队列、状态与 schema 边界。
+
+验证：`cargo test -p rovai-core --features extended-tests --lib thread_runs:: -- --nocapture` 5 项通过。
 固定 50,000 个当前 Run，加入 50,000 个同 Thread 的 Turn-only Run 和 50,000 个其他 Thread Run 后，
-候选 SQL 从 2,003,460 steps 变为 2,003,461 steps；测试拒绝读取 camp_turn，当前 Run/队列的排序和分页仍通过。
+合法 batch 夹具的候选 SQL 从 1,953,460 steps 变为 1,953,461 steps；测试拒绝读取 camp_turn，当前 Run/队列的排序和分页仍通过。
 `cargo fmt --all --check`、文档单测 10 项通过；通用文档门禁按本节前述受控源码隔离树执行。
 默认 workspace 首轮两项 Runtime discovery 探测超时，分别串行复核通过后，
 `cargo test --workspace -- --test-threads=2` 完整通过；未改动 Runtime discovery 代码或测试。
