@@ -51,7 +51,7 @@
     "test:feishu-login": "node --test scripts/lib/feishu-login-integration.test.mjs",
     "test:dingtalk-login": "node --test scripts/lib/dingtalk-login-presentation.test.mjs",
     "accept:message-export": "node scripts/accept-message-export.mjs",
-    "test:message-export-ui": "node --test --test-concurrency=1 scripts/lib/message-export.test.mjs scripts/lib/conversation-export.test.mjs",
+    "test:message-export-ui": "node --test --test-concurrency=1 scripts/lib/message-export.test.mjs scripts/lib/conversation-export.test.mjs scripts/lib/message-export-mobile.test.mjs",
     "test:message-quotes": "node --test scripts/lib/message-quotes.test.mjs",
     "test:message-anchors": "node --test scripts/lib/message-anchors.test.mjs",
     "test:composer-input": "node --test --test-concurrency=1 scripts/lib/structured-mention-composer.test.mjs scripts/lib/composer-invitations.test.mjs",

@@ -73,5 +73,7 @@
 .message-export-read-spinner { width:18px; height:18px; border:2px solid var(--line); border-top-color:var(--muted); border-radius:50%; animation:message-export-spin .8s linear infinite; }
 @keyframes message-export-spin { to { transform:rotate(360deg); } }
 @media(prefers-reduced-motion:reduce) { .message-export-read-spinner { animation:none; } }
+html[data-mobile-web="true"] .message-export-document[data-export-format="html"] { width:100%; min-width:0; max-width:100%; padding:20px 14px; box-sizing:border-box; }
+html[data-mobile-web="true"] .dialog-content.app-dialog.message-export-dialog .app-dialog-footer button { min-height:44px; }
 @media(max-width:760px) { .message-export-selecting .conversation-bubble[data-message-id]::before { left:-28px; }.message-export-check { left:-27px; }.message-export-options { gap:12px; }.message-export-preview { max-height:calc(100dvh - 360px); }.message-selection-dock { padding-inline:12px; } }
 @media(pointer:coarse) { .message-select-button { width:40px; height:40px; }.message-export-check { width:40px; left:-35px; } }

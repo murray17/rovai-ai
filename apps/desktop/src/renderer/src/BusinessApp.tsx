@@ -20,7 +20,7 @@ import { newCommandId } from '../../shared/command-id'
 import { ConversationExportDialog, useConversationExport } from './ConversationExport'
 import type { BusinessEnvironment } from './business-environment'
 import { AppHeader } from './AppHeader'
-import { MobileLayoutProvider, MobilePageHeader, useMobilePageTransition, useMobileViewport } from './MobileLayout'
+import { MobileConversationDrawer, MobileLayoutProvider, MobilePageHeader, useMobilePageTransition, useMobileViewport } from './MobileLayout'
 import { MobileSettingsLayout } from './MobileSettingsLayout'
 export { AppHeader } from './AppHeader'
 import { CurrentUserProfileProvider } from './CurrentUserProfile'
@@ -4710,32 +4710,10 @@ export function BusinessApp({
         )}
       </main>
 
-      {mobile && <Dialog.Root open={mobileConversationDrawerOpen} onOpenChange={setMobileConversationDrawerOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="mobile-conversation-scrim" />
-          <Dialog.Content id="mobile-app-menu" className="mobile-conversation-drawer app-menu" aria-describedby={undefined} tabIndex={-1}
-            onOpenAutoFocus={event => {
-              event.preventDefault()
-              const menu = document.getElementById('mobile-app-menu')
-              const list = menu?.querySelector<HTMLElement>('.navigation-scroll')
-              if (list) list.scrollTop = mobileMenuScroll.current
-              menu?.focus()
-            }}
-            onScrollCapture={event => { if (event.target instanceof HTMLElement && event.target.classList.contains('navigation-scroll')) mobileMenuScroll.current = event.target.scrollTop }}
-            onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            const trigger = mobileConversationListButtonRef.current
-            const visibleTrigger = trigger?.getClientRects().length ? trigger
-              : [...document.querySelectorAll<HTMLButtonElement>('.app-shell [aria-label="打开主菜单"]')].find(button => button.getClientRects().length)
-            visibleTrigger?.focus({ preventScroll: true })
-          }}>
-            <header className="app-menu-heading"><Dialog.Title>Rovai AI</Dialog.Title>
-              <Dialog.Close asChild><button className="mobile-icon-button" type="button" aria-label={uiAttribute("关闭主菜单")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></Dialog.Close>
-            </header>
-            {renderNavigation(true)}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>}
+      {mobile && <MobileConversationDrawer open={mobileConversationDrawerOpen} onOpenChange={setMobileConversationDrawerOpen}
+        triggerRef={mobileConversationListButtonRef} scrollPosition={mobileMenuScroll}>
+        {renderNavigation(true)}
+      </MobileConversationDrawer>}
 
       <NewConversationDialog
         open={newConversationOpen}

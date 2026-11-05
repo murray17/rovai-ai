@@ -30,6 +30,8 @@ HTML/PNG 的头像、作者、时间、发送对象默认勾选；Markdown 不�
   旧消息缺少 Turn 且可能跨 Run 分组时，仅补读必要的只读 Run 资料（最多四个并发）；资料不可用时保留独立时间，不猜测分组。
 - `ThreadNavigation` 四种菜单入口共用“复制会话 ID”下方的“导出会话”；不导航、不标记已读。
   直接打开既有预览，等待超过 350ms 才出现小转圈，不显示读取文案或进度数字；读取未完成、失败、空集合均不能下载。
+- MobileUI 的 HTML 阅读面按可用宽度重排，页脚操作至少 44px；PNG 继续使用 720px 阅读面。
+  原有抽屉结构抽为共享 `MobileConversationDrawer`，BusinessApp 与验收夹具使用同一组件，保留滚动和焦点返回。
 - 五套主题增加 `--conversation-selection-surface`；使用现有动作色绘制复选框，没有新增外观设置。
 - 无 Rust、Schema、DTO、授权或 Runtime 改动，不涉及模型上下文变化与真实模型验收。
 
@@ -42,7 +44,9 @@ HTML/PNG 的头像、作者、时间、发送对象默认勾选；Markdown 不�
 使用现有生产 Renderer 夹具与独立临时 Chrome profile，拦截下载链接以检查三种格式 Blob，覆盖 HTML 离线图片/链接/放大、
 PNG 像素中确有图片、缺图卡片、超长失败、元信息开关、日/夜中性灰、窄/矮视口、选文只保留引用、草稿及跨会话清理。
 `scripts/lib/conversation-export.test.mjs` 使用同一生产夹具验证侧栏四类入口、菜单顺序、500/1240 条完整读取、
-导航缺口、未打开 Thread、独立预览的取消/错误/重试/空状态、撤回重读和 PNG 超限。两组浏览器测试由同一命令运行。
+导航缺口、未打开 Thread、独立预览的取消/错误/重试/空状态、撤回重读和 PNG 超限。
+`scripts/lib/message-export-mobile.test.mjs` 通过正式手机抽屉与长按菜单验证预览层级、五套主题、
+窄屏排版和触控尺寸、格式切换、HTML 文件内容与 PNG 1440px 输出，以及关闭返回、取消和失败重试；三组均由 `pnpm test:message-export-ui` 运行。
 回归覆盖任务列表状态、持续加载超时与重试、日/夜代码块计算样式对照、连续/跳选消息时间、默认/自定义标题，
 以及下载后的独立 HTML 在 375 / 720 / 1440px 宽度重新排版且图标与引用标题同行。
 新 Blob 图片挂载后在同一浏览器任务内立即调用生产快照/清洗/PNG 路径，检查初始 0×0、
@@ -101,6 +105,13 @@ arm64 打包 Desktop 的 `pnpm accept:message-export` 通过：三种文件实�
 - 完整 HTML 沿用内联计算样式的现有生成器，文件体积随消息和 DOM 复杂度增长：本轮含代码、图片的
   498 条样本约 36 MB；极长会话仍有浏览器内存与生成耗时边界。PNG 继续使用原有高度/像素限制，不静默截断。
 
+2026-11-04 User 确认 Mobile 交互稿后，手机 HTML 阅读面与页脚触控尺寸已进入生产样式。
+`TZ=UTC pnpm test`（含 Vitest 3107 项通过、2 项跳过）、类型检查、Desktop/Web 构建、三组
+`pnpm test:message-export-ui` 与通用文档治理通过。正式手机抽屉/长按路径的五套主题和
+375×812 / 390×844 / 430×932 均无页面或 HTML 阅读面横向溢出，页脚按钮至少 44px；
+Mobile HTML 文件保留消息、图片和任务状态，PNG 实际生成 1440×3054 文件。
+预览关闭返回原抽屉和来源行，保留草稿；读取取消、失败与重试通过。浏览器使用合成数据与独立 profile。
+
 Work item: 侧栏完整会话导出与移除选文导出
 
 Worktree: 仓库同级 `rovai-ai-sidebar-conversation-export`（绝对路径保留在线程交接）
@@ -113,4 +124,4 @@ Governance: none
 
 Status: ready
 
-Next: 工作分支交付，等待 User 审阅；按既有偏好不自动创建 PR、合并或安装。
+Next: 按 User 授权完成 Mobile 适配、创建以 main 为 base 的 PR 并合入；确认远端合入后同步主 checkout，按 worktree 规则收口。
