@@ -47,25 +47,40 @@ describe('RuntimeFailureNotice', () => {
 
   it.each([
     [
+      'codex-cli',
       'Selected model is at capacity. Please try a different model.',
       'Selected model is at capacity. Please try a different model.'
     ],
-    [null, '模型额度不足']
-  ])('shows only the original safe error on AgentRun when detail is %s', (detail, message) => {
-    const failure = { ...runtimeFailure('compatibility', 'codex-cli'), detail }
-    const markup = renderToStaticMarkup(
-      createElement(RuntimeFailureNotice, { failure, presentation: 'agent-run' })
-    )
+    ['codex-cli', null, '模型额度不足'],
+    [
+      'codebuddy-cli',
+      'ACP error -32603: Internal error: 401 Invalid API key',
+      'ACP error -32603: Internal error: 401 Invalid API key'
+    ],
+    [
+      'codebuddy-cli',
+      'ACP error -32603: Internal error: Model usage has reached personal quota limit.',
+      'ACP error -32603: Internal error: Model usage has reached personal quota limit.'
+    ]
+  ] satisfies Array<[RuntimeFailureView['runtimeKind'], string | null, string]>)(
+    'shows only the original safe error on %s AgentRun when detail is %s',
+    (runtimeKind, detail, message) => {
+      const origin = runtimeKind === 'codex-cli' ? 'compatibility' : 'runtime'
+      const failure = { ...runtimeFailure(origin, runtimeKind), detail }
+      const markup = renderToStaticMarkup(
+        createElement(RuntimeFailureNotice, { failure, presentation: 'agent-run' })
+      )
 
-    expect(runtimeFailureMessage(failure)).toBe(message)
-    expect(markup).toContain('agent-run-runtime-failure')
-    expect(markup).toContain(`>${message}</p>`)
-    expect(markup).not.toContain('Codex CLI')
-    expect(markup).not.toContain('与当前 Rovai 版本不兼容')
-    if (detail) {
-      expect(markup).not.toContain('模型额度不足')
+      expect(runtimeFailureMessage(failure)).toBe(message)
+      expect(markup).toContain('agent-run-runtime-failure')
+      expect(markup).toContain(`>${message}</p>`)
+      expect(markup).not.toContain('Codex CLI')
+      expect(markup).not.toContain('与当前 Rovai 版本不兼容')
+      if (detail) {
+        expect(markup).not.toContain('模型额度不足')
+      }
     }
-  })
+  )
 })
 
 function runtimeFailure(

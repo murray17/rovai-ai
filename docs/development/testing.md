@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-26
+last_updated: 2026-11-04
 ---
 
 # 测试与 Smoke Test
@@ -279,6 +279,17 @@ ACP suffix owner 继续覆盖工具归属、最终文字采集与问卷取消后
 `cargo test -p rovai-core --features slow-tests --lib final_agent_message_uses_complete_assistant_suffix`。
 `smoke-minimax-runtime.mjs --completion-only`／`--questionnaires-only` 的受控 Provider 断言已同步新规则；
 未执行这些入口时，不把协议夹具通过表述为真实 CLI 或模型验收。默认 workspace 仍需通过。
+
+### CodeBuddy 原生失败详情
+
+扩展 `acp_rpc_error_keeps_only_allowlisted_bounded_fields` 的既有解析矩阵，覆盖 CodeBuddy refusal 的
+序列化错误、`data.details/message`、脱敏、非法或超限元数据及成功／取消／其他 Runtime 的反例。
+原有 TRAE 字符串与对象错误、输入接受和错误结算 owners 保留，不新增 Rust 测试函数。
+Renderer 既有 `RuntimeFailureNotice` owner 覆盖 CodeBuddy 的 RunCard 详情展示；原生完整链路另以
+两个官方 CodeBuddy 版本及 loopback Provider 验证，不调用外部模型，不冒充 Windows 真机验收。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib acp_rpc_error_keeps_only_allowlisted_bounded_fields`、
+`cargo test -p rovai-core --features extended-tests --lib prompt_error_after_activity` 及
+`pnpm exec vitest run apps/desktop/src/renderer/src/RuntimeFailureNotice.test.ts`。
 
 ### 补充输入未知后的独立新输入
 
