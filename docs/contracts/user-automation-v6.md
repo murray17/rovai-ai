@@ -5,7 +5,7 @@ version: 6
 authority: desktop-user-automation-and-evaluation-host
 status: accepted
 source_version: v1.59
-last_updated: 2026-09-15
+last_updated: 2026-11-05
 ---
 
 # User Automation v6
@@ -31,3 +31,31 @@ Judge 变更后仍须重新登记与绑定。取消、App 关闭、父进程消�
 原生 unknown 保留事实，按官方入口明确处理，不自动换 Session 或重放任务。
 Hermes 原生会话 CLI 环境仍禁止用户级 `rovai app`。
 详见 [Hermes 未知执行合同](hermes-managed-runtime-v1.md#用户明确处理未知执行)。
+
+## 外部自动化代发成员消息
+
+`rovai app thread send --thread-id <id> --agent-id <recipient-id>` 支持可选
+`--sender-agent-id <sender-id>`，经 `thread.sendAsMember` / `userAutomation.thread.send` 的可选
+`senderAgentId` 字段传入 Core。省略 CLI 参数时仍调用 `thread.send` 并保留现有 User 作者；正文和执行预算规则不变。
+`thread.sendAsMember` 要求非空字符串发送者；旧 Desktop 对未知操作拒绝，CLI 不降级重试为 User 发送。
+普通 `thread.send` 拒绝非 null 的 `senderAgentId`，Core 省略或 null 保留 User 作者。
+
+指定发送者时，这是已认证本机 User 授权的代发，不是外部进程原生身份认证，也不是受管 AgentRun 的 Send。
+只有当前 User actor 可调用此入口；发送者和接收者均须是目标 Thread 内 present、active、未请求离开的成员，
+且不能相同。不可用发送者拒绝为 `automation.sender_unavailable`，自发自收拒绝为
+`automation.self_address_not_allowed`；接收者沿用 `mention_target_unavailable`。拒绝不产生消息、Delivery、
+Run 或 Composer 副作用，并保存可重放回执。相同 commandId 始终返回首个结果，改变发送者不会改写原消息或新建消息；新操作须使用新 commandId。
+
+消息保存 `author_type=agent`、指定的 `author_id`、`origin_kind=automation`、空的
+`source_agent_run_id`，不伪造 Run、lease 或 A2A lineage。审计 actor 仍为授权 User，
+`source_operation_id` 关联原命令；消息不可作为 Composer 草稿撤回。
+现有 Delivery 批处理和公共历史投影向接收模型提供真实 `senderType=agent`、`senderId` 和 `senderName`。
+这条消息不代表新的 User 授权，接收者后续协作继续使用自己的受管 `rovai send`。
+
+CLI 仍要求 Desktop 正在运行并使用当前用户的私有 IPC credential；受管 Runtime 仍禁止 `rovai app`。
+本功能不增加远程匿名入口，不提供跨 OS 用户鉴权，也不能证明调用 CLI 的外部程序确为某种 Runtime。
+
+```sh
+rovai app thread send --thread-id <thread-id> --agent-id <recipient-id> \
+  --sender-agent-id <sender-id> --body-file ./report.txt --timeout 30m
+```

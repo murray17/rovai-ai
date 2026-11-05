@@ -465,7 +465,7 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
             "rovai app thread create [--name <name>] (--workspace <path> | --quick-chat) --member <id> [--member <id> ...] [--lead <id>] [--json]"
         }
         ("camp", Some("send")) => {
-            "rovai app thread send --thread-id <id> --agent-id <id> (--body <text> | --body-file <path>) [--timeout <duration> | explicit budget] [--json]"
+            "rovai app thread send --thread-id <id> --agent-id <recipient-id> [--sender-agent-id <id>] (--body <text> | --body-file <path>) [--timeout <duration> | explicit budget] [--json]"
         }
         ("camp", Some("open")) => "rovai app thread open --thread-id <id> [--json]",
         ("agent-run", Some("show")) => "rovai app agent-run show --agent-run-id <id> [--json]",
@@ -857,6 +857,7 @@ async fn camp_send(flags: &Flags) -> Result<u8> {
                 "camp-id",
                 "camp",
                 "agent-id",
+                "sender-agent-id",
                 "body",
                 "body-file",
                 "command-id",
@@ -871,13 +872,20 @@ async fn camp_send(flags: &Flags) -> Result<u8> {
     let camp_id = alias_required(flags, "camp-id", "camp")?;
     let body = read_body(flags, "body", &["body-file"])?;
     let execution_budget = execution_budget_from_flags(flags, false)?;
+    let sender_agent_id = flags.one("sender-agent-id").map_err(anyhow::Error::new)?;
+    // An older Desktop must reject delegated sends instead of dropping the sender.
     let result = invoke(
-        "thread.send",
+        if sender_agent_id.is_some() {
+            "thread.sendAsMember"
+        } else {
+            "thread.send"
+        },
         json!({
             "commandId": flags.one("command-id").map_err(anyhow::Error::new)?
                 .map(str::to_string).unwrap_or_else(command_id),
             "threadId": camp_id,
             "agentId": flags.required("agent-id").map_err(anyhow::Error::new)?,
+            "senderAgentId": sender_agent_id,
             "body": body,
             "executionBudget": execution_budget
         }),

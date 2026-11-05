@@ -3,7 +3,7 @@ document_type: architecture
 architecture: user-automation
 authority: desktop-user-automation-component-boundaries
 status: accepted
-last_updated: 2026-09-11
+last_updated: 2026-11-05
 ---
 
 # User Automation Architecture
@@ -54,6 +54,9 @@ service；Main 不直接访问 SQLite。成员创建与 Runtime 配置只映射�
 环境或 provider secret。`camp send` 只发出一个带幂等 `commandId` 的
 `userAutomation.thread.send`；Core 在一个 Domain Command transaction 中复用正式 Message publication 与目标
 Delivery 创建，不提前创建 AgentRun，也不以 Composer 作为中间存储或读取、覆盖、消费 Renderer 当前输入。
+可选的成员代发只改变公共消息作者：Core 验证指定发送者的当前成员资格，保留 User 审计 actor，
+以 `automation` 来源发布且不绑定 source Run。它不转移受管执行权，不借用原生 Session 或 lease；
+后续由既有 Delivery 批处理投递，精确字段与拒绝语义见当前合同。
 当前合同无法解释的新状态必须失败并要求升级，不能以
 convenience path 绕过。
 

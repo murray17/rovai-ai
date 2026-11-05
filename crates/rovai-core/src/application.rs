@@ -1775,6 +1775,7 @@ struct SendUserAutomationThreadMessageParams {
     #[serde(rename = "threadId", alias = "campId")]
     camp_id: ThreadId,
     agent_id: String,
+    sender_agent_id: Option<String>,
     body: String,
     execution: Option<ExecutionRequest>,
 }
@@ -12651,6 +12652,7 @@ impl Core {
             payload: SendUserAutomationThreadMessageCommand {
                 camp_id: camp_id.clone(),
                 agent_id: params.agent_id,
+                sender_agent_id: params.sender_agent_id,
                 body: params.body,
                 execution: params.execution,
             },

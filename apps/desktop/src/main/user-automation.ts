@@ -296,6 +296,7 @@ async function sendThreadMessage(
     commandId,
     threadId,
     agentId,
+    ...(input.senderAgentId === undefined ? {} : { senderAgentId: optionalStringField(input, 'senderAgentId') }),
     body,
     execution: {
       taskId: null,
@@ -337,7 +338,7 @@ export async function dispatchUserAutomation(
 ): Promise<unknown> {
   const input = { ...record(params ?? {}, 'params') }
   if (['camp.create', 'camp.send', 'camp.open'].includes(operation)) operation = operation.replace('camp.', 'thread.')
-  const aliases = ['thread.send', 'thread.open'].includes(operation)
+  const aliases = ['thread.send', 'thread.sendAsMember', 'thread.open'].includes(operation)
     ? [['campId', 'threadId']]
     : operation.startsWith('trace.') ? [['campIds', 'threadIds'], ['excludeCampIds', 'excludeThreadIds']] : []
   for (const [old, current] of aliases) {
@@ -401,6 +402,12 @@ export async function dispatchUserAutomation(
     case 'thread.create':
       return dependencies.core.request<StoredCommandResult>('threads.create', input)
     case 'thread.send':
+      if (input.senderAgentId !== undefined && input.senderAgentId !== null) {
+        throw new UserAutomationError('automation_invalid_input', 'Use thread.sendAsMember to delegate a sender')
+      }
+      return sendThreadMessage(dependencies, input)
+    case 'thread.sendAsMember':
+      stringField(input, 'senderAgentId')
       return sendThreadMessage(dependencies, input)
     case 'thread.open':
       return dependencies.openThread(stringField(input, 'threadId'))
