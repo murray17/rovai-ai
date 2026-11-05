@@ -16,7 +16,9 @@ last_updated: 2026-11-05
 
 最低版本为官方 Hermes **0.22.4**，不锁 commit 或版本上界；实际能力通过当前安装的原生接口验证。
 `ROVAI_HERMES_BIN` 或通用启动设置选定程序，直接执行 `hermes --profile <name> acp`。
-`name` 取已应用的启动环境中的 `HERMES_PROFILE`，去除首尾空白；未设置或为空时为 `default`。
+`name` 取已应用的启动环境中的 `HERMES_PROFILE`，去除首尾空白。优先采用子进程的显式设置；
+没有显式设置或移除记录时，读取共享环境解析器提供的有效继承值。显式移除、未设置或为空时为 `default`，
+不会重新继承被清除的值。检查与模型目录使用 Host＋通用配置；队员执行再叠加所选的通用继承与队员覆盖。
 因此可以在队员的运行配置中分别设置 `{"HERMES_PROFILE":"writer"}` 和
 `{"HERMES_PROFILE":"reviewer"}`，沿用现有通用环境与队员覆盖的合并规则，无须切换 Hermes
 的全局 active profile。Profile 名称校验、存在性及对应原生 Home 由官方启动器处理，不静默回退到其他 Profile。
