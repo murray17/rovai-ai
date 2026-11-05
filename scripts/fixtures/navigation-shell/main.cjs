@@ -348,7 +348,59 @@ app.whenReady().then(async () => {
     await run('window.navigationTest.setDisabled(true)');await settle()
     assert.equal(await run('document.querySelector(".navigation-collapse-button").disabled'),true)
     assert.equal(await run('document.querySelector(".navigation-resize-handle").tabIndex'),-1)
-    console.log(JSON.stringify({ok:true,checks:'Desktop pinned conversation icon/alignment/trailing status slot, pointer threshold/reversal/cancellation, full collapse/inert, keyboard/menu, storage, unchanged content renders, draft retention, Windows/menu, macOS/Web fixed settings and collapsed recovery, memory-only shared history, keyboard navigation, ignored Renderer side buttons, native Mac swipe, input consumption and history reset'}))
+    await run('window.navigationTest.setDisabled(false);window.navigationTest.startPagination()');await settle()
+    const groupSelector = key => `[data-group="${key}"]`
+    const groupRows = key => run(`document.querySelectorAll(${JSON.stringify(groupSelector(key)+' [data-thread-id]')}).length`)
+    const groupClick = async (key, selector) => {
+      const target = groupSelector(key) + ' ' + selector
+      await run(`document.querySelector(${JSON.stringify(target)}).scrollIntoView({block:'center'})`);await settle()
+      await click(target)
+    }
+    const keys = ['directory:/fixture/rovai-ai', 'directory:/fixture/pinned', 'quick-chat']
+    await run('document.querySelector("textarea").value="分页切换时保留的草稿"')
+    for (const key of keys) {
+      assert.equal(await groupRows(key),5)
+      await groupClick(key,'.show-more-camps')
+      assert.equal(await groupRows(key),15)
+    }
+    for (const [index,key] of keys.entries()) {
+      await groupClick(key,'.project-select-row')
+      assert.equal(await groupRows(key),0,'Clicking the Project row still folds its children')
+      assert.equal(await run(`window.navigationTest.paginationLimits[${JSON.stringify(key)}]`),5,'Folding a Project resets its pagination immediately')
+      for (const untouched of keys.slice(index+1)) {
+        assert.equal(await groupRows(untouched),15,'Folding one group preserves the other expanded windows')
+      }
+      await run('window.navigationTest.revisePaginationTitles();window.navigationTest.paginationReads.length=0')
+      await groupClick(key,'.project-select-row')
+      assert.equal(await groupRows(key),5,'Reopening ordinary/pinned Projects and Quick Chat starts at five')
+      const reads=await run('window.navigationTest.paginationReads')
+      assert.equal(reads.length,1,'Reopening re-reads the first page')
+      assert.deepEqual(reads[0].groupKeys,[key],'Only the reopened group is read')
+      assert.equal(reads[0].groupLimits[key],5)
+      assert.equal(await run(`document.querySelector(${JSON.stringify(groupSelector(key)+' .navigation-title[title^="分页"]')}).textContent`),`分页 ${index+1} · 1`,'Reopening replaces the cached titles with the current first page')
+    }
+    const ordinaryKey=keys[0]
+    await groupClick(ordinaryKey,'.show-more-camps')
+    await run('window.navigationTest.paginationReads.length=0')
+    await click('.navigation-collapse-button');await click('.navigation-collapse-button')
+    assert.equal(await groupRows(ordinaryKey),15,'Hiding the entire rail preserves the pagination window')
+    assert.equal(await run('window.navigationTest.paginationReads.length'),0)
+    assert.equal(await run('document.querySelector("textarea").value'),'分页切换时保留的草稿')
+    assert.equal(await run('document.querySelector(".selected").dataset.threadId'),'rvcamp_01h47kvsy5fk1shh6w1g60eec2','Pagination leaves the current Thread selected')
+    await groupClick(ordinaryKey,'.project-select-row');await groupClick(ordinaryKey,'.project-select-row')
+    for (const fail of [false,true]) {
+      await run('window.navigationTest.holdPaginationRead()')
+      await groupClick(ordinaryKey,'.show-more-camps')
+      assert.equal(await groupRows(ordinaryKey),5,'A pending expansion keeps the current five visible')
+      await groupClick(ordinaryKey,'.project-select-row')
+      await groupClick(ordinaryKey,'.project-select-row')
+      assert.equal(await groupRows(ordinaryKey),5,'A quick fold/reopen cannot restore the pending expansion')
+      await run(`window.navigationTest.releasePaginationRead(${fail})`);await settle()
+      assert.equal(await groupRows(ordinaryKey),5,'Late success and failure cannot restore an obsolete expansion')
+      assert.equal(await run(`document.querySelector(${JSON.stringify(groupSelector(ordinaryKey)+' .show-more-camps')}).disabled`),false,'The first page remains expandable after the old read settles')
+    }
+    assert.deepEqual(await run('window.navigationTest.paginationErrors'),[],'Obsolete read failures stay fenced')
+    console.log(JSON.stringify({ok:true,checks:'Desktop pinned conversation icon/alignment/trailing status slot, pointer threshold/reversal/cancellation, full collapse/inert, keyboard/menu, storage, unchanged content renders, draft retention, Windows/menu, macOS/Web fixed settings and collapsed recovery, memory-only shared history, keyboard navigation, ignored Renderer side buttons, native Mac swipe, input consumption and history reset, Project pagination reset/freshness/late-result fencing and whole-rail state retention'}))
     window.destroy();app.quit()
   } catch(error) {console.error(error);console.error(await run('JSON.stringify({events:window.pointerEvents?.slice(-30),shell:document.querySelector(".navigation-shell").outerHTML.slice(0,300)})'));await capture('failure');app.exit(1)}
 }).catch(error=>{console.error(error);app.exit(1)})
