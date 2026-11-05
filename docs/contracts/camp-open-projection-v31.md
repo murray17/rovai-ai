@@ -23,6 +23,7 @@ threads.open schema 9 及字段形状保持。
 读取不迁移、回填或删除这些 Run、状态、Evidence 或文件变更记录；历史消息正文保持原读取路径。
 单聊当前使用的 Turn 归属与按具体 Run 身份读取的详情、诊断不属于本次退役范围。
 Renderer 只为仍有关联 Run 或 Delivery 事实的接收者显示处理回执；缺少事实不能推导为“待处理”。
+[Thread Runs v2](thread-runs-v2.md) 使用相同的公开 Run 归属，独立保留 waiting Delivery 的排队项。
 
 ## 查询边界
 

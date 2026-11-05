@@ -441,7 +441,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Collaboration State v4（当前）](collaboration-state-v4.md) | peers 恰好 ID、名称、团队角色，职责不参与协作摘要 |
 | [Collaboration State v3（历史）](collaboration-state-v3.md) | 模型正文删除 schemaVersion，peer、Lead 与 digest 业务语义不变 |
 | [Collaboration State v2（历史）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Thread Runs v1（当前）](thread-runs-v1.md) | 公开执行和排队查询；统一 items、可空 Run ID、实时预览和动态分页 |
+| [Thread Runs v2（当前）](thread-runs-v2.md) | 公开 Run 只按直接会话归属读取，取消 Turn-only 回退；排队聚合、预览和动态分页保持 |
+| [Thread Runs v1（历史）](thread-runs-v1.md) | 公开执行和排队查询；其旧 Turn 归属回退由 v2 退役 |
 | [Camp History v11（历史）](camp-history-v11.md) | 正常 timeline/reply-chain/item 统一 addressing，撤回项保持独立形状 |
 | [Camp History v10（历史）](camp-history-v10.md) | 显式 read/search 可见 claim 前消息，撤回后 read 返回英文状态项；保留按需实时读取与 1–100 诚实分页 |
 | [Camp History v9（历史）](camp-history-v9.md) | 按需实时读取；`camp.read` 默认 20、显式整数 1–100、诚实分页 |

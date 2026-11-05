@@ -43,6 +43,25 @@ last_updated: 2026-11-05
 的 `first.has_more` 断言，以及 `snapshot_treats_accepted_input_without_shutdown_error_as_settled` 的 Manifest
 source fixture 约束。恢复基线 `aca8bf1f1` 的生产文件后分别重跑，失败一致；本次不改写这两个无关 owner。
 
+### thread.runs 同步收敛
+
+User 在本 Thread sequence 8 明确要求删除内置公开查询的旧 Turn 关联。`thread_runs::CANDIDATES_SQL`
+删除 `legacy_runs` 与其 UNION，只通过 Run 的直接 `camp_id` 选择实际执行；当前 waiting Delivery 继续
+独立聚合。合同更新为 [Thread Runs v2](../../contracts/thread-runs-v2.md)，原始记录不迁移或回填。
+输入／输出 schema、CLI 帮助、工具描述、游标 v1、Bootstrap/Dynamic Context、冻结输入和证据版本轴均保持。
+
+扩展既有 `thread_runs::read_tests` 两个 owner：公开 scope 的正反向运行状态、当前失败记录与旧 waiting/failed/succeeded
+记录隔离；50,000 个当前 Run 的纳秒排序、队列聚合、分页接缝和深页保持，并验证同 Thread 的 50,000 个旧 Run
+加其他 Thread 的 50,000 个 Run 不增加候选 SQL 工作量、禁止读取 camp_turn。继续使用内存 SQLite fixture，
+没有新增 Rust 测试函数、Core/Runtime 进程或模型调用。
+
+验证：`cargo test -p rovai-core --features extended-tests --lib thread_runs:: -- --nocapture` 4 项通过。
+固定 50,000 个当前 Run，加入 50,000 个同 Thread 的 Turn-only Run 和 50,000 个其他 Thread Run 后，
+候选 SQL 从 2,003,460 steps 变为 2,003,461 steps；测试拒绝读取 camp_turn，当前 Run/队列的排序和分页仍通过。
+`cargo fmt --all --check`、文档单测 10 项通过；通用文档门禁按本节前述受控源码隔离树执行。
+默认 workspace 首轮两项 Runtime discovery 探测超时，分别串行复核通过后，
+`cargo test --workspace -- --test-threads=2` 完整通过；未改动 Runtime discovery 代码或测试。
+
 ## 原生子代理平铺执行记录（2026-11-01）
 
 按 User 确认方案，在独立 worktree 收敛为普通 command：机器人图标、单文本详情、来源隔离、稳定首次记录顺序与既有步骤分组。

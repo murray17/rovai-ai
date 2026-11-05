@@ -6,7 +6,7 @@ last_updated: 2026-11-05
 
 # 当前规范与决定理由导航
 
-公开执行列表的直接会话归属：[Camp Open Projection v31](../contracts/camp-open-projection-v31.md)、
+公开执行列表的直接会话归属：[Camp Open Projection v31](../contracts/camp-open-projection-v31.md)、[Thread Runs v2](../contracts/thread-runs-v2.md)、
 [Thread Open Read Path](../architecture/camp-open-read-path.md#enter-and-refresh-flow)；取消旧公开卡片兼容、
 保留原始数据与当前单聊的取舍见 [V1.72-D75](../versions/v1.72/decisions.md#v1-72-d75)。
 

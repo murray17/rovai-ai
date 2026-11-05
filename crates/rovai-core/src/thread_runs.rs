@@ -17,7 +17,7 @@ use crate::{
 };
 
 pub const THREAD_RUNS_TOOL_NAME: &str = "thread.runs";
-pub const THREAD_RUNS_CONTRACT_VERSION: u32 = 1;
+pub const THREAD_RUNS_CONTRACT_VERSION: u32 = 2;
 const STATUSES: [&str; 6] = [
     "queued",
     "running",
@@ -348,20 +348,6 @@ const CANDIDATES_SQL: &str = r#"
               AND (?4 = 0 OR r.status IN ('queued', 'running', 'waiting'))
               AND (?5 IS NULL OR (created_key, 1, r.id) < (?5, ?6, ?7))
             ORDER BY created_key DESC, r.id DESC LIMIT ?8
-        ), legacy_runs AS (
-            SELECT r.id AS run_id, c.agent_id, r.status, r.invocation_kind = 'batch' AS batch,
-                   r.created_at, r.started_at, r.ended_at, r.cancel_requested_at,
-                   NULL AS message_count, NULL AS first_message,
-                   rovai_thread_run_time_key(r.created_at) AS created_key,
-                   1 AS source, r.id AS identity
-            FROM camp_turn turn JOIN agent_run r ON r.camp_turn_id = turn.id
-            JOIN conversation c ON c.id = r.conversation_id
-            WHERE turn.camp_id = ?1 AND r.camp_id IS NULL
-              AND r.invocation_kind <> 'single_chat' AND c.kind <> 'single_chat'
-              AND (?2 IS NULL OR c.agent_id = ?2) AND (?3 IS NULL OR r.status = ?3)
-              AND (?4 = 0 OR r.status IN ('queued', 'running', 'waiting'))
-              AND (?5 IS NULL OR (created_key, 1, r.id) < (?5, ?6, ?7))
-            ORDER BY created_key DESC, r.id DESC LIMIT ?8
         ), waiting AS (
             SELECT recipient_agent_id AS agent_id,
                    SUM(CASE WHEN continuation.delivery_id IS NULL THEN 1 ELSE (
@@ -390,7 +376,6 @@ const CANDIDATES_SQL: &str = r#"
             ORDER BY created_key DESC, waiting.agent_id DESC LIMIT ?8
         )
         SELECT * FROM direct_runs
-        UNION ALL SELECT * FROM legacy_runs
         UNION ALL SELECT * FROM queued
         ORDER BY created_key DESC, source DESC, identity DESC LIMIT ?8
     "#;
@@ -597,6 +582,10 @@ mod tests {
 mod read_tests {
     use super::*;
     use rusqlite::Connection;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     const THREAD: &str = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
     const OTHER: &str = "rvcamp_01h47kvsy5fk1shh6w1g60eecg";
@@ -667,13 +656,30 @@ mod read_tests {
                 "queued",
             ),
             ("waiting", Some(THREAD), None, "public", "direct", "waiting"),
+            ("failed", Some(THREAD), None, "public", "direct", "failed"),
             (
-                "failed",
+                "legacy-failed",
                 None,
                 Some("historical"),
                 "public",
                 "direct",
                 "failed",
+            ),
+            (
+                "legacy-waiting",
+                None,
+                Some("historical"),
+                "public",
+                "direct",
+                "waiting",
+            ),
+            (
+                "legacy-succeeded",
+                None,
+                Some("historical"),
+                "public",
+                "direct",
+                "succeeded",
             ),
             (
                 "private-kind",
@@ -733,6 +739,21 @@ mod read_tests {
         };
         let all = read(&mut connection, ThreadRunsInput::default()).unwrap();
         assert_eq!(all["items"].as_array().unwrap().len(), 5);
+        assert!(all["items"].as_array().unwrap().iter().all(|item| {
+            !item["agentRunId"]
+                .as_str()
+                .is_some_and(|id| id.starts_with("legacy-"))
+        }));
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT status FROM agent_run WHERE id = 'legacy-waiting'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "waiting"
+        );
         assert_eq!(all["items"][0]["agentRunId"], Value::Null);
         assert_eq!(all["items"][0]["messageCount"], 3);
         assert_eq!(all["items"][0]["messagePreview"]["text"], "q1");
@@ -780,6 +801,7 @@ mod read_tests {
             },
         )
         .unwrap();
+        assert_eq!(failed["items"].as_array().unwrap().len(), 1);
         assert_eq!(failed["items"][0]["agentRunId"], "failed");
         let page = read(
             &mut connection,
@@ -896,13 +918,12 @@ mod read_tests {
                 [THREAD],
             )
             .unwrap();
-        // 50k public Runs, half with each ownership form. Adjacent Runs share an
+        // 50k directly owned public Runs. Adjacent Runs share an
         // instant, while the four timestamp spellings disagree lexicographically.
         connection.execute(r#"
             WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 50000)
             INSERT INTO agent_run(id,camp_id,camp_turn_id,conversation_id,invocation_kind,status,created_at)
-            SELECT printf('run-%05d',n), CASE WHEN n % 2 = 0 THEN ?1 END,
-                   CASE WHEN n % 2 = 1 THEN 'historical' END, 'public', 'direct', 'succeeded',
+            SELECT printf('run-%05d',n), ?1, NULL, 'public', 'direct', 'succeeded',
                    CASE n % 4
                        WHEN 0 THEN printf('2026-10-03T12:00:00.%09dZ',n/2)
                        WHEN 1 THEN printf('2026-10-03T20:00:00.%09d+08:00',n/2)
@@ -911,11 +932,6 @@ mod read_tests {
                    END
             FROM numbers
         "#, [THREAD]).unwrap();
-        // An equally long unrelated Thread must not join the candidate scan.
-        connection.execute(r#"
-            INSERT INTO agent_run(id,camp_id,conversation_id,invocation_kind,status,created_at)
-            SELECT 'other-' || id, ?1, conversation_id, invocation_kind,status,created_at FROM agent_run
-        "#, [OTHER]).unwrap();
         connection.execute(r#"
             WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 2000)
             INSERT INTO camp_message_delivery(camp_id,recipient_agent_id,status,queue_sequence,created_at,message_id)
@@ -929,10 +945,63 @@ mod read_tests {
             active: false,
             status: None,
         };
-        let before = tx.total_changes();
         // Exercise SQL's returned-candidate boundary, before public projection or
         // Rust truncation. The previous all-candidate query returned 50,002 here.
-        let page = candidates(&tx, &filter, None, 21).unwrap();
+        let measured_page = || {
+            let steps = Arc::new(AtomicUsize::new(0));
+            let observed = Arc::clone(&steps);
+            tx.progress_handler(
+                1,
+                Some(move || {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+            let page = candidates(&tx, &filter, None, 21).unwrap();
+            tx.progress_handler(0, None::<fn() -> bool>).unwrap();
+            (page, steps.load(Ordering::Relaxed))
+        };
+        let (baseline, baseline_steps) = measured_page();
+        // Same-Thread Turn-only history and other Threads must not add work to
+        // the direct-ownership lookup. Keep real target history fixed.
+        tx.execute(
+            r#"
+            INSERT INTO agent_run(id,camp_id,conversation_id,invocation_kind,status,created_at)
+            SELECT 'other-' || id, ?1, conversation_id, invocation_kind,status,created_at
+            FROM agent_run WHERE camp_id = ?2
+        "#,
+            params![OTHER, THREAD],
+        )
+        .unwrap();
+        tx.execute(r#"
+            INSERT INTO agent_run(id,camp_turn_id,conversation_id,invocation_kind,status,created_at)
+            SELECT 'legacy-' || id, 'historical', conversation_id, invocation_kind,'waiting',created_at
+            FROM agent_run WHERE camp_id = ?1
+        "#, [THREAD]).unwrap();
+        tx.authorizer(Some(
+            |context: rusqlite::hooks::AuthContext<'_>| match context.action {
+                rusqlite::hooks::AuthAction::Read {
+                    table_name: "camp_turn",
+                    ..
+                } => rusqlite::hooks::Authorization::Deny,
+                _ => rusqlite::hooks::Authorization::Allow,
+            },
+        ))
+        .unwrap();
+        let before = tx.total_changes();
+        let (page, steps) = measured_page();
+        assert_eq!(
+            page.iter().map(|row| &row.key).collect::<Vec<_>>(),
+            baseline.iter().map(|row| &row.key).collect::<Vec<_>>()
+        );
+        assert!(
+            steps <= baseline_steps + 16,
+            "candidate SQL work grew with excluded Run history: before={baseline_steps}, after={steps}"
+        );
+        eprintln!(
+            "thread_runs_scope target_runs=50000 other_runs=50000 legacy_runs=50000 before_steps={baseline_steps} after_steps={steps}"
+        );
         assert_eq!(page.len(), 21);
         assert_eq!(page[0].run_id.as_deref(), Some("run-50000"));
         assert_eq!(page[1].agent_id, "agent_2");
@@ -1011,10 +1080,7 @@ mod read_tests {
             plan.contains("SEARCH r USING INDEX agent_run_camp_delete_idx (camp_id=?)"),
             "{plan}"
         );
-        assert!(
-            plan.contains("SEARCH r USING INDEX agent_run_a2a_turn_idx (camp_turn_id=?)"),
-            "{plan}"
-        );
+        assert!(!plan.contains("agent_run_a2a_turn_idx"), "{plan}");
         assert!(plan.contains("SEARCH camp_message_delivery USING INDEX camp_message_delivery_waiting_idx (camp_id=?)"), "{plan}");
         assert!(plan.contains("SEARCH delivery USING INDEX camp_message_delivery_waiting_idx (camp_id=? AND recipient_agent_id=? AND queue_sequence=?)"), "{plan}");
         assert!(!plan.contains("SCAN r"), "{plan}");
