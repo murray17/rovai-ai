@@ -11,6 +11,8 @@ describe('message export boundaries', () => {
     const title = defaultMessageExportTitle(source)
     expect(title).toBe('a'.repeat(39) + '👩‍💻… · 会话片段')
     expect(defaultMessageExportTitle('短标题')).toBe('短标题 · 会话片段')
+    expect(defaultMessageExportTitle(source, 'conversation')).toBe('a'.repeat(39) + '👩‍💻…')
+    expect(defaultMessageExportTitle('短标题', 'conversation')).toBe('短标题')
     const entry = { message: message('a', 1, { createdAt: '2026-11-03T01:00:00Z', attachments: [] }), author: 'Alice', avatarRef: null, recipients: [], markdown: source, reply: null }
     const text = messageExportMarkdown(title, [entry], defaultMessageExportOptions('markdown'))
     expect(text).toContain(source)
@@ -30,13 +32,6 @@ describe('message export boundaries', () => {
     const result = exportMessageMarkdown('', [{ kind: 'member_mention', agentId: 'a' }, { kind: 'text', text: code }, { kind: 'thread_reference', threadId: 'secret-id', titleAtSend: '[thread]' }], new Map([['a', '<img src=x>']]), '你')
     expect(result).toContain(code); expect(result).toContain('\\[thread\\]'); expect(result).not.toContain('secret-id'); expect(result).toContain('\\<img src=x\\>')
   })
-  it('excerpt exports never acquire the source message attachments, reply or recipients', () => {
-    const entry = { message: message('a', 1, { createdAt: '2026-11-03T01:00:00Z', attachments: [{ displayName: 'secret-file', mediaType: 'text/plain', kind: 'file', byteSize: 32 }] }), author: 'Alice', avatarRef: null, recipients: ['Bob'], markdown: 'full body', reply: 'reply body', excerpt: 'selected <script>' }
-    const text = messageExportMarkdown('title', [entry], defaultMessageExportOptions('markdown'))
-    expect(text).toMatch(/^# title\n\n### Alice/)
-    expect(text).toContain('Alice'); expect(text).toContain('2026\\-11\\-03'); expect(text).toContain('selected \\<script\\>')
-    for (const absent of ['secret-file', 'full body', 'reply body', 'Bob']) expect(text).not.toContain(absent)
-  })
   it('exports file/internal links as labels while leaving literal code and web links intact', () => {
     const code = '`[source](file:///private/source.ts)`\n\n```md\n[thread](rovai://thread/example)\n```'
     const result = exportMessageMarkdown('[source](file:///private/source.ts) [thread][t] [web](https://example.com)\n\n[t]: rovai://thread/private-id\n\n' + code, null, new Map(), '你')
@@ -50,6 +45,5 @@ describe('message export boundaries', () => {
     expect(entries.map((entry, i) => exportEntryShowsTime(entry, entries[i + 1]))).toEqual([false, false, true])
     expect(exportEntryShowsTime(entries[0], entries[2])).toBe(true)
     expect(exportEntryShowsTime({ ...entries[0], nextGroupedMessageId: null }, entries[1])).toBe(true)
-    expect(exportEntryShowsTime({ ...entries[0], excerpt: '选文' }, entries[1])).toBe(true)
   })
 })

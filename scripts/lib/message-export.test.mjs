@@ -173,17 +173,16 @@ test('message selection exports standalone HTML, PNG and Markdown through produc
     await button('.message-export-dialog', '返回调整'); await b.key('Escape')
     await b.evaluate('__presence.showExportCase()'); await pause(120)
 
-    // Native text selection offers export as a sibling to quote; only that text is captured.
+    // Native text selection retains quoting without a second export entry.
     await b.evaluate(`document.querySelector('[data-message-id=export-code] .safe-markdown').scrollIntoView({block:'start',behavior:'instant'})`)
     await pause(180)
     await b.evaluate(`(()=>{const root=document.querySelector('[data-message-id=export-code] .safe-markdown'),walk=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);let n;while(n=walk.nextNode()){if(n.textContent.includes('普通网页。')){const start=n.textContent.indexOf('普通网页。'),r=document.createRange();r.setStart(n,start);r.setEnd(n,start+5);getSelection().removeAllRanges();getSelection().addRange(r);document.dispatchEvent(new Event('selectionchange'));break}}})()`)
-    await b.wait('!!document.querySelector(".message-selection-export")')
-    await click('.message-selection-export')
-    await b.wait('!!document.querySelector(".message-export-dialog")')
-    await button('.message-export-dialog', '网页 HTML')
-    assert.equal(await b.evaluate('document.querySelector(".message-export-excerpt").textContent'), '普通网页。')
-    assert.equal(await b.evaluate('document.querySelectorAll(".message-export-attachment").length'), 0)
-    await button('.message-export-dialog', '返回调整')
+    await b.wait('!!document.querySelector(".message-quote-selection-toolbar")')
+    assert.equal(await b.evaluate('document.querySelectorAll(".message-quote-selection-toolbar button").length'), 1)
+    assert.equal(await b.evaluate('!!document.querySelector(".message-selection-export")'), false)
+    await click('.message-quote-selection-toolbar button')
+    await b.wait('!document.querySelector(".message-quote-selection-toolbar")')
+    assert.equal(await b.evaluate('!!document.querySelector(".message-export-dialog")'), false)
 
     await click('.message-select-button')
     await button('.message-selection-dock', '全选已加载')

@@ -1,5 +1,5 @@
 import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
-import { exportMessageMarkdown, type MessageExportEntry } from './message-export'
+import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
 import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
 import { isReferenceAtom, isReferenceSegment, projectReference } from './thread-reference'
@@ -5156,21 +5156,14 @@ export function ThreadWorkspace({
   })
   const publicMessagesJoin = (message: ThreadMessageView, next: ThreadMessageView): boolean =>
     shortPublicMessages.has(message.id) && samePublicMessageSegment(groupingMessage(message), groupingMessage(next))
-  const exportEntry = (message: ThreadMessageView, excerpt?: string): MessageExportEntry => {
+  const exportEntry = (message: ThreadMessageView): MessageExportEntry => {
     const names = new Map(messageMentionNames.map(member => [member.agentId, member.displayName]))
     const parent = message.replyToThreadMessageId ? replyParentById.get(message.replyToThreadMessageId) : null
-    const quoted = (message.quotes ?? []).map(q => `${q.authorAtCapture?.displayName ?? ''}：${q.text}`)
     const index = presenceTimeline.findIndex(item => item.kind === 'camp_message' && item.message.id === message.id)
     const next = index >= 0 ? presenceTimeline[index + 1] : undefined
-    return { message: structuredClone(message), author: campMessageAuthorLabel(message, memberById, currentUserName),
+    return createMessageExportEntry(message, { memberById, names, currentUserName, avatarDataUrl: currentUserProfile.avatarDataUrl, parent,
       nextGroupedMessageId: next?.kind === 'camp_message' && publicMessagesJoin(message, next.message) ? next.message.id : null,
-      avatarRef: memberById.get(message.authorId)?.avatarRef ?? null,
-      avatarDataUrl: message.authorType === 'user' ? currentUserProfile.avatarDataUrl : null,
-      runtimeImages: presenceTimeline.flatMap(item => item.kind === 'camp_message' && item.message.id === message.id ? item.runtimeImageGroups.flatMap(group => group.images) : []),
-      recipients: message.addressedAgentIds.map(id => names.get(id) ?? uiAttribute('不可用队员')),
-      markdown: exportMessageMarkdown(message.body, message.content, names, currentUserName),
-      reply: [parent ? `${uiAttribute('回复')} ${campMessageAuthorLabel(parent, memberById, currentUserName)} · ${exportMessageMarkdown(parent.body, parent.content, names, currentUserName).replace(/\\([\\`*_{}\[\]()<>#+.!|~-])/g, '$1').slice(0, 240)}` : '', ...quoted].filter(Boolean).join('\n') || null,
-      ...(excerpt === undefined ? {} : { excerpt }) }
+      runtimeImages: presenceTimeline.flatMap(item => item.kind === 'camp_message' && item.message.id === message.id ? item.runtimeImageGroups.flatMap(group => group.images) : []) })
   }
   const openSelectedExport = (): void => messageExport.open(messageExport.eligible.filter(m => messageExport.selected.has(m.id)).map(m => exportEntry(m)))
   const executionDrawer = executionDrawerProcess ? (
@@ -6385,10 +6378,6 @@ export function ThreadWorkspace({
           ownerKey={`thread:${snapshot.thread.id}`}
           messages={visibleThreadMessages}
           disabled={composerInteractionDisabled}
-          onExport={selection => {
-            const message = messageExport.eligible.find(m => m.id === selection.messageId)
-            if (message) messageExport.open([exportEntry(message, selection.text)])
-          }}
           onAdd={async (selection) => { await mutateRoutingDraft(() => draftCoordinator.mutateQuote({ type: 'add', selection })) }}
         />
         <div className="composer-box">
@@ -10008,17 +9997,6 @@ export function defaultRecipientMentionAgentId(
     && message.addressedAgentIds.length === 1
     ? message.addressedAgentIds[0]
     : null
-}
-
-function campMessageAuthorLabel(
-  message: ThreadMessageView,
-  memberById: ReadonlyMap<string, ThreadSnapshot['members'][number]>,
-  currentUserName: string
-): string {
-  // Channel admission is Owner-only; this label does not change the stored author.
-  if (message.authorType === 'user' || message.authorType === 'external_principal') return currentUserName
-  if (message.authorType === 'system') return uiAttribute("系统")
-  return memberById.get(message.authorId)?.displayName ?? message.authorId
 }
 
 function ReplyParentQuote({

@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-10-30
+last_updated: 2026-11-04
 ---
 
 # App Shell 与统一侧栏
@@ -58,7 +58,10 @@ Thread（包括快速对话）按最近一条已发布用户消息排序，桌�
 置顶项和已保存的 Project 顺序继续由本机偏好拥有。
 
 Thread 行显示稳定标题和必要状态。右键、三点按钮、Shift+F10 / ContextMenu 键及触屏长按打开同一份菜单，
-提供置顶/取消置顶、标记未读/已读、重命名、复制会话 ID 和删除；复制只写稳定 Thread ID 原文。
+提供置顶/取消置顶、标记未读/已读、重命名、复制会话 ID、导出会话和删除；复制只写稳定 Thread ID 原文。
+“导出会话”固定在“复制会话 ID”下方、删除分隔线之前；草稿 Thread 不提供该操作。
+该操作直接打开既有导出预览，不打开目标 Thread、不改变当前时间线、草稿或滚动状态；
+可从未打开的 Thread 发起。完整历史收集与取消、重试规则见[消息导出](conversation-workspace.md#消息导出)。
 复制会话 ID、复制项目路径、重命名项目和从侧栏移除项目成功后不显示 Toast，也不增加替代提示；
 失败继续使用原有错误反馈。
 右键不打开 Thread 或折叠 Project。鼠标菜单靠点击位置，三点和键盘菜单靠行末入口，均限制在窗口内；
