@@ -1,5 +1,8 @@
 /* Shared Porcelain Day / Steel Night tokens; owned by the existing Desktop theme contract. */
 :root {
+  /* User-requested paper buttons for pending decisions, invariant across palettes. */
+  --pending-secondary-canvas: #ffffff;
+  --pending-secondary-ink: #262626;
   /* Neutral project browsing and file reading canvas. */
   --file-canvas: #ffffff;
   --file-hover: #f0f0f0;

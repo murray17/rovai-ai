@@ -969,6 +969,7 @@ export interface SingleChatRunView {
 }
 
 export interface SingleChatSnapshot {
+  nativeInteractions?: NativeInteractionView[]
   conversation: SingleChatConversationView
   approvals: ActionApprovalView[]
   messages: SingleChatMessageView[]
@@ -2444,6 +2445,31 @@ export interface ActionView {
   updatedAt: string
 }
 
+export interface NativeInteractionQuestion {
+  id: string
+  kind: 'confirm' | 'select' | 'input'
+  title: string
+  description: string | null
+  options: { id: string; label: string }[]
+  placeholder: string | null
+  prefill: string | null
+  multiline: boolean
+}
+export type NativeInteractionStatus = 'pending' | 'sent' | 'skipped' | 'expired' | 'unavailable' | 'unknown' | 'failed'
+export interface NativeInteractionView {
+  id: string
+  agentRunId: string
+  executionEpoch: number
+  questions: NativeInteractionQuestion[]
+  canSkip: boolean
+  createdAt: number
+  expiresAt: number | null
+  status: NativeInteractionStatus
+}
+export type NativeInteractionAnswer = { kind: 'confirm'; confirmed: boolean }
+  | { kind: 'select'; optionId: string } | { kind: 'input'; value: string } | { kind: 'skip' }
+export interface NativeInteractionResult { status: NativeInteractionStatus; alreadyHandled?: boolean }
+
 export interface ActionApprovalView {
   id: string
   actionId: string
@@ -2594,6 +2620,7 @@ export interface ThreadSnapshot {
   agentRunImages?: AgentRunImagesView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
   actions: ActionView[]
   timeline: DomainEventView[]
 }
@@ -2628,6 +2655,7 @@ export interface ThreadOpenProjection {
   agentRunFileChanges: AgentRunFileChangesView[]
   agentRunImages?: AgentRunImagesView[]
   approvals: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
   coverage: {
     tasks?: ThreadOpenCollectionCoverage
     messages: ThreadOpenMessageCoverage
@@ -4563,6 +4591,7 @@ export type CoreMethod =
   | 'thread.messages.withdraw'
   | 'userAutomation.thread.send'
   | 'action.approvals.resolve'
+  | 'nativeInteractions.respond'
   | 'notifications.inbox'
   | 'notifications.threadInterruptions'
   | 'notifications.changesSince'

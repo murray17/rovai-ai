@@ -56,20 +56,20 @@ describe('global Web connection recovery', () => {
     client.clear()
   })
 
-  it('recovers a recorded result after response loss without resending or clearing unrelated draft storage', async () => {
+  it.each(['thread.messages.send', 'nativeInteractions.respond'] as const)('recovers %s after response loss without resending or clearing unrelated draft storage', async operation => {
     const saved = storage()
     saved.setItem('rovai.web.edits.v1', 'unsent draft')
     let recorded = false, sends = 0
     const fetcher = vi.fn<typeof fetch>(async (url, init) => {
       if (String(url).endsWith('/login')) return Response.json(identity)
       const request = rpc(init)
-      if (request.operation === 'thread.messages.send') { sends++; throw new TypeError('reply lost') }
+      if (request.operation === operation) { sends++; throw new TypeError('reply lost') }
       if (request.operation === 'commands.reconcile') return recorded ? Response.json({ result: { state: 'recorded', result: { id: 'original-result' } } }) : unknown()
       return Response.json({ result: {} })
     })
     const client = new ConsoleClient(origin, fetcher, saved)
     await client.login('test')
-    const pending = client.request('thread.messages.send', command())
+    const pending = client.request(operation, command())
     await vi.waitFor(() => expect(client.connectionState).toBe('offline'))
     recorded = true
     await client.retryPending()

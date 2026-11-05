@@ -1,4 +1,5 @@
 mod host;
+mod interactions;
 
 use std::{fmt, path::Path, time::Duration};
 
@@ -99,6 +100,7 @@ pub enum PiIncoming {
         native_prompt_id: String,
         delivery_id: String,
         sequence: u64,
+        received_at: i64,
         message: Value,
     },
     Exited {
@@ -128,13 +130,7 @@ pub fn unsupported_extension_ui_cancellation(request: &Value) -> Result<Value> {
         .filter(|id| !id.is_null())
         .cloned()
         .context("Pi Extension UI request omitted id")?;
-    Ok(
-        if request.get("method").and_then(Value::as_str) == Some("confirm") {
-            json!({"type": "extension_ui_response", "id": id, "confirmed": false})
-        } else {
-            json!({"type": "extension_ui_response", "id": id, "cancelled": true})
-        },
-    )
+    Ok(json!({"type": "extension_ui_response", "id": id, "cancelled": true}))
 }
 
 pub fn normalize_event(message: &Value) -> (&'static str, Value) {
@@ -853,7 +849,118 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_native_extension_ui_is_cancelled_without_managed_interpretation() {
+    fn native_extension_ui_preserves_answers_and_expires_without_default_answers() {
+        use crate::native_interaction::{
+            NativeInteractionAnswer as Answer, NativeInteractionStatus as Status,
+        };
+        let mut dialogs = interactions::PiInteractions::default();
+        for method in ["confirm", "select", "input", "editor"] {
+            let request = json!({"type":"extension_ui_request", "method":method, "id":format!("native-{method}"),
+                "title":"原问题\n第二行", "message":" 保留说明 ", "options":["A", "A", "Type something."],
+                "placeholder":" 原提示 ", "prefill":"  初始\n中文  ", "timeout":10});
+            assert!(dialogs.register(&request, "run-1", 7, 100).unwrap());
+            assert!(
+                dialogs.register(&request, "run-1", 7, 999).unwrap(),
+                "duplicate ingress must not renew its deadline"
+            );
+            let entry = dialogs
+                .entries
+                .values_mut()
+                .find(|entry| entry.native_id == request["id"])
+                .unwrap();
+            assert_eq!(entry.view.questions[0].title, "原问题\n第二行");
+            assert_eq!(
+                entry.view.questions[0].description.as_deref(),
+                Some(" 保留说明 ")
+            );
+            assert_eq!(entry.view.can_skip, true);
+            assert_eq!(
+                entry.response(&Answer::Skip).unwrap(),
+                json!({"type":"extension_ui_response", "id":request["id"], "cancelled":true})
+            );
+            match method {
+                "confirm" => {
+                    for confirmed in [false, true] {
+                        assert_eq!(
+                            entry.response(&Answer::Confirm { confirmed }).unwrap()["confirmed"],
+                            confirmed
+                        );
+                    }
+                }
+                "select" => {
+                    assert_eq!(entry.view.questions[0].options.len(), 3);
+                    assert_eq!(
+                        entry
+                            .response(&Answer::Select {
+                                option_id: "2".into()
+                            })
+                            .unwrap()["value"],
+                        "Type something."
+                    );
+                    assert!(
+                        entry
+                            .response(&Answer::Input {
+                                value: "custom text must wait for native input".into()
+                            })
+                            .is_err()
+                    );
+                    assert!(
+                        entry
+                            .response(&Answer::Select {
+                                option_id: "missing".into()
+                            })
+                            .is_err()
+                    );
+                }
+                _ => {
+                    for text in ["", "  中文\n保留空格  "] {
+                        assert_eq!(
+                            entry
+                                .response(&Answer::Input { value: text.into() })
+                                .unwrap()["value"],
+                            text
+                        );
+                        assert_eq!(
+                            entry.view.questions[0].prefill.as_deref(),
+                            Some("  初始\n中文  ")
+                        );
+                        assert_eq!(entry.view.questions[0].multiline, method == "editor");
+                    }
+                }
+            }
+            entry.expire(109);
+            assert_eq!(entry.view.status, Status::Pending);
+            entry.expire(110);
+            assert_eq!(
+                entry.view.status,
+                if method == "editor" {
+                    Status::Pending
+                } else {
+                    Status::Expired
+                }
+            );
+        }
+        assert_eq!(
+            dialogs.pending(1000).len(),
+            1,
+            "editor has no native timeout"
+        );
+        assert!(
+            !dialogs
+                .register(&json!({"method":"notify"}), "run-1", 7, 100)
+                .unwrap()
+        );
+        assert!(
+            dialogs
+                .register(
+                    &json!({"method":"select", "id":"malformed", "title":"bad", "options":[1]}),
+                    "run-1",
+                    7,
+                    100
+                )
+                .is_err()
+        );
+        // Unsupported requests and system cleanup use cancellation, never a synthetic negative answer.
         for method in ["select", "input", "editor"] {
             let request = json!({
                 "type": "extension_ui_request",
@@ -881,7 +988,7 @@ mod tests {
             json!({
                 "type": "extension_ui_response",
                 "id": "ui-confirm",
-                "confirmed": false,
+                "cancelled": true,
             })
         );
     }

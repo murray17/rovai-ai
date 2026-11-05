@@ -19,6 +19,11 @@ last_updated: 2026-11-04
 
 ## 原生提问边界
 
+Pi 已接入 `confirm / select / input / editor` 的当前运行问答，复用 Pi RPC 和会话待处理区域；
+请求仅保存在当前 Runtime 内存。审批和问答共用展示，权限决策和原生答案仍分流；
+不引入新 Prompt、重跑或跨重启恢复。精确状态、期限和提交边界由
+[Native Interactions v1](../contracts/native-interactions-v1.md)拥有。下述问卷禁用不扩展到该 Pi 路径。
+
 问卷承载用户输入，不能进入执行审批来选择答案。Claude、Copilot、Qwen 在统一正式启动处关闭已验证的
 提问工具；Copilot、Qwen 策略属于 Host 兼容输入，不改变原生会话绑定。Kimi 与 Qwen 的意外请求复用 ACP 当前请求归属、
 Prompt 观察与终态，先识别并取消，再让普通权限进入现有审批。已识别但损坏的问卷也不能自动允许。

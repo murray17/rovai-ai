@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { ThreadSnapshot } from '@contracts'
 import type { ReactNode, Ref } from 'react'
 import { PanelToggleIcon } from './PanelToggleIcon'
@@ -45,7 +46,15 @@ export function AppHeader({
   const previewLayout = useOptionalFilePreviewLayout()
   const previewVisible = Boolean(filePreview?.paneVisible)
   const title = threadTitle ?? uiAttribute('正在打开对话')
-  const pendingApprovals = thread?.approvals.filter((approval) => approval.status === 'pending').length ?? 0
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!thread?.nativeInteractions?.some(request => request.expiresAt !== null)) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [thread?.nativeInteractions])
+  const pendingApprovals = (thread?.approvals.filter((approval) => approval.status === 'pending').length ?? 0)
+    + (thread?.nativeInteractions?.filter(request => request.expiresAt === null || request.expiresAt > now).length ?? 0)
   const previewActions = <>
     {filePreview?.activeTab?.kind !== 'mission_activity' && filePreview?.activeTab?.kind !== 'execution' && <FileFindButton />}
     <FilePreviewExpandButton />
@@ -84,11 +93,11 @@ export function AppHeader({
         <div className="topbar-context-status" aria-live="polite">
           {pendingApprovals > 0 && (
             <button
-              className="approval-badge"
+              className="pending-header-entry"
               type="button"
               onClick={onFocusApprovals}
-              aria-label={uiAttribute("待审批 {0}，定位输入框上方审批", String(pendingApprovals))}
-            ><UiText zh={"◆ 待审批 "} />{pendingApprovals}
+              aria-label={uiAttribute("待处理 {0}，定位输入框上方待处理区域", String(pendingApprovals))}
+            ><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true"><path d="M7 5h9M7 10h9M7 15h9"/><path d="M3.5 5h.01M3.5 10h.01M3.5 15h.01" strokeWidth="2.2"/></svg><UiText zh="待处理" /><span>{pendingApprovals}</span>
             </button>
           )}
         </div>

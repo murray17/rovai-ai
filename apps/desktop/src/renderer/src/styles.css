@@ -4269,7 +4269,8 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
   background: var(--surface-raised);
 }
 /* The bottom console and approval surface share the full conversation column. */
-.execution-drawer, .approval-dock { width: 100%; }
+.execution-drawer { width: 100%; }
+.approval-dock.pending-dock { width: min(var(--conversation-composer-width), calc(100% - 54px)); }
 .approval-dock > header { display: flex; min-height: 36px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 9px 6px 13px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--attention-soft) 55%, var(--surface-raised)); }
 .approval-dock-heading { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: 9px; border-radius: 4px; }
 .approval-dock-heading strong { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -9600,3 +9601,51 @@ button.skill-file-current:hover, .skill-file-current[aria-expanded="true"] { bac
   .markdown-mermaid-dialog-header .app-dialog-title { font-size: 12px; }
   .markdown-mermaid-dialog .markdown-mermaid-dialog-header { padding-left: 12px; }
 }
+
+/* Native questions share the approval dock. Only authorizations use attention color. */
+.pending-header-entry { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 7px; border: 1px solid transparent; border-radius: 6px; color: var(--muted); background: transparent; font-family: inherit; font-size: 11.5px; font-weight: 400; line-height: 16px; white-space: nowrap; cursor: pointer; }
+.pending-header-entry > svg { width: 14px; height: 14px; flex: none; }
+.pending-header-entry > span { font-variant-numeric: tabular-nums; }
+.pending-header-entry:hover { color: var(--ink); background: var(--surface-hover); }
+.pending-dock { min-width: 0; max-height: min(430px, 48vh); }
+.pending-dock.is-question > header { background: var(--surface-raised); }
+.pending-dock.is-question > header nav button { color: var(--muted); }
+.pending-dock.is-question > header nav button:hover:not([aria-disabled="true"]) { background: var(--neutral-hover); }
+.pending-dock > header nav.pending-pagination { display: grid; grid-template-columns: 24px minmax(38px, auto) 24px 24px; align-items: center; height: 24px; gap: 2px; }
+.pending-dock > header nav.pending-pagination button { width: 24px; height: 24px; margin: 0; padding: 0; line-height: 1; }
+.pending-pagination svg { display: block; width: 14px; height: 14px; }
+.pending-dock > header nav > .pending-page-count { display: flex; height: 24px; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-variant-numeric: tabular-nums; }
+.pending-content h3 { margin: 0 0 7px; font-size: 13px; font-weight: 600; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pending-owner { display: flex; align-items: center; gap: 6px; min-height: 21px; margin-bottom: 5px; color: var(--muted); font-size: 10.5px; }
+.native-question-description { margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.native-question-options { display: grid; gap: 3px; min-width: 0; margin: 8px -4px 10px; }
+.native-question-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; min-height: 34px; width: 100%; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.native-question-option > span { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.native-question-option > svg { flex: none; width: 14px; height: 14px; color: var(--faint); }
+.native-question-option:is(:hover, :focus-visible):not(:disabled) { outline: none; background: var(--neutral-hover); }
+.native-question-option:active:not(:disabled) { background: var(--neutral-selected); }
+.native-question-option:disabled { cursor: default; opacity: .55; }
+.native-question-input { display: block; box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--dialog-field-line); border-radius: 6px; padding: 8px 10px; margin: 9px 0 12px; background: var(--input); color: var(--ink); font: inherit; font-size: 12.5px; line-height: 1.7; }
+.native-question-input:hover { border-color: var(--dialog-field-line-hover); }
+.native-question-input:focus { outline: none; box-shadow: none; }
+input.native-question-input { height: 36px; }
+textarea.native-question-input { min-height: 96px; max-height: 180px; resize: vertical; }
+.native-question-actions, .native-question-actions > div { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.native-question-actions { justify-content: space-between; margin-top: 10px; }
+.native-question-actions > div { margin-left: auto; }
+.pending-submit-status { color: var(--muted); font-size: 10.5px; }
+.pending-submit-status:empty { display: none; }
+.pending-dock .runtime-option, .native-question-secondary { border: 1px solid var(--line); background: var(--pending-secondary-canvas); color: var(--pending-secondary-ink); }
+.pending-error { margin: 8px 0 0; color: var(--danger); font-size: 12px; white-space: pre-wrap; }
+@media (max-width: 1080px) { .approval-dock.pending-dock { width: min(var(--conversation-composer-width), calc(100% - 28px)); } }
+@media (max-width: 700px) {
+  .approval-dock.pending-dock { width: calc(100% - 24px); }
+  .pending-dock > header nav.pending-pagination { grid-template-columns: 44px minmax(38px, auto) 44px 44px; height: 44px; }
+  .pending-dock > header nav.pending-pagination button { width: 44px; height: 44px; }
+  .native-question-option, .native-question-actions button { min-height: 44px; }
+}
+
+@container conversation-pane (max-width: 480px) {
+  .approval-dock.pending-dock { width: calc(100% - 24px); }
+}
+html[data-mobile-web="true"] .approval-dock.pending-dock { width: calc(100% - 24px); }

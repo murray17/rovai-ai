@@ -787,6 +787,7 @@ pub struct ThreadSnapshot {
     pub agent_run_images: Vec<AgentRunImagesView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub approvals: Vec<ApprovalView>,
+    pub native_interactions: Vec<crate::native_interaction::NativeInteractionView>,
     pub actions: Vec<ActionView>,
     pub timeline: Vec<DomainEventView>,
 }
@@ -845,6 +846,7 @@ pub struct ThreadOpenProjection {
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
     pub agent_run_images: Vec<AgentRunImagesView>,
     pub approvals: Vec<ApprovalView>,
+    pub native_interactions: Vec<crate::native_interaction::NativeInteractionView>,
     pub coverage: ThreadOpenCoverage,
 }
 
@@ -1290,6 +1292,7 @@ impl ReadModelService {
             agent_run_images,
             context_manifests,
             approvals,
+            native_interactions: Vec::new(),
             actions,
             timeline,
         })
@@ -1353,6 +1356,7 @@ impl ReadModelService {
             agent_run_file_changes,
             agent_run_images,
             approvals,
+            native_interactions: Vec::new(),
             coverage,
         })
     }

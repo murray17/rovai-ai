@@ -12,6 +12,7 @@ mod codex;
 pub mod command_code_acp;
 mod health;
 pub mod hermes;
+pub mod native_interaction;
 mod opencode_compat;
 mod pi;
 mod runtime_fleet;

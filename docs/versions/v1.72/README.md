@@ -1467,3 +1467,8 @@ Windows 实测与残余边界见[Windows Preview 开放](command-code-native-sim
 
 原路径附件显示名、ACP 恢复等待、原生 Skill 正文预览与普通任务的 Mission 等待按独立提交收窄。
 工作边界、回归证据与未验证项见[实施记录](usability-check-simplification.md)。
+
+## Pi 原生交互桥接（2026-11-05）
+
+Pi 四类原生问答复用现有待处理区域；协议、答案和运行归属保持原生语义，未扩展其他 Runtime。
+范围、代码归属和验证边界见[实施记录](pi-native-interactions-implementation.md)。
