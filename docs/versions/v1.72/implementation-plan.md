@@ -72,6 +72,10 @@ User sequence 10 指出的生产形态约束由同组 fixture 补齐：当前 Ru
 默认 workspace 首轮两项 Runtime discovery 探测超时，分别串行复核通过后，
 `cargo test --workspace -- --test-threads=2` 完整通过；未改动 Runtime discovery 代码或测试。
 
+PR #1023 首轮 CI 的三个既有钉钉 suite 因间接加载真实 Electron、而 `--ignore-scripts` 不安装其二进制而在
+收集阶段失败。按相邻 gateway/session 测试的边界补齐本地 Electron mock，保留全部业务断言与 CI 安装策略；
+三个 suite 共 103 项及 `pnpm typecheck` 通过，没有改动钉钉生产代码。
+
 ## 原生子代理平铺执行记录（2026-11-01）
 
 按 User 确认方案，在独立 worktree 收敛为普通 command：机器人图标、单文本详情、来源隔离、稳定首次记录顺序与既有步骤分组。
