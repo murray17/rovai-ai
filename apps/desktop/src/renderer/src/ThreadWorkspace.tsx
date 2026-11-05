@@ -5704,8 +5704,10 @@ export function ThreadWorkspace({
                   ) : undefined
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.deliveryKind === 'public_a2a'
-                    && !delivery.continuationRequest
-                    && delivery.messageId === campMessage.id
+                    && (delivery.continuationRequest
+                      ? campMessage.authorType === 'user'
+                        && (delivery.inputMessageIds ?? [delivery.messageId]).includes(campMessage.id)
+                      : delivery.messageId === campMessage.id)
                   )
                   const userMessageRuns = campMessage.authorType === 'user'
                     ? snapshot.agentRuns.filter((run) =>
@@ -8404,18 +8406,34 @@ function UserMessageDeliveryReceipt({
     if (!runByAgentId.has(run.agentId)) runByAgentId.set(run.agentId, run)
   }
   const ordered = message.addressedAgentIds.map((agentId) => {
-    const delivery = deliveries.find(d => d.recipientAgentId === agentId)
-    const run = allRuns.find(r => r.id === delivery?.targetAgentRunId) ?? runByAgentId.get(agentId) ?? null
+    let delivery = deliveries.find(d => d.recipientAgentId === agentId && !d.continuationRequest)
+    const boundRun = allRuns.find(r => r.id === delivery?.targetAgentRunId)
+    const latestRun = runByAgentId.get(agentId)
+    let run = delivery?.requestedMode === 'steer' ? boundRun ?? latestRun ?? null
+      : latestRun && (!boundRun || latestRun.createdAt >= boundRun.createdAt) ? latestRun : boundRun ?? null
+    if (delivery?.requestedMode !== 'steer') {
+      const continuation = deliveries.filter(d => d.recipientAgentId === agentId && d.continuationRequest)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+      const runDelivery = deliveries.find(d => d.targetAgentRunId === run?.id)
+      // A queued continuation has no Run yet. Once claimed, its own Run or a
+      // newer input Run owns the receipt; the original Delivery stays historical.
+      if (continuation && (!run || continuation.targetAgentRunId === run.id
+        || continuation.createdAt >= (runDelivery?.createdAt ?? run.createdAt))) {
+        delivery = continuation
+        run = allRuns.find(r => r.id === continuation.targetAgentRunId) ?? null
+      }
+    }
+    const deliveryOwnsStatus = delivery?.requestedMode === 'steer' || !run || delivery?.targetAgentRunId === run.id
     // Classify each target once. A Steer receipt describes delivery, even when
     // its target Run later finishes; ordinary targets describe execution.
     const status = delivery?.requestedMode === 'steer' && delivery.inputDeliveryStatus === 'accepted' ? 'steered'
-      : delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
-      : delivery?.status === 'failed' || run?.status === 'failed' ? 'failed'
-      : delivery?.status === 'cancelled' || run?.status === 'cancelled' ? 'stopped'
+      : deliveryOwnsStatus && delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
+      : (deliveryOwnsStatus && delivery?.status === 'failed') || run?.status === 'failed' ? 'failed'
+      : (deliveryOwnsStatus && delivery?.status === 'cancelled') || run?.status === 'cancelled' ? 'stopped'
       : delivery?.requestedMode === 'steer' && delivery.status === 'claimed' ? delivery.dispatchPhase === 'attempting' ? 'steerSending' : 'steerPending'
       : run?.status === 'succeeded' || (!run && delivery?.status === 'settled') ? 'completed'
       : run && agentRunIsStarting(run) ? 'starting'
-      : delivery?.status === 'waiting' || !run ? 'pending'
+      : (deliveryOwnsStatus && delivery?.status === 'waiting') || !run ? 'pending'
       : 'inProgress'
     return { agentId, delivery, run, status }
   })
@@ -8483,6 +8501,7 @@ function UserMessageDeliveryReceipt({
               const displayName = member?.displayName ?? agentId
               const statusLabel = status === 'failed' ? uiAttribute('执行失败')
                 : status === 'stopped' ? uiAttribute('已停止')
+                : status === 'pending' ? uiAttribute('待处理')
                 : delivery?.requestedMode === 'steer'
                   ? delivery.inputDeliveryStatus === 'accepted' ? uiAttribute('运行时已接收')
                     : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('是否送达待核对')
@@ -8491,7 +8510,7 @@ function UserMessageDeliveryReceipt({
               return <div className="user-message-receipt-recipient" key={agentId}>
                 <MemberAvatar agentId={agentId} avatarRef={member?.avatarRef ?? null} displayName={displayName} size="mention" decorative />
                 <span><strong>{displayName}</strong><small>{statusLabel}</small></span>
-                {delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
+                {status === 'unknown' && delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
                   setChecking(delivery.id); setCheckResult(null)
                   try {
                     const status = await onReconcile(delivery.id)
