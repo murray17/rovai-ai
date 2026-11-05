@@ -17,6 +17,7 @@ import { hasPendingThreadDraftInput } from './pending-thread-draft'
 import { memberCreationHelper, memberCreationInitialDraft, navigationWithMemberCreationDrafts, type MemberCreationDraft } from './member-creation-flow'
 import { navigationThreadReadState, saveNavigationThreadReadState } from './navigation-unread'
 import { newCommandId } from '../../shared/command-id'
+import { ConversationExportDialog, useConversationExport } from './ConversationExport'
 import type { BusinessEnvironment } from './business-environment'
 import { AppHeader } from './AppHeader'
 import { MobileLayoutProvider, MobilePageHeader, useMobilePageTransition, useMobileViewport } from './MobileLayout'
@@ -1137,6 +1138,7 @@ export function BusinessApp({
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
   const [currentWorkspaceHint, setCurrentWorkspaceHint] = useState<WorkspaceSelection | null>(null)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+  const conversationExport = useConversationExport(client, `${view}:${activeThreadId ?? ''}`)
   const campInspectorVisible = activeThreadId !== null && campInspectorThreadId === activeThreadId
   const singleChatVisible = activeThreadId !== null && singleChatThreadId === activeThreadId
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
@@ -4404,6 +4406,7 @@ export function BusinessApp({
       })
     }}
     onThread={(target) => { setMobileConversationDrawerOpen(false); chooseThread(target) }}
+    onExportThread={conversationExport.reader.open}
     onTogglePin={toggleNavigationPin}
     onRemoveProject={removeNavigationProject}
     onRenameProject={renameProject}
@@ -4422,6 +4425,7 @@ export function BusinessApp({
     <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
       projectFilesEnabled={!!activeProjectPath}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
+    <ConversationExportDialog state={conversationExport.state} reader={conversationExport.reader} />
     <ThreadReferencePreviewProvider threadId={view === 'camp' ? activeThreadId : null} onOpen={async reference => {
       if (reference.kind === 'thread') await activateThread(reference.id, { reconcileDefaultLead: false })
       else {

@@ -21,6 +21,7 @@ import { conversationRunPresenceTimeline } from '../../../apps/desktop/src/rende
 import { liveRuntimeEventFromExecutionEvidence } from '../../../apps/desktop/src/renderer/src/ui-model'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
 import { snapshotExportDocument, exportDocumentPNG } from '../../../apps/desktop/src/renderer/src/message-export'
+import { ConversationExportDialog, useConversationExport } from '../../../apps/desktop/src/renderer/src/ConversationExport'
 const projectedTimeline = (snapshot: any) => conversationRunPresenceTimeline(campConversationTimeline(snapshot.messages,
   snapshot.turns, snapshot.agentRuns, snapshot.tasks, snapshot.agentRunFileChanges, snapshot.agentRunImages, snapshot.memberCreations), snapshot.agentRuns)
 const projectedPresence = (snapshot: any) => projectedTimeline(snapshot).flatMap(item => item.kind === 'run_presence' ? [{ ...item.slot, status: item.slot.run.status }] : [])
@@ -78,6 +79,7 @@ function Workbench() {
     messages: [], agentRuns: [], messageDeliveries: [], executionEvidence: [] } : model.controls.holdEntrySnapshot
       ? { ...namedSnapshot, agentRuns: state.snapshot.agentRuns.map((r: any) => ({ ...r, hasAcceptedContinuation: false })) }
       : namedSnapshot
+  const conversationExport = useConversationExport(model.client as any, `${settings}:${visibleSnapshot.thread.id}`)
   const sequence = scenarios[state.scenario]
   const navigation = useMemo(() => {
     const nav = createDesktopNavigation(async (target, transaction) => {
@@ -113,6 +115,9 @@ function Workbench() {
     Object.assign(window, { __presence: { snapshotExportDocument, exportDocumentPNG, setScenario: model.setScenario, setStage: model.setStage, setTheme, setProposal, setMemberName, setIdentityFields, navigateThread: setOtherThread,
       setLanguage: (language: 'zh-CN' | 'en') => changeInterfaceLanguage(languageTestApi, language),
       getState: model.get, showExportCase: model.showExportCase.bind(model), showExportPendingCase: model.showExportPendingCase.bind(model), showExportGroupCase: model.showExportGroupCase.bind(model), renameThread: model.rename,
+      showFullExportCase: model.showFullExportCase.bind(model), appendExportMessage: model.appendExportMessage.bind(model),
+      revealExportHistory: model.revealExportHistory,
+      removeExportMessage: model.removeExportMessage,
       showReplyCase: model.showReplyCase.bind(model), withdrawReply: model.withdrawReply, showSourceCase: model.showSourceCase.bind(model), showSteerTimeline: model.showSteerTimeline.bind(model), updateSteerTimeline: model.updateSteerTimeline,
       showReceiptCase: model.showReceiptCase.bind(model), finishSteerRuns: model.finishSteerRuns, showSteerCase: model.showSteerCase.bind(model), setRunModel: model.setRunModel, setMemberAvailability: model.setMemberAvailability,
       showNarration: model.showNarration, showStartupStatus: model.showStartupStatus, controls: model.controls, resync: model.resync, stop: model.stop, retry: model.retry, failRun: model.failRun, verify: () => {
@@ -143,6 +148,7 @@ function Workbench() {
   return <MobileLayoutProvider value={false}><ThreadClientProvider client={model.client as any}>
     <CurrentUserProfileContext.Provider value={{ profile, ready: true, error: null, reload: () => {}, save: async next => { setProfile(next as any); return next } }}>
     <FilePreviewProvider threadId={state.snapshot.thread.id} resolvedTheme={theme as any} api={model.fileApi}>
+    <ConversationExportDialog state={conversationExport.state} reader={conversationExport.reader} />
     <div className="prototype-workbench">
       <NavigationShell platform="darwin" settings={settings} className={settings ? '' : 'app-shell-camp'} navigation={navigation}>
         <div className="prototype-window-lights" aria-hidden="true"><i /><i /><i /></div>
@@ -153,6 +159,7 @@ function Workbench() {
           onMemory={() => unsupported('记忆')} onAutomations={() => unsupported('定时任务')} onMissions={() => unsupported('使命板')}
           onSettings={() => { void navigation.push({ kind: 'settings', section: 'appearance' }) }} onOpenProject={() => unsupported('项目')} onCreateInProject={() => unsupported('新对话')}
           onThread={thread => { setInspector(null); setOtherThread(thread.id === current.id ? null : { id: thread.id, title: thread.title }) }}
+          onExportThread={conversationExport.reader.open} onSetThreadUnread={async () => {}}
           onRemoveProject={async () => unsupported('移除项目')} onDelete={async () => unsupported('删除对话')}
           onRename={async (_, title) => model.rename(title)} onError={error => model.note(String(error))} />
         {!settings && <AppHeader threadTitle={visibleSnapshot.thread.title} contextLabel="rovai-ai" thread={visibleSnapshot} detailEntryHostRef={setDetailHost} onFocusApprovals={() => {}} />}

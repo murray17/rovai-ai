@@ -1,4 +1,4 @@
-import type { ThreadMessageView, StructuredThreadMessageContent, AgentRunImageView } from '@contracts'
+import type { ThreadMessageView, ThreadMemberView, StructuredThreadMessageContent, AgentRunImageView } from '@contracts'
 import DOMPurify from 'dompurify'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
@@ -10,19 +10,46 @@ export type MessageExportOptions = { avatars: boolean; authors: boolean; times: 
 export const defaultMessageExportOptions = (format: MessageExportFormat): MessageExportOptions => ({
   avatars: format !== 'markdown', authors: true, times: true, recipients: true
 })
-export function defaultMessageExportTitle(sourceTitle: string): string {
+export function defaultMessageExportTitle(sourceTitle: string, scope: 'selected' | 'conversation' = 'selected'): string {
   const characters = Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(sourceTitle.trim()), part => part.segment)
   const source = characters.length > 40 ? characters.slice(0, 40).join('').trimEnd() + '…' : characters.join('')
+  if (scope === 'conversation') return source || uiAttribute('未命名会话')
   return source ? source + ' · ' + uiAttribute('会话片段') : uiAttribute('会话片段')
 }
 export type MessageExportEntry = {
   message: ThreadMessageView; author: string; avatarRef: string | null; recipients: string[]
-  markdown: string; reply: string | null; excerpt?: string; runtimeImages?: AgentRunImageView[]; avatarDataUrl?: string | null
+  markdown: string; reply: string | null; runtimeImages?: AgentRunImageView[]; avatarDataUrl?: string | null
   /** Frozen adjacency from the source timeline; never inferred from selected entries. */
   nextGroupedMessageId?: string | null
 }
 export function exportEntryShowsTime(entry: MessageExportEntry, next?: MessageExportEntry): boolean {
-  return entry.excerpt !== undefined || !next || next.excerpt !== undefined || entry.nextGroupedMessageId !== next.message.id
+  return !next || entry.nextGroupedMessageId !== next.message.id
+}
+export function campMessageAuthorLabel(message: ThreadMessageView, memberById: ReadonlyMap<string, ThreadMemberView>, currentUserName: string): string {
+  // Channel admission is Owner-only; this label does not change the stored author.
+  if (message.authorType === 'user' || message.authorType === 'external_principal') return currentUserName
+  if (message.authorType === 'system') return uiAttribute('系统')
+  return memberById.get(message.authorId)?.displayName ?? message.authorId
+}
+export function createMessageExportEntry(message: ThreadMessageView, context: {
+  memberById: ReadonlyMap<string, ThreadMemberView>; names: ReadonlyMap<string, string>
+  currentUserName: string; avatarDataUrl: string | null; parent?: ThreadMessageView | null
+  nextGroupedMessageId: string | null; runtimeImages: AgentRunImageView[]
+}): MessageExportEntry {
+  const { memberById, names, currentUserName, parent } = context
+  const quoted = (message.quotes ?? []).map(q => `${q.authorAtCapture?.displayName ?? ''}：${q.text}`)
+  const reply = message.replyToThreadMessageId
+    ? parent && !parent.withdrawn
+      ? `${uiAttribute('回复')} ${campMessageAuthorLabel(parent, memberById, currentUserName)} · ${exportMessageMarkdown(parent.body, parent.content, names, currentUserName).replace(/\\([\\`*_{}\[\]()<>#+.!|~-])/g, '$1').slice(0, 240)}`
+      : uiAttribute('引用的消息当前不可用')
+    : ''
+  return { message: structuredClone(message), author: campMessageAuthorLabel(message, memberById, currentUserName),
+    avatarRef: memberById.get(message.authorId)?.avatarRef ?? null,
+    avatarDataUrl: message.authorType === 'user' ? context.avatarDataUrl : null,
+    recipients: message.addressedAgentIds.map(id => names.get(id) ?? uiAttribute('不可用队员')),
+    markdown: exportMessageMarkdown(message.body, message.content, names, currentUserName),
+    reply: [reply, ...quoted].filter(Boolean).join('\n') || null,
+    nextGroupedMessageId: context.nextGroupedMessageId, runtimeImages: context.runtimeImages }
 }
 export function exportableMessages(messages: readonly ThreadMessageView[]): ThreadMessageView[] {
   return messages.filter(m => !m.withdrawn && !m.id.startsWith('optimistic:') && !m.missionStart
@@ -70,11 +97,11 @@ export function exportMessageMarkdown(body: string, content: StructuredThreadMes
 export function messageExportMarkdown(title: string, entries: readonly MessageExportEntry[], options: MessageExportOptions): string {
   return '# ' + literalMarkdown(title) + '\n\n' + entries.map(e => {
     const heading = [options.authors ? e.author : '', options.times ? e.message.createdAt : ''].filter(Boolean).join(' · ')
-    const attachments = e.excerpt !== undefined ? [] : e.message.attachments.map(a => literalMarkdown(
+    const attachments = e.message.attachments.map(a => literalMarkdown(
       `${a.previewKind === 'image' ? '图片' : '附件'}：${a.displayName}（${a.mediaType ?? a.kind}${a.byteSize !== null ? `，${a.byteSize} bytes` : ''}）`))
-    return [heading ? '### ' + literalMarkdown(heading) : '', e.excerpt !== undefined ? literalMarkdown(e.excerpt) : e.reply ? '> ' + literalMarkdown(e.reply).replaceAll('\n', '\n> ') : '',
-      e.excerpt === undefined ? e.markdown : '', ...attachments, ...(e.excerpt === undefined ? (e.runtimeImages ?? []).map(a => literalMarkdown(`图片：${a.displayName}（${a.mediaType}，${a.byteSize} bytes）`)) : []),
-      e.excerpt === undefined && options.recipients && e.recipients.length ? '发送给 ' + e.recipients.map(n => literalMarkdown('@' + n)).join('、') : ''
+    return [heading ? '### ' + literalMarkdown(heading) : '', e.reply ? '> ' + literalMarkdown(e.reply).replaceAll('\n', '\n> ') : '',
+      e.markdown, ...attachments, ...(e.runtimeImages ?? []).map(a => literalMarkdown(`图片：${a.displayName}（${a.mediaType}，${a.byteSize} bytes）`)),
+      options.recipients && e.recipients.length ? '发送给 ' + e.recipients.map(n => literalMarkdown('@' + n)).join('、') : ''
     ].filter(Boolean).join('\n\n')
   }).join('\n\n---\n\n') + '\n'
 }
