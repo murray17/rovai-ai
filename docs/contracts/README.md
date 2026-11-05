@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-04
+last_updated: 2026-11-05
 ---
 
 # 长期接口合同
@@ -33,7 +33,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Camp Message Send v29](camp-message-send-v29.md)
 - [Thread Reference v1](thread-reference-v1.md)：对话/使命身份、用户目录、首次发布标题与弱引用正文投影。
 - [AgentRun Continuation v4](agent-run-continuation-v4.md)
-- [Camp Open Projection v30](camp-open-projection-v30.md)
+- [Camp Open Projection v31](camp-open-projection-v31.md)
 - [Notification Episode v12](notification-episode-v12.md)
 - [Desktop Shortcuts v2](desktop-shortcuts-v2.md)
 - [Host Web v9](host-web-v9.md)
@@ -152,6 +152,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
 | [Member Creation Flow v1（当前）](member-creation-flow-v1.md) | AI 优先入口、可用协助者、原子静态入队回执与配置链接 |
+| [Camp Open Projection v30（历史）](camp-open-projection-v30.md) | Task 能力决定字段省略和查询准入；公开 Run 的 Turn 回退由 v31 退役 |
 | [Camp Open Projection v29（历史）](camp-open-projection-v29.md) | 惰性锚点预览补充实际回复队员的姓名与头像，保留索引、正文窗口及旧 Host 兼容 |
 | [Camp Open Projection v28（历史）](camp-open-projection-v28.md) | Run 与公开消息共用冻结模型 / 强度投影，补齐执行行模型信息；兼容旧 Host |
 | [Camp Open Projection v27（历史）](camp-open-projection-v27.md) | Run 投影冻结的启动公开消息边界，初始执行行不回插到已领取输入；读取与分页边界不变 |

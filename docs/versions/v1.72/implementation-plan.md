@@ -3,10 +3,41 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-02
+last_updated: 2026-11-05
 ---
 
 # v1.72 实施与验收
+
+## 会话执行查询取消旧 Turn 回退（2026-11-05）
+
+任务分支 `rovai/thread-open-scoped-queries`，基线 `aca8bf1f1`。Run count/list 与文件变更列表直接按
+`agent_run.camp_id` 和已有会话索引读取；无 schema、Migration、历史回填或日常数据写入。
+旧 Turn-only 公开执行卡片退出普通列表，消息正文、当前单聊和按具体 Run 身份的详情／诊断保持。
+规则由 [Camp Open Projection v31](../../contracts/camp-open-projection-v31.md) 拥有，取舍见 [D75](decisions.md#v1-72-d75)。
+
+扩展既有完整 Open SQL 规模 owner，覆盖无关 Run/文件变更数量增长、旧卡片排除、新旧运行形态
+不串会话、原始状态不变。标题与分页 owner 保留当前 Run 的摘要、模型、正文窗口和边界断言；
+其旧 Turn-only Run 显示断言由当前的排除规则替代。没有新增 Rust 测试函数或进程 fixture。
+单查询测试不能捕获嵌套 loader 的全库扫描，因此沿用同一个完整 Read Side、SQLite VM 计步 owner。
+
+验证结果：
+
+- `cargo test --workspace` 与 `cargo fmt --all --check` 通过。
+- `cargo test -p rovai-core --features slow-tests --lib -- camp_open:: camp_open_slow_tests:: agent_run_file_change:: single_chat:: --nocapture`
+  覆盖的 40 项 owner 分批通过，其中单聊 9 项。原只读 owner 保留 SQL/Blob 零写入，并改为检查旧 Run
+  的存储状态仍为 waiting、列表已排除；文件投影 owner 改用当前 batch fixture，保留迟到事实、GC 与有界恢复断言。
+  业务保留 owner 显式开启 Task，继续验证原有 Task/历史事件内容；不改变产品默认值。
+- 无关 Run/文件卡片 100、1,000、10,000 条时，完整 Open 均为 2,887 SQL VM steps；无关事件
+  50,000／500,000／5,000,000 条及 Evidence 1,000／10,000／100,000 条时同样为 2,887 steps。
+- 对报告的真实 Thread 使用只读 Read Side helper 连续测量各 11 次：原版中位 31.49 ms、最高 198.65 ms，
+  本分支中位 4.80 ms、最高 13.00 ms；两组投影均为 160,056 bytes。目标会话仍在使用，先前投影大小变化
+  的一组未用于此对照。测量不包含数据库锁等待、IPC 或 Renderer 绘制，未启动 Core/Runtime 或写日常数据。
+- `pnpm docs:test` 10 项通过。原 checkout 的 `pnpm docs:check` 被 Git 忽略的本地原型坏链阻断；
+  对 Git 受控源码加本任务文档的隔离树执行同一版本／决定 Node 门禁通过，未修改 checker 或本地原型。
+
+扩大的 `read_model::` 慢测另有两项既有失败：`event_reader_hydrates_mixed_command_result_storage_without_changing_pagination`
+的 `first.has_more` 断言，以及 `snapshot_treats_accepted_input_without_shutdown_error_as_settled` 的 Manifest
+source fixture 约束。恢复基线 `aca8bf1f1` 的生产文件后分别重跑，失败一致；本次不改写这两个无关 owner。
 
 ## 原生子代理平铺执行记录（2026-11-01）
 
