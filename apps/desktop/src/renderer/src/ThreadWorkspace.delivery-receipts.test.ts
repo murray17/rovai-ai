@@ -88,6 +88,17 @@ function receipts(agentRuns: AgentRunView[], messageDeliveries: MessageDeliveryV
 }
 
 describe('user message receipts follow the current execution attempt', () => {
+  it('shows only recipients with retained Run or Delivery facts', () => {
+    expect(receipts([], [])).toEqual([])
+    const waiting = originalDeliveries.map(item => ({
+      ...item, status: 'waiting' as const, targetAgentRunId: null, endedAt: null
+    }))
+    expect(receipts([], waiting)).toEqual(['待处理 1', '待处理 1'])
+    expect(receipts([], waiting, {
+      messages: messages.map(message => ({ ...message, addressedAgentIds: agents.map(agent => agent.agentId) }))
+    })).toEqual(['待处理 1', '待处理 1'])
+  })
+
   it('replaces the original failed receipt for every continued batch input', () => {
     expect(receipts([source, successor], [...originalDeliveries, continuation]))
       .toEqual(['处理中 1', '处理中 1'])

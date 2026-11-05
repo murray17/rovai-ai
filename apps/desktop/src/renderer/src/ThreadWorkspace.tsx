@@ -8436,7 +8436,7 @@ function UserMessageDeliveryReceipt({
       : (deliveryOwnsStatus && delivery?.status === 'waiting') || !run ? 'pending'
       : 'inProgress'
     return { agentId, delivery, run, status }
-  })
+  }).filter(item => item.run !== null || item.delivery !== undefined)
   const steered = ordered.filter(item => item.status === 'steered')
   const unknown = ordered.filter(item => item.status === 'unknown')
   const steerPending = ordered.filter(item => item.status === 'steerPending')
