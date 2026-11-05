@@ -42,8 +42,30 @@ pub fn model_selection_matches(selected: &str, current: Option<&str>) -> bool {
 /// the user's Gateway. The native launcher keeps its own bootstrap semantics.
 pub fn configure_command(command: &mut Command) -> Result<()> {
     let home = dirs::home_dir().context("Hermes requires the current user's Home")?;
+    // Read the already-applied member/probe environment before clearing the selector.
+    // Hermes resolves and validates the native profile from the explicit CLI argument.
+    let profile = command
+        .as_std()
+        .get_envs()
+        .find(|(key, _)| {
+            if cfg!(windows) {
+                key.to_string_lossy().eq_ignore_ascii_case("HERMES_PROFILE")
+            } else {
+                *key == "HERMES_PROFILE"
+            }
+        })
+        .and_then(|(_, value)| value)
+        .map(|value| {
+            value
+                .to_str()
+                .context("Hermes profile must be valid UTF-8")
+                .map(|value| value.trim().to_owned())
+        })
+        .transpose()?
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "default".into());
     command
-        .args(["--profile", "default", "acp"])
+        .args(["--profile", profile.as_str(), "acp"])
         .env("HOME", &home)
         .env("HERMES_HOME", home.join(".hermes"))
         .env_remove("HERMES_PROFILE")
@@ -119,21 +141,47 @@ mod tests {
 
     #[test]
     fn native_entry_preserves_the_launcher_and_uses_logical_session_identity() {
-        let mut command = Command::new("/native/hermes");
-        command.env("HERMES_EPHEMERAL_SYSTEM_PROMPT", "native instruction");
-        configure_command(&mut command).unwrap();
-        assert_eq!(command.as_std().get_program(), "/native/hermes");
-        assert_eq!(
-            command.as_std().get_args().collect::<Vec<_>>(),
-            ["--profile", "default", "acp"]
-        );
-        assert!(
-            command
-                .as_std()
-                .get_envs()
-                .any(|(k, v)| k == "HERMES_EPHEMERAL_SYSTEM_PROMPT"
-                    && v == Some(std::ffi::OsStr::new("native instruction")))
-        );
+        for (profile, expected) in [
+            (None, "default"),
+            (Some(""), "default"),
+            (Some("  "), "default"),
+            (Some("default"), "default"),
+            (Some("writer"), "writer"),
+            (Some("reviewer"), "reviewer"),
+            (Some(" writer "), "writer"),
+        ] {
+            let mut values = std::collections::BTreeMap::from([(
+                "HERMES_EPHEMERAL_SYSTEM_PROMPT".into(),
+                "native instruction".into(),
+            )]);
+            if let Some(profile) = profile {
+                values.insert("HERMES_PROFILE".into(), profile.into());
+            }
+            let mut command = Command::new("/native/hermes");
+            crate::member_environment::LaunchEnvironment {
+                values: Some(values),
+                overlay: None,
+            }
+            .apply(&mut command)
+            .unwrap();
+            configure_command(&mut command).unwrap();
+            assert_eq!(command.as_std().get_program(), "/native/hermes");
+            assert_eq!(
+                command.as_std().get_args().collect::<Vec<_>>(),
+                ["--profile", expected, "acp"],
+                "configured profile: {profile:?}"
+            );
+            assert!(command.as_std().get_envs().any(|(k, v)| {
+                k == "HERMES_EPHEMERAL_SYSTEM_PROMPT"
+                    && v == Some(std::ffi::OsStr::new("native instruction"))
+            }));
+            assert!(
+                command
+                    .as_std()
+                    .get_envs()
+                    .any(|(k, v)| k == "HERMES_PROFILE" && v.is_none())
+            );
+        }
         assert_eq!(
             native_session_id(Some("local"), Some("local-session")),
             Some("local-session".into())
