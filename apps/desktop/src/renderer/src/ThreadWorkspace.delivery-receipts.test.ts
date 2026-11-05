@@ -100,6 +100,19 @@ describe('user message receipts follow the current execution attempt', () => {
   })
 
   it.each([
+    ['waiting', ['待处理 1', '待处理 1']], ['running', ['处理中 1', '处理中 1']], ['succeeded', []]
+  ] as const)('also follows a %s continuation after a manual stop', (status, labels) => {
+    const stopped = { ...source, status: 'cancelled' as const,
+      cancelReasonCode: 'user_requested_agent_run_stop' as const }
+    const runs = status === 'waiting' ? [stopped] : [stopped, { ...successor, status }]
+    expect(receipts(runs, [
+      ...originalDeliveries.map(item => ({ ...item, status: 'cancelled' })),
+      { ...continuation, status: status === 'waiting' ? 'waiting' : 'claimed',
+        targetAgentRunId: status === 'waiting' ? null : successor.id }
+    ])).toEqual(labels)
+  })
+
+  it.each([
     ['queued', '启动中 1'], ['failed', '执行失败'], ['cancelled', '已停止'], ['succeeded', null]
   ] as const)('uses the successor %s state without reviving the original failure', (status, label) => {
     expect(receipts([source, { ...successor, status }], [...originalDeliveries, continuation]))
