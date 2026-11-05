@@ -361,16 +361,16 @@ pub fn list_completed_run_file_changes(
                projection.file_count, projection.operation_count,
                projection.additions, projection.deletions,
                projection.files_summary_json, projection.completed_at,
-               projection.schema_version, COALESCE(agent_run.camp_id, camp_turn.camp_id),
+               projection.schema_version, agent_run.camp_id,
                projection.source_change_sequence, projection.revision,
                COALESCE(epoch_state.file_facts_change_sequence, 0)
         FROM agent_run_file_change_projection AS projection
         JOIN agent_run ON agent_run.id = projection.agent_run_id
-        LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         LEFT JOIN agent_run_execution_epoch_state AS epoch_state
           ON epoch_state.agent_run_id = projection.agent_run_id
          AND epoch_state.execution_epoch = projection.execution_epoch
-        WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
+        WHERE agent_run.camp_id = ?1
+          AND agent_run.invocation_kind <> 'single_chat'
           AND projection.status = 'complete'
         ORDER BY projection.completed_at, projection.agent_run_id, projection.execution_epoch
         "#,
@@ -2461,12 +2461,13 @@ mod tests {
             .connection()
             .execute(
                 r#"
-                INSERT INTO camp_turn(
-                    id, camp_id, trigger_type, trigger_id, status, created_at, updated_at
-                ) VALUES (
-                    'file-change-turn', 'file-change-camp', 'system_event',
-                    'file-change-trigger', 'running', ?1, ?1
-                )
+                INSERT INTO camp_message(
+                    id, camp_id, sequence, author_type, author_id, body,
+                    structured_content_json, content_digest, address_mode,
+                    addressed_agent_ids_json, created_at, updated_at
+                ) VALUES ('file-change-anchor', 'file-change-camp', 1, 'user', 'local_user',
+                    'File changes', '[{"kind":"text","text":"File changes"}]',
+                    'sha256:file-change-anchor', 'default', '[]', ?1, ?1)
                 "#,
                 [now],
             )
@@ -2477,7 +2478,8 @@ mod tests {
                 .execute(
                     r#"
                     INSERT INTO agent_run(
-                        id, camp_turn_id, conversation_id,
+                        id, camp_id, conversation_id, invocation_kind,
+                        anchor_message_id, current_public_tail_sequence,
                         initial_camp_context_through_sequence,
                         initial_conversation_context_through_sequence,
                         responsibility_key, start_reason, purpose,
@@ -2485,7 +2487,7 @@ mod tests {
                         status, idempotency_key, runtime_adapter_kind, execution_epoch,
                         created_at, started_at, updated_at
                     ) VALUES (
-                        ?1, 'file-change-turn', ?2, 0, 0, ?3,
+                        ?1, 'file-change-camp', ?2, 'batch', 'file-change-anchor', 1, 0, 0, ?3,
                         'initial', 'test Runtime-reported file changes', 'required',
                         '{"runtimeAdapter":"qoder-cli"}', ?4,
                         'running', ?1, 'qoder-cli', 1, ?5, ?5, ?5
@@ -2825,11 +2827,13 @@ mod tests {
             let run = format!("recovery-run-{index:02}");
             database.connection().execute(
                 r#"INSERT INTO agent_run(
-                    id, camp_turn_id, conversation_id, initial_camp_context_through_sequence,
+                    id, camp_id, invocation_kind, anchor_message_id, current_public_tail_sequence,
+                    camp_turn_id, conversation_id, initial_camp_context_through_sequence,
                     initial_conversation_context_through_sequence, responsibility_key,
                     start_reason, purpose, completion_role, effective_config_json, workspace_json,
                     status, idempotency_key, runtime_adapter_kind, execution_epoch, created_at, started_at, updated_at
-                ) SELECT ?1, camp_turn_id, conversation_id, 0, 0, ?1, start_reason, purpose,
+                ) SELECT ?1, camp_id, invocation_kind, anchor_message_id, current_public_tail_sequence,
+                    camp_turn_id, conversation_id, 0, 0, ?1, start_reason, purpose,
                     completion_role, effective_config_json, workspace_json, 'running', ?1,
                     runtime_adapter_kind, execution_epoch, created_at, started_at, updated_at
                   FROM agent_run WHERE id = 'file-change-run-0'"#, [&run],

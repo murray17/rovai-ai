@@ -18,6 +18,12 @@ import {
   type DingTalkProvisioningInput
 } from './dingtalk-member-bot-provisioner'
 
+// Provisioning consumes gateway DTOs, without a live Electron session or image codec.
+vi.mock('electron', () => ({
+  BrowserWindow: vi.fn(), session: { fromPartition: vi.fn() },
+  nativeImage: { createFromBuffer: vi.fn() }
+}))
+
 describe('direct DingTalk Open Platform member Bot provisioning', () => {
   it('recovers completed application credentials with read-only console calls and no new app or version', async () => {
     const gateway = resumeGateway({ initialStatus: { versionStatus: 'RELEASE' } })

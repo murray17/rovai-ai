@@ -498,13 +498,19 @@ mod slow_tests {
         second_open.unwrap();
         let enter = enter.unwrap();
         assert!(enter.reconcile_duration.is_none());
+        assert!(first_projection.agent_runs.is_empty());
+        assert_eq!(first_projection.coverage.agent_runs.total_count, 0);
+        // Retiring the old cards changes only the read projection. Opening a
+        // Thread still cannot settle or rewrite its historical Run facts.
         assert_eq!(
-            first_projection
-                .agent_runs
-                .iter()
-                .find(|run| run.id == camps[0].1[0])
-                .unwrap()
-                .status,
+            database
+                .connection()
+                .query_row(
+                    "SELECT status FROM agent_run WHERE id = ?1",
+                    [&camps[0].1[0]],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
             "waiting"
         );
         assert_eq!(

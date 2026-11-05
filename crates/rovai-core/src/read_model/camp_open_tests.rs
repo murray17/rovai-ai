@@ -347,6 +347,7 @@ fn append_waiting_user_deliveries(database: &mut Database, camp_id: &str, active
 fn camp_open_preserves_business_state_without_reading_event_history() {
     let (mut database, camp_id, completed_run, active_run) = business_fixture();
     append_waiting_user_deliveries(&mut database, &camp_id, &active_run);
+    crate::task_capability::set(database.connection(), true).unwrap();
     let snapshot = ReadModelService
         .camp_snapshot(&mut database, &camp_id)
         .unwrap();
@@ -583,7 +584,8 @@ fn camp_open_run_titles_and_start_boundaries_survive_message_paging() {
             params![format!("title-page-{sequence}"), camp_id, sequence],
         ).unwrap();
     }
-    // Exercise supported pre-batch Runs through the same summary loader.
+    // Public Runs without direct Thread ownership no longer appear in the
+    // execution list. The current Run's title must still survive paging.
     database.connection().execute(
         "INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, created_at, updated_at,
          execution_budget_schema_version, execution_budget_accepted_at,
@@ -644,6 +646,9 @@ fn camp_open_run_titles_and_start_boundaries_survive_message_paging() {
         let (open, _, _) = read_metered(&mut database, &camp_id);
         assert_eq!(open.messages.len(), 20);
         assert!(open.messages.iter().all(|message| message.id != source_id));
+        assert_eq!(open.agent_runs.len(), 1);
+        assert_eq!(open.agent_runs[0].id, active_run);
+        assert!(open.agent_run_file_changes.is_empty());
         for run in &open.agent_runs {
             assert_eq!(run.input_summary.as_deref(), expected, "{}", run.id);
             // The immutable claim boundary survives after its message leaves
@@ -674,7 +679,7 @@ fn camp_open_run_titles_and_start_boundaries_survive_message_paging() {
 
 #[test]
 fn camp_open_work_is_independent_of_unrelated_event_and_evidence_volume() {
-    let (mut database, camp_id, _, _) = business_fixture();
+    let (mut database, camp_id, completed_run, active_run) = business_fixture();
     let unrelated_workspace = database.directory().join("unrelated-workspace");
     std::fs::create_dir_all(&unrelated_workspace).unwrap();
     let unrelated = CollaborationService::default()
@@ -702,13 +707,145 @@ fn camp_open_work_is_independent_of_unrelated_event_and_evidence_volume() {
         .as_str()
         .unwrap()
         .to_string();
+    let unrelated_camp_id = unrelated.result.payload["threadId"].as_str().unwrap();
+    // Historical Turn-only public Runs are excluded without modifying their
+    // stored facts. Current batch Runs use their direct Thread ownership.
+    for (turn_id, thread_id) in [
+        ("open-scale-target-turn", camp_id.as_str()),
+        ("open-scale-unrelated-turn", unrelated_camp_id),
+    ] {
+        database.connection().execute(
+            "INSERT INTO camp_turn(id, camp_id, trigger_type, trigger_id, status, created_at, updated_at,
+                 execution_budget_schema_version, execution_budget_accepted_at,
+                 execution_budget_max_agent_run_responsibilities, execution_budget_max_accepted_a2a,
+                 execution_budget_root_agent_run_responsibilities)
+             VALUES (?1, ?2, 'system_event', ?1, 'running',
+                     '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z',
+                     1, '2026-08-31T00:00:00Z', 32, 16, 1)",
+            params![turn_id, thread_id],
+        ).unwrap();
+    }
+    database
+        .connection()
+        .execute(
+            "UPDATE agent_run SET invocation_kind = 'direct', camp_id = NULL,
+         camp_turn_id = 'open-scale-target-turn',
+         anchor_message_id = NULL, current_public_tail_sequence = NULL,
+         trigger_camp_message_id = (SELECT message_id FROM agent_run_input
+             WHERE agent_run_id = ?1 ORDER BY ordinal LIMIT 1)
+         WHERE id = ?1",
+            [&completed_run],
+        )
+        .unwrap();
+    database
+        .connection()
+        .execute(
+            "INSERT INTO agent_run_file_change_projection(
+            agent_run_id, execution_epoch, schema_version, status, file_count,
+            operation_count, files_summary_json, details_blob_id, source_evidence_ids_json,
+            completed_at, created_at)
+         SELECT ?1, execution_epoch, schema_version, status, file_count,
+                operation_count, files_summary_json, details_blob_id, source_evidence_ids_json,
+                completed_at, created_at
+         FROM agent_run_file_change_projection WHERE agent_run_id = ?2",
+            params![active_run, completed_run],
+        )
+        .unwrap();
     let (baseline, baseline_steps, _) = read_metered(&mut database, &camp_id);
+    assert_eq!(baseline.coverage.agent_runs.total_count, 1);
+    assert_eq!(baseline.agent_runs.len(), 1);
+    assert_eq!(baseline.agent_runs[0].id, active_run);
+    assert_eq!(baseline.agent_run_file_changes.len(), 1);
+    assert_eq!(baseline.agent_run_file_changes[0].agent_run_id, active_run);
+    assert!(
+        database
+            .connection()
+            .query_row(
+                "SELECT camp_id IS NULL AND status = 'succeeded' FROM agent_run WHERE id = ?1",
+                [&completed_run],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+    );
+    let (other, _, _) = read_metered(&mut database, unrelated_camp_id);
+    assert_eq!(other.coverage.agent_runs.total_count, 1);
+    assert_eq!(other.agent_runs.len(), 1);
+    assert_eq!(other.agent_runs[0].id, unrelated_run_id);
+    assert!(other.agent_run_file_changes.is_empty());
     let base_sequence = baseline.through_global_sequence;
     let mut expected = serde_json::to_value(baseline).unwrap();
     expected
         .as_object_mut()
         .unwrap()
         .remove("throughGlobalSequence");
+    // Event/Evidence growth alone misses scans of Run and file-card metadata.
+    // Extend the same complete-open owner with unrelated current/legacy Runs,
+    // each carrying a completed file card; SQL work must stay bounded.
+    let mut previous_run_volume = 0_i64;
+    for volume in [100_i64, 1_000, 10_000] {
+        let transaction = database.connection_mut().transaction().unwrap();
+        transaction.execute(
+            r#"WITH RECURSIVE rows(n) AS (
+                SELECT ?1 UNION ALL SELECT n + 1 FROM rows WHERE n < ?2
+            )
+            INSERT INTO agent_run(
+                id, camp_id, camp_turn_id, conversation_id,
+                initial_camp_context_through_sequence, initial_conversation_context_through_sequence,
+                responsibility_key, start_reason, purpose, completion_role,
+                effective_config_json, workspace_json, status, idempotency_key,
+                invocation_kind, anchor_message_id, current_public_tail_sequence,
+                created_at, updated_at, ended_at, execution_epoch)
+            SELECT 'open-unrelated-run-' || n,
+                   CASE WHEN n % 2 = 0 THEN ?3 END,
+                   CASE WHEN n % 2 = 1 THEN 'open-scale-unrelated-turn' END,
+                   source.conversation_id, 0, 0, 'open-unrelated-run-' || n,
+                   'initial', 'unrelated history', 'required',
+                   source.effective_config_json, source.workspace_json, 'succeeded',
+                   'open-unrelated-run-' || n,
+                   CASE WHEN n % 2 = 0 THEN 'batch' ELSE 'direct' END,
+                   CASE WHEN n % 2 = 0 THEN source.anchor_message_id END,
+                   CASE WHEN n % 2 = 0 THEN source.current_public_tail_sequence END,
+                   '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z', '2026-08-31T00:00:00Z', 1
+            FROM rows JOIN agent_run AS source ON source.id = ?4"#,
+            params![previous_run_volume + 1, volume, unrelated_camp_id, unrelated_run_id],
+        ).unwrap();
+        transaction
+            .execute(
+                r#"WITH RECURSIVE rows(n) AS (
+                SELECT ?1 UNION ALL SELECT n + 1 FROM rows WHERE n < ?2
+            )
+            INSERT INTO agent_run_file_change_projection(
+                agent_run_id, execution_epoch, schema_version, status, file_count,
+                operation_count, files_summary_json, details_blob_id, source_evidence_ids_json,
+                completed_at, created_at)
+            SELECT 'open-unrelated-run-' || n, source.execution_epoch,
+                   source.schema_version, source.status, source.file_count, source.operation_count,
+                   source.files_summary_json, source.details_blob_id, source.source_evidence_ids_json,
+                   source.completed_at, source.created_at
+            FROM rows JOIN agent_run_file_change_projection AS source ON source.agent_run_id = ?3"#,
+                params![previous_run_volume + 1, volume, completed_run],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        let (open, steps, elapsed) = read_metered(&mut database, &camp_id);
+        // B-tree boundaries may add constant checks as unrelated keys grow.
+        assert!(
+            steps <= baseline_steps + 64,
+            "SQL work grew with {volume} unrelated Runs/file cards: baseline={baseline_steps}, actual={steps}"
+        );
+        let mut actual = serde_json::to_value(open).unwrap();
+        actual
+            .as_object_mut()
+            .unwrap()
+            .remove("throughGlobalSequence");
+        assert_eq!(actual, expected);
+        eprintln!(
+            "camp_open_scale unrelated_runs_and_file_cards={volume} vm_steps={steps} elapsed_ms={:.3}",
+            elapsed.as_secs_f64() * 1_000.0
+        );
+        previous_run_volume = volume;
+    }
+    let (_, baseline_steps, _) = read_metered(&mut database, &camp_id);
     let mut previous_volume = 0_i64;
     // Each scale is a different regression input; five reads report a bounded
     // latency sample. The gate is SQL VM work, not machine-dependent wall time.

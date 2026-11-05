@@ -9,6 +9,8 @@ last_updated: 2026-11-05
 
 ## Public Thread 当前边界
 
+- 公开执行列表按 [Thread Open v31](../../contracts/camp-open-projection-v31.md) 只读取直接 Thread 归属。
+  旧 Turn-only 执行卡片不再显示；消息接收者缺少关联 Run 和 Delivery 事实时，不显示处理回执，不推导为“待处理”。
 - 已激活及普通一键 Pending Thread 的输入内容按 Thread 保存本机快照，切换、刷新、重建窗口和普通重启后恢复。
   普通 Pending 输入保存后显示侧栏草稿行；同一项目可以保留多份，清空后隐藏。AI 创建队员仍按其窗口内草稿合同运行。
   发送失败或结果未知保留当前内容，确认发送成功才清空已发送快照。

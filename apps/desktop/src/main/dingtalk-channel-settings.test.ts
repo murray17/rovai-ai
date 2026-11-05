@@ -39,6 +39,12 @@ import {
 import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
 import { DingTalkProvisioningError } from './dingtalk-member-bot-provisioner'
 
+// These service tests inject their ports; Electron behavior has separate owners.
+vi.mock('electron', () => ({
+  BrowserWindow: vi.fn(), session: { fromPartition: vi.fn() },
+  nativeImage: { createFromBuffer: vi.fn() }
+}))
+
 describe('DingTalk channel account connection', () => {
   it.each([
     'dingtalk_open_platform_unavailable', 'dingtalk_open_platform_timeout', 'channel_storage_unavailable',

@@ -6,10 +6,18 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-04
+last_updated: 2026-11-05
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 会话执行查询取消旧 Turn 回退（2026-11-05）
+
+按 User 确认，公开运行计数、运行列表、文件变更卡片与 `thread.runs` 统一按 Run 的直接会话归属读取；
+旧 Turn-only 公开运行不再显示这些执行卡片，不迁移或回填历史数据，当前单聊与消息正文保持。
+当前规则见 [Camp Open Projection v31](../../contracts/camp-open-projection-v31.md)、[Thread Runs v2](../../contracts/thread-runs-v2.md) 与
+[读取架构](../../architecture/camp-open-read-path.md)，取舍见 [D75](decisions.md#v1-72-d75)，
+代码与验证见[实施记录](implementation-plan.md#会话执行查询取消旧-turn-回退2026-11-05)。
 
 ## 原生成功与空最终文字（2026-11-04，Issue #1012）
 

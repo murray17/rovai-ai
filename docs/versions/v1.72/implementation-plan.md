@@ -3,10 +3,78 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-02
+last_updated: 2026-11-05
 ---
 
 # v1.72 实施与验收
+
+## 会话执行查询取消旧 Turn 回退（2026-11-05）
+
+任务分支 `rovai/thread-open-scoped-queries`，基线 `aca8bf1f1`，集成 main `b3cec851b`。Run count/list 与文件变更列表直接按
+`agent_run.camp_id` 和已有会话索引读取；无 schema、Migration、历史回填或日常数据写入。
+旧 Turn-only 公开执行卡片退出普通列表，消息正文、当前单聊和按具体 Run 身份的详情／诊断保持。
+规则由 [Camp Open Projection v31](../../contracts/camp-open-projection-v31.md) 拥有，取舍见 [D75](decisions.md#v1-72-d75)。
+
+扩展既有完整 Open SQL 规模 owner，覆盖无关 Run/文件变更数量增长、旧卡片排除、新旧运行形态
+不串会话、原始状态不变。标题与分页 owner 保留当前 Run 的摘要、模型、正文窗口和边界断言；
+其旧 Turn-only Run 显示断言由当前的排除规则替代。没有新增 Rust 测试函数或进程 fixture。
+单查询测试不能捕获嵌套 loader 的全库扫描，因此沿用同一个完整 Read Side、SQLite VM 计步 owner。
+
+验证结果：
+
+- `cargo test --workspace` 与 `cargo fmt --all --check` 通过。
+- 缺少关联 Run/Delivery 的消息接收者不再显示“待处理”回执；真实 waiting Delivery 保留。
+  `pnpm typecheck`、`pnpm build:desktop`、`ThreadWorkspace.delivery-receipts.test.ts` 与 `App.test.ts` 共 204 项通过，
+  包括部分接收者缺少事实时的计数及最新主线的重试／停止后继续回执。
+- `cargo test -p rovai-core --features slow-tests --lib -- camp_open:: camp_open_slow_tests:: agent_run_file_change:: single_chat:: --nocapture`
+  覆盖的 40 项 owner 分批通过，其中单聊 9 项。原只读 owner 保留 SQL/Blob 零写入，并改为检查旧 Run
+  的存储状态仍为 waiting、列表已排除；文件投影 owner 改用当前 batch fixture，保留迟到事实、GC 与有界恢复断言。
+  业务保留 owner 显式开启 Task，继续验证原有 Task/历史事件内容；不改变产品默认值。
+- 无关 Run/文件卡片 100、1,000、10,000 条时，完整 Open 均为 2,887 SQL VM steps；无关事件
+  50,000／500,000／5,000,000 条及 Evidence 1,000／10,000／100,000 条时同样为 2,887 steps。
+- 对报告的真实 Thread 使用只读 Read Side helper 连续测量各 11 次：原版中位 31.49 ms、最高 198.65 ms，
+  本分支中位 4.80 ms、最高 13.00 ms；两组投影均为 160,056 bytes。目标会话仍在使用，先前投影大小变化
+  的一组未用于此对照。测量不包含数据库锁等待、IPC 或 Renderer 绘制，未启动 Core/Runtime 或写日常数据。
+- `pnpm docs:test` 10 项通过。原 checkout 的 `pnpm docs:check` 被 Git 忽略的本地原型坏链阻断；
+  对 Git 受控源码加本任务文档的隔离树执行同一版本／决定 Node 门禁（包含固定 base 的 `--require-base`）通过，
+  未修改 checker 或本地原型。
+
+扩大的 `read_model::` 慢测另有两项既有失败：`event_reader_hydrates_mixed_command_result_storage_without_changing_pagination`
+的 `first.has_more` 断言，以及 `snapshot_treats_accepted_input_without_shutdown_error_as_settled` 的 Manifest
+source fixture 约束。恢复基线 `aca8bf1f1` 的生产文件后分别重跑，失败一致；本次不改写这两个无关 owner。
+
+### thread.runs 同步收敛
+
+User 在本 Thread sequence 8 明确要求删除内置公开查询的旧 Turn 关联。`thread_runs::CANDIDATES_SQL`
+删除 `legacy_runs` 与其 UNION，只通过 Run 的直接 `camp_id` 选择实际执行；当前 waiting Delivery 继续
+独立聚合。合同更新为 [Thread Runs v2](../../contracts/thread-runs-v2.md)，原始记录不迁移或回填。
+输入／输出 schema、CLI 帮助、工具描述、游标 v1、Bootstrap/Dynamic Context、冻结输入和证据版本轴均保持。
+
+扩展既有 `thread_runs::read_tests` 两个 owner：公开 scope 的正反向运行状态、当前失败记录与旧 waiting/failed/succeeded
+记录隔离；50,000 个当前 Run 的纳秒排序、队列聚合、分页接缝和深页保持，并验证同 Thread 的 50,000 个旧 Run
+加其他 Thread 的 50,000 个 Run 不增加候选 SQL 工作量、禁止读取 camp_turn。
+
+User sequence 10 指出的生产形态约束由同组 fixture 补齐：当前 Run 全部使用 batch，
+带非空 camp_id／anchor／public tail、空 camp_turn_id，终态补 ended_at；旧 Run 保持 direct 与空 camp_id。
+内存表加入归属 CHECK，当前 batch 的公开投影同步验证冻结输入。规模 owner 仍只测候选 SQL，
+不为 50,000 个 Run 构造不参与查询的完整执行链。
+
+新增 `production_schema_reads_batch_inputs_and_excludes_turn_only_runs`，作为生产 schema 与候选／冻结输入读取的
+唯一集成 owner。它通过真实建 Thread／投递 claim 路径生成两个合法 batch，验证非法 direct 归属、batch
+挂 Turn、缺 camp_id／anchor／tail 均被生产 CHECK 拒绝；合法 batch 可读取、旧 waiting Run 排除且存储不变、
+读取零写入。原内存 owner 无法证明生产约束，因此单独使用临时完整数据库；没有 Core/Runtime 进程或模型调用。
+本轮 Rust 测试函数从 4 项增为 5 项，保留原排序、分页、队列、状态与 schema 边界。
+
+验证：`cargo test -p rovai-core --features extended-tests --lib thread_runs:: -- --nocapture` 5 项通过。
+固定 50,000 个当前 Run，加入 50,000 个同 Thread 的 Turn-only Run 和 50,000 个其他 Thread Run 后，
+合法 batch 夹具的候选 SQL 从 1,953,460 steps 变为 1,953,461 steps；测试拒绝读取 camp_turn，当前 Run/队列的排序和分页仍通过。
+`cargo fmt --all --check`、文档单测 10 项通过；通用文档门禁按本节前述受控源码隔离树执行。
+默认 workspace 首轮两项 Runtime discovery 探测超时，分别串行复核通过后，
+`cargo test --workspace -- --test-threads=2` 完整通过；未改动 Runtime discovery 代码或测试。
+
+PR #1023 首轮 CI 的三个既有钉钉 suite 因间接加载真实 Electron、而 `--ignore-scripts` 不安装其二进制而在
+收集阶段失败。按相邻 gateway/session 测试的边界补齐本地 Electron mock，保留全部业务断言与 CI 安装策略；
+三个 suite 共 103 项及 `pnpm typecheck` 通过，没有改动钉钉生产代码。
 
 ## 原生子代理平铺执行记录（2026-11-01）
 
