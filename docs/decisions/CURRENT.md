@@ -50,6 +50,10 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 
 ## Public Thread 消息与多输入 AgentRun
 
+- 原生成功与文字发布分离：[Runtime Launch v75](../contracts/runtime-launch-and-verification-v75.md)、
+  [Missing-Send v4](../contracts/missing-send-recovery-publication-v4.md)。局部问卷取消保留诊断，随后有效成功不被覆盖；
+  空 final 不产生消息或新模型调用，运行与队列照常完成。
+
 - Thread read 正向增量分页：[History v17](../contracts/camp-history-v17.md)；已确认输入与提示词前后对照见 [实施方案](../versions/v1.72/model-context-change-thread-read-after.md)。
 
 - 对话与使命引用：[Thread Reference v1](../contracts/thread-reference-v1.md)、[Composer 架构](../architecture/camp-composer-draft.md)；理由见 [V1.72-D58](../versions/v1.72/decisions.md#v1-72-d58)。

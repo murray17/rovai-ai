@@ -957,31 +957,7 @@ impl AntigravityAppRuntimeAdapter {
                         true,
                     ));
                 }
-                match result.response {
-                    Some(response) => response.trim().to_string(),
-                    None => {
-                        let internal = anyhow::anyhow!(
-                            "Antigravity success result omitted its response field"
-                        );
-                        let failure = antigravity_public_failure(
-                            request,
-                            &self.log_dir,
-                            RuntimeFailureOrigin::Compatibility,
-                            RuntimeFailurePhase::Terminal,
-                            "runtime_missing_final_output",
-                            "Antigravity 最终结果缺少必要内容",
-                            Some(&internal.to_string()),
-                            false,
-                        );
-                        return Err(antigravity_failure_error(
-                            internal,
-                            failure,
-                            Some(&native_session_id),
-                            &native_turn_id,
-                            true,
-                        ));
-                    }
-                }
+                result.response.unwrap_or_default().trim().to_string()
             }
             AntigravityStdoutCapture::Legacy(stdout) if stdout.truncated => {
                 let internal =
@@ -1058,7 +1034,8 @@ impl AntigravityAppRuntimeAdapter {
             || final_output.clone(),
             |environment| environment.redactor().text(&final_output),
         );
-        if final_output.is_empty() {
+        // Legacy print has no native result frame: an empty stdout cannot prove completion.
+        if final_output.is_empty() && !structured_output {
             let internal = anyhow::anyhow!("Antigravity final output was empty");
             let failure = antigravity_public_failure(
                 request,
@@ -1436,10 +1413,11 @@ async fn process_antigravity_stream_line(
                 .and_then(Value::as_str)
                 .context("Antigravity result omitted status")?
                 .to_string();
-            let response = result
-                .get("response")
-                .and_then(Value::as_str)
-                .map(str::to_string);
+            let response = match result.get("response") {
+                Some(Value::String(response)) => Some(response.clone()),
+                None | Some(Value::Null) => None,
+                Some(_) => anyhow::bail!("Antigravity result response was not a string"),
+            };
             let error = result
                 .get("error")
                 .and_then(Value::as_str)
@@ -1448,9 +1426,6 @@ async fn process_antigravity_stream_line(
                 .get("message")
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            if status.eq_ignore_ascii_case("success") && response.is_none() {
-                anyhow::bail!("Antigravity success result omitted response");
-            }
             if !status.eq_ignore_ascii_case("success")
                 && error.is_none()
                 && message.is_none()
@@ -2939,6 +2914,66 @@ printf '%s\n' 'warning: tool timeout recovered; returning partial catalog' >&2
         assert_eq!(antigravity_tool_kind("search_web"), "web_search");
         assert_eq!(antigravity_tool_kind("write_to_file"), "write");
         assert_eq!(antigravity_tool_kind("future_tool"), "tool");
+        let script = std::fs::read_to_string(&executable).unwrap();
+        let original_result = r#""status":"SUCCESS","response":"structured final""#;
+        for (result, expected_error) in [
+            (r#""status":"SUCCESS","response":"""#, None),
+            (r#""status":"SUCCESS","response":"   ""#, None),
+            (r#""status":"SUCCESS","response":null"#, None),
+            (r#""status":"SUCCESS""#, None),
+            (
+                r#""status":"SUCCESS","response":42"#,
+                Some("runtime_stream_incompatible"),
+            ),
+        ] {
+            std::fs::write(&executable, script.replace(original_result, result)).unwrap();
+            let mut request =
+                fake_antigravity_request(&workspace, &executable, uuid::Uuid::new_v4().to_string());
+            request
+                .runtime
+                .capabilities
+                .push("output.stream_json".to_string());
+            match expected_error {
+                None => assert!(
+                    adapter
+                        .run(request)
+                        .await
+                        .expect("a native success may have no text")
+                        .final_output
+                        .is_empty()
+                ),
+                Some(code) => {
+                    let error = adapter.run(request).await.unwrap_err();
+                    let failure = error
+                        .downcast_ref::<RuntimeFailureError>()
+                        .map(|error| &error.failure)
+                        .or_else(|| {
+                            error
+                                .downcast_ref::<AntigravityDeliveredFailure>()
+                                .map(|error| &error.failure)
+                        })
+                        .expect("invalid output must retain its structured failure");
+                    assert_eq!(failure.code, code);
+                }
+            }
+        }
+        let without_result = script
+            .lines()
+            .filter(|line| !line.contains(r#""event":"result""#))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(&executable, without_result).unwrap();
+        let mut request =
+            fake_antigravity_request(&workspace, &executable, uuid::Uuid::new_v4().to_string());
+        request
+            .runtime
+            .capabilities
+            .push("output.stream_json".to_string());
+        let error = adapter.run(request).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("runtime_missing_final_result"),
+            "a missing native result must still fail: {error:#}"
+        );
         std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }
 
@@ -3100,7 +3135,7 @@ exit 7
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn verified_session_without_final_text_is_a_delivered_failure() {
+    async fn legacy_session_without_completion_evidence_is_a_delivered_failure() {
         use std::os::unix::fs::PermissionsExt;
 
         use rovai_core::agent_profile::{
@@ -3194,7 +3229,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                 input_ready: None,
             })
             .await
-            .expect_err("a verified Session without final text must not look successful");
+            .expect_err("a legacy Session without completion evidence must not look successful");
         let delivered = error
             .downcast_ref::<AntigravityDeliveredFailure>()
             .expect("the failure should preserve delivered-input identity");

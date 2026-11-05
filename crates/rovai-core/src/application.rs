@@ -22155,13 +22155,7 @@ async fn persist_pi_prompt_completion(
 ) -> Result<()> {
     let (final_message, stop_reason) = runtime.terminal().await;
     let stop_reason = stop_reason.unwrap_or_else(|| "unknown".to_string());
-    let outcome = if stop_reason == "stop" && final_message.is_some() {
-        RuntimeTerminalOutcome::Succeeded
-    } else if stop_reason == "aborted" {
-        RuntimeTerminalOutcome::Cancelled
-    } else {
-        RuntimeTerminalOutcome::Failed
-    };
+    let outcome = pi_prompt_terminal_outcome(&stop_reason);
     let delivery_status = if outcome == RuntimeTerminalOutcome::Failed {
         let database = core.database.lock().await;
         ContextService.runtime_input_delivery_status(&database, runtime.delivery_id())?
@@ -22170,11 +22164,7 @@ async fn persist_pi_prompt_completion(
     };
     let manual_retry_allowed = outcome == RuntimeTerminalOutcome::Failed
         && delivery_status.as_deref() == Some("not_accepted");
-    let base_error_code = if stop_reason == "stop" {
-        "runtime_missing_final_output".to_string()
-    } else {
-        format!("runtime_prompt_{stop_reason}")
-    };
+    let base_error_code = format!("runtime_prompt_{stop_reason}");
     let error_detail = format!("Native prompt result ended the prompt as {stop_reason}");
     let public_failure = (outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(
@@ -22289,9 +22279,6 @@ async fn persist_pi_prompt_completion(
             .observe_run_git(&execution.project_binding_kind, &execution.project_path)
             .await;
         let terminal = if outcome == RuntimeTerminalOutcome::Succeeded {
-            let final_output = final_message
-                .clone()
-                .context("Native successful terminal has no final message")?;
             let mut database = core.database.lock().await;
             let envelope = CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
@@ -22306,11 +22293,13 @@ async fn persist_pi_prompt_completion(
                     expected_version: execution.version,
                     execution_epoch,
                     native_turn_id: prompt_id.clone(),
-                    final_output: final_output.clone(),
-                    missing_send_recovery_candidate: Some(MissingSendRecoveryCandidate::new(
-                        MissingSendRecoveryBoundary::PiAgentSettled,
-                        final_output,
-                    )),
+                    final_output: final_message.clone().unwrap_or_default(),
+                    missing_send_recovery_candidate: final_message.clone().map(|body| {
+                        MissingSendRecoveryCandidate::new(
+                            MissingSendRecoveryBoundary::PiAgentSettled,
+                            body,
+                        )
+                    }),
                     ending_git_observation: ending_git_observation.clone(),
                 },
             };
@@ -24961,10 +24950,6 @@ async fn persist_acp_prompt_completion(
             execution_epoch,
         )?
     };
-    let settled_for_empty_final = runtime
-        .allows_empty_final_after_public_send(prompt_id)
-        .await;
-    let unsupported_questionnaire = runtime.has_unsupported_questionnaire(prompt_id).await;
     let missing_send_recovery_candidate = if stop_reason == "end_turn" {
         runtime
             .missing_send_recovery_candidate(prompt_id)
@@ -24982,14 +24967,7 @@ async fn persist_acp_prompt_completion(
     } else {
         None
     };
-    let planned_outcome = acp_prompt_terminal_outcome(
-        stop_reason,
-        response_error.is_some(),
-        final_agent_message.is_some(),
-        committed_public_send,
-        settled_for_empty_final,
-        unsupported_questionnaire,
-    );
+    let planned_outcome = acp_prompt_terminal_outcome(stop_reason, response_error.is_some());
     let delivery_status = if planned_outcome == RuntimeTerminalOutcome::Failed {
         let delivery_id = params
             .get("deliveryId")
@@ -25002,49 +24980,23 @@ async fn persist_acp_prompt_completion(
     };
     let manual_retry_allowed =
         acp_prompt_manual_retry_allowed(planned_outcome, delivery_status.as_deref())
-            && !committed_public_send
-            && !unsupported_questionnaire;
+            && !committed_public_send;
     let base_error_code = if response_error.is_some() {
         "runtime_prompt_runtime_error".to_string()
-    } else if stop_reason == "end_turn" && unsupported_questionnaire {
-        "runtime_questionnaire_unsupported".to_string()
-    } else if stop_reason == "end_turn" && !settled_for_empty_final && final_agent_message.is_none()
-    {
-        "runtime_unsettled_activity".to_string()
-    } else if stop_reason == "end_turn" {
-        "runtime_missing_final_output".to_string()
     } else {
         format!("runtime_prompt_{stop_reason}")
     };
-    let questionnaire_failure = base_error_code == "runtime_questionnaire_unsupported";
-    let error_detail = response_error.map(str::to_string).unwrap_or_else(|| {
-        if questionnaire_failure {
-            format!(
-                "{}原生问卷暂不受支持，未提交答案。请发送新消息，在对话中补充信息或继续任务。",
-                if committed_public_send {
-                    "消息已发送；"
-                } else {
-                    ""
-                }
-            )
-        } else {
-            format!("ACP prompt ended as {stop_reason}")
-        }
-    });
+    let error_detail = response_error
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}"));
     let mut public_failure = (planned_outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(
             adapter_kind,
-            if questionnaire_failure {
-                RuntimeFailureOrigin::Compatibility
-            } else {
-                RuntimeFailureOrigin::Runtime
-            },
+            RuntimeFailureOrigin::Runtime,
             RuntimeFailurePhase::Execution,
             &base_error_code,
             &if committed_public_send {
                 "消息已发送，但运行结束校验失败".to_string()
-            } else if questionnaire_failure {
-                "原生问卷暂不受支持".to_string()
             } else {
                 format!("{} 未能完成运行", runtime_display_name(adapter_kind))
             },
@@ -25378,22 +25330,20 @@ async fn persist_acp_prompt_completion(
     Ok(())
 }
 
-fn acp_prompt_terminal_outcome(
-    stop_reason: &str,
-    has_error: bool,
-    has_final: bool,
-    committed_public_send: bool,
-    settled_for_empty_final: bool,
-    unsupported_questionnaire: bool,
-) -> RuntimeTerminalOutcome {
+fn pi_prompt_terminal_outcome(stop_reason: &str) -> RuntimeTerminalOutcome {
+    match stop_reason {
+        "stop" => RuntimeTerminalOutcome::Succeeded,
+        "aborted" => RuntimeTerminalOutcome::Cancelled,
+        _ => RuntimeTerminalOutcome::Failed,
+    }
+}
+
+fn acp_prompt_terminal_outcome(stop_reason: &str, has_error: bool) -> RuntimeTerminalOutcome {
     if has_error {
         RuntimeTerminalOutcome::Failed
     } else if stop_reason == "cancelled" {
         RuntimeTerminalOutcome::Cancelled
-    } else if stop_reason == "end_turn"
-        && !unsupported_questionnaire
-        && (has_final || (committed_public_send && settled_for_empty_final))
-    {
+    } else if stop_reason == "end_turn" {
         RuntimeTerminalOutcome::Succeeded
     } else {
         RuntimeTerminalOutcome::Failed
@@ -26202,7 +26152,9 @@ async fn process_agent_run_codex_message(
         "Codex terminal run={agent_run_id} epoch={execution_epoch} host={host_instance_id} native={} disposition={release_disposition:?}",
         completed.status
     );
-    let planned_outcome = if completed.status == "completed" && final_agent_message.is_some() {
+    let planned_outcome = if completed.error.is_some() {
+        RuntimeTerminalOutcome::Failed
+    } else if completed.status == "completed" {
         RuntimeTerminalOutcome::Succeeded
     } else if completed.status == "cancelled" {
         RuntimeTerminalOutcome::Cancelled
@@ -26211,19 +26163,19 @@ async fn process_agent_run_codex_message(
     } else {
         RuntimeTerminalOutcome::Failed
     };
-    let base_error_code = match completed.status.as_str() {
-        "completed" => "runtime_missing_final_output".to_string(),
-        "interrupted" => "runtime_interrupted".to_string(),
-        status => format!("runtime_turn_{status}"),
+    let base_error_code = if completed.error.is_some() {
+        "runtime_turn_failed".to_string()
+    } else {
+        match completed.status.as_str() {
+            "interrupted" => "runtime_interrupted".to_string(),
+            status => format!("runtime_turn_{status}"),
+        }
     };
     let error_detail = match &completed.error {
         Some(error) => format!(
             "Codex Native Turn {} ended as {}: {}",
             completed.turn_id, completed.status, error
         ),
-        None if completed.status == "completed" => {
-            "Codex completed the Turn without an Agent message".to_string()
-        }
         None => format!(
             "Codex Native Turn {} ended as {}",
             completed.turn_id, completed.status
@@ -26231,7 +26183,7 @@ async fn process_agent_run_codex_message(
     };
     let error_detail = runtime.redact_text(&error_detail);
     let mut public_failure = (planned_outcome == RuntimeTerminalOutcome::Failed).then(|| {
-        if completed.status == "failed" {
+        if completed.status == "failed" || completed.error.is_some() {
             rovai_core::runtime_failure::public_codex_terminal_failure(
                 &base_error_code,
                 completed.error.as_ref(),
@@ -26243,7 +26195,7 @@ async fn process_agent_run_codex_message(
                 RuntimeFailureOrigin::Rovai,
                 RuntimeFailurePhase::Terminal,
                 &base_error_code,
-                "Codex CLI 未能交付最终回复",
+                "Codex CLI 未能完成运行",
                 None,
                 true,
             )
@@ -26383,70 +26335,41 @@ async fn process_agent_run_codex_message(
         let ending_git_observation = core
             .observe_run_git(&execution.project_binding_kind, &execution.project_path)
             .await;
-        let terminal = if completed.status == "completed" {
-            if let Some(final_output) = final_agent_message.clone() {
-                let mut database = core.database.lock().await;
-                let envelope = CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex".to_string(),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: SucceedAgentRunCommand {
-                        agent_run_id: agent_run_id.to_string(),
-                        expected_version: execution.version,
-                        execution_epoch,
-                        native_turn_id: completed.turn_id.clone(),
-                        final_output,
-                        missing_send_recovery_candidate: missing_send_recovery_candidate.clone(),
-                        ending_git_observation: ending_git_observation.clone(),
-                    },
-                };
-                let service = ExecutionRuntimeService::default();
-                if cleanup_required {
-                    service.succeed_agent_run_requiring_cleanup(
-                        &mut database,
-                        &envelope,
-                        terminal_admission.planned_permit(),
-                    )
-                } else {
-                    match terminal_admission.planned_permit() {
-                        Some(permit) => service.succeed_agent_run_during_planned_shutdown(
-                            &mut database,
-                            permit,
-                            &envelope,
-                        ),
-                        None => service.succeed_agent_run(&mut database, &envelope),
-                    }
-                }
+        let terminal = if planned_outcome == RuntimeTerminalOutcome::Succeeded {
+            let mut database = core.database.lock().await;
+            let envelope = CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-adapter:codex".to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: SucceedAgentRunCommand {
+                    agent_run_id: agent_run_id.to_string(),
+                    expected_version: execution.version,
+                    execution_epoch,
+                    native_turn_id: completed.turn_id.clone(),
+                    final_output: final_agent_message.clone().unwrap_or_default(),
+                    missing_send_recovery_candidate: missing_send_recovery_candidate.clone(),
+                    ending_git_observation: ending_git_observation.clone(),
+                },
+            };
+            let service = ExecutionRuntimeService::default();
+            if cleanup_required {
+                service.succeed_agent_run_requiring_cleanup(
+                    &mut database,
+                    &envelope,
+                    terminal_admission.planned_permit(),
+                )
             } else {
-                let mut database = core.database.lock().await;
-                let envelope = CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex".to_string(),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: FailAgentRunCommand {
-                        agent_run_id: agent_run_id.to_string(),
-                        expected_version: execution.version,
-                        execution_epoch,
-                        error_code: error_code.clone(),
-                        error_detail: Some(error_detail.clone()),
-                        failure: public_failure.clone(),
-                        manual_retry_allowed: !execution.camp_turn_id.is_empty(),
-                        ending_git_observation: ending_git_observation.clone(),
-                    },
-                };
-                let service = ExecutionRuntimeService::default();
-                if cleanup_required {
-                    service.fail_agent_run_requiring_cleanup(&mut database, &envelope)
-                } else {
-                    service.fail_agent_run(&mut database, &envelope)
+                match terminal_admission.planned_permit() {
+                    Some(permit) => service.succeed_agent_run_during_planned_shutdown(
+                        &mut database,
+                        permit,
+                        &envelope,
+                    ),
+                    None => service.succeed_agent_run(&mut database, &envelope),
                 }
             }
         } else {
@@ -28571,104 +28494,27 @@ mod tests {
     }
 
     #[test]
-    fn acp_prompt_failure_is_retryable_only_when_input_was_not_accepted() {
-        for (reason, error, final_text, sent, settled, expected) in [
-            (
-                "end_turn",
-                false,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Succeeded,
-            ),
-            (
-                "end_turn",
-                false,
-                false,
-                false,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                false,
-                false,
-                true,
-                false,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                true,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                true,
-                true,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "cancelled",
-                false,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Cancelled,
-            ),
-            (
-                "max_turn_requests",
-                false,
-                true,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "unknown",
-                false,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                false,
-                true,
-                false,
-                true,
-                RuntimeTerminalOutcome::Succeeded,
-            ),
+    fn native_prompt_failure_is_retryable_only_when_input_was_not_accepted() {
+        for (reason, error, expected) in [
+            ("end_turn", false, RuntimeTerminalOutcome::Succeeded),
+            ("end_turn", true, RuntimeTerminalOutcome::Failed),
+            ("cancelled", false, RuntimeTerminalOutcome::Cancelled),
+            ("cancelled", true, RuntimeTerminalOutcome::Failed),
+            ("refusal", false, RuntimeTerminalOutcome::Failed),
+            ("max_turn_requests", false, RuntimeTerminalOutcome::Failed),
+            ("unknown", false, RuntimeTerminalOutcome::Failed),
         ] {
-            assert_eq!(
-                acp_prompt_terminal_outcome(reason, error, final_text, sent, settled, false),
-                expected
-            );
+            assert_eq!(acp_prompt_terminal_outcome(reason, error), expected);
         }
-        for has_final in [false, true] {
-            for sent in [false, true] {
-                assert_eq!(
-                    acp_prompt_terminal_outcome("end_turn", false, has_final, sent, true, true),
-                    RuntimeTerminalOutcome::Failed,
-                    "text or a committed send cannot answer an unsupported questionnaire"
-                );
-            }
+        for (reason, expected) in [
+            ("stop", RuntimeTerminalOutcome::Succeeded),
+            ("aborted", RuntimeTerminalOutcome::Cancelled),
+            ("error", RuntimeTerminalOutcome::Failed),
+            ("length", RuntimeTerminalOutcome::Failed),
+            ("unknown", RuntimeTerminalOutcome::Failed),
+        ] {
+            assert_eq!(pi_prompt_terminal_outcome(reason), expected);
         }
-        assert_eq!(
-            acp_prompt_terminal_outcome("cancelled", false, true, true, true, true),
-            RuntimeTerminalOutcome::Cancelled
-        );
-        assert_eq!(
-            acp_prompt_terminal_outcome("cancelled", true, true, true, true, true),
-            RuntimeTerminalOutcome::Failed,
-            "a native error still takes precedence"
-        );
         assert!(acp_prompt_manual_retry_allowed(
             RuntimeTerminalOutcome::Failed,
             Some("not_accepted")
@@ -36713,12 +36559,14 @@ for line in sys.stdin:
     #[tokio::test]
     async fn codex_native_terminal_controls_host_independently_of_business_delivery() {
         use std::os::unix::fs::PermissionsExt;
-        for (native_status, final_reply, expected_business, reusable) in [
-            ("completed", true, "succeeded", true),
-            ("completed", false, "failed", true),
-            ("failed", false, "failed", false),
-            ("cancelled", false, "failed", false),
-            ("interrupted", false, "failed", false),
+        for (native_status, final_reply, native_error, expected_business, reusable) in [
+            ("completed", true, false, "succeeded", true),
+            ("completed", false, false, "succeeded", true),
+            ("completed", true, true, "failed", false),
+            ("completed", false, true, "failed", false),
+            ("failed", false, true, "failed", false),
+            ("cancelled", false, false, "failed", false),
+            ("interrupted", false, false, "failed", false),
         ] {
             let root =
                 std::env::temp_dir().join(format!("rovai-codex-terminal-{}", uuid::Uuid::new_v4()));
@@ -36809,7 +36657,7 @@ for line in sys.stdin:
             let terminal = json!({"method":"turn/completed","params":{"threadId":"native-fixture", "turn":{
                 "id":"native-turn", "status":native_status,
                 "items": if final_reply { json!([{"type":"agentMessage","text":"Tool output: 401; quoted unauthorized"}]) } else { json!([]) },
-                "error": if native_status == "failed" { json!({"message":"opaque","codexErrorInfo":"unauthorized"}) } else { Value::Null }
+                "error": if native_error { json!({"message":"opaque","codexErrorInfo":"unauthorized"}) } else { Value::Null }
             }}});
             let mut route = core.planned_shutdown.enter_runtime_route().await.unwrap();
             // Simulate a periodic collector stuck in native I/O. Terminal
@@ -36849,8 +36697,21 @@ for line in sys.stdin:
                     Some("native-fixture"),
                     "trusted native terminal must preserve the original session"
                 );
-                if native_status == "failed" {
+                if native_error {
                     assert_eq!(state.2.as_deref(), Some("runtime_authentication_required"));
+                }
+                if expected_business == "succeeded" && !final_reply {
+                    assert!(state.2.is_none());
+                    let messages: i64 = database.connection().query_row(
+                        "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id=?1 AND author_type='agent'",
+                        [&run_id], |row| row.get(0),
+                    ).unwrap();
+                    assert_eq!(messages, 0, "empty success must not manufacture a message");
+                    let digest: Option<String> = database.connection().query_row(
+                        "SELECT json_extract(payload_json,'$.finalOutputDigest') FROM event_log WHERE entity_id=?1 AND event_type='agent_run.succeeded'",
+                        [&run_id], |row| row.get(0),
+                    ).unwrap();
+                    assert!(digest.is_none());
                 }
             }
             if !reusable {

@@ -2399,7 +2399,7 @@ pub struct CompletedTurn {
 
 impl CompletedTurn {
     pub(crate) fn release_disposition(&self) -> FleetReleaseDisposition {
-        if self.status == "completed" {
+        if self.status == "completed" && self.error.is_none() {
             FleetReleaseDisposition::Reusable
         } else {
             FleetReleaseDisposition::Stop

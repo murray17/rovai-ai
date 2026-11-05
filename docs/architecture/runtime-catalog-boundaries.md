@@ -22,8 +22,9 @@ last_updated: 2026-11-04
 问卷承载用户输入，不能进入执行审批来选择答案。Claude、Copilot、Qwen 在统一正式启动处关闭已验证的
 提问工具；Copilot、Qwen 策略属于 Host 兼容输入，不改变原生会话绑定。Kimi 与 Qwen 的意外请求复用 ACP 当前请求归属、
 Prompt 观察与终态，先识别并取消，再让普通权限进入现有审批。已识别但损坏的问卷也不能自动允许。
-Claude 控制通道拒绝意外问卷并按请求 ID 去重；局部拒绝不覆盖后续原生成功，终态按最后有效结果结算。
-不新增用户回复或自动重跑机制；Claude 结果边界见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#claude-结果与局部问卷拒绝)。
+Claude 控制通道拒绝意外问卷并按请求 ID 去重。各 Runtime 的局部取消诊断均不覆盖后续有效原生成功；
+本轮成功允许最终文字为空，沿用发布／补发去重，空文字不生成消息。
+不新增用户回复或自动重跑机制；终态边界见 [Runtime Launch v75](../contracts/runtime-launch-and-verification-v75.md#原生终态与文字发布)。
 具体字段与优先级见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)。
 MiniMax 保留现有行为，不以修改用户配置关闭问卷；本轮不扩大到其他适配器。
 
@@ -857,10 +858,9 @@ Write 的 Boolean `created` 与 Write/Edit 的结果 `details.patch`；编号/�
 
 原生问卷暂不承接为 Rovai 表单。客户端不广告 elicitation form，MiniMax 无可用答题路径时由
 原生 dismiss；`questionnaire:` permission options 在普通审批和免审批之前返回 `cancelled`，
-不能用允许执行代替选择答案。已观察到未承接问卷的 Prompt 不因非空文字或已公开发送而成功；
-原生错误与取消仍先按各自终态处理。正常 `end_turn` 下公开失败为
-`runtime_questionnaire_unsupported`，说明问卷不受支持、未提交答案并引导 User 发新消息继续。
-已发消息保留，问卷 Run 不自动重放；后继沿既有 Session/Fleet 路径运行，不额外换 Host。
+不能用允许执行代替选择答案。保留问卷取消诊断，随后匹配本轮且无 error 的 `end_turn` 正常成功，
+不要求最终文字或此前公开发送；原生错误、拒绝与整轮取消继续按实际终态处理。
+已发消息保留，不自动重放 Run；后继沿既有 Session/Fleet 路径运行，不额外换 Host。
 这不等于隐藏工具或自动转为 Thread 提问，不修改日常原生配置，各平台准入分别按上文记录。
 
 运行中输入使用 `mcode/session/steer(text, clientRequestId)`，只在冻结版本已验证且当前 Prompt
