@@ -1594,9 +1594,7 @@ impl PiRuntime {
                     .get("stopReason")
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                if let Some(text) = assistant_message_text(assistant) {
-                    *self.final_message.write().await = Some(text);
-                }
+                *self.final_message.write().await = assistant_message_text(assistant);
             }
             Some("tool_execution_start" | "tool_execution_update") => {
                 if let Some(tool_call_id) = message.get("toolCallId").and_then(Value::as_str)
@@ -3312,6 +3310,24 @@ done
         );
 
         host.bind(runtime.owner.clone()).await.unwrap();
+        runtime
+            .observe(json!({"type":"message_end","message":{
+                "role":"assistant","stopReason":"toolUse",
+                "content":[{"type":"text","text":"Earlier progress"}]
+            }}))
+            .await
+            .unwrap();
+        runtime
+            .observe(json!({"type":"message_end","message":{
+                "role":"assistant","stopReason":"stop","content":[]
+            }}))
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime.terminal().await,
+            (None, Some("stop".to_string())),
+            "an empty native final must not borrow the earlier progress text"
+        );
         assert!(
             runtime
                 .steer("idle", &[])

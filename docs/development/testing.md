@@ -124,7 +124,7 @@ ACP suffix、审批 option、失败重试和 native cursor owners；Usage 生命
 
 `--questionnaires-only` 保持原生问卷工具启用，验证单选、多选、发送后问卷、default 权限模式、
 取消后新指令、Core 重启精确恢复，以及后继普通命令 allow/deny。断言原生问卷为 dismissed、
-答案与注入字段为空、`runtime_questionnaire_unsupported` 及可操作公开提示、失败 Run 不可自动重放；
+答案与注入字段为空、局部取消后原生正常结束仍成功，无最终文字不制造消息，已有公开发送不重复；
 已经发送的消息保留。Host 观察使用 Core 直属子进程
 PID 集合，不能替代跨 Session 或并发 Fleet 资格。该矩阵不假造问卷 permission 请求；
 `questionnaire:` option 的防代答反例由既有 extended owner
@@ -259,6 +259,26 @@ reader/writer owner 另覆盖“写入 → 旧 result → 旧 idle → 后续失
 验证有／无先前公开发送的空 success 都成功、无空消息及无重复发送。
 单聊既有 Pending FIFO owner 以空 success 推进下一条，断言不产生空私聊回复；常规非空终态 owner 保留。
 不新增 Rust 测试函数，不把受控协议／数据库测试表述为真实模型验收。
+
+### 全 Runtime 空成功结果
+
+沿用既有 owner，不新增 Rust 测试函数：`native_prompt_failure_is_retryable_only_when_input_was_not_accepted`
+覆盖 Pi／ACP 的原生成功、拒绝、错误、整轮取消与未知；Codex 的
+`codex_native_terminal_controls_host_independently_of_business_delivery` 原空 completed case
+改为成功，校验无空消息、无 final digest、同 Host 后继及迟到旧终态围栏。
+同一 owner 保留携带原生 error 的 completed 为失败并退役 Host。
+Pi 的 `active_input_receipts_and_late_abort_keep_exact_rpc_correlation` 增加最后 assistant 无正文时清除旧进度的断言。
+Antigravity 的 `stream_json_projects_tool_lifecycle_and_command_output` 扩展为空白／null／省略 response 的
+成功及非法类型拒绝，原结构化失败、超时和 legacy 缺少结果 owners 保留。
+ACP suffix owner 继续覆盖工具归属、最终文字采集与问卷取消后的正文，不再测试已删除的整轮问卷否决状态。
+共享公开发布、Single Chat Pending FIFO 和审批选项沿用现有 owners；补发已有文字与无文字成功分开断言。
+
+最小命令为 `cargo test -p rovai-core --features slow-tests --lib native_prompt_failure`、
+`cargo test -p rovai-core --features slow-tests --lib codex_native_terminal`、
+`cargo test -p rovai-core --features slow-tests --lib antigravity::tests::` 及
+`cargo test -p rovai-core --features slow-tests --lib final_agent_message_uses_complete_assistant_suffix`。
+`smoke-minimax-runtime.mjs --completion-only`／`--questionnaires-only` 的受控 Provider 断言已同步新规则；
+未执行这些入口时，不把协议夹具通过表述为真实 CLI 或模型验收。默认 workspace 仍需通过。
 
 ### 补充输入未知后的独立新输入
 

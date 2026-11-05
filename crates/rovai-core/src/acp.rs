@@ -690,7 +690,6 @@ struct AcpPromptObservation {
     assistant_suffix: AcpAssistantSuffixCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
     execution_display: crate::runtime_subagent::AcpExecutionDisplay,
-    unsupported_interaction: bool,
     questionnaire_request_ids: BTreeSet<String>,
     native_usage_message_ids: BTreeSet<String>,
     native_usage_tool_call_ids: BTreeSet<String>,
@@ -705,7 +704,6 @@ impl AcpPromptObservation {
             assistant_suffix: AcpAssistantSuffixCollector::default(),
             observed_tools: HashMap::new(),
             execution_display: crate::runtime_subagent::AcpExecutionDisplay::default(),
-            unsupported_interaction: false,
             questionnaire_request_ids: BTreeSet::new(),
             native_usage_message_ids: BTreeSet::new(),
             native_usage_tool_call_ids: BTreeSet::new(),
@@ -6237,7 +6235,6 @@ impl AcpRuntime {
             {
                 return Ok(());
             }
-            observation.unsupported_interaction = true;
         }
         // This is a client capability limit, never a user answer or refusal.
         eprintln!("ACP native questionnaire cancelled by unsupported client: {kind:?}");
@@ -6294,9 +6291,6 @@ impl AcpRuntime {
         }
         if method == "session/request_permission" {
             observation.assistant_suffix.observe_tool_activity();
-            observation.unsupported_interaction |=
-                classify_permission_request(self.adapter_kind(), params)
-                    != AcpPermissionRequestKind::Execution;
             return Ok(None);
         }
         if method != "session/update" {
@@ -6336,7 +6330,9 @@ impl AcpRuntime {
                 Some("ask_user" | "request_feature_enable")
             )
         {
-            observation.unsupported_interaction = true;
+            self.host.send_host_diagnostic(
+                "MiniMax native questionnaire has no supported user interface".to_string(),
+            );
         }
         if session_update == Some("agent_message_chunk")
             && crate::runtime::is_root_output(params)
@@ -6448,30 +6444,6 @@ impl AcpRuntime {
             .assistant_suffix
             .candidate()
             .map(|text| self.redact_text(&text))
-    }
-
-    pub async fn has_unsupported_questionnaire(&self, native_prompt_id: &str) -> bool {
-        self.active_observation
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|observation| {
-                observation.prompt_id == native_prompt_id && observation.unsupported_interaction
-            })
-    }
-
-    /// Empty assistant output may only finish an already-published turn once
-    /// native tools have settled and no unsupported questionnaire was invoked.
-    pub async fn allows_empty_final_after_public_send(&self, native_prompt_id: &str) -> bool {
-        self.active_observation
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|observation| {
-                observation.prompt_id == native_prompt_id
-                    && observation.observed_tools.is_empty()
-                    && !observation.unsupported_interaction
-            })
     }
 
     pub async fn missing_send_recovery_candidate(&self, native_prompt_id: &str) -> Option<String> {
@@ -15645,24 +15617,28 @@ while IFS= read -r ignored; do :; done
         );
         assert!(
             !runtime
-                .allows_empty_final_after_public_send(prompt_id)
-                .await,
-            "tool still in progress"
+                .active_observation
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .observed_tools
+                .is_empty()
         );
         runtime.observe_message(prompt_id, "session/update", &json!({"update":{
             "sessionUpdate":"tool_call_update", "toolCallId":"tool-read", "status":"completed"
         }})).await.unwrap();
         assert!(
             runtime
-                .allows_empty_final_after_public_send(prompt_id)
+                .active_observation
+                .lock()
                 .await
+                .as_ref()
+                .unwrap()
+                .observed_tools
+                .is_empty()
         );
-        assert!(!runtime.has_unsupported_questionnaire(prompt_id).await);
-        assert!(
-            !runtime
-                .allows_empty_final_after_public_send("stale-prompt")
-                .await
-        );
+        assert!(runtime.final_agent_message("stale-prompt").await.is_none());
         runtime
             .observe_message(
                 prompt_id,
@@ -15673,14 +15649,7 @@ while IFS= read -r ignored; do :; done
             )
             .await
             .unwrap();
-        assert!(
-            !runtime
-                .allows_empty_final_after_public_send(prompt_id)
-                .await,
-            "dismissed question is not a completed answer"
-        );
-        assert!(runtime.has_unsupported_questionnaire(prompt_id).await);
-        assert!(!runtime.has_unsupported_questionnaire("stale-prompt").await);
+        assert!(runtime.final_agent_message(prompt_id).await.is_none());
         runtime
             .observe_message(
                 prompt_id,
@@ -15692,10 +15661,9 @@ while IFS= read -r ignored; do :; done
             )
             .await
             .unwrap();
-        assert!(runtime.final_agent_message(prompt_id).await.is_some());
-        assert!(
-            runtime.has_unsupported_questionnaire(prompt_id).await,
-            "assistant text does not resolve a dismissed questionnaire"
+        assert_eq!(
+            runtime.final_agent_message(prompt_id).await.as_deref(),
+            Some("Waiting for your answer.")
         );
 
         host.shutdown().await;
