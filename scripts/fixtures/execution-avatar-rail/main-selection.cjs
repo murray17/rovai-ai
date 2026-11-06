@@ -22,7 +22,9 @@ app.whenReady().then(async () => {
     focusedRun: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
     focusedInDrawer: !!document.activeElement?.closest('.execution-drawer'),
     fileActive: document.querySelector('.file-preview-tab-activate[aria-selected="true"]')?.textContent.includes('selection.txt') ?? false,
-    emptySelection: !!document.querySelector('.execution-preview-empty')?.checkVisibility()
+    emptySelection: !!document.querySelector('.execution-preview-empty')?.checkVisibility(),
+    replyExecutionVisible: !!document.querySelector('.reply-execution-popover')?.checkVisibility(),
+    replyRunAvailable: !!document.querySelector('.reply-detail-run .run-presence-open')?.checkVisibility()
   }))()`)
   const wait = async (predicate, label) => {
     for (let i = 0; i < 160; i++) {
@@ -41,6 +43,21 @@ app.whenReady().then(async () => {
     if (!node) throw new Error('Missing visible control: ' + ${JSON.stringify(selector)})
     node.click()
   })()`)
+  const nativeClick = async selector => {
+    const point = await run(`(() => {
+      const node = [...document.querySelectorAll(${JSON.stringify(selector)})].find(node => node.checkVisibility())
+      if (!node) throw new Error('Missing visible control: ' + ${JSON.stringify(selector)})
+      const rect = node.getBoundingClientRect()
+      const x = Math.round(rect.x + rect.width / 2), y = Math.round(rect.y + rect.height / 2)
+      return { x, y, reachable: node.contains(document.elementFromPoint(x, y)) }
+    })()`)
+    assert.equal(point.reachable, true, `${selector} must be reachable through normal pointer input`)
+    const { x, y } = point
+    window.webContents.sendInputEvent({ type: 'mouseMove', x, y })
+    window.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+    window.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 })
+    await run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  }
   const select = agentId => click(`.run-pulse-chip[data-agent-id="${agentId}"]`)
   const overview = '__execution_overview__'
   const report = []
@@ -121,6 +138,25 @@ app.whenReady().then(async () => {
       }
       report.push(`${placement}-closed-return`)
     }
+    await configure('selection-reply', { placement: 'bottom', running: true, reply: true })
+    await nativeClick('.reply-parent-quote')
+    await wait(s => s.replyRunAvailable, 'Reply chain loads its running execution')
+    await nativeClick('.reply-detail-run .run-presence-open')
+    await wait(s => s.visible && s.replyExecutionVisible && s.selected === 'agent-1', 'Reply details opens the exact execution')
+    await nativeClick('.execution-bottom-collapse-button')
+    await wait(s => !s.visible && s.replyExecutionVisible && s.selected === null, 'Explicit close stays cleared while its reply host remains visible')
+    await configure('selection-reply', { placement: 'bottom', running: true, reply: true })
+    assert.equal((await state()).selected, null, 'A fresh snapshot cannot undo explicit close')
+    await click('.reply-detail-run .run-presence-open')
+    await wait(s => s.visible && s.selected === 'agent-1', 'Explicit Run navigation can open after close')
+    await click('.execution-bottom-collapse-button')
+    await wait(s => !s.visible && s.selected === null, 'The second explicit close remains cleared too')
+    await click('.reply-execution-popover .camp-detail-collapse')
+    await wait(s => !s.replyExecutionVisible && !s.visible, 'Reply execution can still be dismissed')
+    await configure('selection-reply', { placement: 'right', running: true, reply: true })
+    await run('window.executionSelectionTest.openExecution()')
+    await wait(s => s.visible && s.selected === 'agent-1', 'A newly visible execution surface restores its Tab after close')
+    report.push('reply-host-explicit-close')
     assert.deepEqual(errors, [])
     console.log(JSON.stringify({ ok: true, report }))
     window.destroy()

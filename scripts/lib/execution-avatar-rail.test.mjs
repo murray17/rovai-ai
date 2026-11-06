@@ -15,7 +15,7 @@ const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/execution-avatar-rail')
 
 test('production execution popover preserves dismissal, selection, scrolling and navigation through native input', { timeout: 180_000 }, t => runFixture(t, 'main.cjs'))
-test('execution Tabs survive Thread returns without retaining Run disclosure or opening protected files', { timeout: 90_000 }, t => runFixture(t, 'main-selection.cjs'))
+test('execution Tabs survive Thread returns and respect explicit close without retaining Run disclosure or opening protected files', { timeout: 90_000 }, t => runFixture(t, 'main-selection.cjs'))
 
 async function runFixture(t, entrypoint) {
   if (!admitElectronIntegrationTest(t)) return

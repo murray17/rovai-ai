@@ -16,6 +16,8 @@ User 将范围收敛为当前窗口内、按 Thread 记住队员或总览 Tab，
 - `execution-tab-selection.ts` 只缓存有界的 Thread → Tab ID；`ThreadWorkspace.tsx` 在进入、可见空选中、普通打开和精确导航处统一选择。
 - 右侧执行标签直接激活、顶部入口、浮层与底部展开使用有效选择；已失效的队员回退总览，文件预览继续优先保留。
 - 复用 `execution-avatar-rail` 的生产组件与隔离 Electron owner，覆盖终态返回、文件保护、选择失效、显式导航与三种承载位置。
+- Review 后补充分离显式关闭意图与待恢复的空选择：底部布局从回复详情打开执行，再点底部收起时，
+  回复执行承载区仍可见，原补选 effect 会立即选回。现关闭期间禁止补选；显式选择或再次显示承载区后恢复原规则。
 
 任务分支 `rovai/execution-tab-selection`，基线 `940e3c4057fcf885898388d43b65e3710c0f1a1c`；独立 worktree 保留待 Review。
 
@@ -24,9 +26,10 @@ User 将范围收敛为当前窗口内、按 Thread 记住队员或总览 Tab，
 - `pnpm typecheck`、`TZ=UTC pnpm test`、默认 `pnpm test:rust:pr` 通过；前端全量 3,126 项通过、2 项既有跳过。
 - `pnpm test:execution-avatar-rail` 三项通过，覆盖原交互矩阵、新增 Tab 恢复场景及执行阶段更新。
   新增 owner 另验证顶部打开、同一窗口按 Thread 隔离、无记录空态保留、浮层／底部关闭不自动重开、底部 Escape 焦点返回。
+  回复执行组合在修复前稳定复现关闭后重选；原生鼠标验证入口可达，修复后覆盖关闭、快照刷新、精确导航重新打开与再次显示右侧恢复。
 - `camp-open-projection` 的 formal-entry owner 通过：首次总览、缓存期显式选择、显式关闭不重开、恢复 Tab 后选择当前 Run。
   `notification-attention` 的 AgentRun 精确定位 owner 通过，通知仍覆盖上次 Tab。
-- `pnpm package:mac` 构建 0.5.9 arm64 开发包通过；独立 userData／Skill 目录的模拟数据实测确认：
+- 初版 Tab 恢复实现的 `pnpm package:mac` 构建 0.5.9 arm64 开发包通过；独立 userData／Skill 目录的模拟数据实测确认：
   全终态 A→B→A 保留原队员；文件前台 A→B→A（仍有 running Run）保留文件，再点执行恢复原队员。
   历史折叠不恢复，继续走原默认逻辑；未调用真实模型，未安装或重启日常 App。
 - 原 `pnpm accept:runtime-activity-ui` 在 UI 运行前被既有夹具对已退役 `.runtime-camp-files-root.json` 的读取阻断。

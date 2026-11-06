@@ -2163,8 +2163,13 @@ export function ThreadWorkspace({
   const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(
     workspaceEntryTab === EXECUTION_OVERVIEW_SCOPE ? workspaceEntrySelection?.focusedRun.id ?? null : null
   )
+  const executionSelectionClosed = useRef(false)
+  const executionSelectionSurface = useRef<string | null>(null)
   const selectExecutionTab = useCallback((agentId: string | null): void => {
-    if (agentId !== null) rememberExecutionTab(snapshot.thread.id, agentId)
+    if (agentId !== null) {
+      executionSelectionClosed.current = false
+      rememberExecutionTab(snapshot.thread.id, agentId)
+    }
     setExecutionDrawerAgentId(agentId)
   }, [snapshot.thread.id])
   const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
@@ -2792,7 +2797,14 @@ export function ThreadWorkspace({
       ? executionDrawerAgentId !== null && !executionShortcutCollapsed
       : executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab,
         Boolean(filePreview?.paneVisible && filePreview.activeTab?.kind === 'execution')))
-    if (!workspaceEntrySnapshotReady || !visible || executionDrawerProcess || executionProcessByAgentId.size === 0) return
+    const surface = visible ? `${snapshot.thread.id}:${replyExecutionVisible ? 'reply' : executionPlacement}` : null
+    if (executionSelectionSurface.current !== surface) {
+      executionSelectionSurface.current = surface
+      executionSelectionClosed.current = false
+    }
+    // Closing a selection is intentional even when another host, such as reply details, stays visible.
+    if (!workspaceEntrySnapshotReady || !visible || executionSelectionClosed.current
+      || executionDrawerProcess || executionProcessByAgentId.size === 0) return
     selectExecutionTab(restoredExecutionTab(snapshot.thread.id, executionProcessByAgentId.keys()))
     setExecutionDrawerFocusedRunId(null)
     setExecutionDrawerFocusRequest(request => ({ sequence: request.sequence + 1, moveDomFocus: false }))
@@ -5067,6 +5079,7 @@ export function ThreadWorkspace({
 
   const closeExecutionProcess = (): void => {
     executionEntryInteractionThreadId.current = snapshot.thread.id
+    executionSelectionClosed.current = true
     selectExecutionTab(null)
     setExecutionDrawerFocusedRunId(null)
   }

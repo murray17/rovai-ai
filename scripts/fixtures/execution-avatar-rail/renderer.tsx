@@ -133,6 +133,13 @@ Object.assign(window, { rovai: {
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
     if (method === 'camp.composerDraft.get') return { ...draft, threadId: params?.threadId ?? draft.threadId }
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
+    if (method === 'thread.messages.replies') return {
+      schemaVersion: 1, threadId: params?.threadId, messageId: params?.messageId, rootMessageId: 'message-1',
+      throughGlobalSequence: 1, sourceAvailable: true, replyCount: 1, hasEarlier: false, hasLater: false,
+      messages: snapshotFor(4, 0).messages.filter(message => message.id === params?.messageId)
+        .map(message => ({ ...message, replyToThreadMessageId: 'message-1' })),
+      runAnchorMessageIds: ['public-message-2']
+    }
     if (method === 'agentRunEvidence.getContent') {
       const evidence = snapshotFor(20, 0).executionEvidence.find(item => item.id === params?.evidenceId)
       if (evidence) return { payload: evidence.payload }
@@ -220,7 +227,7 @@ let configureInterruptionFixture: (() => void) | undefined
 Object.assign(window, { configureRunInterruption: () => configureInterruptionFixture?.() })
 
 let configureEmptyExecutionFixture: ((pending: boolean, placement: ExecutionConsolePlacement) => void) | undefined
-type SelectionScenario = { threadId: string; running?: boolean; missingAgent?: string; ready?: boolean; placement?: ExecutionConsolePlacement }
+type SelectionScenario = { threadId: string; running?: boolean; missingAgent?: string; ready?: boolean; placement?: ExecutionConsolePlacement; reply?: boolean }
 let configureSelectionFixture: ((scenario: SelectionScenario) => void) | undefined
 let selectionThreadId = threadId
 Object.assign(window, { executionSelectionTest: {
@@ -379,6 +386,8 @@ function Fixture(): React.JSX.Element {
       .map((run, index) => ({ ...run, status: selectionScenario.running && index === 0 ? 'running' : 'succeeded',
         waitReason: null, endedAt: selectionScenario.running && index === 0 ? null : now }))
     snapshot.tasks = []
+    if (selectionScenario.reply) snapshot.messages = snapshot.messages.map(message => message.id === 'public-message-2'
+      ? { ...message, replyToThreadMessageId: 'message-1' } : message)
   }
   selectionThreadId = snapshot.thread.id
   return <FilePreviewProvider threadId={snapshot.thread.id} resolvedTheme={theme === 'night' ? 'night' : 'day'}>
