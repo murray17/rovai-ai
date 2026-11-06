@@ -83,6 +83,7 @@ describe('native channel question cards', () => {
   it('uses native DingTalk form values without trimming or turning cancel into an answer', () => {
     for (const kind of ['input', 'select', 'confirm'] as const) {
       const item = source(kind), params = dingtalkNativeQuestionCard(item)
+      if (kind !== 'input') expect(JSON.parse(params.form).fields.find((field: { name: string }) => field.name === 'answer').type).toBe('CHECKBOX_GROUP')
       const send = (values: Record<string, unknown>) => dingtalkNativeAnswer({ outTrackId: DINGTALK_NATIVE_CARD_PREFIX + item.deliveryId,
         content: JSON.stringify({ cardPrivateData: { actionIds: [params.question_id], params: values } }) })
       expect(send({ user_cancel: 'true', form: { answer: 'must not be forwarded' } })!.answer).toEqual({ kind: 'skip' })
@@ -92,5 +93,25 @@ describe('native channel question cards', () => {
     }
     const item = source('input', true), form = JSON.parse(dingtalkNativeQuestionCard(item).form)
     expect(form.fields.find((field: { name: string }) => field.name === 'answer')).toMatchObject({ type: 'TEXT_AREA', required: false, defaultValue: '  初始\n中文  ' })
+  })
+
+  it('renders the real follow-up input beside its original selected option without guessing English labels', () => {
+    const item = source('input')
+    item.interaction.selection = { options: [{ id: 'win', label: 'Windows' }, { id: 'custom', label: '自行填写（本地化）' }], optionId: 'custom' }
+    const card = feishuNativeQuestionCard(item)
+    const input = nodes(card).find(node => node.tag === 'input')!
+    expect(input).toMatchObject({ label: { content: '自行填写（本地化）' }, label_position: 'left', name: 'answer' })
+    expect(nodes(card).some(node => node.content === 'Windows')).toBe(true)
+    expect(nodes(card).some(node => node.content === item.interaction.questions[0].title)).toBe(true)
+    const submit = nodes(card).find(node => node.form_action_type === 'submit')!
+    expect(feishuNativeAnswer(action(submit), { answer: '  原文  ' })).toMatchObject({ interactionId: item.interaction.id, answer: { kind: 'input', value: '  原文  ' } })
+    const fields = JSON.parse(dingtalkNativeQuestionCard(item).form).fields
+    expect(fields.find((field: { name: string }) => field.name === 'selection')).toMatchObject({ type: 'CHECKBOX_GROUP', readOnly: true, defaultValue: { value: 'custom' } })
+    expect(fields.find((field: { name: string }) => field.name === 'answer')).toMatchObject({ type: 'TEXT', label: '自行填写（本地化）', required: false })
+    item.interaction.questions[0].title = '原生输入问题\nWindows\n请填写回答'
+    expect(nodes(feishuNativeQuestionCard(item)).filter(node => node.content === 'Windows')).toHaveLength(0)
+    const repeatedFields = JSON.parse(dingtalkNativeQuestionCard(item).form).fields
+    expect(repeatedFields.some((field: { name: string }) => field.name === 'selection')).toBe(false)
+    expect(repeatedFields.find((field: { name: string }) => field.name === 'answer').label).toBe(item.interaction.questions[0].title)
   })
 })

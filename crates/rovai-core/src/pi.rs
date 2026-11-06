@@ -977,6 +977,78 @@ mod tests {
                 )
                 .is_err()
         );
+        let mut scoped = interactions::PiInteractions::default();
+        scoped.tool_scope(Some("native-tool-a"));
+        scoped.register(&json!({"method":"select","id":"a","title":"平台","options":["Windows","自行填写（本地化）"]}), "run", 1, 1).unwrap();
+        let select = scoped.pending(1).pop().unwrap();
+        scoped.complete(
+            &select.id,
+            &Answer::Select {
+                option_id: "1".into(),
+            },
+            Status::Sent,
+        );
+        scoped
+            .register(
+                &json!({"method":"input","id":"b","title":"原生输入说明"}),
+                "run",
+                1,
+                2,
+            )
+            .unwrap();
+        let input = scoped.pending(2).pop().unwrap();
+        assert_ne!(select.id, input.id);
+        assert_eq!(select.presentation_id, input.presentation_id);
+        assert_eq!(
+            input.selection.as_ref().unwrap().options[1].label,
+            "自行填写（本地化）"
+        );
+        assert_eq!(input.selection.as_ref().unwrap().option_id, "1");
+        assert_eq!(
+            scoped.entries[&input.id]
+                .response(&Answer::Input {
+                    value: "  中文  ".into()
+                })
+                .unwrap()["id"],
+            "b"
+        );
+        scoped.complete(
+            &input.id,
+            &Answer::Input {
+                value: "  中文  ".into(),
+            },
+            Status::Sent,
+        );
+        scoped.tool_scope(None);
+        scoped.tool_scope(Some("native-tool-b"));
+        scoped
+            .register(
+                &json!({"method":"input","id":"c","title":"不同工具"}),
+                "run",
+                1,
+                3,
+            )
+            .unwrap();
+        let other = scoped.pending(3).pop().unwrap();
+        assert_ne!(input.presentation_id, other.presentation_id);
+        assert!(other.selection.is_none());
+        scoped
+            .register(
+                &json!({"method":"input","id":"d","title":"同一工具并发"}),
+                "run",
+                1,
+                4,
+            )
+            .unwrap();
+        let concurrent = scoped
+            .entries
+            .values()
+            .find(|entry| entry.native_id == "d")
+            .unwrap();
+        assert!(
+            concurrent.view.presentation_id.is_none(),
+            "concurrent requests never share a card"
+        );
         // Unsupported requests and system cleanup use cancellation, never a synthetic negative answer.
         for method in ["select", "input", "editor"] {
             let request = json!({

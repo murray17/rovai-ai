@@ -2,7 +2,7 @@
 document_type: implementation-record
 version: v1.72
 status: in-progress
-last_updated: 2026-11-05
+last_updated: 2026-11-06
 ---
 
 # Pi 原生问答渠道桥接
@@ -33,7 +33,7 @@ Core 当前 Runtime 问题转换为既有 Outbox 的独立 `native_interaction` 
 只复用平台表单/回调，不复制该插件的默认 TTL、问题替换或发新 Prompt 行为。
 选项回调使用稳定 value；输入原文不 trim，字段缺失不能当成空文本。独立取消回调映射 skip，不提交 form。
 
-该固定模板的限制必须明确：选择/确认均由 SELECT + 提交组成，取消按钮固定写作“取消”，不能动态隐藏；
+该固定模板的限制必须明确：选择/确认均由原生单选列表 + 提交组成，取消按钮固定写作“取消”，不能动态隐藏；
 canSkip=false 的通用请求只能回退 Desktop（Pi 四类均支持 skip）。它尚不能证明目标中的确认题直接按钮体验。
 不得将本候选宣称为最终钉钉交互，也不要求普通用户导入或发布模板。
 
@@ -89,3 +89,27 @@ User 授权向三个渠道测试推送。使用各 Provider 已发布的爱丽�
 飞书/Lark 各四张均被平台接受，并回读确认 interactive 消息存在、未删除、发送者为当前 App；
 钉钉官方问答模板四张均返回投递成功及 carrierId，证明该模板在当前企业/当前 App 可使用。
 该结果未证明跨企业通用、手机/桌面客户端的实际呈现或原生答案回调闭环；上述未完成边界继续保留。
+
+## 同卡接续（2026-11-06）
+
+Pi 唯一活动原生工具内的顺序对话共享一个不透明展示标识；题目及原生 ID 仍各自独立。Core Outbox 复用已知
+平台消息，初次发送未取得回执前不再创建第二张；后继请求出现后，旧关闭更新失效。Main 以 App/消息串行更新，
+成功回调不内联返回旧终态卡，避免迟到回包覆盖正在填写的新表单。不同工具、并发请求和不同运行仍隔离。
+
+飞书/Lark 的真实 input 在原卡保留前一 select 的只读选项，输入框以原选项作为原生左侧 label；
+不匹配英文文案、不预造 input、不合并或改写答案。钉钉官方
+[表单变量协议](https://open.dingtalk.com/document/development/form-variables)的 `CHECKBOX_GROUP` 是单选列表，
+`MULTI_CHECKBOX_GROUP` 才是多选列表，因此可沿用既有模板把下拉改为平铺单选；接续输入同卡保留只读选择。
+不引入 DWS、新模板发布、专属网页、选项状态管理或答案自动重放。
+
+回归扩展现有 Pi dialog、channel authority、Main parser/Host owners，不新增 Rust 测试函数。
+[本轮证据](evidence/pi-native-single-card-2026-11-06.json)记录 Rust workspace 484 通过/1 ignored、两个扩展
+owner、四个 Main 文件 176 项、类型、Desktop/Core 构建、通用文档门禁与真实 Pi 六组回归通过。
+
+飞书真实客户端已验证精简版：两个不同原生请求使用相同 presentation 和消息 ID，选择后原地展开输入，
+中文与前后空格的摘要完全一致，原来的 Run 成功结束。原生输入题已逐行包含选项时，仅避免重复绘制相同上下文，
+原生题目正文不改写。测试经真实平台回调、生产 renderer/parser 与隔离 Core writer；正式渠道 Outbox/Owner
+边界由上述 Rust owner 独立验证，不将这个测试 relay 冒充已运行生产 Main Host 全链路。
+
+Lark、钉钉新版卡已由平台接受，仍待真实客户端点击、原卡填写与回调；钉钉当前企业的单选列表投递不等于
+手机/桌面呈现和跨企业通用已经验收。飞书客户端空表单回包亦未在本轮验证，不从 Pi 层的空文本通过推定。

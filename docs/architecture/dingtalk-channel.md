@@ -3,7 +3,7 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-06
 ---
 
 # 钉钉渠道架构
@@ -29,7 +29,8 @@ last_updated: 2026-11-05
 
 Pi 问答接入既有 App/Stream 与 ChannelDelivery，不引入 DWS、个人 OAuth 或专属问卷服务。
 Core 复用 [Native Interactions v1](../contracts/native-interactions-v1.md#渠道投影与答复)的 Owner、卡片、Run/epoch
-与答案校验；Main 只转换平台卡片/回调。模板适用企业范围和真实客户端表单仍需独立验收，
+与答案校验；Main 只转换平台卡片/回调。同一原生工具内的顺序请求复用 outTrackId，旧请求回包不能覆盖新表单；
+单选使用官方 Form 的平铺 `CHECKBOX_GROUP`，输入接续保留只读选择上下文。模板适用企业范围和真实客户端表单仍需独立验收，
 当前候选及限制见[渠道实施记录](../versions/v1.72/pi-native-channel-interactions.md)。
 
 ```text

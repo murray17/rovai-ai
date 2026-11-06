@@ -1470,8 +1470,10 @@ export class DingTalkChannelSettingsService {
     // Only the authenticated platform envelope carries an operator. Nested form
     // fields and button parameters cannot supply identity or a card target.
     const operatorUserId = typeof callback.payload.userId === 'string' ? callback.payload.userId : null
-    if (!operatorUserId || outTrackId !== DINGTALK_NATIVE_CARD_PREFIX + action.deliveryId) return dingtalkNativeFailure('当前账号或卡片无法回答此问题')
-    return this.#enqueueExecutionCard(`native:${action.interactionId}`, async () => {
+    if (!operatorUserId) return dingtalkNativeFailure('当前账号或卡片无法回答此问题')
+    // The same trusted card may now display a later native request. Core checks
+    // its exact external identity; deliveryId is the current question authority.
+    return this.#enqueueExecutionCard(`native:${callback.appKey}:${outTrackId}`, async () => {
       try {
         const result = await this.#dependencies.core.request<import('@contracts').NativeInteractionResult>('channels.dingtalk.nativeInteractions.respond', {
           ...action, appId: callback.appKey, externalMessageId: outTrackId, chatId: null,
@@ -1481,12 +1483,9 @@ export class DingTalkChannelSettingsService {
         if (result.status === 'failed' || result.status === 'pending' || result.status === 'unknown') {
           return dingtalkNativeFailure(nativeCardResultText(result) + (result.status === 'unknown' ? '，内容已保留' : ''))
         }
-        const source = await this.#dependencies.core.request<NativeCardSource | null>('channels.dingtalk.nativeInteractions.source', {
-          deliveryId: action!.deliveryId, appId: callback.appKey
-        })
-        const text = nativeCardResultText(result)
-        return { ...(source ? { cardData: { cardParamMap: dingtalkNativeQuestionCard({ ...source, interaction: { ...source.interaction, status: result.status } }) } } : {}),
-          userPrivateData: { cardParamMap: { question_desc: text } }, cardUpdateOptions: { updateCardDataByKey: true, updatePrivateDataByKey: true } }
+        // Do not return an old terminal card over a newer form. The serialized
+        // Outbox update also clears any previous private failure hint.
+        return {}
       } catch {
         this.#hostPump.wake()
         return dingtalkNativeFailure('暂未取得提交结果，内容已保留，请核对问题状态')
@@ -1581,7 +1580,7 @@ export class DingTalkChannelSettingsService {
   async #deliver(delivery: ClaimedDelivery): Promise<void> {
     if (delivery.deliveryKind === 'native_interaction') {
       const reference = delivery.payload.nativeInteraction as { interactionId: string }
-      return this.#enqueueExecutionCard(`native:${reference.interactionId}`, () => this.#deliverNow(delivery, null))
+      return this.#enqueueExecutionCard(`native:${delivery.targetAppId}:${delivery.updateMessageId ?? reference.interactionId}`, () => this.#deliverNow(delivery, null))
     }
     if (delivery.deliveryKind === 'execution_console_upsert') {
       const agentRunId = requiredPayloadString(delivery.payload, 'agentRunId')
@@ -1625,7 +1624,7 @@ export class DingTalkChannelSettingsService {
         if (source) {
           const params = dingtalkNativeQuestionCard(source)
           if (externalId) {
-            const text = nativeCardResultText({ status: source.interaction.status })
+            const text = source.interaction.status === 'pending' ? '' : nativeCardResultText({ status: source.interaction.status })
             await api.updateCard(externalId, params, { cardUpdateOptions: { updateCardDataByKey: true, updatePrivateDataByKey: true },
               ...(source.ownerUserId ? { privateData: { [source.ownerUserId]: { cardParamMap: { question_desc: text } } } } : {}) })
           } else if (source.interaction.status === 'pending') {

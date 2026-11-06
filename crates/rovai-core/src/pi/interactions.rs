@@ -1,6 +1,6 @@
 use crate::native_interaction::{
     NativeInteractionAnswer, NativeInteractionStatus as Status, NativeInteractionView,
-    NativeQuestion, NativeQuestionKind, NativeQuestionOption,
+    NativeQuestion, NativeQuestionKind, NativeQuestionOption, NativeSelection,
 };
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -9,6 +9,13 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(super) struct PiInteractions {
     pub entries: HashMap<String, PiInteraction>,
+    presentation: Option<Presentation>,
+}
+
+struct Presentation {
+    tool_call_id: String,
+    id: String,
+    selection: Option<NativeSelection>,
 }
 
 pub(super) struct PiInteraction {
@@ -18,6 +25,47 @@ pub(super) struct PiInteraction {
 }
 
 impl PiInteractions {
+    pub fn tool_scope(&mut self, tool_call_id: Option<&str>) {
+        if self
+            .presentation
+            .as_ref()
+            .is_some_and(|p| Some(p.tool_call_id.as_str()) != tool_call_id)
+        {
+            self.presentation = None;
+        }
+        if let Some(tool_call_id) = tool_call_id {
+            self.presentation.get_or_insert_with(|| Presentation {
+                tool_call_id: tool_call_id.into(),
+                id: uuid::Uuid::new_v4().to_string(),
+                selection: None,
+            });
+        }
+    }
+
+    pub fn complete(&mut self, id: &str, answer: &NativeInteractionAnswer, status: Status) {
+        let Some(entry) = self.entries.get_mut(id) else {
+            return;
+        };
+        if let Some(p) = self.presentation.as_mut()
+            && entry.view.presentation_id.as_deref() == Some(&p.id)
+        {
+            p.selection = match answer {
+                NativeInteractionAnswer::Select { option_id } if status == Status::Sent => {
+                    Some(NativeSelection {
+                        options: entry.view.questions[0].options.clone(),
+                        option_id: option_id.clone(),
+                    })
+                }
+                _ => None,
+            };
+        }
+        entry.view.status = status;
+        if status != Status::Unknown {
+            entry.view.questions.clear();
+            entry.view.selection = None;
+        }
+    }
+
     pub fn register(
         &mut self,
         request: &Value,
@@ -83,6 +131,21 @@ impl PiInteractions {
             None
         };
         let id = uuid::Uuid::new_v4().to_string();
+        // Concurrent dialogs have independent cards, even inside one native tool.
+        if self.presentation.as_ref().is_some_and(|p| {
+            self.entries.values().any(|e| {
+                e.view.presentation_id.as_deref() == Some(&p.id)
+                    && matches!(e.view.status, Status::Pending | Status::Unknown)
+            })
+        }) {
+            self.presentation = None;
+        }
+        let presentation_id = self.presentation.as_ref().map(|p| p.id.clone());
+        let selection = self
+            .presentation
+            .as_mut()
+            .and_then(|p| p.selection.take())
+            .filter(|_| method == "input" || method == "editor");
         self.entries.insert(
             id.clone(),
             PiInteraction {
@@ -96,6 +159,8 @@ impl PiInteractions {
                     created_at: received_at,
                     expires_at,
                     status: Status::Pending,
+                    presentation_id,
+                    selection,
                     questions: vec![NativeQuestion {
                         id: "question".into(),
                         kind: match method {
@@ -143,6 +208,7 @@ impl PiInteraction {
         {
             self.view.status = Status::Expired;
             self.view.questions.clear();
+            self.view.selection = None;
         }
     }
 

@@ -1,0 +1,189 @@
+{
+  "observedAt": "2026-11-06T12:51:14.629Z",
+  "status": "implemented-client-validation-partial",
+  "baseCommit": "6e2b5cba8",
+  "sourceSha256": {
+    "crates/rovai-core/src/pi/interactions.rs": "a7055bb345ec4278523570d27b69d6dcda753619367f293e57a0dbdcda2c45eb",
+    "crates/rovai-core/src/pi/host.rs": "aebe476c80d1c34bcc66c7eeb490c24b2ac7d2df7be3a5c7e71ef8715dca250a",
+    "crates/rovai-core/src/channel/native_interactions.rs": "5ae20a62603bb68f4aacd1c2698204470d5041303f36fd0193e1a4e98482394c",
+    "apps/desktop/src/main/native-interaction-cards.ts": "b10f0f02a320d57e47e0c752d96d117f7c248a030957c41dd785fcc0efe76891",
+    "apps/desktop/src/main/channel-settings.ts": "41a2ce6bfee0de975b718fe3ff591ca2aa4f5d57c62d9ed8f1af47cea2dc584c",
+    "apps/desktop/src/main/dingtalk-channel-settings.ts": "5e84f8d9cdf48f19542306504026c26032e8aa515404bb07b3c9ed3a60725330"
+  },
+  "runtime": {
+    "pi": "1.1.0",
+    "extension": "@juicesharp/rpiv-ask-user-question@2.15.0",
+    "externalModelCalls": 0,
+    "coreDataIsolated": true,
+    "skillLibraryIsolated": true,
+    "homeIsolated": true,
+    "mcpIsolated": true
+  },
+  "checks": [
+    {
+      "command": "cargo test --workspace",
+      "passed": 484,
+      "ignored": 1
+    },
+    {
+      "command": "cargo test -p rovai-core --lib --features extended-tests native_extension_ui_preserves_answers_and_expires_without_default_answers",
+      "passed": 1
+    },
+    {
+      "command": "cargo test -p rovai-core --lib --features extended-tests native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery",
+      "passed": 1,
+      "providers": [
+        "feishu",
+        "dingtalk"
+      ],
+      "covers": [
+        "independent authorities",
+        "initial send receipt fence",
+        "follow-up targets original external card",
+        "old close update invalidated",
+        "native request ID mismatch rejected",
+        "Owner/App/card/Thread/run fencing"
+      ]
+    },
+    {
+      "command": "pnpm exec vitest run apps/desktop/src/main/native-interaction-cards.test.ts apps/desktop/src/main/channel-settings.test.ts apps/desktop/src/main/dingtalk-channel-settings.test.ts apps/desktop/src/main/dingtalk-stream-registry.test.ts",
+      "files": 4,
+      "passed": 176
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "status": "passed"
+    },
+    {
+      "command": "cargo build -p rovai-core --bins",
+      "status": "passed"
+    },
+    {
+      "command": "DOCS_BASE_REF=12c7babff059c12cc1ea3323137d44ef3a7653d7 pnpm docs:check:ci",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm docs:test",
+      "passed": 10
+    },
+    {
+      "command": "ROVAI_PI_QUESTION_PLUGIN=<installed official extension entry> node scripts/smoke-pi-native-interactions.mjs",
+      "groups": 6,
+      "status": "passed",
+      "covers": [
+        "real extension select/input keep one presentation and distinct request IDs",
+        "original option IDs and labels retained",
+        "exact text, empty text at Pi layer",
+        "skip, timeout, stop, concurrent runs and stale answers"
+      ]
+    }
+  ],
+  "platformScope": "Actual platform callbacks through production renderers/decoders to an isolated Core nativeInteractions.respond and installed Pi extension. Production channel Outbox/authorization separately exercised by the Rust owner; this relay does not invoke Main channel Host source/respond.",
+  "platforms": [
+    {
+      "provider": "feishu",
+      "agent": "Alice",
+      "recipient": "verified Owner private chat",
+      "deliveryAccepted": true,
+      "clientRoundTrip": "passed",
+      "actualPlatformCallback": true,
+      "questions": [
+        {
+          "id": "c4f1ac16-fc06-4af9-a1b1-5aad77978660",
+          "presentationId": "ae1459bc-0ec6-4278-a857-b23bb1eaac57",
+          "kind": "select",
+          "externalId": "om_x100b61e8f1bc90a0b0537b6a5c360a7"
+        },
+        {
+          "id": "6a4b05ea-b920-46d0-97bb-15c8a4ecbc09",
+          "presentationId": "ae1459bc-0ec6-4278-a857-b23bb1eaac57",
+          "kind": "input",
+          "externalId": "om_x100b61e8f1bc90a0b0537b6a5c360a7"
+        }
+      ],
+      "callbacks": [
+        {
+          "questionId": "c4f1ac16-fc06-4af9-a1b1-5aad77978660",
+          "answerKind": "select",
+          "status": "sent",
+          "alreadyHandled": false
+        },
+        {
+          "questionId": "6a4b05ea-b920-46d0-97bb-15c8a4ecbc09",
+          "answerKind": "input",
+          "status": "sent",
+          "alreadyHandled": false
+        }
+      ],
+      "sameNativePresentation": true,
+      "reusedSamePlatformCard": true,
+      "hasOriginalSelectionContext": true,
+      "pluginReturnedExactText": true,
+      "inputDigest": "4e79d63d17b3f304f300efb67d8ff6e5e6b9d2e89edec2d11620abba14811301",
+      "nativeClientVisualObserved": true,
+      "duplicateOptionsRemoved": true
+    },
+    {
+      "provider": "lark",
+      "agent": "Alice",
+      "recipient": "verified Owner private chat",
+      "deliveryAccepted": true,
+      "clientRoundTrip": "awaiting-client-action",
+      "actualPlatformCallback": false,
+      "questions": [
+        {
+          "id": "cb36a883-e5dd-48a5-b6d4-77d214598c01",
+          "presentationId": "61045a87-9576-41e5-9c28-2dc5ba649031",
+          "kind": "select",
+          "externalId": "om_x100b61e8f16ba0a4eeeacab9f2ecd8c"
+        }
+      ],
+      "callbacks": [],
+      "sameNativePresentation": null,
+      "reusedSamePlatformCard": null,
+      "hasOriginalSelectionContext": null,
+      "pluginReturnedExactText": null,
+      "inputDigest": null
+    },
+    {
+      "provider": "dingtalk",
+      "agent": "Alice",
+      "recipient": "verified Owner private chat",
+      "deliveryAccepted": true,
+      "clientRoundTrip": "awaiting-client-action",
+      "actualPlatformCallback": false,
+      "questions": [
+        {
+          "id": "46a63d05-24c2-44b6-add6-20967d928c88",
+          "presentationId": "7fdba560-64bf-4a9b-b81b-32fd9c51de60",
+          "kind": "select",
+          "externalId": "rovai_native_test-6aa0743d-0f9b-4adc-9c6e-16c402f3c331"
+        }
+      ],
+      "callbacks": [],
+      "sameNativePresentation": null,
+      "reusedSamePlatformCard": null,
+      "hasOriginalSelectionContext": null,
+      "pluginReturnedExactText": null,
+      "inputDigest": null,
+      "templateId": "c2a6355b-9724-4f7e-9653-d33fcb3311bb.schema",
+      "choiceFieldType": "CHECKBOX_GROUP",
+      "templateCreatedOrPublished": false,
+      "selectionStillRequiresFormSubmit": true
+    }
+  ],
+  "boundaries": {
+    "dailyAppKeptRunning": true,
+    "dailySqliteReadOnly": true,
+    "crossEnterpriseProven": false,
+    "mobileClientsValidated": false,
+    "larkAndDingTalkNativeCallbacksValidated": false,
+    "emptyFeishuClientCallbackValidated": false,
+    "rawAnswerTextStored": false,
+    "modelContextChanged": false
+  }
+}

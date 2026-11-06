@@ -359,7 +359,7 @@ describe('channel settings service', () => {
       expect(response.params).toEqual({ deliveryId: 'delivery-a', interactionId: 'question-a', appId: 'cli_a', externalMessageId: 'card-a', chatId: 'chat-a',
         answer: { kind: 'input', value: '  中文\n ' }, operatorUserId: 'platform-owner', operatorOpenId: 'platform-open', operatorUnionId: 'platform-union' })
       status = 'sent'
-      expect(await handler(event)).toMatchObject({ toast: { content: '已发送' }, card: expect.anything() })
+      expect(await handler(event)).toEqual({ toast: { type: 'info', content: '已发送' } })
       expect(requests.filter(item => item.method.endsWith('nativeInteractions.respond'))).toHaveLength(2)
       const before = requests.length
       expect(await handler({ ...event, raw: { ...event.raw, action: { form_value: {} } } })).toMatchObject({ toast: { type: 'error' } })

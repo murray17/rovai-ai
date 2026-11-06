@@ -61,7 +61,7 @@ import {
 } from '../shared/channel-member-bot-copy'
 import type { FeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { sendFeishuAgentOutput } from './feishu-agent-output-card'
-import { feishuNativeAnswer, feishuNativeQuestionCard, feishuNativeResultCard, nativeCardResultText,
+import { feishuNativeAnswer, feishuNativeQuestionCard, nativeCardResultText,
   sendFeishuNativeQuestion, type NativeCardSource } from './native-interaction-cards'
 import { feishuPageCardResponse, feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
 import {
@@ -2261,7 +2261,7 @@ export class ChannelSettingsService {
     catch { return { toast: { type: 'error', content: '未读取到有效回答，填写内容已保留' } } }
     if (!action) return {}
     try {
-      return await withFeishuPageDeadline(check => this.#enqueueExecutionCard(`native:${action.interactionId}`, async () => {
+      return await withFeishuPageDeadline(check => this.#enqueueExecutionCard(`native:${managed.appId}:${event.messageId}`, async () => {
         check()
         if (raw?.app_id && raw.app_id !== managed.appId) throw new Error('native_card_app_mismatch')
         const result = await this.#dependencies!.core.request<import('@contracts').NativeInteractionResult>(this.#hostMethod('nativeInteractions.respond'), {
@@ -2275,12 +2275,9 @@ export class ChannelSettingsService {
         if (result.status === 'failed' || result.status === 'pending' || result.status === 'unknown') {
           return { toast: { type: 'error' as const, content: nativeCardResultText(result) + (result.status === 'unknown' ? '，内容已保留' : '') } }
         }
-        const source = await this.#dependencies!.core.request<NativeCardSource | null>(this.#hostMethod('nativeInteractions.source'), {
-          deliveryId: action.deliveryId, appId: managed.appId
-        }).catch(() => null)
-        check()
-        return { toast: { type: 'info' as const, content: nativeCardResultText(result) },
-          ...(source ? feishuPageCardResponse(feishuNativeResultCard(source, result)) : {}) }
+        // The Outbox owns painting. A late callback response for the select must
+        // not replace the new input form on the same message with "sent".
+        return { toast: { type: 'info' as const, content: nativeCardResultText(result) } }
       }))
     } catch {
       this.#hostPump?.wake()
@@ -2405,7 +2402,7 @@ export class ChannelSettingsService {
   async #deliver(delivery: ClaimedChannelDelivery): Promise<void> {
     if (delivery.deliveryKind === 'native_interaction') {
       const reference = delivery.payload.nativeInteraction as { interactionId: string }
-      return this.#enqueueExecutionCard(`native:${reference.interactionId}`, () => this.#deliverNow(delivery, null))
+      return this.#enqueueExecutionCard(`native:${delivery.targetAppId}:${delivery.updateMessageId ?? reference.interactionId}`, () => this.#deliverNow(delivery, null))
     }
     if (delivery.deliveryKind === 'execution_console_upsert') {
       const agentRunId = requiredPayloadString(delivery.payload, 'agentRunId')

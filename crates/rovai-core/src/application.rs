@@ -13791,6 +13791,8 @@ impl Core {
             status,
             questions: vec![],
             can_skip: false,
+            presentation_id: card.presentation_id.clone(),
+            selection: None,
         };
         if status == Status::Pending {
             if let Some(runtime) = self
