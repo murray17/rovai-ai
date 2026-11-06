@@ -93,3 +93,42 @@ Rovai 不宣称第三方扩展能够区分取消和否。
 Pi 没有答案 ACK，也不为扩展自行触发的 AbortSignal 取消发送独立失效事件。Core 只依据收到的原生期限、
 所属 Run/Host 生命周期和自身写入状态清理请求，不按后续文字或无关工具事件猜测题目已失效。
 该原生边界不能用“已发送”宣称插件仍在等待或已经采纳答案。
+
+## 渠道投影与答复
+
+飞书、Lark 与钉钉复用同一个 Runtime 请求及提交锁。渠道 Host tick 从当前 PiRuntime 取得问题，
+只为绑定到该 Provider 的公屏 Run 创建 `channel_delivery.delivery_kind=native_interaction`。
+私聊 Run、错误 Thread、旧 epoch 或停止后的请求不能创建渠道卡片。
+每个 interactionId 独立投递；去重、领取、有限次卡片发送/更新重试沿用现有 Outbox。
+Migration 220 将 projection schema 从 169 升至 170，只扩展既有 delivery kind 与 bound-delivery CHECK；
+不新建问卷表。payload 只保存请求/Thread/Run/epoch、时间、状态、根 delivery 与外部卡片标识，
+不持久化问题或回答正文。问题正文只在实际发送时从 Runtime 内存读取。
+
+以下接口只接受对应的可信渠道 Host，不开放给 Renderer、Web 或 Agent CLI：
+
+| Provider | 读取卡片源 | 提交原生答案 |
+|---|---|---|
+| 飞书 | channels.nativeInteractions.source | channels.nativeInteractions.respond |
+| Lark | channels.lark.nativeInteractions.source | channels.lark.nativeInteractions.respond |
+| 钉钉 | channels.dingtalk.nativeInteractions.source | channels.dingtalk.nativeInteractions.respond |
+
+source 参数为 `deliveryId / appId`，返回根 delivery、队员名称、当前 NativeInteraction，以及仅供钉钉
+创建卡片/清理私有提示的已验证 Owner 平台 userId。respond 参数为
+`deliveryId / interactionId / appId / externalMessageId / chatId? / operatorOpenId? / operatorUserId? / operatorUnionId? / answer`。
+answer 与 Desktop/Web 的封闭联合相同；参数不接受任意原生 JSON 或用户声明的 local_user 身份。
+Core 核对 Provider Host、已发布 Bot、Owner、绑定的 Thread/渠道会话、已投递的外部卡片及请求标识，
+再复用同一 Run/epoch/Host/Session 校验与原生 writer。操作者只能来自可信平台回调外层；按钮和表单不能声明身份。
+提交不经过持久化 Command receipt，避免保存回答正文；该提交走现有 control request 通道。
+
+Desktop/Web 或渠道先写入成功后，另一入口只能读回已处理状态。成功/跳过/期限或运行失效的卡片更新
+只更新原卡，不再次提交答案。卡片更新按 interactionId 与回调串行；钉钉 outTrackId 用于回调/更新，
+carrierId 只用于 Robot recall，二者不能互换。答案先于初次投递结算时，后续 tick 补建关闭卡片的 update delivery。
+
+明确提交失败只反馈错误，不重绘表单；内容继续留在客户端。原生写入结果 unknown 保留去重标记和客户端
+表单，不用终态重绘清空草稿；再次点击只能核对该标记，不能再次写入。渠道没有答案重放或 Pi ACK 协议。
+卡片回调超时不表示提交失败，也不能自动重发。固定截止时间直接消费 expiresAt；到期只更新卡片状态，
+不发送默认答案。平台容量不足时整题提示在 Desktop/已登录 Web 处理，不截断选项、预填或用户答案。
+
+飞书/Lark 使用直接生成的 Card JSON 2.0：confirm/select 点击即提交，input/editor 使用可提交空文本的
+form，跳过是表单外的普通 callback。钉钉模板的跨企业可用性与客户端表单行为属于真实平台验收，
+不能由本地 JSON fixture 或另一个同企业 Bot 推定，当前边界见[渠道实施记录](../versions/v1.72/pi-native-channel-interactions.md)。

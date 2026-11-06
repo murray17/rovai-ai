@@ -3,7 +3,7 @@ document_type: architecture
 architecture: lark-channel
 authority: lark-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-10-16
+last_updated: 2026-11-05
 ---
 
 # Lark 渠道架构
@@ -14,6 +14,10 @@ Core 领域逻辑，但拥有自己的 provider 身份、表、请求名、可�
 与[飞书渠道架构](feishu-channel.md)，取舍理由见 [V1.72-D01](../versions/v1.72/decisions.md#v1-72-d01)。
 
 ## 组件与权威
+
+Pi 原生问答复用飞书 Card JSON 2.0 展示与回调实现，使用独立 Lark Host 请求名、App 与 Owner identity；
+不接受飞书 Host 跨 Provider 提交。请求权威仍是当前 PiRuntime，接口和 Outbox 归属见
+[Native Interactions v1](../contracts/native-interactions-v1.md#渠道投影与答复)。
 
 ```text
 Renderer 渠道设置（飞书 / Lark / 钉钉 三个 Provider 页签）

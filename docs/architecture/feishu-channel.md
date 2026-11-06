@@ -3,10 +3,17 @@ document_type: architecture
 architecture: feishu-channel
 authority: feishu-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-09-28
+last_updated: 2026-11-05
 ---
 
 # 飞书渠道架构
+
+## Pi 原生交互
+
+Main 直接生成 Card JSON 2.0 问答卡并处理 SDK 回调；Core 继续拥有当前 Pi 请求、Owner/渠道/Run 校验与
+原生回复。问答使用既有 ChannelDelivery Outbox 的独立 carrier，不进入执行卡或普通聊天，不要求用户配置模板。
+卡片投递/更新与回调按请求串行，明确失败保留客户端表单；不增加答案重放或确认握手。
+精确接口与状态见 [Native Interactions v1](../contracts/native-interactions-v1.md#渠道投影与答复)。
 
 ## 入站资源下载与 Agent 附件
 

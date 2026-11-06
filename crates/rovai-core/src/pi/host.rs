@@ -2089,6 +2089,29 @@ impl PiRpcRuntimeAdapter {
         Ok(runtime)
     }
 
+    pub(crate) async fn channel_interactions(
+        &self,
+    ) -> Vec<(String, crate::native_interaction::NativeInteractionView)> {
+        let runtimes = self
+            .active
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut questions = Vec::new();
+        for runtime in runtimes {
+            questions.extend(
+                runtime
+                    .pending_interactions()
+                    .await
+                    .into_iter()
+                    .map(|question| (runtime.camp_id().to_owned(), question)),
+            );
+        }
+        questions
+    }
+
     pub(crate) async fn pending_interactions(
         &self,
         camp_id: &str,

@@ -753,6 +753,17 @@ fn validate_lark_request_actor(method: &str, params: &Value) -> Result<()> {
     Ok(())
 }
 
+fn native_channel_provider(method: &str) -> Result<&'static str> {
+    channel_request_host_component(method)?;
+    Ok(if method.starts_with("channels.dingtalk.") {
+        "dingtalk"
+    } else if method.starts_with("channels.lark.") {
+        "lark"
+    } else {
+        "feishu"
+    })
+}
+
 fn channel_request_host_component(method: &str) -> Result<&'static str> {
     match method {
         "channels.feishu.account.upsert"
@@ -773,6 +784,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.executionConsole.recentOutput.authorize"
         | "channels.executionConsole.agentRun.cancel"
         | "channels.executionConsole.page.authorize"
+        | "channels.nativeInteractions.source"
+        | "channels.nativeInteractions.respond"
         | "channels.deliveries.settle" => Ok(crate::channel::FEISHU_SPEC.host_component),
         "channels.dingtalk.account.upsert"
         | "channels.dingtalk.account.commitConnection"
@@ -792,6 +805,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.dingtalk.executionConsole.recentOutput.authorize"
         | "channels.dingtalk.executionConsole.agentRun.cancel"
         | "channels.dingtalk.executionConsole.page.authorize"
+        | "channels.dingtalk.nativeInteractions.source"
+        | "channels.dingtalk.nativeInteractions.respond"
         | "channels.dingtalk.deliveries.settle" => Ok("dingtalk-channel-host"),
         "channels.lark.account.upsert"
         | "channels.lark.account.commitConnection"
@@ -811,6 +826,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.lark.executionConsole.recentOutput.authorize"
         | "channels.lark.executionConsole.agentRun.cancel"
         | "channels.lark.executionConsole.page.authorize"
+        | "channels.lark.nativeInteractions.source"
+        | "channels.lark.nativeInteractions.respond"
         | "channels.lark.deliveries.settle" => Ok(rovai_core::channel::LARK_SPEC.host_component),
         _ => anyhow::bail!("request does not identify a channel Host"),
     }
@@ -9155,6 +9172,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.host.tick" => {
+                self.sync_channel_native_interactions("dingtalk").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9300,6 +9318,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.host.tick" => {
+                self.sync_channel_native_interactions("feishu").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9314,6 +9333,7 @@ impl Core {
                 Ok(serde_json::to_value(tick)?)
             }
             "channels.lark.host.tick" => {
+                self.sync_channel_native_interactions("lark").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9326,6 +9346,44 @@ impl Core {
                 )?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(tick)?)
+            }
+            "channels.nativeInteractions.source"
+            | "channels.lark.nativeInteractions.source"
+            | "channels.dingtalk.nativeInteractions.source" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::SourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.channel_native_interaction_source(provider, &params)
+                    .await
+            }
+            "channels.nativeInteractions.respond"
+            | "channels.lark.nativeInteractions.respond"
+            | "channels.dingtalk.nativeInteractions.respond" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::AnswerParams =
+                    serde_json::from_value(request.params.clone())?;
+                let (command, known_status) = {
+                    let mut database = self.database.lock().await;
+                    rovai_core::channel::native_interactions::authorize_answer(
+                        &mut database,
+                        &ActorRef::System {
+                            component_id: channel_request_host_component(&request.method)?
+                                .to_string(),
+                        },
+                        provider,
+                        &params,
+                    )?
+                };
+                use crate::native_interaction::{
+                    NativeInteractionResult, NativeInteractionStatus as Status,
+                };
+                if known_status != Status::Pending {
+                    return Ok(serde_json::to_value(NativeInteractionResult {
+                        status: known_status,
+                        already_handled: matches!(known_status, Status::Sent | Status::Skipped),
+                    })?);
+                }
+                self.answer_native_interaction(&command).await
             }
             "channels.executionConsole.source" => {
                 let params: ChannelExecutionConsoleSourceParams =
@@ -12309,38 +12367,7 @@ impl Core {
             "nativeInteractions.respond" => {
                 let params: crate::native_interaction::RespondNativeInteraction =
                     serde_json::from_value(request.params.clone())?;
-                let valid = {
-                    let database = self.database.lock().await;
-                    database.connection().query_row(
-                        "SELECT EXISTS(SELECT 1 FROM agent_run LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND agent_run.execution_epoch = ?2 AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?3 AND agent_run.status IN ('running', 'waiting') AND agent_run.cancel_requested_at IS NULL)",
-                        rusqlite::params![params.agent_run_id, params.execution_epoch, params.thread_id], |row| row.get::<_, bool>(0))?
-                };
-                let result = if valid {
-                    if let Some(runtime) = self
-                        .pi
-                        .get_agent_run(&params.agent_run_id, params.execution_epoch)
-                        .await
-                    {
-                        if runtime.camp_id() != params.thread_id {
-                            anyhow::bail!("Native interaction belongs to another Thread");
-                        }
-                        serde_json::to_value(
-                            runtime
-                                .answer_interaction(&params.interaction_id, &params.answer)
-                                .await?,
-                        )?
-                    } else {
-                        json!({"status":"unavailable", "alreadyHandled":false})
-                    }
-                } else {
-                    json!({"status":"unavailable", "alreadyHandled":false})
-                };
-                emit(
-                    &self.output,
-                    "agent_run.interaction_changed",
-                    json!({"threadId": params.thread_id, "agentRunId": params.agent_run_id}),
-                );
-                Ok(result)
+                self.answer_native_interaction(&params).await
             }
             "action.approvals.resolve" => {
                 let params: ResolveActionApprovalParams =
@@ -13619,6 +13646,184 @@ impl Core {
         keys.extend(self.claude_code_cli.active_execution_keys());
         keys.extend(self.antigravity_app.active_execution_keys().await);
         keys.into_iter().collect()
+    }
+
+    async fn answer_native_interaction(
+        &self,
+        params: &crate::native_interaction::RespondNativeInteraction,
+    ) -> Result<Value> {
+        use crate::native_interaction::{
+            NativeInteractionResult, NativeInteractionStatus as Status,
+        };
+        let valid = {
+            let database = self.database.lock().await;
+            database.connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND agent_run.execution_epoch = ?2 AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?3 AND agent_run.status IN ('running', 'waiting') AND agent_run.cancel_requested_at IS NULL)",
+                rusqlite::params![params.agent_run_id, params.execution_epoch, params.thread_id], |row| row.get::<_, bool>(0))?
+        };
+        let result = if valid {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&params.agent_run_id, params.execution_epoch)
+                .await
+            {
+                anyhow::ensure!(
+                    runtime.camp_id() == params.thread_id,
+                    "Native interaction belongs to another Thread"
+                );
+                runtime
+                    .answer_interaction(&params.interaction_id, &params.answer)
+                    .await?
+            } else {
+                NativeInteractionResult {
+                    status: Status::Unavailable,
+                    already_handled: false,
+                }
+            }
+        } else {
+            NativeInteractionResult {
+                status: Status::Unavailable,
+                already_handled: false,
+            }
+        };
+        // Only delivery markers are persisted, never the answer or question text.
+        {
+            let mut database = self.database.lock().await;
+            if let Err(error) = rovai_core::channel::native_interactions::record_status(
+                &mut database,
+                &params.interaction_id,
+                result.status,
+            ) {
+                eprintln!("Native channel card marker update failed: {error:#}");
+            }
+        }
+        emit(
+            &self.output,
+            "agent_run.interaction_changed",
+            json!({"threadId":params.thread_id,"agentRunId":params.agent_run_id}),
+        );
+        Ok(serde_json::to_value(result)?)
+    }
+
+    async fn native_card_status(
+        &self,
+        card: &rovai_core::channel::native_interactions::CardReference,
+    ) -> Result<crate::native_interaction::NativeInteractionStatus> {
+        use crate::native_interaction::NativeInteractionStatus as Status;
+        if card.status != Status::Pending {
+            return Ok(card.status);
+        }
+        if let Some(runtime) = self
+            .pi
+            .get_agent_run(&card.agent_run_id, card.execution_epoch)
+            .await
+        {
+            let status = runtime.interaction_status(&card.interaction_id).await;
+            if status != Status::Pending {
+                return Ok(status);
+            }
+            // The pending list also fences stop, dead Host and changed Session.
+            if runtime
+                .pending_interactions()
+                .await
+                .iter()
+                .any(|question| question.id == card.interaction_id)
+            {
+                let database = self.database.lock().await;
+                let valid=database.connection().query_row("SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND execution_epoch=?2 AND status IN ('running','waiting') AND cancel_requested_at IS NULL)",rusqlite::params![card.agent_run_id,card.execution_epoch],|r|r.get::<_,bool>(0))?;
+                if valid {
+                    return Ok(Status::Pending);
+                }
+            }
+        }
+        Ok(Status::Unavailable)
+    }
+
+    async fn sync_channel_native_interactions(&self, provider: &str) -> Result<()> {
+        let questions = self.pi.channel_interactions().await;
+        let cards = {
+            let mut database = self.database.lock().await;
+            rovai_core::channel::native_interactions::project_pending(
+                &mut database,
+                provider,
+                &questions,
+            )?;
+            rovai_core::channel::native_interactions::references(&database, provider)?
+        };
+        for card in cards {
+            let status = self.native_card_status(&card).await?;
+            if status != crate::native_interaction::NativeInteractionStatus::Pending {
+                rovai_core::channel::native_interactions::record_status(
+                    &mut *self.database.lock().await,
+                    &card.interaction_id,
+                    status,
+                )?;
+            }
+        }
+        rovai_core::channel::native_interactions::reconcile_delivered(
+            &mut *self.database.lock().await,
+            provider,
+        )
+    }
+
+    async fn channel_native_interaction_source(
+        &self,
+        provider: &str,
+        params: &rovai_core::channel::native_interactions::SourceParams,
+    ) -> Result<Value> {
+        use crate::native_interaction::{NativeInteractionStatus as Status, NativeInteractionView};
+        let record = rovai_core::channel::native_interactions::source_reference(
+            &*self.database.lock().await,
+            provider,
+            &params.delivery_id,
+            &params.app_id,
+        )?;
+        let Some((delivery_id, agent_display_name, card)) = record else {
+            return Ok(Value::Null);
+        };
+        let status = self.native_card_status(&card).await?;
+        let mut interaction = NativeInteractionView {
+            id: card.interaction_id.clone(),
+            agent_run_id: card.agent_run_id.clone(),
+            execution_epoch: card.execution_epoch,
+            created_at: card.created_at,
+            expires_at: card.expires_at,
+            status,
+            questions: vec![],
+            can_skip: false,
+        };
+        if status == Status::Pending {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&card.agent_run_id, card.execution_epoch)
+                .await
+            {
+                if let Some(question) = runtime
+                    .pending_interactions()
+                    .await
+                    .into_iter()
+                    .find(|q| q.id == card.interaction_id)
+                {
+                    interaction = question;
+                } else {
+                    interaction.status = Status::Unavailable;
+                }
+            } else {
+                interaction.status = Status::Unavailable;
+            }
+        }
+        Ok(serde_json::to_value(
+            rovai_core::channel::native_interactions::CardSource {
+                delivery_id,
+                agent_display_name,
+                owner_user_id: rovai_core::channel::native_interactions::owner_user_id(
+                    &*self.database.lock().await,
+                    provider,
+                    &params.app_id,
+                )?,
+                interaction,
+            },
+        )?)
     }
 
     async fn collect_delivery_batch_dispatch_candidates(

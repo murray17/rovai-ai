@@ -18,10 +18,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             classifier_version='activity-v5',updated_at=datetime('now') WHERE singleton=1;",
     )?;
     anyhow::ensure!(
-        matches!(
-            classify_database_contract(&tx)?,
-            DatabaseContractClassification::Current(_)
-        ),
+        matches!(classify_database_contract(&tx)?,
+            DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 169),
         "Subagent display classifier admission failed"
     );
     tx.commit()?;
@@ -30,6 +28,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(connection: &Connection) {
+    super::channel_native::downgrade_for_test(connection);
     if !connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=219)",
@@ -79,6 +78,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .unwrap();
     migrate(database).unwrap();
     assert_eq!(snapshot(database.connection()), before);
+    super::channel_native::migrate(database).unwrap();
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),
         DatabaseContractClassification::Current(_)

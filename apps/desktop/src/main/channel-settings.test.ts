@@ -325,6 +325,48 @@ function normalizedMessage(input: {
 }
 
 describe('channel settings service', () => {
+  it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])('submits native answers with trusted platform identity and retains forms on failure ($kind)', async profile => {
+    const harness = controlledChannels({ cli_a: { openId: 'bot-a', name: '审阅员' } })
+    const requests: Array<{ method: string; params: unknown }> = []
+    let status = 'failed'
+    const service = new ChannelSettingsService({
+      profile, ...inertInterval(), createChannel: harness.createChannel,
+      credentialStore: memoryCredentialStore({ 'member-a': { appId: 'cli_a', appSecret: 'secret' } }, () => profile.kind),
+      core: channelCore((method, params) => {
+        requests.push({ method, params })
+        if (method === `${profile.methodPrefix}snapshot`) return coreSnapshot({ memberBots: [{
+          agentId: 'agent-a', accountId: 'account-1', brand: profile.kind, appId: 'cli_a', botDisplayName: '审阅员',
+          credentialRef: 'member-a', status: 'published', failureCode: null, version: 1, ownerIdentityStatus: 'verified'
+        }] })
+        if (method === `${profile.hostMethodPrefix}host.tick`) return { deliveries: [] }
+        if (method === `${profile.hostMethodPrefix}nativeInteractions.respond`) return { status, alreadyHandled: false }
+        if (method === `${profile.hostMethodPrefix}nativeInteractions.source`) return { deliveryId: 'delivery-a', agentDisplayName: '审阅员',
+          interaction: { id: 'question-a', status: 'sent', questions: [], canSkip: true, createdAt: 1, expiresAt: null } }
+        return { status: 'applied', payload: {} }
+      })
+    })
+    await service.start()
+    try {
+      const handler = harness.handlers.get('cli_a:cardAction')!
+      const event = { messageId: 'card-a', chatId: 'chat-a', operator: { userId: 'normalized-owner' },
+        action: { value: { kind: 'native_interaction', deliveryId: 'delivery-a', interactionId: 'question-a', answerKind: 'input', operatorUserId: 'forged-user' } },
+        raw: { app_id: 'cli_a', operator: { user_id: 'platform-owner', open_id: 'platform-open', union_id: 'platform-union' }, action: { form_value: { answer: '  中文\n ' } } } }
+      const failure = await handler(event) as Record<string, unknown>
+      expect(failure).toMatchObject({ toast: { type: 'error' } })
+      expect(failure).not.toHaveProperty('card')
+      expect(harness.updateCard).not.toHaveBeenCalled()
+      const response = requests.find(item => item.method.endsWith('nativeInteractions.respond'))!
+      expect(response.params).toEqual({ deliveryId: 'delivery-a', interactionId: 'question-a', appId: 'cli_a', externalMessageId: 'card-a', chatId: 'chat-a',
+        answer: { kind: 'input', value: '  中文\n ' }, operatorUserId: 'platform-owner', operatorOpenId: 'platform-open', operatorUnionId: 'platform-union' })
+      status = 'sent'
+      expect(await handler(event)).toMatchObject({ toast: { content: '已发送' }, card: expect.anything() })
+      expect(requests.filter(item => item.method.endsWith('nativeInteractions.respond'))).toHaveLength(2)
+      const before = requests.length
+      expect(await handler({ ...event, raw: { ...event.raw, action: { form_value: {} } } })).toMatchObject({ toast: { type: 'error' } })
+      expect(requests.slice(before).some(item => item.method.endsWith('nativeInteractions.respond'))).toBe(false)
+    } finally { await service.stop() }
+  })
+
   it.each([FEISHU_PROVIDER_PROFILE, LARK_PROVIDER_PROFILE])('$kind recovers pending attachment downloads without blocking the pump or submitting partial inputs', async (profile) => {
     const harness = controlledChannels({ cli_a: { openId: 'ou_bot_a', name: '审阅员' } })
     const stream = new PassThrough()
