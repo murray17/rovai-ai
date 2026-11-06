@@ -4,7 +4,7 @@ name: Hermes Managed Runtime
 version: v1
 status: accepted
 source_version: v1.72
-last_updated: 2026-10-28
+last_updated: 2026-11-05
 ---
 
 # Hermes Managed Runtime v1
@@ -15,9 +15,18 @@ last_updated: 2026-10-28
 ## 安装与进程
 
 最低版本为官方 Hermes **0.22.4**，不锁 commit 或版本上界；实际能力通过当前安装的原生接口验证。
-`ROVAI_HERMES_BIN` 或通用启动设置选定程序，直接执行 `hermes --profile default acp`。
-不解析/替换 Python 启动串，不生成 `host.py`。子进程固定 `HERMES_HOME=当前用户 ~/.hermes`，
-清除子进程的 profile 选择，不再识别旧私有 Home 启动变量，不修改 Shell 配置或用户 `.env`。
+`ROVAI_HERMES_BIN` 或通用启动设置选定程序，直接执行 `hermes --profile <name> acp`。
+`name` 取已应用的启动环境中的 `HERMES_PROFILE`，去除首尾空白。优先采用子进程的显式设置；
+没有显式设置或移除记录时，读取共享环境解析器提供的有效继承值。显式移除、未设置或为空时为 `default`，
+不会重新继承被清除的值。检查与模型目录使用 Host＋通用配置；队员执行再叠加所选的通用继承与队员覆盖。
+因此可以在队员的运行配置中分别设置 `{"HERMES_PROFILE":"writer"}` 和
+`{"HERMES_PROFILE":"reviewer"}`，沿用现有通用环境与队员覆盖的合并规则，无须切换 Hermes
+的全局 active profile。Profile 名称校验、存在性及对应原生 Home 由官方启动器处理，不静默回退到其他 Profile。
+
+不解析/替换 Python 启动串，不生成 `host.py`。子进程仍以 `HERMES_HOME=当前用户 ~/.hermes`
+作为启动基线；官方 `--profile` 负责解析选中 Profile 的 Home。选定参数后清除子进程的
+`HERMES_PROFILE` 与 `HERMES_DATA_DIR_SUFFIX`，避免保留另一套选择来源。不识别旧私有 Home
+启动变量，不修改 Shell 配置、用户 `.env` 或原生 Profile 文件。检查与实际运行沿用同一启动配置函数。
 
 链路为 **共享 ACP 客户端 → 官方 Hermes ACP → 原生共享 Gateway**。Rovai 只拥有启动的 ACP 连接。
 使用 `ManagedProcessPurpose::RuntimeConnection`，退出、超时和强制清理只作用于客户端根进程，
@@ -28,8 +37,10 @@ ACP initialize 沿用 90 秒预算，超时不自动重放输入。
 
 用户 config、`.env`、Hook、插件、指令文件及 Skills 不由此适配层改写。原生记忆、画像、Skills、
 personality、system prompt 和默认工具集合均由 Hermes 自己处理；不额外禁用，也不强行开启。
-Hermes 正常保存会话、记忆和刷新认证不属于 Rovai 配置覆盖。多个 Session 共享 Home 及原生长期记忆，
-不同 Session ID 只隔离会话，不能承诺成员之间的长期记忆隔离。
+Hermes 正常保存会话、记忆和刷新认证不属于 Rovai 配置覆盖。同一 Profile 的多个 Session 共享
+Home 及原生长期记忆；不同 Session ID 只隔离会话。选择不同 Profile 时，隔离能力由 Hermes
+原生 Profile 提供。修改 Profile 不迁移、合并或重新定位既有 Session；原生恢复失败沿用明确失败路径，
+不偷偷建立新会话。需要在另一 Profile 开始工作时应创建新会话。
 
 版本、入口、安装记录、指纹或普通配置变化只触发探测/进程更新，不单独拒绝精确恢复。
 不同 Binding 并行；同 Binding 使用既有调度和 Fleet owner，不新增全局锁。
