@@ -42,7 +42,7 @@ export default function (pi: any, questionExtension?: (pi: any) => void) {
       } else if (params.scenario === 'timeout') {
         answers.push(await ctx.ui.input('Native timeout', 'Expires in Pi', { timeout: 1200 }));
       } else {
-        answers.push(await ctx.ui.confirm('Confirm yes', 'Original confirmation\n第二行'));
+        answers.push(await ctx.ui.confirm('Confirm yes', 'Original confirmation\n第二行', { timeout: 0 }));
         answers.push(await ctx.ui.confirm('Confirm no', 'No is an explicit answer.'));
         answers.push(await ctx.ui.confirm('Skip confirmation', 'Skip must use cancelled, not confirmed.'));
         const choice = await ctx.ui.select('Select original value', [' Windows ', 'Linux', 'Type something.']);

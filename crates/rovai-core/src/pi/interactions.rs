@@ -72,11 +72,13 @@ impl PiInteractions {
                         .as_f64()
                         .filter(|n| n.is_finite() && *n >= 0.0)
                         .context("Pi dialog timeout is invalid")?;
-                    Ok::<i64, anyhow::Error>(
-                        received_at.saturating_add(milliseconds.ceil().min(i64::MAX as f64) as i64),
-                    )
+                    // Pi only starts its native timer for a truthy timeout; zero has no deadline.
+                    Ok::<Option<i64>, anyhow::Error>((milliseconds > 0.0).then(|| {
+                        received_at.saturating_add(milliseconds.ceil().min(i64::MAX as f64) as i64)
+                    }))
                 })
                 .transpose()?
+                .flatten()
         } else {
             None
         };

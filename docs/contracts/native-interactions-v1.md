@@ -65,9 +65,15 @@ Pi 原生回复没有 ACK；写入 JSONL（含换行及 flush）成功即返回 
 
 ## 期限、失败与恢复
 
-Pi confirm/select/input 的原生 timeout 自原生读流接收时记录一次；editor 没有 timeout。
+Pi confirm/select/input 的正数原生 timeout 自原生读流接收时记录一次；`timeout: 0` 与未设置一样没有期限，
+对应当前 Pi 不启动零值计时器的行为。editor 没有 timeout。
 Core/Renderer 不生成默认期限、不延长或重置期限，不替 Pi 发送超时答案。过期请求移出待处理和数量，
 Core 保留 `expired` 标记以拒绝迟到回答。已经开始并取得成功结果的提交不被前端时钟覆盖。
+
+Web 的未结提交冲突只限制相同 `interactionId`，不同问题可分别提交。发送前本地拒绝或 Host 明确未准入
+通过客户端错误标记 `requestNotSent` 回到普通失败反馈；原提交结果未知时仍禁止重发，不以新问题的提交代替核对。
+问答草稿的保存与清理使用同一范围：公屏为 `threadId + public`，私聊为 `threadId + conversationId`。
+每个面板只清理自己可见范围的草稿，不能用局部列表清理整个 Thread。
 
 | 返回状态 | 含义 |
 |---|---|

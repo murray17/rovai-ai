@@ -17,6 +17,56 @@ const rpc = (init?: RequestInit) => JSON.parse(String(init?.body)) as { operatio
 // Owns the client recovery transaction, not Core's idempotency implementation.
 // Controlled response loss distinguishes unknown receipts from known failures.
 describe('global Web connection recovery', () => {
+  it('submits different native questions concurrently while rejecting a duplicate before sending', async () => {
+    let finishFirst: ((response: Response) => void) | undefined
+    const dispatched: string[] = []
+    const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+      if (String(url).endsWith('/login')) return Response.json(identity)
+      const request = JSON.parse(String(init?.body)) as { operation: string; params: { interactionId: string } }
+      if (request.operation !== 'nativeInteractions.respond') return Response.json({ result: {} })
+      dispatched.push(request.params.interactionId)
+      if (request.params.interactionId === 'first') return new Promise<Response>(resolve => { finishFirst = resolve })
+      return Response.json({ result: { status: 'sent' } })
+    })
+    const client = new ConsoleClient(origin, fetcher, storage())
+    await client.login('test')
+    const answer = (interactionId: string) => ({ commandId: newCommandId(), threadId: 'thread', agentRunId: `run-${interactionId}`,
+      executionEpoch: 1, interactionId, answer: { kind: 'input', value: 'answer' } })
+    const first = client.request('nativeInteractions.respond', answer('first'))
+    await vi.waitFor(() => expect(dispatched).toEqual(['first']))
+    await expect(client.request('nativeInteractions.respond', answer('first'))).rejects.toMatchObject({ requestNotSent: true })
+    expect(dispatched).toEqual(['first'])
+    await expect(client.request('nativeInteractions.respond', answer('second'))).resolves.toEqual({ status: 'sent' })
+    expect(dispatched).toEqual(['first', 'second'])
+    expect(client.pendingCommandCount).toBe(1)
+    finishFirst!(Response.json({ result: { status: 'sent' } }))
+    await expect(first).resolves.toEqual({ status: 'sent' })
+    expect(client.pendingCommandCount).toBe(0)
+    client.clear()
+  })
+
+  it.each([
+    { code: 'request_capacity', status: 429 },
+    { code: 'operation_not_admitted', status: 503 },
+    { code: 'workspace_not_authorized', status: 403 }
+  ])('allows another attempt after a fresh native answer is not admitted: $code', async ({ code, status }) => {
+    let rejected = true
+    const fetcher = vi.fn<typeof fetch>(async url => {
+      if (String(url).endsWith('/login')) return Response.json(identity)
+      return rejected ? Response.json({ error: { code } }, { status }) : Response.json({ result: { status: 'sent' } })
+    })
+    const client = new ConsoleClient(origin, fetcher, storage())
+    await client.login('test')
+    const params = { commandId: newCommandId(), threadId: 'thread', agentRunId: 'run', executionEpoch: 1,
+      interactionId: 'question', answer: { kind: 'input', value: 'draft' } }
+    await expect(client.request('nativeInteractions.respond', params)).rejects.toMatchObject({ code, requestNotSent: true })
+    expect(client.pendingCommandCount).toBe(0)
+    expect(client.connectionState).toBe('live')
+    rejected = false
+    await expect(client.request('nativeInteractions.respond', { ...params, commandId: newCommandId() })).resolves.toEqual({ status: 'sent' })
+    client.clear()
+  })
+
   it('blocks new operations after a stopped service, preserves the original and explicitly retries it once', async () => {
     let available = true
     const saved = storage()

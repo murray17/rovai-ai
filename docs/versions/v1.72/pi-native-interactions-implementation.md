@@ -69,5 +69,28 @@ Provider 是受控本地 stream，Pi 进程、SDK、RPC、扩展和 Core 是真�
 Renderer 使用受控 transport，与真实 Core/Pi 回路分开记账。未单独进行等待中强杀 Core 重启、Windows/Linux 原生 UI
 或真实手机键盘验收；Core 问答记录不持久化，协议不能观测的原生局部取消边界见当前合同。
 
+## 反馈回归修正
+
+首轮验收遗漏了 Web 不同问题同时提交、公屏/私聊交叉清理草稿和 `timeout: 0` 三个组合。
+沿用同一 worktree 最小修正：Web 冲突按 interactionId；发送前拒绝标记为普通失败，真正未知仍禁止重发；
+公屏外层、ApprovalDock 与输入组件的保存/清理统一按可见范围；零超时不生成期限，正数期限规则不变。
+无新增队列、恢复服务、存储层或 Core 问答协议。
+
+回归归属：Web recovery owner 覆盖不同题并发、同题防重复、明确未准入和原未知提交不可被后续拒绝覆盖；
+drafts owner 以同 Thread 三个范围及重载验证隔离；原生产卡片 fixture 验证发送前拒绝可再次操作、真正未知禁用、
+公私聊分别清理后重挂载不丢草稿；原 Rust Pi owner 增加 confirm/select/input 零超时矩阵，不增加 Rust 测试函数。
+真实 Pi probe 的首个 confirm 使用 timeout: 0，验收要求没有期限、等待后仍可原路回答。
+
+[补充验证证据](evidence/pi-native-interactions-followup-2026-11-05.json)单独保存本次结果与源文件 SHA256，
+不覆盖首轮证据。修复前新增 Web/draft 回归及原 Rust owner 的零超时输入均失败；修复后：
+
+| 验证 | 实际结果 |
+|---|---|
+| 真实 Pi 1.1.0 / rpiv 2.15.0 | 六组 RPC 验收通过，含零超时等待后作答、正数超时和迟到回答 |
+| Rust 默认 / Pi 定向 | workspace 484 通过、1 ignored；Pi 25 通过、1 ignored |
+| 完整前端回归 | 270 个 Vitest 文件通过，3132 通过、2 skipped；Node 尾段 377 通过、2 skipped |
+| 生产卡片 | 未发送失败可重试、未知禁用、两队员提交独立结束、公私聊清理后重挂载草稿完整 |
+| 编译与门禁 | typecheck、Desktop 构建、Core binaries 构建、Desktop bridge、Rust 格式检查通过 |
+
 Status: ready。代码与证据完成；按 User 既有约定提交并推送任务分支，不自动创建 PR，保留同一 worktree 后续复用。
 Next: 后续明确要求 PR 时继续使用本分支；不关闭 #1012。

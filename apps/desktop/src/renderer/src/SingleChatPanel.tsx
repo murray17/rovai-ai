@@ -1804,7 +1804,7 @@ export function SingleChatPanel({
       </div>
       {currentSnapshot && <ApprovalDock
         approvals={currentSnapshot.approvals} profileById={profileById} busy={busy}
-        interactions={currentSnapshot.nativeInteractions ?? []} threadId={threadId} onNotice={onNotify}
+        interactions={currentSnapshot.nativeInteractions ?? []} threadId={threadId} conversationId={currentSnapshot.conversation.id} onNotice={onNotify}
         agentRuns={currentSnapshot.agentRuns.map(run => ({ id: run.id, agentId: currentSnapshot.conversation.agentId }))}
         onRespond={async (interaction, answer) => {
           const result = await client.request<import('@contracts').NativeInteractionResult>('nativeInteractions.respond', {

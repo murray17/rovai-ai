@@ -945,6 +945,23 @@ mod tests {
             1,
             "editor has no native timeout"
         );
+        for method in ["confirm", "select", "input"] {
+            let request = json!({"method":method, "id":format!("zero-timeout-{method}"),
+                "title":"No deadline", "options":["A"], "timeout":0});
+            assert!(dialogs.register(&request, "run-1", 7, 100).unwrap());
+            let entry = dialogs
+                .entries
+                .values_mut()
+                .find(|entry| entry.native_id == request["id"])
+                .unwrap();
+            assert_eq!(
+                entry.view.expires_at, None,
+                "Pi does not start a timer for timeout: 0"
+            );
+            entry.expire(i64::MAX);
+            assert_eq!(entry.view.status, Status::Pending);
+            assert!(entry.response(&Answer::Skip).is_ok());
+        }
         assert!(
             !dialogs
                 .register(&json!({"method":"notify"}), "run-1", 7, 100)

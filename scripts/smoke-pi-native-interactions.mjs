@@ -99,6 +99,7 @@ try {
   console.log('Pi fixture configured')
   const threadId = await start('NATIVE_FLOW: run the controlled native-dialog fixture.')
   let item = await nextQuestion(threadId, 'Confirm yes')
+  assert.equal(item.expiresAt, null, 'Pi timeout: 0 leaves the native request answerable without a deadline')
   await delay(300)
   assert.equal((await snapshot(threadId)).nativeInteractions[0].id, item.id, 'unanswered questions do not auto-approve or cancel')
   const stale = { ...item, executionEpoch: item.executionEpoch + 1 }
@@ -134,7 +135,7 @@ try {
   assert.equal(ended.nativeInteractions.length, 0)
   const actualAnswers = (await nativeToolResults(join(agent, 'sessions'))).find(answers => answers.length >= 8)
   assert.deepEqual(actualAnswers.slice(0, 8), [true, false, false, 'Type something.', custom, '', '  第一行\n第二行  ', '1,3; custom answer'], 'The real Pi extension receives exact values, including cancellation semantics and whitespace')
-  reports.push({ name: 'four methods, native continuation, exact text, blank, skip, duplicate and epoch fencing', passed: true })
+  reports.push({ name: 'four methods, zero timeout, native continuation, exact text, blank, skip, duplicate and epoch fencing', passed: true })
   const parallelThread = await start('NATIVE_PARALLEL')
   const parallel = await until(() => snapshot(parallelThread), s => s.nativeInteractions.length === 2, 'two requests from one member')
   assert.equal(new Set(parallel.nativeInteractions.map(item => item.agentRunId)).size, 1)

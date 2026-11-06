@@ -1,4 +1,4 @@
-import { interactionDraft, saveInteractionDraft, retainInteractionDrafts } from './native-interaction-drafts'
+import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
 import type { NativeInteractionView, NativeInteractionAnswer, NativeInteractionResult } from '@contracts'
 import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
@@ -2788,7 +2788,7 @@ export function ThreadWorkspace({
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
   const nativeInteractions = snapshot.nativeInteractions ?? []
   useEffect(() => {
-    if (snapshot.nativeInteractions) retainInteractionDrafts(snapshot.thread.id, new Set(snapshot.nativeInteractions.map(request => request.id)))
+    if (snapshot.nativeInteractions) retainInteractionDrafts({ threadId: snapshot.thread.id, conversationId: null }, new Set(snapshot.nativeInteractions.map(request => request.id)))
   }, [snapshot.thread.id, snapshot.nativeInteractions])
   const previousPendingInteractionCount = useRef(pendingApprovals.length + nativeInteractions.length)
   const executionEventsByRunId = useMemo(
@@ -9442,13 +9442,14 @@ const connectedSnapshot = (): boolean => true
 const noConnectionSubscription = (): (() => void) => () => undefined
 
 export function ApprovalDock({
-  approvals, interactions = [], agentRuns = [], threadId = '', onRespond, onNotice,
+  approvals, interactions = [], agentRuns = [], threadId = '', conversationId = null, onRespond, onNotice,
   profileById, busy, onResolve, containerRef, focusRequest, focusApprovalId, onFocusPresented
 }: {
   approvals: ActionApprovalView[]
   interactions?: NativeInteractionView[]
   agentRuns?: Pick<AgentRunView, 'id' | 'agentId'>[]
   threadId?: string
+  conversationId?: string | null
   onRespond?(interaction: NativeInteractionView, answer: NativeInteractionAnswer): Promise<NativeInteractionResult>
   onNotice?(message: string): void
   profileById: Map<string, AgentProfile>
@@ -9461,6 +9462,7 @@ export function ApprovalDock({
 }): JSX.Element | null {
   const t = useUiText()
   const connection = useThreadConnection()
+  const draftScope = useMemo(() => ({ threadId, conversationId }), [threadId, conversationId])
   const connected = useSyncExternalStore(connection?.subscribe ?? noConnectionSubscription, connection?.getSnapshot ?? connectedSnapshot, connectedSnapshot)
   const [uncertain, setUncertain] = useState<Set<string>>(() => new Set())
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -9498,10 +9500,10 @@ export function ApprovalDock({
     return () => window.clearInterval(timer)
   }, [interactions])
   useEffect(() => {
-    retainInteractionDrafts(threadId, new Set(interactions.filter(request =>
+    retainInteractionDrafts(draftScope, new Set(interactions.filter(request =>
       !completed.has(request.id) && (request.expiresAt === null || request.expiresAt > now || inFlight.current.has(request.id))
     ).map(request => request.id)))
-  }, [threadId, interactions, completed, now])
+  }, [draftScope, interactions, completed, now])
   useEffect(() => {
     const old = previous.current
     const ids = pending.map(request => request.id)
@@ -9566,9 +9568,10 @@ export function ApprovalDock({
         } else onNotice?.(t(result.status === 'expired' ? '回答期限已过' : '请求已失效'))
         setCompleted(current => new Set(current).add(item.id))
       }
-    } catch {
-      if (interaction) setUncertain(current => new Set(current).add(item.id))
-      setErrors(current => ({ ...current, [item.id]: t(interaction ? '提交结果待核对，内容已保留' : '提交失败，内容已保留') }))
+    } catch (error) {
+      const resultUncertain = Boolean(interaction) && !(error && typeof error === 'object' && 'requestNotSent' in error && error.requestNotSent === true)
+      if (resultUncertain) setUncertain(current => new Set(current).add(item.id))
+      setErrors(current => ({ ...current, [item.id]: t(resultUncertain ? '提交结果待核对，内容已保留' : '提交失败，内容已保留') }))
     } finally {
       inFlight.current.delete(item.id)
       setSubmitting(current => { const next = new Set(current); next.delete(item.id); return next })
@@ -9616,7 +9619,7 @@ export function ApprovalDock({
             disabled={questionDisabled} onClick={() => void submit({ kind: 'select', optionId: option.id })}>
             <span>{option.label}</span><PendingChevron direction="right" /></button>)}
         </div>}
-        <NativeQuestionAnswer key={interaction.id} interaction={interaction} threadId={threadId} disabled={questionDisabled}
+        <NativeQuestionAnswer key={interaction.id} interaction={interaction} draftScope={draftScope} disabled={questionDisabled}
           submitting={requestBusy} now={now} onSubmit={answer => void submit(answer)} />
       </div>}
       {(errors[item.id] || interaction?.status === 'unknown') && <p className="pending-error" role="alert">{errors[item.id] ?? t('提交结果待核对，内容已保留')}</p>}
@@ -9630,19 +9633,19 @@ function PendingChevron({ direction }: { direction: 'left' | 'right' | 'up' | 'd
   </svg>
 }
 
-function NativeQuestionAnswer({ interaction, threadId, disabled, submitting, now, onSubmit }: {
-  interaction: NativeInteractionView; threadId: string; disabled: boolean; submitting: boolean; now: number
+function NativeQuestionAnswer({ interaction, draftScope, disabled, submitting, now, onSubmit }: {
+  interaction: NativeInteractionView; draftScope: InteractionDraftScope; disabled: boolean; submitting: boolean; now: number
   onSubmit(answer: NativeInteractionAnswer): void
 }): JSX.Element {
   const t = useUiText()
   const question = interaction.questions[0]
-  const [text, setText] = useState(() => interactionDraft(threadId, interaction.id, question.prefill ?? ''))
+  const [text, setText] = useState(() => interactionDraft(draftScope, interaction.id, question.prefill ?? ''))
   const inputProps = { className: 'native-question-input', value: text,
     'aria-labelledby': `native-question-${interaction.id}`, placeholder: question.placeholder ?? undefined,
     // Connection recovery keeps this draft mounted; only actions are fenced.
     readOnly: submitting,
     onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      setText(event.target.value); saveInteractionDraft(threadId, interaction.id, event.target.value)
+      setText(event.target.value); saveInteractionDraft(draftScope, interaction.id, event.target.value)
     },
     onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       if (event.key === 'Enter' && !event.nativeEvent.isComposing && !disabled && (!question.multiline || event.metaKey || event.ctrlKey)) {
