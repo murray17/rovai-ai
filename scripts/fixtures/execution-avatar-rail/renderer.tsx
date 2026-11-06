@@ -115,12 +115,23 @@ let draft: ThreadComposerDraftView = { threadId, body: '', content: { version: 2
   replyIntent: null, continuationIntent: null, updatedAt: now, expiresAt: null }
 Object.assign(window, { rovai: {
   platform: 'darwin', onEvent: () => () => {},
-  filePreview: { bindThread: async () => {}, onExternalUpdate: () => () => {} },
+  filePreview: {
+    bindThread: async () => {}, onExternalUpdate: () => () => {}, release: async () => ({ released: true }),
+    open: async (request: { threadId: string }) => ({ ok: true, value: { kind: 'file_preview', file: {
+      previewKey: `selection-file:${request.threadId}`, handleId: `selection-file:${request.threadId}`,
+      reopenToken: 'selection-file', fileName: 'selection.txt', displayPath: 'selection.txt',
+      pathPresentation: 'project_relative', size: 32, mime: 'text/plain', extension: '.txt', kind: 'text',
+      hasExternalUpdate: false, contentVersion: { size: 32, mtimeMs: 1 }, contentGeneration: 'selection-1',
+      capabilities: ['read']
+    } } }),
+    readText: async () => ({ ok: true, value: { text: '执行选择回归：当前文件应保持可见。',
+      contentGeneration: 'selection-1', contentVersion: { size: 32, mtimeMs: 1 } } })
+  },
   windowControls: { onCloseTabRequested: () => () => {} },
   request: async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
     if (method === 'preferences.tasks.get') return { enabled: true, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 }
     if (method === 'skills.list' || method === 'skills.deliveryGroups.list') return []
-    if (method === 'camp.composerDraft.get') return draft
+    if (method === 'camp.composerDraft.get') return { ...draft, threadId: params?.threadId ?? draft.threadId }
     if (method === 'camp.composerDraft.save') { draft = { ...draft, ...params, revision: draft.revision + 1 }; return draft }
     if (method === 'agentRunEvidence.getContent') {
       const evidence = snapshotFor(20, 0).executionEvidence.find(item => item.id === params?.evidenceId)
@@ -140,6 +151,7 @@ const visibleNotificationSourceReports: VisibleNotificationSources[] = []
 const presentedNotificationRequests: number[] = []
 let previewHarness: {
   openExecution(): void
+  openFile(): Promise<unknown>
   hidePane(): void
   paneVisible: boolean
   activeTabKind: string | null
@@ -149,6 +161,7 @@ function NotificationFixtureBridge(): null {
   const preview = useFilePreview()
   previewHarness = {
     openExecution: preview.openExecution,
+    openFile: () => preview.open({ kind: 'camp_workspace', threadId: selectionThreadId, rawReference: 'selection.txt' }),
     hidePane: preview.hidePane,
     paneVisible: preview.paneVisible,
     activeTabKind: preview.activeTab?.kind ?? null
@@ -207,6 +220,15 @@ let configureInterruptionFixture: (() => void) | undefined
 Object.assign(window, { configureRunInterruption: () => configureInterruptionFixture?.() })
 
 let configureEmptyExecutionFixture: ((pending: boolean, placement: ExecutionConsolePlacement) => void) | undefined
+type SelectionScenario = { threadId: string; running?: boolean; missingAgent?: string; ready?: boolean; placement?: ExecutionConsolePlacement }
+let configureSelectionFixture: ((scenario: SelectionScenario) => void) | undefined
+let selectionThreadId = threadId
+Object.assign(window, { executionSelectionTest: {
+  configure: (scenario: SelectionScenario) => configureSelectionFixture?.(scenario),
+  openFile: () => previewHarness?.openFile(),
+  openExecution: () => previewHarness?.openExecution(),
+  hideExecution: () => previewHarness?.hidePane()
+} })
 let rejectNextPlacement = false
 Object.assign(window, {
   configureEmptyExecution: (pending = false, placement: ExecutionConsolePlacement = 'inspector') => configureEmptyExecutionFixture?.(pending, placement),
@@ -228,6 +250,15 @@ function Fixture(): React.JSX.Element {
   const [interruptionScenario, setInterruptionScenario] = useState(false)
   const [failureScenario, setFailureScenario] = useState(false)
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
+  const [selectionScenario, setSelectionScenario] = useState<SelectionScenario | null>(null)
+  configureSelectionFixture = scenario => {
+    notificationFixtureEnabled = false
+    setNotificationFocus(null)
+    setSelectionScenario(scenario)
+    setCount(4)
+    setOpen(false)
+    setPlacement(scenario.placement ?? 'right')
+  }
   configureNotificationFixture = () => {
     notificationFixtureEnabled = true
     setOpen(false)
@@ -342,7 +373,15 @@ function Fixture(): React.JSX.Element {
     snapshot.tasks = []
     snapshot.agentRunFileChanges = []
   }
-  return <FilePreviewProvider threadId={threadId} resolvedTheme={theme === 'night' ? 'night' : 'day'}>
+  if (selectionScenario) {
+    snapshot.thread = { ...snapshot.thread, id: selectionScenario.threadId, title: selectionScenario.threadId }
+    snapshot.agentRuns = snapshot.agentRuns.filter(run => run.agentId !== selectionScenario.missingAgent)
+      .map((run, index) => ({ ...run, status: selectionScenario.running && index === 0 ? 'running' : 'succeeded',
+        waitReason: null, endedAt: selectionScenario.running && index === 0 ? null : now }))
+    snapshot.tasks = []
+  }
+  selectionThreadId = snapshot.thread.id
+  return <FilePreviewProvider threadId={snapshot.thread.id} resolvedTheme={theme === 'night' ? 'night' : 'day'}>
     <NotificationFixtureBridge />
     <div className="app-shell app-shell-camp">
     <aside style={{ gridRow: '1 / -1', padding: '48px 24px', background: 'var(--rail)', color: 'var(--rail-ink)' }}>
@@ -368,9 +407,10 @@ function Fixture(): React.JSX.Element {
     </aside>
     <AppHeader threadTitle={snapshot.thread.title} contextLabel="隔离验收" thread={snapshot} detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
-      <ThreadWorkspace missionBoard={notificationFixtureEnabled ? <section className="mission-intro" data-mission-id="mission-rail" tabIndex={-1}>使命来源</section> : null} snapshot={snapshot} projectName="隔离验收" agents={agents.slice(0, snapshot.members.length)} busy={false} stopping={false}
+      <ThreadWorkspace key={snapshot.thread.id} missionBoard={notificationFixtureEnabled ? <section className="mission-intro" data-mission-id="mission-rail" tabIndex={-1}>使命来源</section> : null} snapshot={snapshot} projectName="隔离验收" agents={agents.slice(0, snapshot.members.length)} busy={false} stopping={false}
         onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
         onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} detailEntryHost={entryHost}
+        workspaceEntrySnapshotReady={selectionScenario?.ready ?? true}
         onCancelAgentRun={async run => { setStoppedRuns(current => [...current, run.id]) }}
         executionPlacement={placement} onExecutionPlacementChange={async value => {
           if (rejectNextPlacement) { rejectNextPlacement = false; throw new Error('位置保存失败（隔离验收）') }

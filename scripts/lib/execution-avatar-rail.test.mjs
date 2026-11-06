@@ -14,7 +14,10 @@ import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 const root = resolve(import.meta.dirname, '../..')
 const source = join(root, 'scripts/fixtures/execution-avatar-rail')
 
-test('production execution popover preserves dismissal, selection, scrolling and navigation through native input', { timeout: 180_000 }, async (t) => {
+test('production execution popover preserves dismissal, selection, scrolling and navigation through native input', { timeout: 180_000 }, t => runFixture(t, 'main.cjs'))
+test('execution Tabs survive Thread returns without retaining Run disclosure or opening protected files', { timeout: 90_000 }, t => runFixture(t, 'main-selection.cjs'))
+
+async function runFixture(t, entrypoint) {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-execution-avatar-rail-'))
   let child
@@ -32,7 +35,7 @@ test('production execution popover preserves dismissal, selection, scrolling and
     await mkdir(join(userData, 'managed-skill-library'), { recursive: true })
     process.stdout.write(`Isolated execution rail fixture: ${fixture}\n`)
     const dismissalOnly = process.env.ROVAI_EXECUTION_POPOVER_DISMISSAL_ONLY === '1'
-    child = spawn(electron, [join(source, 'main.cjs'), join(fixture, 'renderer/index.html'), userData,
+    child = spawn(electron, [join(source, entrypoint), join(fixture, 'renderer/index.html'), userData,
       ...(dismissalOnly ? ['--dismissal-only'] : []),
       ...(process.platform === 'linux' ? ['--no-sandbox'] : [])], {
       env: environment, stdio: ['ignore', 'pipe', 'pipe']
@@ -60,4 +63,4 @@ test('production execution popover preserves dismissal, selection, scrolling and
       await rm(fixture, { recursive: true, force: true })
     }
   }
-})
+}
