@@ -77,3 +77,15 @@ v95/v98 仍断言 formatter SQL 只到 42，与现有 formatter 43 不符，相�
 没有禁用、删除或放宽这六条历史迁移测试，本项不冒充扩展数据库全绿。
 
 本项保持进行中；最终完成条件仍是两种渠道内作答准确回到原请求并继续同一 Run，且钉钉模板可被其他企业使用。
+
+## 真实平台卡片推送（2026-11-05）
+
+User 授权向三个渠道测试推送。使用各 Provider 已发布的爱丽丝 Bot，投递到该 App 已验证 Owner 的私聊，
+每边 confirm/select/input/editor 四张，共 12 张。直接执行上述提交版本的卡片 renderer 与钉钉 OpenAPI client；
+消息使用展示测试题，不创建 NativeInteraction/Run，不连接新的 Stream/WebSocket，不写日常 SQLite。
+本轮没有创建或发布模板。
+
+[推送证据](evidence/pi-native-channel-card-push-2026-11-05.json)记录原始投递身份和 renderer SHA256。
+飞书/Lark 各四张均被平台接受，并回读确认 interactive 消息存在、未删除、发送者为当前 App；
+钉钉官方问答模板四张均返回投递成功及 carrierId，证明该模板在当前企业/当前 App 可使用。
+该结果未证明跨企业通用、手机/桌面客户端的实际呈现或原生答案回调闭环；上述未完成边界继续保留。
