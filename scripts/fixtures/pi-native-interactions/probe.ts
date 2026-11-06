@@ -45,10 +45,10 @@ export default function (pi: any, questionExtension?: (pi: any) => void) {
         answers.push(await ctx.ui.confirm('Confirm yes', 'Original confirmation\n第二行', { timeout: 0 }));
         answers.push(await ctx.ui.confirm('Confirm no', 'No is an explicit answer.'));
         answers.push(await ctx.ui.confirm('Skip confirmation', 'Skip must use cancelled, not confirmed.'));
-        const choice = await ctx.ui.select('Select original value', [' Windows ', 'Linux', 'Type something.']);
+        const choice = await ctx.ui.select('Select original value', [' Windows ', 'Linux', 'macOS']);
         answers.push(choice);
-        // This is the native plugin flow, never a host-side English-label rule.
-        if (choice === 'Type something.') answers.push(await ctx.ui.input('Your own answer', 'Preserve every character'));
+        // A separate native question, unrelated to the selected platform.
+        answers.push(await ctx.ui.input('Project name', 'Preserve every character'));
         answers.push(await ctx.ui.input('Empty input', 'Empty text is an answer'));
         answers.push(await ctx.ui.editor('Multiline editor', '  预填\n第二行  '));
         answers.push(await ctx.ui.input('Multiple selections as text', '1,3; custom answer'));

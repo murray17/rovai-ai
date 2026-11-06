@@ -95,23 +95,21 @@ describe('native channel question cards', () => {
     expect(form.fields.find((field: { name: string }) => field.name === 'answer')).toMatchObject({ type: 'TEXT_AREA', required: false, defaultValue: '  初始\n中文  ' })
   })
 
-  it('renders the real follow-up input beside its original selected option without guessing English labels', () => {
-    const item = source('input')
-    item.interaction.selection = { options: [{ id: 'win', label: 'Windows' }, { id: 'custom', label: '自行填写（本地化）' }], optionId: 'custom' }
-    const card = feishuNativeQuestionCard(item)
-    const input = nodes(card).find(node => node.tag === 'input')!
-    expect(input).toMatchObject({ label: { content: '自行填写（本地化）' }, label_position: 'left', name: 'answer' })
-    expect(nodes(card).some(node => node.content === 'Windows')).toBe(true)
-    expect(nodes(card).some(node => node.content === item.interaction.questions[0].title)).toBe(true)
+  it('keeps an ordinary selection and a later unrelated input as independent native questions', () => {
+    const select = source('select')
+    select.interaction.questions[0].options = [{ id: 'win', label: 'Windows' }, { id: 'mac', label: 'macOS' }]
+    const selected = nodes(feishuNativeQuestionCard(select)).find(node => node.tag === 'button')!
+    expect(feishuNativeAnswer(action(selected), null)).toMatchObject({ interactionId: 'question', answer: { kind: 'select', optionId: 'win' } })
+    const input = source('input')
+    input.interaction.id = 'project-name'
+    input.interaction.questions[0].title = '项目名称'
+    const card = feishuNativeQuestionCard(input)
+    expect(nodes(card).some(node => node.content === 'Windows' || node.content === 'macOS')).toBe(false)
+    expect(nodes(card).find(node => node.tag === 'input')).not.toHaveProperty('label')
     const submit = nodes(card).find(node => node.form_action_type === 'submit')!
-    expect(feishuNativeAnswer(action(submit), { answer: '  原文  ' })).toMatchObject({ interactionId: item.interaction.id, answer: { kind: 'input', value: '  原文  ' } })
-    const fields = JSON.parse(dingtalkNativeQuestionCard(item).form).fields
-    expect(fields.find((field: { name: string }) => field.name === 'selection')).toMatchObject({ type: 'CHECKBOX_GROUP', readOnly: true, defaultValue: { value: 'custom' } })
-    expect(fields.find((field: { name: string }) => field.name === 'answer')).toMatchObject({ type: 'TEXT', label: '自行填写（本地化）', required: false })
-    item.interaction.questions[0].title = '原生输入问题\nWindows\n请填写回答'
-    expect(nodes(feishuNativeQuestionCard(item)).filter(node => node.content === 'Windows')).toHaveLength(0)
-    const repeatedFields = JSON.parse(dingtalkNativeQuestionCard(item).form).fields
-    expect(repeatedFields.some((field: { name: string }) => field.name === 'selection')).toBe(false)
-    expect(repeatedFields.find((field: { name: string }) => field.name === 'answer').label).toBe(item.interaction.questions[0].title)
+    expect(feishuNativeAnswer(action(submit), { answer: '  示例项目  ' })).toMatchObject({ interactionId: 'project-name', answer: { kind: 'input', value: '  示例项目  ' } })
+    const fields = JSON.parse(dingtalkNativeQuestionCard(input).form).fields
+    expect(fields.find((field: { name: string }) => field.name === 'answer')).toMatchObject({ label: '项目名称', type: 'TEXT' })
+    expect(fields.some((field: { type: string }) => field.type === 'CHECKBOX_GROUP')).toBe(false)
   })
 })

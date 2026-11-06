@@ -1605,11 +1605,7 @@ impl PiRuntime {
                 .await?;
             return Ok(true);
         }
-        let active = self.active_tool_executions.lock().await;
-        let tool_call_id = (active.len() == 1).then(|| active.keys().next().unwrap().as_str());
-        let mut interactions = self.interactions.lock().await;
-        interactions.tool_scope(tool_call_id);
-        interactions.register(
+        self.interactions.lock().await.register(
             request,
             &self.owner.agent_run_id,
             self.owner.execution_epoch,
@@ -1677,7 +1673,6 @@ impl PiRuntime {
         {
             entry.view.status = Status::Unavailable;
             entry.view.questions.clear();
-            entry.view.selection = None;
             return Ok(NativeInteractionResult {
                 already_handled: false,
                 status: Status::Unavailable,
@@ -1691,7 +1686,7 @@ impl PiRuntime {
                 status: Status::Failed,
             });
         }
-        let status = match self.host.send(response).await {
+        entry.view.status = match self.host.send(response).await {
             Ok(()) if matches!(answer, NativeInteractionAnswer::Skip) => Status::Skipped,
             Ok(()) => Status::Sent,
             // A write/flush error cannot prove the native peer received zero bytes. Never replay.
@@ -1700,17 +1695,18 @@ impl PiRuntime {
                 Status::Unknown
             }
         };
-        dialogs.complete(id, answer, status);
+        if entry.view.status != Status::Unknown {
+            entry.view.questions.clear();
+        }
         Ok(NativeInteractionResult {
             already_handled: false,
-            status,
+            status: entry.view.status,
         })
     }
 
     async fn cancel_interactions(&self) -> Result<()> {
         use crate::native_interaction::NativeInteractionStatus as Status;
         let mut dialogs = self.interactions.lock().await;
-        dialogs.tool_scope(None);
         for entry in dialogs.entries.values_mut() {
             entry.expire(chrono::Utc::now().timestamp_millis());
             if entry.view.status != Status::Pending {
@@ -1718,7 +1714,6 @@ impl PiRuntime {
             }
             entry.view.status = Status::Unavailable;
             entry.view.questions.clear();
-            entry.view.selection = None;
             self.host
                 .send(
                     json!({"type":"extension_ui_response", "id":entry.native_id, "cancelled":true}),
@@ -1729,9 +1724,6 @@ impl PiRuntime {
     }
 
     pub async fn observe(&self, mut message: Value) -> Result<(Value, Option<CompletedAcpAction>)> {
-        if message.get("type").and_then(Value::as_str) == Some("tool_execution_end") {
-            self.interactions.lock().await.tool_scope(None);
-        }
         match message.get("type").and_then(Value::as_str) {
             Some("message_end") => {
                 let Some(assistant) = message

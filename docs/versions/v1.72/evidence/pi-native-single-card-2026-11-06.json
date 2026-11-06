@@ -1,6 +1,6 @@
 {
   "observedAt": "2026-11-06T12:51:14.629Z",
-  "status": "implemented-client-validation-partial",
+  "status": "superseded",
   "baseCommit": "6e2b5cba8",
   "sourceSha256": {
     "crates/rovai-core/src/pi/interactions.rs": "a7055bb345ec4278523570d27b69d6dcda753619367f293e57a0dbdcda2c45eb",
@@ -185,5 +185,6 @@
     "emptyFeishuClientCallbackValidated": false,
     "rawAnswerTextStored": false,
     "modelContextChanged": false
-  }
+  },
+  "supersededReason": "Cross-request grouping, inherited selection context and same-card continuation were removed in favor of independent Pi native requests. Retained observations describe only the previous experiment."
 }

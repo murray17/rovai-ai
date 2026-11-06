@@ -24,9 +24,6 @@ conversation 的 Run；已结束或请求停止的 Run 不提供可提交卡片�
 `createdAt`、`expiresAt` 和 `status`。时间为 Core 的 Unix 毫秒；`expiresAt` 可为 null。Pi 每项只有一题。
 问题包含 `id / kind / title / description / options / placeholder / prefill / multiline`；选项包含稳定 `id` 与原始
 `label`。Host、Session、原生 ID 和答案编码留在 Core，不由 Renderer 构造原生 JSON。
-Pi 在唯一活动原生工具内的顺序请求可带不透明 `presentationId`，供渠道复用消息；并发请求或没有明确工具
-归属时不合并。紧随已回答 select 的真实 input/editor 可带 `selection: {options, optionId}`，保留原选项及已提交
-选项的展示上下文。该内存上下文不包含用户文本答案，不改变当前题目或原生回复 ID，结束后清除。
 
 | Pi 方法 | kind | 用户回答 | 原生响应字段 |
 |---|---|---|---|
@@ -40,6 +37,8 @@ Pi 在唯一活动原生工具内的顺序请求可带不透明 `presentationId`
 不根据 `Type something.` 等文案增加能力或替插件构造下一题。select 回传原始选项后，只有真实 input
 到达才显示文本问题；插件的多选文本也保持原文。`notify / setStatus / setWidget / setTitle / set_editor_text`
 沿用原路径，不进入等待列表；不借此覆盖 Composer 草稿。
+Pi 原生 select 不内置自填选项，也不声明它与后续 input 的关系；同一 Run 或工具调用不能成为关联两题的
+协议依据。每条请求只展示自己的原生内容，不继承上一题的选择、标签或用户文本，不自动代答后续请求。
 
 ## 提交与归属
 
@@ -102,10 +101,8 @@ Pi 没有答案 ACK，也不为扩展自行触发的 AbortSignal 取消发送独
 飞书、Lark 与钉钉复用同一个 Runtime 请求及提交锁。渠道 Host tick 从当前 PiRuntime 取得问题，
 只为绑定到该 Provider 的公屏 Run 创建 `channel_delivery.delivery_kind=native_interaction`。
 私聊 Run、错误 Thread、旧 epoch 或停止后的请求不能创建渠道卡片。
-每个 interactionId 保持独立 Outbox 记录及答复校验；同一 `presentationId`、绑定、App、Run/epoch 内的顺序
-请求复用已投递的外部卡片。先等初次发送回执再更新原卡，不为接续 input 新建第二条消息。
-不同工具、并发问题或不同运行不能复用卡片；不根据 `Type something.` 等文案推断接续。
-去重、领取、有限次卡片发送/更新重试沿用现有 Outbox。
+每个 interactionId 独立投递一张渠道卡片，保留独立 Outbox 记录及答复校验。新的原生请求创建新卡，不复用或
+刷新上一题的卡片来展示下一题。去重、领取、有限次卡片发送/状态更新重试沿用现有 Outbox。
 Migration 220 将 projection schema 从 169 升至 170，只扩展既有 delivery kind 与 bound-delivery CHECK；
 不新建问卷表。payload 只保存请求/Thread/Run/epoch、时间、状态、根 delivery 与外部卡片标识，
 不持久化问题或回答正文。问题正文只在实际发送时从 Runtime 内存读取。
@@ -127,8 +124,8 @@ Core 核对 Provider Host、已发布 Bot、Owner、绑定的 Thread/渠道会�
 提交不经过持久化 Command receipt，避免保存回答正文；该提交走现有 control request 通道。
 
 Desktop/Web 或渠道先写入成功后，另一入口只能读回已处理状态。成功/跳过/期限或运行失效的卡片更新
-只更新原卡，不再次提交答案。卡片更新按 App/外部卡片与回调串行；旧请求的更新在存在后继时失效，成功
-回调只返回反馈、不携带可覆盖新输入框的旧终态卡。钉钉 outTrackId 用于回调/更新，
+只更新该请求自己的卡片，不再次提交答案。状态结算与回调按 interactionId 串行，成功回调只返回反馈，卡片
+终态沿用已有 Outbox；不引入跨请求关联或轮询刷新。钉钉 outTrackId 用于回调/更新，
 carrierId 只用于 Robot recall，二者不能互换。答案先于初次投递结算时，后续 tick 补建关闭卡片的 update delivery。
 
 明确提交失败只反馈错误，不重绘表单；内容继续留在客户端。原生写入结果 unknown 保留去重标记和客户端
@@ -137,8 +134,8 @@ carrierId 只用于 Robot recall，二者不能互换。答案先于初次投递
 不发送默认答案。平台容量不足时整题提示在 Desktop/已登录 Web 处理，不截断选项、预填或用户答案。
 
 飞书/Lark 使用直接生成的 Card JSON 2.0：confirm/select 点击即提交，input/editor 使用可提交空文本的
-form，跳过是表单外的普通 callback。select 接续的真实 input 在原卡显示原选项的只读上下文，并将输入框与
-已选选项组合展示；不增加统一选中态或把用户文本交给旧 select。钉钉沿用官方 Form 模板，以
+form，跳过是表单外的普通 callback。input/editor 仅展示当前输入题，不附带旧选择题的选项或标签。
+钉钉沿用官方 Form 模板，以
 `CHECKBOX_GROUP` 原生单选列表代替下拉选择；模板仍要求表单提交，不能将尚未验证的点击行为宣称为点击即答。
 钉钉模板的跨企业可用性与客户端表单行为属于真实平台验收，
 不能由本地 JSON fixture 或另一个同企业 Bot 推定，当前边界见[渠道实施记录](../versions/v1.72/pi-native-channel-interactions.md)。

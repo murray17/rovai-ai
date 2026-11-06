@@ -16,8 +16,6 @@ pub struct CardReference {
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub status: Status,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub presentation_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -49,7 +47,7 @@ pub struct SourceParams {
     pub app_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnswerParams {
     pub delivery_id: String,
@@ -69,8 +67,7 @@ fn reference(payload: &Value) -> Result<CardReference> {
     )?)
 }
 
-/// Keep question authority independent, while sequential dialogs in one native
-/// tool reuse the already delivered platform card. Public Run/binding ownership is
+/// Append one independent carrier per question. Public Run/binding ownership is
 /// read from Core; a private conversation can never acquire a channel carrier.
 pub fn project_pending(
     database: &mut Database,
@@ -110,43 +107,11 @@ pub fn project_pending(
             created_at: question.created_at,
             expires_at: question.expires_at,
             status: Status::Pending,
-            presentation_id: question.presentation_id.clone(),
         };
-        let dedupe_key = format!("native_interaction:{binding_id}:{}", question.id);
-        if tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM channel_delivery WHERE dedupe_key=?1)",
-            [&dedupe_key],
-            |r| r.get::<_, bool>(0),
-        )? {
-            continue;
-        }
-        let previous = if let Some(presentation_id) = &question.presentation_id {
-            tx.query_row("SELECT delivery.status,COALESCE(json_extract(payload_json,'$.externalMessageId'),external_delivery_message_id)
-                FROM channel_delivery AS delivery WHERE channel_binding_id=?1 AND target_app_id=?2 AND source_agent_id=?3
-                  AND delivery_kind='native_interaction' AND json_extract(payload_json,'$.operation')='send'
-                  AND json_extract(payload_json,'$.nativeInteraction.presentationId')=?4
-                  AND json_extract(payload_json,'$.nativeInteraction.agentRunId')=?5
-                  AND json_extract(payload_json,'$.nativeInteraction.executionEpoch')=?6
-                ORDER BY rowid DESC LIMIT 1", params![binding_id,app_id,agent_id,presentation_id,question.agent_run_id,question.execution_epoch],
-                |r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).optional()?
-        } else {
-            None
-        };
-        // Do not race a second create against an initial HTTP send with no receipt.
-        if previous
-            .as_ref()
-            .is_some_and(|(status, message)| message.is_none() && status != "sent")
-        {
-            continue;
-        }
-        let mut payload = json!({"operation":"send","nativeInteraction":value});
-        if let Some((_, Some(message))) = previous {
-            payload["externalMessageId"] = json!(message);
-        }
         tx.execute("INSERT INTO channel_delivery(id,channel_binding_id,dedupe_key,delivery_kind,priority,target_app_id,source_agent_id,payload_json,status,attempt_count,available_at,created_at,updated_at)
             VALUES(?1,?2,?3,'native_interaction',15,?4,?5,?6,'pending',0,?7,?7,?7) ON CONFLICT(dedupe_key) DO NOTHING",
-            params![format!("rvcd_{}",Uuid::new_v4().simple()),binding_id,dedupe_key,app_id,agent_id,
-                serde_json::to_string(&payload)?,now])?;
+            params![format!("rvcd_{}",Uuid::new_v4().simple()),binding_id,format!("native_interaction:{binding_id}:{}",question.id),app_id,agent_id,
+                serde_json::to_string(&json!({"operation":"send","nativeInteraction":value}))?,now])?;
     }
     tx.commit()?;
     Ok(())
@@ -242,34 +207,19 @@ pub fn source_reference(
         WHERE delivery.id=?1 AND delivery.target_app_id=?2 AND delivery.delivery_kind='native_interaction' AND channel.provider=?3
           AND binding.camp_id=json_extract(delivery.payload_json,'$.nativeInteraction.threadId')",
         params![delivery_id,app_id,provider], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).optional()?;
-    let Some((root, name, binding_status)) = row else {
-        return Ok(None);
-    };
-    let root_payload: String = database.connection().query_row(
-        "SELECT payload_json FROM channel_delivery WHERE id=?1",
-        [&root],
-        |r| r.get(0),
-    )?;
-    let mut card = reference(&serde_json::from_str::<Value>(&root_payload)?)?;
-    if let Some(presentation_id) = &card.presentation_id {
-        let superseded:bool = database.connection().query_row("SELECT EXISTS(SELECT 1 FROM channel_delivery AS next
-                JOIN channel_delivery AS current ON current.id=?1
-                WHERE next.rowid>current.rowid AND next.channel_binding_id=current.channel_binding_id
-                  AND next.target_app_id=current.target_app_id AND next.source_agent_id=current.source_agent_id
-                  AND next.delivery_kind='native_interaction' AND json_extract(next.payload_json,'$.operation')='send'
-                  AND json_extract(next.payload_json,'$.nativeInteraction.presentationId')=?2
-                  AND json_extract(next.payload_json,'$.nativeInteraction.agentRunId')=?3
-                  AND json_extract(next.payload_json,'$.nativeInteraction.executionEpoch')=?4)",
-                params![root,presentation_id,card.agent_run_id,card.execution_epoch], |r|r.get(0))?;
-        // An old completion update must never close the newer input form.
-        if superseded {
-            return Ok(None);
+    row.map(|(root, name, binding_status)| {
+        let root_payload: String = database.connection().query_row(
+            "SELECT payload_json FROM channel_delivery WHERE id=?1",
+            [&root],
+            |r| r.get(0),
+        )?;
+        let mut card = reference(&serde_json::from_str::<Value>(&root_payload)?)?;
+        if binding_status != "active" && card.status == Status::Pending {
+            card.status = Status::Unavailable;
         }
-    }
-    if binding_status != "active" && card.status == Status::Pending {
-        card.status = Status::Unavailable;
-    }
-    Ok(Some((root, name, card)))
+        Ok((root, name, card))
+    })
+    .transpose()
 }
 
 /// Platform identity is received separately from the answer. No Owner command

@@ -19,15 +19,6 @@ function parsedObject(value: unknown): Record<string, unknown> | null {
 }
 const plain = (content: string): Record<string, unknown> => ({ tag: 'plain_text', content })
 const paragraph = (text: string): Record<string, unknown> => ({ tag: 'div', text: plain(text) })
-function selectionContext(source: NativeCardSource): { selected?: { id: string; label: string }; repeated: boolean } {
-  const question = source.interaction.questions[0], selection = source.interaction.selection
-  if (!question || !selection) return { repeated: false }
-  const lines = new Set([question.title, question.description ?? ''].flatMap(text => text.split(/\r?\n/)))
-  return { selected: selection.options.find(option => option.id === selection.optionId),
-    // Some native input prompts already repeat the exact option lines. Keep
-    // that prompt unchanged, without displaying the same context twice.
-    repeated: selection.options.filter(option => option.id !== selection.optionId).every(option => lines.has(option.label)) }
-}
 const fallback = '问题内容超出渠道卡片的可用范围，请在 Rovai Desktop 或已登录的 Web 回答。'
 const deadline = (source: NativeCardSource): string | null => source.interaction.expiresAt === null ? null
   : `截止时间：${new Date(source.interaction.expiresAt).toISOString().replace('T', ' ').replace('Z', ' UTC')}`
@@ -70,19 +61,10 @@ export function feishuNativeQuestionCard(source: NativeCardSource): Record<strin
     if (interaction.canSkip) elements.push(feishuButton(source, '跳过', { kind: 'skip' }))
   } else {
     if ([question.prefill, question.placeholder].some(text => text !== null && Array.from(text).length > 1000)) return feishuShell(source, [paragraph(fallback)])
-    const selection = interaction.selection
-    const context = selectionContext(source)
-    if (selection?.options.some(option => !option.label || Array.from(option.label).length > 100)) return feishuShell(source, [paragraph(fallback)])
-    const input = { tag: 'input', name: ANSWER_FIELD, input_type: question.multiline ? 'multiline_text' : 'text', required: false,
-      max_length: 1000, ...(question.prefill === null ? {} : { default_value: question.prefill }),
-      ...(question.placeholder === null ? {} : { placeholder: plain(question.placeholder) }), width: 'fill' }
-    // This context comes from the actual preceding native select, never a label
-    // such as "Type something.". Its already-answered options are read-only.
-    const labeledInput = context.selected ? { ...input, label: plain(context.selected.label), label_position: 'left' } : input
-    const fields = selection && !context.repeated ? selection.options.map(option => option.id === selection.optionId
-      ? labeledInput : paragraph(option.label)) : [labeledInput]
     elements.push({ tag: 'form', name: 'native_answer', elements: [
-      ...fields,
+      { tag: 'input', name: ANSWER_FIELD, input_type: question.multiline ? 'multiline_text' : 'text', required: false,
+        max_length: 1000, ...(question.prefill === null ? {} : { default_value: question.prefill }),
+        ...(question.placeholder === null ? {} : { placeholder: plain(question.placeholder) }), width: 'fill' },
       { ...feishuButton(source, '提交', { kind: 'input', value: '' }, true), name: 'submit_answer', form_action_type: 'submit' }
     ] })
     // A normal callback outside the form does not submit or reset its draft.
@@ -132,18 +114,11 @@ export function dingtalkNativeQuestionCard(source: NativeCardSource): Record<str
     && (question.prefill?.length ?? 0) <= 4000 && (question.placeholder?.length ?? 0) <= 200
     && question.title.length <= 500 && (question.description?.length ?? 0) <= 4000
     && question.options.length <= 30 && question.options.every(option => option.label.length <= 200)
-    && (!source.interaction.selection || (source.interaction.selection.options.length <= 30
-      && source.interaction.selection.options.every(option => option.label.length <= 200)))
   const metadata = { kind: 'native_interaction', deliveryId: source.deliveryId, interactionId: source.interaction.id, answerKind: question?.kind }
   const fields: Record<string, unknown>[] = []
   if (pending && supported) {
     if (question.description !== null) fields.push({ name: 'description', label: '说明', type: 'TEXT_AREA', readOnly: true, required: false, defaultValue: question.description })
-    const selection = source.interaction.selection
-    const { selected, repeated } = selectionContext(source)
-    if (selection && selected && !repeated) fields.push({ name: 'selection', label: question.title, type: 'CHECKBOX_GROUP', readOnly: true,
-      defaultValue: { index: selection.options.indexOf(selected), value: selected.id },
-      options: selection.options.map(option => ({ value: option.id, text: option.label })) })
-    fields.push({ name: ANSWER_FIELD, label: !repeated && selected ? selected.label : question.title, required: question.kind !== 'input',
+    fields.push({ name: ANSWER_FIELD, label: question.title, required: question.kind !== 'input',
       type: question.kind === 'input' ? question.multiline ? 'TEXT_AREA' : 'TEXT' : 'CHECKBOX_GROUP',
       ...(question.kind === 'input' ? { defaultValue: question.prefill ?? '', ...(question.placeholder === null ? {} : { placeholder: question.placeholder }) }
         : { options: question.kind === 'confirm' ? [{ value: 'true', text: '是' }, { value: 'false', text: '否' }]

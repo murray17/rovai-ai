@@ -108,10 +108,14 @@ try {
   assert.ok(once.every(result => result.status === 'sent'))
   item = await nextQuestion(threadId, 'Confirm no'); assert.equal((await respond(threadId, item, { kind: 'confirm', confirmed: false })).status, 'sent')
   item = await nextQuestion(threadId, 'Skip confirmation'); assert.equal((await respond(threadId, item, { kind: 'skip' })).status, 'skipped')
-  item = await nextQuestion(threadId, 'Select original value'); assert.deepEqual(item.questions[0].options.map(option => option.label), [' Windows ', 'Linux', 'Type something.'])
+  item = await nextQuestion(threadId, 'Select original value'); assert.deepEqual(item.questions[0].options.map(option => option.label), [' Windows ', 'Linux', 'macOS'])
   assert.equal((await respond(threadId, item, { kind: 'select', optionId: '2' })).status, 'sent')
-  const input = await nextQuestion(threadId, 'Your own answer'); assert.notEqual(input.id, item.id)
-  const custom = '  自行填写\n保留空格  '
+  const input = await nextQuestion(threadId, 'Project name'); assert.notEqual(input.id, item.id)
+  for (const question of [item, input]) {
+    assert.equal('presentationId' in question, false, 'native requests have no inferred display grouping')
+    assert.equal('selection' in question, false, 'a previous selection cannot relabel the new native input')
+  }
+  const custom = '  示例项目\n保留空格  '
   assert.equal((await respond(threadId, input, { kind: 'input', value: custom })).status, 'sent')
   item = await nextQuestion(threadId, 'Empty input'); assert.equal((await respond(threadId, item, { kind: 'input', value: '' })).status, 'sent')
   item = await nextQuestion(threadId, 'Multiline editor'); assert.equal(item.questions[0].multiline, true); assert.equal(item.questions[0].prefill, '  预填\n第二行  '); assert.equal(item.expiresAt, null)
@@ -124,10 +128,6 @@ try {
     await respond(threadId, item, { kind: 'select', optionId: '3' })
     const follow = await nextQuestion(threadId, 'Type your answer:')
     assert.notEqual(item.id, follow.id)
-    assert.equal(typeof item.presentationId, 'string')
-    assert.equal(follow.presentationId, item.presentationId, 'real native follow-up keeps the same channel presentation')
-    assert.equal(follow.selection.optionId, '3')
-    assert.deepEqual(follow.selection.options, item.questions[0].options, 'the original options remain available without parsing their labels')
     await respond(threadId, follow, { kind: 'input', value: 'FreeBSD custom' })
     item = await nextQuestion(threadId, 'Plugin multi question')
     assert.equal(item.questions[0].kind, 'input')
@@ -138,7 +138,7 @@ try {
   assert.equal(ended.agentRuns.length, 1)
   assert.equal(ended.nativeInteractions.length, 0)
   const actualAnswers = (await nativeToolResults(join(agent, 'sessions'))).find(answers => answers.length >= 8)
-  assert.deepEqual(actualAnswers.slice(0, 8), [true, false, false, 'Type something.', custom, '', '  第一行\n第二行  ', '1,3; custom answer'], 'The real Pi extension receives exact values, including cancellation semantics and whitespace')
+  assert.deepEqual(actualAnswers.slice(0, 8), [true, false, false, 'macOS', custom, '', '  第一行\n第二行  ', '1,3; custom answer'], 'The real Pi extension receives exact values, including cancellation semantics and whitespace')
   reports.push({ name: 'four methods, zero timeout, native continuation, exact text, blank, skip, duplicate and epoch fencing', passed: true })
   const parallelThread = await start('NATIVE_PARALLEL')
   const parallel = await until(() => snapshot(parallelThread), s => s.nativeInteractions.length === 2, 'two requests from one member')

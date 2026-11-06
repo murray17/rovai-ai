@@ -15936,8 +15936,6 @@ mod tests {
                 created_at: 1,
                 expires_at: None,
                 status: Status::Pending,
-                presentation_id: None,
-                selection: None,
             };
             let questions = vec![
                 (thread.clone(), question("native-a")),
@@ -16199,17 +16197,15 @@ mod tests {
                     .unwrap()
                     .unwrap();
             assert_eq!(source.2.status, Status::Unknown);
-            // Two sequential requests in the same native tool retain distinct
-            // answer authorities but update the same platform message.
-            let mut selected = question("group-select");
-            selected.presentation_id = Some("native-tool-presentation".into());
+            // A later native request in this same Run creates its own card;
+            // neither an earlier answer nor a matching Run supplies a parent question.
             native_interactions::project_pending(
                 &mut db,
                 provider,
-                &[(thread.clone(), selected.clone())],
+                &[(thread.clone(), question("project-name"))],
             )
             .unwrap();
-            let group_tick = service
+            let next_tick = service
                 .host_tick(
                     &mut db,
                     &actor,
@@ -16220,119 +16216,19 @@ mod tests {
                     },
                 )
                 .unwrap();
-            let select_delivery = group_tick
+            let next = next_tick
                 .deliveries
                 .iter()
-                .find(|d| d.payload["nativeInteraction"]["interactionId"] == "group-select")
+                .find(|d| d.payload["nativeInteraction"]["interactionId"] == "project-name")
                 .unwrap();
-            let mut input = selected.clone();
-            input.id = "group-input".into();
-            input.created_at = 2;
-            native_interactions::project_pending(
-                &mut db,
-                provider,
-                &[(thread.clone(), input.clone())],
-            )
-            .unwrap();
-            let count: i64 = db.connection().query_row("SELECT COUNT(*) FROM channel_delivery WHERE json_extract(payload_json,'$.nativeInteraction.interactionId')='group-input'", [], |r|r.get(0)).unwrap();
-            assert_eq!(
-                count, 0,
-                "wait for the initial send receipt; never create a second card"
-            );
-            service
-                .settle_delivery(
-                    &mut db,
-                    &provider_host_envelope(
-                        provider,
-                        "group-select-settle",
-                        SettleChannelDeliveryCommand {
-                            delivery_id: select_delivery.delivery_id.clone(),
-                            worker_id: "native-worker".into(),
-                            outcome: "sent".into(),
-                            external_delivery_message_id: Some("group-carrier".into()),
-                            external_update_message_id: Some("group-card".into()),
-                            failure_code: None,
-                            retryable: false,
-                        },
-                    ),
-                )
-                .unwrap();
-            native_interactions::record_status(&mut db, "group-select", Status::Sent).unwrap();
-            native_interactions::project_pending(&mut db, provider, &[(thread.clone(), input)])
-                .unwrap();
-            assert!(
-                native_interactions::source_reference(
-                    &db,
-                    provider,
-                    &select_delivery.delivery_id,
-                    app
-                )
-                .unwrap()
-                .is_none(),
-                "old completion cannot overwrite the input form"
-            );
-            let follow = service
-                .host_tick(
-                    &mut db,
-                    &actor,
-                    &ChannelHostTickRequest {
-                        worker_id: "native-worker".into(),
-                        limit: 100,
-                        inbound_attachment_app_ids: vec![],
-                    },
-                )
-                .unwrap();
-            let input_delivery = follow
-                .deliveries
-                .iter()
-                .find(|d| d.payload["nativeInteraction"]["interactionId"] == "group-input")
-                .unwrap();
-            assert_eq!(
-                input_delivery.update_message_id.as_deref(),
-                Some("group-card")
-            );
-            service
-                .settle_delivery(
-                    &mut db,
-                    &provider_host_envelope(
-                        provider,
-                        "group-input-settle",
-                        SettleChannelDeliveryCommand {
-                            delivery_id: input_delivery.delivery_id.clone(),
-                            worker_id: "native-worker".into(),
-                            outcome: "sent".into(),
-                            external_delivery_message_id: None,
-                            external_update_message_id: Some("group-card".into()),
-                            failure_code: None,
-                            retryable: false,
-                        },
-                    ),
-                )
-                .unwrap();
-            let input_answer = native_interactions::AnswerParams {
-                delivery_id: input_delivery.delivery_id.clone(),
-                interaction_id: "group-input".into(),
-                external_message_id: "group-card".into(),
-                ..answer.clone()
-            };
-            let authorized =
-                native_interactions::authorize_answer(&mut db, &actor, provider, &input_answer)
+            assert!(next.update_message_id.is_none());
+            assert_ne!(next.delivery_id, first.delivery_id);
+            let previous =
+                native_interactions::source_reference(&db, provider, &first.delivery_id, app)
+                    .unwrap()
                     .unwrap();
-            assert_eq!(authorized.0.interaction_id, "group-input");
-            assert_eq!(authorized.1, Status::Pending);
-            assert_eq!(
-                native_interactions::authorize_answer(
-                    &mut db,
-                    &actor,
-                    provider,
-                    &native_interactions::AnswerParams {
-                        interaction_id: "group-select".into(),
-                        ..input_answer.clone()
-                    }
-                )
-                .is_err(),
-                true
-            );
+            assert_eq!(previous.2.interaction_id, "native-a");
+            assert_eq!(previous.2.status, Status::Sent);
             db.connection()
                 .execute(
                     "UPDATE channel_conversation_binding SET camp_id=NULL WHERE camp_id=?1",

@@ -1,0 +1,145 @@
+{
+  "observedAt": "2026-11-06T13:45:03.823357+00:00",
+  "status": "native-core-regression-passed-platform-acceptance-incomplete",
+  "baseCommit": "ca976441c7f918d547b67c91ce8c1a9ecaeb3041",
+  "sourceSha256": {
+    "crates/rovai-core/src/pi/interactions.rs": "58f2659aa171443d940416dcc40d2ac8cc3b6f1bd65430b871129f449c6a722a",
+    "crates/rovai-core/src/pi/host.rs": "9ff912b5bc320bb867ddf350d2e74f3669ed869879a1abd2f628ebd9f20762b9",
+    "crates/rovai-core/src/native_interaction.rs": "3143387270778b9aaae0a6a93baaf100dae5caa9927d7f51d75fe5621c4daa6a",
+    "crates/rovai-core/src/channel/native_interactions.rs": "aad3d7792c1b7da75a41578d546f045d12b8443702cb32e6335b9d3906925bb0",
+    "apps/desktop/src/main/native-interaction-cards.ts": "551c944c23348e76c4f78d8915e1b36a67e657e8eb2a89e82f9887f346bcd455",
+    "apps/desktop/src/main/channel-settings.ts": "488642a7da70b409915ed4b429011141874f929042041e3b2aca79052e8eb85b",
+    "apps/desktop/src/main/dingtalk-channel-settings.ts": "7edea734991f9e748fb98f04baa427e4a08b71f491cec1f85e4a2b546690dadf",
+    "packages/contracts/src/index.ts": "0f3a1378b5f62f3e38e293ca2e2024be04774ea206a6164a804158d3433c7e32",
+    "scripts/fixtures/pi-native-interactions/probe.ts": "10c73beb3910917e7920f1170e337c847638cd01c72a9f3d67a509d0a11d6d27",
+    "scripts/smoke-pi-native-interactions.mjs": "ce67244246151dae4d510dfe632f09ae6b3be631d40ac42e41aa6b187924068b"
+  },
+  "runtime": {
+    "pi": "1.1.0",
+    "controlledExtension": "scripts/fixtures/pi-native-interactions/probe.ts",
+    "thirdPartyExtension": null,
+    "externalModelCalls": 0,
+    "coreDataIsolated": true,
+    "skillLibraryIsolated": true,
+    "homeIsolated": true,
+    "mcpIsolated": true
+  },
+  "nativeRequestSemantics": {
+    "oneCardPerInteractionId": true,
+    "crossRequestPresentationGrouping": false,
+    "inheritedSelectionContext": false,
+    "selectAcceptsOnlyDeclaredOptionIds": true,
+    "textRepliedToOriginalInputId": true,
+    "currentQuestionTerminalUpdatesUseExistingOutbox": true,
+    "dingTalkChoiceFieldType": "CHECKBOX_GROUP",
+    "dingTalkChoiceStillRequiresFormSubmit": true
+  },
+  "checks": [
+    {
+      "command": "cargo test --workspace",
+      "passed": 484,
+      "ignored": 1,
+      "ignoredTestsPreExisting": true
+    },
+    {
+      "command": "cargo test -p rovai-core --lib --features extended-tests native_extension_ui_preserves_answers_and_expires_without_default_answers",
+      "passed": 1,
+      "covers": [
+        "ordinary select followed by unrelated project-name input",
+        "distinct native IDs and exact answer values",
+        "no inherited selection or presentation metadata"
+      ]
+    },
+    {
+      "command": "cargo test -p rovai-core --lib --features extended-tests native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery",
+      "passed": 1,
+      "providers": [
+        "feishu",
+        "dingtalk"
+      ],
+      "covers": [
+        "later request creates a new card without updateMessageId",
+        "previous request keeps its own terminal status",
+        "Owner/App/card/Thread/run fencing",
+        "unknown submission retains the existing card"
+      ]
+    },
+    {
+      "command": "pnpm exec vitest run apps/desktop/src/main/native-interaction-cards.test.ts apps/desktop/src/main/channel-settings.test.ts apps/desktop/src/main/dingtalk-channel-settings.test.ts apps/desktop/src/main/dingtalk-stream-registry.test.ts",
+      "files": 4,
+      "passed": 176
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "status": "passed"
+    },
+    {
+      "command": "cargo build -p rovai-core --bins",
+      "status": "passed"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm docs:test",
+      "passed": 10
+    },
+    {
+      "command": "env -u ROVAI_PI_QUESTION_PLUGIN node scripts/smoke-pi-native-interactions.mjs",
+      "groups": 5,
+      "status": "passed",
+      "reports": [
+        {
+          "name": "four methods, zero timeout, native continuation, exact text, blank, skip, duplicate and epoch fencing",
+          "passed": true
+        },
+        {
+          "name": "same member concurrent native requests",
+          "passed": true
+        },
+        {
+          "name": "private questions isolated from the public queue",
+          "passed": true
+        },
+        {
+          "name": "native timeout and late answer",
+          "passed": true
+        },
+        {
+          "name": "two members, stop releases native waits, late answers fenced",
+          "passed": true,
+          "runs": [
+            "3efef76f-4f13-424b-a733-8fcc5096237e",
+            "c9f5fa6e-40a9-420e-8528-fe6bd1a814e2"
+          ]
+        }
+      ]
+    },
+    {
+      "command": "DOCS_BASE_REF=12c7babff059c12cc1ea3323137d44ef3a7653d7 pnpm docs:check:ci",
+      "status": "passed"
+    }
+  ],
+  "rustTestOwnership": {
+    "testFunctionsRemoved": 0,
+    "ignoredTestsAdded": 0,
+    "change": "Replace superseded same-card assertions in the existing Pi and channel owners with independent-request counterexamples. Keep four native methods, cancellation, deadline, duplicate-submit and channel authority coverage."
+  },
+  "platformScope": "This revision uses a real Pi Runtime with a controlled native extension and local provider. Channel delivery/authorization and card codecs are fixture-tested. No new live Feishu/Lark/DingTalk client push or callback is claimed.",
+  "boundaries": {
+    "dailyAppKeptRunning": true,
+    "dailyDataWrittenByAcceptance": false,
+    "newTemplatePublished": false,
+    "crossEnterpriseProven": false,
+    "mobileClientsValidated": false,
+    "larkAndDingTalkNativeCallbacksValidated": false,
+    "emptyFeishuClientCallbackValidated": false,
+    "modelContextChanged": false
+  },
+  "supersedes": "pi-native-single-card-2026-11-06.json"
+}

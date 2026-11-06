@@ -12,18 +12,6 @@ pub struct NativeInteractionView {
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub status: NativeInteractionStatus,
-    /// One native tool's sequential dialogs can update the same channel card.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub presentation_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selection: Option<NativeSelection>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeSelection {
-    pub options: Vec<NativeQuestionOption>,
-    pub option_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

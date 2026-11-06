@@ -2465,8 +2465,6 @@ export interface NativeInteractionView {
   createdAt: number
   expiresAt: number | null
   status: NativeInteractionStatus
-  presentationId?: string
-  selection?: { options: { id: string; label: string }[]; optionId: string }
 }
 export type NativeInteractionAnswer = { kind: 'confirm'; confirmed: boolean }
   | { kind: 'select'; optionId: string } | { kind: 'input'; value: string } | { kind: 'skip' }

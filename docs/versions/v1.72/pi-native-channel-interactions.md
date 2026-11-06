@@ -90,26 +90,25 @@ User 授权向三个渠道测试推送。使用各 Provider 已发布的爱丽�
 钉钉官方问答模板四张均返回投递成功及 carrierId，证明该模板在当前企业/当前 App 可使用。
 该结果未证明跨企业通用、手机/桌面客户端的实际呈现或原生答案回调闭环；上述未完成边界继续保留。
 
-## 同卡接续（2026-11-06）
+## 原生请求独立展示（2026-11-06）
 
-Pi 唯一活动原生工具内的顺序对话共享一个不透明展示标识；题目及原生 ID 仍各自独立。Core Outbox 复用已知
-平台消息，初次发送未取得回执前不再创建第二张；后继请求出现后，旧关闭更新失效。Main 以 App/消息串行更新，
-成功回调不内联返回旧终态卡，避免迟到回包覆盖正在填写的新表单。不同工具、并发请求和不同运行仍隔离。
+本次收敛为 Pi Core 的原生 UI 桥接：select 只展示原选项，input/editor 只展示当前输入题，所有答案回各自原生
+请求 ID。不识别 `Type something.`、不继承旧选项、不暂存文字代答下一题；同一 Run/工具调用不能证明两题的关系。
 
-飞书/Lark 的真实 input 在原卡保留前一 select 的只读选项，输入框以原选项作为原生左侧 label；
-不匹配英文文案、不预造 input、不合并或改写答案。钉钉官方
-[表单变量协议](https://open.dingtalk.com/document/development/form-variables)的 `CHECKBOX_GROUP` 是单选列表，
-`MULTI_CHECKBOX_GROUP` 才是多选列表，因此可沿用既有模板把下拉改为平铺单选；接续输入同卡保留只读选择。
-不引入 DWS、新模板发布、专属网页、选项状态管理或答案自动重放。
+删除同卡展示分组、旧选项上下文、跨请求卡片复用/刷新和对应去重逻辑。每个 interactionId 独立渠道卡片、独立
+投递及权限校验；回答、跳过、过期与失效仍由现有 Outbox 结算当前请求自己的状态。Core 问答协议、审批与运行
+收尾继续沿用既有路径，不新增字段、服务或存储。
 
-回归扩展现有 Pi dialog、channel authority、Main parser/Host owners，不新增 Rust 测试函数。
-[本轮证据](evidence/pi-native-single-card-2026-11-06.json)记录 Rust workspace 484 通过/1 ignored、两个扩展
-owner、四个 Main 文件 176 项、类型、Desktop/Core 构建、通用文档门禁与真实 Pi 六组回归通过。
+钉钉继续使用官方[表单变量协议](https://open.dingtalk.com/document/development/form-variables)中的
+`CHECKBOX_GROUP` 平铺单选；输入题保留自己的标题、预填、单行/多行及原始文本。模板要求表单提交的限制不变，
+不引入 DWS 或新模板发布。Lark、钉钉真实客户端的完整回调与跨企业适用范围仍待验收。
 
-飞书真实客户端已验证精简版：两个不同原生请求使用相同 presentation 和消息 ID，选择后原地展开输入，
-中文与前后空格的摘要完全一致，原来的 Run 成功结束。原生输入题已逐行包含选项时，仅避免重复绘制相同上下文，
-原生题目正文不改写。测试经真实平台回调、生产 renderer/parser 与隔离 Core writer；正式渠道 Outbox/Owner
-边界由上述 Rust owner 独立验证，不将这个测试 relay 冒充已运行生产 Main Host 全链路。
+退役旧有 Rust owners 中属于同卡假设的断言，以普通 select 后接无关 input 的反例替换；保留原四种方法、超时、
+取消、请求/运行隔离、渠道 Owner/App/外部卡片校验的 owners，没有删除测试函数或增加 ignored。
+真实 Pi 主流程使用不含自填特殊项的普通平台 select，随后单独询问项目名称；第三方问卷扩展仅保留为可选兼容样本。
 
-Lark、钉钉新版卡已由平台接受，仍待真实客户端点击、原卡填写与回调；钉钉当前企业的单选列表投递不等于
-手机/桌面呈现和跨企业通用已经验收。飞书客户端空表单回包亦未在本轮验证，不从 Pi 层的空文本通过推定。
+[此前同卡试验](evidence/pi-native-single-card-2026-11-06.json)已标记 superseded，仅作追溯，不代表当前实现或验收结论。
+本轮[原生请求独立展示证据](evidence/pi-native-request-isolation-2026-11-06.json)记录 Pi 1.1.0 在不加载第三方问卷
+插件时五组真实 Runtime 验收通过；Main 定向 176 条、Rust 工作区 484 条（既有 1 ignored）、两个扩展 Rust owner、
+类型、Core/Desktop 构建及文档测试通过。
+真实 Pi 验收使用独立数据/Skill/HOME/MCP 目录和受控本地 Provider，外部模型调用为零；不替代平台客户端验收。
