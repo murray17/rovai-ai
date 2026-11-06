@@ -115,9 +115,10 @@ User 授权向三个渠道测试推送。使用各 Provider 已发布的爱丽�
 
 ## 飞书长选项按钮（2026-11-06）
 
-移除飞书/Lark 单个选项超过 100 字符时整题回退的限制，仅在按钮显示层保留序号、按平台上限截短并加省略号。
+移除飞书/Lark 单个选项超过 100 字符时整题回退的限制，仅在按钮显示层按平台上限截短并加省略号。
+不再自动添加编号；短文字、自带编号和重复文案均按原文展示。
 原始选项、顺序和 optionId 保持不变，提交仍由 Core 映射为原始 Pi 选项值；整卡容量及输入字段的原有限制继续保留。
 精确显示边界归 [Native Interactions v1](../../contracts/native-interactions-v1.md#渠道投影与答复)。
 
-`native-interaction-cards.test.ts` 覆盖中文、emoji、两位数序号、长选项的原始 optionId 与数据不变，以及整卡回退。
-四个 Main 渠道定向文件共 177 条通过，`pnpm typecheck` 与 `pnpm build:desktop` 通过；没有新增状态、分页或展开机制。
+`native-interaction-cards.test.ts` 覆盖短文字、自带编号、重复文案、中文、emoji、原始 optionId 与数据不变，以及整卡回退。
+该文件原有 9 条测试、`pnpm typecheck` 与 `pnpm build:desktop` 通过；未扩大验收矩阵。

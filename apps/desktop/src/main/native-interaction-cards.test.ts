@@ -31,24 +31,23 @@ describe('native channel question cards', () => {
     expect(buttons.slice(0, 3).map(button => feishuNativeAnswer(action(button), null)!.answer)).toEqual([
       { kind: 'select', optionId: '0' }, { kind: 'select', optionId: '1' }, { kind: 'select', optionId: '2' }
     ])
-    expect(buttons.slice(0, 3).map(button => (button.text as { content: string }).content)).toEqual(['1. A', '2. A', '3. Type something.'])
+    expect(buttons.slice(0, 3).map(button => (button.text as { content: string }).content)).toEqual(['A', 'A', 'Type something.'])
     expect(nodes(card).some(node => node.tag === 'input' || node.form_action_type === 'submit')).toBe(false)
     expect(item.interaction.questions[0].options.map(option => option.label)).toEqual(['A', 'A', 'Type something.'])
   })
 
-  it('shortens only button text while preserving option numbers, Unicode and original answer IDs', () => {
+  it('preserves native labels and shortens only long button text without changing answer IDs', () => {
     const item = source('select')
-    const labels = ['A'.repeat(97), '长'.repeat(98), '🪴'.repeat(101), ...Array<string>(8).fill('相同前缀'.repeat(30))]
+    const labels = ['A'.repeat(100), '长'.repeat(101), '🪴'.repeat(101), '3. 原生选项', '（四）保留原文', '重复选项', '重复选项']
     item.interaction.questions[0].options = labels.map((label, index) => ({ id: `native-option-${index}`, label }))
     const original = structuredClone(item), card = feishuNativeQuestionCard(item)
     const buttons = nodes(card).filter(node => node.tag === 'button').slice(0, labels.length)
     expect(buttons).toHaveLength(labels.length)
     const texts = buttons.map(button => (button.text as { content: string }).content)
-    expect(texts[0]).toBe('1. ' + 'A'.repeat(97))
-    expect(texts[1]).toBe('2. ' + '长'.repeat(96) + '…')
-    expect(texts[2]).toBe('3. ' + '🪴'.repeat(96) + '…')
-    expect(texts[9]).toMatch(/^10\. .*…$/u)
-    expect(texts[10]).toMatch(/^11\. .*…$/u)
+    expect(texts[0]).toBe(labels[0])
+    expect(texts[1]).toBe('长'.repeat(99) + '…')
+    expect(texts[2]).toBe('🪴'.repeat(99) + '…')
+    expect(texts.slice(3)).toEqual(labels.slice(3))
     expect(texts.every(text => Array.from(text).length <= 100)).toBe(true)
     expect(buttons.map(button => feishuNativeAnswer(action(button), null)!.answer)).toEqual(
       original.interaction.questions[0].options.map(option => ({ kind: 'select', optionId: option.id })))

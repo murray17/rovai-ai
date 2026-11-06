@@ -137,8 +137,9 @@ carrierId 只用于 Robot recall，二者不能互换。答案先于初次投递
 
 飞书/Lark 使用直接生成的 Card JSON 2.0：confirm/select 点击即提交，input/editor 使用可提交空文本的
 form，跳过是表单外的普通 callback。input/editor 仅展示当前输入题，不附带旧选择题的选项或标签。
-选择按钮使用 `序号. 原始选项文字`，按[平台按钮文字上限](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/interactive-components/button)
-限制为 100 个字符（含序号与省略号）；超长时只截短按钮显示文字并保留末尾 `…`，不拆开 Unicode 码点。
+选择按钮直接显示原始选项文字，原文自带序号和相同文案分别保留，不自动编号或去重。按
+[平台按钮文字上限](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/interactive-components/button)
+限制为 100 个字符；超长时只显示前 99 个字符加 `…`，不拆开 Unicode 码点。不超限的文字原样显示。
 全部选项仍按原顺序展示，回调始终携带原始 optionId，由 Core 对应原始 Pi 选项值；不增加分页、展开或新状态。
 钉钉沿用官方 Form 模板，以
 `CHECKBOX_GROUP` 原生单选列表代替下拉选择；模板仍要求表单提交，不能将尚未验证的点击行为宣称为点击即答。

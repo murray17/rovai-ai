@@ -36,9 +36,11 @@ function feishuButton(source: NativeCardSource, text: string, answer: NativeInte
   return { tag: 'button', text: plain(text), type: primary ? 'primary' : 'default', width: 'fill',
     behaviors: [{ type: 'callback', value: actionValue(source, answer) }] }
 }
-function feishuOptionText(label: string, index: number): string {
-  const text = Array.from(`${index + 1}. ${label}`)
-  return text.length <= FEISHU_BUTTON_TEXT_LIMIT ? text.join('') : text.slice(0, FEISHU_BUTTON_TEXT_LIMIT - 1).join('') + '…'
+function feishuOptionText(label: string): string {
+  const chars = Array.from(label)
+  return chars.length <= FEISHU_BUTTON_TEXT_LIMIT
+    ? label
+    : chars.slice(0, FEISHU_BUTTON_TEXT_LIMIT - 1).join('') + '…'
 }
 function feishuShell(source: NativeCardSource, elements: Record<string, unknown>[]): Record<string, unknown> {
   return { schema: '2.0', config: { update_multi: true }, header: { title: plain(`${source.agentDisplayName} · Pi`), template: 'grey' }, body: { elements } }
@@ -61,7 +63,7 @@ export function feishuNativeQuestionCard(source: NativeCardSource): Record<strin
       feishuButton(source, '否', { kind: 'confirm', confirmed: false }), feishuButton(source, '是', { kind: 'confirm', confirmed: true }, true)]
     elements.push({ tag: 'column_set', columns: buttons.map(button => ({ tag: 'column', width: 'weighted', weight: 1, elements: [button] })) })
   } else if (question.kind === 'select') {
-    elements.push(...question.options.map((option, index) => feishuButton(source, feishuOptionText(option.label, index), { kind: 'select', optionId: option.id })))
+    elements.push(...question.options.map(option => feishuButton(source, feishuOptionText(option.label), { kind: 'select', optionId: option.id })))
     if (interaction.canSkip) elements.push(feishuButton(source, '跳过', { kind: 'skip' }))
   } else {
     if ([question.prefill, question.placeholder].some(text => text !== null && Array.from(text).length > 1000)) return feishuShell(source, [paragraph(fallback)])
