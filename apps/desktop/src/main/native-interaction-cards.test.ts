@@ -31,8 +31,29 @@ describe('native channel question cards', () => {
     expect(buttons.slice(0, 3).map(button => feishuNativeAnswer(action(button), null)!.answer)).toEqual([
       { kind: 'select', optionId: '0' }, { kind: 'select', optionId: '1' }, { kind: 'select', optionId: '2' }
     ])
+    expect(buttons.slice(0, 3).map(button => (button.text as { content: string }).content)).toEqual(['1. A', '2. A', '3. Type something.'])
     expect(nodes(card).some(node => node.tag === 'input' || node.form_action_type === 'submit')).toBe(false)
     expect(item.interaction.questions[0].options.map(option => option.label)).toEqual(['A', 'A', 'Type something.'])
+  })
+
+  it('shortens only button text while preserving option numbers, Unicode and original answer IDs', () => {
+    const item = source('select')
+    const labels = ['A'.repeat(97), '长'.repeat(98), '🪴'.repeat(101), ...Array<string>(8).fill('相同前缀'.repeat(30))]
+    item.interaction.questions[0].options = labels.map((label, index) => ({ id: `native-option-${index}`, label }))
+    const original = structuredClone(item), card = feishuNativeQuestionCard(item)
+    const buttons = nodes(card).filter(node => node.tag === 'button').slice(0, labels.length)
+    expect(buttons).toHaveLength(labels.length)
+    const texts = buttons.map(button => (button.text as { content: string }).content)
+    expect(texts[0]).toBe('1. ' + 'A'.repeat(97))
+    expect(texts[1]).toBe('2. ' + '长'.repeat(96) + '…')
+    expect(texts[2]).toBe('3. ' + '🪴'.repeat(96) + '…')
+    expect(texts[9]).toMatch(/^10\. .*…$/u)
+    expect(texts[10]).toMatch(/^11\. .*…$/u)
+    expect(texts.every(text => Array.from(text).length <= 100)).toBe(true)
+    expect(buttons.map(button => feishuNativeAnswer(action(button), null)!.answer)).toEqual(
+      original.interaction.questions[0].options.map(option => ({ kind: 'select', optionId: option.id })))
+    expect(item).toEqual(original)
+    expect(JSON.stringify(card)).not.toContain('Rovai Desktop')
   })
 
   it.each([false, true])('preserves exact input and an independent skip callback (multiline=%s)', multiline => {
@@ -50,10 +71,12 @@ describe('native channel question cards', () => {
     expect(feishuNativeAnswer(action(skip), { answer: 'never submitted' })!.answer).toEqual({ kind: 'skip' })
   })
 
-  it('falls back as a whole instead of truncating options or prefills, with no invented timeout', () => {
-    for (const item of [source('select'), source('input')]) {
-      if (item.interaction.questions[0].kind === 'select') item.interaction.questions[0].options[1].label = '长'.repeat(101)
-      else item.interaction.questions[0].prefill = '长'.repeat(1001)
+  it('falls back only when the card or text field cannot hold the question, with no invented timeout', () => {
+    const manyOptions = source('select'), largeCard = source('select'), longPrefill = source('input')
+    manyOptions.interaction.questions[0].options = Array.from({ length: 201 }, (_, index) => ({ id: String(index), label: `选项 ${index + 1}` }))
+    largeCard.interaction.questions[0].description = '长'.repeat(9000)
+    longPrefill.interaction.questions[0].prefill = '长'.repeat(1001)
+    for (const item of [manyOptions, largeCard, longPrefill]) {
       const original = structuredClone(item)
       const card = feishuNativeQuestionCard(item)
       expect(nodes(card).some(node => typeof node.content === 'string' && node.content.includes('Rovai Desktop'))).toBe(true)

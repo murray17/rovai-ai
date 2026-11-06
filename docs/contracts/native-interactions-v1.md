@@ -33,7 +33,8 @@ conversation 的 Run；已结束或请求停止的 Run 不提供可提交卡片�
 | editor | input，multiline=true | 原始文本，保留 prefill | value |
 | 四类的跳过 | canSkip=true | skip | cancelled: true |
 
-标题、说明、选项和顺序、预填、换行与空白原样保留。空文本不等于跳过；否只表示显式回答 false。
+标题、说明、选项原文和顺序、预填、换行与空白原样保留；渠道按钮文字的显示上限见下文。
+空文本不等于跳过；否只表示显式回答 false。
 不根据 `Type something.` 等文案增加能力或替插件构造下一题。select 回传原始选项后，只有真实 input
 到达才显示文本问题；插件的多选文本也保持原文。`notify / setStatus / setWidget / setTitle / set_editor_text`
 沿用原路径，不进入等待列表；不借此覆盖 Composer 草稿。
@@ -131,10 +132,14 @@ carrierId 只用于 Robot recall，二者不能互换。答案先于初次投递
 明确提交失败只反馈错误，不重绘表单；内容继续留在客户端。原生写入结果 unknown 保留去重标记和客户端
 表单，不用终态重绘清空草稿；再次点击只能核对该标记，不能再次写入。渠道没有答案重放或 Pi ACK 协议。
 卡片回调超时不表示提交失败，也不能自动重发。固定截止时间直接消费 expiresAt；到期只更新卡片状态，
-不发送默认答案。平台容量不足时整题提示在 Desktop/已登录 Web 处理，不截断选项、预填或用户答案。
+不发送默认答案。整张卡片或输入字段无法完整承载问题时，提示在 Desktop/已登录 Web 处理；不删减选项、
+不改写预填或用户答案。飞书/Lark 的单个选项过长不能触发整题回退。
 
 飞书/Lark 使用直接生成的 Card JSON 2.0：confirm/select 点击即提交，input/editor 使用可提交空文本的
 form，跳过是表单外的普通 callback。input/editor 仅展示当前输入题，不附带旧选择题的选项或标签。
+选择按钮使用 `序号. 原始选项文字`，按[平台按钮文字上限](https://open.feishu.cn/document/feishu-cards/card-json-v2-components/interactive-components/button)
+限制为 100 个字符（含序号与省略号）；超长时只截短按钮显示文字并保留末尾 `…`，不拆开 Unicode 码点。
+全部选项仍按原顺序展示，回调始终携带原始 optionId，由 Core 对应原始 Pi 选项值；不增加分页、展开或新状态。
 钉钉沿用官方 Form 模板，以
 `CHECKBOX_GROUP` 原生单选列表代替下拉选择；模板仍要求表单提交，不能将尚未验证的点击行为宣称为点击即答。
 钉钉模板的跨企业可用性与客户端表单行为属于真实平台验收，
