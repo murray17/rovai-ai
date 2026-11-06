@@ -192,6 +192,14 @@ Core 的正文、寻址与发布合同继续由 `team_tool::tests` 拥有，真�
 固定配额。评审门槛是每项测试是否拥有清晰、唯一且值得长期维护的合同；相同覆盖应优先扩展既有
 owner，而不是继续增加平行 fixture 和断言。
 
+外部 CLI 成员代发扩展既有 `user_automation_send_is_atomic_idempotent_and_never_persists_staging_draft`
+和 `user_automation_rejection_is_replayable_without_message_run_or_draft_effects`，不新增 Rust owner。
+原 SQLite fixture 继续拥有原子发布、幂等与拒绝零副作用，同时核对 User 审计与 agent 公共作者分离、
+无 source Run、同 commandId 更换发送者仍返回首个结果，以及正式批处理 `RUN_INPUT` 投影的 agent 来源。
+Main dispatcher 传递沿用既有 User Automation 测试；模型投影和持久化边界不能仅由参数 parser 证明。
+最小命令为 `cargo test -p rovai-core --features slow-tests --lib user_automation_` 和
+`pnpm exec vitest run apps/desktop/src/main/user-automation.test.ts`，再运行默认 workspace 回归。
+
 ### 单项 Runtime 检查减重
 
 Issue #997 扩展既有 `windows_command_shim_content_changes_compatibility_fingerprint`，通过真实发现入口

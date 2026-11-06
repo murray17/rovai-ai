@@ -141,6 +141,30 @@ describe('User Automation transport', () => {
         }
       }
     })
+    await dispatchUserAutomation('thread.sendAsMember', {
+      commandId: 'delegated-command', threadId: 'rvcamp_test', agentId: 'agent_1',
+      senderAgentId: 'agent_2', body: 'scheduled report'
+    }, { core, openThread: async (threadId) => ({ threadId, opened: true }), appVersion: 'test' })
+    expect(calls[1]).toMatchObject({ method: 'userAutomation.thread.send', params: {
+      senderAgentId: 'agent_2', agentId: 'agent_1'
+    } })
+    expect(calls[0].params).not.toHaveProperty('senderAgentId')
+    await expect(dispatchUserAutomation('thread.sendAsMember', {
+      commandId: 'invalid-sender', threadId: 'rvcamp_test', agentId: 'agent_1',
+      senderAgentId: 42, body: 'scheduled report'
+    }, { core, openThread: async (threadId) => ({ threadId, opened: true }), appVersion: 'test' }))
+      .rejects.toMatchObject({ code: 'automation_invalid_input' })
+    for (const [operation, senderAgentId] of [
+      ['thread.sendAsMember', undefined], ['thread.sendAsMember', null],
+      ['thread.sendAsMember', ''], ['thread.send', 'agent_2']
+    ]) {
+      await expect(dispatchUserAutomation(operation as string, {
+        commandId: 'invalid-delegation', threadId: 'rvcamp_test', agentId: 'agent_1',
+        senderAgentId, body: 'scheduled report'
+      }, { core, openThread: async (threadId) => ({ threadId, opened: true }), appVersion: 'test' }))
+        .rejects.toMatchObject({ code: 'automation_invalid_input' })
+    }
+    expect(calls).toHaveLength(2)
   })
 
   it('fails closed when Core ever returns Pending Execution', async () => {
