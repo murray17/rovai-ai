@@ -700,10 +700,15 @@ Run、target parent、return target 或同一 ThreadTurn 推断发送归属。�
 默认采用浮层不等于默认展开；仍遵循下文 running Run 进入与精确导航规则。浮层最大宽 440px，受当前会话阅读区宽高约束，不挤占会话或文件预览。
 移到右侧时，“执行”成为文件预览同级标签，共用当前分栏比例；切换执行、Mission 活动或文件不得改变右侧宽度。
 移到底部后顶部执行入口消失、浮层和右侧标签收起，横向队员过程入口下方打开可调高度详情，并保留最后使用的
-“任务 / 队员”基础选择。位置偏好只拥有承载位置，
-不跨 Thread 保存 Agent/Run selection、Drawer 开合、Tool 全文或滚动位置，也不根据窗口宽度自动改变。
-重新进入 Thread 时可以从当前权威 snapshot 推导最新 running Run，并以总览作为过程 scope、该 Run 作为精确
-focused Run；这是新的瞬时 selection，不是恢复旧 Drawer 状态，也不改写位置偏好。
+“任务 / 队员”基础选择。位置偏好只拥有承载位置，不根据窗口宽度自动改变。
+当前窗口按 Thread 有界保存上次选中的队员 Tab 或总览，不保存具体 Run、Drawer 开合、历史开合、Tool 全文或滚动位置。
+返回或主动打开执行页时恢复仍有可显示过程的队员，否则回退总览；直接激活已恢复的右侧执行标签也遵守同一规则。
+进入或重新打开有执行过程的执行页时补齐有效选择；没有记录时保留原空态。
+用户显式关闭详情清空 selection 后，即使回复执行等承载区仍可见，也不得立即补选或随快照刷新重新选中。
+这次关闭意图只在当前可见承载区有效；再次显式选择、重新显示或切换到另一可见承载区、重新进入 Thread 后可正常恢复 Tab。
+隐藏执行页、底部已收起详情及首次无 running Run 的进入保持原开合规则。
+Tab 恢复后，Run 选择、当前区与历史区展示继续沿用现有逻辑，不恢复旧 Drawer 状态，不改写位置偏好。
+显式队员／总览选择和精确 Run 导航优先于记住的 Tab。
 
 三个位置共享当前 Agent 与精确 Run selection、Evidence load 和状态投影，不允许同时存在多套过程列表
 或详情。位置切换通过稳定 host 移动同一个已挂载 Drawer DOM，保留 disclosure、加载状态、
@@ -760,7 +765,9 @@ queued 回执的时钟及各执行状态图形不变。
 Composer 焦点。若用户正在可见的“任务”Tab 新建任务，Renderer 消费本次自动聚焦请求但不切走表单，
 离开表单后也不补跳；仅浏览任务、编辑既有任务或查看队员仍按回执自动打开执行。不可见的旧 Run
 selection 不算“正在查看 non-terminal Run”。从其他 Thread、一级页面或应用启动/恢复进入当前 Thread 时，若
-权威 snapshot 含 running Run，则自动选择总览，并以 `createdAt + id` 最新者作为精确 focused Run 展开；
+权威 snapshot 含 running Run，则按原规则自动打开执行，恢复当前窗口记住的有效队员／总览 Tab；
+没有有效选择时使用总览，并以 `createdAt + id` 最新的 running Run 作为精确 focused Run 展开。
+恢复队员 Tab 时沿用该队员的既有 Run 优先级，不保留上次具体 Run；
 `inspector` placement 激活首个“执行”
 入口，`right` placement 打开右侧“执行”标签，底部 placement 直接展开
 Drawer，均不移动 DOM 键盘焦点。Mission 的活动标签继续保留，已可见的文件或活动页优先遵循下述保护。
@@ -815,7 +822,7 @@ Run 状态与占用比例不触发圆环状态色。所有已注册配色使用�
 分页、显式截断标记或 Managed Blob 的存储与读取边界。
 
 Task related execution、停止结果和世界地图入口在右侧承载时必须显示 Inspector、激活“执行”并打开
-精确 Agent/Run。关闭详情只清除 selection，保留位置和队员入口；隐藏 Inspector 只改变可见性，再次
+精确 Agent/Run。关闭详情只清除当前 selection，保留上次 Tab、位置和队员入口；隐藏 Inspector 只改变可见性，再次
 显示时保留“执行”Tab、Agent 与 Run。位置切换后焦点进入另一位置的对应切换控件；底部详情关闭/Escape
 优先返回仍连接的真实过程入口，无法返回时落到当前位置切换控件。浮层内 Escape 在子菜单和工具结果
 处理后关闭整个浮层，返回顶部执行入口，保留 Agent/Run selection、已展开记录与滚动位置。
