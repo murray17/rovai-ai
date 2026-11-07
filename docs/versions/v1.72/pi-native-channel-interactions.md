@@ -16,7 +16,8 @@ Governance: none；沿用现有渠道权威和 Outbox，无模型上下文或审
 ## 实现与边界
 
 Core 当前 Runtime 问题转换为既有 Outbox 的独立 `native_interaction` carrier；Migration 220/schema 170
-只放宽该 kind 的现有约束。数据库不保存问题/答案。可信渠道 Host 通过 source/respond 读取当前问题与回传
+只放宽该 kind 的现有约束。数据库不保存完整问题/答案；飞书/Lark 的既有投递 payload 仅保留原卡更新所需的
+有限问题/回答展示摘要。可信渠道 Host 通过 source/respond 读取当前问题与回传
 原生答案，Owner/App/外部卡片/绑定 Thread/Run epoch 校验和 writer 与 Desktop/Web 共用。
 关闭卡片是独立 Outbox 更新，发送/更新重试不重放答案；原生 unknown 只保留状态并反馈，不重绘客户端草稿。
 
@@ -40,7 +41,8 @@ canSkip=false 的通用请求只能回退 Desktop（Pi 四类均支持 skip）�
 官方[能力对齐说明](https://github.com/DingTalk-Real-AI/dingtalk-openclaw-connector/blob/main/docs/COMMUNITY_CAPABILITY_ALIGNMENT.md)
 也明确区分本地测试与真实客户端验收。固定模板 ID 不是 Rovai 自建模板跨企业开放的证据。
 验收必须使用第二家企业自己的 Bot/App 凭据和测试会话完成投递、填写、可信回调；同企业第二个 Bot 不足以证明。
-该条件、手机/桌面输入表现及未填写空文本的真实 callback shape 尚未验证。
+跨企业条件、手机端及未填写空文本的真实 callback shape 尚未验证。本机桌面端四种方法的真实回调已补测，
+但钉钉使用独立验收 relay，未覆盖生产 Main Host/Outbox；范围见本文末尾的 2026-11-07 记录。
 
 ## 测试归属与最低命令
 
@@ -133,3 +135,38 @@ Pi 取消回包、运行归属和渠道路径未变，格式及 confirm 取消�
 
 复用既有 `test:approval-dock` owner，覆盖成功/跳过/已处理均不弹 Toast，以及同 Run 新请求不抢占其他待答项。
 该 Electron UI 回归及 `pnpm typecheck` 通过；测试使用独立 userData，不启动 Core/Runtime。
+
+## 飞书/Lark 原卡只读结果（2026-11-07）
+
+完成后更新原消息，保留问题与首次实际发送的回答预览，移除操作控件。confirm 的否、主动跳过和空文本分别
+表达；input/editor 共用只读文本并保留换行。问题与答案使用同一 300 字符截短函数，原生答案保持完整。
+两段可选文本沿用 `channel_delivery.payload_json`，不新建表或 Migration；旧记录无摘要时保留状态文字。
+Desktop/Web 与渠道共用原生 writer 的首个成功结果，生命周期同步同取状态与预览，避免生成互相覆盖的结果。
+更新失败继续走 Outbox，不重发原生答案。钉钉模板、交互、数据和展示保持原样。
+
+扩展原 Pi UI/Host、渠道归属与卡片/Provider Host 测试，不增加 Rust 测试 owner 或新框架。
+精确边界见 [Native Interactions v1](../../contracts/native-interactions-v1.md#飞书lark-只读结果卡)。
+
+定向 Main/卡片测试 92 条、默认 Rust workspace、类型检查、Desktop/Core 构建及通用文档门禁通过。
+扩展 `native_` 筛选为 72 通过、1 既有 ignored、1 失败；失败仍是上文已记录的 v95 formatter 42/43
+历史断言，本次未改相关源文件，也未禁用或放宽测试。新增断言所在的 Pi UI/渠道 owner 通过；
+Host 首次成功写入、并发不同答案及重复点击不覆盖的扩展 owner 单独通过。
+
+[真实客户端验收证据](evidence/pi-native-result-cards-2026-11-07.json)使用 Pi 1.1.0、真实
+`sub2api/gpt-6.1-sol` 和只调用原生 UI 的受控扩展，不加载第三方问卷插件。所有验收 Core、Skill、HOME、
+Pi 配置及 MCP 路径独立；日常 App 未重启或停止，临时模型凭据在连接关闭后删除。
+
+飞书 5 题、Lark 6 题经生产 `ChannelSettingsService`、SDK、Core Owner/App/卡片校验和 Outbox 完成，
+11 张原卡分别更新同一个外部消息 ID，均保留问题、移除控件；回答、跳过和空文本分别展示。
+两边同一原生 Run 均正常成功，458 字符 editor 原文及空白/换行在 Pi tool_result 中精确匹配，
+结果预览按 300 字符截短。Lark 另有一题由 Desktop/Web 共用的公开 Core 提交入口回答，原渠道卡同步更新；
+这项是实际 Core 接口验收，不冒充 Desktop GUI 点击。账号/App/Owner 与私聊绑定使用隔离库中的已验证元数据，
+不是账号配置流程验收。
+
+钉钉旧模板的确认、单行、多行在首轮收到真实客户端回调；原生 tool_result 精确保留输入空白和换行。
+该轮选择题未到验收连接，停止自有 fixture 后另开独立单选回路，真实客户端选择 Windows 后原 Run 成功。
+因此四种方法分别通过，但不能将首轮整体记成成功。此项只验证现有 renderer/decoder、可信回调及隔离 Core/Pi
+回传，不覆盖生产钉钉 Main Host/Outbox，也不证明跨企业模板通用；钉钉结果展示没有改变。
+
+同一 Bot 的其他连接在验收时仍在线，部分点击未到测试连接；本轮不宣称竞争连接下的首击可靠性，
+也没有为验收增加产品答案重试。客户端截图随 Thread 交付，手机端和钉钉跨企业验收继续保留未完成边界。

@@ -13661,6 +13661,7 @@ impl Core {
                 "SELECT EXISTS(SELECT 1 FROM agent_run LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND agent_run.execution_epoch = ?2 AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?3 AND agent_run.status IN ('running', 'waiting') AND agent_run.cancel_requested_at IS NULL)",
                 rusqlite::params![params.agent_run_id, params.execution_epoch, params.thread_id], |row| row.get::<_, bool>(0))?
         };
+        let mut answer_preview = None;
         let result = if valid {
             if let Some(runtime) = self
                 .pi
@@ -13671,9 +13672,11 @@ impl Core {
                     runtime.camp_id() == params.thread_id,
                     "Native interaction belongs to another Thread"
                 );
-                runtime
+                let result = runtime
                     .answer_interaction(&params.interaction_id, &params.answer)
-                    .await?
+                    .await?;
+                answer_preview = runtime.interaction_result(&params.interaction_id).await.1;
+                result
             } else {
                 NativeInteractionResult {
                     status: Status::Unavailable,
@@ -13686,13 +13689,14 @@ impl Core {
                 already_handled: false,
             }
         };
-        // Only delivery markers are persisted, never the answer or question text.
+        // Feishu/Lark keep only the bounded preview of the first native answer.
         {
             let mut database = self.database.lock().await;
             if let Err(error) = rovai_core::channel::native_interactions::record_status(
                 &mut database,
                 &params.interaction_id,
                 result.status,
+                answer_preview.as_deref(),
             ) {
                 eprintln!("Native channel card marker update failed: {error:#}");
             }
@@ -13705,22 +13709,25 @@ impl Core {
         Ok(serde_json::to_value(result)?)
     }
 
-    async fn native_card_status(
+    async fn native_card_result(
         &self,
         card: &rovai_core::channel::native_interactions::CardReference,
-    ) -> Result<crate::native_interaction::NativeInteractionStatus> {
+    ) -> Result<(
+        crate::native_interaction::NativeInteractionStatus,
+        Option<String>,
+    )> {
         use crate::native_interaction::NativeInteractionStatus as Status;
         if card.status != Status::Pending {
-            return Ok(card.status);
+            return Ok((card.status, card.answer_preview.clone()));
         }
         if let Some(runtime) = self
             .pi
             .get_agent_run(&card.agent_run_id, card.execution_epoch)
             .await
         {
-            let status = runtime.interaction_status(&card.interaction_id).await;
+            let (status, answer_preview) = runtime.interaction_result(&card.interaction_id).await;
             if status != Status::Pending {
-                return Ok(status);
+                return Ok((status, answer_preview));
             }
             // The pending list also fences stop, dead Host and changed Session.
             if runtime
@@ -13732,11 +13739,11 @@ impl Core {
                 let database = self.database.lock().await;
                 let valid=database.connection().query_row("SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND execution_epoch=?2 AND status IN ('running','waiting') AND cancel_requested_at IS NULL)",rusqlite::params![card.agent_run_id,card.execution_epoch],|r|r.get::<_,bool>(0))?;
                 if valid {
-                    return Ok(Status::Pending);
+                    return Ok((Status::Pending, None));
                 }
             }
         }
-        Ok(Status::Unavailable)
+        Ok((Status::Unavailable, None))
     }
 
     async fn sync_channel_native_interactions(&self, provider: &str) -> Result<()> {
@@ -13751,12 +13758,13 @@ impl Core {
             rovai_core::channel::native_interactions::references(&database, provider)?
         };
         for card in cards {
-            let status = self.native_card_status(&card).await?;
+            let (status, answer_preview) = self.native_card_result(&card).await?;
             if status != crate::native_interaction::NativeInteractionStatus::Pending {
                 rovai_core::channel::native_interactions::record_status(
                     &mut *self.database.lock().await,
                     &card.interaction_id,
                     status,
+                    answer_preview.as_deref(),
                 )?;
             }
         }
@@ -13781,7 +13789,7 @@ impl Core {
         let Some((delivery_id, agent_display_name, card)) = record else {
             return Ok(Value::Null);
         };
-        let status = self.native_card_status(&card).await?;
+        let (status, answer_preview) = self.native_card_result(&card).await?;
         let mut interaction = NativeInteractionView {
             id: card.interaction_id.clone(),
             agent_run_id: card.agent_run_id.clone(),
@@ -13822,6 +13830,12 @@ impl Core {
                     &params.app_id,
                 )?,
                 interaction,
+                answer_preview: if card.question_preview.is_some() {
+                    answer_preview
+                } else {
+                    None
+                },
+                question_preview: card.question_preview,
             },
         )?)
     }

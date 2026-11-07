@@ -60,7 +60,9 @@ Desktop/Web 提交 `nativeInteractions.respond`，参数为：
 或 `skip`。字段和原生方法必须匹配；选择标识必须属于该题。无任意原生 JSON 入口。
 Core 检查 Thread/Run、执行 epoch、停止与终态、Host/Session owner、请求标识和期限，再在原 Runtime
 的局部提交锁中完成写入。同一请求只能写入一次；并发或重复提交返回原有处理状态及 alreadyHandled 标记，界面显示“请求已处理”，不发送第二个答案。
-成功后只保留本轮去重所需的原生 ID/状态等最小标记，清除问题正文；不新增数据库表、答案聊天消息或回答日志。
+成功后清除原始问题，保留本轮去重所需的原生 ID/状态，以及同步渠道结果卡所需的有限回答预览。
+预览与成功状态在同一原生提交锁内生成，重复提交不能重新生成或覆盖首次实际发送的答案。
+不新增数据库表、答案聊天消息或回答日志；渠道展示数据的持久化边界见下文。
 
 登记请求后事件读取继续。用户等待不结束运行，也不阻塞其他 Runtime 消息或停止入口。
 Pi 原生回复没有 ACK；写入 JSONL（含换行及 flush）成功即返回 `sent` 或 `skipped`。
@@ -106,8 +108,10 @@ Pi 没有答案 ACK，也不为扩展自行触发的 AbortSignal 取消发送独
 每个 interactionId 独立投递一张渠道卡片，保留独立 Outbox 记录及答复校验。新的原生请求创建新卡，不复用或
 刷新上一题的卡片来展示下一题。去重、领取、有限次卡片发送/状态更新重试沿用现有 Outbox。
 Migration 220 将 projection schema 从 169 升至 170，只扩展既有 delivery kind 与 bound-delivery CHECK；
-不新建问卷表。payload 只保存请求/Thread/Run/epoch、时间、状态、根 delivery 与外部卡片标识，
-不持久化问题或回答正文。问题正文只在实际发送时从 Runtime 内存读取。
+不新建问卷表。payload 保存请求/Thread/Run/epoch、时间、状态、根 delivery 与外部卡片标识。
+飞书/Lark 新生成的投递记录另在 `nativeInteraction` 中保存可选 `questionPreview / answerPreview` 两段有限展示文本；
+问题标题与必要说明在首次投影时组合，回答预览只取原生写入成功的答案。完整问题和答案不进入 Outbox，
+待答卡的完整问题仍从 Runtime 内存读取。钉钉不保存这两段预览。
 
 以下接口只接受对应的可信渠道 Host，不开放给 Renderer、Web 或 Agent CLI：
 
@@ -117,7 +121,8 @@ Migration 220 将 projection schema 从 169 升至 170，只扩展既有 deliver
 | Lark | channels.lark.nativeInteractions.source | channels.lark.nativeInteractions.respond |
 | 钉钉 | channels.dingtalk.nativeInteractions.source | channels.dingtalk.nativeInteractions.respond |
 
-source 参数为 `deliveryId / appId`，返回根 delivery、队员名称、当前 NativeInteraction，以及仅供钉钉
+source 参数为 `deliveryId / appId`，返回根 delivery、队员名称、当前 NativeInteraction、可选的
+`questionPreview / answerPreview`，以及仅供钉钉
 创建卡片/清理私有提示的已验证 Owner 平台 userId。respond 参数为
 `deliveryId / interactionId / appId / externalMessageId / chatId? / operatorOpenId? / operatorUserId? / operatorUnionId? / answer`。
 answer 与 Desktop/Web 的封闭联合相同；参数不接受任意原生 JSON 或用户声明的 local_user 身份。
@@ -146,3 +151,19 @@ form，跳过是表单外的普通 callback。input/editor 仅展示当前输入
 `CHECKBOX_GROUP` 原生单选列表代替下拉选择；模板仍要求表单提交，不能将尚未验证的点击行为宣称为点击即答。
 钉钉模板的跨企业可用性与客户端表单行为属于真实平台验收，
 不能由本地 JSON fixture 或另一个同企业 Bot 推定，当前边界见[渠道实施记录](../versions/v1.72/pi-native-channel-interactions.md)。
+
+### 飞书/Lark 只读结果卡
+
+回答成功后，Outbox 更新该题的原消息，不撤回、不另发结果消息。标题为“队员名 · 回答已发送”，
+正文保留问题展示摘要及实际答案预览，移除所有作答控件。confirm 显示“回答：是/否”；select 显示
+“已选择：原始选项文字”，不使用已截短的按钮文字；input/editor 共用只读文本，保留原始空白和换行，
+不再展示预填或 diff。空字符串显示“已提交空文本”，不能当作跳过；只有空白的非空文本仍按原文展示。
+
+问题摘要与回答预览使用同一个固定函数：按 Unicode 码点保留前 300 个字符，超出时追加
+“……（仅展示部分内容）”。上限包含答案的显示前缀，不修改发送给 Pi 的文本，不增加展开、分页或配置。
+各入口共享首次原生写入成功的结果；后续重复点击或生命周期清理不能覆盖它。没有成功答案的
+skipped/expired/unavailable 卡片只保留问题，分别标记“已跳过，未提交回答”“回答期限已过”“请求已失效”。
+failed/unknown 继续沿用原待答卡与错误反馈，不能写入答案预览或改成成功卡。
+
+这两段有限文本仅服务原卡更新，保留原有可见范围，不写普通日志或聊天消息；旧记录没有问题摘要时继续显示
+原有状态文字，不回填历史数据，不增加 Migration。卡片更新失败只重试已有 Outbox 更新，不能再次回复 Pi。

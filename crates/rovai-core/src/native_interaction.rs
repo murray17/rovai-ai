@@ -27,6 +27,41 @@ pub struct NativeQuestion {
     pub multiline: bool,
 }
 
+fn preview_text(text: &str) -> String {
+    let mut chars = text.chars();
+    let mut preview: String = chars.by_ref().take(300).collect();
+    if chars.next().is_some() {
+        preview.push_str("……（仅展示部分内容）");
+    }
+    preview
+}
+
+impl NativeQuestion {
+    /// Bounded channel display text, separate from the original native content.
+    pub(crate) fn display_preview(&self) -> String {
+        preview_text(&match &self.description {
+            Some(description) => format!("{}\n\n{description}", self.title),
+            None => self.title.clone(),
+        })
+    }
+
+    pub(crate) fn answer_preview(&self, answer: &NativeInteractionAnswer) -> Option<String> {
+        let text = match answer {
+            NativeInteractionAnswer::Confirm { confirmed } => {
+                format!("回答：{}", if *confirmed { "是" } else { "否" })
+            }
+            NativeInteractionAnswer::Select { option_id } => {
+                let option = self.options.iter().find(|option| option.id == *option_id)?;
+                format!("已选择：{}", option.label)
+            }
+            NativeInteractionAnswer::Input { value } if value.is_empty() => "已提交空文本".into(),
+            NativeInteractionAnswer::Input { value } => format!("回答：\n{value}"),
+            NativeInteractionAnswer::Skip => return None,
+        };
+        Some(preview_text(&text))
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeQuestionKind {

@@ -1,5 +1,6 @@
 //! A NativeInteraction is the question authority. The channel Outbox stores only
-//! its routing/terminal markers and card identity, never question or answer text.
+//! its routing/terminal markers and card identity. Feishu/Lark additionally keep
+//! bounded display previews for updating the original card after completion.
 use super::*;
 use crate::native_interaction::{
     NativeInteractionAnswer, NativeInteractionStatus as Status, NativeInteractionView,
@@ -16,6 +17,10 @@ pub struct CardReference {
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub status: Status,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_preview: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_preview: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -25,6 +30,10 @@ pub struct CardSource {
     pub agent_display_name: String,
     pub owner_user_id: Option<String>,
     pub interaction: NativeInteractionView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question_preview: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answer_preview: Option<String>,
 }
 
 /// Host-only platform identity, used as creator and to clear the Owner's private
@@ -107,6 +116,12 @@ pub fn project_pending(
             created_at: question.created_at,
             expires_at: question.expires_at,
             status: Status::Pending,
+            question_preview: if matches!(provider, FEISHU_PROVIDER | LARK_PROVIDER) {
+                question.questions.first().map(|q| q.display_preview())
+            } else {
+                None
+            },
+            answer_preview: None,
         };
         tx.execute("INSERT INTO channel_delivery(id,channel_binding_id,dedupe_key,delivery_kind,priority,target_app_id,source_agent_id,payload_json,status,attempt_count,available_at,created_at,updated_at)
             VALUES(?1,?2,?3,'native_interaction',15,?4,?5,?6,'pending',0,?7,?7,?7) ON CONFLICT(dedupe_key) DO NOTHING",
@@ -133,7 +148,12 @@ pub fn references(database: &Database, provider: &str) -> Result<Vec<CardReferen
 
 /// Independent delivery updates use the existing Outbox retry/lease machinery.
 /// In particular, retrying a PATCH can never call the native answer writer.
-pub fn record_status(database: &mut Database, interaction_id: &str, status: Status) -> Result<()> {
+pub fn record_status(
+    database: &mut Database,
+    interaction_id: &str,
+    status: Status,
+    answer_preview: Option<&str>,
+) -> Result<()> {
     if matches!(status, Status::Pending | Status::Failed) {
         return Ok(());
     }
@@ -147,14 +167,23 @@ pub fn record_status(database: &mut Database, interaction_id: &str, status: Stat
         [interaction_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?)))?;
     for (id, binding, app, agent, payload, message_id) in roots {
         let mut payload: Value = serde_json::from_str(&payload)?;
-        let old = reference(&payload)?.status;
-        // A later lifecycle sweep must not erase an already-sent/skipped result.
-        let status = if !matches!(old, Status::Pending | Status::Failed) {
-            old
-        } else {
-            status
+        let card = reference(&payload)?;
+        // First native write wins, even if a lifecycle sweep reached this row
+        // before its completion was recorded. Unknown writes are never replayed.
+        let status = match card.status {
+            Status::Sent | Status::Skipped | Status::Unknown => card.status,
+            Status::Pending | Status::Failed => status,
+            _ if matches!(status, Status::Sent | Status::Skipped) => status,
+            _ => card.status,
         };
         payload["nativeInteraction"]["status"] = serde_json::to_value(status)?;
+        if status == Status::Sent
+            && card.question_preview.is_some()
+            && card.answer_preview.is_none()
+            && let Some(preview) = answer_preview
+        {
+            payload["nativeInteraction"]["answerPreview"] = json!(preview);
+        }
         tx.execute(
             "UPDATE channel_delivery SET payload_json=?2,updated_at=?3 WHERE id=?1",
             params![id, serde_json::to_string(&payload)?, now],
@@ -188,7 +217,7 @@ pub fn reconcile_delivered(database: &mut Database, provider: &str) -> Result<()
               AND json_extract(updated.payload_json,'$.rootDeliveryId')=delivery.id)", [provider], |r| r.get::<_,String>(0))?;
     for row in rows {
         let value = reference(&serde_json::from_str::<Value>(&row)?)?;
-        record_status(database, &value.interaction_id, value.status)?;
+        record_status(database, &value.interaction_id, value.status, None)?;
     }
     Ok(())
 }

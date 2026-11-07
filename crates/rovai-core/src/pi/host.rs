@@ -1632,13 +1632,23 @@ impl PiRuntime {
         &self,
         id: &str,
     ) -> crate::native_interaction::NativeInteractionStatus {
+        self.interaction_result(id).await.0
+    }
+
+    pub(crate) async fn interaction_result(
+        &self,
+        id: &str,
+    ) -> (
+        crate::native_interaction::NativeInteractionStatus,
+        Option<String>,
+    ) {
         use crate::native_interaction::NativeInteractionStatus as Status;
         let mut dialogs = self.interactions.lock().await;
         let Some(entry) = dialogs.entries.get_mut(id) else {
-            return Status::Unavailable;
+            return (Status::Unavailable, None);
         };
         entry.expire(chrono::Utc::now().timestamp_millis());
-        entry.view.status
+        (entry.view.status, entry.answer_preview.clone())
     }
 
     pub(crate) async fn answer_interaction(
@@ -1695,6 +1705,13 @@ impl PiRuntime {
                 Status::Unknown
             }
         };
+        if entry.view.status == Status::Sent {
+            entry.answer_preview = entry
+                .view
+                .questions
+                .first()
+                .and_then(|q| q.answer_preview(answer));
+        }
         if entry.view.status != Status::Unknown {
             entry.view.questions.clear();
         }
@@ -3572,12 +3589,43 @@ done
         let answer = Answer::Select {
             option_id: "0".into(),
         };
+        let other_answer = Answer::Select {
+            option_id: "1".into(),
+        };
         let (first, duplicate) = tokio::join!(
             runtime.answer_interaction(&dialog.id, &answer),
-            runtime.answer_interaction(&dialog.id, &answer)
+            runtime.answer_interaction(&dialog.id, &other_answer)
         );
-        assert_eq!(first.unwrap().status, Status::Sent);
-        assert_eq!(duplicate.unwrap().status, Status::Sent);
+        let (first, duplicate) = (first.unwrap(), duplicate.unwrap());
+        assert_eq!(first.status, Status::Sent);
+        assert_eq!(duplicate.status, Status::Sent);
+        assert_ne!(first.already_handled, duplicate.already_handled);
+        let sent_preview = if !first.already_handled {
+            "已选择：原始选项"
+        } else {
+            "已选择：Type something."
+        };
+        assert_eq!(
+            runtime.interaction_result(&dialog.id).await,
+            (Status::Sent, Some(sent_preview.into()))
+        );
+        assert!(
+            runtime.interactions.lock().await.entries[&dialog.id]
+                .view
+                .questions
+                .is_empty()
+        );
+        assert!(
+            runtime
+                .answer_interaction(&dialog.id, &Answer::Skip)
+                .await
+                .unwrap()
+                .already_handled
+        );
+        assert_eq!(
+            runtime.interaction_result(&dialog.id).await.1.as_deref(),
+            Some(sent_preview)
+        );
         runtime.register_interaction(&json!({"type":"extension_ui_request", "id":"stale-session", "method":"input", "title":"Session fence"}), now).await.unwrap();
         let stale = runtime.pending_interactions().await.pop().unwrap();
         *host.session_id.write().await = "another-session".to_string();

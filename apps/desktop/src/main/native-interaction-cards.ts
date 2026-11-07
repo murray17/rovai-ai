@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import type { NativeInteractionAnswer, NativeInteractionResult, NativeInteractionView } from '@contracts'
 import { LarkChannelError, type LarkChannel } from '@larksuiteoapi/node-sdk'
 
-export type NativeCardSource = { deliveryId: string; agentDisplayName: string; ownerUserId?: string | null; interaction: NativeInteractionView }
+export type NativeCardSource = { deliveryId: string; agentDisplayName: string; ownerUserId?: string | null; interaction: NativeInteractionView;
+  questionPreview?: string | null; answerPreview?: string | null }
 type CardAction = { deliveryId: string; interactionId: string; answer: NativeInteractionAnswer }
 type ActionValue = { kind: 'native_interaction'; deliveryId: string; interactionId: string; answerKind: 'confirm' | 'select' | 'input' | 'skip'; confirmed?: boolean; optionId?: string }
 export const DINGTALK_QUESTION_TEMPLATE_ID = 'c2a6355b-9724-4f7e-9653-d33fcb3311bb.schema'
@@ -42,11 +43,15 @@ function feishuOptionText(label: string): string {
     ? label
     : chars.slice(0, FEISHU_BUTTON_TEXT_LIMIT - 1).join('') + '…'
 }
-function feishuShell(source: NativeCardSource, elements: Record<string, unknown>[]): Record<string, unknown> {
-  return { schema: '2.0', config: { update_multi: true }, header: { title: plain(`${source.agentDisplayName} · Pi`), template: 'grey' }, body: { elements } }
+function feishuShell(source: NativeCardSource, elements: Record<string, unknown>[], title = `${source.agentDisplayName} · Pi`): Record<string, unknown> {
+  return { schema: '2.0', config: { update_multi: true }, header: { title: plain(title), template: 'grey' }, body: { elements } }
 }
 export function feishuNativeResultCard(source: NativeCardSource, result: NativeInteractionResult): Record<string, unknown> {
-  return feishuShell(source, [paragraph(nativeCardResultText(result))])
+  if (source.questionPreview == null) return feishuShell(source, [paragraph(nativeCardResultText(result))])
+  const state = result.status === 'sent' ? '回答已发送' : nativeCardResultText({ status: result.status })
+  const elements = [paragraph(source.questionPreview)]
+  if (result.status === 'sent' && source.answerPreview != null) elements.push(paragraph(source.answerPreview))
+  return feishuShell(source, elements, `${source.agentDisplayName} · ${state}`)
 }
 
 export function feishuNativeQuestionCard(source: NativeCardSource): Record<string, unknown> {

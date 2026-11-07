@@ -23,6 +23,22 @@ describe('native channel question cards', () => {
     expect(nodes(card).some(node => 'confirm' in node || node.form_action_type === 'submit')).toBe(false)
     item.interaction.canSkip = false
     expect(nodes(feishuNativeQuestionCard(item)).filter(node => node.tag === 'button')).toHaveLength(2)
+    item.questionPreview = '是否继续？\n\n原问题说明'
+    item.interaction.questions = []
+    for (const answer of ['是', '否']) {
+      item.answerPreview = `回答：${answer}`
+      const result = feishuNativeResultCard(item, { status: 'sent', alreadyHandled: true })
+      expect(nodes(result).some(node => node.content === '爱丽丝 · 回答已发送')).toBe(true)
+      expect(nodes(result).some(node => node.content === item.questionPreview)).toBe(true)
+      expect(nodes(result).some(node => node.content === `回答：${answer}`)).toBe(true)
+      expect(nodes(result).some(node => node.tag === 'button' || node.tag === 'input' || node.tag === 'form')).toBe(false)
+    }
+    for (const [status, text] of [['skipped', '已跳过，未提交回答'], ['expired', '回答期限已过'], ['unavailable', '请求已失效']] as const) {
+      const result = feishuNativeResultCard(item, { status })
+      expect(nodes(result).some(node => node.content === `爱丽丝 · ${text}`)).toBe(true)
+      expect(nodes(result).some(node => node.content === item.questionPreview)).toBe(true)
+      expect(nodes(result).some(node => node.content === item.answerPreview || node.tag === 'button')).toBe(false)
+    }
   })
 
   it('uses all stable option IDs even for duplicate labels and Type something.', () => {
@@ -53,6 +69,13 @@ describe('native channel question cards', () => {
       original.interaction.questions[0].options.map(option => ({ kind: 'select', optionId: option.id })))
     expect(item).toEqual(original)
     expect(JSON.stringify(card)).not.toContain('Rovai Desktop')
+    item.questionPreview = '本轮检查哪个平台？'
+    item.answerPreview = `已选择：${labels[1]}`
+    item.interaction.status = 'sent'
+    item.interaction.questions = []
+    const result = feishuNativeQuestionCard(item)
+    expect(nodes(result).some(node => node.content === `已选择：${labels[1]}`)).toBe(true)
+    expect(nodes(result).some(node => node.tag === 'button')).toBe(false)
   })
 
   it.each([false, true])('preserves exact input and an independent skip callback (multiline=%s)', multiline => {
@@ -68,6 +91,16 @@ describe('native channel question cards', () => {
     expect(nodes(form).filter(node => node.tag === 'button')).toHaveLength(1)
     const skip = nodes(card).find(node => node.tag === 'button' && (action(node) as { answerKind: string }).answerKind === 'skip')!
     expect(feishuNativeAnswer(action(skip), { answer: 'never submitted' })!.answer).toEqual({ kind: 'skip' })
+    item.questionPreview = ' 原问题\n第二行 \n\n 原说明\n保留换行 '
+    item.interaction.questions = []
+    for (const preview of ['已提交空文本', '回答：\n  中文\n保留空格  ', '回答：\n' + '🪴'.repeat(296) + '……（仅展示部分内容）']) {
+      item.answerPreview = preview
+      const result = feishuNativeResultCard(item, { status: 'sent' })
+      expect(nodes(result).some(node => node.content === preview)).toBe(true)
+      expect(nodes(result).some(node => node.content === item.questionPreview)).toBe(true)
+      expect(nodes(result).some(node => node.tag === 'button' || node.tag === 'input' || node.tag === 'form')).toBe(false)
+      expect(JSON.stringify(result)).not.toContain('初始')
+    }
   })
 
   it('falls back only when the card or text field cannot hold the question, with no invented timeout', () => {

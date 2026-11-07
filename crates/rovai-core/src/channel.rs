@@ -15834,6 +15834,7 @@ mod tests {
     fn native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery() {
         use crate::native_interaction::{
             NativeInteractionAnswer, NativeInteractionStatus as Status, NativeInteractionView,
+            NativeQuestion, NativeQuestionKind,
         };
         // Owns the new NativeInteraction -> existing channel Outbox/auth seam.
         // No Runtime or provider network is needed to prove identity and races.
@@ -15931,7 +15932,16 @@ mod tests {
                 id: id.into(),
                 agent_run_id: runs[0].clone(),
                 execution_epoch: epoch,
-                questions: vec![],
+                questions: vec![NativeQuestion {
+                    id: "question".into(),
+                    kind: NativeQuestionKind::Input,
+                    title: "原问题".into(),
+                    description: Some(" 原说明\n第二行 ".into()),
+                    options: vec![],
+                    placeholder: None,
+                    prefill: Some("未提交的预填文本".into()),
+                    multiline: true,
+                }],
                 can_skip: true,
                 created_at: 1,
                 expires_at: None,
@@ -15994,6 +16004,11 @@ mod tests {
                     .unwrap()
                     .unwrap();
             assert_eq!(source.2.thread_id, thread);
+            assert_eq!(
+                source.2.question_preview.as_deref(),
+                (provider == FEISHU_PROVIDER).then_some("原问题\n\n 原说明\n第二行 ")
+            );
+            assert!(source.2.answer_preview.is_none());
             assert!(
                 native_interactions::source_reference(
                     &db,
@@ -16083,8 +16098,32 @@ mod tests {
                     _ => answer.app_id = before,
                 };
             }
-            native_interactions::record_status(&mut db, "native-a", Status::Sent).unwrap();
-            native_interactions::record_status(&mut db, "native-a", Status::Unavailable).unwrap();
+            let preview = questions[0].1.questions[0]
+                .answer_preview(&answer.answer)
+                .unwrap();
+            // A lifecycle sweep can finish before the writer records its native
+            // success. Its stale marker must not suppress the actual answer.
+            db.connection().execute("UPDATE channel_delivery SET payload_json=json_set(payload_json,'$.nativeInteraction.status','unavailable') WHERE id=?1", [&first.delivery_id]).unwrap();
+            native_interactions::record_status(&mut db, "native-a", Status::Sent, Some(&preview))
+                .unwrap();
+            native_interactions::record_status(
+                &mut db,
+                "native-a",
+                Status::Sent,
+                Some("late duplicate must not replace the answer"),
+            )
+            .unwrap();
+            native_interactions::record_status(&mut db, "native-a", Status::Unavailable, None)
+                .unwrap();
+            let completed =
+                native_interactions::source_reference(&db, provider, &first.delivery_id, app)
+                    .unwrap()
+                    .unwrap()
+                    .2;
+            assert_eq!(
+                completed.answer_preview.as_deref(),
+                (provider == FEISHU_PROVIDER).then_some(preview.as_str())
+            );
             assert_eq!(
                 native_interactions::authorize_answer(&mut db, &actor, provider, &answer)
                     .unwrap()
@@ -16097,7 +16136,7 @@ mod tests {
                 .iter()
                 .find(|d| d.payload["nativeInteraction"]["interactionId"] == "native-b")
                 .unwrap();
-            native_interactions::record_status(&mut db, "native-b", Status::Skipped).unwrap();
+            native_interactions::record_status(&mut db, "native-b", Status::Skipped, None).unwrap();
             service
                 .settle_delivery(
                     &mut db,
@@ -16120,7 +16159,23 @@ mod tests {
             native_interactions::reconcile_delivered(&mut db, provider).unwrap();
             let payloads:Vec<String>=query_rows(db.connection(),"SELECT payload_json FROM channel_delivery WHERE delivery_kind='native_interaction'",[],|r|r.get(0)).unwrap();
             assert_eq!(payloads.len(), 4);
-            assert!(payloads.iter().all(|p| !p.contains("private answer")));
+            assert!(
+                payloads
+                    .iter()
+                    .all(|p| !p.contains("未提交的预填文本") && !p.contains("late duplicate"))
+            );
+            if provider == DINGTALK_PROVIDER {
+                assert!(payloads.iter().all(|p| !p.contains("private answer")
+                    && !p.contains("questionPreview")
+                    && !p.contains("answerPreview")));
+            }
+            let skipped =
+                native_interactions::source_reference(&db, provider, &second.delivery_id, app)
+                    .unwrap()
+                    .unwrap()
+                    .2;
+            assert_eq!(skipped.status, Status::Skipped);
+            assert!(skipped.answer_preview.is_none());
             let updates = service
                 .host_tick(
                     &mut db,
@@ -16183,9 +16238,15 @@ mod tests {
                     ),
                 )
                 .unwrap();
-            native_interactions::record_status(&mut db, "native-unknown", Status::Unknown).unwrap();
-            native_interactions::record_status(&mut db, "native-unknown", Status::Unavailable)
+            native_interactions::record_status(&mut db, "native-unknown", Status::Unknown, None)
                 .unwrap();
+            native_interactions::record_status(
+                &mut db,
+                "native-unknown",
+                Status::Unavailable,
+                None,
+            )
+            .unwrap();
             native_interactions::reconcile_delivered(&mut db, provider).unwrap();
             let count:i64=db.connection().query_row("SELECT COUNT(*) FROM channel_delivery WHERE json_extract(payload_json,'$.rootDeliveryId')=?1",[&unknown.delivery_id],|r|r.get(0)).unwrap();
             assert_eq!(
@@ -16229,6 +16290,21 @@ mod tests {
                     .unwrap();
             assert_eq!(previous.2.interaction_id, "native-a");
             assert_eq!(previous.2.status, Status::Sent);
+            // A legacy payload without display text keeps its status-only shape.
+            db.connection().execute("UPDATE channel_delivery SET payload_json=json_remove(payload_json,'$.nativeInteraction.questionPreview','$.nativeInteraction.answerPreview') WHERE id=?1", [&first.delivery_id]).unwrap();
+            native_interactions::record_status(
+                &mut db,
+                "native-a",
+                Status::Sent,
+                Some("no historical backfill"),
+            )
+            .unwrap();
+            let legacy =
+                native_interactions::source_reference(&db, provider, &first.delivery_id, app)
+                    .unwrap()
+                    .unwrap()
+                    .2;
+            assert!(legacy.question_preview.is_none() && legacy.answer_preview.is_none());
             db.connection()
                 .execute(
                     "UPDATE channel_conversation_binding SET camp_id=NULL WHERE camp_id=?1",

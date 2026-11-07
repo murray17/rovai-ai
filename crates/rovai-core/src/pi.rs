@@ -874,6 +874,9 @@ mod tests {
                 Some(" 保留说明 ")
             );
             assert_eq!(entry.view.can_skip, true);
+            let question = &entry.view.questions[0];
+            assert_eq!(question.display_preview(), "原问题\n第二行\n\n 保留说明 ");
+            assert_eq!(question.answer_preview(&Answer::Skip), None);
             assert_eq!(
                 entry.response(&Answer::Skip).unwrap(),
                 json!({"type":"extension_ui_response", "id":request["id"], "cancelled":true})
@@ -882,6 +885,10 @@ mod tests {
                 "confirm" => {
                     for confirmed in [false, true] {
                         assert_eq!(
+                            entry.view.questions[0].answer_preview(&Answer::Confirm { confirmed }),
+                            Some(format!("回答：{}", if confirmed { "是" } else { "否" }))
+                        );
+                        assert_eq!(
                             entry.response(&Answer::Confirm { confirmed }).unwrap()["confirmed"],
                             confirmed
                         );
@@ -889,6 +896,26 @@ mod tests {
                 }
                 "select" => {
                     assert_eq!(entry.view.questions[0].options.len(), 3);
+                    assert_eq!(
+                        entry.view.questions[0].answer_preview(&Answer::Select {
+                            option_id: "2".into()
+                        }),
+                        Some("已选择：Type something.".into())
+                    );
+                    let mut long = entry.view.questions[0].clone();
+                    long.options[0].label = "🪴".repeat(350);
+                    long.title = "🪴".repeat(350);
+                    assert_eq!(
+                        long.display_preview(),
+                        format!("{}……（仅展示部分内容）", "🪴".repeat(300))
+                    );
+                    assert_eq!(
+                        long.answer_preview(&Answer::Select {
+                            option_id: "0".into()
+                        })
+                        .unwrap(),
+                        format!("已选择：{}……（仅展示部分内容）", "🪴".repeat(296))
+                    );
                     assert_eq!(
                         entry
                             .response(&Answer::Select {
@@ -913,7 +940,16 @@ mod tests {
                     );
                 }
                 _ => {
-                    for text in ["", "  中文\n保留空格  "] {
+                    for text in ["", "  ", "  中文\n保留空格  "] {
+                        assert_eq!(
+                            entry.view.questions[0]
+                                .answer_preview(&Answer::Input { value: text.into() }),
+                            Some(if text.is_empty() {
+                                "已提交空文本".into()
+                            } else {
+                                format!("回答：\n{text}")
+                            })
+                        );
                         assert_eq!(
                             entry
                                 .response(&Answer::Input { value: text.into() })
@@ -926,6 +962,21 @@ mod tests {
                         );
                         assert_eq!(entry.view.questions[0].multiline, method == "editor");
                     }
+                    let text = "🪴".repeat(350);
+                    assert_eq!(
+                        entry
+                            .response(&Answer::Input {
+                                value: text.clone()
+                            })
+                            .unwrap()["value"],
+                        text
+                    );
+                    assert_eq!(
+                        entry.view.questions[0]
+                            .answer_preview(&Answer::Input { value: text })
+                            .unwrap(),
+                        format!("回答：\n{}……（仅展示部分内容）", "🪴".repeat(296))
+                    );
                 }
             }
             entry.expire(109);

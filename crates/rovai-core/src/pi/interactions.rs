@@ -13,6 +13,7 @@ pub(super) struct PiInteractions {
 
 pub(super) struct PiInteraction {
     pub view: NativeInteractionView,
+    pub answer_preview: Option<String>,
     pub native_id: Value,
     method: String,
 }
@@ -87,6 +88,7 @@ impl PiInteractions {
             id.clone(),
             PiInteraction {
                 native_id,
+                answer_preview: None,
                 method: method.to_owned(),
                 view: NativeInteractionView {
                     id,
