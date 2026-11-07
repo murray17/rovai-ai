@@ -662,7 +662,7 @@ test('standalone Server phone settings expose update controls, initial login and
     const token = (await readFile(join(dataDir, 'server-token'), 'utf8')).trim()
     const update = (body, session, headers = {}) => fetch(`${origin}/api/v1/updates`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session}` } : {}), ...headers }, body: JSON.stringify(body) })
     assert.equal((await update({ operation: 'get' })).status, 401)
-    const session = await (await fetch(`${origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 5, administratorToken: token }) })).json()
+    const session = await (await fetch(`${origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: token }) })).json()
     assert.equal(session.channels, 'unsupported', 'standalone Server does not advertise Desktop channels')
     assert.equal((await update({ operation: 'get' }, session.token, { Origin: 'http://other-device.invalid' })).status, 403)
     for (const body of [{ operation: 'exec' }, { operation: 'get', url: 'https://other-device.invalid/package' }, { operation: 'install', version: '999.0.0', path: '/tmp/package' }]) {

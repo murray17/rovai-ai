@@ -2,14 +2,14 @@
 document_type: implementation-plan
 version: v1.72
 authority: project-file-reference-implementation-and-verification
-status: proposed
+status: in_progress
 last_updated: 2026-11-07
 ---
 
 # 公开对话项目文件引用实施计划
 
 本计划承接[模型输入 R1](model-context-change-project-file-reference.md)，确认门槛与完整 shape 只在该说明维护。
-当前完成 worktree 和基线调查，正式实现尚未开始。v5.1 原型只作为交互参照，不复制其模拟服务。
+User 已在 sequence 21 确认 R1，现开始正式实现。v5.1 原型只作为交互参照，不复制其模拟服务。
 
 ## Worktree 交接
 
@@ -19,10 +19,10 @@ last_updated: 2026-11-07
 | Worktree | `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-project-file-references` |
 | Branch | `rovai/project-file-references` |
 | Base | `55a83f89733393cfcad76b046e344c222577abe1`（已核对 origin/main） |
-| Governance | none；无主线文档先行要求；R1 等待二次确认 |
-| Status | active；准备实施，未开始正式代码／Schema／当前合同修改 |
-| Validation | 本轮文档结构／链接与待确认门禁结果在下方记录 |
-| Next | 取得 R1 确认后在本 worktree 完成 Core 预检与发布，再接正式 Renderer/Host |
+| Governance | none；无主线文档先行要求；R1 已由 User sequence 21 二次确认 |
+| Status | active；正式主链与界面通过，R3 模型行为仍未通过 |
+| Validation | 见下方实际实现、确定性门禁、真实 UI 及 Runtime 分项结果 |
+| Next | User 决定补充 R2 后，只实施获准提示并定向复查 R3；保持原失败证据 |
 
 保留此 worktree 跨后续 Run 复用。完成后按用户当前偏好提交并推送同名远端分支，不自动创建或重开 PR；
 合入前不清理 worktree，不触碰其他活跃目录或日常 App 数据。
@@ -97,13 +97,82 @@ DOCS_BASE_REF=55a83f89733393cfcad76b046e344c222577abe1 pnpm docs:check:ci
 所有启动与 Runtime 都按[本地隔离流程](../../development/local-workflow.md)执行，worktree 使用自己的依赖和 target。
 真实任务的输入投影、读取调用、错误与结果只在隔离 fixture 中留证，导出必要脱敏摘要。
 
-## 本轮准备结果
+## 准备与确认记录
 
 - 已创建独立 worktree，并确认工作基线与 origin/main 一致。
 - 已完成当前发送、回放、来源解析、封闭内容与版本边界调查；已冻结 R1 范围、预算和真实任务条件。
-- R1 当前为 pending。未运行正式实现测试，不将原型的 51 项或图标 8 项检查登记为生产通过。
+- 提案提交时 R1 为 pending；现已登记 sequence 21 的真实确认。未运行正式实现测试，不将原型的 51 项或图标 8 项检查登记为生产通过。
 - `pnpm docs:test`：10 项通过。
 - `DOCS_BASE_REF=55a83f89733393cfcad76b046e344c222577abe1 pnpm docs:check:decisions -- --require-base`：通过，版本决定、历史冻结与链接检查无错误。
 - `pnpm docs:check`：按预期在新 R1 的 4 项确认记录上拒绝：confirmed_revision、confirmation_status、confirmed_by、confirmed_at。没有补造记录或跳过版本门禁。
 - `git diff --check`：通过。worktree 私有依赖按原 lockfile 串行核对完成，lockfile 无改动；未启动 App/Core/Runtime。
-- 后续收到真实确认后补记录并重跑全部文档门禁，才开始正式代码。
+- 2026-11-07：收到 User sequence 21 确认，登记 R1 后重跑文档门禁，正式实现开始。
+
+## 实际实现与验收
+
+实施基于同一独立分支，使用正式组件、真实 Host/Core 和临时文件系统，不依赖离线原型。
+
+- Core：封闭草稿／正式文件段、锁外预检、事务内绑定复核、回执优先重放、Pending 原子邀请／激活／投递、
+  最多 32 个身份和实际 UTF-8／URI 投影预算。发布路径与标签只能由 Core 构造。
+- Host：复用项目目录与 Mission ready 工作副本；新增目标确认，根内可读普通文件和符号链接遵守原边界。
+  同根跨对话重新签发；跨根保留身份并要求重新选择；历史预览比较冻结路径。
+- Renderer：四来源独立分组、手动固定、独立 scope、防抖／取消／迟到过滤；原生文件图标、文件名与同名消歧，
+  完整路径仍保存在身份中。选择直接回编辑，无装饰性加载动画；点击和键盘打开原预览。
+- 恢复：补齐输入历史、私有剪贴板、整条消息复制、本机草稿和失败留稿；未知格式保留原记录并阻止覆盖。
+  文件树／预览共用插入函数，文件加其他引用和仅文件均构成实际输入，不参与成员寻址。
+- 兼容：ComposerDocument 保持 2；schema 169→170 由 migration 220 仅更新准入标记，无新业务表或历史重写。
+  Host Web 协议 5→6；app.info 的能力声明同时通过 Desktop 与过滤后的 HTTP 投影提供，仍不暴露 dataDir。
+  相关新版本合同、当前路由、UI 和操作指南已同步。
+
+### 确定性与界面结果
+
+| 验证 | 实际结果 |
+| --- | --- |
+| TypeScript / 生产构建 | `pnpm typecheck`、`pnpm build:desktop` 通过 |
+| 全量 Vitest | 270 文件，3,132 通过、2 项既有 skip；使用 UTC 运行既有日期断言 |
+| Rust 默认 workspace | 全过：Core 438 通过／1 项既有 ignored；其余 crate 与 CLI 通过 |
+| 定向 Rust owner | camp_content 16 项、Pending 原子发送 1 项、初始／Steer 冻结 1 项通过；project_files 根边界由既有 3 项 owner 覆盖 |
+| 原生 Composer | 3 个 Electron owner 通过，包含成员邀请、输入、IME、恢复和 Web 链接 |
+| 原生项目目录 | 既有真实 Host 项目目录 owner 通过，包括预览、编辑保存、主题、窄屏及缩放；不据此宣称文件 Mention 的 200% 专项已测 |
+| Host 文件烟测 | 6 组通过：独立 scope、重绑、预览收紧、Pending 拒绝及重放、伪造字段、Web 鉴权与旧协议拒绝 |
+| Host Desktop＋Web 主 owner | 通过；Core 生命周期、HTTP 投影、权限、旧协议及文件编辑均保持 |
+| 正式文件界面 | Desktop＋认证 Web 16 项通过，覆盖原生复制、同根／异根粘贴、短标签、预览、仅文件按钮、文件树、Tab／Enter／删除／Undo、预览插入、中文 IME、输入历史、消息复制、真实删除后拒绝留稿、窄屏触控长按详情及 44px 操作区 |
+| 布局 | day／night × 390／1040／1440／2560；实际输入框与文件扩展名可见，无页面横向溢出 |
+| 文档治理 | docs:test 10 项及 require-base 的决定／链接门禁通过；version 门禁仅余补充 R2 的 4 项真实确认记录，未补造确认 |
+
+`composer-trigger` 扩展了路径、扩展名、Unicode 和邮箱／URL 的既有边界 owner。
+文件 URI 的共用 golden 覆盖 Unicode、空格、括号、井号、百分号、Unix 反斜线、Windows drive、UNC 及 canonicalize 的 verbatim 前缀；只规范 URI，不改冻结路径字段。
+输入／Steer owner 用已发布但不可再解析的文件定位证明恢复只用冻结字段；完整 URI 经 JSON 编码后核对。
+当前 quote_text 保存可见选文快照，没有 URI 偏移映射；不重算旧选文。
+
+### 真实 Runtime 结果
+
+macOS arm64 的真实 Codex CLI 0.166.0 与 Claude Code 2.1.311 使用新的 Core／Native Home、项目及 Skills／MCP。
+只复制认证与 Provider 配置，不复制日常 Session、hooks 或 MCP；结束后清理本次 Native Home。
+版本初始冻结值、观察值、实际输入 SHA-256、正文投影、读取工具与返回结果见[脱敏证据](project-file-reference-evidence.json)。
+原始冻结输入只保留在权限受限的本机 fixture，未导出凭据、私有推理或完整原生日志。
+
+| Case | 结果 |
+| --- | --- |
+| R1 Codex / Claude 各两文件 | 均通过；返回只存在于文件中的随机值，消息正文未注入文件内容 |
+| R2 既有任务只补交日志 | 两个 Runtime 均通过；只有文件引用也可继续上文任务 |
+| R3 新对话只有文件 | **失败**：可发布且未修改文件，但回复只说明没有具体任务，未主动询问；保留原断言与输出 |
+| R4 发布后修改内容 | 通过；真实工具读到新值，历史发布字段和正文不变 |
+| R4 发布后撤读权限 | 通过；返回真实 Permission denied，不擅自 chmod 或改用其他路径 |
+
+共七例，六例通过；没有把执行终态 succeeded 等同于产品验收通过。首个漏带 execution 的夹具只发布而未运行，
+修正夹具后才进行真实调用。后续只补跑未执行的 R4，不重复消耗已通过的四个读取任务。
+[补充 R2](model-context-change-project-file-reference-clarification.md)提出公开 Charter 的一句澄清规则，仍为 pending；
+本次不修改 Charter 26、Bootstrap v6、Binding compatibility 16 或冻结输入，不将 R1 确认移作 R2 确认。
+
+### 已知限制与交接
+
+- 既有 `file-preview-layout` 的图片重建滚动位置失败，以及 `file-reference-navigation` 的 HTML 链接／边距断言失败，
+  均在原始基线的独立 checkout 上复现。保留原失败，没有改动断言、扩大超时或修复无关业务来冒充本功能通过。
+- 本次未做真实 Windows／Linux、移动设备硬件、文件 Mention 200% 专项或所有 Runtime 的平台资格验证。
+  异步隔离、来源失败及预算的确定性边界由对应 owner 负责，不把一次真实快速搜索当作性能或遍历完整性保证。
+- worktree 与分支保留；按当前偏好提交、推送，不自动创建 PR、合并、安装或重启日常 App。
+
+本项九范围复核：Version lifecycle 仍为 v1.72；Decisions 的当前合同路由已更新，无额外版本切换决定；
+Contracts、Architecture、UI 与 Documentation routing 已同步。Runtime Activity 不新增事件映射；
+Runtime compatibility 仅记录上述两个已测版本，不扩大平台资格。Root README 在未收口前不增加已发布能力声明。

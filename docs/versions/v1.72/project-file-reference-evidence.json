@@ -1,0 +1,206 @@
+{
+  "recordedAt": "2026-11-07",
+  "branch": "rovai/project-file-references",
+  "base": "55a83f89733393cfcad76b046e344c222577abe1",
+  "platform": "macOS arm64",
+  "scope": "Production Host/Core and actual native Runtime file tools in private fixtures",
+  "overallPassed": false,
+  "limitation": "R3 did not ask the User for a task; supplemental R2 Charter proposal is pending. No unconfirmed guidance was injected.",
+  "cases": [
+    {
+      "case": "R1-codex",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": null,
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "bodyProjection": "Read both referenced files with your file tools and report their NONCE values to this conversation. Do not edit files. After that, when I provide a log file in the next message, read it and report LOG_NONCE. Ask me to provide that log. [codex\\-one\\.txt](file://<FIXTURE>/project/codex-one.txt) [codex\\-two\\.txt](file://<FIXTURE>/project/codex-two.txt)",
+      "reply": "已读取两个文件，未修改文件。codex-one.txt：NONCE_ONE=e13b12662ba56bff94e57b21；codex-two.txt：NONCE_TWO=c360ef033c078d72578c9046。请提供日志文件，我会读取并报告 LOG_NONCE。",
+      "frozenInputSha256": [
+        "091485c8d0f0e85ce0cc1d2e1f73f5f4e28c6b5431f1318fec349c614e795f1c"
+      ],
+      "noStandaloneFilesField": true,
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c 'cat codex-one.txt codex-two.txt'",
+          "output": "NONCE_ONE=e13b12662ba56bff94e57b21\nNONCE_TWO=c360ef033c078d72578c9046\n",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "case": "R2-file-only-codex",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "bodyProjection": "[codex\\-log\\.txt](file://<FIXTURE>/project/codex-log.txt)",
+      "reply": "已读取 codex-log.txt，未修改文件。LOG_NONCE=98dd855d390b43105df21c7f",
+      "frozenInputSha256": [
+        "68b4597ad5686f9151bc4971a1c8a478b3888bfd73137276b518c88205cf98cf"
+      ],
+      "noStandaloneFilesField": true,
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c 'cat codex-log.txt'",
+          "output": "LOG_NONCE=98dd855d390b43105df21c7f\n",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "case": "R1-claude",
+      "runtime": "claude-code-cli",
+      "version": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "bodyProjection": "Read both referenced files with your file tools and report their NONCE values to this conversation. Do not edit files. After that, when I provide a log file in the next message, read it and report LOG_NONCE. Ask me to provide that log. [claude\\-one\\.txt](file://<FIXTURE>/project/claude-one.txt) [claude\\-two\\.txt](file://<FIXTURE>/project/claude-two.txt)",
+      "reply": "@你 Read both files without modifying them: claude-one.txt: NONCE_ONE=18fe65f8ed220fb466e94889; claude-two.txt: NONCE_TWO=b02381de9b26b372e92c8976. Please provide the log file in your next message; I will read it and report LOG_NONCE.",
+      "frozenInputSha256": [
+        "97d476d9dc9600879b6af5aeddd45c3e21a7d64aa3ea4e3dab87ff6798e6fe58"
+      ],
+      "noStandaloneFilesField": true,
+      "tools": [
+        {
+          "kind": "read",
+          "operationKind": "read",
+          "path": "claude-one.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        },
+        {
+          "kind": "read",
+          "operationKind": "read",
+          "path": "claude-two.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        }
+      ]
+    },
+    {
+      "case": "R2-file-only-claude",
+      "runtime": "claude-code-cli",
+      "version": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "bodyProjection": "[claude\\-log\\.txt](file://<FIXTURE>/project/claude-log.txt)",
+      "reply": "Read claude-log.txt without modifying it: LOG_NONCE=5401be0fe4b09807f4f06a5d.",
+      "frozenInputSha256": [
+        "f3a549cfa855b621ec458b51aa379f2967e2a3805748364d1338fd7bb864a53f"
+      ],
+      "noStandaloneFilesField": true,
+      "tools": [
+        {
+          "kind": "read",
+          "operationKind": "read",
+          "path": "claude-log.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        }
+      ]
+    },
+    {
+      "case": "R3-new-file-only",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": false,
+      "bodyProjection": "[unassigned\\.txt](file://<FIXTURE>/project/unassigned.txt)",
+      "reply": "已读取 unassigned.txt，内容为“An unrelated fixture. No work has been requested.”，其中没有具体任务。",
+      "frozenInputSha256": [
+        "926b804273b482859b69e3783df8778ed9b039f8c2776dc6ff13458505836e35"
+      ],
+      "noStandaloneFilesField": true,
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c 'cat unassigned.txt'",
+          "output": "An unrelated fixture. No work has been requested.\n",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "case": "R4-live-content",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "bodyProjection": "First use your shell tool to wait up to 30 seconds for <FIXTURE>/project/live.ready to exist. Only after the gate exists, read the referenced file and report its NONCE. If reading fails, report the real error and do not change permissions, retry alternate paths, or modify any files. [live\\.txt](file://<FIXTURE>/project/live.txt)",
+      "reply": "NONCE=d07617cda573987fde62db9e",
+      "frozenInputSha256": [
+        "f96f058cc1a0c6d57261e2becba330de1f4b6182aa26a75566ac1dc670afcf10"
+      ],
+      "noStandaloneFilesField": true,
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c 'deadline=$((SECONDS + 30))\nwhile [[ ! -e <FIXTURE>/project/live.ready ]]; do\n  if (( SECONDS >= deadline )); then\n    print -u2 '\"'Timed out after 30 seconds waiting for live.ready'\n    exit 1\n  fi\n  sleep 0.2\ndone\ncat <FIXTURE>/project/live.txt\"",
+          "output": "NONCE=d07617cda573987fde62db9e\n",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "case": "R4-permission-error",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "bodyProjection": "First use your shell tool to wait up to 30 seconds for <FIXTURE>/project/read-error.ready to exist. Only after the gate exists, read the referenced file and report its NONCE. If reading fails, report the real error and do not change permissions, retry alternate paths, or modify any files. [unreadable\\.txt](file://<FIXTURE>/project/unreadable.txt)",
+      "reply": "门控文件已存在，随后读取失败，无法获取 NONCE。实际错误：cat: <FIXTURE>/project/unreadable.txt: Permission denied。未更改权限、尝试其他路径或修改任何文件。",
+      "frozenInputSha256": [
+        "8f18ff1700f65ac175642028a0d3a7325b372e5cf7263d926e5bbecc44cf0d64"
+      ],
+      "noStandaloneFilesField": true,
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c 'for i in {1..30}; do\n  if [[ -e <FIXTURE>/project/read-error.ready ]]; then\n    cat <FIXTURE>/project/unreadable.txt\n    exit $?\n  fi\n  sleep 1\ndone\nprint -u2 '\"'Gate did not appear within 30 seconds.'\nexit 124\"",
+          "output": "cat: <FIXTURE>/project/unreadable.txt: Permission denied\n",
+          "exitCode": 1
+        }
+      ]
+    }
+  ]
+}

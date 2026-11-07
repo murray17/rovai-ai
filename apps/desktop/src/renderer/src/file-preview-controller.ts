@@ -864,7 +864,7 @@ export function createFilePreviewSession(api: FilePreviewApi, threadId: string, 
   ): Promise<FilePreviewOpenOutcome> => {
     target ??= 'rawReference' in request ? parseFileReference(request.rawReference)?.target : undefined
     if (!threadId || !owner.isCurrent(threadId)) return { kind: 'error', error: unavailableSourceError() }
-    const cached = tabsRef.current.find(tab => tab.kind === 'file' && (tab.sourceKey === filePreviewSourceKey(request) || tab.sourceAliases?.includes(filePreviewSourceKey(request))))
+    const cached = request.kind === 'project_file' ? undefined : tabsRef.current.find(tab => tab.kind === 'file' && (tab.sourceKey === filePreviewSourceKey(request) || tab.sourceAliases?.includes(filePreviewSourceKey(request))))
     owner.touch(session, cached?.id)
     if (cached?.kind === 'file' && (cached.content || cached.loadState === 'opening')) {
       if (target && cached.file) setTabs(tabs => tabs.map(tab => tab.id === cached.id

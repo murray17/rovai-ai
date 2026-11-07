@@ -1,3 +1,10 @@
+import { useProjectFileComposer } from './ProjectFileComposerContext'
+import { useOptionalFilePreview } from './file-preview-context'
+import { isProjectFileAtom, fileReferenceKey, fileReferencePresentation } from './project-file-reference'
+import { composerProjectFiles, useProjectFileAvailability, type FileAvailability } from './useProjectFileAvailability'
+import { useProjectFileReferenceCapability, createProjectFileReference } from './useProjectFileCandidates'
+import { pickerOptionKey } from './useReferencePicker'
+import { ProjectFileReferenceActions } from './ProjectFileReferenceActions'
 import { useReferencePicker, type ReferenceScope } from './useReferencePicker'
 import { composerReferenceIdentities, useReferenceAvailability } from './useReferenceAvailability'
 import { ThreadReferenceMenu } from './ThreadReferenceMenu'
@@ -14,6 +21,7 @@ import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import {
   $getRoot,
+  $getNearestNodeFromDOMNode,
   $getNodeByKey,
   $createTextNode,
   $getSelection,
@@ -46,6 +54,7 @@ import {
 } from 'react'
 import {
   ComposerAtomNode,
+  $createComposerAtomNode,
   $isComposerAtomNode,
   setComposerAtomPresentationResolver,
   type ComposerAtomPresentation
@@ -65,6 +74,7 @@ import type { ComposerSkillOption } from './composer-skill-picker'
 import { $replaceEditorWithComposerDocument, $rootToComposerDocument } from './composer-editor-state'
 import {
   $replaceComposerTriggerWithAtom,
+  $findComposerTriggerMatch,
   type ComposerTriggerMatch
 } from './composer-trigger'
 import {
@@ -118,6 +128,7 @@ export interface StructuredMentionComposerHandle {
   ): void
   setDocument(document: ComposerDocument, boundary?: 'start' | 'end'): void
   focus(boundary?: 'start' | 'end'): void
+  insertProjectFile(atom: Extract<ComposerAtom, { type: 'project_file_reference' }>): void
   startMention(): void
   getLocalVersion(): number
   isDirty(): boolean
@@ -320,12 +331,23 @@ function ComposerBridge({
 }): JSX.Element {
   const [editor] = useLexicalComposerContext()
   const referencePreview = useReferencePreview()
+  const filePreview = useOptionalFilePreview()
+  const filesSupported = useProjectFileReferenceCapability(referenceScope?.client)
+  const [fileAtoms, setFileAtoms] = useState(() => composerProjectFiles(document))
+  const fileAvailability = useProjectFileAvailability(referenceScope, fileAtoms, filesSupported)
+  const [fileSelectionError, setFileSelectionError] = useState('')
+  const fileSelectionBeforePointer = useRef<ReturnType<typeof $getSelection>>(null)
+  const [fileActions, setFileActions] = useState<{ edit(replace: boolean): void; nodeKey: string; trigger: HTMLElement; atom: Extract<ComposerAtom, { type: 'project_file_reference' }>; restore(): void } | null>(null)
+  const insertionTicket = useRef(0)
+  const fileInsertionPending = useRef(false)
+  useEffect(() => { insertionTicket.current++; setFileActions(null) }, [draftIdentity])
   const [referenceIdentities, setReferenceIdentities] = useState(() => composerReferenceIdentities(document))
   const referenceAvailability = useReferenceAvailability(referenceScope, referenceIdentities)
-  const onActivateReference = (node: ComposerAtomNode, trigger: HTMLElement): boolean => {
+  const onActivateReference = (node: ComposerAtomNode, trigger: HTMLElement, fileDetails = false): boolean => {
     const atom = node.getAtom()
-    if (!isReferenceAtom(atom) || !referenceScope || !referencePreview) return false
-    const savedSelection = $getSelection()?.clone()
+    if ((!isReferenceAtom(atom) && !isProjectFileAtom(atom)) || !referenceScope) return false
+    const savedSelection = isProjectFileAtom(atom) ? fileSelectionBeforePointer.current ?? $getSelection()?.clone() : $getSelection()?.clone()
+    fileSelectionBeforePointer.current = null
     const selectionKeys = $isRangeSelection(savedSelection)
       ? [savedSelection.anchor.key, savedSelection.focus.key]
       : savedSelection?.getNodes().map(selected => selected.getKey()) ?? []
@@ -340,22 +362,78 @@ function ComposerBridge({
       }, { discrete: true, tag: HISTORY_PUSH_TAG })
       editor.focus()
     }
-    referencePreview({ reference: referenceIdentity(atom), title: atom.labelFallback ?? referenceIdentity(atom).id,
-      titleMode: 'current', trigger, remove: () => edit(false), replace: () => edit(true),
-      restoreFocus: () => {
-        const root = editor.getRootElement()
-        if (!root?.isConnected) return
-        // NodeSelection alone does not focus the contenteditable DOM root.
-        root.focus({ preventScroll: true })
-        if (!edited && savedSelection) {
-          editor.update(() => {
-            if (selectionKeys.every(key => $getNodeByKey(key)?.isAttached())) $setSelection(savedSelection.clone())
-          }, { discrete: true })
-        } else editor.focus()
-      }
-    })
+    const restore = () => {
+      const root = editor.getRootElement()
+      if (!root?.isConnected) return
+      root.focus({ preventScroll: true })
+      if (!edited && savedSelection) editor.update(() => {
+        if (selectionKeys.every(key => $getNodeByKey(key)?.isAttached())) $setSelection(savedSelection.clone())
+      }, { discrete: true })
+      else editor.focus()
+    }
+    if (isProjectFileAtom(atom)) {
+      if (fileDetails) setFileActions({ atom, trigger, nodeKey: node.getKey(), restore, edit })
+      else void filePreview?.open({ kind: 'project_file', threadId: atom.threadId, rawReference: atom.rawReference }).then(restore).catch(() => setFileActions({ atom, trigger, nodeKey: node.getKey(), restore, edit }))
+    } else referencePreview?.({ reference: referenceIdentity(atom), title: atom.labelFallback ?? referenceIdentity(atom).id,
+      titleMode: 'current', trigger, remove: () => edit(false), replace: () => edit(true), restoreFocus: restore })
     return true
   }
+  const fileComposer = useProjectFileComposer()
+  useEffect(() => {
+    if (!fileComposer || !referenceScope) return
+    return fileComposer.register({ threadId: referenceScope.threadId, client: referenceScope.client,
+      enabled: filesSupported && ready && !disabled && purpose === 'message', insert: atom => {
+        if (!editor.isEditable()) return
+        editor.update(() => {
+          let selection = $getSelection()
+          if (!$isRangeSelection(selection)) selection = $getRoot().selectEnd()
+          selection.insertNodes([$createComposerAtomNode(atom), $createTextNode(' ')])
+        }, { discrete: true, tag: HISTORY_PUSH_TAG })
+        editor.focus()
+      } })
+  }, [fileComposer?.register, referenceScope?.threadId, referenceScope?.client, filesSupported, ready, disabled, purpose, editor])
+
+  useEffect(() => {
+    let cleanup = () => {}
+    const stop = editor.registerRootListener(root => {
+      cleanup()
+      if (!root) return
+      let timer: ReturnType<typeof setTimeout> | undefined, suppressUntil = 0
+      const showDetails = (element?: HTMLElement | null, event?: Event) => {
+        editor.update(() => {
+          const selection = $getSelection()
+          const node = element ? $getNearestNodeFromDOMNode(element) : $isNodeSelection(selection) ? selection.getNodes()[0] : null
+          if (!$isComposerAtomNode(node) || node.getAtomType() !== 'project_file_reference') return
+          const trigger = element ?? editor.getElementByKey(node.getKey())
+          if (!trigger) return
+          event?.preventDefault(); event?.stopPropagation()
+          callbacks.current.onActivateReference(node, trigger, true)
+        })
+      }
+      const details = (event: Event) => {
+        if (event instanceof KeyboardEvent && !(event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10')) return
+        showDetails((event.target as Element | null)?.closest<HTMLElement>('[data-composer-atom=project_file_reference]'), event)
+      }
+      const down = (event: PointerEvent) => {
+        const element = (event.target as Element | null)?.closest<HTMLElement>('[data-composer-atom=project_file_reference]')
+        if (element) editor.getEditorState().read(() => { fileSelectionBeforePointer.current = $getSelection()?.clone() ?? null })
+        if (event.pointerType !== 'touch') return
+        if (element) timer = setTimeout(() => { suppressUntil = Date.now() + 900; showDetails(element) }, 550)
+      }
+      const up = (event: Event) => { clearTimeout(timer); if (Date.now() < suppressUntil) { event.preventDefault(); event.stopPropagation() } }
+      const cancel = () => clearTimeout(timer)
+      const click = (event: Event) => { if (Date.now() < suppressUntil) { event.preventDefault(); event.stopImmediatePropagation() } }
+      root.addEventListener('contextmenu', details); root.addEventListener('keydown', details)
+      root.addEventListener('pointerdown', down, true); root.addEventListener('pointerup', up)
+      root.addEventListener('touchend', up, { passive: false }); root.addEventListener('pointercancel', cancel); root.addEventListener('pointermove', cancel); root.addEventListener('click', click, true)
+      cleanup = () => {
+        clearTimeout(timer); root.removeEventListener('contextmenu', details); root.removeEventListener('keydown', details)
+        root.removeEventListener('pointerdown', down, true); root.removeEventListener('pointerup', up); root.removeEventListener('touchend', up); root.removeEventListener('pointercancel', cancel); root.removeEventListener('pointermove', cancel); root.removeEventListener('click', click, true)
+      }
+    })
+    return () => { cleanup(); stop() }
+  }, [editor])
+
   const mobile = useMobileLayout()
   const mobileRef = useRef(mobile)
   mobileRef.current = mobile
@@ -381,6 +459,7 @@ function ComposerBridge({
     purpose,
     referenceScope,
     referenceAvailability,
+    fileAtoms, fileAvailability: fileAvailability.items, filesSupported,
     onActivateReference,
     onDocumentChange,
     onEffectiveDocumentChange,
@@ -405,6 +484,7 @@ function ComposerBridge({
     purpose,
     referenceScope,
     referenceAvailability,
+    fileAtoms, fileAvailability: fileAvailability.items, filesSupported,
     onActivateReference,
     onDocumentChange,
     onEffectiveDocumentChange,
@@ -432,7 +512,7 @@ function ComposerBridge({
     if (!$isNodeSelection(selection)) return false
     const nodes = selection.getNodes()
     const node = nodes.length === 1 ? nodes[0] : null
-    if (!$isComposerAtomNode(node) || !isReferenceAtom(node.getAtom())) return false
+    if (!$isComposerAtomNode(node) || (!isReferenceAtom(node.getAtom()) && !isProjectFileAtom(node.getAtom()))) return false
     const trigger = editor.getElementByKey(node.getKey())
     if (!trigger || !callbacks.current.onActivateReference(node, trigger)) return false
     event?.preventDefault()
@@ -461,15 +541,21 @@ function ComposerBridge({
     () => mentionQuery === null ? [] : structuredMentionOptions(members, mentionQuery, inviteLayer, purpose !== 'mission'),
     [inviteLayer, members, mentionQuery, purpose]
   )
-  const referencePicker = useReferencePicker(referenceScope, triggerMatch, inviteLayer, mentionOptions)
+  const referencePicker = useReferencePicker(referenceScope, triggerMatch, inviteLayer, mentionOptions, filesSupported)
   const pickerRef = useRef(referencePicker)
   pickerRef.current = referencePicker
+  useEffect(() => {
+    insertionTicket.current++; fileInsertionPending.current = false; setFileSelectionError('')
+  }, [triggerMatch?.nodeKey, triggerMatch?.fromOffset, triggerMatch?.toOffset, triggerMatch?.query, referenceScope?.threadId])
   const skillOptions = useMemo(
     () => skillQuery === null ? [] : structuredSkillOptions(skills ?? [], skillQuery),
     [skillQuery, skills]
   )
   const bindings = useCallback(() => ({
-    persist: callbacks.current.persistDocument,
+    persist: async (next: ComposerDocument, context: ComposerPersistContext) => {
+      if (composerProjectFiles(next).length && !callbacks.current.filesSupported) throw new Error(uiAttribute('当前 Host 不支持文件引用，请升级后恢复此草稿'))
+      await callbacks.current.persistDocument?.(next, context)
+    },
     waitForAuthority: callbacks.current.waitForDraftAuthority,
     currentDraft: () => callbacks.current.getAuthoritativeDraft?.() ?? null,
     atomIsAvailable: (node: ComposerAtomNode) =>
@@ -482,6 +568,8 @@ function ComposerBridge({
       recovery?.set(draftIdentity, { document: local, base: callbacks.current.getAuthoritativeDraft?.()?.content ?? authorityDocument.current })
     },
     onEffectiveDocumentChange: (local: ComposerDocument) => {
+      const nextFiles = composerProjectFiles(local)
+      setFileAtoms(previous => JSON.stringify(previous) === JSON.stringify(nextFiles) ? previous : nextFiles)
       const next = composerReferenceIdentities(local)
       setReferenceIdentities(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
       callbacks.current.onEffectiveDocumentChange?.(local)
@@ -530,7 +618,7 @@ function ComposerBridge({
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), bindings())
     const runtime: ComposerExtensionRuntime<ThreadComposerDraftView> = {
       sync,
-      submit: () => { void callbacks.current.onSubmit() },
+      submit: () => { if (!fileInsertionPending.current) void callbacks.current.onSubmit() },
       enterInsertsLineBreak: () => callbacks.current.purpose === 'mission' || mobileRef.current,
       shouldSubmitEnter: event => {
         const context = shortcutRef.current
@@ -549,7 +637,7 @@ function ComposerBridge({
             : segment) }
         }
         if (parsed && !callbacks.current.referenceScope) {
-          parsed.segments = parsed.segments.map(segment => segment.kind === 'atom' && isReferenceAtom(segment.atom)
+          parsed.segments = parsed.segments.map(segment => segment.kind === 'atom' && (isReferenceAtom(segment.atom) || isProjectFileAtom(segment.atom))
             ? { kind: 'text', text: composerDocumentToPlainText({ version: 2, segments: [segment] }) } : segment)
         }
         return parsed
@@ -595,7 +683,21 @@ function ComposerBridge({
     editor.update(() => {
       for (const atom of $nodesOfType(ComposerAtomNode)) atom.markDirty()
     }, { tag: [ROVAI_ATOM_PRESENTATION_TAG, HISTORIC_TAG, SKIP_DOM_SELECTION_TAG] })
-  }, [bindings, editor, members, skills, referenceAvailability])
+  }, [bindings, editor, members, skills, referenceAvailability, fileAvailability.items, fileAtoms, filesSupported])
+
+  useEffect(() => {
+    if (!referenceScope || !filesSupported) return
+    editor.update(() => {
+      for (const node of $nodesOfType(ComposerAtomNode)) {
+        const atom = node.getAtom()
+        if (!isProjectFileAtom(atom) || atom.threadId === referenceScope.threadId) continue
+        const result = fileAvailability.items.get(fileReferenceKey(atom))
+        if (result?.status === 'available' && result.reference.threadId === referenceScope.threadId) {
+          node.setFileThreadId(result.reference.threadId).setRawReference(result.reference.rawReference).setFallbackLabel(result.reference.labelFallback)
+        }
+      }
+    }, { tag: [HISTORIC_TAG, SKIP_DOM_SELECTION_TAG] })
+  }, [editor, referenceScope?.threadId, filesSupported, fileAvailability.items])
 
   useLayoutEffect(() => {
     if (!initializedRef.current || previousReadyRef.current || !ready) {
@@ -645,6 +747,17 @@ function ComposerBridge({
         }
       }
       return sync.flush()
+    },
+    insertProjectFile(atom) {
+      if (!callbacks.current.filesSupported || atom.threadId !== callbacks.current.referenceScope?.threadId || !editor.isEditable()) return
+      editor.update(() => {
+        const selection = $getSelection()
+        if (!$isRangeSelection(selection) && !$isNodeSelection(selection)) $getRoot().selectEnd()
+        const node = $createComposerAtomNode(atom)
+        const current = $getSelection()
+        if ($isRangeSelection(current)) current.insertNodes([node, $createTextNode(' ')])
+      }, { discrete: true, tag: HISTORY_PUSH_TAG })
+      editor.focus()
     },
     appendText(text) {
       // Recovery uses the live editor, including edits made while preparation
@@ -701,18 +814,44 @@ function ComposerBridge({
     if (editorRef) editorRef.current = element
   }, [editorRef])
 
+  useEffect(() => {
+    let cleanup = () => {}
+    const stop = editor.registerRootListener(root => {
+      cleanup()
+      if (!root) return
+      const start = () => { insertionTicket.current++; fileInsertionPending.current = false; setTriggerMatch(null) }
+      const end = () => { queueMicrotask(() => editor.getEditorState().read(() => setTriggerMatch($findComposerTriggerMatch(editor)))) }
+      root.addEventListener('compositionstart', start); root.addEventListener('compositionend', end)
+      cleanup = () => { root.removeEventListener('compositionstart', start); root.removeEventListener('compositionend', end) }
+    })
+    return () => { cleanup(); stop() }
+  }, [editor])
+
   const mentionMenuOptions = referenceScope ? referencePicker.options : mentionOptions
-  const getMentionOptions = (query: string) => callbacks.current.referenceScope ? pickerRef.current.query === query && !pickerRef.current.loading ? pickerRef.current.options : [] : structuredMentionOptions(callbacks.current.members, query, inviteLayerRef.current, callbacks.current.purpose !== 'mission')
+  const getMentionOptions = (query: string) => callbacks.current.referenceScope ? pickerRef.current.query === query ? pickerRef.current.options : [] : structuredMentionOptions(callbacks.current.members, query, inviteLayerRef.current, callbacks.current.purpose !== 'mission')
   const skillMenuOptions = useMemo(() => skillOptions.slice(0, 50), [skillOptions])
   const mentionMenuId = `${id || generatedId}-mention-options`
   const skillMenuId = `${id || generatedId}-skill-options`
   const menuOpen = mentionOpen || skillOpen
 
+  const editFile = (replace: boolean) => {
+    if (!fileActions) return
+    fileActions.edit(replace)
+    setFileActions(null)
+  }
+
   return <div className={`structured-mention-composer ${className}`.trim()}>
+    <ProjectFileReferenceActions request={fileActions} status={fileActions ? fileAvailability.items.get(fileReferenceKey(fileActions.atom)) : undefined} onClose={() => setFileActions(null)} onRemove={() => editFile(false)} onReplace={() => editFile(true)} onRetry={fileAvailability.retry} onOpen={() => {
+      if (!fileActions) return
+      const { atom, restore } = fileActions
+      void filePreview?.open({ kind: 'project_file', threadId: atom.threadId, rawReference: atom.rawReference }).then(() => restore())
+      setFileActions(null)
+    }} />
+    {fileSelectionError && <div className="ref-source-note" role="status">{fileSelectionError}<button type="button" className="ref-text-button" onClick={() => { setFileSelectionError(''); referencePicker.retry() }}><UiText zh="重试" /></button></div>}
     <ComposerWebLinksPlugin />
     {inputHistory && ready && <ComposerInputHistoryPlugin key={draftIdentity} getHistory={inputHistory}
       syncRef={syncRef} navigationRef={historyNavigationRef} />}
-    <ContentEditable id={id} ref={setEditorElement}
+    <ContentEditable id={id} ref={setEditorElement} data-thread-id={referenceScope?.threadId}
       className="structured-mention-editor" aria-label={ariaLabel}
       aria-expanded={menuOpen} aria-controls={skillOpen ? skillMenuId : mentionMenuId}
       aria-disabled={disabled || !ready} spellCheck={false}
@@ -722,15 +861,16 @@ function ComposerBridge({
       menuAnchor={purpose === 'mission' ? 'caret' : 'editor'}
       selectionScope={`${inviteLayer ? 'inviting' : 'camp'}:${referencePicker.filter}`}
       onCycleCategory={referenceScope ? direction => {
-        const categories = ['members', 'thread', 'mission'] as const
-        const index = categories.indexOf(pickerRef.current.filter)
+        const categories = ['members', ...(filesSupported ? ['file' as const] : []), 'thread', 'mission'] as const
+        const index = categories.findIndex(value => value === pickerRef.current.filter)
         changeInviteLayer(false)
         pickerRef.current.selectFilter(categories[(index + direction + categories.length) % categories.length])
       } : undefined}
+      optionKeys={mentionOpen ? mentionMenuOptions.map(pickerOptionKey) : skillMenuOptions.map(item => item.id)}
       optionCount={mentionOpen ? mentionMenuOptions.length : skillMenuOptions.length}
       getOptionState={(match) => match.kind === 'member'
         ? {
-            catalogStatus: callbacks.current.referenceScope && (pickerRef.current.query !== match.query || pickerRef.current.loading) ? 'loading' : 'ready',
+            catalogStatus: callbacks.current.referenceScope && (pickerRef.current.query !== match.query || !pickerRef.current.options.length && (pickerRef.current.loading || pickerRef.current.status === 'error' || pickerRef.current.files.partial || Boolean(pickerRef.current.files.error) || pickerRef.current.sourceErrors.length > 0)) ? 'loading' : 'ready',
             optionCount: getMentionOptions(match.query).length
           }
         : {
@@ -750,6 +890,24 @@ function ComposerBridge({
         if (match.kind === 'member') {
           const option = getMentionOptions(match.query)[index]
           if (!option) return false
+          if (option.kind === 'file') {
+            const scope = callbacks.current.referenceScope
+            if (!scope || !callbacks.current.filesSupported) return false
+            const ticket = ++insertionTicket.current
+            fileInsertionPending.current = true
+            setFileSelectionError('')
+            const key = pickerRef.current.key
+            void scope.client.request<import('@contracts').ProjectFilesResult<Extract<import('@contracts').OpenFilePreviewRequest, { kind: 'project_file' }>>>('projectFiles.request', { threadId: scope.threadId, action: 'open', scopeId: option.scopeId, entryId: option.item.id })
+              .then(result => { if (!result.ok) throw new Error(result.error.code); return createProjectFileReference(scope.client, scope.threadId, result.value) })
+              .then(atom => {
+                if (ticket !== insertionTicket.current || callbacks.current.referenceScope?.threadId !== scope.threadId || pickerRef.current.key !== key || editor.isComposing() || !editor.isEditable()) return
+                editor.update(() => {
+                  const fresh = $findComposerTriggerMatch(editor)
+                  if (fresh?.nodeKey === match.nodeKey && fresh.fromOffset === match.fromOffset && fresh.toOffset === match.toOffset && fresh.query === match.query) $replaceComposerTriggerWithAtom(match, atom)
+                }, { discrete: true, tag: HISTORY_PUSH_TAG })
+              }).catch(() => { if (ticket === insertionTicket.current && pickerRef.current.key === key) setFileSelectionError(uiAttribute('暂时无法引用此文件，请重试')) }).finally(() => { if (ticket === insertionTicket.current) fileInsertionPending.current = false })
+            return false
+          }
           if (option.kind === 'reference') return $replaceComposerTriggerWithAtom(match, referenceAtom(option.item))
           if (option.kind === 'invite_other') {
             changeInviteLayer(true)
@@ -936,9 +1094,20 @@ function atomPresentation(
   node: ComposerAtomNode,
   input: Pick<StructuredMentionComposerProps,
     'purpose' | 'members' | 'skills' | 'skillCatalogStatus' | 'onActivateMemberMention'
-    | 'onActivateAllMembersMention' | 'onActivateSkillMention'> & { referenceAvailability?: ReturnType<typeof useReferenceAvailability>; onActivateReference?(node: ComposerAtomNode, trigger: HTMLElement): void }
+    | 'onActivateAllMembersMention' | 'onActivateSkillMention'> & { referenceScope?: ReferenceScope; fileAtoms?: readonly Extract<ComposerAtom, { type: 'project_file_reference' }>[]; fileAvailability?: ReadonlyMap<string, FileAvailability>; filesSupported?: boolean; referenceAvailability?: ReturnType<typeof useReferenceAvailability>; onActivateReference?(node: ComposerAtomNode, trigger: HTMLElement): void }
 ): ComposerAtomPresentation {
   const atom = node.getAtom()
+  if (isProjectFileAtom(atom)) {
+    const status = input.fileAvailability?.get(fileReferenceKey(atom))
+    const resolvedLabel = (file: Extract<ComposerAtom, { type: 'project_file_reference' }>) => {
+      const resolved = input.fileAvailability?.get(fileReferenceKey(file))
+      return resolved?.status === 'available' ? { ...file, labelFallback: resolved.reference.labelFallback } : file
+    }
+    const presentation = fileReferencePresentation(resolvedLabel(atom), (input.fileAtoms ?? [atom]).map(resolvedLabel))
+    const unavailable = !input.filesSupported || atom.threadId !== input.referenceScope?.threadId || status?.status === 'unavailable' || status?.status === 'needs_reselect'
+    const ariaLabel = unavailable ? uiAttribute('{0}，需要重新选择', presentation.ariaLabel) : status?.status === 'network_error' ? uiAttribute('{0}，连接失败，可重试', presentation.ariaLabel) : presentation.ariaLabel
+    return { label: presentation.label, fullPath: presentation.path, ariaLabel, availability: unavailable ? 'unavailable' : 'available', interactive: true }
+  }
   if (isReferenceAtom(atom)) {
     const id = referenceIdentity(atom).id
     const item = input.referenceAvailability?.get(id)
@@ -989,7 +1158,7 @@ function activateAtom(
     | 'onActivateAllMembersMention' | 'onActivateSkillMention'> & { onActivateReference?(node: ComposerAtomNode, trigger: HTMLElement): void }
 ): void {
   const atom = node.getAtom()
-  if (isReferenceAtom(atom)) { input.onActivateReference?.(node, trigger); return }
+  if (isReferenceAtom(atom) || isProjectFileAtom(atom)) { input.onActivateReference?.(node, trigger); return }
   if (atom.type === 'member') {
     const member = input.members.find((candidate) => candidate.agentId === atom.agentId)
     if (member && member.mentionable !== false) {

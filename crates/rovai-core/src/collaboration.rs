@@ -618,6 +618,15 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<SendUserThreadMessageCommand>,
     ) -> Result<CommandExecution> {
+        self.send_user_camp_message_with_files(database, envelope, None)
+    }
+
+    pub fn send_user_camp_message_with_files(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SendUserThreadMessageCommand>,
+        files: Option<&crate::project_file_reference::Preflight>,
+    ) -> Result<CommandExecution> {
         crate::web_upload::protect_for_send(database, &envelope.payload.source_attachments)?;
         let command = SendUserThreadDraftCommand {
             draft_client: DraftClient::default(),
@@ -639,8 +648,16 @@ impl CollaborationService {
                 ),
             },
             |transaction| {
-                let content = composer_document_to_content(&envelope.payload.content)?;
-                validate_user_authored_content(&content)?;
+                let content = if let Some(files) = files {
+                    match files.publish(transaction, &command.camp_id, &envelope.payload.content)? {
+                        Ok(content) => content,
+                        Err(rejection) => return Ok(Err(rejection)),
+                    }
+                } else {
+                    let content = composer_document_to_content(&envelope.payload.content)?;
+                    validate_user_authored_content(&content)?;
+                    content
+                };
                 if let Some(rejection) =
                     invite_pending_thread_mentions(transaction, envelope, &content)?
                 {
@@ -4109,11 +4126,21 @@ fn load_structured_content_submission(
     {
         return Ok(Err(rejection));
     }
-    if crate::thread_reference::contains_reference(&content)
-        && !content.iter().any(|segment| matches!(segment, StructuredThreadMessageSegment::Text { text } if !text.trim().is_empty()))
-        && source_attachments.is_empty() && prepared_attachment_ids.is_empty()
-    {
-        return Ok(Err(rejected("camp_message.empty_body", "请补充本轮内容")));
+    let actual_input = content.iter().any(|segment| {
+        matches!(segment,
+        StructuredThreadMessageSegment::Text { text } if !text.trim().is_empty())
+    }) || content.iter().any(|segment| {
+        matches!(
+            segment,
+            StructuredThreadMessageSegment::ProjectFileReference { .. }
+                | StructuredThreadMessageSegment::SkillMention { .. }
+        )
+    });
+    if !actual_input && source_attachments.is_empty() && prepared_attachment_ids.is_empty() {
+        return Ok(Err(rejected(
+            "camp_message.empty_body",
+            "请填写这次的问题后再发送",
+        )));
     }
     let mentioned_agent_ids = member_mention_ids(&content);
     let mut member_names = BTreeMap::new();
@@ -4138,7 +4165,15 @@ fn load_structured_content_submission(
             display_name.expect("checked Member Mention identity"),
         );
     }
-    let body = render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned())?;
+    let body = match render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned()) {
+        Ok(body) => body,
+        Err(error) => {
+            return Ok(Err(CommandHandlerResult::rejected(
+                "camp_message.invalid_content",
+                json!({"message":error.to_string(),"segmentIndex":error.downcast_ref::<crate::camp_content::ContentSegmentError>().map(|error|error.segment_index).unwrap_or(0)}),
+            )));
+        }
+    };
     if body.trim().is_empty() && prepared_attachment_ids.is_empty() && source_attachments.is_empty()
     {
         return Ok(Err(rejected(

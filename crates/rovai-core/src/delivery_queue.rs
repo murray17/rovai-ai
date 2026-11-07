@@ -3133,11 +3133,23 @@ mod tests {
             thread_id: reference_id.clone(),
             title_at_send: "登录 [发布标题]".into(),
         };
+        let frozen_file = StructuredThreadMessageSegment::ProjectFileReference {
+            thread_id: fixture.camp_id.clone(),
+            raw_reference: "published-locator-no-longer-resolvable".into(),
+            path_at_send: "/frozen-project/已移动 #1.test.ts".into(),
+            label_at_send: "src/已移动 #1.test.ts".into(),
+        };
+        let frozen_file_projection = crate::project_file_reference::render_link(
+            "/frozen-project/已移动 #1.test.ts",
+            "src/已移动 #1.test.ts",
+        )
+        .unwrap();
         let initial_content = vec![
             StructuredThreadMessageSegment::Text {
                 text: "initial work".into(),
             },
             reference.clone(),
+            frozen_file.clone(),
         ];
         fixture.database.connection().execute(
             "UPDATE camp_message SET structured_content_json=?1,content_digest=?2 WHERE id='initial-steer'",
@@ -3155,6 +3167,13 @@ mod tests {
             )
             .unwrap();
         let initial = fixture.materialize_run(&run);
+        let encoded_file_projection = serde_json::to_string(&frozen_file_projection).unwrap();
+        assert!(
+            initial
+                .runtime_payload
+                .contains(&encoded_file_projection[1..encoded_file_projection.len() - 1]),
+            "claim must use published fields without touching the missing file"
+        );
         assert!(
             initial
                 .runtime_payload
@@ -3200,6 +3219,7 @@ mod tests {
                 name_at_send: "not-authorized".into(),
             },
             reference,
+            frozen_file,
         ];
         fixture
             .database
@@ -3444,6 +3464,10 @@ mod tests {
         assert_eq!(projected["messages"].as_array().unwrap().len(), 1);
         let body = projected["messages"][0]["body"].as_str().unwrap();
         assert!(body.contains(&format!("rovai://thread/{reference_id}")));
+        assert!(
+            body.contains(&frozen_file_projection),
+            "Steer and initial input share the frozen file projector"
+        );
         assert!(body.contains("登录 \\[发布标题\\]"));
         assert!(projected["messages"][0].get("references").is_none());
         assert_eq!(

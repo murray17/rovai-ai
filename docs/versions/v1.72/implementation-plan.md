@@ -8,12 +8,12 @@ last_updated: 2026-11-07
 
 # v1.72 实施与验收
 
-## 项目文件引用（2026-11-07，准备实施）
+## 项目文件引用（2026-11-07，功能分支验收）
 
 独立分支 `rovai/project-file-references` 已从 `55a83f8` 建立，并核对 origin/main 相同。
-[R1 模型输入说明](model-context-change-project-file-reference.md)等待二次确认；当前完成调查和提案，
-未修改正式实现。独立[实施计划](project-file-reference-implementation.md)拥有工作目录、模块、
-验证 owner、冻结真实任务与后续结果，P1 优先完成，P2 与契约同步收敛。
+[R1 模型输入说明](model-context-change-project-file-reference.md)已获 User sequence 21 二次确认；
+正式实现、迁移及恢复已接通，Desktop／Web 真实界面通过。独立[实施记录](project-file-reference-implementation.md#实际实现与验收)
+拥有工作目录、模块与逐项结果。真实 Runtime 六例通过，R3 未主动追问而失败；补充 R2 待真实确认。
 
 ## 执行 Tab 恢复与空选中回退（2026-11-05）
 

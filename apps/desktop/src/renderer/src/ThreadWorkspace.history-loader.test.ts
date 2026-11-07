@@ -80,7 +80,7 @@ describe('Thread history loader', () => {
   })
 
   it('hides the history entry when there are no earlier messages', () => {
-    expect(renderHistoryLoader(false)).not.toContain('camp-history-loader')
+    expect(renderHistoryLoader(false)).not.toContain('class="camp-history-loader')
   })
 
   it.each([

@@ -21,6 +21,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
         matches!(
             classify_database_contract(&tx)?,
             DatabaseContractClassification::Current(_)
+                | DatabaseContractClassification::SupportedMigrationSource(_)
         ),
         "Subagent display classifier admission failed"
     );
@@ -30,6 +31,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(connection: &Connection) {
+    connection.execute_batch("DELETE FROM schema_migration WHERE version=220; UPDATE rovai_data_contract SET projection_schema_version=169 WHERE projection_schema_version=170;").unwrap();
     if !connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=219)",
@@ -78,6 +80,24 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .execute_batch("DROP TRIGGER reject_subagent_classifier_marker;")
         .unwrap();
     migrate(database).unwrap();
+    // The next reader-admission marker has no data rewrite; a failed marker update must roll back.
+    database.connection().execute_batch("CREATE TEMP TRIGGER reject_file_reference_marker BEFORE UPDATE ON rovai_data_contract WHEN NEW.projection_schema_version=170 BEGIN SELECT RAISE(ABORT,'file reference marker rollback'); END;").unwrap();
+    assert!(
+        database
+            .migrate_project_file_references()
+            .unwrap_err()
+            .to_string()
+            .contains("file reference marker rollback")
+    );
+    assert!(
+        matches!(classify_database_contract(database.connection()).unwrap(), DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 169)
+    );
+    assert!(!database.schema_migration_applied(220).unwrap());
+    database
+        .connection()
+        .execute_batch("DROP TRIGGER reject_file_reference_marker;")
+        .unwrap();
+    database.migrate_project_file_references().unwrap();
     assert_eq!(snapshot(database.connection()), before);
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),

@@ -508,7 +508,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 169;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 170;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1003,6 +1003,7 @@ struct CurrentMigrationState {
     v217: bool,
     v218: bool,
     v219: bool,
+    v220: bool,
 }
 
 impl CurrentMigrationState {
@@ -1024,6 +1025,11 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v220 {
+            let mut previous = *self;
+            previous.v220 = false;
+            return schema == 170 && previous.admits(contract, 169, classifier);
+        }
         if self.v219 {
             let mut previous = *self;
             previous.v219 = false;
@@ -3823,6 +3829,7 @@ pub(crate) fn classify_database_contract(
                 | 167
                 | 168
                 | 169
+                | 170
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -6155,7 +6162,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=216),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=217),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=218),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=219)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=219),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=220)
         "#,
         [],
         |row| {
@@ -6310,6 +6318,7 @@ fn load_current_migration_state(
                 v217: row.get(147)?,
                 v218: row.get(148)?,
                 v219: row.get(149)?,
+                v220: row.get(150)?,
             })
         },
     )
@@ -9604,6 +9613,9 @@ impl Database {
             if !self.schema_migration_applied(219)? {
                 migration_step!("migration_219", subagent::migrate(self));
             }
+            if !self.schema_migration_applied(220)? {
+                migration_step!("migration_220", self.migrate_project_file_references());
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10486,11 +10498,27 @@ impl Database {
         if !self.schema_migration_applied(219)? {
             migration_step!("migration_219", subagent::migrate(self));
         }
+        if !self.schema_migration_applied(220)? {
+            migration_step!("migration_220", self.migrate_project_file_references());
+        }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
         {
             eprintln!("Notification Episode startup retention failed: {error:#}");
         }
+        Ok(())
+    }
+
+    fn migrate_project_file_references(&mut self) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&tx)?, DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 169),
+            "Project file references require schema 169"
+        );
+        tx.execute_batch("INSERT INTO schema_migration VALUES(220,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=170, updated_at=datetime('now') WHERE singleton=1;")?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -42234,6 +42262,7 @@ mod tests {
             v217: version >= 217,
             v218: version >= 218,
             v219: version >= 219,
+            v220: version >= 220,
         }
     }
 

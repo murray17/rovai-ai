@@ -35,14 +35,14 @@ module.exports = async ({ evaluate, wait, key, click, window, evidence }) => {
     await reset(pending)
     await insert('@aili')
     await candidate(); await ready()
-    assert.equal(await evaluate("document.querySelector('.ref-filters [aria-selected=true]').textContent"), '队员')
+    assert.equal(await evaluate("document.querySelectorAll('.ref-filters [aria-selected=true]').length"), 0)
     writeFileSync(join(evidence, 'pinyin-' + (pending ? 'pending' : 'public') + '.png'), (await window.webContents.capturePage()).toPNG())
     await key('Enter', 13)
     assert.equal((await expectSelection()).text, '@爱丽丝 ')
     // Native typing after selection proves the caret is after the trailing space.
     await insert('@als')
     await candidate(); await ready()
-    for (const category of ['对话', '使命', '队员']) {
+    for (const category of ['队员', '对话', '使命', '队员']) {
       await key('Tab', 9)
       await wait(`document.querySelector('.ref-filters [aria-selected=true]').textContent === '${category}'`)
       await ready()
@@ -106,9 +106,10 @@ module.exports = async ({ evaluate, wait, key, click, window, evidence }) => {
   }
   for (const [query, label] of [['会话', '对话'], ['使命', '使命']]) {
     await reset(false); await insert('@' + query); await ready()
-    assert.equal(await evaluate("document.querySelector('.ref-filters [aria-selected=true]').textContent"), label)
+    assert.equal(await evaluate("document.querySelectorAll('.ref-filters [aria-selected=true]').length"), 0)
+    assert.ok(await evaluate("[...document.querySelectorAll('.ref-thread-option strong')].some(node => node.textContent.includes(" + JSON.stringify(query) + "))"))
   }
-  checks.push('automatic title categories still match original Chinese text')
+  checks.push('default grouped title results still match original Chinese text')
   await reset(false); await insert('/sheji')
   await wait("!!document.querySelector('.structured-skill-menu .structured-mention-empty')")
   assert.equal(await evaluate("document.querySelectorAll('.structured-skill-menu [role=option]').length"), 0)

@@ -872,6 +872,7 @@ function CommandPalette({
   firstRunThreadId: string | null
   onThread(thread: NavigationThreadTarget): void
 }): JSX.Element {
+  const client = useThreadClient()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const projectNameByPath = useMemo(
@@ -892,8 +893,8 @@ function CommandPalette({
   useEffect(() => {
     setLookup(null)
     if (!open || threadId === null) return
-    return startNavigationThreadLookup(threadId, setLookup)
-  }, [open, threadId])
+    return startNavigationThreadLookup(threadId, setLookup, id => client.request('navigation.findThread', { threadId: id }))
+  }, [client, open, threadId])
 
   const selectedIndex = Math.min(activeIndex, Math.max(visible.length - 1, 0))
 

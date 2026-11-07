@@ -1,3 +1,5 @@
+import { InlineProjectFileReference } from './InlineProjectFileReference'
+import { projectFileLink } from './project-file-reference'
 import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
 import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
@@ -1480,6 +1482,7 @@ export function structuredThreadContentPlainText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   const parts = content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return `@${currentUserName}`
@@ -1522,6 +1525,7 @@ function structuredThreadContentMarkdownText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   return content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
     if (segment.kind === 'member_mention') {
@@ -4320,6 +4324,7 @@ export function ThreadWorkspace({
       const routedDraft = materializeLocalContinuation(frozenDraft, currentSnapshot.members)
       if (routedDraft.content.segments.some(segment => segment.kind === 'atom' && isReferenceAtom(segment.atom))
         && !routedDraft.content.segments.some(segment => segment.kind === 'text' && segment.text.trim())
+        && !routedDraft.content.segments.some(segment => segment.kind === 'atom' && (segment.atom.type === 'project_file_reference' || segment.atom.type === 'skill'))
         && !routedDraft.attachments.length) throw new Error(uiAttribute('请补充本轮内容'))
       // Flush can change recipients; keep the execution snapshot from this
       // submission so an ended target cannot turn into a successor's Steer.
@@ -6589,7 +6594,7 @@ export function ThreadWorkspace({
             <StructuredMentionComposer
               ref={composerHandleRef}
               id="camp-message"
-              referenceScope={{ threadId: snapshot.thread.id, client }}
+              referenceScope={{ threadId: snapshot.thread.id, client, projectBound: snapshot.thread.projectBindingKind === 'directory' }}
               draftIdentity={`${snapshot.thread.id}:composer`}
               inputHistory={() => threadInputHistory(visibleThreadMessages)}
               onEffectiveDocumentChange={content => {
@@ -10475,6 +10480,7 @@ export function StructuredMessageBody({
             </span>
           )
         }
+        if (segment.kind === 'project_file_reference') return <InlineProjectFileReference key={`file-${index}`} file={segment} files={content.filter(item => item.kind === 'project_file_reference')} />
         if (isReferenceSegment(segment)) return <InlineThreadReference key={`reference-${index}`} segment={segment} />
         if (segment.kind === 'skill_mention') {
           return (

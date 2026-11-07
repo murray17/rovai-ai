@@ -3,8 +3,12 @@ document_type: model-context-change
 version: v1.72
 change_id: project-file-reference
 revision: 1
-confirmation_status: pending
-implementation_status: proposed
+confirmation_status: confirmed
+confirmed_revision: 1
+confirmed_by: User
+confirmed_at: 2026-11-07T16:15:07Z
+confirmation_message_id: 90e5e2f1-6d68-43b5-a047-fad13517c3df
+implementation_status: in_progress
 authority: model-input-change-proposal
 implementation_baseline: 55a83f89733393cfcad76b046e344c222577abe1
 last_updated: 2026-11-07
@@ -14,13 +18,14 @@ last_updated: 2026-11-07
 
 ## 二次确认
 
-本文是待确认的正式实施 revision，不是已交付交互稿的验收记录。
+本文为 User 已确认的正式实施 revision，尚不代表实现或验收完成。
 User 在 Thread `rvcamp_01m6rthem2ex9bv2n6cb990jht` sequence 1 给出最初方案，sequence 11
 修订短标签、分组搜索、跨对话恢复和仅文件发送，sequence 13～15 要求沿用现有文件类型图标，
 sequence 17（`694f96a1-8dbe-43ca-9675-d92421ad2def`）要求开启 worktree 开始实现。
-上述内容是本次范围和工作授权；R1 写成后仍须按[上下文治理](../../development/model-context-change-governance.md#二次确认门槛)
-取得对本 revision 的真实二次确认。未确认前只调查、建立 worktree 和编辑提案；不自填确认人或时间，
-不修改实现、Schema 或当前合同。确认后登记 `confirmed_revision: 1`、确认人、时间和真实消息 ID。
+R1 提交并公开说明后，sequence 19 进一步询问文件输入 JSON；已说明正文中的 Markdown file URI 投影、
+草稿身份和 Core 发布字段。User 在 sequence 21（`90e5e2f1-6d68-43b5-a047-fad13517c3df`）回复
+“那你实现吧”，确认按 R1 开始正式实现，满足[上下文治理](../../development/model-context-change-governance.md#二次确认门槛)。
+`confirmed_at` 为收到该确认后登记的 UTC 时间，不冒充用户消息的原始时间戳。实质性范围变更仍需新 revision。
 
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-project-file-references`。
 - Branch：`rovai/project-file-references`。
@@ -225,7 +230,7 @@ type ProjectFileReferenceResolution =
 
 | 轴 | R1 结论 |
 | --- | --- |
-| ComposerDocument | 保持 2，增加封闭文件变体；Composer Draft 合同 v19 → v20 |
+| ComposerDocument | 保持 2，增加封闭文件变体；Composer Draft 合同 v20 → v21 |
 | 文件来源 | rawReference 现有编码保持；新 Project File Reference v1；File Preview v26 → v27 收录目标确认与历史预览路径比较 |
 | 引用／消息发送 | Thread Reference v1 → v2；Camp Message Send v29 → v30，定义分组、文件实际输入及事务外预检 |
 | 对话读取／恢复 | Camp Open Projection v31 → v32；Input History v1 → v2；Message Reedit v1 → v2，收录新变体及明确的文字回填 |
@@ -274,3 +279,12 @@ Web 新旧组合以协议准入失败。新客户端连接缺能力 Host 时不�
 使用新的绝对 fixture 路径，独立 data/userData/Skills/MCP/cache/workspace；不写日常目录，不复制 Session 或
 未脱敏凭据到证据。若本机资格或认证不可用，保留未通过状态，不降级成模拟通过。此冻结矩阵不授权扩大
 通用模型评测或安装、重启日常 App；真实调用按本次任务与该矩阵执行，具体版本在运行前记录。
+
+## 实施证据（2026-11-07）
+
+实际版本为 schema 170／migration 220、Host Web protocol 6，ComposerDocument 2 与上述 Context／Bootstrap 轴保持。
+实现、真实 UI 与确定性门禁结果见[实施记录](project-file-reference-implementation.md#实际实现与验收)，
+实际模型输入哈希与文件工具证据见[脱敏记录](project-file-reference-evidence.json)。
+真实 Runtime 七例中六例通过，R3 的主动追问失败保留；新增指导属于[待确认补充 R2](model-context-change-project-file-reference-clarification.md)，
+未写入本次 Charter，不把本 R1 的确认移用于新规则。当前选文按既有 quote_text 保存可见文本快照，
+不重算旧 quote 或 URI 偏移；本次不改变其字段或版本轴。

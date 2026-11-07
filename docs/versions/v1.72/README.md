@@ -11,12 +11,15 @@ last_updated: 2026-11-07
 
 # Rovai-ai v1.72：Lark 独立渠道
 
-## 项目文件引用（2026-11-07，实施提案）
+## 项目文件引用（2026-11-07，功能分支验收）
 
 已按 User 的正式实施请求建立独立 worktree。公开 Active／普通 Pending 的文件身份、短标签、
 分组搜索、跨对话恢复与仅文件输入以 [R1 独立说明](model-context-change-project-file-reference.md)
-为待确认范围；正式代码、Schema 与当前合同尚未修改。模块、测试归属及后续验证见
-[实施计划](project-file-reference-implementation.md)，离线交互稿不作为生产或真实 Runtime 证据。
+为已确认范围（User sequence 21）。Core 与 Desktop／Web 主链已实现；类型、事务、恢复和真实界面通过，
+真实 Runtime 七例中六例通过。新对话只有文件时未主动追问，按 R3 原标准保留失败；
+[补充 R2](model-context-change-project-file-reference-clarification.md)仍待确认，未修改 Charter。
+模块、逐项验证及已知限制见[实施记录](project-file-reference-implementation.md#实际实现与验收)，
+真实输入哈希、文件读取及失败摘要见[脱敏证据](project-file-reference-evidence.json)。未合入、安装或替换日常 App。
 
 ## 执行 Tab 恢复与空选中回退（2026-11-05）
 

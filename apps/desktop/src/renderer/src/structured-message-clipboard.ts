@@ -1,3 +1,5 @@
+import { validProjectFileAtom } from './project-file-reference'
+import type { ComposerDocument, ProjectFileReferenceAtom } from '@contracts'
 import { isReferenceSegment, projectReference } from './thread-reference'
 import type { StructuredThreadMessageContent } from '@contracts'
 
@@ -20,6 +22,7 @@ export interface StructuredMessageClipboardData {
 }
 
 type PrivateClipboardSegment =
+  | { kind: 'project_file_reference'; atom: ProjectFileReferenceAtom; fallbackText: string }
   | { kind: 'text'; text: string }
   | { kind: 'member_mention'; agentId: string; fallbackText: string }
   | { kind: 'all_members_mention'; fallbackText: '@所有队员' }
@@ -62,6 +65,7 @@ function privateSegmentText(segment: PrivateClipboardSegment): string {
 function isPrivateClipboardSegment(value: unknown): value is PrivateClipboardSegment {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const segment = value as Record<string, unknown>
+  if (segment.kind === 'project_file_reference') return typeof segment.atom === 'object' && segment.atom !== null && validProjectFileAtom(segment.atom as Record<string, unknown>) && segment.fallbackText === (segment.atom as ProjectFileReferenceAtom).labelFallback
   if (segment.kind === 'text') {
     return typeof segment.text === 'string' && segment.text.length <= MAX_SEGMENT_TEXT_LENGTH
   }
@@ -119,6 +123,7 @@ export function createStructuredMessageClipboardData(
   if (!content?.some((segment) => segment.kind !== 'text')) return null
   const memberById = new Map(members.map((member) => [member.agentId, member]))
   const privateContent: PrivateClipboardSegment[] = content.map((segment) => {
+    if (segment.kind === 'project_file_reference') return { kind: 'project_file_reference', atom: { type: 'project_file_reference', threadId: segment.threadId, rawReference: segment.rawReference, labelFallback: segment.labelAtSend }, fallbackText: segment.labelAtSend }
     if (isReferenceSegment(segment)) return { kind: 'text', text: projectReference(segment) }
     if (segment.kind === 'text') return segment
     if (segment.kind === 'all_members_mention') {
@@ -176,6 +181,7 @@ export function readStructuredMessageClipboardContent(
     members.filter((member) => member.mentionable !== false).map((member) => member.agentId)
   )
   return payload.content.map((segment) => {
+    if (segment.kind === 'project_file_reference') return { kind: 'text', text: segment.fallbackText }
     if (segment.kind === 'text') return segment
     if (segment.kind === 'all_members_mention') return { kind: 'all_members_mention' }
     if (segment.kind === 'current_user_mention') {
@@ -186,4 +192,16 @@ export function readStructuredMessageClipboardContent(
     }
     return { kind: 'text', text: segment.fallbackText }
   })
+}
+
+/** Private HTML survives application message-copy APIs that cannot write custom MIME. */
+export function readStructuredMessageComposerDocument(html: string, plainText: string): ComposerDocument | null {
+  const payload = privatePayloadFromHtml(html)
+  if (!payload || payload.content.map(privateSegmentText).join('') !== plainText) return null
+  return { version: 2, segments: payload.content.map(segment => {
+    if (segment.kind === 'project_file_reference') return { kind: 'atom', atom: { ...segment.atom } }
+    if (segment.kind === 'member_mention') return { kind: 'atom', atom: { type: 'member', agentId: segment.agentId, labelFallback: segment.fallbackText.slice(1) } }
+    if (segment.kind === 'all_members_mention') return { kind: 'atom', atom: { type: 'all_members' } }
+    return { kind: 'text', text: privateSegmentText(segment) }
+  }) }
 }

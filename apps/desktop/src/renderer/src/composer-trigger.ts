@@ -27,7 +27,7 @@ export interface ComposerTriggerWindow {
 }
 
 const TRIGGER_BOUNDARY = '[\\s，。！？；：、（(\\[【{「『]'
-const MEMBER_TRIGGER = new RegExp(`(^|${TRIGGER_BOUNDARY})@([\\p{L}\\p{N}_-]*)$`, 'u')
+const MEMBER_TRIGGER = new RegExp(`(^|${TRIGGER_BOUNDARY})@([\\p{L}\\p{N}_.\\/\\\\-]*)$`, 'u')
 const SKILL_TRIGGER = new RegExp(`(^|${TRIGGER_BOUNDARY})/([\\p{L}\\p{N}_-]*)$`, 'u')
 
 /**

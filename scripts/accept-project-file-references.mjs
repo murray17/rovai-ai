@@ -1,0 +1,245 @@
+import { isolatedFileReferenceRuntimeEnvironment, configureFileReferenceRuntime } from './lib/project-file-reference-runtime-env.mjs'
+import assert from 'node:assert/strict'
+import { randomUUID } from 'node:crypto'
+import { cp, mkdir, mkdtemp, realpath, unlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import electron from 'electron'
+import { launchAcceptanceBrowser, pause } from './lib/host-web-browser.mjs'
+
+// Full production Desktop and authenticated Web UI, fresh profiles and immutable copied binaries.
+// A Runtime profile enables member eligibility; no execution is requested here.
+// Real Runtime file-read evidence has a separate opt-in owner.
+const repository = resolve(import.meta.dirname, '..')
+const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-file-reference-ui-')))
+const userData = join(fixture, 'userData'), skills = join(userData, 'managed-skill-library'), binaries = join(fixture, 'bin'), project = join(fixture, 'project')
+for (const dir of [binaries, project, userData, skills, join(project, 'src/auth'), join(project, 'src/billing')]) await mkdir(dir, { recursive: true })
+for (const name of ['rovai-host', 'rovai']) await cp(join(repository, 'target/debug', name), join(binaries, name))
+for (const [path, text] of Object.entries({ 'package.json':'{"name":"file-reference-acceptance"}', 'README.md':'# File reference fixture', 'missing.log':'readable before deletion', 'src/auth/index.ts':'export const auth = true', 'src/billing/index.ts':'export const billing = true', 'src/auth/composer-trigger.test.ts':'export const test = true', 'src/auth/中文 (draft)#1.ts':'export const nonce = "only-on-disk"' })) await writeFile(join(project, path), text)
+console.log(JSON.stringify({ channel:'automatic_acceptance', fixture, userData, skills, mcp:join(userData,'mcp.json'), realRuntime:false }))
+const native = await isolatedFileReferenceRuntimeEnvironment(fixture)
+let desktop, browser
+const checks = [], screenshots = []
+const key = async (surface, key, modifiers = 0) => {
+  const codes = { Enter:13, Escape:27, ArrowDown:40, ArrowUp:38, ArrowLeft:37, ArrowRight:39, Backspace:8, Tab:9, End:35, a:65, c:67, v:86, z:90 }
+  const code = key.length === 1 ? `Key${key.toUpperCase()}` : key
+  const command = modifiers === 4 ? ({ a:'selectAll', c:'copy', v:'paste', z:'undo' })[key] : undefined
+  // CDP needs macOS editor commands explicitly; modifier-only events do not generate copy/paste.
+  await surface.send('Input.dispatchKeyEvent', { type:command ? 'rawKeyDown' : 'keyDown', key, code, modifiers, windowsVirtualKeyCode:codes[key] ?? 0, ...(command ? {commands:[command]} : key === 'Enter' ? {text:'\r'} : {}) })
+  await surface.send('Input.dispatchKeyEvent', { type:'keyUp', key, code, modifiers, windowsVirtualKeyCode:codes[key] ?? 0 })
+}
+try {
+  const env = { ...native.env, ROVAI_ALLOW_ISOLATED_INSTANCE:'1', ROVAI_HOST_BIN:join(binaries,'rovai-host') }; delete env.ELECTRON_RUN_AS_NODE
+  desktop = await launchAcceptanceBrowser({ executable:electron, args:[repository, `--user-data-dir=${userData}`, '--remote-debugging-port=0'], env })
+  await desktop.send('Emulation.setFocusEmulationEnabled', {enabled:true})
+  await desktop.wait('Boolean(window.rovai?.request)')
+  await desktop.wait("window.rovai.supervisor.getSnapshot().then(state => state.fullCoreState === 'ready')", 40000)
+  await desktop.evaluate("(async()=>{const api=window.rovai.onboarding;let state=await api.get();if(state.status==='uninitialized')state=await api.showWelcome();if(state.status==='in_progress'&&state.step==='welcome')state=await api.completeWelcome();if(state.status==='in_progress'&&state.step==='member'){await api.selectMember('luoke');state=await api.completeMemberSelection()}if(state.status==='in_progress'&&state.step==='runtime')state=await api.deferRuntimeSetup();return state.status})()")
+  { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.conversation-jump'))`, 25000) }
+  const call = (method, params = {}) => desktop.evaluate(`window.rovai.request(${JSON.stringify(method)}, ${JSON.stringify(params)}).catch(error=>{throw new Error(JSON.stringify(error))})`)
+  const slowCall = async (method, params) => {
+    await desktop.evaluate(`(()=>{window.__fileAcceptanceRequest={done:false};window.rovai.request(${JSON.stringify(method)},${JSON.stringify(params)}).then(value=>window.__fileAcceptanceRequest={done:true,value}).catch(error=>window.__fileAcceptanceRequest={done:true,error});return true})()`)
+    await desktop.wait('window.__fileAcceptanceRequest.done', 125000)
+    const result = await desktop.evaluate('window.__fileAcceptanceRequest')
+    await desktop.evaluate('delete window.__fileAcceptanceRequest')
+    if(result.error)throw Error(JSON.stringify(result.error)); return result.value
+  }
+  const nativeClick = desktop.click
+  desktop.click = async expression => {
+    await desktop.wait(`(()=>{const element=(${expression});if(!element)return false;const r=element.getBoundingClientRect();return r.width>0&&r.height>0&&element.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`,25000)
+    return nativeClick(expression)
+  }
+  const profiles = await call('members.list')
+  await configureFileReferenceRuntime(slowCall, 'codex-cli', profiles[0].agentId)
+  const create = async (name, path = project) => {
+    const workspace = { projectPath: path }
+    const result = await call('threads.create', { commandId:randomUUID(), name, workspace, memberAgentIds:[profiles[0].agentId], defaultLeadAgentId:profiles[0].agentId, collaborationMode:'peer' })
+    assert.equal(result.status,'applied')
+    await call('thread.messages.send', { commandId:randomUUID(), threadId:result.payload.threadId, content:{version:2,segments:[{kind:'text',text:'UI fixture note; no execution requested.'}]} })
+    return result.payload.threadId
+  }
+  const thread = await create('Project files · UI acceptance')
+  const target = await create('Project files · paste target')
+  const foreignProject = join(fixture,'other-project'); await mkdir(foreignProject); await writeFile(join(foreignProject,'package.json'), '{}')
+  const foreign = await create('Project files · different root', foreignProject)
+  const openThread = async (surface, id) => {
+    await surface.wait("Boolean(document.querySelector('.conversation-jump'))", 25000)
+    await surface.evaluate("window.__fileRefPointers=[];document.addEventListener('pointerdown',event=>window.__fileRefPointers.push({type:event.type,target:event.target.className}),{capture:true});document.addEventListener('click',event=>window.__fileRefPointers.push({type:event.type,target:event.target.className}),{capture:true})")
+    await surface.click("document.querySelector('.conversation-jump')")
+    await surface.wait("Boolean(document.querySelector('.command-palette input'))").catch(async error=>{console.log(JSON.stringify({pointerDebug:await surface.evaluate('window.__fileRefPointers')}));throw error})
+    await surface.send('Input.insertText', {text:id})
+    await surface.wait("Boolean(document.querySelector('.command-palette-item'))", 20000)
+    await surface.click("document.querySelector('.command-palette-item')")
+    await surface.wait(`Boolean(document.querySelector('#camp-message[data-thread-id="${id}"][contenteditable=true]'))`, 20000)
+  }
+  const clear = async surface => {
+    // Focus the editor's empty padding; its center may be an intentionally clickable file atom.
+    const point=await surface.evaluate("(()=>{const r=document.querySelector('#camp-message').getBoundingClientRect();return {x:r.right-3,y:r.bottom-3}})()")
+    for (const type of ['mouseMoved','mousePressed','mouseReleased']) await surface.send('Input.dispatchMouseEvent',{type,...point,button:'left',clickCount:1})
+    await key(surface,'a',4); await key(surface,'Backspace')
+    await surface.wait("!document.querySelector('#camp-message').textContent.trim()")
+    await surface.click("document.querySelector('#camp-message')")
+    await surface.wait("document.activeElement?.id === 'camp-message'")
+    await surface.wait("document.querySelector('#camp-message').contains(getSelection()?.anchorNode)")
+    await surface.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))')
+  }
+  const type = (surface, text) => surface.send('Input.insertText', { text })
+  const choose = async (surface, query, name) => {
+    await surface.evaluate("window.__fileInputEvents=[];for(const name of ['beforeinput','input','compositionstart','compositionend'])document.querySelector('#camp-message').addEventListener(name,event=>window.__fileInputEvents.push({name,data:event.data,inputType:event.inputType}),true)")
+    await type(surface, '@'+query)
+    await surface.wait(`Boolean([...document.querySelectorAll('.ref-options [data-option-kind=file]')].find(node => node.querySelector('strong')?.textContent === ${JSON.stringify(name)}))`)
+    await surface.click(`[...document.querySelectorAll('.ref-options [data-option-kind=file]')].find(node => node.querySelector('strong')?.textContent === ${JSON.stringify(name)})`)
+    await surface.wait(`Boolean([...document.querySelectorAll('#camp-message [data-composer-atom=project_file_reference]')].find(node => node.textContent.includes(${JSON.stringify(name)})))`)
+  }
+  { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.conversation-jump'))`, 25000) }
+  await openThread(desktop, thread)
+  await choose(desktop, 'package.json', 'package.json')
+  assert.equal(await desktop.evaluate("document.querySelector('#camp-message .project-file-reference').textContent"), 'package.json')
+  assert.equal(await desktop.evaluate("document.querySelectorAll('#camp-message .project-file-reference .project-file-icon').length"), 1)
+  assert.equal(await desktop.evaluate("document.activeElement.id"), 'camp-message')
+  checks.push('Desktop chooses a real file, inserts the shared icon and short name, and keeps editing focus')
+  await clear(desktop)
+  await choose(desktop, 'src/auth/index', 'index.ts')
+  await type(desktop, ' compare ')
+  await choose(desktop, 'src/billing/index', 'index.ts')
+  await desktop.wait("[...document.querySelectorAll('#camp-message .reference-token-label')].map(node=>node.textContent).join('|') === 'auth/index.ts|billing/index.ts'")
+  checks.push('same-name files receive the shortest distinguishing directories')
+  const token = "document.querySelector('#camp-message .project-file-reference')"
+  await desktop.click(token)
+  await desktop.wait("Boolean(document.querySelector('.file-preview-code-mirror .cm-content'))")
+  assert.equal(await desktop.evaluate("document.querySelector('.file-preview-code-mirror .cm-content').textContent.includes('auth = true')"), true)
+  checks.push('click opens existing preview with actual file bytes')
+  await desktop.send('Input.dispatchMouseEvent', { type:'mousePressed', ...(await desktop.evaluate(`(()=>{const r=${token}.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)), button:'right', clickCount:1 })
+  await desktop.send('Input.dispatchMouseEvent', { type:'mouseReleased', ...(await desktop.evaluate(`(()=>{const r=${token}.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)), button:'right', clickCount:1 })
+  await desktop.wait("Boolean(document.querySelector('.ref-popover [role=status], .ref-popover-title'))")
+  assert.equal(await desktop.evaluate("document.querySelector('.ref-popover-title').textContent.includes('src/auth/index.ts')"), true)
+  await key(desktop,'Escape')
+  await clear(desktop); await choose(desktop, 'package.json', 'package.json')
+  await desktop.evaluate("window.__fileClipboardEvents=[];for(const name of ['copy','paste'])document.addEventListener(name,event=>queueMicrotask(()=>window.__fileClipboardEvents.push({name,prevented:event.defaultPrevented,types:[...(event.clipboardData?.types??[])],plain:event.clipboardData?.getData('text/plain')})),true)")
+  await key(desktop,'a',4); await key(desktop,'c',4)
+  await openThread(desktop, target); await clear(desktop); await key(desktop,'v',4)
+  await desktop.wait(`(()=>{const draft=JSON.parse(localStorage.getItem('rovai.camp-composer-draft.v1:${target}')??'null');return draft?.content.segments.some(segment=>segment.kind==='atom'&&segment.atom.type==='project_file_reference'&&segment.atom.threadId==='${target}')})()`)
+  checks.push('native same-root cross-thread paste reissues target identity and persists it')
+  await openThread(desktop, foreign); await clear(desktop); await key(desktop,'v',4)
+  await desktop.wait("Boolean(document.querySelector('#camp-message .project-file-reference.is-unavailable'))")
+  checks.push('different-root native paste preserves the atom and marks it for reselection')
+  const started = await desktop.evaluate("window.rovai.hostWeb.start({listen:'127.0.0.1:0',allowInsecureLan:false})")
+  browser = await launchAcceptanceBrowser({ executable:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args:['--headless=new','--no-first-run','--disable-background-networking','--remote-debugging-port=0',`--user-data-dir=${join(fixture,'chrome-profile')}`,'about:blank'] })
+  await browser.send('Emulation.setFocusEmulationEnabled',{enabled:true})
+  await browser.send('Page.navigate',{url:started.origin})
+  await browser.wait("Boolean(document.querySelector('#administrator-token'))")
+  await browser.click("document.querySelector('#administrator-token')"); await type(browser, started.administratorToken)
+  await browser.click("document.querySelector('.web-login-form button[type=submit], form button[type=submit]')")
+  await browser.wait("Boolean(document.querySelector('.app-shell'))", 30000)
+  await openThread(browser, thread); await clear(browser); await choose(browser, 'composer-trigger.test', 'composer-trigger.test.ts')
+  checks.push('authenticated Web uses the same candidate and file atom components')
+  const sendAction="document.querySelector('#camp-message').closest('form').querySelector('.composer-primary-action.is-send')"
+  await browser.wait(`${sendAction}.disabled === false`)
+  checks.push('a valid file alone enables the actual public Composer send action')
+  await browser.click("document.querySelector('.project-files-toggle')")
+  await browser.wait("Boolean(document.querySelector('.project-files-reference[aria-label*=\"package.json\"]'))")
+  await browser.evaluate("document.querySelector('.project-files-reference[aria-label*=\"package.json\"]').focus()")
+  await key(browser,'Enter')
+  await browser.wait("document.querySelectorAll('#camp-message .project-file-reference').length === 2 && document.activeElement?.id === 'camp-message'")
+  checks.push('keyboard file-tree action inserts the same atom beside existing content and returns editing focus')
+  await browser.click("document.querySelector('.project-files-toggle')")
+  await clear(browser); await type(browser,'@')
+  await browser.wait("Boolean(document.querySelector('.ref-filters [role=tab]'))")
+  await key(browser,'Tab')
+  await browser.wait("document.querySelector('.ref-filters [aria-selected=true]')?.textContent === '文件'")
+  await type(browser,'package.json')
+  await browser.wait("Boolean(document.querySelector('.ref-options [data-option-kind=file]'))")
+  await key(browser,'Enter')
+  await browser.wait("Boolean(document.querySelector('#camp-message .project-file-reference'))")
+  await key(browser,'Backspace'); await key(browser,'Backspace'); await key(browser,'Backspace')
+  await browser.wait("!document.querySelector('#camp-message .project-file-reference')")
+  await key(browser,'z',4)
+  await browser.wait("Boolean(document.querySelector('#camp-message .project-file-reference'))")
+  checks.push('Tab filtering, Enter selection, atomic deletion and native Undo preserve file identity')
+  await clear(browser); await choose(browser,'package.json','package.json')
+  await key(browser,'ArrowLeft'); await key(browser,'ArrowLeft')
+  await browser.wait("Boolean(document.querySelector('#camp-message .project-file-reference[data-composer-selected=true]'))")
+  await key(browser,'Enter')
+  await browser.wait("document.querySelector('.file-preview-code-mirror .cm-content')?.textContent.includes('file-reference-acceptance')")
+  checks.push('Enter on a keyboard-selected file opens its preview')
+  const tabPoint=await browser.evaluate("(()=>{const r=document.querySelector('.file-preview-tab-activate[aria-selected=true]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()")
+  for(const type of ['mousePressed','mouseReleased'])await browser.send('Input.dispatchMouseEvent',{type,...tabPoint,button:'right',clickCount:1})
+  await browser.wait("Boolean(document.querySelector('.file-preview-tab-menu'))")
+  const beforePreviewInsert=await browser.evaluate("document.querySelectorAll('#camp-message .project-file-reference').length")
+  await browser.click("[...document.querySelectorAll('.file-preview-tab-menu button')].find(node=>node.textContent==='引用到输入框')")
+  await browser.wait(`document.querySelectorAll('#camp-message .project-file-reference').length === ${beforePreviewInsert+1} && document.activeElement?.id === 'camp-message'`)
+  checks.push('preview reference action preserves existing input and restores editing focus')
+  await clear(browser); await type(browser,'@')
+  await browser.send('Input.imeSetComposition',{text:'中文',selectionStart:2,selectionEnd:2})
+  await pause(170)
+  assert.equal(await browser.evaluate("document.querySelectorAll('#camp-message .project-file-reference, .ref-options [data-option-kind=file]').length"),0)
+  await type(browser,'中文')
+  await browser.wait("Boolean([...document.querySelectorAll('.ref-options [data-option-kind=file]')].find(node=>node.querySelector('strong')?.textContent==='中文 (draft)#1.ts'))")
+  await browser.click("[...document.querySelectorAll('.ref-options [data-option-kind=file]')].find(node=>node.querySelector('strong')?.textContent==='中文 (draft)#1.ts')")
+  await browser.wait("document.querySelector('#camp-message .project-file-reference')?.getAttribute('title') === 'src/auth/中文 (draft)#1.ts'")
+  checks.push('native Chinese composition pauses candidates and commits the complete spaced/hash filename identity')
+  // Publish through Core without execution, then exercise the real historical UI.
+  const sourceDraft=await desktop.evaluate(`JSON.parse(localStorage.getItem('rovai.camp-composer-draft.v1:${thread}')).content`)
+  const published=await call('thread.messages.send',{commandId:randomUUID(),threadId:thread,content:sourceDraft})
+  const messageId=published.commandResult.payload.threadMessageId
+  assert.ok(messageId)
+  await browser.wait(`Boolean(document.querySelector('[data-message-id="${messageId}"] .project-file-reference'))`)
+  await clear(browser); await key(browser,'ArrowUp')
+  await browser.wait("document.querySelector('#camp-message .project-file-reference')?.getAttribute('title') === 'package.json'")
+  checks.push('native input history restores the published file atom and its position')
+  await browser.click(`document.querySelector('[data-message-id="${messageId}"] .project-file-reference')`)
+  await browser.wait("document.querySelector('.file-preview-code-mirror .cm-content')?.textContent.includes('file-reference-acceptance')")
+  await clear(browser)
+  await browser.click(`document.querySelector('[data-message-id="${messageId}"] .message-copy-button')`)
+  await browser.wait(`document.querySelector('[data-message-id="${messageId}"] .message-copy-button')?.getAttribute('aria-label') === '已复制这条消息'`)
+  await browser.click("document.querySelector('#camp-message')"); await key(browser,'v',4)
+  await browser.wait("Boolean(document.querySelector('#camp-message .project-file-reference'))")
+  checks.push('published file renders and previews; whole-message copy restores a structured file atom')
+  await clear(browser); await choose(browser,'missing.log','missing.log')
+  const beforeRejected=await call('threads.open',{threadId:thread,traceId:randomUUID()})
+  await unlink(join(project,'missing.log'))
+  await browser.click(sendAction)
+  await browser.wait("Boolean(document.querySelector('#camp-message .project-file-reference.is-unavailable'))")
+  const afterRejected=await call('threads.open',{threadId:thread,traceId:randomUUID()})
+  assert.equal(afterRejected.messages.length,beforeRejected.messages.length)
+  assert.equal(afterRejected.agentRuns.length,beforeRejected.agentRuns.length)
+  assert.equal(await browser.evaluate("document.querySelector('#camp-message .project-file-reference').textContent"),'missing.log')
+  checks.push('actual send rejects a deleted file, marks its atom, preserves the draft and creates no message or execution')
+  await clear(browser); await choose(browser,'composer-trigger.test','composer-trigger.test.ts')
+  await choose(browser,'package.json','package.json'); await choose(browser,'README.md','README.md')
+  await browser.click("document.querySelector('.file-preview-toggle[aria-label=\"收起文件预览\"]')")
+  await browser.wait("!document.querySelector('.app-toast')",10000)
+  for (const theme of ['day','night']) {
+    await browser.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`)
+    for (const width of [1040,1440,2560,390]) {
+      await browser.send('Emulation.setDeviceMetricsOverride',{width,height:920,deviceScaleFactor:1,mobile:width===390})
+      await pause(100)
+      assert.equal(await browser.evaluate('document.documentElement.scrollWidth <= innerWidth+1'),true,theme+' '+width+' has no horizontal overflow')
+      assert.equal(await browser.evaluate("(()=>{const r=document.querySelector('#camp-message').getBoundingClientRect();return r.width>0&&r.top<innerHeight&&[...document.querySelectorAll('#camp-message .file-reference-extension')].every(node=>node.getBoundingClientRect().width>0)})()"),true,'composer and file extensions remain visible at '+width)
+      const name = `${theme}-${width}.png`; await browser.capture(join(fixture,name)); screenshots.push(name)
+    }
+  }
+  await browser.send('Emulation.setTouchEmulationEnabled',{enabled:true,maxTouchPoints:1})
+  const touchPoint=await browser.evaluate("(()=>{const r=document.querySelector('#camp-message .project-file-reference').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()")
+  await browser.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...touchPoint,id:1}]})
+  await pause(650)
+  await browser.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]})
+  await browser.wait("document.querySelector('.project-file-actions .ref-popover-title')?.textContent.includes('src/auth/composer-trigger.test.ts')")
+  assert.equal(await browser.evaluate("document.querySelector('.file-preview-toggle').getAttribute('aria-label')"),'展开文件预览')
+  assert.equal(await browser.evaluate("[...document.querySelectorAll('.project-file-actions button')].every(node=>node.getBoundingClientRect().height>=44)"),true)
+  await browser.capture(join(fixture,'night-touch-details.png')); screenshots.push('night-touch-details.png')
+  await key(browser,'Escape')
+  checks.push('narrow touch long-press exposes the full path and 44px actions without opening a preview')
+  assert.deepEqual(desktop.errors, []); assert.deepEqual(browser.errors, [])
+  await writeFile(join(fixture,'result.json'), JSON.stringify({checks,screenshots,realRuntime:false},null,2))
+  console.log(JSON.stringify({passed:checks,screenshots,fixture,realRuntime:false}))
+} catch(error) {
+  if (desktop) {
+    const diagnostics = await desktop.evaluate(`({thread:document.querySelector('#camp-message')?.dataset.threadId,html:document.querySelector('#camp-message')?.innerHTML,clipboard:window.__fileClipboardEvents,drafts:Object.fromEntries(Object.entries(localStorage).filter(([key])=>key.startsWith('rovai.camp-composer-draft.v1:')))})`).catch(()=>null)
+    await writeFile(join(fixture,'desktop-diagnostics.json'),JSON.stringify(diagnostics,null,2)).catch(()=>{})
+  }
+  await desktop?.capture(join(fixture,'desktop-failure.png')).catch(()=>{})
+  await browser?.capture(join(fixture,'web-failure.png')).catch(()=>{})
+  if (browser) await writeFile(join(fixture,'web-diagnostics.json'),JSON.stringify(await browser.evaluate("({events:window.__fileInputEvents,selection:getSelection()?.anchorNode?.parentElement?.outerHTML,active:document.activeElement?.outerHTML,thread:document.querySelector('#camp-message')?.dataset.threadId,html:document.querySelector('#camp-message')?.innerHTML,drafts:Object.fromEntries(Object.entries(localStorage).filter(([key])=>key.startsWith('rovai.camp-composer-draft.v1:')))})").catch(()=>null),null,2)).catch(()=>{})
+  throw error
+} finally { await browser?.close(); await desktop?.close(); await native.cleanup() }

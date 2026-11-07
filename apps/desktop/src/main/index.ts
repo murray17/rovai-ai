@@ -197,6 +197,7 @@ console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
 
 const allowedMethods = new Set<CoreMethod>([
   'projectFiles.request',
+  'projectFileReferences.resolve',
   'health.check',
   'preferences.tasks.get',
   'preferences.tasks.set',

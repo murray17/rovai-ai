@@ -88,6 +88,7 @@ export function exportMessageMarkdown(body: string, content: StructuredThreadMes
     if (s.kind === 'member_mention') return literalMarkdown('@' + (names.get(s.agentId) ?? '不可用队员'))
     if (s.kind === 'current_user_mention') return literalMarkdown('@' + currentUser)
     if (s.kind === 'all_members_mention') return '@所有队员'
+    if (s.kind === 'project_file_reference') return literalMarkdown(s.labelAtSend)
     if (s.kind === 'skill_mention') return literalMarkdown('/' + s.nameAtSend)
     if (s.kind === 'thread_reference' || s.kind === 'mission_reference') return literalMarkdown(s.titleAtSend)
     return '> ' + literalMarkdown(s.senderDisplayName + '：' + s.body).replaceAll('\n', '\n> ')

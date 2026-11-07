@@ -483,7 +483,7 @@ function contributionForNode(
   if ($isComposerAtomNode(node)) {
     const type = node.getAtomType()
     return {
-      content: 1,
+      content: type === 'skill' || type === 'project_file_reference' ? 1 : 0,
       explicitRecipient: type === 'member' || type === 'all_members' ? 1 : 0,
       allMembers: type === 'all_members' ? 1 : 0,
       unavailableAtom: bindings.atomIsAvailable(node) ? 0 : 1,

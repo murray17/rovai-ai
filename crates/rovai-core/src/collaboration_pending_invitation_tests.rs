@@ -476,4 +476,126 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
         assert_eq!(replay.result, accepted.result);
         assert_eq!(domain_state(&database, &camp), committed);
     }
+    // Same transaction owner: file-only first input, atomic refusal, frozen projection and replay.
+    {
+        use crate::camp_content::{ComposerAtom, ComposerDocument, ComposerSegment};
+        use crate::project_file_reference::Preflight;
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        let workspace = database.directory().join("file-reference-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let file = workspace.join("input #1.log");
+        std::fs::write(&file, "nonce-before").unwrap();
+        let mut create = CreateThreadCommand::for_test(workspace.to_str().unwrap().into());
+        create.activation_state = ThreadActivationState::Pending;
+        let created = service
+            .create_camp(&mut database, &envelope("files-create", None, create))
+            .unwrap();
+        let camp = created.result.payload["threadId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let binding = crate::project_files::binding(&database, &camp).unwrap();
+        let (_, identity) = crate::project_files::root(&binding).unwrap();
+        let raw = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(identity, "input #1.log")).unwrap());
+        let atom = ComposerSegment::Atom {
+            atom: ComposerAtom::ProjectFileReference {
+                thread_id: camp.clone(),
+                raw_reference: raw.clone(),
+                label_fallback: "untrusted display only".into(),
+            },
+        };
+        let mut send = message(&camp, &["agent_2"], false);
+        send.content = ComposerDocument {
+            version: 2,
+            segments: vec![
+                ComposerSegment::Atom {
+                    atom: ComposerAtom::Member {
+                        agent_id: "agent_2".into(),
+                        label_fallback: None,
+                    },
+                },
+                atom.clone(),
+                atom,
+            ],
+        };
+        let command = envelope("files-first", Some(&camp), send);
+        let initial = domain_state(&database, &camp);
+        std::fs::remove_file(&file).unwrap();
+        let missing = Preflight::prepare(
+            camp.clone(),
+            &command.payload.content,
+            Some(binding.clone()),
+        );
+        let refused = service
+            .send_user_camp_message_with_files(&mut database, &command, Some(&missing))
+            .unwrap();
+        assert_eq!(refused.result.code, "project_file_reference_unavailable");
+        assert_eq!(refused.result.payload["segmentIndex"], 1);
+        assert_eq!(refused.result.payload["reason"], "file_missing");
+        assert_eq!(domain_state(&database, &camp), initial);
+        std::fs::write(&file, "nonce-restored").unwrap();
+        let valid = Preflight::prepare(
+            camp.clone(),
+            &command.payload.content,
+            Some(binding.clone()),
+        );
+        let replay = service
+            .send_user_camp_message_with_files(&mut database, &command, Some(&valid))
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, refused.result);
+        let mut fresh = command.clone();
+        fresh.command_id = "files-new-command".into();
+        let accepted = service
+            .send_user_camp_message_with_files(&mut database, &fresh, Some(&valid))
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        let message_id = accepted.result.payload["threadMessageId"].as_str().unwrap();
+        let (body, json): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT body, structured_content_json FROM camp_message WHERE id=?1",
+                [message_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(body.matches("input%20%231.log").count(), 2);
+        assert!(!body.contains("untrusted"));
+        let published: Vec<Segment> = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            published
+                .iter()
+                .filter(|s| matches!(s, Segment::ProjectFileReference { .. }))
+                .count(),
+            2
+        );
+        std::fs::remove_file(&file).unwrap();
+        let committed = domain_state(&database, &camp);
+        let replay = service
+            .send_user_camp_message(&mut database, &fresh)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result, accepted.result);
+        assert_eq!(domain_state(&database, &camp), committed);
+        assert_eq!(
+            crate::camp_content::render_agent_plain_text(database.connection(), &published)
+                .unwrap(),
+            body
+        );
+        // A binding mutation after preflight is rejected inside the transaction, before any publication.
+        database
+            .connection()
+            .execute(
+                "UPDATE camp SET project_path=?1 WHERE id=?2",
+                params![workspace.join("different-root").to_str(), camp],
+            )
+            .unwrap();
+        let before = domain_state(&database, &camp);
+        fresh.command_id = "files-rebound".into();
+        let refused = service
+            .send_user_camp_message_with_files(&mut database, &fresh, Some(&valid))
+            .unwrap();
+        assert_eq!(refused.result.payload["reason"], "root_changed");
+        assert_eq!(domain_state(&database, &camp), before);
+    }
 }
