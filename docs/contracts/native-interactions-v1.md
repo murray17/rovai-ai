@@ -4,7 +4,7 @@ name: Native Interactions
 version: v1
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-06
+last_updated: 2026-11-07
 ---
 
 # Native Interactions v1
@@ -64,7 +64,8 @@ Core 检查 Thread/Run、执行 epoch、停止与终态、Host/Session owner、�
 
 登记请求后事件读取继续。用户等待不结束运行，也不阻塞其他 Runtime 消息或停止入口。
 Pi 原生回复没有 ACK；写入 JSONL（含换行及 flush）成功即返回 `sent` 或 `skipped`。
-这只表示已发送，不表示插件采纳或任务成功。跳过的界面反馈是“已跳过，未提交回答”，不承诺后续继续。
+这只表示已发送，不表示插件采纳或任务成功。跳过使用原生取消回包，不承诺后续继续；Desktop/Web 的收尾反馈
+由[会话待处理区](../ui/components/conversation-workspace.md)拥有。
 
 ## 期限、失败与恢复
 

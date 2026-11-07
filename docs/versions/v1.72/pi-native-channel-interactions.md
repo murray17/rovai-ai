@@ -2,7 +2,7 @@
 document_type: implementation-record
 version: v1.72
 status: in-progress
-last_updated: 2026-11-06
+last_updated: 2026-11-07
 ---
 
 # Pi 原生问答渠道桥接
@@ -122,3 +122,14 @@ User 授权向三个渠道测试推送。使用各 Provider 已发布的爱丽�
 
 `native-interaction-cards.test.ts` 覆盖短文字、自带编号、重复文案、中文、emoji、原始 optionId 与数据不变，以及整卡回退。
 该文件原有 9 条测试、`pnpm typecheck` 与 `pnpm build:desktop` 通过；未扩大验收矩阵。
+
+## 原生问答收尾精简（2026-11-07）
+
+Desktop/Web 发送成功、跳过或收到已处理结果后直接移出待处理列表，删除重复的全局成功 Toast。
+删除按同一 Run 追踪新问题并自动切换/聚焦的分支；新题按既有顺序追加，不越过当前其他待答请求。
+保留卡片内提交失败/结果未知反馈、草稿与提交防重；迟到提交发现过期或失效时仍说明原因。
+Pi 取消回包、运行归属和渠道路径未变，格式及 confirm 取消返回 false 的原生边界见
+[Native Interactions v1](../../contracts/native-interactions-v1.md#期限失败与恢复)。
+
+复用既有 `test:approval-dock` owner，覆盖成功/跳过/已处理均不弹 Toast，以及同 Run 新请求不抢占其他待答项。
+该 Electron UI 回归及 `pnpm typecheck` 通过；测试使用独立 userData，不启动 Core/Runtime。

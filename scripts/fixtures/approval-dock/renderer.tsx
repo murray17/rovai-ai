@@ -35,7 +35,8 @@ const initial: ActionApprovalView[] = [1, 2, 3].map(index => ({
     consequence: 'Internal consequence must not be displayed', nativeResponseDigest: option.optionId }))
 }))
 const nativeResponses: Array<{ id: string; answer: NativeInteractionAnswer }> = []
-let nativeMode: 'ok' | 'failed' | 'not-sent' | 'unknown' | 'error' | 'defer' = 'ok'
+const nativeNotices: string[] = []
+let nativeMode: 'ok' | 'handled' | 'failed' | 'not-sent' | 'unknown' | 'error' | 'defer' = 'ok'
 let nativeFinish: () => void = () => undefined
 let nativeScenario: (requests: NativeInteractionView[], withApprovals?: boolean, conversationId?: string | null) => void
 let appendNative: (request: NativeInteractionView) => void
@@ -61,7 +62,7 @@ function Fixture() {
   const [interactions, setInteractions] = useState<NativeInteractionView[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [serial, setSerial] = useState(0)
-  nativeScenario = (requests, withApprovals = false, conversation = null) => { nativeResponses.length = 0; nativeMode = 'ok'; setApprovals(withApprovals ? [initial[0]] : []); setInteractions(requests); setConversationId(conversation); setBusy(false); setFocus(null); setSerial(++renderSerial) }
+  nativeScenario = (requests, withApprovals = false, conversation = null) => { nativeResponses.length = 0; nativeNotices.length = 0; nativeMode = 'ok'; setApprovals(withApprovals ? [initial[0]] : []); setInteractions(requests); setConversationId(conversation); setBusy(false); setFocus(null); setSerial(++renderSerial) }
   appendNative = request => setInteractions(current => [...current, request])
   const [busy, setBusy] = useState(false)
   const [focus, setFocus] = useState<{ id: string | null; serial: number } | null>(null)
@@ -105,7 +106,7 @@ function Fixture() {
       </section>
       <div className="conversation-controls">
         {(approvals.length > 0 || interactions.length > 0) && <ApprovalDock key={serial} approvals={approvals} profileById={new Map()} busy={busy}
-          interactions={interactions} threadId="native-fixture" conversationId={conversationId}
+          interactions={interactions} threadId="native-fixture" conversationId={conversationId} onNotice={message => { nativeNotices.push(message) }}
           agentRuns={[{ id: 'run-native', agentId: 'native-one' }, { id: 'run-native-two', agentId: 'native-two' }]}
           onRespond={async (request, answer): Promise<NativeInteractionResult> => {
             if (nativeMode === 'not-sent') throw Object.assign(new Error('Rejected before dispatch'), { requestNotSent: true })
@@ -115,7 +116,7 @@ function Fixture() {
             if (nativeMode === 'error') throw new Error('Response lost after dispatch')
             if (nativeMode === 'defer') await new Promise<void>(resolve => { nativeFinish = resolve })
             setInteractions(current => current.filter(item => item.id !== request.id))
-            return { status: answer.kind === 'skip' ? 'skipped' : 'sent' }
+            return { status: answer.kind === 'skip' ? 'skipped' : 'sent', alreadyHandled: nativeMode === 'handled' }
           }}
           containerRef={dockRef} focusRequest={focus?.serial ?? null} focusApprovalId={focus?.id ?? null}
           // Header requests can remain set after presentation without a notification waiter.
@@ -152,7 +153,7 @@ Object.assign(window, { approvalTest: {
     const buttons = [...document.querySelectorAll<HTMLButtonElement>('.runtime-option')]
     const bounds = (selector: string) => document.querySelector(selector)?.getBoundingClientRect().toJSON()
     return {
-      id: summary?.dataset.approvalSummary, requests, presented, nativeResponses,
+      id: summary?.dataset.approvalSummary, requests, presented, nativeResponses, nativeNotices,
       native: {
         title: document.querySelector('.pending-content h3')?.textContent,
         text: document.querySelector<HTMLInputElement | HTMLTextAreaElement>('.native-question-input')?.value,

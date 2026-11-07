@@ -9473,7 +9473,6 @@ export function ApprovalDock({
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [now, setNow] = useState(Date.now)
   const inFlight = useRef(new Set<string>())
-  const continueRun = useRef<string | null>(null)
   const contentId = useId()
   const presentedFocusRequest = useRef<number | null>(null)
   const arrival = useRef(new Map<string, number>())
@@ -9492,7 +9491,7 @@ export function ApprovalDock({
   const question = interaction?.questions[0]
   const agentId = approval?.agentId ?? agentRuns.find(run => run.id === interaction?.agentRunId)?.agentId ?? ''
   const sourceLabel = `${profileById.get(agentId)?.displayName ?? agentId} · ${approval ? runtimeAdapterLabel(approval.adapterKind) : 'Pi'}`
-  const previous = useRef<{ ids: string[]; active: string | null }>({ ids: [], active: null })
+  const previousActive = useRef<string | null>(null)
 
   useEffect(() => {
     if (!interactions.some(request => request.expiresAt !== null)) return
@@ -9505,19 +9504,13 @@ export function ApprovalDock({
     ).map(request => request.id)))
   }, [draftScope, interactions, completed, now])
   useEffect(() => {
-    const old = previous.current
+    const old = previousActive.current
     const ids = pending.map(request => request.id)
-    const continuation = continueRun.current && pending.find(request => !old.ids.includes(request.id)
-      && request.interaction?.agentRunId === continueRun.current)
-    if (continuation && (document.activeElement === document.body || containerRef.current?.contains(document.activeElement))) {
-      setActiveId(continuation.id); continueRun.current = null
-      requestAnimationFrame(() => containerRef.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>('.native-question-input')?.focus())
-    }
-    else if (!ids.includes(activeId ?? '') && item) setActiveId(item.id)
-    previous.current = { ids, active: item?.id ?? null }
+    if (!ids.includes(activeId ?? '') && item) setActiveId(item.id)
+    previousActive.current = item?.id ?? null
     setExpandedReasonIds(expanded => new Set([...expanded].filter(id => ids.includes(id))))
     // Appending another member's question never changes the current request or focus.
-    if (old.active && !ids.includes(old.active) && item && (document.activeElement === document.body || containerRef.current?.contains(document.activeElement))) {
+    if (old && !ids.includes(old) && item && (document.activeElement === document.body || containerRef.current?.contains(document.activeElement))) {
       containerRef.current?.querySelector<HTMLElement>('[data-approval-summary]')?.focus({ preventScroll: true })
     }
   }, [pending.map(request => request.id).join('|'), activeId, item?.id, containerRef])
@@ -9544,7 +9537,6 @@ export function ApprovalDock({
   const showReason = approval && Boolean(approval.reason?.trim())
     && normalizedApprovalText(approval.reason ?? '') !== normalizedApprovalText(approval.actionSummary)
   const changeRequest = (index: number): void => {
-    continueRun.current = null
     if (pending[index]) setActiveId(pending[index].id)
   }
   const submit = async (answer: NativeInteractionAnswer | string): Promise<void> => {
@@ -9562,10 +9554,9 @@ export function ApprovalDock({
           setErrors(current => ({ ...current, [item.id]: t('提交结果待核对，内容已保留') }))
           return
         }
-        if (result.status === 'sent' || result.status === 'skipped') {
-          continueRun.current = interaction.agentRunId
-          onNotice?.(t(result.alreadyHandled ? '请求已处理' : result.status === 'skipped' ? '已跳过，未提交回答' : '已发送'))
-        } else onNotice?.(t(result.status === 'expired' ? '回答期限已过' : '请求已失效'))
+        if (result.status === 'expired' || result.status === 'unavailable') {
+          onNotice?.(t(result.status === 'expired' ? '回答期限已过' : '请求已失效'))
+        }
         setCompleted(current => new Set(current).add(item.id))
       }
     } catch (error) {
@@ -9609,7 +9600,7 @@ export function ApprovalDock({
             data-option-id={option.optionId} onClick={() => void submit(option.optionId)} disabled={requestBusy || !connected}
             title={label} aria-label={label}>{label}</button>
         })}{approval.options.length === 0 && <p className="approval-option-error"><UiText zh="当前智能体未提供可无损回传的原生选项，请求无法提交。" /></p>}</div>
-      </> : interaction && question && <div onFocusCapture={() => { continueRun.current = null }} onPointerDownCapture={() => { continueRun.current = null }}>
+      </> : interaction && question && <div>
         <div className="pending-owner"><MemberAvatar agentId={agentId} avatarRef={profileById.get(agentId)?.avatarRef ?? null}
           displayName={profileById.get(agentId)?.displayName ?? agentId} size="execution" decorative />{sourceLabel}</div>
         <h3 id={`native-question-${interaction.id}`}>{question.title}</h3>
