@@ -3,10 +3,17 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-05
+last_updated: 2026-11-07
 ---
 
 # v1.72 实施与验收
+
+## 项目文件引用（2026-11-07，准备实施）
+
+独立分支 `rovai/project-file-references` 已从 `55a83f8` 建立，并核对 origin/main 相同。
+[R1 模型输入说明](model-context-change-project-file-reference.md)等待二次确认；当前完成调查和提案，
+未修改正式实现。独立[实施计划](project-file-reference-implementation.md)拥有工作目录、模块、
+验证 owner、冻结真实任务与后续结果，P1 优先完成，P2 与契约同步收敛。
 
 ## 执行 Tab 恢复与空选中回退（2026-11-05）
 
