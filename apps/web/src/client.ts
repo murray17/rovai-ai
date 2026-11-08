@@ -7,7 +7,7 @@ import { newCommandId } from '../../desktop/src/shared/command-id'
 import { recoverLocalThreadSend } from '../../desktop/src/renderer/src/camp-composer-send-recovery'
 import type { ThreadReadInvalidation, ChannelKind, ChannelSettingsSnapshot, FilePreviewBinaryContent, FilePreviewOperationResult, LocalAttachmentSourceView } from '@contracts'
 
-const HOST_WEB_PROTOCOL_VERSION = 6
+const HOST_WEB_PROTOCOL_VERSION = 7
 
 const transferErrors: Record<string, string> = {
   upload_too_large: '单个上传文件不能超过 30 MiB（31,457,280 字节）。',

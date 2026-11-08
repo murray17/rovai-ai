@@ -68,7 +68,8 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
-    c.execute_batch("DELETE FROM schema_migration WHERE version=221; UPDATE rovai_data_contract SET projection_schema_version=170 WHERE projection_schema_version=171;").unwrap();
+    // Retire both additive reference receipts before rebuilding the older source.
+    c.execute_batch("DELETE FROM schema_migration WHERE version IN (221,222); UPDATE rovai_data_contract SET projection_schema_version=170 WHERE projection_schema_version IN (171,172);").unwrap();
     let applied = c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=220)",

@@ -111,7 +111,7 @@ All Members 候选继续显示广播说明，范围仍是发送时 Thread 中的
 - Escape：候选/链接菜单优先；输入历史浏览时恢复原结构化草稿并消费事件，其余沿用 Atom 激活态关闭；
 - Arrow Up/Down：Typeahead 优先；会话输入在文档绝对起点用 Up 回看，浏览中在绝对终点用 Down 前进。
   回看置于起点，前进置于终点；Down 越过最新项恢复草稿。有选区、修饰键或 IME 时保持原行为，
-  非浏览中的 Down 不接管。见 [Input History v2](../../contracts/input-history-v2.md)；
+  非浏览中的 Down 不接管。见 [Input History v2](../../contracts/input-history-v3.md)；
   Mission 等非会话编辑器保持原行为；
 - Backspace/Delete：普通文本遵循原生 Lexical 行为，Atom 整体删除；绝对起点保留 `onBackspaceAtStart`；
 - Undo/Redo：覆盖输入、删除、粘贴、换行、Atom 插入/删除和选区替换；Catalog 与保存状态不进入历史。
@@ -178,7 +178,7 @@ Atom 的内容优先按结构化粘贴。仅含文字的内部文档使用文档
 移除未进入发送流程的生成附件，先成功保存移除后的本机草稿，再等待异步删除并清登记。曾进入发送流程的
 文件只移除引用，保留到会话删除。清理失败用轻提示说明，允许继续编辑；外部文件和发送成功后的源文件不删除。
 发送成功后先保存新草稿，再释放旧登记，保存失败保留恢复能力。普通弹窗零消息 Active 不按 Pending 清理；
-一键 Pending 的附件仍在时不是空草稿。存储、保护和失败边界见 [Composer Draft v20](../../contracts/camp-composer-draft-v21.md)。
+一键 Pending 的附件仍在时不是空草稿。存储、保护和失败边界见 [Composer Draft v20](../../contracts/camp-composer-draft-v22.md)。
 
 不得从纯文本 `@Alice`、`/review-code` 或外部 HTML 的 `data-reference-id`、`data-atom-type`、`data-skill-id`
 猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。
@@ -227,7 +227,7 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 
 | 层级 | 权威入口 |
 | --- | --- |
-| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v21](../../contracts/camp-composer-draft-v21.md)与[Pending Camp Activation v5](../../contracts/pending-camp-activation-v5.md) |
+| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v21](../../contracts/camp-composer-draft-v22.md)与[Pending Camp Activation v5](../../contracts/pending-camp-activation-v5.md) |
 | Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
 | Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
 | Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |
@@ -240,8 +240,8 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 
 项目对话的公开 `@` 面板为队员／文件／对话／使命四个 30px 标签；快速对话只显示队员／对话／使命。
 不显示“全部”、额外标题或键盘操作说明。
-成员保持既有头像、角色、Runtime 和邀请图标。裸 `@` 优先当前队员；非空查询独立检索各来源并按组显示，
-名称或路径明确匹配时文件优先。成员命中或单一来源失败都不隐藏其他来源。手动类别固定本次触发，
+成员保持既有头像、角色、Runtime 和邀请图标。裸 `@` 优先当前队员；各来源独立检索，每次只显示当前 Tab，
+路径或扩展名查询优先文件。单一来源失败不妨碍切换其他类别。手动类别固定本次触发，
 异步结果不得改变已移动到的候选身份。文件类别仅在 Host 能力支持且当前对话关联项目目录时提供；
 快速对话隐藏文件类别，鼠标和键盘分类导航使用同一组可见类别。已关联项目但根不可用时保留文件入口并反馈重试，
 完整空结果与不完整结果分别处理。
@@ -278,4 +278,12 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 对话／使命整条复制保留 Markdown 定位链接；文件整条复制同时携带结构化身份和完整可读路径。
 选文沿用当前 quote_text 的可见文字快照，不夹带 URI、不写入视觉省略号，也不重算旧快照或 URI 偏移。
 不可用草稿保留移除/重选入口。手动点击或 Tab 切类别固定本次查询，搜索响应不覆盖选择。
-私聊和使命描述不提供引用候选。内容与事务权威见 [Thread Reference v2](../../contracts/thread-reference-v2.md)。
+私聊和使命描述不提供引用候选。内容与事务权威见 [Thread Reference v2](../../contracts/thread-reference-v3.md)。
+
+## 项目文件与目录候选
+
+四个 @ Tab 各自显示候选，不合并为跨类别分组；手动类别在本次触发期间保持。候选使用类型图标、
+名称、灰色父目录的同一行连续左排，根层没有父目录说明。桌面面板宽 480px，受 Composer 与视口限制；
+文件/目录桌面行高 32px，Web 手机至少 44px。文件名、扩展及 test/spec 差异优先保留。
+目录候选、草稿和已发送短标签都不追加 /；完整定位与身份保存在原字段中。目录激活定位现有文件树，
+文件激活继续预览；选择本身不自动预览、不额外确认、不人为延时。

@@ -10,7 +10,7 @@ last_updated: 2026-10-23
 
 公开 Thread Composer 的内容权威是客户端本机、按 Thread 隔离的轻量状态。Active 与普通一键 Pending
 都保存本机快照；Core 仅为普通 Pending 保存客户端 presence，拥有侧栏可见性与清理保护。合同见
-[Camp Composer Draft v21](../contracts/camp-composer-draft-v21.md)。Single Chat 的私有 Draft/Pending 不在本架构范围。
+[Camp Composer Draft v21](../contracts/camp-composer-draft-v22.md)。Single Chat 的私有 Draft/Pending 不在本架构范围。
 
 ## 组件边界
 
@@ -67,7 +67,7 @@ Thread+messageId 验证。附件缩略图、应用内预览、系统打开与 re
 
 公共 Thread 与 Single Chat 共用同步导航器；首次 ↑ 从现有消息集合提取独立的本轮内容数组，
 仅保留下标和原草稿/选区。公共数据来自 `visibleThreadMessages`，单聊来自当前快照的正式消息与
-活动 Pending。范围、顺序与筛选规则见 [Input History v2](../contracts/input-history-v2.md)。
+活动 Pending。范围、顺序与筛选规则见 [Input History v2](../contracts/input-history-v3.md)。
 输入历史不拥有数据库读取、消息加载、跨会话缓存或成功回执记录。
 
 Lexical adapter 保留原 EditorState，预览只替换显示与有效输入；`ComposerDraftSync` 保存/重试仍引用
@@ -99,7 +99,7 @@ Web 复用上传回执，不调用 Electron Main。Host 接收时直写同一 Th
 
 普通弹窗的零消息 Active 不因清空而丢弃；一键 Pending 继续使用既有 presence、离开与启动清理，并补齐
 输出目录删除。首次发布后身份与路径不变。不建立新的草稿事务、发送对账或垃圾回收框架；
-精确接口与负例由 [v20](../contracts/camp-composer-draft-v21.md) 拥有。
+精确接口与负例由 [v20](../contracts/camp-composer-draft-v22.md) 拥有。
 
 ## 撤回与短期重新编辑
 
@@ -107,7 +107,7 @@ Web 复用上传回执，不调用 Electron Main。Host 接收时直写同一 Th
 并擦除受控原文；撤回本身不会把内容放回 Composer。首次 claim 后撤回资格永久关闭。
 输入历史不另行监听撤回；本轮已提取内容仍可由 User 回填，下一轮依据最新消息数据，重新发送算新提交。
 
-[Message Reedit v2](../contracts/message-reedit-v2.md) 另行拥有两分钟内的客户端文字回填。
+[Message Reedit v2](../contracts/message-reedit-v3.md) 另行拥有两分钟内的客户端文字回填。
 `MessageReeditStore` 在独立 localStorage 命名空间保存有界 pending / ready 副本，统一读取校验和应用级清理；
 `MessageWithdrawal` 只适配原撤回命令与回放，将命令结果、副本写入、列表刷新分开处理。
 `ThreadWorkspace` 负责蓝色无下划线入口及已有草稿的替换确认，最终回填前再次读取有效副本。
@@ -130,7 +130,7 @@ Migration 163 一次性删除旧 **Core** public Composer Draft、未公开 Pend
 
 ## 对话与使命参考
 
-[Thread Reference v2](../contracts/thread-reference-v2.md) 将本机引用选择、用户目录读取和正式发布分开。
+[Thread Reference v2](../contracts/thread-reference-v3.md) 将本机引用选择、用户目录读取和正式发布分开。
 `thread_reference` 模块拥有 live 目录、目标校验及首次标题捕获；发布网关先完成命令回放判定，再在原事务
 中捕获标题并沿既有成员语义创建消息和 Delivery。不存在另一个引用清单或背景摘要 owner。
 

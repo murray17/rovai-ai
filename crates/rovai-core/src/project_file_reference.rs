@@ -2,8 +2,8 @@
 //! A locator is not an authorization token. Every operation starts from the target Thread binding.
 use crate::{
     camp_content::{
-        ComposerAtom, ComposerDocument, ComposerSegment, StructuredThreadMessageContent,
-        StructuredThreadMessageSegment,
+        ComposerAtom, ComposerDocument, ComposerSegment, ProjectFileTargetKind,
+        StructuredThreadMessageContent, StructuredThreadMessageSegment,
     },
     command::CommandHandlerResult,
     project_files::{self, Binding},
@@ -33,6 +33,9 @@ pub fn validate_locator(raw: &str, label: &str) -> Result<()> {
 
 /// Shared Markdown projection. The path is already canonicalized by Host; URL performs platform encoding.
 pub fn render_link(path: &str, label: &str) -> Result<String> {
+    render_target_link(path, label, ProjectFileTargetKind::File)
+}
+pub fn render_target_link(path: &str, label: &str, kind: ProjectFileTargetKind) -> Result<String> {
     // Windows canonicalize() may freeze a verbatim drive or UNC prefix.
     // The stored path stays untouched; file URIs use its ordinary path spelling.
     let unc;
@@ -42,7 +45,7 @@ pub fn render_link(path: &str, label: &str) -> Result<String> {
     } else {
         path.strip_prefix(r"\\?\").unwrap_or(path)
     };
-    let uri = if let Ok(uri) = url::Url::from_file_path(path) {
+    let mut uri = if let Ok(uri) = url::Url::from_file_path(path) {
         uri
     } else {
         // Preserve frozen Windows path semantics when another host OS reads history.
@@ -65,6 +68,15 @@ pub fn render_link(path: &str, label: &str) -> Result<String> {
         }
         uri
     };
+    if kind == ProjectFileTargetKind::Directory && !uri.path().ends_with('/') {
+        uri.set_path(&format!("{}/", uri.path()));
+    }
+    let directory_label = format!("{}/", label.trim_end_matches('/'));
+    let label = if kind == ProjectFileTargetKind::Directory {
+        directory_label.as_str()
+    } else {
+        label
+    };
     let label: String = label
         .chars()
         .flat_map(|c| {
@@ -84,14 +96,22 @@ pub fn render_link(path: &str, label: &str) -> Result<String> {
     ))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Resolved {
     pub(crate) raw: String,
     pub(crate) path: String,
     pub(crate) label: String,
+    pub(crate) target_kind: ProjectFileTargetKind,
 }
 
 pub(crate) fn resolve(binding: &Binding, raw: &str) -> Result<Resolved> {
+    resolve_target(binding, raw, ProjectFileTargetKind::File)
+}
+pub(crate) fn resolve_target(
+    binding: &Binding,
+    raw: &str,
+    target_kind: ProjectFileTargetKind,
+) -> Result<Resolved> {
     ensure!(!raw.is_empty() && raw.len() <= 16_384, "invalid_reference");
     let decoded = URL_SAFE_NO_PAD.decode(raw).context("invalid_reference")?;
     let (expected, relative): (String, String) =
@@ -114,12 +134,30 @@ pub(crate) fn resolve(binding: &Binding, raw: &str) -> Result<Resolved> {
         })
     })?;
     ensure!(path.starts_with(&root), "outside_root");
-    ensure!(path.is_file(), "not_regular_file");
-    fs::File::open(&path).context("unreadable")?;
+    ensure!(path.is_file() || path.is_dir(), "not_regular_file");
+    match target_kind {
+        ProjectFileTargetKind::File => {
+            ensure!(path.is_file(), "target_kind_changed");
+            fs::File::open(&path).context("unreadable")?;
+        }
+        ProjectFileTargetKind::Directory => {
+            ensure!(path.is_dir(), "target_kind_changed");
+            let mut candidate = root.clone();
+            for component in Path::new(&relative).components() {
+                candidate.push(component);
+                ensure!(
+                    !fs::symlink_metadata(&candidate)?.file_type().is_symlink(),
+                    "outside_root"
+                );
+            }
+            fs::read_dir(&path).context("unreadable")?;
+        }
+    }
     Ok(Resolved {
         raw: raw.into(),
         path: path.to_str().context("invalid_reference")?.into(),
         label: relative,
+        target_kind,
     })
 }
 fn reason(error: &anyhow::Error) -> &str {
@@ -131,6 +169,7 @@ fn reason(error: &anyhow::Error) -> &str {
         "file_missing",
         "outside_root",
         "not_regular_file",
+        "target_kind_changed",
         "unreadable",
     ]
     .into_iter()
@@ -174,6 +213,7 @@ impl Preflight {
                     ComposerAtom::ProjectFileReference {
                         thread_id,
                         raw_reference,
+                        target_kind,
                         ..
                     },
             } = segment
@@ -182,12 +222,15 @@ impl Preflight {
             };
             let result = if thread_id != &proof.thread {
                 Err(anyhow::anyhow!("thread_mismatch"))
-            } else if proof.files.contains_key(raw_reference) {
-                continue;
+            } else if let Some(file) = proof.files.get(raw_reference) {
+                if file.target_kind == *target_kind {
+                    continue;
+                }
+                Err(anyhow::anyhow!("target_kind_changed"))
             } else if proof.files.len() >= MAX_FILES {
                 proof.error = Some(CommandHandlerResult::rejected(
                     "camp_message.invalid_content",
-                    json!({"message":"每条消息最多引用 32 个不同文件", "segmentIndex":index}),
+                    json!({"message":"每条消息最多引用 32 个不同文件或目录", "segmentIndex":index}),
                 ));
                 break;
             } else {
@@ -195,7 +238,7 @@ impl Preflight {
                     .binding
                     .as_ref()
                     .context("root_unavailable")
-                    .and_then(|binding| resolve(binding, raw_reference))
+                    .and_then(|binding| resolve_target(binding, raw_reference, *target_kind))
             };
             match result {
                 Ok(file) => {
@@ -260,6 +303,7 @@ impl Preflight {
                     raw_reference: file.raw.clone(),
                     path_at_send: file.path.clone(),
                     label_at_send: file.label.clone(),
+                    target_kind: file.target_kind,
                 });
             } else {
                 content.extend(crate::camp_content::composer_document_to_content(
@@ -291,6 +335,8 @@ pub struct ResolveRequest {
 pub struct Reference {
     pub thread_id: String,
     pub raw_reference: String,
+    #[serde(default)]
+    pub target_kind: ProjectFileTargetKind,
 }
 
 /// Take this metadata snapshot under the short database lock, then resolve on a blocking worker.
@@ -316,10 +362,10 @@ pub fn bindings(
 pub fn resolve_references(request: ResolveRequest, bindings: HashMap<String, Binding>) -> Value {
     let mut cache = HashMap::new();
     let values: Vec<Value> = request.references.iter().map(|reference| {
-        cache.entry((reference.thread_id.clone(), reference.raw_reference.clone())).or_insert_with(|| {
+        cache.entry((reference.thread_id.clone(), reference.raw_reference.clone(), reference.target_kind)).or_insert_with(|| {
             let Some(target) = bindings.get(&request.thread_id) else { return json!({"status":"unavailable", "reason":"root_unavailable"}) };
             let Some(source) = bindings.get(&reference.thread_id) else { return json!({"status":"needs_reselect", "reason":"source_unavailable"}) };
-            let file = match resolve(source, &reference.raw_reference) {
+            let file = match resolve_target(source, &reference.raw_reference, reference.target_kind) {
                 Ok(file) => file,
                 Err(error) => return json!({"status":"unavailable", "reason":reason(&error)}),
             };
@@ -327,10 +373,12 @@ pub fn resolve_references(request: ResolveRequest, bindings: HashMap<String, Bin
                 if !project_files::same_effective_root(source, target).unwrap_or(false) { return json!({"status":"needs_reselect", "reason":"root_mismatch"}) }
                 let Ok((_, identity)) = project_files::root(target) else { return json!({"status":"unavailable", "reason":"root_unavailable"}) };
                 let raw = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(identity, &file.label)).expect("locator serialization"));
-                if let Err(error) = resolve(target, &raw) { return json!({"status":"unavailable", "reason":reason(&error)}) }
+                if let Err(error) = resolve_target(target, &raw, reference.target_kind) { return json!({"status":"unavailable", "reason":reason(&error)}) }
                 raw
             };
-            json!({"status":"available", "reference":{"type":"project_file_reference", "threadId":request.thread_id, "rawReference":raw, "labelFallback":file.label}})
+            let mut atom = json!({"type":"project_file_reference", "threadId":request.thread_id, "rawReference":raw, "labelFallback":file.label});
+            if !reference.target_kind.is_file() { atom["targetKind"] = json!(reference.target_kind); }
+            json!({"status":"available", "reference":atom})
         }).clone()
     }).collect();
     json!({"ok":true, "value":values})

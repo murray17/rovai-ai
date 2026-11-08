@@ -9,22 +9,26 @@ import { launchHost } from './lib/host-test-client.mjs'
 import { pause } from './lib/host-web-browser.mjs'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 import { isolatedFileReferenceRuntimeEnvironment, configureFileReferenceRuntime } from './lib/project-file-reference-runtime-env.mjs'
-if (!process.argv.includes('--real-runtime')) throw Error('Explicit --real-runtime is required (paid model calls; six file-read inputs or eight complex-location inputs).')
+if (!process.argv.includes('--real-runtime')) throw Error('Explicit --real-runtime is required (paid model calls; six file-read inputs or eight file/directory location inputs).')
 const repository = resolve(import.meta.dirname, '..')
-const identityCases = process.argv.includes('--identity-cases')
-const resumeIndex = process.argv.indexOf(identityCases ? '--remaining-identity-cases' : '--remaining-live-cases')
+const directoryCases = process.argv.includes('--directory-cases')
+const identityCases = directoryCases || process.argv.includes('--identity-cases')
+const resumeIndex = process.argv.indexOf(directoryCases ? '--remaining-directory-cases' : identityCases ? '--remaining-identity-cases' : '--remaining-live-cases')
 const resume = resumeIndex >= 0 ? resolve(process.argv[resumeIndex+1]) : null
 if (identityCases && process.argv.includes('--remaining-live-cases')) throw Error('Complex-location cases cannot resume or rewrite the original file-read evidence.')
 const plannedInputs = identityCases ? 8 : 6
-const fixture = resume ?? await realpath(await mkdtemp(join(tmpdir(), 'rovai-file-reference-runtime-')))
+const fixtureIndex = process.argv.indexOf('--fixture')
+const explicitFixture = fixtureIndex >= 0 ? resolve(process.argv[fixtureIndex+1]) : null
+if(explicitFixture&&!resume)assert.equal((await readdir(explicitFixture)).length,0,'Explicit fixture must be empty')
+const fixture = resume ?? explicitFixture ?? await realpath(await mkdtemp(join(tmpdir(), 'rovai-file-reference-runtime-')))
 const report = resume ? JSON.parse(await readFile(join(fixture,'private-evidence.json'),'utf8')) : { fixture, realRuntime:true, cases:[], qualification:[], startedAt:new Date().toISOString() }
 if (resume && identityCases) {
-  assert.equal(report.scope,'complex-file-locations')
+  assert.equal(report.scope,directoryCases ? 'directory-locations' : 'complex-file-locations')
   assert.ok(report.cases.every(item=>item.success),'Only resume an interrupted fixture with no failed model cases')
   report.interruptions=[...(report.interruptions??[]),{error:report.error,completed:report.cases.map(item=>item.case),resumedAt:new Date().toISOString()}]
   delete report.error
 }
-report.scope = identityCases ? 'complex-file-locations' : 'original-R1-matrix'
+report.scope = directoryCases ? 'directory-locations' : identityCases ? 'complex-file-locations' : 'original-R1-matrix'
 const data = join(fixture,'data'), project = join(fixture,'project'), binaries = join(fixture,'bin')
 for(const directory of [data, project, binaries])await mkdir(directory,{mode:0o700,recursive:true})
 for(const name of ['rovai-host','rovai'])await cp(join(repository,'target/debug',name),join(binaries,name))
@@ -39,7 +43,7 @@ const reference = async(threadId,path)=>{
   const scopeId=resolved.value.scopeId
   try{
     const opened=await host.request('projectFiles.request',{threadId,action:'open',scopeId,entryId:'p:'+Buffer.from(path).toString('base64url')});assert.equal(opened.ok,true)
-    const confirmed=await host.request('projectFileReferences.resolve',{threadId,references:[{threadId,rawReference:opened.value.rawReference}]})
+    const confirmed=await host.request('projectFileReferences.resolve',{threadId,references:[{threadId,rawReference:opened.value.rawReference,...(opened.value.targetKind?{targetKind:opened.value.targetKind}:{})}]})
     assert.equal(confirmed.value[0].status,'available');return {kind:'atom',atom:confirmed.value[0].reference}
   }finally{await host.request('projectFiles.request',{threadId,action:'release',scopeId})}
 }
@@ -108,9 +112,10 @@ try{
     const done=name=>report.cases.some(item=>item.case===name&&item.success)
     const verify = async (runtime, threadId, relative, path, selected, decoy, name) => {
       const segment=await reference(threadId,relative)
-      const work=await input(runtime,threadId,[{kind:'text',text:'Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. '},segment],name)
+      const work=await input(runtime,threadId,[{kind:'text',text:directoryCases ? 'List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. ' : 'Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. '},segment],name)
       const result=await work.wait();assert.equal(result.status,'succeeded');assert.ok(result.reply.includes(selected));assert.ok(!result.reply.includes(decoy));assert.ok(!result.bodyProjection.includes(selected)&&!result.bodyProjection.includes(decoy))
       assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').pathAtSend,await realpath(path))
+      if(directoryCases){assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').targetKind,'directory');assert.ok(result.bodyProjection.includes('/)'))}
       result.expectedPath=await realpath(path);result.selectedNonce=selected;result.decoyNonce=decoy;result.success=true
       return result
     }
@@ -119,14 +124,14 @@ try{
       for(const directory of ['src/auth','src/billing','src/中文 目录'])await mkdir(join(project,directory),{recursive:true})
       let selected=randomBytes(12).toString('hex'),decoy=randomBytes(12).toString('hex')
       if (!done('I1-same-name-'+suffix)) {
-      await writeFile(join(project,'src/auth/config.ts'),`export const NONCE = '${decoy}'\n`)
-      await writeFile(join(project,'src/billing/config.ts'),`export const NONCE = '${selected}'\n`)
-      await verify(runtime,await create(runtime,'Same-name file identity '+suffix),'src/billing/config.ts',join(project,'src/billing/config.ts'),selected,decoy,'I1-same-name-'+suffix)
+      if(directoryCases){await mkdir(join(project,'src/auth/config'),{recursive:true});await writeFile(join(project,'src/auth/config/marker.txt'),decoy)}else await writeFile(join(project,'src/auth/config.ts'),`export const NONCE = '${decoy}'\n`)
+      if(directoryCases){await mkdir(join(project,'src/billing/config'),{recursive:true});await writeFile(join(project,'src/billing/config/marker.txt'),selected)}else await writeFile(join(project,'src/billing/config.ts'),`export const NONCE = '${selected}'\n`)
+      await verify(runtime,await create(runtime,'Same-name file identity '+suffix),directoryCases?'src/billing/config':'src/billing/config.ts',join(project,directoryCases?'src/billing/config':'src/billing/config.ts'),selected,decoy,'I1-same-name-'+suffix)
       }
       if (!done('I2-special-path-'+suffix)) {
       selected=randomBytes(12).toString('hex');decoy=randomBytes(12).toString('hex')
-      const special='src/中文 目录/参数 (草稿)#1.ts'
-      await writeFile(join(project,special),`export const NONCE = '${selected}'\n`)
+      const special=directoryCases?'src/中文 目录/参数 (草稿)#1':'src/中文 目录/参数 (草稿)#1.ts'
+      if(directoryCases){await mkdir(join(project,special),{recursive:true});await writeFile(join(project,special,'marker.txt'),selected)}else await writeFile(join(project,special),`export const NONCE = '${selected}'\n`)
       await writeFile(join(project,'src/中文 目录/参数 (草稿)1.ts'),`export const NONCE = '${decoy}'\n`)
       await verify(runtime,await create(runtime,'Special-path file identity '+suffix),special,join(project,special),selected,decoy,'I2-special-path-'+suffix)
       }
@@ -141,12 +146,12 @@ try{
       const workspace=db.prepare("SELECT state,working_directory FROM mission_workspace WHERE mission_id=?").get(mission.payload.missionId)
       assert.equal(workspace?.state,'ready');assert.notEqual(workspace.working_directory,project)
       selected=randomBytes(12).toString('hex');decoy=randomBytes(12).toString('hex')
-      await writeFile(join(project,'config.ts'),`export const NONCE = '${decoy}'\n`)
-      await writeFile(join(workspace.working_directory,'config.ts'),`export const NONCE = '${selected}'\n`)
-      const file=await reference(threadId,'config.ts'),work=await input(runtime,threadId,[file],'I3-worktree-'+suffix),result=await work.wait()
+      if(directoryCases){await mkdir(join(project,'config'),{recursive:true});await writeFile(join(project,'config/marker.txt'),decoy)}else await writeFile(join(project,'config.ts'),`export const NONCE = '${decoy}'\n`)
+      if(directoryCases){await mkdir(join(workspace.working_directory,'config'),{recursive:true});await writeFile(join(workspace.working_directory,'config/marker.txt'),selected)}else await writeFile(join(workspace.working_directory,directoryCases?'config':'config.ts'),`export const NONCE = '${selected}'\n`)
+      const file=await reference(threadId,directoryCases?'config':'config.ts'),work=await input(runtime,threadId,directoryCases?[{kind:'text',text:'List the referenced directory and read its marker.txt with your file tools; report the NONCE. Do not edit or delegate. '},file]:[file],'I3-worktree-'+suffix),result=await work.wait()
       assert.equal(result.status,'succeeded');assert.ok(result.reply.includes(selected));assert.ok(!result.reply.includes(decoy));assert.ok(!result.bodyProjection.includes(selected)&&!result.bodyProjection.includes(decoy))
-      assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').pathAtSend,await realpath(join(workspace.working_directory,'config.ts')))
-      result.expectedPath=await realpath(join(workspace.working_directory,'config.ts'));result.selectedNonce=selected;result.decoyNonce=decoy;result.sourceDirectory=project;result.success=true
+      assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').pathAtSend,await realpath(join(workspace.working_directory,directoryCases?'config':'config.ts')))
+      result.expectedPath=await realpath(join(workspace.working_directory,directoryCases?'config':'config.ts'));result.selectedNonce=selected;result.decoyNonce=decoy;result.sourceDirectory=project;result.success=true
       console.log(JSON.stringify({completed:['I1-same-name-'+suffix,'I2-special-path-'+suffix,'I3-worktree-'+suffix],runtime:runtime.kind,correctSelectedNonce:true}))
     }
   }

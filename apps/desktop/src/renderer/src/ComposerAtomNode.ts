@@ -1,9 +1,9 @@
 import { ProjectFileReferenceLabel } from './ProjectFileReferenceLabel'
 import { createElement, type ReactElement } from 'react'
-import { ProjectFileIcon } from './ProjectFileIcon'
+import { ProjectFileIcon, ProjectFolderIcon } from './ProjectFileIcon'
 import { isProjectFileAtom } from './project-file-reference'
 import { isReferenceAtom, referenceIdentity } from './thread-reference'
-import type { ComposerAtom } from '@contracts'
+import type { ComposerAtom, ProjectFileTargetKind } from '@contracts'
 import {
   $applyNodeReplacement,
   $getState,
@@ -35,6 +35,7 @@ export type SerializedComposerAtomNode = SerializedLexicalNode & {
   nameAtSend?: string | null
   fileThreadId?: string
   rawReference?: string
+  targetKind?: ProjectFileTargetKind
   fallbackLabel?: string
 }
 
@@ -56,6 +57,7 @@ const fallbackLabelState = createState('fallbackLabel', {
 })
 
 const fileThreadIdState = createState('fileThreadId', { parse: value => typeof value === 'string' ? value : '' })
+const targetKindState = createState('targetKind', { parse: (value): ProjectFileTargetKind => { if (value === undefined || value === 'file') return 'file'; if (value === 'directory') return 'directory'; throw new Error('Unknown project reference target kind') } })
 const rawReferenceState = createState('rawReference', { parse: value => typeof value === 'string' ? value : '' })
 
 const presentationResolvers = new WeakMap<LexicalEditor, (node: ComposerAtomNode) => ComposerAtomPresentation>()
@@ -91,7 +93,8 @@ export class ComposerAtomNode extends DecoratorNode<ReactElement | null> {
         { stateConfig: nameAtSendState, flat: true },
         { stateConfig: fallbackLabelState, flat: true },
         { stateConfig: fileThreadIdState, flat: true },
-        { stateConfig: rawReferenceState, flat: true }
+        { stateConfig: rawReferenceState, flat: true },
+        { stateConfig: targetKindState, flat: true }
       ]
     })
   }
@@ -109,6 +112,7 @@ export class ComposerAtomNode extends DecoratorNode<ReactElement | null> {
       .setFallbackLabel(serializedNode.fallbackLabel ?? '')
       .setFileThreadId(serializedNode.fileThreadId ?? '')
       .setRawReference(serializedNode.rawReference ?? '')
+      .setTargetKind(serializedNode.targetKind ?? 'file')
   }
 
   exportJSON(): SerializedComposerAtomNode {
@@ -134,10 +138,12 @@ export class ComposerAtomNode extends DecoratorNode<ReactElement | null> {
     const presentation = presentationResolvers.get(editor)?.(this)
     const path = presentation?.fullPath ?? atom.labelFallback
     return createElement('span', { className: 'project-file-token-content' },
-      createElement(ProjectFileIcon, { fileName: path }),
+      atom.targetKind === 'directory' ? createElement(ProjectFolderIcon) : createElement(ProjectFileIcon, { fileName: path }),
       createElement(ProjectFileReferenceLabel, { label: presentation?.label ?? path.split('/').at(-1) ?? path, fileName: path.split('/').at(-1) ?? path }))
   }
 
+  getTargetKind(): ProjectFileTargetKind { return $getState(this, targetKindState) }
+  setTargetKind(value: ProjectFileTargetKind): this { return $setState(this, targetKindState, value) }
   getFileThreadId(): string { return $getState(this, fileThreadIdState) }
   setFileThreadId(value: string): this { return $setState(this, fileThreadIdState, value) }
   getRawReference(): string { return $getState(this, rawReferenceState) }
@@ -189,7 +195,7 @@ export class ComposerAtomNode extends DecoratorNode<ReactElement | null> {
 
   getAtom(): ComposerAtom {
     const atomType = this.getAtomType()
-    if (atomType === 'project_file_reference') return { type: atomType, threadId: this.getFileThreadId(), rawReference: this.getRawReference(), labelFallback: this.getFallbackLabel() }
+    if (atomType === 'project_file_reference') return { type: atomType, threadId: this.getFileThreadId(), rawReference: this.getRawReference(), labelFallback: this.getFallbackLabel(), ...(this.getTargetKind() === 'directory' ? { targetKind: 'directory' as const } : {}) }
     if (atomType === 'all_members') return { type: 'all_members' }
     if (atomType === 'skill') {
       return {
@@ -280,6 +286,7 @@ export function $createComposerAtomNode(atom: ComposerAtom): ComposerAtomNode {
     .setReferenceId(isReferenceAtom(atom) ? referenceIdentity(atom).id : atom.type === 'member' ? atom.agentId : atom.type === 'skill' ? atom.skillId : null)
     .setFileThreadId(isProjectFileAtom(atom) ? atom.threadId : '')
     .setRawReference(isProjectFileAtom(atom) ? atom.rawReference : '')
+    .setTargetKind(isProjectFileAtom(atom) ? atom.targetKind ?? 'file' : 'file')
     .setNameAtSend(atom.type === 'skill' ? atom.nameAtSend : null)
     .setFallbackLabel(isProjectFileAtom(atom) ? atom.labelFallback : isReferenceAtom(atom) ? atom.labelFallback ?? '' : atom.type === 'member' ? atom.labelFallback ?? '' : atom.type === 'skill' ? atom.nameAtSend : '所有队员')
   return node

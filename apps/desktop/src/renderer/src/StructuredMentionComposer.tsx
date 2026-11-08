@@ -1,4 +1,6 @@
 import { useProjectFileComposer } from './ProjectFileComposerContext'
+import type { ProjectFileReferenceSource } from '@contracts'
+import { useProjectFiles } from './ProjectFilesContext'
 import { useOptionalFilePreview } from './file-preview-context'
 import { isProjectFileAtom, fileReferenceKey, fileReferencePresentation } from './project-file-reference'
 import { composerProjectFiles, useProjectFileAvailability, type FileAvailability } from './useProjectFileAvailability'
@@ -335,6 +337,7 @@ function ComposerBridge({
   const [editor] = useLexicalComposerContext()
   const referencePreview = useReferencePreview()
   const filePreview = useOptionalFilePreview()
+  const projectBrowser = useProjectFiles()
   const filesSupported = useProjectFileReferenceCapability(referenceScope?.client)
   const [fileAtoms, setFileAtoms] = useState(() => composerProjectFiles(document))
   const fileAvailability = useProjectFileAvailability(referenceScope, fileAtoms, filesSupported)
@@ -396,6 +399,7 @@ function ComposerBridge({
     }
     if (isProjectFileAtom(atom)) {
       if (fileDetails) setFileActions({ atom, trigger, nodeKey: node.getKey(), restore, edit })
+      else if (atom.targetKind === 'directory') void projectBrowser?.revealReference(atom.threadId, atom.rawReference).then(ok => { if (ok === null || !trigger.isConnected) return; if (!ok) setFileActions({ atom, trigger, nodeKey: node.getKey(), restore, edit }); restore() }).catch(() => setFileActions({ atom, trigger, nodeKey: node.getKey(), restore, edit }))
       else void filePreview?.open({ kind: 'project_file', threadId: atom.threadId, rawReference: atom.rawReference }).then(restore).catch(() => setFileActions({ atom, trigger, nodeKey: node.getKey(), restore, edit }))
     } else referencePreview?.({ reference: referenceIdentity(atom), title: atom.labelFallback ?? referenceIdentity(atom).id,
       titleMode: 'current', trigger, remove: () => edit(false), replace: () => edit(true), restoreFocus: restore })
@@ -720,7 +724,7 @@ function ComposerBridge({
         if (!isProjectFileAtom(atom) || atom.threadId === referenceScope.threadId) continue
         const result = fileAvailability.items.get(fileReferenceKey(atom))
         if (result?.status === 'available' && result.reference.threadId === referenceScope.threadId) {
-          node.setFileThreadId(result.reference.threadId).setRawReference(result.reference.rawReference).setFallbackLabel(result.reference.labelFallback)
+          node.setFileThreadId(result.reference.threadId).setRawReference(result.reference.rawReference).setFallbackLabel(result.reference.labelFallback).setTargetKind(result.reference.targetKind ?? 'file')
         }
       }
     }, { tag: [HISTORIC_TAG, SKIP_DOM_SELECTION_TAG] })
@@ -873,7 +877,8 @@ function ComposerBridge({
     <ProjectFileReferenceActions request={fileActions} status={fileActions ? fileAvailability.items.get(fileReferenceKey(fileActions.atom)) : undefined} onClose={() => setFileActions(null)} onRemove={() => editFile(false)} onReplace={() => editFile(true)} onRetry={fileAvailability.retry} onOpen={() => {
       if (!fileActions) return
       const { atom, restore } = fileActions
-      void filePreview?.open({ kind: 'project_file', threadId: atom.threadId, rawReference: atom.rawReference }).then(() => restore())
+      if (atom.targetKind === 'directory') void projectBrowser?.revealReference(atom.threadId, atom.rawReference).then(() => restore())
+      else void filePreview?.open({ kind: 'project_file', threadId: atom.threadId, rawReference: atom.rawReference }).then(() => restore())
       setFileActions(null)
     }} />
     {fileSelectionError && <div className="ref-source-note" role="status">{fileSelectionError}<button type="button" className="ref-text-button" onClick={() => { setFileSelectionError(''); referencePicker.retry() }}><UiText zh="重试" /></button></div>}
@@ -928,7 +933,7 @@ function ComposerBridge({
             pickerInsertion.current = finishInsertion
             setFileSelectionError('')
             const key = pickerRef.current.key
-            void scope.client.request<import('@contracts').ProjectFilesResult<Extract<import('@contracts').OpenFilePreviewRequest, { kind: 'project_file' }>>>('projectFiles.request', { threadId: scope.threadId, action: 'open', scopeId: option.scopeId, entryId: option.item.id })
+            void scope.client.request<import('@contracts').ProjectFilesResult<ProjectFileReferenceSource>>('projectFiles.request', { threadId: scope.threadId, action: 'open', scopeId: option.scopeId, entryId: option.item.id, targetKind: option.item.directory ? 'directory' : 'file' })
               .then(result => { if (!result.ok) throw new Error(result.error.code); return createProjectFileReference(scope.client, scope.threadId, result.value) })
               .then(atom => {
                 if (ticket !== insertionTicket.current || callbacks.current.referenceScope?.threadId !== scope.threadId || pickerRef.current.key !== key || editor.isComposing() || !editor.isEditable()) return

@@ -16,6 +16,9 @@ describe('file identity across presentation and recovery', () => {
     const deeper = [file('a/auth/index.ts'), file('b/auth/index.ts')]
     expect(deeper.map(ref => fileReferencePresentation(ref, deeper).label)).toEqual(['a/auth/index.ts', 'b/auth/index.ts'])
     expect(refs[0]!.labelFallback).toBe('src/auth/index.ts')
+    const directories = [ { ...file('src/auth/'), targetKind: 'directory' as const }, { ...file('tests/auth'), targetKind: 'directory' as const } ]
+    expect(directories.map(ref => fileReferencePresentation(ref, directories).label)).toEqual(['src/auth', 'tests/auth'])
+    expect(fileReferencePresentation({ ...file('apps/desktop'), targetKind: 'directory' }, []).label).toBe('desktop')
     const roots = [file('src/index.ts', 'root-a'), file('src/index.ts', 'root-b')]
     expect(new Set(roots.map(ref => fileReferencePresentation(ref, roots).label)).size).toBe(2)
     expect(roots.every(ref => !fileReferencePresentation(ref, roots).label.includes('thread'))).toBe(true)
@@ -30,17 +33,23 @@ describe('file identity across presentation and recovery', () => {
     const differentThread = { ...document, segments: [{ kind: 'atom' as const, atom: { ...document.segments[0]!.atom, threadId: 'other' } }] }
     expect(composerDocumentsEqualDirect(document, differentThread)).toBe(false)
     expect(normalizeComposerDocument(document)).toEqual(document)
+    for (const targetKind of ['file','directory']) expect(parseComposerClipboardDocument(JSON.stringify({ version: 2, segments: [{ kind: 'atom', atom: { ...file('src/auth'), targetKind } }] }))).not.toBeNull()
+    for (const targetKind of ['folder', '', null]) expect(parseComposerClipboardDocument(JSON.stringify({ version: 2, segments: [{ kind: 'atom', atom: { ...file('src/auth'), targetKind } }] }))).toBeNull()
+    expect(composerDocumentsEqualDirect({ version: 2, segments: [{ kind: 'atom', atom: file('same') }] }, { version: 2, segments: [{ kind: 'atom', atom: { ...file('same'), targetKind: 'directory' } }] })).toBe(false)
   })
   it('restores every occurrence and position from history, while withdrawal reedit keeps path text', () => {
     const content = [{ kind: 'text' as const, text: '前 ' }, published('src/中文 #1.test.ts'), { kind: 'text' as const, text: ' 后 ' }, published('src/中文 #1.test.ts')]
     const expected = composerDocumentFromLegacyContent(content)
     expect(threadInputHistory([{ authorType: 'user', authorId: 'local_user', withdrawn: false, body: 'frozen', content }])).toEqual([expected])
+    const directory = { ...published('src/auth'), targetKind: 'directory' as const }
+    expect(threadInputHistory([{ authorType: 'user', authorId: 'local_user', withdrawn: false, body: 'frozen', content: [directory] }])[0]?.segments[0]).toMatchObject({ kind: 'atom', atom: { targetKind: 'directory', labelFallback: 'src/auth' } })
     expect(messageReeditDocument({ body: 'frozen', content })).toEqual({ version: 2, segments: [{ kind: 'text', text: '前 src/中文 #1.test.ts 后 src/中文 #1.test.ts' }] })
     expect(composerDocumentStatus({ version: 2, segments: [{ kind: 'atom', atom: file('file.log') }] }, [], [])).toMatchObject({ hasContent: true, hasExplicitRecipient: false, memberAgentIds: [] })
     expect(composerDocumentStatus({ version: 2, segments: [{ kind: 'atom', atom: { type: 'all_members' } }] }, [], [])).toMatchObject({ hasContent: false, hasExplicitRecipient: true })
   })
   it('projects frozen host paths and labels with the same escaping as Core', () => {
     expect(projectFileLink(published('中文 (a)#\\b.test.ts'))).toBe('[中文 \\(a\\)\\#\\\\b\\.test\\.ts](file:///project/%E4%B8%AD%E6%96%87%20%28a%29%23%5Cb.test.ts)')
+    expect(projectFileLink({ ...published('中文 (a)#/auth'), targetKind: 'directory' })).toBe('[中文 \\(a\\)\\#\\/auth\\/](file:///project/%E4%B8%AD%E6%96%87%20%28a%29%23/auth/)')
     const renamed = published('old/index.ts')
     expect(fileReferencePresentation(renamed, [renamed]).label).toBe('index.ts')
     expect(projectFileLink(renamed)).toContain('/project/old/index.ts)')

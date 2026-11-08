@@ -1288,12 +1288,15 @@ export interface MissionReferenceComposerAtom {
   labelFallback?: string
 }
 
+export type ProjectFileTargetKind = 'file' | 'directory'
+
 export interface ProjectFileReferenceAtom {
   type: 'project_file_reference'
   threadId: string
   rawReference: string
   /** Complete project-relative path, never used as location authority. */
   labelFallback: string
+  targetKind?: ProjectFileTargetKind
 }
 
 export interface PublishedProjectFileReference {
@@ -1302,11 +1305,21 @@ export interface PublishedProjectFileReference {
   rawReference: string
   pathAtSend: string
   labelAtSend: string
+  targetKind?: ProjectFileTargetKind
+}
+
+/** Root-bound metadata returned by projectFiles.open; directories are never file-preview inputs. */
+export interface ProjectFileReferenceSource {
+  kind: 'project_file'
+  threadId: string
+  rawReference: string
+  targetKind?: ProjectFileTargetKind
+  expectedPathAtSend?: string
 }
 
 export interface ProjectFileReferencesResolveRequest {
   threadId: string
-  references: Array<{ threadId: string; rawReference: string }>
+  references: Array<{ threadId: string; rawReference: string; targetKind?: ProjectFileTargetKind }>
 }
 export type ProjectFileReferenceResolution =
   | { status: 'available'; reference: ProjectFileReferenceAtom }
@@ -1894,6 +1907,10 @@ export interface ProjectFilesRequest {
   query?: string
   queryRevision?: number
   revision?: number
+  /** Directory activation validates the original root and optional published path. */
+  rawReference?: string
+  expectedPathAtSend?: string
+  targetKind?: ProjectFileTargetKind
 }
 export type ProjectFilesResult<T> = { ok: true; value: T } | { ok: false; error: { code: string } }
 export interface ProjectFilesApi {

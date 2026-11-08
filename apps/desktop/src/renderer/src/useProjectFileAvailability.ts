@@ -15,7 +15,7 @@ export function reportProjectFileReferenceRejection(thread: string, raw: string,
   listeners.forEach(listener => listener(thread, raw, reason))
 }
 export function useProjectFileAvailability(scope: ReferenceScope | undefined, files: readonly ProjectFileReferenceAtom[], supported: boolean) {
-  const key = JSON.stringify(files.map(file => [file.threadId, file.rawReference]))
+  const key = JSON.stringify(files.map(file => [file.threadId, file.rawReference, file.targetKind ?? 'file']))
   const [state, setState] = useState<{ thread: string; items: ReadonlyMap<string, FileAvailability> }>({ thread: '', items: new Map() })
   const [revision, setRevision] = useState(0)
   const generation = useRef(0)
@@ -23,7 +23,7 @@ export function useProjectFileAvailability(scope: ReferenceScope | undefined, fi
     if (!scope || !files.length || !supported) return
     let cancelled = false
     const ticket = ++generation.current
-    const refs = JSON.parse(key) as [string, string][]
+    const refs = JSON.parse(key) as [string, string, 'file' | 'directory'][]
     const refresh = () => setRevision(value => value + 1)
     const stop = scope.client.onInvalidated?.(change => { if (!change || change.resync || change.referencesChanged) refresh() })
     const stopEvent = scope.client.onEvent?.(event => {
@@ -33,14 +33,14 @@ export function useProjectFileAvailability(scope: ReferenceScope | undefined, fi
       if (thread !== scope.threadId) return
       // Only a check started after this rejection may clear its unavailable status.
       generation.current++
-      setState(previous => ({ thread, items: new Map(previous.thread === thread ? previous.items : []).set(fileReferenceKey({ threadId: thread, rawReference: raw }), { status: 'unavailable', reason }) }))
+      setState(previous => { const items = new Map(previous.thread === thread ? previous.items : []); for (const file of files) if (file.rawReference === raw) items.set(fileReferenceKey(file), { status: 'unavailable', reason }); return { thread, items } })
     }
     listeners.add(rejected)
     void (async () => {
       const items = new Map<string, FileAvailability>()
       for (let offset = 0; offset < refs.length; offset += 32) {
         if (cancelled || ticket !== generation.current) return
-        const batch = refs.slice(offset, offset + 32).map(([threadId, rawReference]) => ({ threadId, rawReference }))
+        const batch = refs.slice(offset, offset + 32).map(([threadId, rawReference, targetKind]) => ({ threadId, rawReference, ...(targetKind === 'directory' ? { targetKind } : {}) }))
         let values: FileAvailability[]
         try {
           const result = await scope.client.request<unknown>('projectFileReferences.resolve', { threadId: scope.threadId, references: batch })

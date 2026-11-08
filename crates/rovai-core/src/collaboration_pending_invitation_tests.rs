@@ -477,18 +477,33 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
         assert_eq!(domain_state(&database, &camp), committed);
     }
     // Same transaction owner: file-only first input, atomic refusal, frozen projection and replay.
-    {
+    for target_kind in [
+        crate::camp_content::ProjectFileTargetKind::File,
+        crate::camp_content::ProjectFileTargetKind::Directory,
+    ] {
+        let directory = target_kind == crate::camp_content::ProjectFileTargetKind::Directory;
         use crate::camp_content::{ComposerAtom, ComposerDocument, ComposerSegment};
         use crate::project_file_reference::Preflight;
         use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-        let workspace = database.directory().join("file-reference-workspace");
+        let workspace = database.directory().join(if directory {
+            "directory-reference-workspace"
+        } else {
+            "file-reference-workspace"
+        });
         std::fs::create_dir_all(&workspace).unwrap();
         let file = workspace.join("input #1.log");
-        std::fs::write(&file, "nonce-before").unwrap();
+        if directory {
+            std::fs::create_dir(&file).unwrap();
+        } else {
+            std::fs::write(&file, "nonce-before").unwrap();
+        }
         let mut create = CreateThreadCommand::for_test(workspace.to_str().unwrap().into());
         create.activation_state = ThreadActivationState::Pending;
         let created = service
-            .create_camp(&mut database, &envelope("files-create", None, create))
+            .create_camp(
+                &mut database,
+                &envelope(&format!("files-create-{directory}"), None, create),
+            )
             .unwrap();
         let camp = created.result.payload["threadId"]
             .as_str()
@@ -502,6 +517,7 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
                 thread_id: camp.clone(),
                 raw_reference: raw.clone(),
                 label_fallback: "untrusted display only".into(),
+                target_kind,
             },
         };
         let mut send = message(&camp, &["agent_2"], false);
@@ -518,9 +534,13 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
                 atom,
             ],
         };
-        let command = envelope("files-first", Some(&camp), send);
+        let command = envelope(&format!("files-first-{directory}"), Some(&camp), send);
         let initial = domain_state(&database, &camp);
-        std::fs::remove_file(&file).unwrap();
+        if directory {
+            std::fs::remove_dir(&file).unwrap();
+        } else {
+            std::fs::remove_file(&file).unwrap();
+        }
         let missing = Preflight::prepare(
             camp.clone(),
             &command.payload.content,
@@ -533,7 +553,11 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
         assert_eq!(refused.result.payload["segmentIndex"], 1);
         assert_eq!(refused.result.payload["reason"], "file_missing");
         assert_eq!(domain_state(&database, &camp), initial);
-        std::fs::write(&file, "nonce-restored").unwrap();
+        if directory {
+            std::fs::create_dir(&file).unwrap();
+        } else {
+            std::fs::write(&file, "nonce-restored").unwrap();
+        }
         let valid = Preflight::prepare(
             camp.clone(),
             &command.payload.content,
@@ -545,7 +569,7 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
         assert!(replay.replayed);
         assert_eq!(replay.result, refused.result);
         let mut fresh = command.clone();
-        fresh.command_id = "files-new-command".into();
+        fresh.command_id = format!("files-new-command-{directory}");
         let accepted = service
             .send_user_camp_message_with_files(&mut database, &fresh, Some(&valid))
             .unwrap();
@@ -569,7 +593,11 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
                 .count(),
             2
         );
-        std::fs::remove_file(&file).unwrap();
+        if directory {
+            std::fs::remove_dir(&file).unwrap();
+        } else {
+            std::fs::remove_file(&file).unwrap();
+        }
         let committed = domain_state(&database, &camp);
         let replay = service
             .send_user_camp_message(&mut database, &fresh)
@@ -591,7 +619,7 @@ fn pending_invitations_commit_with_first_message_and_roll_back_every_failure() {
             )
             .unwrap();
         let before = domain_state(&database, &camp);
-        fresh.command_id = "files-rebound".into();
+        fresh.command_id = format!("files-rebound-{directory}");
         let refused = service
             .send_user_camp_message_with_files(&mut database, &fresh, Some(&valid))
             .unwrap();

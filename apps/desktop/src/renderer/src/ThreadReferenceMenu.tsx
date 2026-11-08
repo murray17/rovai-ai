@@ -1,8 +1,9 @@
+import { ProjectFileReferenceLabel } from './ProjectFileReferenceLabel'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { NavigationIcon } from './NavigationIcon'
 import { MissionIcon } from './MissionIcon'
 import { MentionRuntimeButton } from './MentionRuntimeButton'
-import { ProjectFileIcon } from './ProjectFileIcon'
+import { ProjectFileIcon, ProjectFolderIcon } from './ProjectFileIcon'
 import { referenceProject } from './thread-reference'
 import type { StructuredMentionOption } from './StructuredMentionComposer'
 import { pickerOptionKey, type ReferenceFilter, type useReferencePicker } from './useReferencePicker'
@@ -18,7 +19,19 @@ export function ThreadReferenceMenu({ menuId, picker, inviteLayer, pendingInvite
   const list = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const virtualized = !picker.grouped && options.length > 40 && filter !== 'members'
-  const rowHeight = filter === 'file' ? 42 : 32
+  const [rowHeight, setRowHeight] = useState(32)
+  useLayoutEffect(() => {
+    const element = list.current
+    if (!element) return
+    const measure = () => {
+      const height = element.querySelector<HTMLElement>('[role=option]')?.getBoundingClientRect().height
+      if (height) setRowHeight(height)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [filter, options.length])
   const start = Math.max(0, Math.floor(scrollTop / rowHeight) - 3)
   const indices = virtualized ? [...new Set([...Array.from({ length: Math.min(22, options.length - start) }, (_, offset) => start + offset), selectedIndex])].filter(index => index >= 0 && index < options.length).sort((a, b) => a - b) : options.map((_, index) => index)
   useLayoutEffect(() => {
@@ -39,7 +52,7 @@ export function ThreadReferenceMenu({ menuId, picker, inviteLayer, pendingInvite
   const fileError = picker.files.error === 'root_unavailable' ? '工作目录不可用' : '暂时无法读取文件'
   return <div className="mention-menu structured-mention-menu ref-menu">
     <div className="ref-menu-heading"><div className="ref-filters" role="tablist" aria-label={uiAttribute('提及类型')}>
-      {tabs.map(value => <button type="button" role="tab" key={value} aria-selected={filter === value} tabIndex={filter === value || filter === 'all' && value === 'members' ? 0 : -1}
+      {tabs.map(value => <button type="button" role="tab" key={value} aria-selected={filter === value} tabIndex={filter === value ? 0 : -1}
         onMouseDown={event => event.preventDefault()} onClick={() => onFilter(value)} onKeyDown={event => {
           if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
           event.preventDefault()
@@ -47,7 +60,7 @@ export function ThreadReferenceMenu({ menuId, picker, inviteLayer, pendingInvite
           onFilter(tabs[next]!); event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role=tab]')[next]?.focus()
         }}>{uiAttribute(labels[value])}</button>)}
     </div></div>
-    <div className="ref-options" ref={list} id={menuId} role="listbox" aria-label={uiAttribute('选择引用或队员')} aria-busy={loading} data-managed-scroll="true" data-virtualized={virtualized} onScroll={event => setScrollTop(event.currentTarget.scrollTop)}>
+    <div className="ref-options" ref={list} id={menuId} role="listbox" aria-label={uiAttribute('选择引用或队员')} aria-busy={loading} data-managed-scroll="true" data-filter={filter} data-virtualized={virtualized} onScroll={event => setScrollTop(event.currentTarget.scrollTop)}>
       <div className={virtualized ? 'ref-option-window' : undefined} style={virtualized ? { height: options.length * rowHeight } : undefined}>
       {indices.map(index => {
         const option = options[index]!
@@ -55,14 +68,14 @@ export function ThreadReferenceMenu({ menuId, picker, inviteLayer, pendingInvite
         const item = option.kind === 'reference' ? option.item : null
         const file = option.kind === 'file' ? option.item : null
         const label = file?.name ?? item?.title ?? member?.displayName ?? uiAttribute(option.kind === 'all_members' ? '所有队员' : option.kind === 'invite_other' ? '邀请其他队员' : '返回本会话')
-        const subtitle = file ? file.relativePath.split('/').slice(0, -1).join('/') || './' : item ? referenceProject(item) : member?.teamRole ?? uiAttribute(option.kind === 'all_members' ? '广播给当前全部队员' : option.kind === 'invite_other' ? '浏览其他可用队员' : '查看当前会话队员')
+        const subtitle = file ? file.relativePath.split('/').slice(0, -1).join('/') || '' : item ? referenceProject(item) : member?.teamRole ?? uiAttribute(option.kind === 'all_members' ? '广播给当前全部队员' : option.kind === 'invite_other' ? '浏览其他可用队员' : '查看当前会话队员')
         return <div key={pickerOptionKey(option)} className="ref-option-wrap" style={virtualized ? { position: 'absolute', top: index * rowHeight, left: 0, right: 0, height: rowHeight } : undefined}>
           {picker.grouped && (index === 0 || group(index - 1) !== group(index)) && <div className="ref-group-label">{uiAttribute(labels[group(index)])}</div>}
           <button type="button" role="option" tabIndex={-1} id={`${menuId}-option-${index}`} aria-posinset={index + 1} aria-setsize={picker.hasMore ? -1 : options.length} aria-selected={selectedIndex === index}
             data-option-kind={option.kind} data-reference-id={item?.id} data-agent-id={member?.agentId} aria-label={file ? `${file.name}，${file.relativePath}` : `${label}，${subtitle}`} title={file?.relativePath ?? (item ? `${label}\n${subtitle}` : undefined)}
             className={[selectedIndex === index ? 'active' : '', item || file ? 'ref-thread-option' : '', file ? 'ref-file-option' : '', member?.runtimeLabel ? 'has-runtime' : '', member?.inThread === false ? 'is-invitable' : '', option.kind === 'invite_other' || option.kind === 'back_to_camp' ? 'is-mention-action' : ''].join(' ')}
             onMouseMove={() => setHighlightedIndex(index)} onMouseDown={event => event.preventDefault()} onClick={() => selectIndex(index)}>
-            {file || item ? <><span className="ref-candidate-icon">{file ? <ProjectFileIcon fileName={file.name} /> : item?.kind === 'mission' ? <MissionIcon /> : <NavigationIcon name="messages" />}</span><strong className="ref-candidate-title">{label}</strong><small className="ref-candidate-project">{subtitle}</small></>
+            {file || item ? <><span className="ref-candidate-icon">{file ? file.directory ? <ProjectFolderIcon /> : <ProjectFileIcon fileName={file.name} /> : item?.kind === 'mission' ? <MissionIcon /> : <NavigationIcon name="messages" />}</span><strong className="ref-candidate-title">{file ? <ProjectFileReferenceLabel label={file.name} fileName={file.name} /> : label}</strong><small className="ref-candidate-project" hidden={!subtitle}>{subtitle}</small></>
               : <>{option.kind !== 'reference' && option.kind !== 'file' && renderAvatar(option)}<span><strong>{label}</strong><small>{subtitle}</small></span></>}
             {member?.inThread === false && <span className="mention-option-state">{uiAttribute(pendingInviteIds.includes(member.agentId) ? '待邀请' : '邀请')}</span>}
           </button>

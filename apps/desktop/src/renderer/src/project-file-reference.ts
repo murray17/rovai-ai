@@ -3,12 +3,13 @@ import { uiAttribute } from './interface-language'
 
 export const isProjectFileAtom = (atom: ComposerAtom): atom is ProjectFileReferenceAtom => atom.type === 'project_file_reference'
 export type FileReference = ProjectFileReferenceAtom | PublishedProjectFileReference
-export const fileReferenceKey = (file: Pick<FileReference, 'threadId' | 'rawReference'>): string => JSON.stringify([file.threadId, file.rawReference])
-export const fileReferencePath = (file: FileReference): string => 'labelAtSend' in file ? file.labelAtSend : file.labelFallback
+export const fileReferenceKey = (file: Pick<FileReference, 'threadId' | 'rawReference' | 'targetKind'>): string => JSON.stringify([file.threadId, file.rawReference, ...(file.targetKind === 'directory' ? ['directory'] : [])])
+export const fileReferencePath = (file: FileReference): string => { const path = 'labelAtSend' in file ? file.labelAtSend : file.labelFallback; return file.targetKind === 'directory' ? path.replace(/\/+$/u, '') : path }
 export const fileName = (path: string): string => path.split('/').at(-1) ?? path
 export function validProjectFileAtom(value: Record<string, unknown>): value is Record<string, unknown> & ProjectFileReferenceAtom {
   const bytes = (text: string): number => new TextEncoder().encode(text).byteLength
-  return Object.keys(value).length === 4 && Object.keys(value).every(key => ['type', 'threadId', 'rawReference', 'labelFallback'].includes(key))
+  return (Object.keys(value).length === 4 || Object.keys(value).length === 5) && Object.keys(value).every(key => ['type', 'threadId', 'rawReference', 'labelFallback', 'targetKind'].includes(key))
+    && (!Object.hasOwn(value, 'targetKind') || value.targetKind === 'file' || value.targetKind === 'directory')
     && value.type === 'project_file_reference'
     && typeof value.threadId === 'string' && value.threadId.trim() === value.threadId && value.threadId.length > 0 && bytes(value.threadId) <= 256 && !/\p{Cc}/u.test(value.threadId)
     && typeof value.rawReference === 'string' && value.rawReference.length > 0 && bytes(value.rawReference) <= 16384 && !/\p{Cc}/u.test(value.rawReference)
@@ -30,7 +31,7 @@ export function fileReferencePresentation(file: FileReference, files: readonly F
     sourceLabel = uiAttribute('来源 {0}', String(identities.indexOf(fileReferenceKey(file)) + 1))
     label = `${sourceLabel} · ${label}`
   }
-  return { label, fileName: fileName(path), path, ariaLabel: uiAttribute('文件引用：{0}', sourceLabel ? `${sourceLabel} · ${path}` : path), directory: parts.slice(0, -1).join('/') }
+  return { label, fileName: fileName(path), path, ariaLabel: uiAttribute(file.targetKind === 'directory' ? '目录引用：{0}' : '文件引用：{0}', sourceLabel ? `${sourceLabel} · ${path}` : path), directory: parts.slice(0, -1).join('/') }
 }
 
 /** Kept byte-for-byte aligned with Core's project_file_reference::render_link. */
@@ -43,6 +44,8 @@ export function projectFileLink(file: PublishedProjectFileReference): string {
   else if (/^\\\\/u.test(path)) {
     const [host, ...parts] = path.slice(2).split('\\'); url.hostname = host!; url.pathname = `/${parts.join('/')}`
   } else url.pathname = path.replace(/\\/gu, '%5C')
-  const label = file.labelAtSend.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/gu, '\\$&')
+  if (file.targetKind === 'directory' && !url.pathname.endsWith('/')) url.pathname += '/'
+  const labelAtSend = file.targetKind === 'directory' ? file.labelAtSend.replace(/\/+$/u, '') + '/' : file.labelAtSend
+  const label = labelAtSend.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/gu, '\\$&')
   return `[${label}](${url.href.replace(/\(/gu, '%28').replace(/\)/gu, '%29')})`
 }

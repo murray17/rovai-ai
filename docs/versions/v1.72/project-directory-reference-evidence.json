@@ -1,0 +1,1179 @@
+{
+  "scope": "directory-locations",
+  "sourceBase": "e12d3eaf2d65182402e147405422acab11262306",
+  "sourceState": "feature working tree; production directory projection unchanged by later test/docs/UI-only edits",
+  "dataContract": {
+    "contract_version": "v1.72",
+    "projection_schema_version": 172
+  },
+  "success": true,
+  "cases": [
+    {
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "runtimeVersion": {
+        "initial": null,
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": false,
+      "threadId": "rvcamp_01m6xeend1fm09vx1083f3fy3f",
+      "messageId": "1513ba88-d04c-4b17-9c5e-8eb6d3ea1fc0",
+      "runId": "0f67b45b-7156-4f3b-859b-5d831b0e2584",
+      "bodyProjection": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\/billing\\/config\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/billing/config",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config",
+          "rawReference": "WyJkMjFkY2ZmNzAwZjlhYTJlMmJiYWNhMDQ4MmUyOWNmYmUxMWY1NzIzYzQ1NTU3MTJjZjQyOGI3ZjU3MDA4MzllIiwic3JjL2JpbGxpbmcvY29uZmlnIl0",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xeend1fm09vx1083f3fy3f"
+        }
+      ],
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_1\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xeend1fm09vx1083f3fy3f\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@叮叮 List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\\\/billing\\\\/config\\\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/)\",\"mentions\":[],\"messageId\":\"1513ba88-d04c-4b17-9c5e-8eb6d3ea1fc0\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "810b6dba2c328022db8d6d96bfff6c6568974bd0df5a28a3439c71ea368dde13",
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config",
+      "selectedNonce": "b13d4fb32fa78b2def3a65d1",
+      "decoyNonce": "ba6e596d69ca8cfd7fc83647",
+      "reply": "指定目录仅含 marker.txt。NONCE: b13d4fb32fa78b2def3a65d1"
+    },
+    {
+      "case": "I2-special-path-codex",
+      "runtime": "codex-cli",
+      "runtimeVersion": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": false,
+      "threadId": "rvcamp_01m6xef8vefzrt8j13w510hb99",
+      "messageId": "0b8f01c0-fd57-4755-bbf6-33cf02c12234",
+      "runId": "fd5f9ea0-bff9-4e4a-b363-8f8c0d7c01b9",
+      "bodyProjection": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\/中文 目录\\/参数 \\(草稿\\)\\#1\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/中文 目录/参数 (草稿)#1",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/中文 目录/参数 (草稿)#1",
+          "rawReference": "WyI4ZGQ4MDU0Njg4NzgzYjg3NjA1MGFhNjQ5NzBlNTgzZmE1OWMzZWE0ZDk4MjIxNmI1OGU1ZWIzNWViZjBkNTUwIiwic3JjL-S4reaWhyDnm67lvZUv5Y-C5pWwICjojYnnqL8pIzEiXQ",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xef8vefzrt8j13w510hb99"
+        }
+      ],
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_1\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xef8vefzrt8j13w510hb99\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@叮叮 List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\\\/中文 目录\\\\/参数 \\\\(草稿\\\\)\\\\#1\\\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231/)\",\"mentions\":[],\"messageId\":\"0b8f01c0-fd57-4755-bbf6-33cf02c12234\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "9d074dbff8b8eca5fff89363043bb778d3235d6a5811ffb21687f975bdb80803",
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/中文 目录/参数 (草稿)#1",
+      "selectedNonce": "a3a454cbd13596d82daa11f4",
+      "decoyNonce": "fc9821be6a7d70e1a3b5a8da",
+      "reply": "指定目录中仅有 marker.txt。NONCE: a3a454cbd13596d82daa11f4"
+    },
+    {
+      "case": "I3-prepare-codex",
+      "runtime": "codex-cli",
+      "runtimeVersion": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": true,
+      "threadId": "rvcamp_01m6xefr6mfs180k9pycat816b",
+      "messageId": "87b43f0f-6dd6-4d09-aeec-ca7069ec1895",
+      "runId": "47811468-2186-43ec-ab68-99059c9a048f",
+      "bodyProjection": "Read the Mission description, then briefly confirm you are ready for the file I will supply next. Do not read or edit project files or delegate.",
+      "content": [
+        {
+          "kind": "text",
+          "text": "Read the Mission description, then briefly confirm you are ready for the file I will supply next. Do not read or edit project files or delegate."
+        }
+      ],
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_1\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xefr6mfs180k9pycat816b\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\",\"mission\":{\"missionId\":\"rvm_01a1bae7e0d47e42804d36ee4ed4b586\",\"status\":\"not_started\",\"title\":\"Worktree file identity codex\"}}\n[/RUN_FACTS]\n\n[WORKSPACE]\n{\"branch\":\"rovai/mission/001\",\"workingDirectory\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/\"}\n[/WORKSPACE]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@叮叮 Read the Mission description, then briefly confirm you are ready for the file I will supply next. Do not read or edit project files or delegate.\",\"mentions\":[],\"messageId\":\"87b43f0f-6dd6-4d09-aeec-ca7069ec1895\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "a6812834de28982bce3f96546848fdf4a1cd1897aaa56bb9d4bb152add09ace3",
+      "reply": "已阅读 Mission 描述，准备好了，请提供文件引用。"
+    },
+    {
+      "case": "I3-worktree-codex",
+      "runtime": "codex-cli",
+      "runtimeVersion": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": false,
+      "threadId": "rvcamp_01m6xefr6mfs180k9pycat816b",
+      "messageId": "96a04dc9-b8cf-4bca-8806-f4f868276128",
+      "runId": "ae6cb9fa-5589-4986-81bc-238370455a48",
+      "bodyProjection": "List the referenced directory and read its marker.txt with your file tools; report the NONCE. Do not edit or delegate. [config\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/config/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory and read its marker.txt with your file tools; report the NONCE. Do not edit or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "config",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/config",
+          "rawReference": "WyI4NWE2ZjViNTg0MWMzMzk3YzRkYTM1MTk3MzEzYTk2MjhhMmFhNDA4NWIzZTViY2I1MjY5NTRkMTA4YzM0NWQyIiwiY29uZmlnIl0",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xefr6mfs180k9pycat816b"
+        }
+      ],
+      "frozenInputs": [
+        "[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xefr6mfs180k9pycat816b\",\"historyHint\":\"All visible messages after sequence 1 are in RUN_INPUT or were written by you.\",\"mission\":{\"missionId\":\"rvm_01a1bae7e0d47e42804d36ee4ed4b586\",\"status\":\"not_started\",\"title\":\"Worktree file identity codex\"}}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@叮叮 List the referenced directory and read its marker.txt with your file tools; report the NONCE. Do not edit or delegate. [config\\\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/config/)\",\"mentions\":[],\"messageId\":\"96a04dc9-b8cf-4bca-8806-f4f868276128\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":3}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "aa1a388caabf9fb719b9bb466cc69787088c78777591d80205dbfddfda2932b9",
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/config",
+      "selectedNonce": "1fec7f04790b9777b9c358c1",
+      "decoyNonce": "a402b3922fc65708a645c168",
+      "reply": "config/ 目录包含 marker.txt。读取到的 NONCE：1fec7f04790b9777b9c358c1"
+    },
+    {
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "runtimeVersion": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": false,
+      "threadId": "rvcamp_01m6xegpx1en8btjxpfdtb9409",
+      "messageId": "d50773c3-82e3-4b14-8db5-3fb0b3cb7a20",
+      "runId": "521ac88e-261a-47fe-904b-1c880ecfd914",
+      "bodyProjection": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\/billing\\/config\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/billing/config",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config",
+          "rawReference": "WyIxOTMyOTY2ODE5ZTE0Y2U2YWQ1MWQ5NDNjZjU3MzExNTczODdhMDc3ZmVkMWRiYWEzODVjZmJhZGRmNzE5NzY1Iiwic3JjL2JpbGxpbmcvY29uZmlnIl0",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xegpx1en8btjxpfdtb9409"
+        }
+      ],
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_2\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xegpx1en8btjxpfdtb9409\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@芝士 List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\\\/billing\\\\/config\\\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/)\",\"mentions\":[],\"messageId\":\"d50773c3-82e3-4b14-8db5-3fb0b3cb7a20\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "a6cc0a0d770c4807efc9c9c4412cbe6ed74bdcfc15d4dd47f2916e670005736c",
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config",
+      "selectedNonce": "008c983dec326b3e8e7732b8",
+      "decoyNonce": "68fdfd6af766406886b8d7db",
+      "reply": "Listed `src/billing/config/`; it contains `marker.txt`. Read that file. NONCE: `008c983dec326b3e8e7732b8`. No files were edited and no work was delegated."
+    },
+    {
+      "case": "I2-special-path-claude",
+      "runtime": "claude-code-cli",
+      "runtimeVersion": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": false,
+      "threadId": "rvcamp_01m6xehh43ezhtv5p6b6nnkb39",
+      "messageId": "e86471a1-0b41-49ee-a257-3f4936687fb2",
+      "runId": "4b54dd29-5d7b-4944-b998-da6369edfacc",
+      "bodyProjection": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\/中文 目录\\/参数 \\(草稿\\)\\#1\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/中文 目录/参数 (草稿)#1",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/中文 目录/参数 (草稿)#1",
+          "rawReference": "WyIwZjNlNTk4OTZmMDIyYTM4NzAxMmRmODlkYmUzZjI4ZDhiMTBmZDBhNzQ0MzU0ZGFiNzg1ZjRmNmMzZDg3MGI2Iiwic3JjL-S4reaWhyDnm67lvZUv5Y-C5pWwICjojYnnqL8pIzEiXQ",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xehh43ezhtv5p6b6nnkb39"
+        }
+      ],
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_2\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xehh43ezhtv5p6b6nnkb39\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@芝士 List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [src\\\\/中文 目录\\\\/参数 \\\\(草稿\\\\)\\\\#1\\\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231/)\",\"mentions\":[],\"messageId\":\"e86471a1-0b41-49ee-a257-3f4936687fb2\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "6c0b3772564ec31f483f9cc9ef1cdc0114d04e6fb3d602c19985302196d906d3",
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/中文 目录/参数 (草稿)#1",
+      "selectedNonce": "969124299a222bdb2a3f4d1b",
+      "decoyNonce": "bf45594d7331e57557281ec4",
+      "reply": "Listed `src/中文 目录/参数 (草稿)#1/`; it contains `marker.txt`. Read that file. NONCE: `969124299a222bdb2a3f4d1b`. No files were edited and no work was delegated."
+    },
+    {
+      "case": "I3-prepare-claude",
+      "runtime": "claude-code-cli",
+      "runtimeVersion": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": true,
+      "threadId": "rvcamp_01m6xej7d1fm9b7364bm6h5m3m",
+      "messageId": "92255142-4fac-46e9-a883-e5c4f679d134",
+      "runId": "221f8f41-1e2b-4cf8-8732-7311786655dd",
+      "bodyProjection": "Read the Mission description, then briefly confirm you are ready for the file I will supply next. Do not read or edit project files or delegate.",
+      "content": [
+        {
+          "kind": "text",
+          "text": "Read the Mission description, then briefly confirm you are ready for the file I will supply next. Do not read or edit project files or delegate."
+        }
+      ],
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_2\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xej7d1fm9b7364bm6h5m3m\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\",\"mission\":{\"missionId\":\"rvm_01a1bae91da17d12b38cc449392fb325\",\"status\":\"not_started\",\"title\":\"Worktree file identity claude\"}}\n[/RUN_FACTS]\n\n[WORKSPACE]\n{\"branch\":\"rovai/mission/002\",\"workingDirectory\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-002/\"}\n[/WORKSPACE]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@芝士 Read the Mission description, then briefly confirm you are ready for the file I will supply next. Do not read or edit project files or delegate.\",\"mentions\":[],\"messageId\":\"92255142-4fac-46e9-a883-e5c4f679d134\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "e150e685c86da0c993905c8664181aaab843abcd84bcba8018a288f2cc3e1c8a",
+      "reply": "I have read the Mission description and am ready for the file reference. I have not read or edited any project files or delegated any work."
+    },
+    {
+      "case": "I3-worktree-claude",
+      "runtime": "claude-code-cli",
+      "runtimeVersion": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "setup": false,
+      "threadId": "rvcamp_01m6xej7d1fm9b7364bm6h5m3m",
+      "messageId": "ea783964-d64c-4e3c-8737-d97e3408f9c8",
+      "runId": "2950f2ac-ceb5-49c9-8665-83a2bc4e7632",
+      "bodyProjection": "List the referenced directory and read its marker.txt with your file tools; report the NONCE. Do not edit or delegate. [config\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-002/config/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory and read its marker.txt with your file tools; report the NONCE. Do not edit or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "config",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-002/config",
+          "rawReference": "WyJiZTY4OTZjMjNmNmRhYmI1NTViOTdjZGE0NmQxNDM3MjMwYTlhMjJjZTQ2ZDA5NzM2NmQ0ZWNhMDcxZThjNjM1IiwiY29uZmlnIl0",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xej7d1fm9b7364bm6h5m3m"
+        }
+      ],
+      "frozenInputs": [
+        "[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-dc8870327c64e2e7baa690af41fe7d89868b0719fa05c3a8a7ac6a84f4a3967d/attachments/rvcamp_01m6xej7d1fm9b7364bm6h5m3m\",\"historyHint\":\"All visible messages after sequence 1 are in RUN_INPUT or were written by you.\",\"mission\":{\"missionId\":\"rvm_01a1bae91da17d12b38cc449392fb325\",\"status\":\"not_started\",\"title\":\"Worktree file identity claude\"}}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@芝士 List the referenced directory and read its marker.txt with your file tools; report the NONCE. Do not edit or delegate. [config\\\\/](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-002/config/)\",\"mentions\":[],\"messageId\":\"ea783964-d64c-4e3c-8737-d97e3408f9c8\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":3}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "inputSha256": "9c64cdbbd4e3617391f6b1d3bcd679395a4f5e5b7c80d3b8b2b02b03f6b54952",
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-002/config",
+      "selectedNonce": "a886e9d66dd8f41fc674bcea",
+      "decoyNonce": "a910ef50e2c16628fc1a2c8e",
+      "reply": "Listed the referenced config/ directory; it contains marker.txt. Read config/marker.txt. NONCE: a886e9d66dd8f41fc674bcea. No files were edited and no work was delegated."
+    }
+  ],
+  "coreToolEvidence": [
+    {
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "sequence": 3,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'ls -la /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/'",
+          "commandActions": [
+            {
+              "name": null,
+              "path": "config",
+              "type": "listFiles"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project",
+          "id": "exec-5a9f776a-1a09-4b4b-9ee6-744b62586723",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 01:24 .\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 01:24 ..\n-rw-r--r--@ 1 murray.xue  staff  24 Nov  8 01:24 marker.txt\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "sequence": 4,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'cat /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/marker.txt'",
+          "commandActions": [
+            {
+              "name": "marker.txt",
+              "path": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/marker.txt",
+              "type": "read"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project",
+          "id": "exec-bfc0361c-51fe-4fac-9123-847f89720996",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "b13d4fb32fa78b2def3a65d1",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/billing/config/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "codex-cli",
+            "observedRuntimeVersion": "codex-cli 0.166.0",
+            "sourceEventKind": "activity.commandExecution.read"
+          },
+          "status": "available"
+        }
+      }
+    },
+    {
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "sequence": 7,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c \"rovai send --public-only --body '指定目录仅含 marker.txt。NONCE: b13d4fb32fa78b2def3a65d1'\"",
+          "commandActions": [
+            {
+              "name": null,
+              "path": null,
+              "type": "unknown"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project",
+          "id": "exec-b2439a36-0956-4f37-a2c2-4c9dcd1cb12d",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "{\"agentAddressingMode\":\"public_only\",\"deliveryIds\":[],\"effectiveRecipients\":[],\"messageId\":\"6385409c-443b-4458-a571-c52b00b80c72\"}\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "case": "I2-special-path-codex",
+      "runtime": "codex-cli",
+      "sequence": 3,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c \"ls -la 'src/中文 目录/参数 (草稿)#1/'\"",
+          "commandActions": [
+            {
+              "name": null,
+              "path": "参数 (草稿)#1",
+              "type": "listFiles"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project",
+          "id": "exec-f2ba61f0-24b3-40b0-96a7-5ffda5684565",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff   96 Nov  8 01:25 .\ndrwxr-xr-x@ 4 murray.xue  staff  128 Nov  8 01:25 ..\n-rw-r--r--@ 1 murray.xue  staff   24 Nov  8 01:25 marker.txt\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "case": "I2-special-path-codex",
+      "runtime": "codex-cli",
+      "sequence": 4,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c \"cat 'src/中文 目录/参数 (草稿)#1/marker.txt'\"",
+          "commandActions": [
+            {
+              "name": "marker.txt",
+              "path": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/中文 目录/参数 (草稿)#1/marker.txt",
+              "type": "read"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project",
+          "id": "exec-21d6c46d-5ab8-4b7c-ac9b-16202e9d55a1",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "a3a454cbd13596d82daa11f4",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/中文 目录/参数 (草稿)#1/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "codex-cli",
+            "observedRuntimeVersion": "codex-cli 0.166.0",
+            "sourceEventKind": "activity.commandExecution.read"
+          },
+          "status": "available"
+        }
+      }
+    },
+    {
+      "case": "I2-special-path-codex",
+      "runtime": "codex-cli",
+      "sequence": 7,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c \"rovai send --public-only --body '指定目录中仅有 marker.txt。NONCE: a3a454cbd13596d82daa11f4'\"",
+          "commandActions": [
+            {
+              "name": null,
+              "path": null,
+              "type": "unknown"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project",
+          "id": "exec-bd570819-61c1-44a0-8f38-9d97c534ff00",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "{\"agentAddressingMode\":\"public_only\",\"deliveryIds\":[],\"effectiveRecipients\":[],\"messageId\":\"5a0e9590-c28f-43a3-81e5-823755a45af9\"}\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "case": "I3-prepare-codex",
+      "runtime": "codex-cli",
+      "sequence": 4,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": "c6d15258ea35371a5681a89e31e48f2d34a9dffcc1a8f3627db535e233a7e65b",
+        "authorizationDecision": "allowed",
+        "canonicalTool": "mission.get",
+        "idempotentReplay": false,
+        "input": null,
+        "kind": "builtin_tool_invocation",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": {
+          "canonicalInput": {},
+          "digestBinding": {
+            "input": {
+              "digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+              "evidenceField": "rawInputDigest"
+            },
+            "result": {
+              "digest": "c6d15258ea35371a5681a89e31e48f2d34a9dffcc1a8f3627db535e233a7e65b",
+              "evidenceField": "rawOutputDigest"
+            }
+          },
+          "inputDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "operation": "mission.get",
+          "projectionDigest": "f62604ba9154e77c1973f7702a4a521455ff6b19d73e1ec50a353864e9ccc6fa",
+          "resultDigest": "c6d15258ea35371a5681a89e31e48f2d34a9dffcc1a8f3627db535e233a7e65b",
+          "schemaVersion": 4
+        },
+        "rawInputDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": "core",
+        "status": "started",
+        "title": "mission.get",
+        "toolCallId": "f3268210d70bfeacc49ff7db25d75b6ac3b378b91448aa9f0689218830c2858e",
+        "toolName": null
+      },
+      "result": {
+        "coreEnvelope": {
+          "contractVersion": 2,
+          "error": {
+            "code": null,
+            "recovery": null
+          },
+          "ok": true,
+          "operation": "mission.get",
+          "receipt": null,
+          "requestId": "a6acb5da-895d-49ed-bc6c-06f17ed00381"
+        },
+        "operationProjection": {
+          "projectionDigest": "d5710023bb64fd684265122add9b725b328fc9fc82bad729ceeeeea8417414db"
+        },
+        "output": "{\"attachments\":[],\"description\":\"When I provide a file reference in the next message, read only that referenced file and report its NONCE. For now, briefly say you are ready. Do not read or edit project files or delegate.\",\"missionId\":\"rvm_01a1bae7e0d47e42804d36ee4ed4b586\",\"sourceMessageId\":null,\"status\":\"not_started\",\"title\":\"Worktree file identity codex\"}",
+        "rawOutputDigest": "c6d15258ea35371a5681a89e31e48f2d34a9dffcc1a8f3627db535e233a7e65b",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I3-prepare-codex",
+      "runtime": "codex-cli",
+      "sequence": 5,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'rovai mission get'",
+          "commandActions": [
+            {
+              "name": null,
+              "path": null,
+              "type": "unknown"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001",
+          "id": "exec-6799dca2-6f2a-492d-8769-10e224b0009a",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "{\"attachments\":[],\"description\":\"When I provide a file reference in the next message, read only that referenced file and report its NONCE. For now, briefly say you are ready. Do not read or edit project files or delegate.\",\"missionId\":\"rvm_01a1bae7e0d47e42804d36ee4ed4b586\",\"sourceMessageId\":null,\"status\":\"not_started\",\"title\":\"Worktree file identity codex\"}\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "case": "I3-worktree-codex",
+      "runtime": "codex-cli",
+      "sequence": 3,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'ls -la /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/config/'",
+          "commandActions": [
+            {
+              "name": null,
+              "path": "config",
+              "type": "listFiles"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001",
+          "id": "exec-a0e31e41-e0cd-4bb0-bfea-15a221ea5f83",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff   96 Nov  8 01:25 .\ndrwxr-xr-x@ 5 murray.xue  staff  160 Nov  8 01:25 ..\n-rw-r--r--@ 1 murray.xue  staff   24 Nov  8 01:25 marker.txt\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "case": "I3-worktree-codex",
+      "runtime": "codex-cli",
+      "sequence": 4,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'cat /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/config/marker.txt'",
+          "commandActions": [
+            {
+              "name": "marker.txt",
+              "path": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001/config/marker.txt",
+              "type": "read"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001",
+          "id": "exec-fb514f19-6d73-478e-862a-846ffc5fb553",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "1fec7f04790b9777b9c358c1",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "config/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "codex-cli",
+            "observedRuntimeVersion": "codex-cli 0.166.0",
+            "sourceEventKind": "activity.commandExecution.read"
+          },
+          "status": "available"
+        }
+      }
+    },
+    {
+      "case": "I3-worktree-codex",
+      "runtime": "codex-cli",
+      "sequence": 6,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c \"rovai send --public-only --body 'config/ 目录包含 marker.txt。读取到的 NONCE：1fec7f04790b9777b9c358c1'\"",
+          "commandActions": [
+            {
+              "name": null,
+              "path": null,
+              "type": "unknown"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-001",
+          "id": "exec-0c5f2bbd-a494-4fba-bb88-6917965a4d2c",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "{\"agentAddressingMode\":\"public_only\",\"deliveryIds\":[],\"effectiveRecipients\":[],\"messageId\":\"9e46049b-2501-44ed-95c4-7a5c16522f94\"}\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 2,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "ls -la /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/billing/config/",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_22017cbc3dce44f2b3cf07164887609d",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 01:24 .\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 01:24 ..\n-rw-r--r--@ 1 murray.xue  staff  24 Nov  8 01:25 marker.txt",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 3,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": null,
+        "kind": "read",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Read",
+        "toolCallId": "call_22b23380633846cf8e462e28269b39b3",
+        "toolName": "Read"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/billing/config/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        },
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 5,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "rovai send --public-only --body 'Listed `src/billing/config/`; it contains `marker.txt`. Read that file. NONCE: `008c983dec326b3e8e7732b8`. No files were edited and no work was delegated.'",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_aca6aa5ad47942c18fb59e140a0e8fd8",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "{\"agentAddressingMode\":\"public_only\",\"deliveryIds\":[],\"effectiveRecipients\":[],\"messageId\":\"a936933f-1641-4862-9f50-07f447aabe2b\"}",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I2-special-path-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 2,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "ls -la '/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project/src/中文 目录/参数 (草稿)#1/'",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_9161d8161cae4ab58e112cec5a30f654",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff   96 Nov  8 01:25 .\ndrwxr-xr-x@ 4 murray.xue  staff  128 Nov  8 01:25 ..\n-rw-r--r--@ 1 murray.xue  staff   24 Nov  8 01:26 marker.txt",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I2-special-path-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 3,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": null,
+        "kind": "read",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Read",
+        "toolCallId": "call_7233193bc06845ee9875203764d6c66a",
+        "toolName": "Read"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/中文 目录/参数 (草稿)#1/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        },
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I2-special-path-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 6,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "rovai send --public-only --body 'Listed `src/中文 目录/参数 (草稿)#1/`; it contains `marker.txt`. Read that file. NONCE: `969124299a222bdb2a3f4d1b`. No files were edited and no work was delegated.'",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_7994b2ed95714eeeb8e0fb57c71687e5",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "{\"agentAddressingMode\":\"public_only\",\"deliveryIds\":[],\"effectiveRecipients\":[],\"messageId\":\"39b152b6-ad95-4196-9176-fa728082887e\"}",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I3-prepare-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 3,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "rovai mission get",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_5144e1a918be4aef8da2d00d42e938e0",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "{\"attachments\":[],\"description\":\"When I provide a file reference in the next message, read only that referenced file and report its NONCE. For now, briefly say you are ready. Do not read or edit project files or delegate.\",\"missionId\":\"rvm_01a1bae91da17d12b38cc449392fb325\",\"sourceMessageId\":null,\"status\":\"not_started\",\"title\":\"Worktree file identity claude\"}",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I3-prepare-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 4,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": "87b6ba7451ed80ca576afde122341268b255af954ef50017679b08118c4e20a7",
+        "authorizationDecision": "allowed",
+        "canonicalTool": "mission.get",
+        "idempotentReplay": false,
+        "input": null,
+        "kind": "builtin_tool_invocation",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": {
+          "canonicalInput": {},
+          "digestBinding": {
+            "input": {
+              "digest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+              "evidenceField": "rawInputDigest"
+            },
+            "result": {
+              "digest": "87b6ba7451ed80ca576afde122341268b255af954ef50017679b08118c4e20a7",
+              "evidenceField": "rawOutputDigest"
+            }
+          },
+          "inputDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "operation": "mission.get",
+          "projectionDigest": "f62604ba9154e77c1973f7702a4a521455ff6b19d73e1ec50a353864e9ccc6fa",
+          "resultDigest": "87b6ba7451ed80ca576afde122341268b255af954ef50017679b08118c4e20a7",
+          "schemaVersion": 4
+        },
+        "rawInputDigest": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": "core",
+        "status": "started",
+        "title": "mission.get",
+        "toolCallId": "666539f95a8a719b8cb9e8844ed40f89d0dfdd63840b56f3f62e6714b536eff6",
+        "toolName": null
+      },
+      "result": {
+        "coreEnvelope": {
+          "contractVersion": 2,
+          "error": {
+            "code": null,
+            "recovery": null
+          },
+          "ok": true,
+          "operation": "mission.get",
+          "receipt": null,
+          "requestId": "b4ef4b0e-06c8-45d0-9f31-b1f6b1eeb0a0"
+        },
+        "operationProjection": {
+          "projectionDigest": "4625de16caebc1411dd7e12dbb52f878f28ccb41b0cfb2b37e530a83a5cbebfc"
+        },
+        "output": "{\"attachments\":[],\"description\":\"When I provide a file reference in the next message, read only that referenced file and report its NONCE. For now, briefly say you are ready. Do not read or edit project files or delegate.\",\"missionId\":\"rvm_01a1bae91da17d12b38cc449392fb325\",\"sourceMessageId\":null,\"status\":\"not_started\",\"title\":\"Worktree file identity claude\"}",
+        "rawOutputDigest": "87b6ba7451ed80ca576afde122341268b255af954ef50017679b08118c4e20a7",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I3-worktree-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 2,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "ls -la /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-directory-real-runtime-2kFuMW/project-mission-002/config/",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_d9448aa6ceff4de2a9d37f7cc45f03b0",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff   96 Nov  8 01:26 .\ndrwxr-xr-x@ 5 murray.xue  staff  160 Nov  8 01:26 ..\n-rw-r--r--@ 1 murray.xue  staff   24 Nov  8 01:26 marker.txt",
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I3-worktree-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 3,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": null,
+        "kind": "read",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Read",
+        "toolCallId": "call_f6824463a6784ec7a534cbc3232b31e3",
+        "toolName": "Read"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "config/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        },
+        "status": "completed"
+      }
+    },
+    {
+      "case": "I3-worktree-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 7,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "rovai send --public-only --body 'Listed the referenced config/ directory; it contains marker.txt. Read config/marker.txt. NONCE: a886e9d66dd8f41fc674bcea. No files were edited and no work was delegated.'",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_ff44c9c4e2cc49c1bf697b184c2e8ef1",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "{\"agentAddressingMode\":\"public_only\",\"deliveryIds\":[],\"effectiveRecipients\":[],\"messageId\":\"274d60e1-3589-47fd-8222-2f641db32aa4\"}",
+        "status": "completed"
+      }
+    }
+  ],
+  "qualification": [
+    {
+      "kind": "codex-cli",
+      "status": "installed_unverified",
+      "model": {
+        "mode": "runtime_default"
+      }
+    },
+    {
+      "kind": "claude-code-cli",
+      "status": "installed_unverified",
+      "model": {
+        "mode": "runtime_default"
+      }
+    }
+  ],
+  "noncesAbsentFromFrozenInput": true,
+  "privateCredentialsExported": false
+}
