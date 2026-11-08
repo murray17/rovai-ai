@@ -93,7 +93,10 @@ function FileTree({ store, onOpen }: { store: ProjectFilesStore; onOpen(entry: P
           {!row.entry.directory && !row.entry.unavailable && composer?.target?.enabled && composer.target.threadId === store.threadId && <button type="button" className="project-files-reference" aria-label={uiAttribute('引用 {0} 到输入框', row.entry.relativePath)} title={uiAttribute('引用到输入框')} onClick={event => {
             event.stopPropagation()
             setReferenceError(false)
-            void store.open(row.entry).then(source => { if (source?.kind === 'project_file') return composer.reference(source); throw new Error('source_unavailable') }).catch(() => setReferenceError(true))
+            void composer.reference(store.threadId, async () => {
+              const source = await store.open(row.entry)
+              return source?.kind === 'project_file' ? source : null
+            }).catch(() => setReferenceError(true))
           }}>@</button>}
         </div>
         {row.entry.directory && state.expanded.has(row.entry.id) && state.pages.get(row.entry.id)?.error && <div className="project-files-feedback"><span>{uiAttribute('无法读取目录')}</span><button onClick={() => { void store.load(row.entry.id) }}>{uiAttribute('重试')}</button></div>}

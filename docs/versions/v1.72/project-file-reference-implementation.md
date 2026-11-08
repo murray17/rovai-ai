@@ -20,9 +20,9 @@ User 已在 sequence 21 确认 R1，现开始正式实现。v5.1 原型只作为
 | Branch | `rovai/project-file-references` |
 | Base | `55a83f89733393cfcad76b046e344c222577abe1`（已核对 origin/main） |
 | Governance | none；无主线文档先行要求；R1 已由 User sequence 21 二次确认 |
-| Status | active；正式主链与界面通过，R3 模型行为仍未通过 |
+| Status | active；sequence 26 的三个前端边界已修复并补齐复杂定位证据；R3 模型行为仍未通过，保留平台与既有测试限制 |
 | Validation | 见下方实际实现、确定性门禁、真实 UI 及 Runtime 分项结果 |
-| Next | User 决定补充 R2 后，只实施获准提示并定向复查 R3；保持原失败证据 |
+| Next | 补充 R2 revision 2 独立待确认；获准后验证应询问和应继续的三种任务，不改判 R3 原失败或扩大已测平台范围 |
 
 保留此 worktree 跨后续 Run 复用。完成后按用户当前偏好提交并推送同名远端分支，不自动创建或重开 PR；
 合入前不清理 worktree，不触碰其他活跃目录或日常 App 数据。
@@ -108,6 +108,35 @@ DOCS_BASE_REF=55a83f89733393cfcad76b046e344c222577abe1 pnpm docs:check:ci
 - `git diff --check`：通过。worktree 私有依赖按原 lockfile 串行核对完成，lockfile 无改动；未启动 App/Core/Runtime。
 - 2026-11-07：收到 User sequence 21 确认，登记 R1 后重跑文档门禁，正式实现开始。
 
+## Sequence 26 复核修复与补强计划
+
+User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺口。本轮不修改 R1 的文件身份、Core 发布、
+模型投影、版本轴或仅文件发送语义；R2 Charter 指导保持独立待确认，R3 原失败证据保持。
+
+| 边界 | 修复及预先冻结的通过标准 |
+| --- | --- |
+| 未完成插入与提交 | 候选确认、文件树 open＋确认、预览确认共用待插入状态；鼠标、键盘和直接表单提交均不能发送残余查询词。采用暂禁发送，正常草稿保存仍可 flush，不先锁编辑器等待插入 |
+| 可用性错误分类 | 请求级 root_unavailable 等明确业务错误为 unavailable；连接／超时为 network_error；畸形 DTO 为 protocol_error 并记录协议警告，不能伪装成文件消失或连接失败 |
+| 拒绝与旧检查竞态 | Core 拒绝使此前检查代次失效；延迟旧成功不得清除拒绝，仅拒绝之后发起的新检查可解除 |
+
+扩展既有生产 Desktop＋认证 Web owner，以真实 Host 返回的响应作为 deferred Promise，明确控制插入等待和
+“旧检查成功→删除文件→真实发送拒绝→旧成功迟到”的顺序。状态分类使用同一入口的受控响应，保留模拟性质说明。
+防误发送屏障记录并阻止待插入用例中的任何意外 send RPC；通过标准要求零发送尝试，不用拦截后的失败冒充通过。
+
+### 复杂定位真实读取（运行前冻结）
+
+使用新的隔离 fixture、真实 Core 与既有合格 Codex／Claude，各执行三项读取；两次 Mission 准备单独计数。
+总计八个真实任务输入（六次读取＋两次工作副本准备），与原七项证据分开保存。不会在本轮加入未获准的 Charter 文本。
+
+| Case（每个 Runtime 各一次） | 操作与通过标准 |
+| --- | --- |
+| I1 同名 | auth/config.ts 与 billing/config.ts 写不同随机值，只引用 billing；正式路径、冻结 URI、真实工具读取及回复均指向被选中文件，回复不含诱饵值；输入未注入随机值 |
+| I2 特殊路径 | 引用 `src/中文 目录/参数 (草稿)#1.ts`，另放无井号诱饵；从正式 URI 到实际读取正确还原中文、空格、括号与井号，返回被选值而非诱饵 |
+| I3 有效工作副本 | 按正常 Mission 投递准备真实 ready 工作副本，主项目及工作副本 config.ts 放不同值；上文明确待文件后读取，再仅补交工作副本引用。路径与实际工具指向有效工作副本，不能读取主项目诱饵 |
+
+准备任务只确认就绪，不读取或修改项目文件；不伪造 Mission workspace 数据库状态。正例各一次，失败原样留证，
+只在夹具或未完成任务有明确新依据时定向复查。原 R3 不在本轮重跑、不因复杂定位通过而改判。
+
 ## 实际实现与验收
 
 实施基于同一独立分支，使用正式组件、真实 Host/Core 和临时文件系统，不依赖离线原型。
@@ -129,14 +158,14 @@ DOCS_BASE_REF=55a83f89733393cfcad76b046e344c222577abe1 pnpm docs:check:ci
 | 验证 | 实际结果 |
 | --- | --- |
 | TypeScript / 生产构建 | `pnpm typecheck`、`pnpm build:desktop` 通过 |
-| 全量 Vitest | 270 文件，3,132 通过、2 项既有 skip；使用 UTC 运行既有日期断言 |
+| 全量 Vitest | 复核修复后 271 文件，3,146 通过、2 项既有 skip；使用 UTC 运行既有日期断言 |
 | Rust 默认 workspace | 全过：Core 438 通过／1 项既有 ignored；其余 crate 与 CLI 通过 |
 | 定向 Rust owner | camp_content 16 项、Pending 原子发送 1 项、初始／Steer 冻结 1 项通过；project_files 根边界由既有 3 项 owner 覆盖 |
 | 原生 Composer | 3 个 Electron owner 通过，包含成员邀请、输入、IME、恢复和 Web 链接 |
 | 原生项目目录 | 既有真实 Host 项目目录 owner 通过，包括预览、编辑保存、主题、窄屏及缩放；不据此宣称文件 Mention 的 200% 专项已测 |
 | Host 文件烟测 | 6 组通过：独立 scope、重绑、预览收紧、Pending 拒绝及重放、伪造字段、Web 鉴权与旧协议拒绝 |
 | Host Desktop＋Web 主 owner | 通过；Core 生命周期、HTTP 投影、权限、旧协议及文件编辑均保持 |
-| 正式文件界面 | Desktop＋认证 Web 16 项通过，覆盖原生复制、同根／异根粘贴、短标签、预览、仅文件按钮、文件树、Tab／Enter／删除／Undo、预览插入、中文 IME、输入历史、消息复制、真实删除后拒绝留稿、窄屏触控长按详情及 44px 操作区 |
+| 正式文件界面 | 复核修复后 Desktop＋认证 Web 20 项通过，保留原 16 项路径并补齐三处异步插入提交阻断、业务／协议分类与旧检查覆盖发送拒绝的反例；结果见[界面证据](project-file-reference-review-ui-evidence.json) |
 | 布局 | day／night × 390／1040／1440／2560；实际输入框与文件扩展名可见，无页面横向溢出 |
 | 文档治理 | docs:test 10 项及 require-base 的决定／链接门禁通过；version 门禁仅余补充 R2 的 4 项真实确认记录，未补造确认 |
 
@@ -164,6 +193,30 @@ macOS arm64 的真实 Codex CLI 0.166.0 与 Claude Code 2.1.311 使用新的 Cor
 修正夹具后才进行真实调用。后续只补跑未执行的 R4，不重复消耗已通过的四个读取任务。
 [补充 R2](model-context-change-project-file-reference-clarification.md)提出公开 Charter 的一句澄清规则，仍为 pending；
 本次不修改 Charter 26、Bootstrap v6、Binding compatibility 16 或冻结输入，不将 R1 确认移作 R2 确认。
+
+### Sequence 26 实际修复与复验（2026-11-07）
+
+- 所有公开发送入口先读取编辑器同步的待插入状态，再锁编辑器；提交专用 flush 再检查一次，普通保存 flush 保持可用。
+  候选、文件树的首次 open 和预览确认分别持有独立插入令牌；某个请求结束不会误清除另一个仍在等待的请求。
+- 可用性响应解码区分明确业务错误、传输异常及协议异常，14 个定向 TS 用例通过。异常响应保留身份与可重试提示；
+  `root_unavailable` 不再显示连接失败。协议异常单独警告并阻止以未确认状态发送，不伪造文件消失。
+- 发送拒绝递增检查代次；真实 UI 延迟一份 Host 已确认 available 的成功响应，随后删除文件并实际提交，Core 拒绝后
+  文档和 Atom 保留且无新增消息／执行。放行旧成功后仍不可用，恢复文件并发起新的检查后才解除。
+- 三处插入等待均验证鼠标及直接 form 提交零 send RPC 尝试，不发送残留 `@query`；预览操作仍由用户主动触发。
+  分类用例的请求级业务／畸形 DTO 为受控注入；拒绝时序使用真实文件删除和真实 Core 结果，不混称真实文件系统故障。
+- 新增[复杂定位证据](project-file-reference-identity-evidence.json)：Codex CLI 0.166.0 与 Claude Code 2.1.311 的
+  I1／I2／I3 共六次真实读取全部通过；两个真实 Mission 准备任务另计，通过正常 dispatcher 产生 ready Git 工作副本。
+  同名、中文／空格／括号／井号，以及主项目与有效工作副本的不同随机值均核对正确，没有读到诱饵值。
+  正式路径、实际 RUN_INPUT 消息、冻结哈希、执行根、Core read operation 和原生读取结果相互核对；
+  实际消息包含原有默认接收者前缀，URI 保持发布定位，senderId 为 `user`，没有 files 区块或文件全文注入。
+- 复杂读取首轮在两个 Codex 任务通过后被夹具的 `mission.invalid_tag` 阻断，恢复入口又遇到既有目录 EEXIST；
+  两次中断均保留，修正夹具后只继续剩余六个输入，没有重跑已通过任务或删除原 R3 失败。结束后本次 Native Home 已清理。
+- `pnpm typecheck`、UTC 全量 Vitest、`pnpm test:composer-input`（3 项）及生产构建通过；Rust／Core 源码本轮未修改，
+  上表 Rust 结果为此前 R1 实施时的实际记录，本轮未重复全 workspace。
+- `pnpm test` 的组合命令在 docs:test 10 项通过后，被尚未确认 R2 的四项记录门禁阻止；因此单独运行完整 Vitest，
+  不把组合命令报告为通过。require-base 的文档决定／链接门禁通过；没有添加 checker 例外或补造确认。
+- R1 两个模型输入示例的 senderId 按现有实现勘误为 `user`；R1 确认仍有效。R2 提案 revision 2 补足
+  “新对话无任务应询问／上文日志任务直接继续／本轮明确分析直接执行”，Charter 文本尚未实施。
 
 ### 已知限制与交接
 

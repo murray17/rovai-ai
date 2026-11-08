@@ -404,7 +404,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             {referenceError && <p className="ref-source-note" role="status">{uiAttribute('暂时无法引用此文件，请重试')}</p>}
             {tab.kind === 'file' && <>
             {tab.sourceRequest?.kind === 'project_file' && composer?.target?.enabled && composer.target.threadId === tab.sourceRequest.threadId && <button type="button" role="menuitem" onClick={() => {
-              if (tab.sourceRequest?.kind === 'project_file') void composer.reference(tab.sourceRequest).then(() => setMenu(null)).catch(() => setReferenceError(true))
+              if (tab.sourceRequest?.kind === 'project_file') void composer.reference(tab.sourceRequest.threadId, tab.sourceRequest).then(() => setMenu(null)).catch(() => setReferenceError(true))
             }}>{uiAttribute('引用到输入框')}</button>}
 
             {canDownloadFile(tab, api) && <button role="menuitem" type="button"

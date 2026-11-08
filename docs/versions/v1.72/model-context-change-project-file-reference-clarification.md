@@ -2,7 +2,7 @@
 document_type: model-context-change
 version: v1.72
 change_id: project-file-reference-clarification
-revision: 1
+revision: 2
 confirmation_status: pending
 implementation_status: proposed
 authority: model-input-change-proposal
@@ -63,12 +63,21 @@ R3 新对话只发文件时，Codex 实际回复“已读取 unassigned.txt，�
 ## 验证
 
 先保留 R3 原失败。扩展现有 Charter/Native Binding owner，证明新 Session revision 与文本、旧兼容性和冻结证据。
-重跑相同 R3 新对话仅文件任务一次，要求主动询问用户需要做什么，且不修改文件；失败仍如实记录。
-R1/R2 已通过的真实读取任务不重复运行。继续完成 R4 live 读取／真实权限错误、Desktop/Web UI 和已有确定性门禁。
+获准后使用新 Session 定向覆盖下列三种真实任务；既有 Session 保持冻结的旧 Charter，不能宣称立即取得新行为。
+
+| 场景 | 预先冻结的通过标准 |
+| --- | --- |
+| 新对话只发送文件，没有明确任务 | 简短询问需要完成什么工作，不擅自修改；沿用 R3 原标准，失败如实保留 |
+| 上文已要求提供日志，随后只补交日志引用 | 直接继续上文任务，读取正确内容，不重复询问任务 |
+| 本轮文字明确要求分析引用文件 | 正常分析正确文件，不因文件引用额外请求任务确认 |
+
+这是新增指导最直接的正反回归范围，不能只重跑 R3。已完成的 R4 live／权限任务保持原证据；
+三项前端边界修复和复杂定位读取另在[实施记录](project-file-reference-implementation.md)验收，不等待本补充确认。
+本 revision 2 只修订验证范围，拟加入的完整 Charter 文本、版本和兼容边界与原提案相同。
 
 ## 二次确认
 
-待 User 对本补充 revision 1 明确同意后，才修改 Charter、当前合同或版本常量。
+待 User 对本补充 revision 2 明确同意后，才修改 Charter、当前合同或版本常量。
 依据[模型上下文治理](../../development/model-context-change-governance.md#二次确认门槛)：
 “说明内容发生语义变化时必须递增 revision，旧确认立即失效，重新取得开发者确认”。
 本说明是独立的新增上下文规则，R1 已确认的文件身份、发布与恢复实现继续进行，不把 R1 的同意移作此处的确认。

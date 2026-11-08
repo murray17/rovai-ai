@@ -75,7 +75,7 @@ type StructuredThreadMessageSegmentBefore =
 公开 batch 的普通消息继续使用现有 `RUN_INPUT.messages[]`；无附件、quote 或 Skill 的具体例子：
 
 ```json
-{"messageId":"msg_example","sequence":3,"senderType":"user","senderId":"local_user","body":"@爱丽丝 请检查 src/auth/login.ts。","mentions":[{"id":"agent_6","name":"爱丽丝"}]}
+{"messageId":"msg_example","sequence":3,"senderType":"user","senderId":"user","body":"@爱丽丝 请检查 src/auth/login.ts。","mentions":[{"id":"agent_6","name":"爱丽丝"}]}
 ```
 
 `body` 由现有共用正文 projector 生成。可选 anchor、quotes、attachments、skills 仍按各自当前合同省略；
@@ -148,7 +148,7 @@ URI 使用 pathAtSend，经 URI 库进行平台路径转换与编码，标签转
 上述模型例子变为：
 
 ```json
-{"messageId":"msg_example","sequence":3,"senderType":"user","senderId":"local_user","body":"@爱丽丝 请检查 [src/auth/login.ts](file:///project/src/auth/login.ts)。","mentions":[{"id":"agent_6","name":"爱丽丝"}]}
+{"messageId":"msg_example","sequence":3,"senderType":"user","senderId":"user","body":"@爱丽丝 请检查 [src/auth/login.ts](file:///project/src/auth/login.ts)。","mentions":[{"id":"agent_6","name":"爱丽丝"}]}
 ```
 
 不增加 RUN_INPUT.files、references、独立上下文块、文件内容或重复 SourceAttachment。
@@ -288,3 +288,11 @@ Web 新旧组合以协议准入失败。新客户端连接缺能力 Host 时不�
 真实 Runtime 七例中六例通过，R3 的主动追问失败保留；新增指导属于[待确认补充 R2](model-context-change-project-file-reference-clarification.md)，
 未写入本次 Charter，不把本 R1 的确认移用于新规则。当前选文按既有 quote_text 保存可见文本快照，
 不重算旧 quote 或 URI 偏移；本次不改变其字段或版本轴。
+
+## 示例勘误：2026-11-07 模型可见发送者
+
+User sequence 26 指出变更前后两个 JSON 示例误用了 `senderId: "local_user"`，现均纠正为 `"user"`。
+依据当前 [message_sender.rs](../../../crates/rovai-core/src/message_sender.rs)，内部 user／external_principal
+投影为模型可见的 `senderType: "user", senderId: "user"`；这不改变内部 current_user_mention 的 userId。
+本次仅修正文档示例与现有代码不一致之处，没有改动发送者投影、模型输入协议、已冻结输入或 R1 已确认的功能语义。
+因此保留真实的 R1 revision 1 确认；新增 Charter 行为仍按独立补充 R2 取得确认。

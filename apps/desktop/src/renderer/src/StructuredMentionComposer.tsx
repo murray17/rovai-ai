@@ -117,7 +117,8 @@ export type StructuredMentionOption =
 
 export interface StructuredMentionComposerHandle {
   getDocument(): ComposerDocument
-  flush(): Promise<ComposerFlushResult<ThreadComposerDraftView>>
+  flush(options?: { forSubmission?: boolean }): Promise<ComposerFlushResult<ThreadComposerDraftView>>
+  hasPendingFileInsertion(): boolean
   adoptHistoryPreview(): void
   cancelHistoryPreview(): void
   appendText(text: string): void
@@ -164,6 +165,7 @@ export interface StructuredMentionComposerProps {
   ): Promise<void>
   waitForDraftAuthority?(): Promise<void>
   onLocalStatusChange?(status: ComposerLocalStatus): void
+  onFileInsertionPendingChange?(pending: boolean): void
   pendingInviteIds?: readonly string[]
   onDirtyChange?(dirty: boolean): void
   onPersistenceErrorChange?(error: Error | null): void
@@ -315,6 +317,7 @@ function ComposerBridge({
   persistDocument,
   waitForDraftAuthority,
   onLocalStatusChange,
+  onFileInsertionPendingChange,
   pendingInviteIds = [],
   onDirtyChange,
   onPersistenceErrorChange,
@@ -339,7 +342,27 @@ function ComposerBridge({
   const fileSelectionBeforePointer = useRef<ReturnType<typeof $getSelection>>(null)
   const [fileActions, setFileActions] = useState<{ edit(replace: boolean): void; nodeKey: string; trigger: HTMLElement; atom: Extract<ComposerAtom, { type: 'project_file_reference' }>; restore(): void } | null>(null)
   const insertionTicket = useRef(0)
-  const fileInsertionPending = useRef(false)
+  const fileInsertions = useRef(new Set<object>())
+  const pendingChange = useRef(onFileInsertionPendingChange)
+  pendingChange.current = onFileInsertionPendingChange
+  const insertionsMounted = useRef(true)
+  const pickerInsertion = useRef<(() => void) | null>(null)
+  const beginFileInsertion = useCallback(() => {
+    const token = {}
+    fileInsertions.current.add(token)
+    pendingChange.current?.(true)
+    return () => {
+      if (fileInsertions.current.delete(token) && insertionsMounted.current) pendingChange.current?.(fileInsertions.current.size > 0)
+    }
+  }, [])
+  useEffect(() => {
+    insertionsMounted.current = true
+    return () => {
+      insertionsMounted.current = false
+      fileInsertions.current.clear()
+      pendingChange.current?.(false)
+    }
+  }, [])
   useEffect(() => { insertionTicket.current++; setFileActions(null) }, [draftIdentity])
   const [referenceIdentities, setReferenceIdentities] = useState(() => composerReferenceIdentities(document))
   const referenceAvailability = useReferenceAvailability(referenceScope, referenceIdentities)
@@ -382,6 +405,8 @@ function ComposerBridge({
   useEffect(() => {
     if (!fileComposer || !referenceScope) return
     return fileComposer.register({ threadId: referenceScope.threadId, client: referenceScope.client,
+      beginInsertion: beginFileInsertion,
+      isEditable: () => editor.isEditable(),
       enabled: filesSupported && ready && !disabled && purpose === 'message', insert: atom => {
         if (!editor.isEditable()) return
         editor.update(() => {
@@ -391,7 +416,7 @@ function ComposerBridge({
         }, { discrete: true, tag: HISTORY_PUSH_TAG })
         editor.focus()
       } })
-  }, [fileComposer?.register, referenceScope?.threadId, referenceScope?.client, filesSupported, ready, disabled, purpose, editor])
+  }, [fileComposer?.register, referenceScope?.threadId, referenceScope?.client, filesSupported, ready, disabled, purpose, editor, beginFileInsertion])
 
   useEffect(() => {
     let cleanup = () => {}
@@ -545,7 +570,9 @@ function ComposerBridge({
   const pickerRef = useRef(referencePicker)
   pickerRef.current = referencePicker
   useEffect(() => {
-    insertionTicket.current++; fileInsertionPending.current = false; setFileSelectionError('')
+    insertionTicket.current++
+    pickerInsertion.current?.(); pickerInsertion.current = null
+    setFileSelectionError('')
   }, [triggerMatch?.nodeKey, triggerMatch?.fromOffset, triggerMatch?.toOffset, triggerMatch?.query, referenceScope?.threadId])
   const skillOptions = useMemo(
     () => skillQuery === null ? [] : structuredSkillOptions(skills ?? [], skillQuery),
@@ -618,7 +645,7 @@ function ComposerBridge({
     const sync = new ComposerDraftSync(editor, editor.getEditorState(), bindings())
     const runtime: ComposerExtensionRuntime<ThreadComposerDraftView> = {
       sync,
-      submit: () => { if (!fileInsertionPending.current) void callbacks.current.onSubmit() },
+      submit: () => { if (!fileInsertions.current.size) void callbacks.current.onSubmit() },
       enterInsertsLineBreak: () => callbacks.current.purpose === 'mission' || mobileRef.current,
       shouldSubmitEnter: event => {
         const context = shortcutRef.current
@@ -736,7 +763,9 @@ function ComposerBridge({
       syncRef.current?.adoptHistoryPreview()
     },
     cancelHistoryPreview() { historyNavigationRef.current?.cancel() },
-    flush: async () => {
+    hasPendingFileInsertion: () => fileInsertions.current.size > 0,
+    flush: async (options) => {
+      if (options?.forSubmission && fileInsertions.current.size) throw new Error(uiAttribute('文件引用尚未插入完成，请稍后发送'))
       const sync = syncRef.current
       if (!sync) {
         return {
@@ -819,7 +848,7 @@ function ComposerBridge({
     const stop = editor.registerRootListener(root => {
       cleanup()
       if (!root) return
-      const start = () => { insertionTicket.current++; fileInsertionPending.current = false; setTriggerMatch(null) }
+      const start = () => { insertionTicket.current++; pickerInsertion.current?.(); pickerInsertion.current = null; setTriggerMatch(null) }
       const end = () => { queueMicrotask(() => editor.getEditorState().read(() => setTriggerMatch($findComposerTriggerMatch(editor)))) }
       root.addEventListener('compositionstart', start); root.addEventListener('compositionend', end)
       cleanup = () => { root.removeEventListener('compositionstart', start); root.removeEventListener('compositionend', end) }
@@ -894,7 +923,9 @@ function ComposerBridge({
             const scope = callbacks.current.referenceScope
             if (!scope || !callbacks.current.filesSupported) return false
             const ticket = ++insertionTicket.current
-            fileInsertionPending.current = true
+            pickerInsertion.current?.()
+            const finishInsertion = beginFileInsertion()
+            pickerInsertion.current = finishInsertion
             setFileSelectionError('')
             const key = pickerRef.current.key
             void scope.client.request<import('@contracts').ProjectFilesResult<Extract<import('@contracts').OpenFilePreviewRequest, { kind: 'project_file' }>>>('projectFiles.request', { threadId: scope.threadId, action: 'open', scopeId: option.scopeId, entryId: option.item.id })
@@ -905,7 +936,10 @@ function ComposerBridge({
                   const fresh = $findComposerTriggerMatch(editor)
                   if (fresh?.nodeKey === match.nodeKey && fresh.fromOffset === match.fromOffset && fresh.toOffset === match.toOffset && fresh.query === match.query) $replaceComposerTriggerWithAtom(match, atom)
                 }, { discrete: true, tag: HISTORY_PUSH_TAG })
-              }).catch(() => { if (ticket === insertionTicket.current && pickerRef.current.key === key) setFileSelectionError(uiAttribute('暂时无法引用此文件，请重试')) }).finally(() => { if (ticket === insertionTicket.current) fileInsertionPending.current = false })
+              }).catch(() => { if (ticket === insertionTicket.current && pickerRef.current.key === key) setFileSelectionError(uiAttribute('暂时无法引用此文件，请重试')) }).finally(() => {
+                finishInsertion()
+                if (pickerInsertion.current === finishInsertion) pickerInsertion.current = null
+              })
             return false
           }
           if (option.kind === 'reference') return $replaceComposerTriggerWithAtom(match, referenceAtom(option.item))
@@ -1105,8 +1139,9 @@ function atomPresentation(
     }
     const presentation = fileReferencePresentation(resolvedLabel(atom), (input.fileAtoms ?? [atom]).map(resolvedLabel))
     const unavailable = !input.filesSupported || atom.threadId !== input.referenceScope?.threadId || status?.status === 'unavailable' || status?.status === 'needs_reselect'
-    const ariaLabel = unavailable ? uiAttribute('{0}，需要重新选择', presentation.ariaLabel) : status?.status === 'network_error' ? uiAttribute('{0}，连接失败，可重试', presentation.ariaLabel) : presentation.ariaLabel
-    return { label: presentation.label, fullPath: presentation.path, ariaLabel, availability: unavailable ? 'unavailable' : 'available', interactive: true }
+    const protocolError = status?.status === 'protocol_error'
+    const ariaLabel = protocolError ? uiAttribute('{0}，文件服务响应异常，请重试', presentation.ariaLabel) : unavailable ? uiAttribute('{0}，需要重新选择', presentation.ariaLabel) : status?.status === 'network_error' ? uiAttribute('{0}，连接失败，可重试', presentation.ariaLabel) : presentation.ariaLabel
+    return { label: presentation.label, fullPath: presentation.path, ariaLabel, availability: unavailable || protocolError ? 'unavailable' : 'available', interactive: true }
   }
   if (isReferenceAtom(atom)) {
     const id = referenceIdentity(atom).id

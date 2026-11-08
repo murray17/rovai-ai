@@ -18,6 +18,10 @@ last_updated: 2026-11-07
 为已确认范围（User sequence 21）。Core 与 Desktop／Web 主链已实现；类型、事务、恢复和真实界面通过，
 真实 Runtime 七例中六例通过。新对话只有文件时未主动追问，按 R3 原标准保留失败；
 [补充 R2](model-context-change-project-file-reference-clarification.md)仍待确认，未修改 Charter。
+sequence 26 复核的三处前端边界已修复；Desktop／认证 Web 20 项及全量 Vitest 3,146 项通过。
+另补同名、特殊路径与 Mission 工作副本三组真实定位，Codex／Claude 六次读取通过，两个准备任务另计，
+见[复杂定位证据](project-file-reference-identity-evidence.json)与[延迟界面验证](project-file-reference-review-ui-evidence.json)。
+原 R3 仍失败；R2 revision 2 的三种行为回归须获准后使用新 Session 验证，既有 Session 保留冻结 Charter。
 模块、逐项验证及已知限制见[实施记录](project-file-reference-implementation.md#实际实现与验收)，
 真实输入哈希、文件读取及失败摘要见[脱敏证据](project-file-reference-evidence.json)。未合入、安装或替换日常 App。
 

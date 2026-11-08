@@ -4313,5 +4313,8 @@
   "来源 {0}": "Source {0}",
   "{0}，需要重新选择": "{0}, reselect required",
   "{0}，连接失败，可重试": "{0}, connection failed, retry available",
-  "当前 Host 不支持文件引用，请升级后恢复此草稿": "This Host does not support file references. Upgrade to restore this draft."
+  "当前 Host 不支持文件引用，请升级后恢复此草稿": "This Host does not support file references. Upgrade to restore this draft.",
+  "文件引用尚未插入完成，请稍后发送": "The file reference is still being inserted. Send when it is ready.",
+  "文件服务响应异常，引用已保留，请重试": "The file service returned an invalid response. Your reference is preserved. Try again.",
+  "{0}，文件服务响应异常，请重试": "{0}, invalid file service response, retry required"
 }

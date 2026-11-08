@@ -4,22 +4,33 @@ import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, stat, writeFile
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
+import { execFileSync } from 'node:child_process'
 import { launchHost } from './lib/host-test-client.mjs'
 import { pause } from './lib/host-web-browser.mjs'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 import { isolatedFileReferenceRuntimeEnvironment, configureFileReferenceRuntime } from './lib/project-file-reference-runtime-env.mjs'
-if (!process.argv.includes('--real-runtime')) throw Error('Explicit --real-runtime is required (paid model calls, seven planned task inputs).')
+if (!process.argv.includes('--real-runtime')) throw Error('Explicit --real-runtime is required (paid model calls; seven original inputs or eight complex-location inputs).')
 const repository = resolve(import.meta.dirname, '..')
-const resumeIndex = process.argv.indexOf('--remaining-live-cases')
+const identityCases = process.argv.includes('--identity-cases')
+const resumeIndex = process.argv.indexOf(identityCases ? '--remaining-identity-cases' : '--remaining-live-cases')
 const resume = resumeIndex >= 0 ? resolve(process.argv[resumeIndex+1]) : null
+if (identityCases && process.argv.includes('--remaining-live-cases')) throw Error('Complex-location cases cannot resume or rewrite the original R1/R3 evidence.')
+const plannedInputs = identityCases ? 8 : 7
 const fixture = resume ?? await realpath(await mkdtemp(join(tmpdir(), 'rovai-file-reference-runtime-')))
+const report = resume ? JSON.parse(await readFile(join(fixture,'private-evidence.json'),'utf8')) : { fixture, realRuntime:true, cases:[], qualification:[], startedAt:new Date().toISOString() }
+if (resume && identityCases) {
+  assert.equal(report.scope,'complex-file-locations')
+  assert.ok(report.cases.every(item=>item.success),'Only resume an interrupted fixture with no failed model cases')
+  report.interruptions=[...(report.interruptions??[]),{error:report.error,completed:report.cases.map(item=>item.case),resumedAt:new Date().toISOString()}]
+  delete report.error
+}
+report.scope = identityCases ? 'complex-file-locations' : 'original-R1-matrix'
 const data = join(fixture,'data'), project = join(fixture,'project'), binaries = join(fixture,'bin')
 for(const directory of [data, project, binaries])await mkdir(directory,{mode:0o700,recursive:true})
 for(const name of ['rovai-host','rovai'])await cp(join(repository,'target/debug',name),join(binaries,name))
 const native = await isolatedFileReferenceRuntimeEnvironment(fixture)
 const host = launchHost(join(binaries,'rovai-host'), [...coreDataDirectoryArguments(data),'--skill-library-root',join(data,'skills'),'--mcp-config-path',join(data,'mcp.json')], {cwd:repository,env:native.env})
-const report = resume ? JSON.parse(await readFile(join(fixture,'private-evidence.json'),'utf8')) : { fixture, realRuntime:true, cases:[], qualification:[], startedAt:new Date().toISOString() }
-console.log(JSON.stringify({channel:'automatic_acceptance',fixture,data,skills:join(data,'skills'),mcp:join(data,'mcp.json'),nativeHomes:'private fixture only',realRuntime:true,plannedInputs:7}))
+console.log(JSON.stringify({channel:'automatic_acceptance',fixture,data,skills:join(data,'skills'),mcp:join(data,'mcp.json'),nativeHomes:'private fixture only',realRuntime:true,plannedInputs,scope:report.scope}))
 const active = new Map()
 const wait = async(probe,label,timeout=240000)=>{const until=Date.now()+timeout;while(Date.now()<until){const found=await probe();if(found)return found;await pause(500)}throw Error('Timed out: '+label)}
 const snapshot = threadId=>host.request('threads.open',{threadId,traceId:randomUUID()})
@@ -37,8 +48,8 @@ try{
   await host.ready
   db=new DatabaseSync(join(data,'rovai.sqlite'),{readOnly:true})
   const profiles=await host.request('members.list')
-  const configured=resume?[{kind:'codex-cli',agentId:profiles[0].agentId}]:[]
-  for(const [index,kind]of (resume?[]:['codex-cli','claude-code-cli']).entries()){
+  const configured=resume&&!identityCases?[{kind:'codex-cli',agentId:profiles[0].agentId}]:[]
+  for(const [index,kind]of (resume&&!identityCases?[]:['codex-cli','claude-code-cli']).entries()){
     try{
       const member=await configureFileReferenceRuntime(host.request.bind(host),kind,profiles[index].agentId)
       report.qualification.push({kind,status:member.runtimeReadiness.status,model:member.runtimeConfiguration.model})
@@ -57,8 +68,9 @@ try{
     const messageId=result.commandResult.payload.threadMessageId
     assert.ok(messageId)
     const message=(await snapshot(threadId)).messages.find(message=>message.id===messageId)
-    assert.ok(message.content.some(segment=>segment.kind==='project_file_reference'))
-    const candidate={case:caseName,runtime:runtime.kind,threadId,messageId,bodyProjection:message.body,content:message.content,success:false}
+    const setup = caseName.startsWith('I3-prepare-')
+    assert.equal(message.content.some(segment=>segment.kind==='project_file_reference'),!setup)
+    const candidate={case:caseName,runtime:runtime.kind,threadId,messageId,bodyProjection:message.body,content:message.content,setup,success:false}
     report.cases.push(candidate)
     candidate.wait=async()=>{
       const run=await wait(async()=>{
@@ -73,18 +85,72 @@ try{
         return ['succeeded','failed','cancelled','interrupted'].includes(run.status)?run:null
       },caseName+' completion')
       active.delete(run.id);candidate.runId=run.id;candidate.status=run.status
+      candidate.workspace=JSON.parse(db.prepare('SELECT workspace_json FROM agent_run WHERE id=?').get(run.id).workspace_json)
       candidate.runtimeVersion=db.prepare('SELECT runtime_initial_reported_version AS initial, runtime_reported_version AS observed FROM agent_run WHERE id=?').get(run.id)
       const current=await snapshot(threadId)
       candidate.reply=current.messages.filter(message=>message.sourceAgentRunId===run.id).map(message=>message.body).join('\n')
       const manifests=db.prepare('SELECT b.storage_relative_path FROM context_manifest m JOIN managed_blob b ON b.id=m.rendered_payload_blob_id WHERE m.agent_run_id=? ORDER BY m.created_at').all(run.id)
       candidate.frozenInputs=[]
       for(const row of manifests)candidate.frozenInputs.push(await readFile(join(data,'managed-blobs',row.storage_relative_path),'utf8'))
-      assert.equal(candidate.frozenInputs.some(text=>text.includes('file:')),true,caseName+' URI survives actual input freezing')
+      if (!setup) assert.equal(candidate.frozenInputs.some(text=>text.includes('file:')),true,caseName+' URI survives actual input freezing')
       return candidate
     }
     return candidate
   }
-  if(!resume) {
+  if (identityCases) {
+    const hooks=join(fixture,'empty-hooks');await mkdir(hooks,{recursive:true})
+    const git=(...args)=>execFileSync('git',['-c',`core.hooksPath=${hooks}`,'-c','commit.gpgsign=false','-C',project,...args],{encoding:'utf8'}).trim()
+    if (!resume) {
+      execFileSync('git',['init',project],{stdio:'ignore'})
+      await writeFile(join(project,'tracked.txt'),'private acceptance repository\n')
+      git('add','.');git('-c','user.name=Reference acceptance','-c','user.email=reference@example.invalid','commit','-m','fixture')
+    }
+    const done=name=>report.cases.some(item=>item.case===name&&item.success)
+    const verify = async (runtime, threadId, relative, path, selected, decoy, name) => {
+      const segment=await reference(threadId,relative)
+      const work=await input(runtime,threadId,[{kind:'text',text:'Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. '},segment],name)
+      const result=await work.wait();assert.equal(result.status,'succeeded');assert.ok(result.reply.includes(selected));assert.ok(!result.reply.includes(decoy));assert.ok(!result.bodyProjection.includes(selected)&&!result.bodyProjection.includes(decoy))
+      assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').pathAtSend,await realpath(path))
+      result.expectedPath=await realpath(path);result.selectedNonce=selected;result.decoyNonce=decoy;result.success=true
+      return result
+    }
+    for(const runtime of configured){
+      const suffix=runtime.kind.startsWith('codex')?'codex':'claude'
+      for(const directory of ['src/auth','src/billing','src/中文 目录'])await mkdir(join(project,directory),{recursive:true})
+      let selected=randomBytes(12).toString('hex'),decoy=randomBytes(12).toString('hex')
+      if (!done('I1-same-name-'+suffix)) {
+      await writeFile(join(project,'src/auth/config.ts'),`export const NONCE = '${decoy}'\n`)
+      await writeFile(join(project,'src/billing/config.ts'),`export const NONCE = '${selected}'\n`)
+      await verify(runtime,await create(runtime,'Same-name file identity '+suffix),'src/billing/config.ts',join(project,'src/billing/config.ts'),selected,decoy,'I1-same-name-'+suffix)
+      }
+      if (!done('I2-special-path-'+suffix)) {
+      selected=randomBytes(12).toString('hex');decoy=randomBytes(12).toString('hex')
+      const special='src/中文 目录/参数 (草稿)#1.ts'
+      await writeFile(join(project,special),`export const NONCE = '${selected}'\n`)
+      await writeFile(join(project,'src/中文 目录/参数 (草稿)1.ts'),`export const NONCE = '${decoy}'\n`)
+      await verify(runtime,await create(runtime,'Special-path file identity '+suffix),special,join(project,special),selected,decoy,'I2-special-path-'+suffix)
+      }
+      if (done('I3-worktree-'+suffix)) continue
+      const mission=await host.request('missions.create',{commandId:randomUUID(),command:{title:'Worktree file identity '+suffix,description:'When I provide a file reference in the next message, read only that referenced file and report its NONCE. For now, briefly say you are ready. Do not read or edit project files or delegate.',projectPath:project,projectBindingKind:'directory',memberAgentIds:[runtime.agentId],defaultLeadAgentId:runtime.agentId,tags:[]}})
+      assert.equal(mission.status,'applied')
+      const threadId=mission.payload.threadId
+      // A real queued Mission task prepares its workspace through the normal dispatcher.
+      // Count this preparation separately from the six file-read tasks; never seed a ready row.
+      const prepare=await input(runtime,threadId,[{kind:'text',text:'Read the Mission description, then briefly confirm you are ready for the file I will supply next. Do not read or edit project files or delegate.'}],'I3-prepare-'+suffix)
+      const ready=await prepare.wait();assert.equal(ready.status,'succeeded');ready.success=true
+      const workspace=db.prepare("SELECT state,working_directory FROM mission_workspace WHERE mission_id=?").get(mission.payload.missionId)
+      assert.equal(workspace?.state,'ready');assert.notEqual(workspace.working_directory,project)
+      selected=randomBytes(12).toString('hex');decoy=randomBytes(12).toString('hex')
+      await writeFile(join(project,'config.ts'),`export const NONCE = '${decoy}'\n`)
+      await writeFile(join(workspace.working_directory,'config.ts'),`export const NONCE = '${selected}'\n`)
+      const file=await reference(threadId,'config.ts'),work=await input(runtime,threadId,[file],'I3-worktree-'+suffix),result=await work.wait()
+      assert.equal(result.status,'succeeded');assert.ok(result.reply.includes(selected));assert.ok(!result.reply.includes(decoy));assert.ok(!result.bodyProjection.includes(selected)&&!result.bodyProjection.includes(decoy))
+      assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').pathAtSend,await realpath(join(workspace.working_directory,'config.ts')))
+      result.expectedPath=await realpath(join(workspace.working_directory,'config.ts'));result.selectedNonce=selected;result.decoyNonce=decoy;result.sourceDirectory=project;result.success=true
+      console.log(JSON.stringify({completed:['I1-same-name-'+suffix,'I2-special-path-'+suffix,'I3-worktree-'+suffix],runtime:runtime.kind,correctSelectedNonce:true}))
+    }
+  }
+  if(!resume && !identityCases) {
   for(const runtime of configured){
     const suffix=runtime.kind.startsWith('codex')?'codex':'claude'
     const a=randomBytes(12).toString('hex'),b=randomBytes(12).toString('hex'),log=randomBytes(12).toString('hex')
@@ -103,6 +169,7 @@ try{
   const unclearResult=await unclear.wait();assert.equal(unclearResult.status,'succeeded')
   assert.match(unclearResult.reply,/[?？]|需要|what|would|please.*task/iu);assert.equal(await readFile(join(project,'unassigned.txt'),'utf8'),'An unrelated fixture. No work has been requested.\n');unclearResult.success=true
   }
+  if (!identityCases) {
   const runtime=configured[0]
   for(const failure of [false,true]){
     const name=failure?'unreadable.txt':'live.txt', gate=failure?'read-error.ready':'live.ready', old=randomBytes(12).toString('hex'),next=randomBytes(12).toString('hex')
@@ -116,7 +183,8 @@ try{
     const original=(await snapshot(threadId)).messages.find(message=>message.id===result.messageId)
     assert.equal(original.body,result.bodyProjection);result.success=true
   }
-  report.success=report.cases.length===7&&report.cases.every(item=>item.success)
+  }
+  report.success=report.cases.length===plannedInputs&&report.cases.every(item=>item.success)
 }catch(error){report.error=String(error.message);report.success=false;throw error}
 finally{
   for(const [runId,{threadId}]of active){try{const run=(await snapshot(threadId)).agentRuns.find(run=>run.id===runId);if(run)await host.request('agentRuns.cancel',{commandId:randomUUID(),command:{threadId,agentRunId:runId,expectedVersion:run.version}})}catch{}}
@@ -136,7 +204,7 @@ finally{
     for (const item of report.cases) if (item.runId) {
       for (const row of db.prepare("SELECT sequence,kind,input_preview_json,input_blob_id,result_preview_json,result_blob_id FROM agent_run_execution_evidence WHERE agent_run_id=? AND kind IN ('command','tool_result') ORDER BY sequence").all(item.runId)) {
         const input=await load(row.input_preview_json,row.input_blob_id),result=await load(row.result_preview_json,row.result_blob_id)
-        if (!/\.txt|NONCE|permission denied/iu.test(JSON.stringify({input,result}))) continue
+        if (!/\.(?:txt|ts)\b|NONCE|permission denied/iu.test(JSON.stringify({input,result}))) continue
         report.coreToolEvidence.push({case:item.case,runtime:item.runtime,sequence:row.sequence,kind:row.kind,input,result})
       }
     }

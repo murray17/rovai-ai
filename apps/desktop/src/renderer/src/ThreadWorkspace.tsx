@@ -1867,6 +1867,7 @@ export function ThreadWorkspace({
     hasUnavailableAtom: false,
     memberAgentIds: []
   })
+  const [fileInsertionPending, setFileInsertionPending] = useState(false)
   const singleChatLeaveGuardRef = useRef<(() => ThreadLeavePreparation) | null>(null)
   const bindSingleChatLeaveGuard = useCallback((guard: (() => ThreadLeavePreparation) | null): void => {
     singleChatLeaveGuardRef.current = guard
@@ -2765,7 +2766,7 @@ export function ThreadWorkspace({
   const composerInteractionDisabled = messageExport.selecting || draftLoadState.state !== 'ready'
     || routingMutating
     || composerSubmitting
-  const composerSendDisabled = composerSendIsDisabled({
+  const composerSendDisabled = fileInsertionPending || composerSendIsDisabled({
     hasSendablePayload,
     hasAvailableRecipient,
     hasUnavailableMention,
@@ -4304,7 +4305,7 @@ export function ThreadWorkspace({
     ) return
     const threadId = snapshot.thread.id
     const composerHandle = composerHandleRef.current
-    if (!composerHandle) return
+    if (!composerHandle || composerHandle.hasPendingFileInsertion()) return
     followTimelineAfterUserSend(threadId)
     composerSubmittingRef.current = true
     setComposerSubmitting(true)
@@ -4317,7 +4318,7 @@ export function ThreadWorkspace({
     try {
       composerHandle.adoptHistoryPreview()
       await attachmentPreparationQueue.current
-      const flushed = await composerHandle.flush()
+      const flushed = await composerHandle.flush({ forSubmission: true })
       const frozenDraft = flushed.draft ?? draftCoordinator.getCurrentDraft()
       if (!frozenDraft) throw new Error(uiAttribute('Composer Draft 尚未就绪。'))
       const currentSnapshot = activeSnapshotRef.current
@@ -6612,6 +6613,7 @@ export function ThreadWorkspace({
               persistDocument={(content) => saveStructuredDraft(snapshot.thread.id, content)}
               waitForDraftAuthority={() => draftCoordinator.waitForIdle().then(() => undefined)}
               onLocalStatusChange={setComposerLocalStatus}
+              onFileInsertionPendingChange={setFileInsertionPending}
               onPersistenceErrorChange={setComposerPersistenceError}
               onBackspaceAtStart={composerDraft?.replyIntent
                 ? () => cancelReply('start')
