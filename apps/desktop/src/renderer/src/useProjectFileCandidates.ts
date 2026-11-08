@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { OpenFilePreviewRequest, ProjectFileEntry, ProjectFilesPage, ProjectFilesResult, ProjectFilesScope, ProjectFileReferenceAtom, ProjectFileReferenceResolution } from '@contracts'
+import type { ProjectFileReferenceSource, ProjectFileEntry, ProjectFilesPage, ProjectFilesResult, ProjectFilesScope, ProjectFileReferenceAtom, ProjectFileReferenceResolution } from '@contracts'
 import type { ReferenceScope } from './useReferencePicker'
 
 export function useProjectFileReferenceCapability(client: ReferenceScope['client'] | undefined) {
@@ -8,7 +8,7 @@ export function useProjectFileReferenceCapability(client: ReferenceScope['client
     if (!client) return
     let cancelled = false
     const read = () => { void client.request<{ composerProjectFileReferenceVersion?: number }>('app.info').then(info => {
-      if (!cancelled) setState({ client, supported: info.composerProjectFileReferenceVersion === 1 })
+      if (!cancelled) setState({ client, supported: info.composerProjectFileReferenceVersion === 2 })
     }).catch(() => { if (!cancelled) setState({ client, supported: false }) }) }
     read()
     const stop = client.onInvalidated?.(change => { if (!change || change.resync) read() })
@@ -18,8 +18,8 @@ export function useProjectFileReferenceCapability(client: ReferenceScope['client
 }
 
 export async function createProjectFileReference(client: ReferenceScope['client'], threadId: string,
-  source: Extract<OpenFilePreviewRequest, { kind: 'project_file' }>): Promise<ProjectFileReferenceAtom> {
-  const result = await client.request<ProjectFilesResult<ProjectFileReferenceResolution[]>>('projectFileReferences.resolve', { threadId, references: [{ threadId: source.threadId, rawReference: source.rawReference }] })
+  source: Extract<ProjectFileReferenceSource, { kind: 'project_file' }>): Promise<ProjectFileReferenceAtom> {
+  const result = await client.request<ProjectFilesResult<ProjectFileReferenceResolution[]>>('projectFileReferences.resolve', { threadId, references: [{ threadId: source.threadId, rawReference: source.rawReference, ...(source.targetKind ? { targetKind: source.targetKind } : {}) }] })
   if (!result.ok) throw new Error(result.error.code)
   const item = result.value[0]
   if (item?.status !== 'available') throw new Error(item?.reason ?? 'invalid_reference')
@@ -58,7 +58,7 @@ export function useProjectFileCandidates(scope: ReferenceScope | undefined, anch
       }).then(result => {
         if (ticket !== generation.current || currentKey.current !== key) return
         if (!result.ok) throw new Error(result.error.code)
-        setState({ key, items: result.value.entries.filter(item => !item.directory && !item.unavailable), partial: result.value.partial, loading: false, error: null })
+        setState({ key, items: result.value.entries.filter(item => !item.unavailable), partial: result.value.partial, loading: false, error: null })
       }).catch(error => { if (ticket === generation.current && currentKey.current === key) setState({ key, items: [], partial: false, loading: false, error: error instanceof Error ? error.message : 'read_failed' }) })
     }, query ? 150 : 0)
     return () => {

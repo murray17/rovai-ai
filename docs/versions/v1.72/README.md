@@ -1496,3 +1496,10 @@ Pi 四类原生问答复用现有待处理区域；协议、答案和运行归�
 
 飞书/Lark 与钉钉的后续桥接另见[渠道实施记录](pi-native-channel-interactions.md)。共用提交与卡片适配已实现，
 钉钉模板跨企业和真实客户端验收仍待完成，不以本地 fixture 宣告交付。
+
+## 项目目录引用（2026-11-08）
+
+User 已确认目录与文件共用候选及发送链路，模型只获得目录路径，按需读取。目录名不带显示用尾斜线；
+根层省略辅助路径，四个候选 Tab 分开，桌面宽度 480px。正式目录 URI 仍保留尾斜线。
+范围与确认见[独立 R1](model-context-change-project-directory-reference.md)，
+工作目录、冻结验证及实际结果见[实施记录](project-directory-reference-implementation.md)。

@@ -17,6 +17,7 @@ interface ProjectFilesContextValue {
   setWidth(width: number, commit?: boolean): void
   toggle(trigger?: HTMLElement): void
   hide(restoreFocus?: boolean): void
+  revealReference(threadId: string, rawReference: string, expectedPathAtSend?: string): Promise<boolean | null>
 }
 const Context = createContext<ProjectFilesContextValue | null>(null)
 export function ProjectFilesProvider({ api, threadId, preview, onConnectionRestored, children }: { api?: ProjectFilesApi; threadId: string | null; preview: FilePreviewContextValue; onConnectionRestored?: FilePreviewApi['onConnectionRestored']; children: ReactNode }): React.JSX.Element {
@@ -29,6 +30,8 @@ export function ProjectFilesProvider({ api, threadId, preview, onConnectionResto
     if (stores.size > 24) for (const [id, stale] of stores) if (id !== threadId) { stale.deactivate(); stores.delete(id); break }
     return value
   }, [api, stores, threadId])
+  const revealSequence = useRef(0)
+  const currentStore = useRef(store); currentStore.current = store
   const [expanded, setVisible] = useState(() => stored(visibleKey) === 'true')
   const active = preview.tabs.some(isDirectoryPreviewTab)
   const visible = !!store && expanded && preview.paneVisible && active
@@ -65,7 +68,18 @@ export function ProjectFilesProvider({ api, threadId, preview, onConnectionResto
     return () => { window.removeEventListener('pagehide', close); window.removeEventListener('pageshow', resume); window.removeEventListener('online', resume) }
   }, [store, visible])
   useShortcutAction('project-files', target => { toggle(target instanceof HTMLElement ? target : undefined) }, !!store)
-  const value = useMemo(() => ({ store, visible, active, width, setWidth, toggle, hide }), [store, visible, active, width, setWidth, toggle, hide])
+  const revealReference = useCallback(async (thread: string, raw: string, expected?: string) => {
+    const ticket = ++revealSequence.current
+    const captured = currentStore.current
+    if (!captured || captured.threadId !== thread) return false
+    let found: boolean | null
+    try { found = await captured.revealReference(raw, expected) } catch (error) { if (!visible && currentStore.current === captured && ticket === revealSequence.current) captured.deactivate(); throw error }
+    if (currentStore.current !== captured || ticket !== revealSequence.current || found === null) return null
+    if (!found) { if (!visible) captured.deactivate(); return false }
+    preview.openProjectFiles(); setVisible(true); remember(visibleKey, 'true')
+    return true
+  }, [preview.openProjectFiles, visible])
+  const value = useMemo(() => ({ store, visible, active, width, setWidth, toggle, hide, revealReference }), [store, visible, active, width, setWidth, toggle, hide, revealReference])
   return <Context.Provider value={value}>{children}</Context.Provider>
 }
 export function useProjectFiles(): ProjectFilesContextValue | null { return useContext(Context) }

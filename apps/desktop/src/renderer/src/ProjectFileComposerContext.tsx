@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { OpenFilePreviewRequest, ProjectFileReferenceAtom } from '@contracts'
+import type { ProjectFileReferenceSource, ProjectFileReferenceAtom } from '@contracts'
 import type { ReferenceScope } from './useReferencePicker'
 import { createProjectFileReference } from './useProjectFileCandidates'
-type Source = Extract<OpenFilePreviewRequest, { kind: 'project_file' }>
+type Source = Extract<ProjectFileReferenceSource, { kind: 'project_file' }>
 interface Target { threadId: string; enabled: boolean; client: ReferenceScope['client']; isEditable(): boolean; beginInsertion(): () => void; insert(atom: ProjectFileReferenceAtom): void }
 interface Value {
   target: Target | null

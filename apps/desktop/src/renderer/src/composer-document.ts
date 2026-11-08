@@ -113,7 +113,7 @@ export function composerDocumentsEqualDirect(
 function composerAtomsEqual(left: ComposerAtom, right: ComposerAtom): boolean {
   if (left.type !== right.type) return false
   if (left.type === 'all_members') return true
-  if (isProjectFileAtom(left)) return isProjectFileAtom(right) && left.threadId === right.threadId && left.rawReference === right.rawReference && left.labelFallback === right.labelFallback
+  if (isProjectFileAtom(left)) return isProjectFileAtom(right) && left.threadId === right.threadId && left.rawReference === right.rawReference && left.labelFallback === right.labelFallback && (left.targetKind ?? 'file') === (right.targetKind ?? 'file')
   if (left.type === 'member') {
     return right.type === 'member'
       && left.agentId === right.agentId
@@ -143,7 +143,7 @@ export function validateComposerDocument(value: unknown): value is ComposerDocum
       || !hasOnlyKeys(segment, ['kind', 'atom'])
       || !validateComposerAtom(segment.atom)) return false
     if (isProjectFileAtom(segment.atom)) {
-      textLength += utf8Length(segment.atom.threadId) + utf8Length(segment.atom.rawReference) + utf8Length(segment.atom.labelFallback)
+      textLength += utf8Length(segment.atom.threadId) + utf8Length(segment.atom.rawReference) + utf8Length(segment.atom.labelFallback) + (segment.atom.targetKind === 'directory' ? 9 : 0)
       if (textLength > MAX_COMPOSER_TEXT_LENGTH) return false
     }
     if ((segment.atom.type === 'member' || isReferenceAtom(segment.atom)) && segment.atom.labelFallback) {
@@ -318,7 +318,7 @@ export function composerDocumentFromLegacyContent(
         atom: { type: 'skill', skillId: segment.skillId, nameAtSend: segment.nameAtSend }
       })
     } else if (segment.kind === 'project_file_reference') {
-      segments.push({ kind: 'atom', atom: { type: 'project_file_reference', threadId: segment.threadId, rawReference: segment.rawReference, labelFallback: segment.labelAtSend } })
+      segments.push({ kind: 'atom', atom: { type: 'project_file_reference', threadId: segment.threadId, rawReference: segment.rawReference, labelFallback: segment.labelAtSend, ...(segment.targetKind ? { targetKind: segment.targetKind } : {}) } })
     } else if (isReferenceSegment(segment)) {
       segments.push({ kind: 'atom', atom: 'threadId' in segment
         ? { type: 'thread_reference', threadId: segment.threadId, labelFallback: segment.titleAtSend }

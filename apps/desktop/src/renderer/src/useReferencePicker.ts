@@ -12,7 +12,7 @@ interface Source { key: string; status: 'loading' | 'ready' | 'error' | 'more'; 
 const empty: Source = { key: '', status: 'ready', items: [], nextCursor: null }
 export const pickerOptionKey = (option: ReferencePickerOption): string => option.kind === 'file' ? `file:${option.scopeId}:${option.item.id}` : option.kind === 'reference' ? `${option.item.kind}:${option.item.id}` : option.kind === 'member' ? `member:${option.member.agentId}` : option.kind
 
-/** Each source returns independently. A member hit never suppresses project files. */
+/** Searches remain independent; each tab displays only its own source. */
 export function useReferencePicker(scope: ReferenceScope | undefined, match: ComposerTriggerMatch | null,
   inviteLayer: boolean, members: readonly StructuredMentionOption[], filesSupported = false) {
   const query = match?.kind === 'member' ? match.query : null
@@ -23,16 +23,18 @@ export function useReferencePicker(scope: ReferenceScope | undefined, match: Com
   const generation = useRef(0)
   const hasProject = scope?.projectBound !== false
   const categories: readonly ReferenceFilter[] = ['members', ...(filesSupported && hasProject ? ['file' as const] : []), 'thread', 'mission']
+  const automaticScope = JSON.stringify([anchor, query])
+  const chosenAutomatic = useRef<{ scope: string; filter: ReferenceFilter | null }>({ scope: '', filter: null })
+  if (chosenAutomatic.current.scope !== automaticScope) chosenAutomatic.current = { scope: automaticScope, filter: null }
   const manualFilter = manual?.anchor === anchor && categories.includes(manual.filter) ? manual.filter : null
-  const filter = inviteLayer ? 'members' : manualFilter ?? (query?.trim() ? 'all' : 'members')
   const key = JSON.stringify([scope?.threadId, anchor, query, manualFilter, inviteLayer, retry])
   const currentKey = useRef(key); currentKey.current = key
   const enabled = !!scope && query !== null && !inviteLayer
-  const files = useProjectFileCandidates(scope, anchor, query, enabled && filesSupported && hasProject && (filter === 'all' || filter === 'file'), retry)
+  const files = useProjectFileCandidates(scope, anchor, query, enabled && filesSupported && hasProject && (manualFilter === 'file' || !manualFilter && !!query?.trim()), retry)
   useEffect(() => {
     const ticket = ++generation.current
     if (!scope || query === null || inviteLayer) { if (query === null) setManual(null); return }
-    const kinds = (['thread', 'mission'] as const).filter(kind => filter === 'all' || filter === kind)
+    const kinds = (['thread', 'mission'] as const).filter(kind => manualFilter === kind || !manualFilter && !!query.trim())
     for (const kind of kinds) setSources(previous => ({ ...previous, [kind]: { ...empty, key, status: 'loading' } }))
     const timer = setTimeout(() => { for (const kind of kinds) {
       void scope.client.request<ReferencePage>('threadReferences.list', { threadId: scope.threadId, kind, query }).then(result => {
@@ -40,16 +42,20 @@ export function useReferencePicker(scope: ReferenceScope | undefined, match: Com
       }).catch(() => { if (ticket === generation.current && currentKey.current === key) setSources(previous => ({ ...previous, [kind]: { ...empty, key, status: 'error' } })) })
     } }, query.trim() ? 150 : 0)
     return () => { clearTimeout(timer); generation.current++ }
-  }, [scope?.client, scope?.threadId, key, filter])
+  }, [scope?.client, scope?.threadId, key, manualFilter])
   const source = (kind: 'thread' | 'mission') => sources[kind].key === key ? sources[kind] : { ...empty, status: 'loading' as const }
   const fileOptions: ReferencePickerOption[] = files.scope ? files.items.map(item => ({ kind: 'file', item, scopeId: files.scope!.scopeId })) : []
   const referenceOptions = (kind: 'thread' | 'mission'): ReferencePickerOption[] => source(kind).items.map(item => ({ kind: 'reference', item }))
   const pathQuery = !!query && /[\\/]|\.[\p{L}\p{N}]+$/u.test(query)
-  const grouped = filter === 'all'
-  const options: readonly ReferencePickerOption[] = !enabled ? members : filter === 'members' ? members : filter === 'file' ? fileOptions
-    : filter === 'thread' || filter === 'mission' ? referenceOptions(filter)
-      : [...(pathQuery ? fileOptions.slice(0, 8) : members.slice(0, 8)), ...(pathQuery ? members.slice(0, 8) : fileOptions.slice(0, 8)), ...referenceOptions('thread').slice(0, 4), ...referenceOptions('mission').slice(0, 4)]
-  const loading = enabled && (filter === 'file' ? files.loading : filter === 'thread' || filter === 'mission' ? source(filter).status === 'loading' : grouped && (files.loading || source('thread').status === 'loading' || source('mission').status === 'loading'))
+  const automatic: ReferenceFilter = !query?.trim() ? 'members' : pathQuery && categories.includes('file') ? 'file'
+    : members.some(option => option.kind === 'member' || option.kind === 'all_members') ? 'members'
+    : categories.includes('file') && (fileOptions.length || files.loading) ? 'file'
+    : source('thread').items.length ? 'thread' : source('mission').items.length ? 'mission' : categories.includes('file') ? 'file' : 'members'
+  const filter: ReferenceFilter = inviteLayer ? 'members' : manualFilter ?? chosenAutomatic.current.filter ?? automatic
+  const grouped = false
+  const options: readonly ReferencePickerOption[] = !enabled || filter === 'members' ? members : filter === 'file' ? fileOptions : referenceOptions(filter)
+  if (!manualFilter && options.some(option => option.kind !== 'invite_other' && option.kind !== 'back_to_camp')) chosenAutomatic.current.filter = filter
+  const loading = enabled && (filter === 'file' ? files.loading : filter === 'thread' || filter === 'mission' ? source(filter).status === 'loading' : false)
   const status = filter === 'file' ? files.error ? 'error' : files.loading ? 'loading' : 'ready'
     : filter === 'thread' || filter === 'mission' ? source(filter).status : 'ready'
   const more = async (): Promise<void> => {
@@ -64,5 +70,5 @@ export function useReferencePicker(scope: ReferenceScope | undefined, match: Com
   }
   return { options, filter, loading, status, hasMore: (filter === 'thread' || filter === 'mission') && !!source(filter).nextCursor,
     selectFilter: (filter: ReferenceFilter) => setManual({ anchor, filter }), more, retry: () => setRetry(value => value + 1), query, key, files, filesSupported, grouped,
-    categories, hasProject, sourceErrors: (['thread', 'mission'] as const).filter(kind => (grouped || filter === kind) && source(kind).status === 'error') }
+    categories, hasProject, sourceErrors: (['thread', 'mission'] as const).filter(kind => (filter === kind) && source(kind).status === 'error') }
 }

@@ -148,7 +148,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(code, expected, 'excluded discovery addresses retain authentication and same-origin admission')
     }
     const login = async (editor) => {
-      const response = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: administrator, ...(editor ? { editor } : {}) }) })
+      const response = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, administratorToken: administrator, ...(editor ? { editor } : {}) }) })
       assert.equal(response.status, 200)
       assert.equal(response.headers.get('set-cookie'), null)
       return response.json()
@@ -159,6 +159,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       ['capabilities', { headers: { Authorization: `Bearer ${administrator}` } }, 401],
       ['capabilities', { headers: { Origin: 'http://127.0.0.1:1' } }, 403],
       ['capabilities?token=not-a-real-token', {}, 400],
+      ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: administrator }) }, 409],
       ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 5, administratorToken: administrator }) }, 409],
       ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 4, administratorToken: administrator }) }, 409],
       ['login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 3, administratorToken: administrator }) }, 409],
@@ -175,7 +176,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       const before = await readAssetFile(authPath)
       await chmod(authPath, 0o444)
       try {
-        const rejected = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: administrator }) })
+        const rejected = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, administratorToken: administrator }) })
         assert.equal(rejected.status, 503)
         const failure = await rejected.json()
         assert.equal(failure.error.code, 'session_storage_unavailable')
@@ -186,7 +187,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       } finally { await chmod(authPath, 0o666) }
     }
     const first = await login()
-    assert.equal(first.protocolVersion, 6)
+    assert.equal(first.protocolVersion, 7)
     assert.deepEqual(first.fileTransfers, { uploadMaxBytes: 30 * 1024 * 1024, nativeDownload: true,
       downloadMaxBytes: 80 * 1024 * 1024, downloadAdmissionSeconds: 120 })
     assert.ok(first.expiresAt - first.serverTime <= 30 * 24 * 60 * 60 * 1000 && first.expiresAt - first.serverTime > 30 * 24 * 60 * 60 * 1000 - 10000)
@@ -199,7 +200,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const earlyTiming = await earlyRenewal.json()
     assert.equal(earlyTiming.expiresAt, first.expiresAt)
     assert.equal('token' in earlyTiming, false)
-    const exchange = ticket => request('login-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, ticket }) })
+    const exchange = ticket => request('login-ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, ticket }) })
     const staleTicket = await host.request('host.web.loginTicket')
     const ticket = await host.request('host.web.loginTicket')
     assert.equal(ticket.expiresInSeconds, 120)
@@ -244,7 +245,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.equal((await authorized(fork, 'session/renew', { method: 'POST' })).status, 401)
     const info = await call(first, 'app.info')
     assert.equal('dataDir' in info, false)
-    assert.equal(info.composerProjectFileReferenceVersion, 1)
+    assert.equal(info.composerProjectFileReferenceVersion, 2)
     assert.equal(info.name, (await host.request('app.info')).name)
     assert.deepEqual(await call(second, 'navigation.snapshot'), await host.request('navigation.snapshot'))
     for (const operation of ['preferences.newConversation.initialize', 'host.web.token', 'host.web.rotate', 'host.web.loginTicket', 'core.shutdown', 'host.editor.resolve', 'host.upload.bind', 'camp.composerDraft.get', 'camp.composerDraft.save', 'camp.sourceAttachments.addFromPath', 'camp.attachments.desktopOpenTarget', 'filePreview.resolveSource', 'filePreview.readEditable', 'filePreview.saveText']) {
@@ -306,7 +307,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     assert.deepEqual((await call(first, 'commands.reconcile', { operation: 'camps.create', params: directoryParams })).result, directoryCamp)
     // Public Camp editing is local to each Renderer. The Host owns only the
     // authenticated upload source and the one-shot publication command.
-    const forged = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: administrator, editor: { clientId: first.clientId, proof: second.editorProof } }) })
+    const forged = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, administratorToken: administrator, editor: { clientId: first.clientId, proof: second.editorProof } }) })
     assert.equal(forged.status, 401)
     const resumed = await login({ clientId: first.clientId, proof: first.editorProof })
     assert.equal(resumed.clientId, first.clientId)
@@ -991,7 +992,7 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
       assert.equal(await expectClosed(reader), true, 'rotation must close every client stream')
       reader.releaseLock()
     }
-    const rotatedLogin = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: rotated.administratorToken }) })
+    const rotatedLogin = await request('login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, administratorToken: rotated.administratorToken }) })
     assert.equal(rotatedLogin.status, 200)
     const beforeStop = await rotatedLogin.json()
     const unusedBeforeStop = await host.request('host.web.loginTicket')
@@ -1006,9 +1007,9 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     const restarted = await host.request('host.web.start', { listen: '127.0.0.1:0', uiDirectory: ownedUiDirectory })
     assert.equal(restarted.enabled, true)
     assert.equal(restarted.administratorToken, rotated.administratorToken, 'restart reuses the retained credential')
-    assert.equal((await fetch(`${restarted.origin}/api/v1/login-ticket`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, ticket: unusedBeforeStop.ticket }) })).status, 401)
+    assert.equal((await fetch(`${restarted.origin}/api/v1/login-ticket`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, ticket: unusedBeforeStop.ticket }) })).status, 401)
     assert.equal((await fetch(`${restarted.origin}/api/v1/capabilities`, { headers: { Authorization: `Bearer ${beforeStop.token}` } })).status, 401, 'old browser sessions cannot resume after stop')
-    const beforeExitReply = await fetch(`${restarted.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: restarted.administratorToken }) })
+    const beforeExitReply = await fetch(`${restarted.origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, administratorToken: restarted.administratorToken }) })
     assert.equal(beforeExitReply.status, 200, 'the retained credential permits a fresh login')
     const beforeExit = await beforeExitReply.json()
     const reply = await host.request('core.shutdown', { protocolVersion: 3, deadlineMs: 10_000 })

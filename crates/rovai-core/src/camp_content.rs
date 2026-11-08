@@ -140,6 +140,22 @@ pub enum ComposerSegment {
     Atom { atom: ComposerAtom },
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectFileTargetKind {
+    #[default]
+    File,
+    Directory,
+}
+impl ProjectFileTargetKind {
+    pub fn is_file(&self) -> bool {
+        *self == Self::File
+    }
+    pub fn byte_len(&self) -> usize {
+        if self.is_file() { 0 } else { 9 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComposerAtom {
@@ -169,6 +185,12 @@ pub enum ComposerAtom {
         raw_reference: String,
         #[serde(rename = "labelFallback")]
         label_fallback: String,
+        #[serde(
+            default,
+            rename = "targetKind",
+            skip_serializing_if = "ProjectFileTargetKind::is_file"
+        )]
+        target_kind: ProjectFileTargetKind,
     },
     Skill {
         #[serde(rename = "skillId")]
@@ -220,6 +242,12 @@ pub enum StructuredThreadMessageSegment {
         path_at_send: String,
         #[serde(rename = "labelAtSend")]
         label_at_send: String,
+        #[serde(
+            default,
+            rename = "targetKind",
+            skip_serializing_if = "ProjectFileTargetKind::is_file"
+        )]
+        target_kind: ProjectFileTargetKind,
     },
     ExternalQuote {
         #[serde(rename = "senderDisplayName")]
@@ -329,11 +357,15 @@ pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
                         thread_id,
                         raw_reference,
                         label_fallback,
+                        target_kind,
                     },
             } => {
                 validate_composer_identity(thread_id, "Project File Thread")?;
                 crate::project_file_reference::validate_locator(raw_reference, label_fallback)?;
-                text_bytes += thread_id.len() + raw_reference.len() + label_fallback.len();
+                text_bytes += thread_id.len()
+                    + raw_reference.len()
+                    + label_fallback.len()
+                    + target_kind.byte_len();
             }
             ComposerSegment::Atom {
                 atom: ComposerAtom::AllMembers,
@@ -507,12 +539,14 @@ pub fn composer_document_from_content(
                 thread_id,
                 raw_reference,
                 label_at_send,
+                target_kind,
                 ..
             } => ComposerSegment::Atom {
                 atom: ComposerAtom::ProjectFileReference {
                     thread_id,
                     raw_reference,
                     label_fallback: label_at_send,
+                    target_kind,
                 },
             },
             StructuredThreadMessageSegment::CurrentUserMention { .. }
@@ -657,14 +691,20 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
                 raw_reference,
                 path_at_send,
                 label_at_send,
+                target_kind,
             } => {
                 validate_composer_identity(thread_id, "Project File Thread")?;
                 crate::project_file_reference::validate_locator(raw_reference, label_at_send)?;
-                crate::project_file_reference::render_link(path_at_send, label_at_send)?;
+                crate::project_file_reference::render_target_link(
+                    path_at_send,
+                    label_at_send,
+                    *target_kind,
+                )?;
                 text_bytes += thread_id.len()
                     + raw_reference.len()
                     + path_at_send.len()
-                    + label_at_send.len();
+                    + label_at_send.len()
+                    + target_kind.byte_len();
             }
             StructuredThreadMessageSegment::AllMembersMention => {}
             StructuredThreadMessageSegment::CurrentUserMention { user_id } => {
@@ -903,10 +943,12 @@ fn render_plain_text_with_user_offsets(
             StructuredThreadMessageSegment::ProjectFileReference {
                 path_at_send,
                 label_at_send,
+                target_kind,
                 ..
-            } => rendered.push_str(&crate::project_file_reference::render_link(
+            } => rendered.push_str(&crate::project_file_reference::render_target_link(
                 path_at_send,
                 label_at_send,
+                *target_kind,
             )?),
             StructuredThreadMessageSegment::AllMembersMention => rendered.push_str("@所有队员"),
             StructuredThreadMessageSegment::CurrentUserMention { user_id } => {
@@ -1189,6 +1231,7 @@ pub fn canonical_content_digest(content: &[StructuredThreadMessageSegment]) -> R
 
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests {
+    use super::ProjectFileTargetKind;
     use super::{
         ComposerAtom, ComposerDocument, ComposerSegment, ExternalQuoteAttachmentSummary,
         StructuredThreadMessageSegment as Segment, canonical_content_digest,
@@ -1357,6 +1400,43 @@ mod tests {
                 format!("[file\\.ts]({uri})")
             );
         }
+        let mut directory_doc = file_doc.clone();
+        directory_doc["segments"][0]["atom"]["targetKind"] = "directory".into();
+        let directory = parse_composer_document_json(&directory_doc.to_string()).unwrap();
+        assert_eq!(
+            serde_json::to_value(directory).unwrap()["segments"][0]["atom"]["targetKind"],
+            "directory"
+        );
+        directory_doc["segments"][0]["atom"]["targetKind"] = "folder".into();
+        assert!(parse_composer_document_json(&directory_doc.to_string()).is_err());
+        assert!(
+            serde_json::to_value(&draft).unwrap()["segments"][0]["atom"]
+                .get("targetKind")
+                .is_none()
+        );
+        for (path, uri) in [
+            (
+                "/project/中文 (a)#/auth",
+                "file:///project/%E4%B8%AD%E6%96%87%20(a)%23/auth/",
+            ),
+            ("/project/100%25", "file:///project/100%2525/"),
+            (r"C:\project\a b#1", "file:///C:/project/a%20b%231/"),
+            (r"\\server\share\a b", "file://server/share/a%20b/"),
+        ] {
+            let link = crate::project_file_reference::render_target_link(
+                path,
+                "src/auth",
+                ProjectFileTargetKind::Directory,
+            )
+            .unwrap();
+            assert_eq!(
+                link,
+                format!(
+                    "[src\\/auth\\/]({})",
+                    uri.replace('(', "%28").replace(')', "%29")
+                )
+            );
+        }
         // The frozen URI projection can exceed the input metadata budget through percent encoding.
         let projected_overflow = vec![
             Segment::Text {
@@ -1367,6 +1447,7 @@ mod tests {
                 raw_reference: "opaque".into(),
                 path_at_send: format!("/project/{}", "中".repeat(8_000)),
                 label_at_send: "file.ts".into(),
+                target_kind: ProjectFileTargetKind::File,
             },
         ];
         validate_content(&projected_overflow).unwrap();

@@ -4,8 +4,8 @@ import { validProjectFileAtom } from './project-file-reference'
 export type FileAvailability = ProjectFileReferenceResolution
   | { status: 'network_error' }
   | { status: 'protocol_error'; reason: string }
-type Identity = Pick<ProjectFileReferenceAtom, 'threadId' | 'rawReference'>
-const businessErrors = new Set(['invalid_reference', 'thread_mismatch', 'root_unavailable', 'root_changed', 'file_missing', 'outside_root', 'not_regular_file', 'unreadable'])
+type Identity = Pick<ProjectFileReferenceAtom, 'threadId' | 'rawReference' | 'targetKind'>
+const businessErrors = new Set(['invalid_reference', 'thread_mismatch', 'root_unavailable', 'root_changed', 'file_missing', 'outside_root', 'not_regular_file', 'unreadable', 'target_kind_changed'])
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const fields = (value: Record<string, unknown>, names: string[]) => Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name))
 const protocolError = (reason: string): FileAvailability => ({ status: 'protocol_error', reason })
@@ -21,6 +21,7 @@ export function projectFileAvailabilityResult(result: unknown, target: string, r
   return result.value.map((item: unknown, index): FileAvailability => {
     if (!object(item)) return protocolError('invalid_resolution')
     if (item.status === 'available' && fields(item, ['status', 'reference']) && object(item.reference) && validProjectFileAtom(item.reference)
+      && (item.reference.targetKind ?? 'file') === (references[index]!.targetKind ?? 'file')
       && item.reference.threadId === target && (references[index]!.threadId !== target || item.reference.rawReference === references[index]!.rawReference)) {
       return { status: 'available', reference: item.reference }
     }

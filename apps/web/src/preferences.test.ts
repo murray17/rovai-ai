@@ -20,7 +20,7 @@ it('uses the Host team and one-click flag across browser sessions', async () => 
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
   const saved = { newConversationTeamId: null as string | null, newConversationDefaults: { memberAgentIds: ['agent-a', 'agent-b'], defaultLeadAgentId: 'agent-b' }, newConversationDefaultsRequireConfirmation: false, oneClickNewConversationEnabled: true }
   const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 6, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     const input = JSON.parse(String(options?.body))
     if (input.operation === 'preferences.newConversation.setTeam') saved.newConversationTeamId = input.params.teamId
     else if (input.operation === 'preferences.newConversation.setOneClick') saved.oneClickNewConversationEnabled = input.params.enabled

@@ -9722,7 +9722,7 @@ impl Core {
                 "name": "Rovai-ai",
                 "version": env!("CARGO_PKG_VERSION"),
                 "dataDir": self.data_dir,
-                "composerProjectFileReferenceVersion": 1,
+                "composerProjectFileReferenceVersion": 2,
             })),
             "memberAvatars.read" => {
                 #[derive(Deserialize)]

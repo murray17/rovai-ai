@@ -28,6 +28,7 @@ function FileTree({ store, onOpen }: { store: ProjectFilesStore; onOpen(entry: P
   const [focused, setFocused] = useState<string | null>(state.selected)
   const [referenceError, setReferenceError] = useState(false)
   useEffect(() => setReferenceError(false), [store, state.query])
+  useLayoutEffect(() => { if (state.selected) { setFocused(state.selected); scroll.current?.querySelector<HTMLElement>('[aria-selected=true]')?.scrollIntoView({ block: 'nearest' }) } }, [state.selected, state.expanded, state.pages])
   const rows: Row[] = []
   function visit(parent: string, depth: number): void {
     const page = state.pages.get(parent)
@@ -90,7 +91,7 @@ function FileTree({ store, onOpen }: { store: ProjectFilesStore; onOpen(entry: P
           <span className="project-files-chevron">{row.entry.directory && <svg viewBox="0 0 16 16" className={state.expanded.has(row.entry.id) ? 'is-expanded' : ''} aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>}</span>
           {row.entry.directory ? <ProjectFolderIcon /> : <ProjectFileIcon fileName={row.entry.name}/>}
           <span className="project-files-name">{row.entry.name}{search && <small>{row.entry.relativePath}</small>}</span>
-          {!row.entry.directory && !row.entry.unavailable && composer?.target?.enabled && composer.target.threadId === store.threadId && <button type="button" className="project-files-reference" aria-label={uiAttribute('引用 {0} 到输入框', row.entry.relativePath)} title={uiAttribute('引用到输入框')} onClick={event => {
+          {!row.entry.unavailable && composer?.target?.enabled && composer.target.threadId === store.threadId && <button type="button" className="project-files-reference" aria-label={uiAttribute('引用 {0} 到输入框', row.entry.relativePath)} title={uiAttribute('引用到输入框')} onClick={event => {
             event.stopPropagation()
             setReferenceError(false)
             void composer.reference(store.threadId, async () => {
@@ -130,7 +131,8 @@ export function ProjectFilesPane(): React.JSX.Element | null {
     const source = await browser.store!.open(entry)
     if (!source || !preview) return
     initialize?.()
-    void preview.open(source, undefined, { fileName: entry.name })
+    if (source.kind !== 'project_file' || source.targetKind === 'directory') return
+    void preview.open({ kind: 'project_file', threadId: source.threadId, rawReference: source.rawReference }, undefined, { fileName: entry.name })
     if (layout?.directoryDrawer) browser.hide()
   }
   return <>

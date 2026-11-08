@@ -3138,6 +3138,7 @@ mod tests {
             raw_reference: "published-locator-no-longer-resolvable".into(),
             path_at_send: "/frozen-project/已移动 #1.test.ts".into(),
             label_at_send: "src/已移动 #1.test.ts".into(),
+            target_kind: crate::camp_content::ProjectFileTargetKind::File,
         };
         let frozen_file_projection = crate::project_file_reference::render_link(
             "/frozen-project/已移动 #1.test.ts",

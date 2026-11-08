@@ -1,4 +1,6 @@
-import type { OpenFilePreviewRequest, ProjectFileEntry, ProjectFilesApi, ProjectFilesPage, ProjectFilesRequest, ProjectFilesScope } from '@contracts'
+import type { ProjectFileReferenceSource, ProjectFileEntry, ProjectFilesApi, ProjectFilesPage, ProjectFilesRequest, ProjectFilesScope } from '@contracts'
+
+const referenceBusinessErrors = new Set(['root_unavailable', 'scope_expired', 'entry_unavailable', 'browse_limit', 'read_failed'])
 
 export interface DirectoryPage extends ProjectFilesPage { visibleCount: number; loading?: boolean; error?: string }
 export interface ProjectFilesSnapshot {
@@ -23,11 +25,13 @@ export class ProjectFilesStore {
   private listeners = new Set<() => void>()
   private epoch = 0
   private queryEpoch = 0
+  private revealEpoch = 0
   private refreshingEpoch: number | null = null
   private loadSequence = 0
   private loads = new Map<string, number>()
   private refreshAgain = false
   private active = false
+  private activation: Promise<void> | null = null
   scrollTop = 0
   constructor(readonly threadId: string, private readonly api: ProjectFilesApi) {}
   getSnapshot = (): ProjectFilesSnapshot => this.state
@@ -41,9 +45,15 @@ export class ProjectFilesStore {
     return result.value
   }
   private release(scope: ProjectFilesScope): void { void this.request('release', scope).catch(() => undefined) }
-  async activate(): Promise<void> {
-    if (this.active) return
+  activate(): Promise<void> {
+    if (this.active) return this.activation ?? Promise.resolve()
     this.active = true
+    const pending = this.activateScope()
+    this.activation = pending
+    void pending.finally(() => { if (this.activation === pending) this.activation = null })
+    return pending
+  }
+  private async activateScope(): Promise<void> {
     const epoch = ++this.epoch
     this.update({ loading: true, error: null })
     try {
@@ -67,7 +77,7 @@ export class ProjectFilesStore {
     }
   }
   deactivate(): void {
-    this.active = false; ++this.epoch; ++this.queryEpoch
+    this.active = false; this.activation = null; ++this.epoch; ++this.queryEpoch; ++this.revealEpoch
     if (this.state.scope) this.release(this.state.scope)
     this.update({ scope: null, loading: false, searching: false })
   }
@@ -92,6 +102,7 @@ export class ProjectFilesStore {
     }
   }
   async toggle(entry: ProjectFileEntry): Promise<void> {
+    ++this.revealEpoch
     if (!entry.directory || entry.unavailable) return
     const expanded = new Set(this.state.expanded)
     if (expanded.has(entry.id)) expanded.delete(entry.id)
@@ -151,6 +162,7 @@ export class ProjectFilesStore {
     }
   }
   setQuery(query: string): void {
+    ++this.revealEpoch
     ++this.queryEpoch
     if (this.state.scope) void this.request('cancelSearch', this.state.scope, { queryRevision: this.queryEpoch }).catch(() => undefined)
     this.update({ query, results: null, searching: !!query.trim() })
@@ -166,12 +178,73 @@ export class ProjectFilesStore {
       if (epoch === this.epoch && queryEpoch === this.queryEpoch) this.update({ searching: false, error: error instanceof Error ? error.message : 'read_failed' })
     }
   }
-  async open(entry: ProjectFileEntry): Promise<OpenFilePreviewRequest | null> {
+  /** A reference reveals only its ancestor chain and immediate children, never a recursive subtree. */
+  async revealReference(rawReference: string, expectedPathAtSend?: string): Promise<boolean | null> {
+    let ticket = ++this.revealEpoch
+    await this.activate()
+    if (ticket !== this.revealEpoch) return null
+    const scope = this.state.scope, epoch = this.epoch
+    if (!scope) {
+      const code = this.state.error ?? 'root_unavailable'
+      if (referenceBusinessErrors.has(code)) return false
+      this.update({ error: 'network_error' })
+      throw new Error(code)
+    }
+    try {
+      let decoded: unknown
+      try { decoded = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(rawReference.replace(/-/gu, '+').replace(/_/gu, '/')), c => c.charCodeAt(0)))) } catch { throw new Error('entry_unavailable') }
+      if (!Array.isArray(decoded) || decoded.length !== 2 || decoded[0] !== scope.rootId || typeof decoded[1] !== 'string') throw new Error('entry_unavailable')
+      const parts = decoded[1].split('/') as string[]
+      if (parts.some(part => !part || part === '.' || part === '..')) throw new Error('entry_unavailable')
+      const entryId = (path: string): string => 'p:' + btoa(String.fromCharCode(...new TextEncoder().encode(path))).replace(/=/gu, '').replace(/\+/gu, '-').replace(/\//gu, '_')
+      const id = entryId(decoded[1])
+      const source = await this.request<ProjectFileReferenceSource>('open', scope, { entryId: id, rawReference, ...(expectedPathAtSend ? { expectedPathAtSend } : {}) })
+      if (epoch !== this.epoch || ticket !== this.revealEpoch) return null
+      if (source.kind !== 'project_file' || source.targetKind !== 'directory') return false
+      this.setQuery(''); ticket = this.revealEpoch
+      const expanded = new Set(this.state.expanded)
+      for (let depth = 1; depth <= parts.length; depth++) {
+        const parent = depth === 1 ? 'root' : entryId(parts.slice(0, depth - 1).join('/'))
+        if (!this.state.pages.has(parent)) await this.load(parent)
+        if (epoch !== this.epoch || ticket !== this.revealEpoch) return null
+        const next = entryId(parts.slice(0, depth).join('/'))
+        let page = this.state.pages.get(parent)
+        if (page?.error) throw new Error(page.error)
+        let index = page?.entries.findIndex(entry => entry.id === next) ?? -1
+        if (index < 0) {
+          await this.load(parent)
+          if (epoch !== this.epoch || ticket !== this.revealEpoch) return null
+          page = this.state.pages.get(parent)
+          if (page?.error) throw new Error(page.error)
+          index = page?.entries.findIndex(entry => entry.id === next) ?? -1
+        }
+        if (index < 0) throw new Error(page?.partial ? 'browse_limit' : 'entry_unavailable')
+        if (page && index >= page.visibleCount) this.update({ pages: new Map(this.state.pages).set(parent, { ...page, visibleCount: index + 1 }) })
+        expanded.add(next)
+      }
+      await this.load(id)
+      if (epoch !== this.epoch || ticket !== this.revealEpoch) return null
+      const targetError = this.state.pages.get(id)?.error
+      if (targetError) throw new Error(targetError)
+      this.update({ expanded, selected: id, error: null })
+      await this.watch()
+      return epoch === this.epoch && ticket === this.revealEpoch ? true : null
+    } catch (error) {
+      if (epoch !== this.epoch || ticket !== this.revealEpoch) return null
+      const code = error instanceof Error ? error.message : ''
+      const business = referenceBusinessErrors.has(code)
+      this.update({ error: business ? code : 'network_error' })
+      if (!business) throw error
+      return false
+    }
+  }
+  async open(entry: ProjectFileEntry): Promise<ProjectFileReferenceSource | null> {
+    ++this.revealEpoch
     const scope = this.state.scope, epoch = this.epoch
     if (!scope || entry.unavailable) return null
     this.update({ selected: entry.id })
     try {
-      const source = await this.request<OpenFilePreviewRequest>('open', scope, { entryId: entry.id })
+      const source = await this.request<ProjectFileReferenceSource>('open', scope, { entryId: entry.id, targetKind: entry.directory ? 'directory' : 'file' })
       return epoch === this.epoch ? source : null
     } catch (error) {
       if (epoch === this.epoch) this.update({ error: error instanceof Error ? error.message : 'read_failed' })
