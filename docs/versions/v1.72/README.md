@@ -16,15 +16,13 @@ last_updated: 2026-11-07
 已按 User 的正式实施请求建立独立 worktree。公开 Active／普通 Pending 的文件身份、短标签、
 分组搜索、跨对话恢复与仅文件输入以 [R1 独立说明](model-context-change-project-file-reference.md)
 为已确认范围（User sequence 21）。Core 与 Desktop／Web 主链已实现；类型、事务、恢复和真实界面通过，
-真实 Runtime 七例中六例通过。新对话只有文件时未主动追问，按 R3 原标准保留失败；
-[补充 R2](https://github.com/murray17/rovai-ai/blob/1e3dec453ce2358c3863ad2e2cae90cbc7a3c4f2/docs/versions/v1.72/model-context-change-project-file-reference-clarification.md)仍待确认，未修改 Charter。
+六项真实文件读取通过。User sequence 37 已取消专属任务询问规则及其专项验收，相关测试与待办已移除。
 sequence 26 复核的三处前端边界已修复，全量 Vitest 3,146 项通过。
 sequence 30 已隐藏快速对话的文件类别并同步键盘导航；Desktop／认证 Web 扩展至 22 项通过。
 另补同名、特殊路径与 Mission 工作副本三组真实定位，Codex／Claude 六次读取通过，两个准备任务另计，
 见[复杂定位证据](project-file-reference-identity-evidence.json)与[延迟界面验证](project-file-reference-review-ui-evidence.json)。
-原 R3 仍失败；R2 revision 2 的三种行为回归须获准后使用新 Session 验证，既有 Session 保留冻结 Charter。
 模块、逐项验证及已知限制见[实施记录](project-file-reference-implementation.md#实际实现与验收)，
-真实输入哈希、文件读取及失败摘要见[脱敏证据](project-file-reference-evidence.json)。未合入、安装或替换日常 App。
+真实输入哈希、文件读取及早期执行记录见[脱敏证据](project-file-reference-evidence.json)。主功能经 PR #1028 合入 main，安装按 User 请求继续。
 
 ## 执行 Tab 恢复与空选中回退（2026-11-05）
 

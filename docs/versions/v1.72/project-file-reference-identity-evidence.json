@@ -3,13 +3,12 @@
   "branch": "rovai/project-file-references",
   "reviewedCommit": "4c3b5d330bfbb31a41aba9833fbf613b5f050ca9",
   "platform": "macOS arm64",
-  "scope": "Three complex file locations through production Host/Core and actual Codex and Claude file tools. Separate from the original R1/R3 matrix.",
+  "scope": "Three complex file locations through production Host/Core and actual Codex and Claude file tools. Separate from the earlier simple file-read matrix.",
   "overallPassed": true,
   "plannedInputs": 8,
   "readCases": 6,
   "preparationCases": 2,
   "unconfirmedCharterGuidanceInjected": false,
-  "originalR3Result": "failed; unchanged in project-file-reference-evidence.json",
   "isolation": "Private Core data, Skills, MCP, Runtime homes, Git repository and Mission worktrees; native authentication copies removed after execution.",
   "interruptions": [
     {

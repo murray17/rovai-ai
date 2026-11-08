@@ -20,9 +20,9 @@ User 已在 sequence 21 确认 R1，现开始正式实现。v5.1 原型只作为
 | Branch | `rovai/project-file-references` |
 | Base | `55a83f89733393cfcad76b046e344c222577abe1`（已核对 origin/main） |
 | Governance | none；无主线文档先行要求；R1 已由 User sequence 21 二次确认 |
-| Status | ready；User sequence 32 要求本次 PR 合入 main，sequence 33 要求安装；R3 原失败保持，未确认 R2 为独立后续工作 |
+| Status | ready；User sequence 32 要求本次 PR 合入 main，sequence 33 要求安装；User sequence 37 已取消文件专属任务询问规则与专项验收 |
 | Validation | 见下方实际实现、确定性门禁、真实 UI 及 Runtime 分项结果 |
-| Next | 通过主线整合门禁后合并并执行隔离 daily 安装验收；R2 revision 2 单独待确认，不随本 PR 修改 Charter |
+| Next | 通过主线整合门禁后合并并执行隔离 daily 安装验收；完成范围清理与 daily 安装，不新增 Charter 规则 |
 
 保留此 worktree 跨后续 Run 复用。完成后按用户当前偏好提交并推送同名远端分支，不自动创建或重开 PR；
 合入前不清理 worktree，不触碰其他活跃目录或日常 App 数据。
@@ -111,7 +111,7 @@ DOCS_BASE_REF=55a83f89733393cfcad76b046e344c222577abe1 pnpm docs:check:ci
 ## Sequence 26 复核修复与补强计划
 
 User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺口。本轮不修改 R1 的文件身份、Core 发布、
-模型投影、版本轴或仅文件发送语义；R2 Charter 指导保持独立待确认，R3 原失败证据保持。
+模型投影、版本轴或仅文件发送语义；不新增 Charter 指导；早期执行结果按原值留存。
 
 | 边界 | 修复及预先冻结的通过标准 |
 | --- | --- |
@@ -135,7 +135,7 @@ User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺�
 | I3 有效工作副本 | 按正常 Mission 投递准备真实 ready 工作副本，主项目及工作副本 config.ts 放不同值；上文明确待文件后读取，再仅补交工作副本引用。路径与实际工具指向有效工作副本，不能读取主项目诱饵 |
 
 准备任务只确认就绪，不读取或修改项目文件；不伪造 Mission workspace 数据库状态。正例各一次，失败原样留证，
-只在夹具或未完成任务有明确新依据时定向复查。原 R3 不在本轮重跑、不因复杂定位通过而改判。
+只在夹具或未完成任务有明确新依据时定向复查。早期执行结果不因新的定位用例通过而重写。
 
 ## 实际实现与验收
 
@@ -168,7 +168,7 @@ User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺�
 | Host Desktop＋Web 主 owner | 通过；Core 生命周期、HTTP 投影、权限、旧协议及文件编辑均保持 |
 | 正式文件界面 | sequence 30 后 Desktop＋认证 Web 22 项通过，保留原 20 项路径并增加快速对话隐藏文件类别及键盘跳过；结果见[界面证据](project-file-reference-review-ui-evidence.json) |
 | 布局 | day／night × 390／1040／1440／2560；实际输入框与文件扩展名可见，无页面横向溢出 |
-| 文档治理 | 整合后 docs:test 10 项、完整 docs:check:ci 及 require-base 决定／链接门禁通过；本 PR 只包含已确认 R1，未确认 R2 提案完整保留在不可变历史与 Thread 附件 |
+| 文档治理 | 整合后 docs:test 10 项、完整 docs:check:ci 及 require-base 决定／链接门禁通过；本 PR 只包含已确认 R1，仅保留已确认的文件输入范围，不增加文件专属提示词 |
 
 `composer-trigger` 扩展了路径、扩展名、Unicode 和邮箱／URL 的既有边界 owner。
 文件 URI 的共用 golden 覆盖 Unicode、空格、括号、井号、百分号、Unix 反斜线、Windows drive、UNC 及 canonicalize 的 verbatim 前缀；只规范 URI，不改冻结路径字段。
@@ -184,16 +184,14 @@ macOS arm64 的真实 Codex CLI 0.166.0 与 Claude Code 2.1.311 使用新的 Cor
 
 | Case | 结果 |
 | --- | --- |
-| R1 Codex / Claude 各两文件 | 均通过；返回只存在于文件中的随机值，消息正文未注入文件内容 |
-| R2 既有任务只补交日志 | 两个 Runtime 均通过；只有文件引用也可继续上文任务 |
-| R3 新对话只有文件 | **失败**：可发布且未修改文件，但回复只说明没有具体任务，未主动询问；保留原断言与输出 |
-| R4 发布后修改内容 | 通过；真实工具读到新值，历史发布字段和正文不变 |
-| R4 发布后撤读权限 | 通过；返回真实 Permission denied，不擅自 chmod 或改用其他路径 |
+| Codex / Claude 各两文件 | 均通过；返回只存在于文件中的随机值，消息正文未注入文件内容 |
+| 既有任务只补交日志 | 两个 Runtime 均通过；只有文件引用也可继续上文任务 |
+| 发布后修改内容 | 通过；真实工具读到新值，历史发布字段和正文不变 |
+| 发布后撤读权限 | 通过；返回真实 Permission denied，不擅自 chmod 或改用其他路径 |
 
-共七例，六例通过；没有把执行终态 succeeded 等同于产品验收通过。首个漏带 execution 的夹具只发布而未运行，
+六项文件读取均通过；早期另有任务询问用例，User sequence 37 已撤销该专项验收。原始记录不改判。首个漏带 execution 的夹具只发布而未运行，
 修正夹具后才进行真实调用。后续只补跑未执行的 R4，不重复消耗已通过的四个读取任务。
-[补充 R2](https://github.com/murray17/rovai-ai/blob/1e3dec453ce2358c3863ad2e2cae90cbc7a3c4f2/docs/versions/v1.72/model-context-change-project-file-reference-clarification.md)提出公开 Charter 的一句澄清规则，仍为 pending；
-本次不修改 Charter 26、Bootstrap v6、Binding compatibility 16 或冻结输入，不将 R1 确认移作 R2 确认。
+本次不修改 Charter 26、Bootstrap v6、Binding compatibility 16 或冻结输入。
 
 ### Sequence 26 实际修复与复验（2026-11-07）
 
@@ -211,13 +209,10 @@ macOS arm64 的真实 Codex CLI 0.166.0 与 Claude Code 2.1.311 使用新的 Cor
   正式路径、实际 RUN_INPUT 消息、冻结哈希、执行根、Core read operation 和原生读取结果相互核对；
   实际消息包含原有默认接收者前缀，URI 保持发布定位，senderId 为 `user`，没有 files 区块或文件全文注入。
 - 复杂读取首轮在两个 Codex 任务通过后被夹具的 `mission.invalid_tag` 阻断，恢复入口又遇到既有目录 EEXIST；
-  两次中断均保留，修正夹具后只继续剩余六个输入，没有重跑已通过任务或删除原 R3 失败。结束后本次 Native Home 已清理。
+  两次中断均保留，修正夹具后只继续剩余六个输入，没有重跑已通过任务或改写早期执行结果。结束后本次 Native Home 已清理。
 - `pnpm typecheck`、UTC 全量 Vitest、`pnpm test:composer-input`（3 项）及生产构建通过；Rust／Core 源码本轮未修改，
   上表 Rust 结果为此前 R1 实施时的实际记录，本轮未重复全 workspace。
-- `pnpm test` 的组合命令在 docs:test 10 项通过后，被尚未确认 R2 的四项记录门禁阻止；因此单独运行完整 Vitest，
-  不把组合命令报告为通过。require-base 的文档决定／链接门禁通过；没有添加 checker 例外或补造确认。
-- R1 两个模型输入示例的 senderId 按现有实现勘误为 `user`；R1 确认仍有效。R2 提案 revision 2 补足
-  “新对话无任务应询问／上文日志任务直接继续／本轮明确分析直接执行”，Charter 文本尚未实施。
+- R1 两个模型输入示例的 senderId 按现有实现勘误为 `user`；R1 确认仍有效。
 
 ### Sequence 30 快速对话入口收敛（2026-11-07）
 
@@ -228,13 +223,13 @@ User 要求快速对话移除不可用的文件 Tab。当前关联项目的会�
 
 `pnpm typecheck`、`pnpm build:desktop` 通过。既有生产 Desktop＋认证 Web owner 扩展后 22 项通过，
 新增两个快速对话场景，并明确核对项目会话仍有四类入口。本轮未重复真实 Runtime 读取或 Rust 测试；
-此前证据及 R2 待确认状态保持，文档门禁仍不能因未确认 R2 记作全通过。
+此前文件读取证据保持，未引入新的提示词或行为验收。
 
 ### 合并范围与迁移整合（User sequence 32／33）
 
 User 要求提交 PR 合入 main，并安装到本机日常 App。本 PR 只合入已确认 R1 与后续前端修复；
-未确认 R2 从本次实施变更中拆出，完整提案保留在上方不可变提交链接及本 Thread 附件中，仍为 pending。
-不伪造确认、不修改 Charter、不把 R3 原失败改判为通过，也不修改通用 checker。
+不新增 Charter 规则，不修改通用 checker。User sequence 37 进一步明确取消专属任务询问规则及验收；
+相关 smoke 断言、提案引用和待办均删除，原始执行报告仅保留历史事实，不再作为当前失败待办。
 
 整合主线 `4984480ac` 的原生交互后，主线 migration 220／schema 170 保留；文件引用的只读准入标记
 顺延至 migration 221／schema 171。两条升级路径均先执行原生交互迁移，再提交文件引用标记。
@@ -244,6 +239,12 @@ User 要求提交 PR 合入 main，并安装到本机日常 App。本 PR 只合�
 首次默认 Rust 运行有一个既有 Cursor alias 探测 fixture 返回 runtime_probe_timed_out；该项隔离复验 0.35 秒通过。
 完整 workspace 复验控制为 4 个测试线程，保留首轮记录，不修改探测超时。完整结果随本次 PR 登记。
 前述功能分支原始证据保持对应的旧版本和哈希。待安装 daily 包另使用隔离生产 App 验收，当前日常进程与用户数据保持。
+
+### User sequence 37 范围清理
+
+删除新对话仅文件输入必须主动追问的 smoke 用例与断言，基础真实读取矩阵由七项收敛为六项。
+保留多文件、上下文补交文件、live 内容、权限反馈及复杂定位读取。不增加任何专属系统提示规则。
+此次只删除未实施提案及验收逻辑，产品运行代码原本未包含该规则；原始报告中的旧结果不改写为通过。
 
 ### 已知限制与交接
 
