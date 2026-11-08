@@ -58,6 +58,7 @@ async function runFixture(t, expectedCases, mode = 'standard') {
 }
 
 test('Mission card, drawer, delivery and retained preview share one Camp workspace', { timeout: 150_000 }, t => runFixture(t, 13))
+test('Mission running entries respect execution auto-open in drawer, full and Mobile', { timeout: 100_000 }, t => runFixture(t, 7, 'execution-auto-open'))
 test('Mission deletion carries the required Camp open trace ID', { timeout: 100_000 }, t => runFixture(t, 1, 'delete-trace'))
 test('Mission file trees virtualize a large cumulative Git diff', { timeout: 100_000 }, t => runFixture(t, 1, 'large-diff'))
 test('Mission activity follows the actual checkout and drops stale views', { timeout: 100_000 }, t => runFixture(t, 1, 'checkout-view'))
