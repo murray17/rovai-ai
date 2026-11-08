@@ -1380,7 +1380,7 @@ mod tests {
         assert!(member_mention_ids(&published).is_empty());
         assert_eq!(
             render_plain_text(&published, |_| None).unwrap(),
-            "请检查 [中文 \\(a\\)\\#\\\\b\\.test\\.ts](file:///project/%E4%B8%AD%E6%96%87%20%28a%29%23%5Cb.test.ts)"
+            "请检查 [中文 (a)#\\\\b.test.ts](file:///project/%E4%B8%AD%E6%96%87%20%28a%29%23%5Cb.test.ts)"
         );
         for (path, uri) in [
             ("/project/100%25.ts", "file:///project/100%2525.ts"),
@@ -1397,7 +1397,7 @@ mod tests {
         ] {
             assert_eq!(
                 crate::project_file_reference::render_link(path, "file.ts").unwrap(),
-                format!("[file\\.ts]({uri})")
+                format!("[file.ts]({uri})")
             );
         }
         let mut directory_doc = file_doc.clone();
@@ -1431,10 +1431,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 link,
-                format!(
-                    "[src\\/auth\\/]({})",
-                    uri.replace('(', "%28").replace(')', "%29")
-                )
+                format!("[auth]({})", uri.replace('(', "%28").replace(')', "%29"))
             );
         }
         // The frozen URI projection can exceed the input metadata budget through percent encoding.

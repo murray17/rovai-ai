@@ -4334,5 +4334,7 @@
   "请求已处理": "This request has already been handled.",
   "提交中…": "Submitting…",
   "目录当前不可用": "This directory is currently unavailable",
-  "目录引用：{0}": "Directory reference: {0}"
+  "目录引用：{0}": "Directory reference: {0}",
+  "目录引用详情": "Directory reference details",
+  "打开目录": "Open directory"
 }

@@ -71,24 +71,15 @@ pub fn render_target_link(path: &str, label: &str, kind: ProjectFileTargetKind) 
     if kind == ProjectFileTargetKind::Directory && !uri.path().ends_with('/') {
         uri.set_path(&format!("{}/", uri.path()));
     }
-    let directory_label = format!("{}/", label.trim_end_matches('/'));
-    let label = if kind == ProjectFileTargetKind::Directory {
-        directory_label.as_str()
-    } else {
-        label
-    };
     let label: String = label
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or(label)
         .chars()
-        .flat_map(|c| {
-            if c.is_ascii_punctuation() {
-                vec!['\\', c]
-            } else if c.is_control() {
-                vec![' ']
-            } else {
-                vec![c]
-            }
-        })
+        .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
+    let label = crate::reference_markdown::escape_link_label(&label);
     // Markdown destinations also need parentheses encoded, independently of URL's path rules.
     Ok(format!(
         "[{label}]({})",

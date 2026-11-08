@@ -123,7 +123,7 @@ export function createStructuredMessageClipboardData(
   if (!content?.some((segment) => segment.kind !== 'text')) return null
   const memberById = new Map(members.map((member) => [member.agentId, member]))
   const privateContent: PrivateClipboardSegment[] = content.map((segment) => {
-    if (segment.kind === 'project_file_reference') return { kind: 'project_file_reference', atom: { type: 'project_file_reference', threadId: segment.threadId, rawReference: segment.rawReference, labelFallback: segment.labelAtSend }, fallbackText: segment.labelAtSend }
+    if (segment.kind === 'project_file_reference') return { kind: 'project_file_reference', atom: { type: 'project_file_reference', threadId: segment.threadId, rawReference: segment.rawReference, labelFallback: segment.labelAtSend, ...(segment.targetKind ? { targetKind: segment.targetKind } : {}) }, fallbackText: segment.labelAtSend }
     if (isReferenceSegment(segment)) return { kind: 'text', text: projectReference(segment) }
     if (segment.kind === 'text') return segment
     if (segment.kind === 'all_members_mention') {

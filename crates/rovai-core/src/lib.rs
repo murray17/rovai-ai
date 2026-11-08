@@ -15,6 +15,7 @@ pub mod hermes;
 pub mod native_interaction;
 mod opencode_compat;
 mod pi;
+mod reference_markdown;
 mod runtime_fleet;
 mod runtime_mcp;
 
