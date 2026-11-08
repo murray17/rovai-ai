@@ -4494,13 +4494,15 @@ export function BusinessApp({
           <MissionSurface key={activeThreadId} enabled={!!activeMission} full={!missionDrawer} onExpand={() => setMissionPresentation('full')} onClose={returnToMissions}>
           {activeMission && <MissionHeader mission={activeMission} drawer={missionDrawer} thread={visibleThreadSnapshot} projectName={activeThreadProject?.name ?? activeThreadContextLabel}
             openRequest={missionOpenRequest} onExpand={() => setMissionPresentation('full')} onFold={() => setMissionPresentation('drawer')}
-            executionTakesPreviewPriority={generalPreferences.executionConsolePlacement === 'right'
+            executionTakesPreviewPriority={generalPreferences.executionConsoleAutoOpen
+              && generalPreferences.executionConsolePlacement === 'right'
               && visibleThreadSnapshot.agentRuns.some((run) => run.status === 'running')}
             onClose={returnToMissions} onFocusApprovals={focusThreadApprovals} detailEntryHostRef={setThreadDetailEntryHost}/>}
           <ThreadWorkspace
             key={activeThreadId}
             missionBoard={activeMission ? <MissionIntro mission={activeMission} projects={displayNavigation?.projects ?? []}/> : null}
             previewTabsInPane={false}
+            executionAutoOpen={generalPreferences.executionConsoleAutoOpen}
             suppressExecutionAutoOpen={missionDrawerSuppressesExecutionAutoOpen(
               missionDrawer,
               generalPreferences.executionConsolePlacement

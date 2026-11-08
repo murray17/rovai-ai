@@ -1527,6 +1527,11 @@ ipcMain.handle('rovai:general-preferences-set-execution-placement', (_event, pla
   )
 })
 
+ipcMain.handle('rovai:general-preferences-set-execution-auto-open', (_event, enabled: unknown) => {
+  if (typeof enabled !== 'boolean') throw new Error('Invalid execution console auto-open preference')
+  return hostGeneralPreferences().setExecutionConsoleAutoOpen(enabled)
+})
+
 ipcMain.handle('rovai:general-preferences-set-team', (_event, teamId: unknown, enableOneClick: unknown = false) => {
   if (typeof enableOneClick !== 'boolean') throw new Error('Invalid one-click preference')
   if (teamId !== null && (typeof teamId !== 'string' || !teamId || teamId.length > 200)) throw new Error('Invalid Team')

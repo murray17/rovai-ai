@@ -1651,7 +1651,8 @@ export function ThreadWorkspace({
   userAnchorNavigation,
   missionBoard = null,
   previewTabsInPane = false,
-  suppressExecutionAutoOpen = false,
+  executionAutoOpen = false,
+  suppressExecutionAutoOpen: suppressExecutionAutoOpenForSurface = false,
   initialComposerDraft = null,
   memberCreation = false,
   onPendingDraftChange,
@@ -1715,6 +1716,7 @@ export function ThreadWorkspace({
   userAnchorNavigation?: ThreadUserAnchorNavigation
   missionBoard?: React.ReactNode
   previewTabsInPane?: boolean
+  executionAutoOpen?: boolean
   suppressExecutionAutoOpen?: boolean
   initialComposerDraft?: ThreadComposerDraftView | null
   memberCreation?: boolean
@@ -1885,6 +1887,7 @@ export function ThreadWorkspace({
   const [composerInviteMessage, setComposerInviteMessage] = useState<string | null>(null)
   const [routingMutating, setRoutingMutating] = useState(false)
   const mobile = useMobileLayout()
+  const suppressExecutionAutoOpen = !executionAutoOpen || mobile || suppressExecutionAutoOpenForSurface
   const composerSubmittingRef = useRef(false)
   const routingMutatingRef = useRef(false)
   const composerLockAwaitingDisabledCommitRef = useRef(false)
@@ -4370,6 +4373,7 @@ export function ThreadWorkspace({
         pendingDraftPersistence.current!.acknowledgeActivation(threadId)
       }
       if (mountedThreadId.current === threadId
+        && !suppressExecutionAutoOpen
         && (sendReceipt.deliveryIds.length || sendReceipt.agentRunIds.length)) {
         setSubmittedExecutionRequests((current) => [...current, {
           ...sendReceipt,

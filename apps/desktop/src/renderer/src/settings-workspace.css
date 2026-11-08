@@ -342,6 +342,13 @@
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-world-map-setting small {
   font-size: 11px;
 }
+:root .settings-panel .general-world-map-setting > .general-conversation-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.general-conversation-title label { cursor: pointer; }
+:root .settings-panel div.general-world-map-setting { cursor: default; }
 :root .settings-panel:not(.settings-panel-mcp,.settings-panel-skills) .general-window-row {
   padding: 0;
   min-height: 34px;
@@ -1506,7 +1513,7 @@
 .runtime-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .runtime-conflict-actions .quiet-button { min-height: 32px; }
 
-:root .settings-panel .general-world-map-setting.general-task-setting {
+:root .settings-panel .general-section-body > .general-world-map-setting ~ .general-world-map-setting {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid var(--line);

@@ -158,6 +158,15 @@ export class GeneralPreferencesStore {
     })
   }
 
+  setExecutionConsoleAutoOpen(enabled: boolean): Promise<GeneralPreferencesSnapshot> {
+    if (typeof enabled !== 'boolean') {
+      return Promise.reject(new Error('Invalid execution console auto-open preference'))
+    }
+    return this.#enqueue(async () => {
+      return this.#commit({ ...this.#snapshot, executionConsoleAutoOpen: enabled })
+    })
+  }
+
   setNewConversationDefaults(defaults: NewConversationDefaults, enableOneClick = false): Promise<GeneralPreferencesSnapshot> {
     if (!isNewConversationDefaults(defaults)) {
       return Promise.reject(new Error('Default new conversation members and Lead are invalid'))

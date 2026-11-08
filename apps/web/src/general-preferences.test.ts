@@ -38,14 +38,28 @@ describe('browser-local language preference', () => {
 
   it('preserves schema 5 values while missing storage alone gets the system default', async () => {
     const { entries } = browser()
-    const { interfaceLanguagePreference: _preference, newConversationTeamId: _team, ...common } = DEFAULT_STORED_GENERAL_PREFERENCES
+    const { interfaceLanguagePreference: _preference, newConversationTeamId: _team, executionConsoleAutoOpen: _autoOpen, ...common } = DEFAULT_STORED_GENERAL_PREFERENCES
     for (const language of ['zh-CN', 'en'] as const) {
       entries.set('rovai.presentation:owner:general', JSON.stringify({ ...common, schemaVersion: 5, interfaceLanguage: language }))
       const api = browserGeneralPreferences('owner')
       expect(await api.getInterfaceLanguage()).toMatchObject({ interfaceLanguagePreference: language, interfaceLanguage: language })
       await api.setLastSettingsSection('runtime')
-      expect(JSON.parse(entries.get('rovai.presentation:owner:general')!)).toMatchObject({ schemaVersion: 7, interfaceLanguagePreference: language })
+      expect(JSON.parse(entries.get('rovai.presentation:owner:general')!)).toMatchObject({ schemaVersion: 8, interfaceLanguagePreference: language })
     }
+  })
+
+  it('keeps execution auto-open local, migrates disabled and preserves the saved value on write failure', async () => {
+    const { entries, storage } = browser()
+    const { executionConsoleAutoOpen: _autoOpen, ...legacy } = DEFAULT_STORED_GENERAL_PREFERENCES
+    entries.set('rovai.presentation:owner:general', JSON.stringify({ ...legacy, schemaVersion: 7, executionConsolePlacement: 'bottom' }))
+    const api = browserGeneralPreferences('owner')
+    expect(await api.get()).toMatchObject({ executionConsoleAutoOpen: false, executionConsolePlacement: 'bottom' })
+    await api.setExecutionConsoleAutoOpen(true)
+    expect(await browserGeneralPreferences('owner').get()).toMatchObject({ executionConsoleAutoOpen: true })
+    expect(await browserGeneralPreferences('another-owner').get()).toMatchObject({ executionConsoleAutoOpen: false })
+    storage.setItem.mockImplementationOnce(() => { throw new Error('quota') })
+    await expect(api.setExecutionConsoleAutoOpen(false)).rejects.toThrow('quota')
+    expect(await api.get()).toMatchObject({ executionConsoleAutoOpen: true })
   })
 
   it('retains valid memory and the damaged record until a successful retry, then survives a write failure', async () => {
