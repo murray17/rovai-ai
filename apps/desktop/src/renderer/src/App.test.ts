@@ -624,6 +624,7 @@ describe('active Thread event invalidation', () => {
     let snapshot = campOpenProjectionAsSnapshot(projection('running'), null)
     const renderThread = (): string => renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
+      executionAutoOpen: true,
       projectName: null,
       agents: [agentProfile()],
       busy: false,
@@ -4198,6 +4199,7 @@ describe('task event projections', () => {
 
     const workspaceProps: Parameters<typeof ThreadWorkspace>[0] = {
       snapshot: groupedSnapshot,
+      executionAutoOpen: true,
       executionPlacement: 'bottom',
       projectName: 'Rovai',
       agents: [profile],
@@ -4215,6 +4217,11 @@ describe('task event projections', () => {
       onStop: () => undefined
     }
     const markup = renderToStaticMarkup(createElement(ThreadWorkspace, workspaceProps))
+    const manualExecutionMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
+      ...workspaceProps, executionAutoOpen: false
+    }))
+    expect(manualExecutionMarkup).not.toContain('class="execution-drawer execution-drawer-bottom')
+    expect(manualExecutionMarkup).toContain('data-presence-run="run-muwa"')
     const suppressedMissionDrawerMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       missionBoard: createElement('section', null, 'Mission board'),
@@ -4421,6 +4428,7 @@ describe('task event projections', () => {
 
     const inspectorMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: groupedSnapshot,
+      executionAutoOpen: true,
       projectName: 'Rovai',
       agents: [profile],
       busy: false,
@@ -4571,6 +4579,7 @@ describe('task event projections', () => {
 
     const cancellingMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
+      executionAutoOpen: true,
       projectName: 'Rovai',
       agents: [profile],
       liveRuntimeEvents: [],

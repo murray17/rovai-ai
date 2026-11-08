@@ -221,6 +221,9 @@ const api: RovaiApi = {
     setExecutionConsolePlacement(placement: ExecutionConsolePlacement) {
       return ipcRenderer.invoke('rovai:general-preferences-set-execution-placement', placement)
     },
+    setExecutionConsoleAutoOpen(enabled: boolean) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-execution-auto-open', enabled)
+    },
     setNewConversationTeam(teamId, enableOneClick = false) {
       return ipcRenderer.invoke('rovai:general-preferences-set-team', teamId, enableOneClick)
     },

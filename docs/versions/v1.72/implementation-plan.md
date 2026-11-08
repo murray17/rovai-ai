@@ -8,6 +8,38 @@ last_updated: 2026-11-08
 
 # v1.72 实施与验收
 
+## 执行台自动打开偏好（2026-11-08）
+
+独立 worktree 从 `origin/main` 的 `cab7f7788eddaad3308a9d5574de649ecb1ae6e5` 建立，
+分支为 `rovai/execution-auto-open-preference`。通用偏好 schema 8 增加默认 false 的
+`executionConsoleAutoOpen`，Desktop 私有文件和 Web 现有客户端存储分别保存；有效旧偏好升级时
+保留语言、位置、默认队伍与地图等字段，损坏记录不覆盖。设置失败保留已保存值。
+
+共享 ThreadWorkspace 只在偏好开启、非 Mobile 且当前 surface 允许时追踪发送后的精确执行导航，
+同一准入也覆盖初始 snapshot、延迟 snapshot 和 Thread 重入。关闭偏好会消费待处理导航，后续开启不补跳；
+不收起已打开面板，手动导航和现有执行 Tab 恢复继续保留。三项设置顺序和说明遵循
+[通用设置 brief](../../ui/surfaces/settings-workspace.md#通用)，复用现有生产问号帮助组件。
+
+隔离 Electron 执行选择 owner 已通过三种承载位置的关闭／开启、运行中进入、延迟 Run 发布、
+关闭时保留选择、显式通知定位、等待期间关闭及 Mobile 强制手动场景；原有队员／总览记忆、文件保护、
+关闭和回复详情 owner 仍通过。隔离设置 owner 已通过问号原文、说明不触发开关、保存失败与重挂载恢复，
+并保留原有主题与缩放回归。测试只替换 transport，不启动 Core、真实 Runtime 或日常 App。
+TypeScript、完整 Desktop 构建（含 Web 与只读执行页）、真实 preload 桥接和通用文档门禁已通过。
+`TZ=UTC pnpm test`：Vitest 3,173 通过、2 既有跳过；Node 主套件 377 通过、2 平台跳过。
+Honolulu 首轮的两项既有日期断言和一次文件监听超时均在 UTC 完整重跑中通过，未修改相关实现或测试。
+`pnpm test:execution-avatar-rail` 三个 owner、`pnpm test:settings-workspace` 全部通过；
+消息执行行生产 owner 与回复分栏 owner 也通过。
+
+额外检查有两处未通过，未纳入本次修复：
+
+- `pnpm test:rust:pr` 的 Core 阶段为 437 通过、1 失败、1 ignored；
+  `runtime_probe_process::tests::successful_leader_with_stdio_holding_descendant_finishes_bounded`
+  报 `runtime_probe_stdout_cleanup_timed_out`。相同 workspace 组合的定向重跑复现，Core 单包定向通过；
+  `Cargo.toml`、`Cargo.lock`、`.cargo` 与全部 Rust 输入相对基线无变化。
+- `pnpm test:run-presence-ui` 为 2 通过、1 失败；回复原文定位的 `regroup-middle` 场景未满足
+  “closing details must actually regroup the same Run messages”。临时使用基线
+  `cab7f7788` 的 ThreadWorkspace 重跑同一 owner 仍复现，已逐字节恢复本次组件；执行条 owner 通过。
+
 ## 手机会话身份行对齐（2026-11-08）
 
 按已确认交互稿，在 [`mobile.css`](../../../apps/web/src/mobile.css) 中统一队员消息与独立执行行的身份高度：

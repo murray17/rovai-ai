@@ -4334,5 +4334,10 @@
   "请求已处理": "This request has already been handled.",
   "提交中…": "Submitting…",
   "目录当前不可用": "This directory is currently unavailable",
-  "目录引用：{0}": "Directory reference: {0}"
+  "目录引用：{0}": "Directory reference: {0}",
+  "自动打开执行台": "Automatically open execution desk",
+  "自动打开执行台说明": "About opening the execution desk automatically",
+  "发送消息后，或进入有队员正在执行的会话时，自动展开执行台。": "Automatically open the execution desk after sending a message or entering a conversation with a teammate running.",
+  "会话任务说明": "About conversation tasks",
+  "执行、任务与阅读偏好": "Execution, tasks and reading preferences"
 }

@@ -3483,11 +3483,12 @@ export type InterfaceLanguagePreference = 'system' | InterfaceLanguage
 
 /** Disk/browser representation. Resolved language and read status are never persisted. */
 export interface GeneralPreferencesStorage {
-  schemaVersion: 7
+  schemaVersion: 8
   interfaceLanguagePreference: InterfaceLanguagePreference
   startupLocationMode: StartupLocationMode
   lastSettingsSection: SettingsSection
   executionConsolePlacement: ExecutionConsolePlacement
+  executionConsoleAutoOpen: boolean
   newConversationDefaults: NewConversationDefaults | null
   newConversationTeamId: string | null
   newConversationDefaultsRequireConfirmation: boolean
@@ -3563,6 +3564,7 @@ export interface GeneralPreferencesApi extends InterfaceLanguageApi {
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot>
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot>
   setExecutionConsolePlacement(placement: ExecutionConsolePlacement): Promise<GeneralPreferencesSnapshot>
+  setExecutionConsoleAutoOpen(enabled: boolean): Promise<GeneralPreferencesSnapshot>
   /** Saves the team atomically with enabling one-click when requested; otherwise preserves its current flag. */
   setNewConversationTeam(teamId: string | null, enableOneClick?: boolean): Promise<GeneralPreferencesSnapshot>
   setNewConversationDefaults(defaults: NewConversationDefaults, enableOneClick?: boolean): Promise<GeneralPreferencesSnapshot>

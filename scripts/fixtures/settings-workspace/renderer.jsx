@@ -95,7 +95,8 @@ Object.assign(window, { rovai: {
     setStartupLocationMode: savePreference('startupLocationMode'),
     setNewConversationDefaults: savePreference('newConversationDefaults'),
     setOneClickNewConversationEnabled: savePreference('oneClickNewConversationEnabled'),
-    setWorldMapEnabled: savePreference('worldMapEnabled')
+    setWorldMapEnabled: savePreference('worldMapEnabled'),
+    setExecutionConsoleAutoOpen: savePreference('executionConsoleAutoOpen')
   },
   windowControls: { getResetCapability: async () => ({ canReset: true, reason: null }), resetBounds: async () => ({ performed: true }) },
   channels: {

@@ -3,6 +3,7 @@ import { LanguagePreferenceOptions } from './LanguagePreferenceControl'
 import { useTaskCapability } from './TaskCapabilityProvider'
 import { WindowCloseSettings } from './WindowCloseSettings'
 import { GeneralLeadSelect } from './GeneralLeadSelect'
+import { NewConversationQuickHelp } from './NewConversationQuickHelp'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -82,6 +83,8 @@ export function GeneralSettings({
   const [oneClickConfirmOpen, setOneClickConfirmOpen] = useState(false)
   const [worldMapBusy, setWorldMapBusy] = useState(false)
   const [worldMapError, setWorldMapError] = useState<string | null>(null)
+  const [executionAutoOpenBusy, setExecutionAutoOpenBusy] = useState(false)
+  const [executionAutoOpenError, setExecutionAutoOpenError] = useState<string | null>(null)
   const [resetCapability, setResetCapability] = useState<WindowResetCapability | null>(null)
   const [resetBusy, setResetBusy] = useState(false)
   const [resetError, setResetError] = useState<string | null>(null)
@@ -95,6 +98,7 @@ export function GeneralSettings({
   const loadPreferences = useCallback(async (): Promise<void> => {
     setPreferenceError(null)
     setWorldMapError(null)
+    setExecutionAutoOpenError(null)
     try {
       acceptPreferences(await api.get())
     } catch (error) {
@@ -231,6 +235,19 @@ export function GeneralSettings({
       setPreferenceError(errorMessage(error))
     } finally {
       setOneClickBusy(false)
+    }
+  }
+
+  const setExecutionAutoOpen = async (enabled: boolean): Promise<void> => {
+    if (!preferences || enabled === preferences.executionConsoleAutoOpen || executionAutoOpenBusy) return
+    setExecutionAutoOpenBusy(true)
+    setExecutionAutoOpenError(null)
+    try {
+      acceptPreferences(await api.setExecutionConsoleAutoOpen(enabled))
+    } catch (error) {
+      setExecutionAutoOpenError(errorMessage(error))
+    } finally {
+      setExecutionAutoOpenBusy(false)
     }
   }
 
@@ -431,8 +448,32 @@ export function GeneralSettings({
         </section>
 
         <section className="section-block general-settings-section" aria-labelledby="general-conversation-heading">
-          <div className="section-heading"><div><h2 id="general-conversation-heading"><UiText zh={"会话"} /></h2><p><UiText zh={"阅读面与沉浸视图"} /></p></div></div>
+          <div className="section-heading"><div><h2 id="general-conversation-heading"><UiText zh={"会话"} /></h2><p><UiText zh={"执行、任务与阅读偏好"} /></p></div></div>
           <div className="general-section-body">
+            <div className="general-world-map-setting general-execution-auto-open-setting" aria-busy={executionAutoOpenBusy}>
+              <span className="general-conversation-title">
+                <label htmlFor="general-execution-auto-open"><strong><UiText zh="自动打开执行台" /></strong></label>
+                <NewConversationQuickHelp label={uiAttribute('自动打开执行台说明')}>
+                  <UiText zh="发送消息后，或进入有队员正在执行的会话时，自动展开执行台。" />
+                </NewConversationQuickHelp>
+              </span>
+              <input id="general-execution-auto-open" type="checkbox" role="switch" aria-label={uiAttribute('自动打开执行台')}
+                checked={preferences?.executionConsoleAutoOpen ?? false} disabled={!preferences || executionAutoOpenBusy}
+                onChange={event => void setExecutionAutoOpen(event.target.checked)} />
+            </div>
+            <div className="sr-only" role="status">{executionAutoOpenBusy && <UiText zh="正在保存会话偏好…" />}</div>
+            {executionAutoOpenError && <div className="general-inline-status is-error" role="alert"><span>{executionAutoOpenError}</span></div>}
+            <div className="general-world-map-setting general-task-setting" aria-busy={tasks.saving}>
+              <span className="general-conversation-title">
+                <label htmlFor="general-task-enabled"><strong><UiText zh="会话任务" /></strong></label>
+                <NewConversationQuickHelp label={uiAttribute('会话任务说明')}>
+                  <UiText zh="在所有会话中提供任务面板和队员任务工具；关闭不删除已有任务记录。" />
+                </NewConversationQuickHelp>
+              </span>
+              <input id="general-task-enabled" type="checkbox" role="switch" aria-label={uiAttribute('会话任务')} checked={tasks.enabled} disabled={!tasks.ready || tasks.saving} onChange={event => void tasks.setEnabled(event.target.checked)} />
+            </div>
+            <div className="sr-only" role="status">{tasks.saving && <UiText zh="正在保存…" />}</div>
+            {tasks.error && <div className="general-inline-status is-error" role="alert"><span><UiText zh={tasks.error === 'save' ? '未能保存，请重试。' : '无法读取会话任务设置，请重试。'} /></span><button className="quiet-button compact" type="button" onClick={() => void tasks.retry()}><UiText zh="重试" /></button></div>}
             <label className="general-world-map-setting" aria-busy={worldMapBusy}>
               <span>
                 <strong><UiText zh={"世界地图"} /></strong>
@@ -455,12 +496,6 @@ export function GeneralSettings({
                 <button className="quiet-button compact" type="button" onClick={() => void loadPreferences()}><UiText zh={"重新读取"} /></button>
               </div>
             )}
-            <label className="general-world-map-setting general-task-setting" aria-busy={tasks.saving}>
-              <span><strong><UiText zh="会话任务" /></strong><small id="general-task-description"><UiText zh="在所有会话中提供任务面板和队员任务工具；关闭不删除已有任务记录。" /></small></span>
-              <input type="checkbox" role="switch" aria-label={uiAttribute('会话任务')} aria-describedby="general-task-description" checked={tasks.enabled} disabled={!tasks.ready || tasks.saving} onChange={event => void tasks.setEnabled(event.target.checked)} />
-            </label>
-            <div className="sr-only" role="status">{tasks.saving && <UiText zh="正在保存…" />}</div>
-            {tasks.error && <div className="general-inline-status is-error" role="alert"><span><UiText zh={tasks.error === 'save' ? '未能保存，请重试。' : '无法读取会话任务设置，请重试。'} /></span><button className="quiet-button compact" type="button" onClick={() => void tasks.retry()}><UiText zh="重试" /></button></div>}
           </div>
         </section>
 

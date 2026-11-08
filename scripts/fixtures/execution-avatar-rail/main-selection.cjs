@@ -63,6 +63,67 @@ app.whenReady().then(async () => {
   const report = []
   try {
     await window.loadFile(renderer)
+    const settle = () => run('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    const update = async patch => { await run(`window.executionSelectionTest.update(${JSON.stringify(patch)})`); await settle() }
+    const submit = async () => {
+      await run(`(() => {
+        const editor = document.querySelector('#camp-message')
+        editor.focus()
+        document.execCommand('insertText', false, 'Auto-open preference regression')
+      })()`)
+      for (let i = 0; i < 80; i++) {
+        if (await run(`!document.querySelector('.conversation-controls .composer-primary-action').disabled`)) break
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      await click('.conversation-controls .composer-primary-action')
+      for (let i = 0; i < 80; i++) {
+        if (await run('window.executionSelectionTest.submittedMessages() > 0')) return settle()
+        await new Promise(resolve => setTimeout(resolve, 25))
+      }
+      throw new Error('Composer did not accept the fixture input')
+    }
+    for (const placement of ['inspector', 'right', 'bottom']) {
+      await configure(`auto-off-entry-${placement}`, { placement, autoOpen: false, running: true, ready: false })
+      await update({ ready: true })
+      assert.equal((await state()).visible, false, `${placement}: disabled preference waits quietly for the authoritative snapshot`)
+      assert.equal((await state()).selected, null, `${placement}: disabled entry has no implicit selection`)
+      await update({ autoOpen: true })
+      assert.equal((await state()).visible, false, `${placement}: enabling does not replay entry navigation`)
+
+      await configure(`auto-on-entry-${placement}`, { placement, autoOpen: true, running: true })
+      await wait(s => s.visible && s.selected === overview, `${placement}: explicit opt-in opens a running entry`)
+      await update({ autoOpen: false })
+      await select('agent-2')
+      await submit()
+      await run('window.executionSelectionTest.publishSubmittedRun()'); await settle()
+      assert.equal((await state()).selected, 'agent-2', `${placement}: disabled send preserves the visible member selection`)
+      assert.equal((await state()).visible, true, `${placement}: disabling preserves the manually visible desk`)
+
+      await configure(`auto-off-send-${placement}`, { placement, autoOpen: false })
+      await submit()
+      await run('window.executionSelectionTest.publishSubmittedRun()'); await settle()
+      assert.equal((await state()).visible, false, `${placement}: disabled delayed submission never opens`)
+      await run("window.executionNotificationTest.focusRun(200, 'run-submitted')")
+      await wait(s => s.visible && s.focusedRun === 'run-submitted', `${placement}: explicit Run navigation still opens`)
+
+      await configure(`auto-on-send-${placement}`, { placement, autoOpen: true })
+      await submit()
+      assert.equal((await state()).visible, false, `${placement}: an unclaimed Delivery does not create a Run`)
+      await run('window.executionSelectionTest.publishSubmittedRun()')
+      await wait(s => s.visible && s.focusedRun === 'run-submitted', `${placement}: opted-in delayed submission opens its exact Run`)
+    }
+    await configure('auto-off-pending', { autoOpen: true, placement: 'inspector' })
+    await submit(); await update({ autoOpen: false })
+    await run('window.executionSelectionTest.publishSubmittedRun()'); await settle()
+    await update({ autoOpen: true })
+    assert.equal((await state()).visible, false, 'Disabling consumes a pending delayed request without replay')
+    await configure('auto-mobile', { autoOpen: true, running: true, mobile: true, placement: 'inspector' })
+    assert.equal((await state()).visible, false, 'Mobile ignores auto-open on entry')
+    await submit(); await run('window.executionSelectionTest.publishSubmittedRun()'); await settle()
+    assert.equal((await state()).visible, false, 'Mobile ignores auto-open after submission')
+    assert.equal((await state()).selected, null, 'Mobile submission preserves execution selection')
+    report.push('auto-open-off-on-entry-and-delayed-send-all-placements', 'off-preserves-reading-and-explicit-navigation', 'pending-disable-no-replay', 'mobile-manual-with-opt-in')
+
     await configure('selection-a')
     assert.equal((await state()).visible, false, 'Terminal history must not automatically open execution')
     await run('window.executionSelectionTest.openExecution()')

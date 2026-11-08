@@ -5,6 +5,7 @@ import { AppHeader } from '../../../apps/desktop/src/renderer/src/App'
 import { ThreadWorkspace, type NotificationFocusTarget, type VisibleNotificationSources } from '../../../apps/desktop/src/renderer/src/ThreadWorkspace'
 import { FilePreviewProvider, useFilePreview } from '../../../apps/desktop/src/renderer/src/FilePreviewContext'
 import { ThreadClientProvider } from '../../../apps/desktop/src/renderer/src/camp-client'
+import { MobileLayoutProvider } from '../../../apps/desktop/src/renderer/src/MobileLayout'
 import { desktopThreadClient } from '../../../apps/desktop/src/renderer/src/desktop-camp-client'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 
@@ -227,11 +228,17 @@ let configureInterruptionFixture: (() => void) | undefined
 Object.assign(window, { configureRunInterruption: () => configureInterruptionFixture?.() })
 
 let configureEmptyExecutionFixture: ((pending: boolean, placement: ExecutionConsolePlacement) => void) | undefined
-type SelectionScenario = { threadId: string; running?: boolean; missingAgent?: string; ready?: boolean; placement?: ExecutionConsolePlacement; reply?: boolean }
+type SelectionScenario = { threadId: string; running?: boolean; missingAgent?: string; ready?: boolean; placement?: ExecutionConsolePlacement; reply?: boolean; autoOpen?: boolean; mobile?: boolean }
 let configureSelectionFixture: ((scenario: SelectionScenario) => void) | undefined
+let updateSelectionFixture: ((patch: Partial<SelectionScenario>) => void) | undefined
+let publishSubmittedRun: (() => void) | undefined
+let submittedMessages = 0
 let selectionThreadId = threadId
 Object.assign(window, { executionSelectionTest: {
   configure: (scenario: SelectionScenario) => configureSelectionFixture?.(scenario),
+  update: (patch: Partial<SelectionScenario>) => updateSelectionFixture?.(patch),
+  publishSubmittedRun: () => publishSubmittedRun?.(),
+  submittedMessages: () => submittedMessages,
   openFile: () => previewHarness?.openFile(),
   openExecution: () => previewHarness?.openExecution(),
   hideExecution: () => previewHarness?.hidePane()
@@ -258,7 +265,12 @@ function Fixture(): React.JSX.Element {
   const [failureScenario, setFailureScenario] = useState(false)
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
   const [selectionScenario, setSelectionScenario] = useState<SelectionScenario | null>(null)
+  const [submittedRunVisible, setSubmittedRunVisible] = useState(false)
+  updateSelectionFixture = patch => setSelectionScenario(current => current ? { ...current, ...patch } : current)
+  publishSubmittedRun = () => setSubmittedRunVisible(true)
   configureSelectionFixture = scenario => {
+    submittedMessages = 0
+    setSubmittedRunVisible(false)
     notificationFixtureEnabled = false
     setNotificationFocus(null)
     setSelectionScenario(scenario)
@@ -388,6 +400,10 @@ function Fixture(): React.JSX.Element {
     snapshot.tasks = []
     if (selectionScenario.reply) snapshot.messages = snapshot.messages.map(message => message.id === 'public-message-2'
       ? { ...message, replyToThreadMessageId: 'message-1' } : message)
+    if (submittedRunVisible) snapshot.agentRuns.push({ ...snapshot.agentRuns[0],
+      id: 'run-submitted', status: 'running', endedAt: null,
+      inputMessageIds: ['message-submitted'], anchorMessageId: 'message-submitted',
+      executionEvidenceCount: 0, createdAt: '2026-08-31T04:02:00Z' })
   }
   selectionThreadId = snapshot.thread.id
   return <FilePreviewProvider threadId={snapshot.thread.id} resolvedTheme={theme === 'night' ? 'night' : 'day'}>
@@ -416,8 +432,14 @@ function Fixture(): React.JSX.Element {
     </aside>
     <AppHeader threadTitle={snapshot.thread.title} contextLabel="隔离验收" thread={snapshot} detailEntryHostRef={setEntryHost} onFocusApprovals={() => {}} />
     <main className="content task-content">
+      <MobileLayoutProvider value={selectionScenario?.mobile ?? false}>
       <ThreadWorkspace key={snapshot.thread.id} missionBoard={notificationFixtureEnabled ? <section className="mission-intro" data-mission-id="mission-rail" tabIndex={-1}>使命来源</section> : null} snapshot={snapshot} projectName="隔离验收" agents={agents.slice(0, snapshot.members.length)} busy={false} stopping={false}
-        onSend={async () => {}} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
+        executionAutoOpen={selectionScenario?.autoOpen ?? true}
+        onSend={async () => {
+          if (!selectionScenario) return
+          submittedMessages++
+          return { threadMessageId: 'message-submitted', deliveryIds: ['delivery-submitted'], agentRunIds: [], addressedAgentIds: ['agent-1'] }
+        }} onChangeLead={async () => {}} onTasksChanged={async () => {}} onResolveApproval={() => {}}
         onStop={() => {}} worldMapEnabled={false} inspectorVisible={open} detailEntryHost={entryHost}
         workspaceEntrySnapshotReady={selectionScenario?.ready ?? true}
         onCancelAgentRun={async run => { setStoppedRuns(current => [...current, run.id]) }}
@@ -438,6 +460,7 @@ function Fixture(): React.JSX.Element {
           latestVisibleNotificationSources = sources
           visibleNotificationSourceReports.push(sources)
         } : undefined} />
+      </MobileLayoutProvider>
     </main>
   </div></FilePreviewProvider>
 }

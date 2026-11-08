@@ -4501,6 +4501,7 @@ export function BusinessApp({
             key={activeThreadId}
             missionBoard={activeMission ? <MissionIntro mission={activeMission} projects={displayNavigation?.projects ?? []}/> : null}
             previewTabsInPane={false}
+            executionAutoOpen={generalPreferences.executionConsoleAutoOpen}
             suppressExecutionAutoOpen={missionDrawerSuppressesExecutionAutoOpen(
               missionDrawer,
               generalPreferences.executionConsolePlacement

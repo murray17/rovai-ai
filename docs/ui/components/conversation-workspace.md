@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-07
+last_updated: 2026-11-08
 ---
 
 # Thread 会话工作区
@@ -760,7 +760,13 @@ Desktop 与宽屏 Web 的展开正文首尾、主要过程项间距及相邻 Run
 执行浮层入口、右侧标签、消息区“处理中”回执和底部标题共用同一 24×24 心跳路径与 1.65 描边；
 queued 回执的时钟及各执行状态图形不变。
 
-打开过程入口时，先定位最新 running，其次最新 non-terminal，最后最新 terminal Run。用户显式
+“设置 → 通用 → 会话”的“自动打开执行台”默认关闭。关闭时，发送、延迟入队后的 Run 发布及
+进入／恢复含 running Run 的会话均不自动展开或改变执行队员／Run 选择；不保留待补跳意图。
+用户已打开的执行台继续更新当前内容，不因关闭该偏好而收起。手动入口、快捷键、位置切换与精确通知定位
+不受该偏好影响；按 Thread 记住的队员／总览 Tab 仅在可见执行页或主动打开时恢复。Mobile 始终手动打开。
+开启该偏好后，Desktop 与宽屏 Web 遵循以下两类自动规则及其保护边界；切换开关本身不触发补开。
+
+打开过程入口时，先定位最新 running，其次最新 non-terminal，最后最新 terminal Run。开启自动打开时，用户显式
 发送成功且未在查看 non-terminal Run 时，按 Core 有序回执打开首个 Run 的精确 stage，但不夺走
 Composer 焦点。若用户正在可见的“任务”Tab 新建任务，Renderer 消费本次自动聚焦请求但不切走表单，
 离开表单后也不补跳；仅浏览任务、编辑既有任务或查看队员仍按回执自动打开执行。不可见的旧 Run
@@ -801,7 +807,7 @@ AgentRun 通知定位必须先显示目标承载位置，再选择成员、展�
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
 Composer 或唯一 Stop。
 
-本工作区显式提交后入队的消息，在真正发布时沿用发送后的精确定位规则；上一轮被取消同样适用。
+仅开启自动打开时，本工作区显式提交后入队的消息，在真正发布时沿用发送后的精确定位规则；上一轮被取消同样适用。
 Renderer 以公开消息和 Delivery ID 跟踪刚提交输入；Scheduler claim 后按返回的真实 Run 展开并恢复详情底部跟随，
 不创建 pending-input 占位，也不夺走 Composer 焦点。
 删除待发送消息、无执行发布或离开 Thread 会消费或丢弃意图；其他窗口的发送和后台新 Run 不触发该行为。
@@ -1471,7 +1477,7 @@ Approval/Recovery Dock、Composer 或文件预览，不改变会话网格列宽�
 内容区独立滚动，头尾栏始终可见；执行台内部沿用上面的背景分层，列表与工具输出样式不随承载位置改变。
 
 浮层开合只在当前工作区内保留，不读取旧的侧栏显隐偏好。进入没有 running Run 的 Thread 时默认收起；进入
-含 running Run 的 Thread、显式移动到浮层或精确执行导航仍遵循上面的自动展开规则。切换内容或收起浮层不得
+含 running Run 的 Thread 仅在开启自动打开时展开；显式移动到浮层或精确执行导航仍直接展示。切换内容或收起浮层不得
 重建执行 Drawer，不得丢失 Agent/Run selection、已展开 Tool、已读结果或滚动位置。
 Mobile 的执行标签由用户主动打开；发送或排队后发布 Run 不自动切换页面。手机 Run 摘要仍复用相同时间、状态与当前执行标记，具体布局见 [Mobile WebUI](../host-web-mobile.md#对话与执行)。
 
