@@ -165,7 +165,7 @@ User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺�
 | 原生项目目录 | 既有真实 Host 项目目录 owner 通过，包括预览、编辑保存、主题、窄屏及缩放；不据此宣称文件 Mention 的 200% 专项已测 |
 | Host 文件烟测 | 6 组通过：独立 scope、重绑、预览收紧、Pending 拒绝及重放、伪造字段、Web 鉴权与旧协议拒绝 |
 | Host Desktop＋Web 主 owner | 通过；Core 生命周期、HTTP 投影、权限、旧协议及文件编辑均保持 |
-| 正式文件界面 | 复核修复后 Desktop＋认证 Web 20 项通过，保留原 16 项路径并补齐三处异步插入提交阻断、业务／协议分类与旧检查覆盖发送拒绝的反例；结果见[界面证据](project-file-reference-review-ui-evidence.json) |
+| 正式文件界面 | sequence 30 后 Desktop＋认证 Web 22 项通过，保留原 20 项路径并增加快速对话隐藏文件类别及键盘跳过；结果见[界面证据](project-file-reference-review-ui-evidence.json) |
 | 布局 | day／night × 390／1040／1440／2560；实际输入框与文件扩展名可见，无页面横向溢出 |
 | 文档治理 | docs:test 10 项及 require-base 的决定／链接门禁通过；version 门禁仅余补充 R2 的 4 项真实确认记录，未补造确认 |
 
@@ -217,6 +217,17 @@ macOS arm64 的真实 Codex CLI 0.166.0 与 Claude Code 2.1.311 使用新的 Cor
   不把组合命令报告为通过。require-base 的文档决定／链接门禁通过；没有添加 checker 例外或补造确认。
 - R1 两个模型输入示例的 senderId 按现有实现勘误为 `user`；R1 确认仍有效。R2 提案 revision 2 补足
   “新对话无任务应询问／上文日志任务直接继续／本轮明确分析直接执行”，Charter 文本尚未实施。
+
+### Sequence 30 快速对话入口收敛（2026-11-07）
+
+User 要求快速对话移除不可用的文件 Tab。当前关联项目的会话／使命仍提供文件类别，快速对话仅显示
+队员／对话／使命；可见 Tab、Tab／Shift+Tab 与标签方向键共用 picker 的类别集合，不能导航到隐藏类别。
+项目已关联但根不可访问时保留文件入口及重试，避免把临时目录故障当作未关联项目。
+没有 ready WT 的使命仍直接引用关联项目目录；本轮仅改入口，不改变目录解析、文件身份、Core 或模型输入。
+
+`pnpm typecheck`、`pnpm build:desktop` 通过。既有生产 Desktop＋认证 Web owner 扩展后 22 项通过，
+新增两个快速对话场景，并明确核对项目会话仍有四类入口。本轮未重复真实 Runtime 读取或 Rust 测试；
+此前证据及 R2 待确认状态保持，文档门禁仍不能因未确认 R2 记作全通过。
 
 ### 已知限制与交接
 

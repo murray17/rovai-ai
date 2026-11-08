@@ -31,7 +31,7 @@ export function ThreadReferenceMenu({ menuId, picker, inviteLayer, pendingInvite
     } else element.querySelector<HTMLElement>('[aria-selected=true]')?.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex, virtualized, rowHeight])
   useLayoutEffect(() => { if (list.current) list.current.scrollTop = 0; setScrollTop(0) }, [filter, picker.query])
-  const tabs = (['members', ...(picker.filesSupported ? ['file' as const] : []), 'thread', 'mission'] as const)
+  const tabs = picker.categories
   const group = (index: number): ReferenceFilter => {
     const item = options[index]!
     return item.kind === 'file' ? 'file' : item.kind === 'reference' ? item.item.kind : 'members'

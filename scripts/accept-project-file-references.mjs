@@ -53,7 +53,7 @@ try {
   const profiles = await call('members.list')
   await configureFileReferenceRuntime(slowCall, 'codex-cli', profiles[0].agentId)
   const create = async (name, path = project) => {
-    const workspace = { projectPath: path }
+    const workspace = path === null ? null : { projectPath: path }
     const result = await call('threads.create', { commandId:randomUUID(), name, workspace, memberAgentIds:[profiles[0].agentId], defaultLeadAgentId:profiles[0].agentId, collaborationMode:'peer' })
     assert.equal(result.status,'applied')
     await call('thread.messages.send', { commandId:randomUUID(), threadId:result.payload.threadId, content:{version:2,segments:[{kind:'text',text:'UI fixture note; no execution requested.'}]} })
@@ -63,6 +63,7 @@ try {
   const target = await create('Project files · paste target')
   const foreignProject = join(fixture,'other-project'); await mkdir(foreignProject); await writeFile(join(foreignProject,'package.json'), '{}')
   const foreign = await create('Project files · different root', foreignProject)
+  const quick = await create('Project files · quick chat', null)
   const openThread = async (surface, id) => {
     await surface.wait("Boolean(document.querySelector('.conversation-jump'))", 25000)
     await surface.evaluate("window.__fileRefPointers=[];document.addEventListener('pointerdown',event=>window.__fileRefPointers.push({type:event.type,target:event.target.className}),{capture:true});document.addEventListener('click',event=>window.__fileRefPointers.push({type:event.type,target:event.target.className}),{capture:true})")
@@ -90,10 +91,24 @@ try {
     await surface.evaluate("window.__fileInputEvents=[];for(const name of ['beforeinput','input','compositionstart','compositionend'])document.querySelector('#camp-message').addEventListener(name,event=>window.__fileInputEvents.push({name,data:event.data,inputType:event.inputType}),true)")
     await type(surface, '@'+query)
     await surface.wait(`Boolean([...document.querySelectorAll('.ref-options [data-option-kind=file]')].find(node => node.querySelector('strong')?.textContent === ${JSON.stringify(name)}))`)
+    assert.deepEqual(await surface.evaluate("[...document.querySelectorAll('.ref-filters [role=tab]')].map(node=>node.textContent)"),['队员','文件','对话','使命'])
     await surface.click(`[...document.querySelectorAll('.ref-options [data-option-kind=file]')].find(node => node.querySelector('strong')?.textContent === ${JSON.stringify(name)})`)
     await surface.wait(`Boolean([...document.querySelectorAll('#camp-message [data-composer-atom=project_file_reference]')].find(node => node.textContent.includes(${JSON.stringify(name)})))`)
     await surface.wait("document.activeElement?.id === 'camp-message'")
     await rendered(surface)
+  }
+  const quickChatTabs = async surface => {
+    await openThread(surface, quick); await clear(surface); await type(surface, '@')
+    await surface.wait("Boolean(document.querySelector('.ref-filters [role=tab]'))")
+    const labels="[...document.querySelectorAll('.ref-filters [role=tab]')].map(node=>node.textContent)"
+    assert.deepEqual(await surface.evaluate(labels),['队员','对话','使命'])
+    for(const [modifiers,label] of [[0,'对话'],[8,'队员'],[8,'使命'],[0,'队员']]) {
+      await key(surface,'Tab',modifiers)
+      await surface.wait(`document.querySelector('.ref-filters [aria-selected=true]')?.textContent === ${JSON.stringify(label)}`)
+    }
+    assert.deepEqual(await surface.evaluate(labels),['队员','对话','使命'])
+    assert.equal(await surface.evaluate("document.querySelectorAll('.ref-options [data-option-kind=file]').length"),0)
+    await key(surface,'Escape')
   }
   { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.conversation-jump'))`, 25000) }
   await openThread(desktop, thread)
@@ -102,6 +117,9 @@ try {
   assert.equal(await desktop.evaluate("document.querySelectorAll('#camp-message .project-file-reference .project-file-icon').length"), 1)
   assert.equal(await desktop.evaluate("document.activeElement.id"), 'camp-message')
   checks.push('Desktop chooses a real file, inserts the shared icon and short name, and keeps editing focus')
+  await quickChatTabs(desktop)
+  checks.push('Desktop quick chat hides Files and Tab/Shift+Tab cycle only Members, Conversations and Missions')
+  await openThread(desktop, thread)
   await clear(desktop)
   await choose(desktop, 'src/auth/index', 'index.ts')
   await type(desktop, ' compare ')
@@ -138,6 +156,9 @@ try {
   await browser.wait("Boolean(document.querySelector('.app-shell'))", 30000)
   await openThread(browser, thread); await clear(browser); await choose(browser, 'composer-trigger.test', 'composer-trigger.test.ts')
   checks.push('authenticated Web uses the same candidate and file atom components')
+  await quickChatTabs(browser)
+  checks.push('authenticated Web quick chat hides Files while project conversations retain all four categories')
+  await openThread(browser, thread)
   const sendAction="document.querySelector('#camp-message').closest('form').querySelector('.composer-primary-action.is-send')"
   await browser.wait(`${sendAction}.disabled === false`)
   checks.push('a valid file alone enables the actual public Composer send action')

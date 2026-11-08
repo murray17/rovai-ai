@@ -890,7 +890,7 @@ function ComposerBridge({
       menuAnchor={purpose === 'mission' ? 'caret' : 'editor'}
       selectionScope={`${inviteLayer ? 'inviting' : 'camp'}:${referencePicker.filter}`}
       onCycleCategory={referenceScope ? direction => {
-        const categories = ['members', ...(filesSupported ? ['file' as const] : []), 'thread', 'mission'] as const
+        const categories = pickerRef.current.categories
         const index = categories.findIndex(value => value === pickerRef.current.filter)
         changeInviteLayer(false)
         pickerRef.current.selectFilter(categories[(index + direction + categories.length) % categories.length])

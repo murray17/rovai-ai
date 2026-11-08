@@ -21,12 +21,14 @@ export function useReferencePicker(scope: ReferenceScope | undefined, match: Com
   const [sources, setSources] = useState<{ thread: Source; mission: Source }>({ thread: empty, mission: empty })
   const [retry, setRetry] = useState(0)
   const generation = useRef(0)
-  const manualFilter = manual?.anchor === anchor ? manual.filter : null
+  const hasProject = scope?.projectBound !== false
+  const categories: readonly ReferenceFilter[] = ['members', ...(filesSupported && hasProject ? ['file' as const] : []), 'thread', 'mission']
+  const manualFilter = manual?.anchor === anchor && categories.includes(manual.filter) ? manual.filter : null
   const filter = inviteLayer ? 'members' : manualFilter ?? (query?.trim() ? 'all' : 'members')
   const key = JSON.stringify([scope?.threadId, anchor, query, manualFilter, inviteLayer, retry])
   const currentKey = useRef(key); currentKey.current = key
   const enabled = !!scope && query !== null && !inviteLayer
-  const files = useProjectFileCandidates(scope, anchor, query, enabled && filesSupported && scope?.projectBound !== false && (filter === 'all' || filter === 'file'), retry)
+  const files = useProjectFileCandidates(scope, anchor, query, enabled && filesSupported && hasProject && (filter === 'all' || filter === 'file'), retry)
   useEffect(() => {
     const ticket = ++generation.current
     if (!scope || query === null || inviteLayer) { if (query === null) setManual(null); return }
@@ -62,5 +64,5 @@ export function useReferencePicker(scope: ReferenceScope | undefined, match: Com
   }
   return { options, filter, loading, status, hasMore: (filter === 'thread' || filter === 'mission') && !!source(filter).nextCursor,
     selectFilter: (filter: ReferenceFilter) => setManual({ anchor, filter }), more, retry: () => setRetry(value => value + 1), query, key, files, filesSupported, grouped,
-    hasProject: scope?.projectBound !== false, sourceErrors: (['thread', 'mission'] as const).filter(kind => (grouped || filter === kind) && source(kind).status === 'error') }
+    categories, hasProject, sourceErrors: (['thread', 'mission'] as const).filter(kind => (grouped || filter === kind) && source(kind).status === 'error') }
 }

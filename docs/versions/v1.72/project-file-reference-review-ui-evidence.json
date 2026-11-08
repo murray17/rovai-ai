@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-11-08T05:44:16.789Z",
+  "recordedAt": "2026-11-08T08:07:15.473Z",
   "reviewedCommit": "4c3b5d330bfbb31a41aba9833fbf613b5f050ca9",
   "platform": "macOS arm64",
   "scope": "Production Desktop and authenticated Web with real Host reads and controlled HTTP response delivery",
@@ -7,11 +7,13 @@
   "realRuntime": false,
   "checks": [
     "Desktop chooses a real file, inserts the shared icon and short name, and keeps editing focus",
+    "Desktop quick chat hides Files and Tab/Shift+Tab cycle only Members, Conversations and Missions",
     "same-name files receive the shortest distinguishing directories",
     "click opens existing preview with actual file bytes",
     "native same-root cross-thread paste reissues target identity and persists it",
     "different-root native paste preserves the atom and marks it for reselection",
     "authenticated Web uses the same candidate and file atom components",
+    "authenticated Web quick chat hides Files while project conversations retain all four categories",
     "a valid file alone enables the actual public Composer send action",
     "delayed candidate confirmation blocks mouse and direct form submission until the correct atom is inserted",
     "keyboard file-tree action inserts the same atom beside existing content and returns editing focus",
@@ -47,5 +49,13 @@
     "Controlled delivery is deterministic race validation, not a performance benchmark.",
     "Touch and narrow viewport are browser emulation, not real mobile hardware.",
     "Existing unrelated file preview/navigation baseline failures and the original R3 model-behavior failure are not reclassified."
-  ]
+  ],
+  "followUp": {
+    "userSequence": 30,
+    "baseCommit": "6eb02f332414e7fccce59d8d7cb6ee2e7405743e",
+    "scope": "Hide the Files category in quick chats; keep project categories and keyboard cycling consistent.",
+    "newCases": 2,
+    "productionUiCases": 22,
+    "realRuntime": false
+  }
 }
