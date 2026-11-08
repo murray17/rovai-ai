@@ -76,8 +76,9 @@ General preference storage schema 8 adds this boolean to schema 7; valid schema 
 with false while retaining all other recognized choices. Invalid records remain recoverable and are
 not overwritten. Desktop Main serializes private writes; Web stores the choice in its existing scoped
 presentation record. Save failure preserves the last saved switch value and reports the error in its row.
-The switch controls both submitted-Run navigation and running-Run entry on Desktop and wide Web;
-Mobile remains manual. Full behavior belongs to [conversation execution](../components/conversation-workspace.md#thread-执行过程).
+The switch is shown only on Desktop and wide Web and controls both submitted-Run navigation and running-Run entry.
+Mobile omits this row, its help and save feedback, and remains manual. Responsive layout changes preserve the saved
+preference for the next wide layout. Full behavior belongs to [conversation execution](../components/conversation-workspace.md#thread-执行过程).
 
 World-map availability remains in this section.
 Read the saved availability; a profile without preferences starts disabled. Changes commit immediately.

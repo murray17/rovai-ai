@@ -4,6 +4,7 @@ import { ThreadNavigation } from '@renderer/ThreadNavigation'
 import { WindowDragStrip } from '@renderer/BusinessApp'
 import { HostWebSettings } from '@renderer/HostWebSettings'
 import { GeneralSettings } from '@renderer/GeneralSettings'
+import { MobileLayoutProvider, useMobileViewport } from '@renderer/MobileLayout'
 import { AppearanceSettings } from '@renderer/AppearanceSettings'
 import { NotificationSettings } from '@renderer/NotificationSettings'
 import { editableSnapshot, configurationFromSnapshot, withSnapshotValue } from '@renderer/runtime-startup-editor'
@@ -169,6 +170,7 @@ Object.assign(window, { rovai: {
 } })
 
 function Fixture() {
+  const mobile = useMobileViewport(true)
   const [page, setPage] = useState('general')
   const [remotePort, setRemotePort] = useState(null)
   const [generation, setGeneration] = useState(0)
@@ -198,7 +200,7 @@ function Fixture() {
       onRemoveProject={async () => {}} onRename={async () => {}} onDelete={async () => {}} onError={error => { throw error }} />
     <main className="content settings-content">
       <div className="settings-workbench"><div className={`settings-panel settings-panel-${page}`} key={`${page}-${generation}`}>
-        {page === 'general' && <GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} agents={roster} initialPreferences={state.preferences} onPreferencesChange={ignore} />}
+        {page === 'general' && <MobileLayoutProvider value={mobile}><GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} agents={roster} initialPreferences={state.preferences} onPreferencesChange={ignore} /></MobileLayoutProvider>}
         {page === 'remote' && <HostWebSettings portDraft={remotePort} onPortDraftChange={setRemotePort} api={window.rovai.hostWeb} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}
