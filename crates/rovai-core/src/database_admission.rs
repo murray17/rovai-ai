@@ -1349,7 +1349,7 @@ mod tests {
                         )
                         .unwrap();
                     writer
-                        .execute("DELETE FROM schema_migration WHERE version=219", [])
+                        .execute("DELETE FROM schema_migration WHERE version=220", [])
                         .unwrap();
                 }
                 "ambiguous" => {

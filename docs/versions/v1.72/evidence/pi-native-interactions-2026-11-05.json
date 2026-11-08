@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "46274cb412717b4a27ee92e19f1a8d2e05a1c41c",
+  "branch": "rovai/pi-native-interactions",
+  "platform": {
+    "system": "Darwin",
+    "machine": "arm64"
+  },
+  "native": {
+    "ok": true,
+    "version": "1.1.0",
+    "plugin": {
+      "name": "@juicesharp/rpiv-ask-user-question",
+      "version": "2.15.0"
+    },
+    "externalModelCalls": 0,
+    "reports": [
+      {
+        "name": "installed ask_user_question: single/custom and multi text via actual native RPC",
+        "passed": true
+      },
+      {
+        "name": "four methods, native continuation, exact text, blank, skip, duplicate and epoch fencing",
+        "passed": true
+      },
+      {
+        "name": "same member concurrent native requests",
+        "passed": true
+      },
+      {
+        "name": "private questions isolated from the public queue",
+        "passed": true
+      },
+      {
+        "name": "native timeout and late answer",
+        "passed": true
+      },
+      {
+        "name": "two members, stop releases native waits, late answers fenced",
+        "passed": true,
+        "runs": [
+          "299a6c25-b11d-4bf9-94d8-808d09c6c3ff",
+          "889ea2e6-3913-414f-8a90-78b053e6fed3"
+        ]
+      }
+    ]
+  },
+  "validation": [
+    {
+      "command": "cargo test --workspace",
+      "passed": 484,
+      "ignored": 1,
+      "status": "passed"
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib pi::",
+      "passed": 25,
+      "ignored": 1,
+      "status": "passed"
+    },
+    {
+      "command": "TZ=UTC pnpm test",
+      "vitestPassed": 3126,
+      "vitestSkipped": 2,
+      "nodePassed": 377,
+      "nodeSkipped": 2,
+      "status": "passed"
+    },
+    {
+      "command": "pnpm exec vitest run apps/desktop/src/renderer/src/SingleChatPanel.test.ts apps/desktop/src/renderer/src/App.test.ts apps/web/src/client-recovery.test.ts",
+      "passed": 214,
+      "status": "passed"
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test:desktop-bridge",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test:approval-dock",
+      "status": "passed",
+      "coverage": [
+        "existing approvals",
+        "native confirm/select/input/editor",
+        "mixed pending queue",
+        "per-request drafts",
+        "new requests preserve focus",
+        "skip capability",
+        "definite failure",
+        "unknown receipt",
+        "double click",
+        "disconnection fencing",
+        "timeout removal",
+        "five palettes",
+        "200 percent zoom",
+        "desktop and emulated mobile geometry"
+      ]
+    }
+  ],
+  "boundaries": [
+    "Pi RPC and installed rpiv plugin are real; the provider is a controlled local stream with zero external model calls.",
+    "Renderer acceptance mounts production components with a controlled transport; it is separate from the real Core/Pi acceptance.",
+    "No Windows/Linux native UI or real mobile keyboard qualification is claimed.",
+    "Core crash/restart with a waiting dialog was not separately exercised; request records remain memory-only.",
+    "Pi has no answer ACK or independent invalidation event for extension-local AbortSignal cancellation."
+  ],
+  "sourceSha256": {
+    "crates/rovai-core/src/pi/host.rs": "c57c604b2d2cff1a784c0852a2493aa4e809e470459057972a50ba22d3ea1c7c",
+    "crates/rovai-core/src/pi/interactions.rs": "e60afafece86fb113b9c531755bd195dd2150903a85d7d6d18cb8024f425e033",
+    "crates/rovai-core/src/native_interaction.rs": "bc4f6ba0fc3e2f3206e1c207ceaa85edbe89814f87729654daa9a6bb0b5e958b",
+    "crates/rovai-core/src/application.rs": "111c97a61b19107e074f131d26166a1c2defeeefe804d4f6c75aba76c531e054",
+    "apps/desktop/src/renderer/src/ThreadWorkspace.tsx": "8dddb078d8aae3851329a6cc8b62f23a5a2f6d3787d612a13c47eb9ec1982bae",
+    "apps/desktop/src/renderer/src/SingleChatPanel.tsx": "1064833f3a8cdbf5d030ebc09ec131490bcdca55c781c0cab98509f17dfdb17b",
+    "scripts/fixtures/pi-native-interactions/probe.ts": "70b07ede518f61c2c0d7e77cb7da46a22635b2afc4621fbf3f9c4608d8146263",
+    "scripts/smoke-pi-native-interactions.mjs": "b7e0d45d702b64d27774ba3a3919350e867c2da2971d7ef714f416fb9b59c628",
+    "scripts/fixtures/approval-dock/main.cjs": "461318a2f9c8d99a3fa9c45609bc24fa1d329d68b5c8b1d860375e45a9877df1"
+  }
+}

@@ -5,6 +5,54 @@ import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
 afterEach(() => vi.useRealTimers())
 
 describe('DingTalk Stream registry', () => {
+  it('returns one bounded native form response without delaying ordinary callbacks or replaying a late result', async () => {
+    vi.useFakeTimers()
+    const client = new FakeStreamClient([])
+    const respond = vi.spyOn(client, 'socketCallBackResponse')
+    let finish!: (value: Record<string, unknown>) => void
+    const onCard = vi.fn(async () => undefined)
+    const registry = new DingTalkStreamRegistry({
+      createClient: () => client, onMessage: async () => undefined, onCard,
+      onNativeCard: () => new Promise(resolve => { finish = resolve })
+    })
+    await registry.start(credential)
+    client.emit(TOPIC_CARD, { outTrackId: 'rovai_native_question-1' })
+    await vi.advanceTimersByTimeAsync(1)
+    expect(respond).not.toHaveBeenCalled()
+    client.emit(TOPIC_CARD, { outTrackId: 'ordinary-card' })
+    await vi.advanceTimersByTimeAsync(1)
+    expect(onCard).toHaveBeenCalledOnce()
+    expect(respond).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(respond).toHaveBeenCalledTimes(2)
+    expect(respond.mock.calls[1]?.[1]).toMatchObject({ cardUpdateOptions: { updatePrivateDataByKey: true } })
+    finish({ cardData: { cardParamMap: { card_status: 'submitted' } } })
+    await vi.advanceTimersByTimeAsync(1)
+    expect(respond).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns native business data once and fences replies after the connection stops', async () => {
+    const client = new FakeStreamClient([])
+    const respond = vi.spyOn(client, 'socketCallBackResponse')
+    let finish!: (value: Record<string, unknown>) => void
+    const registry = new DingTalkStreamRegistry({
+      createClient: () => client, onMessage: async () => undefined, onCard: async () => undefined,
+      onNativeCard: () => new Promise(resolve => { finish = resolve })
+    })
+    await registry.start(credential)
+    client.emit(TOPIC_CARD, { outTrackId: 'rovai_native_question-1' })
+    await new Promise(resolve => setImmediate(resolve))
+    finish({ cardData: { cardParamMap: { card_status: 'submitted' } } })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(respond).toHaveBeenCalledWith('stream-message-1', { cardData: { cardParamMap: { card_status: 'submitted' } } })
+    client.emit(TOPIC_CARD, { outTrackId: 'rovai_native_question-2' })
+    await new Promise(resolve => setImmediate(resolve))
+    registry.stop('ding-app')
+    finish({ cardData: {} })
+    await new Promise(resolve => setImmediate(resolve))
+    expect(respond).toHaveBeenCalledTimes(1)
+  })
+
   it('ACKs Robot callbacks before deferring application work', async () => {
     const order: string[] = []
     const client = new FakeStreamClient(order)
@@ -207,7 +255,7 @@ class FakeStreamClient {
     this.connected = true
   }
 
-  socketCallBackResponse(): void {
+  socketCallBackResponse(_messageId?: string, _response?: unknown): void {
     this.#order.push('ack')
   }
 

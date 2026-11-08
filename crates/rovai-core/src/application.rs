@@ -753,6 +753,17 @@ fn validate_lark_request_actor(method: &str, params: &Value) -> Result<()> {
     Ok(())
 }
 
+fn native_channel_provider(method: &str) -> Result<&'static str> {
+    channel_request_host_component(method)?;
+    Ok(if method.starts_with("channels.dingtalk.") {
+        "dingtalk"
+    } else if method.starts_with("channels.lark.") {
+        "lark"
+    } else {
+        "feishu"
+    })
+}
+
 fn channel_request_host_component(method: &str) -> Result<&'static str> {
     match method {
         "channels.feishu.account.upsert"
@@ -773,6 +784,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.executionConsole.recentOutput.authorize"
         | "channels.executionConsole.agentRun.cancel"
         | "channels.executionConsole.page.authorize"
+        | "channels.nativeInteractions.source"
+        | "channels.nativeInteractions.respond"
         | "channels.deliveries.settle" => Ok(crate::channel::FEISHU_SPEC.host_component),
         "channels.dingtalk.account.upsert"
         | "channels.dingtalk.account.commitConnection"
@@ -792,6 +805,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.dingtalk.executionConsole.recentOutput.authorize"
         | "channels.dingtalk.executionConsole.agentRun.cancel"
         | "channels.dingtalk.executionConsole.page.authorize"
+        | "channels.dingtalk.nativeInteractions.source"
+        | "channels.dingtalk.nativeInteractions.respond"
         | "channels.dingtalk.deliveries.settle" => Ok("dingtalk-channel-host"),
         "channels.lark.account.upsert"
         | "channels.lark.account.commitConnection"
@@ -811,6 +826,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.lark.executionConsole.recentOutput.authorize"
         | "channels.lark.executionConsole.agentRun.cancel"
         | "channels.lark.executionConsole.page.authorize"
+        | "channels.lark.nativeInteractions.source"
+        | "channels.lark.nativeInteractions.respond"
         | "channels.lark.deliveries.settle" => Ok(rovai_core::channel::LARK_SPEC.host_component),
         _ => anyhow::bail!("request does not identify a channel Host"),
     }
@@ -862,6 +879,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "singleChat.end"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
+            | "nativeInteractions.respond"
             | "runtime.pendingExecution.cancel"
             | "runtime.subsystems.retry"
     )
@@ -7993,7 +8011,15 @@ impl Core {
         let Some(outcome) = outcome else {
             return Ok(None);
         };
-        let projection = outcome.projection;
+        let mut projection = outcome.projection;
+        projection.native_interactions = self.pi.pending_interactions(&projection.camp.id).await;
+        projection.native_interactions.retain(|request| {
+            projection.agent_runs.iter().any(|run| {
+                run.id == request.agent_run_id
+                    && matches!(run.status.as_str(), "running" | "waiting")
+                    && run.cancel_requested_at.is_none()
+            })
+        });
         let projection_ms = outcome.projection_duration.as_millis();
         let serialization_started_at = Instant::now();
         let value = serde_json::to_value(&projection)?;
@@ -8043,6 +8069,32 @@ impl Core {
                 Ok(json!({ "released": true }))
             }
             "commands.reconcile" => {
+                if request.params.get("operation").and_then(Value::as_str)
+                    == Some("nativeInteractions.respond")
+                {
+                    let params: crate::native_interaction::RespondNativeInteraction =
+                        serde_json::from_value(request.params["params"].clone())?;
+                    let status = if let Some(runtime) = self
+                        .pi
+                        .get_agent_run(&params.agent_run_id, params.execution_epoch)
+                        .await
+                    {
+                        anyhow::ensure!(
+                            runtime.camp_id() == params.thread_id,
+                            "Native interaction belongs to another Thread"
+                        );
+                        runtime.interaction_status(&params.interaction_id).await
+                    } else {
+                        crate::native_interaction::NativeInteractionStatus::Unavailable
+                    };
+                    return Ok(
+                        if status == crate::native_interaction::NativeInteractionStatus::Pending {
+                            json!({"state":"unknown"})
+                        } else {
+                            json!({"state":"recorded", "result":{"status":status}})
+                        },
+                    );
+                }
                 let database = self.database.lock().await;
                 web_commands::reconcile(
                     &database,
@@ -9120,6 +9172,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.host.tick" => {
+                self.sync_channel_native_interactions("dingtalk").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9265,6 +9318,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.host.tick" => {
+                self.sync_channel_native_interactions("feishu").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9279,6 +9333,7 @@ impl Core {
                 Ok(serde_json::to_value(tick)?)
             }
             "channels.lark.host.tick" => {
+                self.sync_channel_native_interactions("lark").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9291,6 +9346,44 @@ impl Core {
                 )?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(tick)?)
+            }
+            "channels.nativeInteractions.source"
+            | "channels.lark.nativeInteractions.source"
+            | "channels.dingtalk.nativeInteractions.source" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::SourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.channel_native_interaction_source(provider, &params)
+                    .await
+            }
+            "channels.nativeInteractions.respond"
+            | "channels.lark.nativeInteractions.respond"
+            | "channels.dingtalk.nativeInteractions.respond" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::AnswerParams =
+                    serde_json::from_value(request.params.clone())?;
+                let (command, known_status) = {
+                    let mut database = self.database.lock().await;
+                    rovai_core::channel::native_interactions::authorize_answer(
+                        &mut database,
+                        &ActorRef::System {
+                            component_id: channel_request_host_component(&request.method)?
+                                .to_string(),
+                        },
+                        provider,
+                        &params,
+                    )?
+                };
+                use crate::native_interaction::{
+                    NativeInteractionResult, NativeInteractionStatus as Status,
+                };
+                if known_status != Status::Pending {
+                    return Ok(serde_json::to_value(NativeInteractionResult {
+                        status: known_status,
+                        already_handled: matches!(known_status, Status::Sent | Status::Skipped),
+                    })?);
+                }
+                self.answer_native_interaction(&command).await
             }
             "channels.executionConsole.source" => {
                 let params: ChannelExecutionConsoleSourceParams =
@@ -11048,10 +11141,24 @@ impl Core {
                 let params: SingleChatSnapshotParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    SingleChatService::for_client(request.client.clone())
-                        .snapshot(&database, &params.conversation_id)?,
-                )?)
+                let mut snapshot = SingleChatService::for_client(request.client.clone())
+                    .snapshot(&database, &params.conversation_id)?;
+                drop(database);
+                if let Some(snapshot) = snapshot.as_mut() {
+                    let mut interactions = self
+                        .pi
+                        .pending_interactions(&snapshot.conversation.camp_id)
+                        .await;
+                    interactions.retain(|request| {
+                        snapshot.agent_runs.iter().any(|run| {
+                            run.id == request.agent_run_id
+                                && matches!(run.status.as_str(), "running" | "waiting")
+                                && run.cancel_requested_at.is_none()
+                        })
+                    });
+                    snapshot.native_interactions = Some(interactions);
+                }
+                Ok(serde_json::to_value(snapshot)?)
             }
             "singleChat.sourceAttachments.addFromPath" => {
                 let params: AddSingleChatSourceAttachmentFromPathParams =
@@ -11203,7 +11310,7 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
-                let projection = outcome.projection;
+                let mut projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
                 if outcome.navigation_changed {
@@ -11217,6 +11324,15 @@ impl Core {
                     .reconcile_duration
                     .map(|duration| duration.as_millis())
                     .unwrap_or(0);
+                projection.native_interactions =
+                    self.pi.pending_interactions(&projection.camp.id).await;
+                projection.native_interactions.retain(|request| {
+                    projection.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
                 let value = serde_json::to_value(&projection)?;
@@ -11245,9 +11361,18 @@ impl Core {
                 let db_lock_ms = lock_started_at.elapsed().as_millis();
                 let database_started_at = std::time::Instant::now();
                 let outcome = ThreadOpenService.open(&mut database, params.camp_id.as_str())?;
-                let projection = outcome.projection;
+                let mut projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
+                projection.native_interactions =
+                    self.pi.pending_interactions(&projection.camp.id).await;
+                projection.native_interactions.retain(|request| {
+                    projection.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
                 let value = serde_json::to_value(&projection)?;
@@ -11488,9 +11613,19 @@ impl Core {
             "camps.snapshot" => {
                 let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
-                )?)
+                let mut snapshot =
+                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?;
+                drop(database);
+                snapshot.native_interactions =
+                    self.pi.pending_interactions(params.camp_id.as_str()).await;
+                snapshot.native_interactions.retain(|request| {
+                    snapshot.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
+                Ok(serde_json::to_value(snapshot)?)
             }
             "agentRunImages.read" => {
                 let params: AgentRunImageParams = serde_json::from_value(request.params.clone())?;
@@ -12228,6 +12363,11 @@ impl Core {
                     );
                 }
                 Ok(serde_json::to_value(view)?)
+            }
+            "nativeInteractions.respond" => {
+                let params: crate::native_interaction::RespondNativeInteraction =
+                    serde_json::from_value(request.params.clone())?;
+                self.answer_native_interaction(&params).await
             }
             "action.approvals.resolve" => {
                 let params: ResolveActionApprovalParams =
@@ -13506,6 +13646,198 @@ impl Core {
         keys.extend(self.claude_code_cli.active_execution_keys());
         keys.extend(self.antigravity_app.active_execution_keys().await);
         keys.into_iter().collect()
+    }
+
+    async fn answer_native_interaction(
+        &self,
+        params: &crate::native_interaction::RespondNativeInteraction,
+    ) -> Result<Value> {
+        use crate::native_interaction::{
+            NativeInteractionResult, NativeInteractionStatus as Status,
+        };
+        let valid = {
+            let database = self.database.lock().await;
+            database.connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND agent_run.execution_epoch = ?2 AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?3 AND agent_run.status IN ('running', 'waiting') AND agent_run.cancel_requested_at IS NULL)",
+                rusqlite::params![params.agent_run_id, params.execution_epoch, params.thread_id], |row| row.get::<_, bool>(0))?
+        };
+        let mut answer_preview = None;
+        let result = if valid {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&params.agent_run_id, params.execution_epoch)
+                .await
+            {
+                anyhow::ensure!(
+                    runtime.camp_id() == params.thread_id,
+                    "Native interaction belongs to another Thread"
+                );
+                let result = runtime
+                    .answer_interaction(&params.interaction_id, &params.answer)
+                    .await?;
+                answer_preview = runtime.interaction_result(&params.interaction_id).await.1;
+                result
+            } else {
+                NativeInteractionResult {
+                    status: Status::Unavailable,
+                    already_handled: false,
+                }
+            }
+        } else {
+            NativeInteractionResult {
+                status: Status::Unavailable,
+                already_handled: false,
+            }
+        };
+        // Feishu/Lark keep only the bounded preview of the first native answer.
+        {
+            let mut database = self.database.lock().await;
+            if let Err(error) = rovai_core::channel::native_interactions::record_status(
+                &mut database,
+                &params.interaction_id,
+                result.status,
+                answer_preview.as_deref(),
+            ) {
+                eprintln!("Native channel card marker update failed: {error:#}");
+            }
+        }
+        emit(
+            &self.output,
+            "agent_run.interaction_changed",
+            json!({"threadId":params.thread_id,"agentRunId":params.agent_run_id}),
+        );
+        Ok(serde_json::to_value(result)?)
+    }
+
+    async fn native_card_result(
+        &self,
+        card: &rovai_core::channel::native_interactions::CardReference,
+    ) -> Result<(
+        crate::native_interaction::NativeInteractionStatus,
+        Option<String>,
+    )> {
+        use crate::native_interaction::NativeInteractionStatus as Status;
+        if card.status != Status::Pending {
+            return Ok((card.status, card.answer_preview.clone()));
+        }
+        if let Some(runtime) = self
+            .pi
+            .get_agent_run(&card.agent_run_id, card.execution_epoch)
+            .await
+        {
+            let (status, answer_preview) = runtime.interaction_result(&card.interaction_id).await;
+            if status != Status::Pending {
+                return Ok((status, answer_preview));
+            }
+            // The pending list also fences stop, dead Host and changed Session.
+            if runtime
+                .pending_interactions()
+                .await
+                .iter()
+                .any(|question| question.id == card.interaction_id)
+            {
+                let database = self.database.lock().await;
+                let valid=database.connection().query_row("SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND execution_epoch=?2 AND status IN ('running','waiting') AND cancel_requested_at IS NULL)",rusqlite::params![card.agent_run_id,card.execution_epoch],|r|r.get::<_,bool>(0))?;
+                if valid {
+                    return Ok((Status::Pending, None));
+                }
+            }
+        }
+        Ok((Status::Unavailable, None))
+    }
+
+    async fn sync_channel_native_interactions(&self, provider: &str) -> Result<()> {
+        let questions = self.pi.channel_interactions().await;
+        let cards = {
+            let mut database = self.database.lock().await;
+            rovai_core::channel::native_interactions::project_pending(
+                &mut database,
+                provider,
+                &questions,
+            )?;
+            rovai_core::channel::native_interactions::references(&database, provider)?
+        };
+        for card in cards {
+            let (status, answer_preview) = self.native_card_result(&card).await?;
+            if status != crate::native_interaction::NativeInteractionStatus::Pending {
+                rovai_core::channel::native_interactions::record_status(
+                    &mut *self.database.lock().await,
+                    &card.interaction_id,
+                    status,
+                    answer_preview.as_deref(),
+                )?;
+            }
+        }
+        rovai_core::channel::native_interactions::reconcile_delivered(
+            &mut *self.database.lock().await,
+            provider,
+        )
+    }
+
+    async fn channel_native_interaction_source(
+        &self,
+        provider: &str,
+        params: &rovai_core::channel::native_interactions::SourceParams,
+    ) -> Result<Value> {
+        use crate::native_interaction::{NativeInteractionStatus as Status, NativeInteractionView};
+        let record = rovai_core::channel::native_interactions::source_reference(
+            &*self.database.lock().await,
+            provider,
+            &params.delivery_id,
+            &params.app_id,
+        )?;
+        let Some((delivery_id, agent_display_name, card)) = record else {
+            return Ok(Value::Null);
+        };
+        let (status, answer_preview) = self.native_card_result(&card).await?;
+        let mut interaction = NativeInteractionView {
+            id: card.interaction_id.clone(),
+            agent_run_id: card.agent_run_id.clone(),
+            execution_epoch: card.execution_epoch,
+            created_at: card.created_at,
+            expires_at: card.expires_at,
+            status,
+            questions: vec![],
+            can_skip: false,
+        };
+        if status == Status::Pending {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&card.agent_run_id, card.execution_epoch)
+                .await
+            {
+                if let Some(question) = runtime
+                    .pending_interactions()
+                    .await
+                    .into_iter()
+                    .find(|q| q.id == card.interaction_id)
+                {
+                    interaction = question;
+                } else {
+                    interaction.status = Status::Unavailable;
+                }
+            } else {
+                interaction.status = Status::Unavailable;
+            }
+        }
+        Ok(serde_json::to_value(
+            rovai_core::channel::native_interactions::CardSource {
+                delivery_id,
+                agent_display_name,
+                owner_user_id: rovai_core::channel::native_interactions::owner_user_id(
+                    &*self.database.lock().await,
+                    provider,
+                    &params.app_id,
+                )?,
+                interaction,
+                answer_preview: if card.question_preview.is_some() {
+                    answer_preview
+                } else {
+                    None
+                },
+                question_preview: card.question_preview,
+            },
+        )?)
     }
 
     async fn collect_delivery_batch_dispatch_candidates(
@@ -21859,6 +22191,7 @@ async fn process_pi_events(
                 native_prompt_id,
                 delivery_id,
                 sequence,
+                received_at,
                 message,
             } => {
                 if let Err(error) = process_agent_run_pi_message(
@@ -21871,6 +22204,7 @@ async fn process_pi_events(
                     &native_prompt_id,
                     &delivery_id,
                     sequence,
+                    received_at,
                     message,
                     &mut runtime_route_permit,
                 )
@@ -21940,6 +22274,7 @@ async fn process_agent_run_pi_message(
     native_prompt_id: &str,
     delivery_id: &str,
     sequence: u64,
+    received_at: i64,
     message: Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) -> Result<()> {
@@ -22001,6 +22336,15 @@ async fn process_agent_run_pi_message(
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
+            Some("confirm" | "select" | "input" | "editor") => {
+                runtime.register_interaction(&message, received_at).await?;
+                emit(
+                    output,
+                    "agent_run.interaction_changed",
+                    json!({"threadId": runtime.camp_id(), "agentRunId": agent_run_id}),
+                );
+                return Ok(());
+            }
             _ => {
                 let response = match pi::unsupported_extension_ui_cancellation(&message) {
                     Ok(response) => response,

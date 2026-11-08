@@ -2,6 +2,8 @@
 mod attachment_paths;
 #[path = "db_automation_naming.rs"]
 mod automation_naming;
+#[path = "db_channel_native.rs"]
+mod channel_native;
 #[path = "db_claim_context.rs"]
 mod claim_context;
 #[path = "db_compact_execution.rs"]
@@ -63,6 +65,11 @@ pub(crate) fn assert_task_capability_upgrade(database: &mut Database) {
 #[cfg(test)]
 pub(crate) fn assert_subagent_classifier_upgrade(database: &mut Database) {
     subagent::assert_upgrade(database);
+}
+
+#[cfg(all(test, feature = "extended-tests"))]
+pub(crate) fn assert_native_channel_upgrade(database: &mut Database) {
+    channel_native::assert_upgrade(database);
 }
 #[cfg(test)]
 pub(crate) fn assert_single_chat_facts_upgrade(database: &mut Database) {
@@ -508,7 +515,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 169;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 170;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1003,6 +1010,7 @@ struct CurrentMigrationState {
     v217: bool,
     v218: bool,
     v219: bool,
+    v220: bool,
 }
 
 impl CurrentMigrationState {
@@ -1024,6 +1032,14 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v220 {
+            let mut previous = *self;
+            previous.v220 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 170
+                && self.v219
+                && previous.admits("v1.72", 169, classifier);
+        }
         if self.v219 {
             let mut previous = *self;
             previous.v219 = false;
@@ -3346,6 +3362,8 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
                         | 166
                         | 167
                         | 168
+                        | 169
+                        | 170
                 )
         })
     {
@@ -3823,6 +3841,7 @@ pub(crate) fn classify_database_contract(
                 | 167
                 | 168
                 | 169
+                | 170
         )
     {
         let expected_migration = marker.projection_schema_version + 50;
@@ -3832,6 +3851,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 170
+                || channel_native::schema_matches(connection)?)
             && (marker.projection_schema_version < 168 || quote_text::schema_matches(connection)?)
             && (marker.projection_schema_version < 167
                 || hermes::rules_schema_matches(connection)?)
@@ -6155,7 +6176,8 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=216),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=217),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=218),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=219)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=219),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=220)
         "#,
         [],
         |row| {
@@ -6310,6 +6332,7 @@ fn load_current_migration_state(
                 v217: row.get(147)?,
                 v218: row.get(148)?,
                 v219: row.get(149)?,
+                v220: row.get(150)?,
             })
         },
     )
@@ -9604,6 +9627,9 @@ impl Database {
             if !self.schema_migration_applied(219)? {
                 migration_step!("migration_219", subagent::migrate(self));
             }
+            if !self.schema_migration_applied(220)? {
+                migration_step!("migration_220", channel_native::migrate(self));
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -10485,6 +10511,9 @@ impl Database {
         }
         if !self.schema_migration_applied(219)? {
             migration_step!("migration_219", subagent::migrate(self));
+        }
+        if !self.schema_migration_applied(220)? {
+            migration_step!("migration_220", channel_native::migrate(self));
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -42234,6 +42263,7 @@ mod tests {
             v217: version >= 217,
             v218: version >= 218,
             v219: version >= 219,
+            v220: version >= 220,
         }
     }
 
@@ -42485,7 +42515,7 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                219,
+                220,
             ),
             (
                 "v1.72/schema 167 before literal quote text",
@@ -43069,7 +43099,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(219);
+        let current = migration_state_through(220);
         assert!(current.admits(
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
@@ -43828,7 +43858,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(218));
+        assert_eq!(state, migration_state_through(220));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -43890,7 +43920,7 @@ mod tests {
                 }
                 "current_receipt" => {
                     connection
-                        .execute("DELETE FROM schema_migration WHERE version=217", [])
+                        .execute("DELETE FROM schema_migration WHERE version=220", [])
                         .unwrap();
                 }
                 "steer_identity" => {
@@ -43983,7 +44013,7 @@ mod tests {
         database
             .connection()
             .execute_batch(
-                "DELETE FROM schema_migration WHERE version<217;
+                "DELETE FROM schema_migration WHERE version<220;
              DROP TABLE runtime_usage_run_summary;",
             )
             .unwrap();

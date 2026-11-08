@@ -105,3 +105,9 @@ Memory 与 Automation 的滚动块局部使用 `--neutral-selected`；这不把 
 文件工作区使用 `--file-canvas / hover / selected / line / ink / muted`，包括目录、文件正文和关联会话顶栏/正文。
 三套浅色主题采用白底与浅灰选中，两套深色主题采用同一中性深灰；完整色值在 canonical Token block。
 主导航、执行台及语法高亮保留各自 Token；文件区样式不重新定义全局配色或等宽字体。
+
+## 待处理区次要按钮
+
+`--pending-secondary-canvas` 与 `--pending-secondary-ink` 拥有待处理区次要按钮的白底深色文字，
+按 User 确认在五套配色中保持一致；边框仍用当前主题的 `--line`，主要操作继续使用 action 家族。
+组件不直接写色值，也不按主题分叉结构。

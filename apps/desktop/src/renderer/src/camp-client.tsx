@@ -22,6 +22,8 @@ export type ThreadClient = Pick<RovaiApi,
     }>
   }
   editingRecovery?: EditingRecovery
+  /** Reuse the global connection state; native-answer actions cannot run while disconnected. */
+  connection?: { subscribe(listener: () => void): () => void; getSnapshot(): boolean }
   /** Stable local profile/Host/Owner scope; absence disables withdrawn-text persistence. */
   reeditScope?: string
   /** Web may resolve the original Promise through receipt lookup; preserve that provenance. */
@@ -71,3 +73,6 @@ export function useThreadClient(): ThreadClient {
 }
 
 export function useEditingRecovery(): EditingRecovery | undefined { return useContext(ThreadClientContext)?.editingRecovery }
+
+/** Optional for standalone pending-surface fixtures and pre-auth shells. */
+export function useThreadConnection(): ThreadClient['connection'] { return useContext(ThreadClientContext)?.connection }

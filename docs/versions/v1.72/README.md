@@ -1475,3 +1475,11 @@ Windows 实测与残余边界见[Windows Preview 开放](command-code-native-sim
 
 原路径附件显示名、ACP 恢复等待、原生 Skill 正文预览与普通任务的 Mission 等待按独立提交收窄。
 工作边界、回归证据与未验证项见[实施记录](usability-check-simplification.md)。
+
+## Pi 原生交互桥接（2026-11-05）
+
+Pi 四类原生问答复用现有待处理区域；协议、答案和运行归属保持原生语义，未扩展其他 Runtime。
+范围、代码归属和验证边界见[实施记录](pi-native-interactions-implementation.md)。
+
+飞书/Lark 与钉钉的后续桥接另见[渠道实施记录](pi-native-channel-interactions.md)。共用提交与卡片适配已实现，
+钉钉模板跨企业和真实客户端验收仍待完成，不以本地 fixture 宣告交付。

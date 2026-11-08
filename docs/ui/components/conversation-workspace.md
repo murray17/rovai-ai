@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-07
 ---
 
 # Thread 会话工作区
@@ -1172,11 +1172,11 @@ Runtime 与原生图片解码失败时沿用“图片已不可用”，禁用查
 每个 Task 在创建位置只显示一张读取当前五态文案、标题和负责人的实时卡。Inspector list/detail
 负责发现和完整责任审计，Agent 过程负责执行事实；Task 取消不等于 AgentRun 或 ThreadTurn 取消。
 
-所有 pending Approval 位于 Composer 正上方的唯一非模态 Dock。Header 待审批入口显示总数，
+执行审批和 Pi 原生问答位于 Composer 正上方的唯一非模态待处理 Dock。Header 用中性列表图标、“待处理”和总数，
 Dock 内以队列计数和上一项／下一项导航呈现多项请求，保留 Runtime 原生选项、范围和决定身份。
 Header/通知摘要只展开、定位并聚焦 Dock，不改变执行台位置或 Run selection，不强制切换详情内容；浮层按外部焦点规则收起。Approval 不进入消息时间线。
 
-Desktop / 宽屏 Web 的 Dock 与底部执行台共用会话列全宽，不跟随正文或 Composer 的内缩轨道。单行顶栏显示当前请求摘要、
+Desktop / 宽屏 Web 的 Dock 与 Composer 输入框同宽并对齐；窄会话列和 Mobile 继续跟随 Composer 的内缩轨道。单行顶栏显示当前请求摘要、
 当前队员与 Runtime、队列导航和收起入口；命令与请求 JSON 原样展示，达到内容高度上限后局部滚动。
 选项使用紧凑内容宽度按钮，严格保留 Runtime 的原始顺序、原生标签和 `optionId`，默认不显示内部 `consequence`，
 也不通过翻译或术语替换改写 Runtime 文案。ACP 缺少有效 `name` / `label` 时直接展示 `optionId`；
@@ -1189,9 +1189,9 @@ Claude 的记忆选项只显示含规则范围的完整原生按钮标签，不�
 手机按钮至少为 44px 触控区域。规则与 suppression 边界见
 [Runtime Launch v46](../../contracts/runtime-launch-and-verification-v46.md)。其他 Runtime 的内部 consequence 不展示。
 
-Dock 保留橙色顶部，以中性边框界定请求，移除左侧橙线和浮层阴影。原始 JSON 的底色与执行台 command
+审批保留橙色顶部；问答使用中性顶部和“等待回答”，不显示需要回答／需要确认等标签。Dock 使用中性边框，不增加左侧橙线或浮层阴影。原始 JSON 的底色与执行台 command
 结果框共用 `--shell-result-canvas`，使用 11.5px 等宽文字，保留空白与局部滚动；请求区可由键盘聚焦和滚动。
-按钮保留原生标签与顺序，使用中性边框、500 字重和明确的按下／提交中状态。
+审批按钮保留原生标签与顺序，使用淡中性边框、500 字重和明确的按下／提交中状态；跳过、否及次要审批按钮使用白底深色文字。
 手机的上下标题、44px 控件、选项换行与可视高度适配见 [Mobile WebUI](../host-web-mobile.md#对话与执行)。
 
 翻页保持刚触发的导航按钮焦点。边界按钮使用 `aria-disabled`，仍可保持焦点但触发无操作。
@@ -1199,6 +1199,20 @@ Dock 保留橙色顶部，以中性边框界定请求，移除左侧橙线和浮
 Reason 仅在空白归一化后与动作摘要完全相同或自身为空时隐藏，不作语义推断。其余原文默认两行预览，
 超出时提供“展开全文 / 收起全文”，状态按审批 ID 隔离。容器宽度变化（含详情/文件区显隐与调整）时重新
 计算溢出，不重置该审批的展开状态；完整说明始终可读，不因压缩而永久丢失。
+
+Pi 的 confirm 使用“跳过／否／是”，select 使用完整选项行并点击即提交，不使用单选圆点或额外提交；
+input 为单行、editor 为保留预填的多行输入，填写后提交。跳过按 canSkip 显示。不按文案添加自由输入，
+只有后续真实 input 到达才显示文本框。审批仍调用审批接口；问答不受自动审批、bypass 或记住规则影响。
+协议由 [Native Interactions v1](../../contracts/native-interactions-v1.md)拥有。
+
+仅有一组上一项／下一项和数量；箭头与数字垂直对齐。底部抽屉展开时向下箭头表示收起，收起时向上箭头表示展开。
+切换和收起不提交、不跳过；新请求追加并保留正在填写的请求及焦点，不按同一 Run 推断接续或自动切换到新题。按请求保存草稿，页面刷新后只恢复 Core
+仍有效请求的草稿，结束后清除，不跨设备同步。保存和清理均按公屏 `threadId + public` 或私聊
+`threadId + conversationId` 隔离，各面板不清理其他范围。原生超时移除卡片和数量，不保留常驻失效卡片。
+原生问答发送成功、跳过或返回已处理时安静移出待处理列表，不弹成功 Toast；提交时发现过期或失效仍提示原因。
+已确认发送失败时卡片内显示“提交失败，内容已保留”，恢复原按钮，不增加重试按钮；结果未知时保留草稿并禁用提交。
+Web 发送前拒绝属于普通失败，不显示结果待核对；不同问题不因同类操作的未结提交互相锁住。
+断线复用全局连接恢复，卡片不增加连接弹窗。无快捷键小字提示，不重复放置停止任务入口。
 
 public Composer 不提供 ThreadTurn 或整轮停止。执行台保留既有 AgentRun Stop，
 只停止当前聚焦 Run；底部和 Inspector 复用同一个直接停止入口与状态。

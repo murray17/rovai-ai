@@ -969,6 +969,7 @@ export interface SingleChatRunView {
 }
 
 export interface SingleChatSnapshot {
+  nativeInteractions?: NativeInteractionView[]
   conversation: SingleChatConversationView
   approvals: ActionApprovalView[]
   messages: SingleChatMessageView[]
@@ -2444,6 +2445,31 @@ export interface ActionView {
   updatedAt: string
 }
 
+export interface NativeInteractionQuestion {
+  id: string
+  kind: 'confirm' | 'select' | 'input'
+  title: string
+  description: string | null
+  options: { id: string; label: string }[]
+  placeholder: string | null
+  prefill: string | null
+  multiline: boolean
+}
+export type NativeInteractionStatus = 'pending' | 'sent' | 'skipped' | 'expired' | 'unavailable' | 'unknown' | 'failed'
+export interface NativeInteractionView {
+  id: string
+  agentRunId: string
+  executionEpoch: number
+  questions: NativeInteractionQuestion[]
+  canSkip: boolean
+  createdAt: number
+  expiresAt: number | null
+  status: NativeInteractionStatus
+}
+export type NativeInteractionAnswer = { kind: 'confirm'; confirmed: boolean }
+  | { kind: 'select'; optionId: string } | { kind: 'input'; value: string } | { kind: 'skip' }
+export interface NativeInteractionResult { status: NativeInteractionStatus; alreadyHandled?: boolean }
+
 export interface ActionApprovalView {
   id: string
   actionId: string
@@ -2594,6 +2620,7 @@ export interface ThreadSnapshot {
   agentRunImages?: AgentRunImagesView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
   actions: ActionView[]
   timeline: DomainEventView[]
 }
@@ -2628,6 +2655,7 @@ export interface ThreadOpenProjection {
   agentRunFileChanges: AgentRunFileChangesView[]
   agentRunImages?: AgentRunImagesView[]
   approvals: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
   coverage: {
     tasks?: ThreadOpenCollectionCoverage
     messages: ThreadOpenMessageCoverage
@@ -4459,6 +4487,8 @@ export type CoreMethod =
   | 'channels.lark.roster.reconcile'
   | 'channels.lark.deliveries.settle'
   | 'channels.lark.host.tick'
+  | 'channels.lark.nativeInteractions.source'
+  | 'channels.lark.nativeInteractions.respond'
   | 'channels.lark.executionConsole.page.authorize'
   | 'channels.lark.executionConsole.recentOutput.authorize'
   | 'channels.lark.executionConsole.agentRun.cancel'
@@ -4480,6 +4510,8 @@ export type CoreMethod =
   | 'channels.dingtalk.roster.reconcile'
   | 'channels.dingtalk.inbound.finalize'
   | 'channels.dingtalk.host.tick'
+  | 'channels.dingtalk.nativeInteractions.source'
+  | 'channels.dingtalk.nativeInteractions.respond'
   | 'channels.dingtalk.executionConsole.page.authorize'
   | 'channels.dingtalk.executionConsole.recentOutput.authorize'
   | 'channels.dingtalk.executionConsole.agentRun.cancel'
@@ -4492,6 +4524,8 @@ export type CoreMethod =
   | 'channels.inbound.attachments.complete'
   | 'channels.host.tick'
   | 'channels.executionConsole.source'
+  | 'channels.nativeInteractions.source'
+  | 'channels.nativeInteractions.respond'
   | 'channels.executionConsole.page.authorize'
   | 'channels.executionConsole.recentOutput.authorize'
   | 'channels.executionConsole.agentRun.cancel'
@@ -4563,6 +4597,7 @@ export type CoreMethod =
   | 'thread.messages.withdraw'
   | 'userAutomation.thread.send'
   | 'action.approvals.resolve'
+  | 'nativeInteractions.respond'
   | 'notifications.inbox'
   | 'notifications.threadInterruptions'
   | 'notifications.changesSince'
