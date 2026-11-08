@@ -1,3 +1,5 @@
+import { InlineProjectFileReference } from './InlineProjectFileReference'
+import { projectFileLink } from './project-file-reference'
 import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
 import type { NativeInteractionView, NativeInteractionAnswer, NativeInteractionResult } from '@contracts'
 import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
@@ -1482,6 +1484,7 @@ export function structuredThreadContentPlainText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   const parts = content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return `@${currentUserName}`
@@ -1524,6 +1527,7 @@ function structuredThreadContentMarkdownText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   return content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
     if (segment.kind === 'member_mention') {
@@ -1867,6 +1871,7 @@ export function ThreadWorkspace({
     hasUnavailableAtom: false,
     memberAgentIds: []
   })
+  const [fileInsertionPending, setFileInsertionPending] = useState(false)
   const singleChatLeaveGuardRef = useRef<(() => ThreadLeavePreparation) | null>(null)
   const bindSingleChatLeaveGuard = useCallback((guard: (() => ThreadLeavePreparation) | null): void => {
     singleChatLeaveGuardRef.current = guard
@@ -2765,7 +2770,7 @@ export function ThreadWorkspace({
   const composerInteractionDisabled = messageExport.selecting || draftLoadState.state !== 'ready'
     || routingMutating
     || composerSubmitting
-  const composerSendDisabled = composerSendIsDisabled({
+  const composerSendDisabled = fileInsertionPending || composerSendIsDisabled({
     hasSendablePayload,
     hasAvailableRecipient,
     hasUnavailableMention,
@@ -4308,7 +4313,7 @@ export function ThreadWorkspace({
     ) return
     const threadId = snapshot.thread.id
     const composerHandle = composerHandleRef.current
-    if (!composerHandle) return
+    if (!composerHandle || composerHandle.hasPendingFileInsertion()) return
     followTimelineAfterUserSend(threadId)
     composerSubmittingRef.current = true
     setComposerSubmitting(true)
@@ -4321,13 +4326,14 @@ export function ThreadWorkspace({
     try {
       composerHandle.adoptHistoryPreview()
       await attachmentPreparationQueue.current
-      const flushed = await composerHandle.flush()
+      const flushed = await composerHandle.flush({ forSubmission: true })
       const frozenDraft = flushed.draft ?? draftCoordinator.getCurrentDraft()
       if (!frozenDraft) throw new Error(uiAttribute('Composer Draft 尚未就绪。'))
       const currentSnapshot = activeSnapshotRef.current
       const routedDraft = materializeLocalContinuation(frozenDraft, currentSnapshot.members)
       if (routedDraft.content.segments.some(segment => segment.kind === 'atom' && isReferenceAtom(segment.atom))
         && !routedDraft.content.segments.some(segment => segment.kind === 'text' && segment.text.trim())
+        && !routedDraft.content.segments.some(segment => segment.kind === 'atom' && (segment.atom.type === 'project_file_reference' || segment.atom.type === 'skill'))
         && !routedDraft.attachments.length) throw new Error(uiAttribute('请补充本轮内容'))
       // Flush can change recipients; keep the execution snapshot from this
       // submission so an ended target cannot turn into a successor's Steer.
@@ -6600,7 +6606,7 @@ export function ThreadWorkspace({
             <StructuredMentionComposer
               ref={composerHandleRef}
               id="camp-message"
-              referenceScope={{ threadId: snapshot.thread.id, client }}
+              referenceScope={{ threadId: snapshot.thread.id, client, projectBound: snapshot.thread.projectBindingKind === 'directory' }}
               draftIdentity={`${snapshot.thread.id}:composer`}
               inputHistory={() => threadInputHistory(visibleThreadMessages)}
               onEffectiveDocumentChange={content => {
@@ -6618,6 +6624,7 @@ export function ThreadWorkspace({
               persistDocument={(content) => saveStructuredDraft(snapshot.thread.id, content)}
               waitForDraftAuthority={() => draftCoordinator.waitForIdle().then(() => undefined)}
               onLocalStatusChange={setComposerLocalStatus}
+              onFileInsertionPendingChange={setFileInsertionPending}
               onPersistenceErrorChange={setComposerPersistenceError}
               onBackspaceAtStart={composerDraft?.replyIntent
                 ? () => cancelReply('start')
@@ -10532,6 +10539,7 @@ export function StructuredMessageBody({
             </span>
           )
         }
+        if (segment.kind === 'project_file_reference') return <InlineProjectFileReference key={`file-${index}`} file={segment} files={content.filter(item => item.kind === 'project_file_reference')} />
         if (isReferenceSegment(segment)) return <InlineThreadReference key={`reference-${index}`} segment={segment} />
         if (segment.kind === 'skill_mention') {
           return (

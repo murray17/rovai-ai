@@ -1,0 +1,61 @@
+{
+  "recordedAt": "2026-11-08T08:07:15.473Z",
+  "reviewedCommit": "4c3b5d330bfbb31a41aba9833fbf613b5f050ca9",
+  "platform": "macOS arm64",
+  "scope": "Production Desktop and authenticated Web with real Host reads and controlled HTTP response delivery",
+  "overallPassed": true,
+  "realRuntime": false,
+  "checks": [
+    "Desktop chooses a real file, inserts the shared icon and short name, and keeps editing focus",
+    "Desktop quick chat hides Files and Tab/Shift+Tab cycle only Members, Conversations and Missions",
+    "same-name files receive the shortest distinguishing directories",
+    "click opens existing preview with actual file bytes",
+    "native same-root cross-thread paste reissues target identity and persists it",
+    "different-root native paste preserves the atom and marks it for reselection",
+    "authenticated Web uses the same candidate and file atom components",
+    "authenticated Web quick chat hides Files while project conversations retain all four categories",
+    "a valid file alone enables the actual public Composer send action",
+    "delayed candidate confirmation blocks mouse and direct form submission until the correct atom is inserted",
+    "keyboard file-tree action inserts the same atom beside existing content and returns editing focus",
+    "file-tree open and reference resolution share the submission barrier from their first asynchronous operation",
+    "Tab filtering, Enter selection, atomic deletion and native Undo preserve file identity",
+    "Enter on a keyboard-selected file opens its preview",
+    "preview reference action preserves existing input and restores editing focus",
+    "native Chinese composition pauses candidates and commits the complete spaced/hash filename identity",
+    "native input history restores the published file atom and its position",
+    "published file renders and previews; whole-message copy restores a structured file atom",
+    "controlled request-level business and protocol errors have distinct UI states and block sending without claiming a connection failure",
+    "actual send rejects a deleted file, marks its atom, preserves the draft and creates no message or execution",
+    "deferred old success cannot clear a send rejection; a new post-rejection check can confirm the restored file",
+    "narrow touch long-press exposes the full path and 44px actions without opening a preview"
+  ],
+  "screenshots": [
+    "day-1040.png",
+    "day-1440.png",
+    "day-2560.png",
+    "day-390.png",
+    "night-1040.png",
+    "night-1440.png",
+    "night-2560.png",
+    "night-390.png",
+    "night-touch-details.png"
+  ],
+  "method": {
+    "insertion": "Native selection with deferred real Host replies; disabled mouse send and direct form submit both required to make zero send RPC attempts; unexpected attempts are blocked by the fixture.",
+    "classification": "Controlled business root_unavailable and malformed response DTO at the actual availability entry, followed by a real successful retry. Unit owner separately verifies transport failures.",
+    "rejectionRace": "Defer a real available response, delete its real file, submit to Core, assert actual rejection and draft preservation, deliver old success, assert unavailable remains; restore file and assert a new check can clear it."
+  },
+  "limitations": [
+    "Controlled delivery is deterministic race validation, not a performance benchmark.",
+    "Touch and narrow viewport are browser emulation, not real mobile hardware.",
+    "Existing unrelated file preview/navigation baseline failures and the original R3 model-behavior failure are not reclassified."
+  ],
+  "followUp": {
+    "userSequence": 30,
+    "baseCommit": "6eb02f332414e7fccce59d8d7cb6ee2e7405743e",
+    "scope": "Hide the Files category in quick chats; keep project categories and keyboard cycling consistent.",
+    "newCases": 2,
+    "productionUiCases": 22,
+    "realRuntime": false
+  }
+}

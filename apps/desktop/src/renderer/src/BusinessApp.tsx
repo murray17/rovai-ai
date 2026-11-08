@@ -1,3 +1,4 @@
+import { reportProjectFileReferenceRejection } from './useProjectFileAvailability'
 import { prepareFileEditsForQuit } from './file-edit-store'
 import { ThreadReferencePreviewProvider } from './ThreadReferencePreview'
 import { MessageReeditStore } from './message-reedit-store'
@@ -3921,6 +3922,10 @@ export function BusinessApp({
         throw new Error(uiAttribute('消息提交结果暂时不可用，请稍后重试。'))
       }
       if (result.commandResult.status === 'rejected') {
+        if (result.commandResult.code === 'project_file_reference_unavailable') {
+          const payload = result.commandResult.payload
+          if (typeof payload.rawReference === 'string') reportProjectFileReferenceRejection(threadId, payload.rawReference, String(payload.reason ?? 'invalid_reference'))
+        }
         const recovery = runtimeRecoveryFromCommandResult(threadId, result.commandResult)
         if (recovery) {
           rejectedForRuntime = true
@@ -3936,10 +3941,13 @@ export function BusinessApp({
         ? result.commandResult.payload.sequence
         : optimisticMessage.sequence
       if (threadMessageId) {
-        setOptimisticThreadMessages((current) => [...current, {
-          threadId, commandId,
-          message: { ...optimisticMessage, id: threadMessageId, sequence, threadTurnId: null }
-        }])
+        // File publication fields arrive from Core's projection; never display a fabricated file segment.
+        if (!draft.content.segments.some(segment => segment.kind === 'atom' && segment.atom.type === 'project_file_reference')) {
+          setOptimisticThreadMessages((current) => [...current, {
+            threadId, commandId,
+            message: { ...optimisticMessage, id: threadMessageId, sequence, threadTurnId: null }
+          }])
+        }
         void refreshActiveThreadSnapshot(threadId)
           .then(async () => {
             if (selectionGeneration !== campSelectionGeneration.current) return
@@ -5195,7 +5203,7 @@ export function optimisticThreadMessage(
     sourceAgentRunId: null,
     quotes: draft.quotes,
     body: draft.body,
-    content: composerDocumentToStructuredContent(draft.content),
+    content: composerDocumentToStructuredContent({ ...draft.content, segments: draft.content.segments.map(segment => segment.kind === 'atom' && segment.atom.type === 'project_file_reference' ? { kind: 'text', text: segment.atom.labelFallback } : segment) }),
     attachments: draft.attachments,
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
     addressedAgentIds,

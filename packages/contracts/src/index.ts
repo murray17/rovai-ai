@@ -1232,6 +1232,7 @@ export type StructuredThreadMessageSegment =
   | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
   | { kind: 'thread_reference'; threadId: string; titleAtSend: string }
   | { kind: 'mission_reference'; missionId: string; titleAtSend: string }
+  | PublishedProjectFileReference
   | {
       kind: 'external_quote'
       senderDisplayName: string
@@ -1257,6 +1258,7 @@ export type ComposerAtom =
   | SkillComposerAtom
   | ThreadReferenceComposerAtom
   | MissionReferenceComposerAtom
+  | ProjectFileReferenceAtom
 
 export interface MemberComposerAtom {
   type: 'member'
@@ -1285,6 +1287,31 @@ export interface MissionReferenceComposerAtom {
   missionId: string
   labelFallback?: string
 }
+
+export interface ProjectFileReferenceAtom {
+  type: 'project_file_reference'
+  threadId: string
+  rawReference: string
+  /** Complete project-relative path, never used as location authority. */
+  labelFallback: string
+}
+
+export interface PublishedProjectFileReference {
+  kind: 'project_file_reference'
+  threadId: string
+  rawReference: string
+  pathAtSend: string
+  labelAtSend: string
+}
+
+export interface ProjectFileReferencesResolveRequest {
+  threadId: string
+  references: Array<{ threadId: string; rawReference: string }>
+}
+export type ProjectFileReferenceResolution =
+  | { status: 'available'; reference: ProjectFileReferenceAtom }
+  | { status: 'needs_reselect'; reason: 'root_mismatch' | 'source_unavailable' }
+  | { status: 'unavailable'; reason: string }
 
 export type ReferenceKind = 'thread' | 'mission'
 export interface ReferenceIdentity { kind: ReferenceKind; id: string }
@@ -1594,6 +1621,7 @@ export type OpenFilePreviewRequest =
       threadId: string
       /** Host-issued reference to the current root generation and file. */
       rawReference: string
+      expectedPathAtSend?: string
     }
   | {
       kind: 'skill_reference'
@@ -4324,6 +4352,7 @@ export interface UpdateAutomationCommand {
 
 export type CoreMethod =
   | 'projectFiles.request'
+  | 'projectFileReferences.resolve'
   | 'preferences.tasks.get'
   | 'preferences.tasks.set'
   | 'teams.list'

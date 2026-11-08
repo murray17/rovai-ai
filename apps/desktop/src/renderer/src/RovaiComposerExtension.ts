@@ -1,3 +1,4 @@
+import { readStructuredMessageComposerDocument } from './structured-message-clipboard'
 import type { ComposerDocument } from '@contracts'
 import { HistoryExtension } from '@lexical/history'
 import { PlainTextExtension } from '@lexical/plain-text'
@@ -260,7 +261,8 @@ export const ComposerClipboardExtension = defineExtension({
           return true
         }
         const structured = clipboard.getData(ROVAI_COMPOSER_CLIPBOARD_MIME)
-        const document = structured ? runtime.recoverClipboard(structured) : null
+        const htmlDocument = !structured ? readStructuredMessageComposerDocument(clipboard.getData('text/html'), clipboard.getData('text/plain')) : null
+        const document = structured ? runtime.recoverClipboard(structured) : htmlDocument ? runtime.recoverClipboard(JSON.stringify(htmlDocument)) : null
         event.preventDefault()
         const hasAtoms = document?.segments.some(segment => segment.kind === 'atom') ?? false
         const plainText = document

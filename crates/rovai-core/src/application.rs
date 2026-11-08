@@ -838,6 +838,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
         method,
         "health.check"
             | "projectFiles.request"
+            | "projectFileReferences.resolve"
             | "runtime.status.get"
             | "diagnostics.check"
             | "diagnostics.export"
@@ -2943,7 +2944,14 @@ impl Core {
         };
         let thread = params.camp_id.clone();
         let reference = params.raw_reference.clone().unwrap_or_default();
+        let expected = params.expected_path_at_send.clone();
         tokio::task::spawn_blocking(move || {
+            if let Some(expected) = expected {
+                let file = crate::project_file_reference::resolve(&binding, &reference).ok()?;
+                if file.path != expected {
+                    return None;
+                }
+            }
             crate::project_files::resolve_source(binding, thread, &reference).ok()
         })
         .await
@@ -9714,6 +9722,7 @@ impl Core {
                 "name": "Rovai-ai",
                 "version": env!("CARGO_PKG_VERSION"),
                 "dataDir": self.data_dir,
+                "composerProjectFileReferenceVersion": 1,
             })),
             "memberAvatars.read" => {
                 #[derive(Deserialize)]
@@ -12222,6 +12231,21 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "projectFileReferences.resolve" => {
+                let params: crate::project_file_reference::ResolveRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let bindings = {
+                    let database = self.database.lock().await;
+                    crate::project_file_reference::bindings(database.connection(), &params)
+                };
+                match bindings {
+                    Ok(bindings) => Ok(tokio::task::spawn_blocking(move || {
+                        crate::project_file_reference::resolve_references(params, bindings)
+                    })
+                    .await?),
+                    Err(_) => Ok(json!({"ok":false,"error":{"code":"root_unavailable"}})),
+                }
+            }
             "projectFiles.request" => {
                 let params: crate::project_files::Request =
                     serde_json::from_value(request.params.clone())?;
@@ -12747,6 +12771,16 @@ impl Core {
                 "pendingExecution": null,
             }));
         }
+        let binding = {
+            let database = self.database.lock().await;
+            crate::project_files::binding(&database, &envelope.payload.camp_id).ok()
+        };
+        let thread = envelope.payload.camp_id.clone();
+        let document = envelope.payload.content.clone();
+        let files = tokio::task::spawn_blocking(move || {
+            crate::project_file_reference::Preflight::prepare(thread, &document, binding)
+        })
+        .await?;
         let execution = {
             let _attachments = if envelope.payload.source_attachments.is_empty() {
                 None
@@ -12754,7 +12788,11 @@ impl Core {
                 Some(self.pasted_text_operations.lock().await)
             };
             let mut database = self.database.lock().await;
-            CollaborationService::default().send_user_camp_message(&mut database, &envelope)?
+            CollaborationService::default().send_user_camp_message_with_files(
+                &mut database,
+                &envelope,
+                Some(&files),
+            )?
         };
         if execution.result.status != CommandResultStatus::Rejected {
             emit_navigation_invalidated(

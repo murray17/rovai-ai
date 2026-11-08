@@ -98,7 +98,7 @@ export async function exercisePastedText({ host, origin, session, otherSession, 
 
 export async function verifyPastedTextRestart({ origin, administratorToken, state }) {
   const login = await fetch(`${origin}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ protocolVersion: 5, administratorToken, editor: state.editor }) })
+    body: JSON.stringify({ protocolVersion: 6, administratorToken, editor: state.editor }) })
   assert.equal(login.status, 200)
   const session = await login.json()
   const files = async (action, id) => (await fetch(`${origin}/api/v1/files`, { method: 'POST',

@@ -36,7 +36,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-const HOST_WEB_PROTOCOL_VERSION: u32 = 5;
+const HOST_WEB_PROTOCOL_VERSION: u32 = 6;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

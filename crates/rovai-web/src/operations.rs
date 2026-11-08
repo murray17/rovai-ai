@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 /// and the legacy shared draft remain outside the network capability.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub enum Operation {
+    #[serde(rename = "projectFileReferences.resolve")]
+    ProjectFileReferencesResolve,
     #[serde(rename = "projectFiles.request")]
     ProjectFiles,
     #[serde(rename = "missions.workspace.cleanup")]
@@ -381,7 +383,7 @@ pub enum Operation {
 impl Operation {
     pub fn timeout(self) -> std::time::Duration {
         std::time::Duration::from_secs(match self {
-            Self::ProjectFiles => 30,
+            Self::ProjectFileReferencesResolve | Self::ProjectFiles => 30,
             Self::MissionCleanupRetry
             | Self::MissionChanges
             | Self::MissionFileDiff
@@ -397,7 +399,9 @@ impl Operation {
     pub fn project(self, mut value: serde_json::Value) -> serde_json::Value {
         use serde_json::json;
         match self {
-            Self::AppInfo => json!({"name":value["name"],"version":value["version"]}),
+            Self::AppInfo => {
+                json!({"name":value["name"],"version":value["version"],"composerProjectFileReferenceVersion":value["composerProjectFileReferenceVersion"]})
+            }
             // Core owns credential redaction and digest-CAS. These projections
             // admit the fields used by the shared editor, never future fields.
             Self::Mcp | Self::McpRepair => project_mcp_config(value),
@@ -449,6 +453,7 @@ impl Operation {
 
     pub fn method(self) -> &'static str {
         match self {
+            Self::ProjectFileReferencesResolve => "projectFileReferences.resolve",
             Self::ProjectFiles => "projectFiles.request",
             Self::TasksGet => "preferences.tasks.get",
             Self::TasksSet => "preferences.tasks.set",

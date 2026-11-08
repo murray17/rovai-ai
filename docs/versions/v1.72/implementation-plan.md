@@ -3,10 +3,19 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-05
+last_updated: 2026-11-07
 ---
 
 # v1.72 实施与验收
+
+## 项目文件引用（2026-11-07，功能分支验收）
+
+独立分支 `rovai/project-file-references` 已从 `55a83f8` 建立，并核对 origin/main 相同。
+[R1 模型输入说明](model-context-change-project-file-reference.md)已获 User sequence 21 二次确认；
+正式实现、迁移及恢复已接通，Desktop／Web 真实界面通过。独立[实施记录](project-file-reference-implementation.md#实际实现与验收)
+拥有工作目录、模块与逐项结果。真实 Runtime 六例通过，R3 未主动追问而失败；补充 R2 待真实确认。
+sequence 26 的三个前端边界已修复，延迟真实响应的界面验证通过；复杂定位的六次真实读取及两个准备任务通过。
+详见同一实施记录和独立[复杂定位证据](project-file-reference-identity-evidence.json)，不改判原 R3，不实施未确认 R2。
 
 ## 执行 Tab 恢复与空选中回退（2026-11-05）
 

@@ -68,6 +68,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    c.execute_batch("DELETE FROM schema_migration WHERE version=221; UPDATE rovai_data_contract SET projection_schema_version=170 WHERE projection_schema_version=171;").unwrap();
     let applied = c
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=220)",
@@ -152,6 +153,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     migrate(database).unwrap();
     assert_eq!(snapshot(database.connection()), before);
     assert_eq!(indexes(database.connection()), before_indexes);
+    database.migrate_project_file_references().unwrap();
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),
         DatabaseContractClassification::Current(_)

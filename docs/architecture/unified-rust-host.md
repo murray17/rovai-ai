@@ -10,7 +10,7 @@ last_updated: 2026-11-02
 [Runtime 兼容性](../runtime-compatibility.md)，不能由目标结构推断完成。
 现有准入、事务、Runtime 与关闭合同继续有效；新增 wire 合同随对应实现明确发布。
 原生 Server 数据根、初始 CLI 兼容、初始化准入和停止适配由[Host Lifecycle v2](../contracts/host-lifecycle-v2.md)拥有；
-当前受控网络入口由[Host Web v9](../contracts/host-web-v9.md)拥有；未变更的详细边界继续由其继承的 v2 章节定义。
+当前受控网络入口由[Host Web v10](../contracts/host-web-v10.md)拥有；未变更的详细边界继续由其继承的 v2 章节定义。
 
 当前已实现父进程匿名管道与进程内请求共用一个 Host/Core、共享生产 Thread 页面、客户端草稿、source 上传及
 逐项准入的 Thread 写入。以下 UDS/Named Pipe 身份握手与完整公共 DTO 生成仍是后续目标，
@@ -112,7 +112,7 @@ Agent Managed 与 legacy 机制不变，不建对象存储、附件目录库或�
 Web 公屏长粘贴单独使用既有 UploadTarget 分支，直接写入 Thread 输出目录的 UUID `.txt`。
 Core 原 SQLite 持久保存生成归属与单向发送保护，附件操作锁协调保护与异步 unlink；浏览器先保存草稿再请求清理。
 删除走现有独立请求路径，文件系统等待不占数据库锁或普通请求队列；空附件发送不取附件操作锁。
-不改变普通上传与私聊规则，不引入后台任务或额外存储服务，见 [Host Web v9](../contracts/host-web-v9.md)。
+不改变普通上传与私聊规则，不引入后台任务或额外存储服务，见 [Host Web v10](../contracts/host-web-v10.md)。
 
 资源读取按精确身份、owner locator 与作用域授权；路径规范化、符号链接和读取时变化不能逃逸授权。
 远程 Owner 直接选择 Host 有权访问的工作目录，不需要本机预授权名单；Core 继续拥有原有项目和文件校验。
@@ -129,7 +129,7 @@ Session 撤销阻止新准入，来源失效阻止新申请；已签发能力在
 预览失败不阻止来源下载，文件内容沿用 source reference 与 legacy 的既有生命周期。草稿缩略图仅在 Host 确认绑定、可用性及摘要一致后
 复用当前客户端的有界 File 缓存；刷新、内容变化或缓存淘汰恢复 Host 读取。空句柄不启动文件更新轮询。
 静态服务只挂应用构建产物。长期缓存只准入构建清单中带内容哈希且字节校验相符的文件，入口及私有响应仍不缓存。
-具体字段和边界由 [Host Web v9](../contracts/host-web-v9.md) 及其继承的预览规则拥有。
+具体字段和边界由 [Host Web v10](../contracts/host-web-v10.md) 及其继承的预览规则拥有。
 HTML/HTM 附件复用共享交互查看器，由认证 POST 读取后交给同来源静态预览壳。Desktop 托管 Web 和独立
 Server Web 共用该 Rust 路径；响应 CSP 与 iframe 均采用
 `sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"`，仅预览响应允许 HTTP(S)

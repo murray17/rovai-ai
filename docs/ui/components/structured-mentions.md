@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-composer-atoms-and-structured-mentions
 status: accepted
-last_updated: 2026-11-03
+last_updated: 2026-11-07
 ---
 
 # 结构化 Mention 与 Composer Atom
@@ -15,7 +15,7 @@ Composer 是结构化纯文本输入框，不是富文本、Markdown 或通用�
 `- list`、`[link](url)` 都保留为普通字符；不提供 heading、文本样式、代码、引用、列表、表格、链接、
 Markdown shortcut、HTML 富文本粘贴、Block 拖拽或协同文档编辑。
 
-普通文本与不可拆分 Atom 是仅有的业务 primitive。Member、All Members、Skill、Thread Reference 和 Mission Reference 共用同一种 Atom 交互与
+普通文本与不可拆分 Atom 是仅有的业务 primitive。Member、All Members、Skill、Thread Reference、Mission Reference 和 Project File Reference 共用同一种 Atom 交互与
 DOM 形态，但 identity、候选来源、激活行为和发送校验保持强类型。
 
 ## Atom 呈现与身份
@@ -24,8 +24,9 @@ DOM 形态，但 identity、候选来源、激活行为和发送校验保持强�
 信息卡打开时只使用既有 8% mention feedback。Skill 使用既有 Skill 行内语言。unavailable 状态保留可见标签，
 通过弱化样式和明确状态反馈表达，不消失、不变回可编辑文字。
 
-每个 Composer Atom 是 identity-only inline `DecoratorNode<null>`，只对应一个 `contentEditable=false` span DOM；
-`decorate()` 返回 null，不得挂载独立 React Root、Portal 或 Catalog 订阅。Atom 内没有独立可聚焦按钮，光标不能
+每个 Composer Atom 是 identity-only inline DecoratorNode，只对应一个 `contentEditable=false` span DOM；
+原有 Atom 的 `decorate()` 返回 null，文件 Atom 使用 Lexical 原生 decoration 复用 ProjectFileIcon 与短标签组件，
+不得挂载独立 React Root、额外 Portal 或 Catalog 订阅。Atom 内没有独立可聚焦按钮，光标不能
 进入其中，键盘可以 NodeSelection，Backspace/Delete 一次删除整个 Atom。普通字符落在 Atom 前后的独立 TextNode。
 
 Member 的唯一身份是 `agentId`，显示名称/头像从当前 Thread 成员或可邀请的队员资料解析；改名只刷新显示。
@@ -38,10 +39,10 @@ Member 的唯一身份是 `agentId`，显示名称/头像从当前 Thread 成员
 `@`、`@a`、`@alice` 只在折叠光标、普通 TextNode、非 composition，且 `@` 位于文本开头或允许分隔符之后时
 打开。Member 与 Skill 共用一个 Trigger Plugin 和一个 Editor update listener；查询不得跨 Atom、换行或 Paragraph，
 从当前 TextNode 的 caret 位置只分配光标左侧最多 128 个字符。方向键移动候选，Enter 选择，Esc 关闭；菜单消费
-按键时不得触发发送。公开三类别 `@` 面板中的 Tab/Shift+Tab 切换类别，Enter 选择；其他面板仍用 Enter/Tab 选择。
+按键时不得触发发送。公开四类别 `@` 面板中的 Tab/Shift+Tab 切换类别，Enter 选择；其他面板仍用 Enter/Tab 选择。
 按键的归属不读取 React `menuOpen` 或渲染后的候选数组，而由 Typeahead 的 Lexical
 critical-priority command 从当前 selection 同步重算 trigger：Catalog loading 时消费按键但不选择，ready 且有候选时
-选择当前项，无 trigger 或 ready/error 且无候选时才交给普通发送行为。
+选择当前项。公开引用菜单的加载、错误、部分零结果和旧查询状态消费 Enter，不发送残留查询；完整空结果沿用既有普通文字行为。
 当前候选必须保持在滚动区域内，并通过稳定 option ID 与编辑器的 `aria-activedescendant` 对应；
 Member 与 Skill 菜单共享这项焦点同步，菜单关闭后移除该关联。
 
@@ -102,14 +103,15 @@ All Members 候选继续显示广播说明，范围仍是发送时 Thread 中的
 中文、日文、韩文 composition 期间，Typeahead 暂停更新，Atom 不插入，EditorState 不替换，Enter 不发送，
 也不执行 DOM selection 恢复。compositionend 后基于最终普通文本重新计算查询。
 
-- Enter：Typeahead 先同步决定是否消费；单独键盘选中的会话／使命 Atom 打开引用详情；其余非 Shift、非 composition、Composer 非空且允许发送时提交；
-- Tab/Shift+Tab：公开 `@` 面板按队员、对话、使命循环／反向切换，保持查询和编辑器焦点，loading/empty 时同样生效；
+- Enter：Typeahead 先同步决定是否消费；单独键盘选中的会话／使命 Atom 打开引用详情，文件 Atom 打开文件预览；其余非 Shift、非 composition、Composer 非空且允许发送时提交；
+- Tab/Shift+Tab：公开 `@` 面板按当前可见的队员、文件、对话、使命类别循环／反向切换；快速对话跳过文件，
+  保持查询和编辑器焦点，loading/empty 时同样生效；
   Escape 关闭后恢复普通 Tab 导航。Skills、单类别面板与私聊保持既有选择方式；
 - Shift+Enter：插入 LineBreak，领域文档导出为 Text 中的 `\n`；
 - Escape：候选/链接菜单优先；输入历史浏览时恢复原结构化草稿并消费事件，其余沿用 Atom 激活态关闭；
 - Arrow Up/Down：Typeahead 优先；会话输入在文档绝对起点用 Up 回看，浏览中在绝对终点用 Down 前进。
   回看置于起点，前进置于终点；Down 越过最新项恢复草稿。有选区、修饰键或 IME 时保持原行为，
-  非浏览中的 Down 不接管。见 [Input History v1](../../contracts/input-history-v1.md)；
+  非浏览中的 Down 不接管。见 [Input History v2](../../contracts/input-history-v2.md)；
   Mission 等非会话编辑器保持原行为；
 - Backspace/Delete：普通文本遵循原生 Lexical 行为，Atom 整体删除；绝对起点保留 `onBackspaceAtStart`；
 - Undo/Redo：覆盖输入、删除、粘贴、换行、Atom 插入/删除和选区替换；Catalog 与保存状态不进入历史。
@@ -148,14 +150,15 @@ Atom，也不从同一来源自动生成。
 Composer 选区 Copy/Cut 同时写：
 
 - `text/plain`：Member 使用当前名称或 fallback、All Members 为 `@所有队员`、Skill 为 `/<nameAtSend>`、
-  LineBreak 为 `\n`；
+  文件为完整可读项目相对路径，LineBreak 为 `\n`；
 - `application/x-rovai-composer+json`：选区对应的 `ComposerDocument` V2，不是 Lexical JSON；RangeSelection 与
   键盘选中的 Atom NodeSelection 都必须产生对应投影；
 - `text/html`：仅兼容可见文本，不拥有 identity。
 
 粘贴时文件优先交给附件入口。没有文件时优先读取私有 MIME，严格校验 version、closed Segment/Atom shape 和
-identity；当前 Catalog 中可恢复的引用还原为 Atom，不可恢复引用转换为普通可见文本。只有恢复后仍包含实际
-Member、All Members 或 Skill Atom 的内容优先按结构化粘贴。仅含文字的内部文档使用文档自身的完整正文，
+identity；成员和 Skill 沿既有 Catalog 恢复。文件保留 Atom，同根跨对话由目标服务重新确认；失败保留路径并要求重选，不能静默降成文字。
+内部整条消息的私有 HTML 也可携带文件身份，缺少必填完整回退标签时按无效私有格式处理。恢复后仍包含任何实际
+Atom 的内容优先按结构化粘贴。仅含文字的内部文档使用文档自身的完整正文，
 同样参与下面的长文本阈值判断；不能因带私有 MIME 而豁免，也不被并行的 `text/plain` 截短或替换。
 没有合法私有 MIME 时使用 `text/plain`，或把 HTML 解析为可见纯文本。
 
@@ -175,7 +178,7 @@ Member、All Members 或 Skill Atom 的内容优先按结构化粘贴。仅含�
 移除未进入发送流程的生成附件，先成功保存移除后的本机草稿，再等待异步删除并清登记。曾进入发送流程的
 文件只移除引用，保留到会话删除。清理失败用轻提示说明，允许继续编辑；外部文件和发送成功后的源文件不删除。
 发送成功后先保存新草稿，再释放旧登记，保存失败保留恢复能力。普通弹窗零消息 Active 不按 Pending 清理；
-一键 Pending 的附件仍在时不是空草稿。存储、保护和失败边界见 [Composer Draft v20](../../contracts/camp-composer-draft-v20.md)。
+一键 Pending 的附件仍在时不是空草稿。存储、保护和失败边界见 [Composer Draft v20](../../contracts/camp-composer-draft-v21.md)。
 
 不得从纯文本 `@Alice`、`/review-code` 或外部 HTML 的 `data-reference-id`、`data-atom-type`、`data-skill-id`
 猜测 identity。整条历史用户消息的专用复制入口继续保留文件链接原始 target，不因显示 label 丢失路径。
@@ -224,7 +227,7 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 
 | 层级 | 权威入口 |
 | --- | --- |
-| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v20](../../contracts/camp-composer-draft-v20.md)与[Pending Camp Activation v5](../../contracts/pending-camp-activation-v5.md) |
+| public Composer 本地所有权、发送快照、失败保留与退出边界 | [Camp Composer Draft v21](../../contracts/camp-composer-draft-v21.md)与[Pending Camp Activation v5](../../contracts/pending-camp-activation-v5.md) |
 | Lexical/React/Core 所有权、局部编辑、同步与 replacement | [Composer 架构](../../architecture/camp-composer-draft.md) |
 | Reply/Continuation 来源、物化与无 fallback | [Composer Draft 不变量](../../architecture/foundational-invariants.md#camp-composer) |
 | Renderer 视觉、Typeahead、Popover、IME、键盘与 Clipboard | 本文 |
@@ -235,10 +238,27 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 
 ## 公开引用候选
 
-公开 `@` 面板为队员／对话／使命三个 30px 标签，不显示“全部”、标题或键盘操作说明。
-成员保持既有头像、角色、Runtime 和邀请图标。搜索包括会话外可邀请成员；模糊匹配按队员、对话、使命
-优先选择首个有结果的类别，队员拼音命中同样参与自动选择。等待期间只显示“搜索中…”，不逐个切换标签。
-手动切换固定本次 `@` 的类别，后续队员拼音命中不覆盖手动选择；新一次触发重新自动选择。空结果仅“无匹配结果”。
+项目对话的公开 `@` 面板为队员／文件／对话／使命四个 30px 标签；快速对话只显示队员／对话／使命。
+不显示“全部”、额外标题或键盘操作说明。
+成员保持既有头像、角色、Runtime 和邀请图标。裸 `@` 优先当前队员；非空查询独立检索各来源并按组显示，
+名称或路径明确匹配时文件优先。成员命中或单一来源失败都不隐藏其他来源。手动类别固定本次触发，
+异步结果不得改变已移动到的候选身份。文件类别仅在 Host 能力支持且当前对话关联项目目录时提供；
+快速对话隐藏文件类别，鼠标和键盘分类导航使用同一组可见类别。已关联项目但根不可用时保留文件入口并反馈重试，
+完整空结果与不完整结果分别处理。
+不完整文件结果始终提示缩小范围，包括零条结果，不推断文件不存在。
+
+文件候选为图标、主行文件名与辅助相对目录，完整路径进入可访问名称，不显示内部 ID。
+空查询只列根目录可引用文件，非空独立 scope 搜索；显示有界结果，内部滚动，不承诺分页或总数。
+选中文件直接插入并回到编辑，不自动预览或播放加载动画。来源确认尚未完成时暂禁发送；
+候选、文件树和预览动作从首次异步操作起共用这一提交检查，覆盖鼠标、键盘及直接表单提交，不能发送残留查询词。
+正常草稿保存仍可进行，不先锁定编辑器再等待依赖可编辑状态的插入。草稿及历史标签默认为文件名，
+同名时按当前引用集合补最短可区分目录，优先保留文件名和测试扩展名；完整路径保存在身份字段中。
+文件点击／键盘激活打开已有预览，右键、Shift+F10 或长按打开完整路径及重选／移除操作。
+文件树和预览共用“引用到输入框”，不替换既有正文。文件仅表达处理对象，不参与成员路由。
+
+明确的根／文件业务错误显示引用不可用；连接中断显示连接失败并保留身份；不符合契约的响应显示文件服务异常，
+不伪装为文件删除或网络错误。Core 发送拒绝优先于此前发起的后台检查；旧成功响应不能解除拒绝状态，
+仅拒绝之后发起的新检查可重新确认可用性。可用性更新不改正文、身份或撤销历史。
 
 对话和使命候选为 32px 单行：既有无底色图标、左标题、右项目，两者独立省略。不显示时间、状态、编号、
 总数或最近条数提示。同名项仍按稳定 ID 选择。初始和每次追加最多 8 条；“加载更多”为无分隔线的弱文字，
@@ -255,6 +275,7 @@ Agent 消息中的 Current User Mention 可为前缀，也可位于任意已解�
 详情标题可多行折行，浮层最高为 `min(28rem, available-height)`，内部滚动使窄屏操作可达，不增加 Tooltip。
 无障碍名称包含完整标题，图标不重复朗读。键盘选中的单一引用 Atom 可用 Enter 打开详情，Escape 返回编辑器
 及有效原选区；移除／重选保留操作后的光标，外部点击或打开来源不抢回焦点。历史按钮保留原生键盘激活。
-复制整条消息仍含完整 Markdown 定位链接，选文使用完整标题语义及原标量选区，不夹带 URI 或写入视觉省略号。
+对话／使命整条复制保留 Markdown 定位链接；文件整条复制同时携带结构化身份和完整可读路径。
+选文沿用当前 quote_text 的可见文字快照，不夹带 URI、不写入视觉省略号，也不重算旧快照或 URI 偏移。
 不可用草稿保留移除/重选入口。手动点击或 Tab 切类别固定本次查询，搜索响应不覆盖选择。
-私聊和使命描述不提供引用候选。内容与事务权威见 [Thread Reference v1](../../contracts/thread-reference-v1.md)。
+私聊和使命描述不提供引用候选。内容与事务权威见 [Thread Reference v2](../../contracts/thread-reference-v2.md)。

@@ -270,7 +270,7 @@ test('trusted Web HTML uses native storage, forms, popups and modals while prese
     // Publish an image-shaped file without starting a Run. A failed image
     // decoder must leave the message attachment's source download accessible.
     const imageBytes = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0])
-    const author = await (await fetch(service.origin + '/api/v1/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 5, administratorToken: service.administratorToken }) })).json()
+    const author = await (await fetch(service.origin + '/api/v1/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 6, administratorToken: service.administratorToken }) })).json()
     const imageIntent = { commandId: crypto.randomUUID(), threadId: created.payload.threadId, expectedRevision: 0, displayName: 'broken.png', byteSize: imageBytes.length, sha256: createHash('sha256').update(imageBytes).digest('hex') }
     const imageForm = new FormData(); imageForm.append('intent', JSON.stringify(imageIntent)); imageForm.append('file', new Blob([imageBytes]), 'broken.png')
     const imageUpload = await fetch(service.origin + '/api/v1/uploads', { method: 'POST', headers: { Authorization: `Bearer ${author.token}`, 'X-Rovai-Upload-Command-Id': imageIntent.commandId }, body: imageForm })

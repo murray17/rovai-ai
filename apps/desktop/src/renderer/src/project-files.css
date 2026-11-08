@@ -80,3 +80,5 @@
 html.project-files-resizing, html.project-files-resizing * { cursor: col-resize !important; user-select: none !important; }
 html.project-files-resizing iframe { pointer-events: none; }
 @container camp-shell (max-width: 1329px) { .project-files-project.context-project, .project-files-project + .context-sep { display: none; } }
+.project-files-reference { margin-left: auto; padding: 2px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.project-files-reference:hover, .project-files-reference:focus-visible { background: var(--neutral-hover); color: var(--ink); }

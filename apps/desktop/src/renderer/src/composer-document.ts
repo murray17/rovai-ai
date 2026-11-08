@@ -1,3 +1,4 @@
+import { isProjectFileAtom, validProjectFileAtom } from './project-file-reference'
 import { isReferenceAtom, isReferenceSegment, validReferenceAtom, projectReference, referenceIdentity } from './thread-reference'
 import type {
   ComposerAtom,
@@ -74,7 +75,7 @@ export function cloneComposerDocument(document: ComposerDocument): ComposerDocum
 }
 
 function cloneComposerAtom(atom: ComposerAtom): ComposerAtom {
-  if (isReferenceAtom(atom)) return { ...atom }
+  if (isProjectFileAtom(atom) || isReferenceAtom(atom)) return { ...atom }
   if (atom.type === 'member') {
     return atom.labelFallback === undefined
       ? { type: 'member', agentId: atom.agentId }
@@ -112,6 +113,7 @@ export function composerDocumentsEqualDirect(
 function composerAtomsEqual(left: ComposerAtom, right: ComposerAtom): boolean {
   if (left.type !== right.type) return false
   if (left.type === 'all_members') return true
+  if (isProjectFileAtom(left)) return isProjectFileAtom(right) && left.threadId === right.threadId && left.rawReference === right.rawReference && left.labelFallback === right.labelFallback
   if (left.type === 'member') {
     return right.type === 'member'
       && left.agentId === right.agentId
@@ -140,6 +142,10 @@ export function validateComposerDocument(value: unknown): value is ComposerDocum
     if (segment.kind !== 'atom'
       || !hasOnlyKeys(segment, ['kind', 'atom'])
       || !validateComposerAtom(segment.atom)) return false
+    if (isProjectFileAtom(segment.atom)) {
+      textLength += utf8Length(segment.atom.threadId) + utf8Length(segment.atom.rawReference) + utf8Length(segment.atom.labelFallback)
+      if (textLength > MAX_COMPOSER_TEXT_LENGTH) return false
+    }
     if ((segment.atom.type === 'member' || isReferenceAtom(segment.atom)) && segment.atom.labelFallback) {
       textLength += utf8Length(segment.atom.labelFallback)
       if (textLength > MAX_COMPOSER_TEXT_LENGTH) return false
@@ -162,6 +168,7 @@ export function parseComposerClipboardDocument(value: string): ComposerDocument 
 
 function validateComposerAtom(value: unknown): value is ComposerAtom {
   if (!isRecord(value)) return false
+  if (value.type === 'project_file_reference') return validProjectFileAtom(value)
   if (value.type === 'thread_reference' || value.type === 'mission_reference') return validReferenceAtom(value)
   if (value.type === 'all_members') return Object.keys(value).length === 1
   if (value.type === 'member') {
@@ -239,6 +246,7 @@ export function composerDocumentToPlainText(
     if (segment.kind === 'text') return segment.text
     const atom = segment.atom
     if (atom.type === 'member') return memberAtomPlainText(atom, memberNames.get(atom.agentId) ?? null)
+    if (isProjectFileAtom(atom)) return atom.labelFallback
     if (isReferenceAtom(atom)) return projectReference(atom)
     if (atom.type === 'all_members') return '@所有队员'
     return `/${atom.nameAtSend}`
@@ -268,8 +276,8 @@ export function composerDocumentStatus(
       if (segment.text.trim().length > 0) hasContent = true
       continue
     }
-    hasContent = true
     const atom = segment.atom
+    if (atom.type === 'skill' || isProjectFileAtom(atom)) hasContent = true
     if (atom.type === 'all_members') {
       hasExplicitRecipient = true
       hasAllMembers = true
@@ -309,6 +317,8 @@ export function composerDocumentFromLegacyContent(
         kind: 'atom',
         atom: { type: 'skill', skillId: segment.skillId, nameAtSend: segment.nameAtSend }
       })
+    } else if (segment.kind === 'project_file_reference') {
+      segments.push({ kind: 'atom', atom: { type: 'project_file_reference', threadId: segment.threadId, rawReference: segment.rawReference, labelFallback: segment.labelAtSend } })
     } else if (isReferenceSegment(segment)) {
       segments.push({ kind: 'atom', atom: 'threadId' in segment
         ? { type: 'thread_reference', threadId: segment.threadId, labelFallback: segment.titleAtSend }
@@ -326,6 +336,7 @@ export function composerDocumentToStructuredContent(
   return normalizeComposerDocument(document).segments.map((segment) => {
     if (segment.kind === 'text') return { kind: 'text', text: segment.text }
     const atom = segment.atom
+    if (isProjectFileAtom(atom)) throw new Error('File publication fields are owned by Core')
     if (atom.type === 'member') {
       return { kind: 'member_mention', agentId: atom.agentId }
     }

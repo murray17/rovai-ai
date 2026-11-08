@@ -1349,7 +1349,10 @@ mod tests {
                         )
                         .unwrap();
                     writer
-                        .execute("DELETE FROM schema_migration WHERE version=220", [])
+                        .execute(
+                            "DELETE FROM schema_migration WHERE version=?1",
+                            [crate::db::CURRENT_PROJECTION_SCHEMA_VERSION + 50],
+                        )
                         .unwrap();
                 }
                 "ambiguous" => {

@@ -15,7 +15,7 @@ last_updated: 2026-11-05
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History v16](../contracts/camp-history-v16.md)、
 [Durable Task v6](../contracts/durable-task-v6.md) 和
-[Camp Message Send v29](../contracts/camp-message-send-v29.md)、
+[Camp Message Send v30](../contracts/camp-message-send-v30.md)、
 [Current User Attention v8](../contracts/current-user-attention-v8.md)与
 [Missing-Send Recovery Publication v3](../contracts/missing-send-recovery-publication-v3.md) 为准；v19 及更早 Transport 只保留
 historical 语义。决策理由见
@@ -215,7 +215,7 @@ timeline 与回复链使用互斥的 `--before/--after`，`--after 0` 从最早�
 文件选择在 `--file` 的精确帮助中说明：普通引用优先 Markdown，明确请求的附件或渠道文件交付使用 `--file`。
 Summary 不再说明附件快照、路径优化或纯附件示例；输入 schema、纯附件发送和路径处理均不变。
 精确教学、User 寻址和三渠道 Session 的补充提示由
-[Camp Message Send v29](../contracts/camp-message-send-v29.md) 及其继承链拥有。
+[Camp Message Send v30](../contracts/camp-message-send-v30.md) 及其继承链拥有。
 
 Send `body` exact help 只说明正文 payload；Bootstrap、Send summary/schema/CLI help
 都不公开 inline fallback 机制。`--to` 只接受 canonical ID，并是 Agent 目标 authoring 的唯一推荐入口。Core

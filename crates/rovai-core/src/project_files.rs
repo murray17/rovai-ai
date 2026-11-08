@@ -57,7 +57,7 @@ fn entry_path(id: &str) -> Result<PathBuf> {
     Ok(relative.into())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Binding {
     path: PathBuf,
     identity: String,
@@ -69,11 +69,18 @@ pub fn binding(database: &Database, thread: &str) -> Result<Binding> {
         !thread.is_empty() && thread.len() <= 128,
         "root_unavailable"
     );
-    let project: String = database.connection().query_row(
+    binding_from_connection(database.connection(), thread)
+}
+
+pub(crate) fn binding_from_connection(
+    connection: &rusqlite::Connection,
+    thread: &str,
+) -> Result<Binding> {
+    let project: String = connection.query_row(
         "SELECT project_path FROM camp WHERE id=?1 AND activation_state IN ('pending','active') AND deletion_operation_id IS NULL AND project_binding_kind='directory'",
         [thread], |row| row.get(0),
     ).context("root_unavailable")?;
-    let workspace: Option<(String, String, i64)> = database.connection().query_row(
+    let workspace: Option<(String, String, i64)> = connection.query_row(
         "SELECT w.id,w.working_directory,w.generation FROM mission_workspace w JOIN mission m ON m.id=w.mission_id WHERE m.camp_id=?1 AND w.state='ready' ORDER BY w.created_at LIMIT 1",
         [thread], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).optional()?;
@@ -89,7 +96,7 @@ pub fn binding(database: &Database, thread: &str) -> Result<Binding> {
     })
 }
 
-fn root(binding: &Binding) -> Result<(PathBuf, String)> {
+pub(crate) fn root(binding: &Binding) -> Result<(PathBuf, String)> {
     let path = fs::canonicalize(&binding.path).context("root_unavailable")?;
     let metadata = fs::metadata(&path).context("root_unavailable")?;
     ensure!(metadata.is_dir(), "root_unavailable");
@@ -109,6 +116,29 @@ fn root(binding: &Binding) -> Result<(PathBuf, String)> {
         ))
     );
     Ok((path, identity))
+}
+
+// Cross-thread equivalence deliberately excludes the Thread prefix, but retains workspace generation.
+pub(crate) fn same_effective_root(left: &Binding, right: &Binding) -> Result<bool> {
+    let (left_path, _) = root(left)?;
+    let (right_path, _) = root(right)?;
+    if left_path != right_path
+        || left.identity.split_once(':').map(|x| x.1) != right.identity.split_once(':').map(|x| x.1)
+    {
+        return Ok(false);
+    }
+    let left_metadata = fs::metadata(&left_path)?;
+    let right_metadata = fs::metadata(&right_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok((left_metadata.dev(), left_metadata.ino())
+            == (right_metadata.dev(), right_metadata.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(left_metadata.created().ok() == right_metadata.created().ok())
+    }
 }
 
 /// A preview reference survives closing the browser, but never a root rebind/replacement.
@@ -739,6 +769,80 @@ mod tests {
                 .unwrap(),
             fs::canonicalize(fixture.0.join("same #1.txt")).unwrap()
         );
+        // File-reference admission owns the same containment and root-generation boundary.
+        let admitted =
+            crate::project_file_reference::resolve(&fixture.binding(), reference).unwrap();
+        assert_eq!(admitted.label, "same #1.txt");
+        let link =
+            crate::project_file_reference::render_link(&admitted.path, &admitted.label).unwrap();
+        assert!(link.ends_with("/same%20%231.txt)"));
+        let target = Binding {
+            path: fixture.0.clone(),
+            identity: "target:project".into(),
+        };
+        let resolve_paste = |target: Binding| {
+            crate::project_file_reference::resolve_references(
+            serde_json::from_value(json!({"threadId":"target", "references":[{"threadId":"thread","rawReference":reference}]})).unwrap(),
+            HashMap::from([("thread".into(), fixture.binding()), ("target".into(), target)]))
+        };
+        let pasted = resolve_paste(target.clone());
+        assert_eq!(pasted["value"][0]["status"], "available");
+        assert_eq!(pasted["value"][0]["reference"]["threadId"], "target");
+        assert_ne!(pasted["value"][0]["reference"]["rawReference"], reference);
+        assert_eq!(
+            resolve_paste(Binding {
+                path: other.0.clone(),
+                identity: "target:project".into()
+            })["value"][0]["status"],
+            "needs_reselect"
+        );
+        assert_eq!(
+            resolve_paste(Binding {
+                path: target.path.clone(),
+                identity: "target:workspace:2".into()
+            })["value"][0]["status"],
+            "needs_reselect"
+        );
+        let (root_path, root_identity) = root(&fixture.binding()).unwrap();
+        for relative in ["../escape", "/absolute", "cycle", "missing.txt"] {
+            let raw =
+                URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(&root_identity, relative)).unwrap());
+            assert!(crate::project_file_reference::resolve(&fixture.binding(), &raw).is_err());
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                other.0.join("same #1.txt"),
+                root_path.join("external-file"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(
+                root_path.join("same #1.txt"),
+                root_path.join("internal-file"),
+            )
+            .unwrap();
+            let raw = |relative| {
+                URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(&root_identity, relative)).unwrap())
+            };
+            assert!(
+                crate::project_file_reference::resolve(&fixture.binding(), &raw("external-file"))
+                    .is_err()
+            );
+            assert!(
+                crate::project_file_reference::resolve(&fixture.binding(), &raw("internal-file"))
+                    .is_ok()
+            );
+        }
+        fs::write(root_path.join("same #1.txt"), "changed live").unwrap();
+        assert_eq!(
+            crate::project_file_reference::resolve(&fixture.binding(), reference)
+                .unwrap()
+                .path,
+            admitted.path
+        );
+        fs::remove_file(root_path.join("same #1.txt")).unwrap();
+        assert!(crate::project_file_reference::resolve(&fixture.binding(), reference).is_err());
+        fs::write(root_path.join("same #1.txt"), "restored").unwrap();
         assert!(resolve_source(other.binding(), "thread".into(), reference).is_err());
         let mut rebound = fixture.binding();
         rebound.identity = "thread:workspace:2".into();

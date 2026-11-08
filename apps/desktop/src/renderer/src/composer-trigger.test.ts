@@ -61,6 +61,16 @@ describe('Composer bounded trigger scan', () => {
     expect(match(member)).toMatchObject({
       kind: 'member', query: 'Ali', fromOffset: 3, toOffset: 7
     })
+    for (const query of ['src/', 'package.json', 'composer-trigger.test.ts', '中文_文件-name.ts', 'src\\auth\\index.ts']) {
+      const editor = createComposerEditor(`检查 @${query}`)
+      selectEnd(editor)
+      expect(match(editor)).toMatchObject({ kind: 'member', query, fromOffset: 3, toOffset: 4 + query.length })
+    }
+    for (const text of ['user@package.json', 'https://example.com/@src/index.ts', '@with spaces.ts']) {
+      const editor = createComposerEditor(text)
+      selectEnd(editor)
+      expect(match(editor)).toBeNull()
+    }
 
     const skill = createComposerEditor('请处理：/review')
     selectEnd(skill)

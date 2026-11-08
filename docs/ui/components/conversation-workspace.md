@@ -9,7 +9,7 @@ last_updated: 2026-11-07
 
 ## Public Thread 当前边界
 
-- 公开执行列表按 [Thread Open v31](../../contracts/camp-open-projection-v31.md) 只读取直接 Thread 归属。
+- 公开执行列表按 [Thread Open v31](../../contracts/camp-open-projection-v32.md) 只读取直接 Thread 归属。
   旧 Turn-only 执行卡片不再显示；消息接收者缺少关联 Run 和 Delivery 事实时，不显示处理回执，不推导为“待处理”。
 - 已激活及普通一键 Pending Thread 的输入内容按 Thread 保存本机快照，切换、刷新、重建窗口和普通重启后恢复。
   普通 Pending 输入保存后显示侧栏草稿行；同一项目可以保留多份，清空后隐藏。AI 创建队员仍按其窗口内草稿合同运行。
@@ -121,7 +121,7 @@ PNG 使用同一阅读面以 2 倍分辨率生成，720px 阅读宽度、最高 
 结束后释放，下一轮使用最新数据。按钮、接收者提示与发送资格跟随预览，
 原草稿继续保留。Up 在文档起点回看，浏览中的 Down 在文档终点前进；Esc 恢复并消费事件，
 单聊不同时收起。编辑/发送预览后进入普通草稿流程，候选菜单、IME、选区、修饰键优先。
-见 [Input History v1](../../contracts/input-history-v1.md)。不增加面板、遮罩或持久“历史草稿”，
+见 [Input History v2](../../contracts/input-history-v2.md)。不增加面板、遮罩或持久“历史草稿”，
 不增加历史专用读取或跨会话缓存，也不扩大消息加载范围。
 
 ## 成员 Fast 响应模式
@@ -462,7 +462,7 @@ Agent 公共消息继续左对齐，仅正文使用与用户消息相同的雾�
 已有草稿时显示“替换当前输入文字？”确认框；取消保留草稿，最终确认若已过期则拒绝回填并说明草稿已保留。
 成功回填只替换文字，按普通草稿保存且不随副本到期清除。撤回及到期不强制结束现有 ↑↓ 历史预览。
 命令成功后的列表刷新失败单独提示，不把撤回误报为失败；完整状态与清理边界由
-[Message Reedit v1](../../contracts/message-reedit-v1.md) 拥有。
+[Message Reedit v2](../../contracts/message-reedit-v2.md) 拥有。
 事务资格、并发围栏与标记投影由 [Camp Message Send v23](../../contracts/camp-message-send-v23.md) 拥有。
 
 消息复制成功只把复制图标短暂换成勾号，不增加可见“已复制”标签；读屏播报保留，错误沿用原反馈。
