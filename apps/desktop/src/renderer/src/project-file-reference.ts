@@ -1,5 +1,6 @@
 import type { ComposerAtom, ProjectFileReferenceAtom, PublishedProjectFileReference } from '@contracts'
 import { uiAttribute } from './interface-language'
+import { escapeReferenceLinkLabel } from './reference-markdown'
 
 export const isProjectFileAtom = (atom: ComposerAtom): atom is ProjectFileReferenceAtom => atom.type === 'project_file_reference'
 export type FileReference = ProjectFileReferenceAtom | PublishedProjectFileReference
@@ -45,7 +46,6 @@ export function projectFileLink(file: PublishedProjectFileReference): string {
     const [host, ...parts] = path.slice(2).split('\\'); url.hostname = host!; url.pathname = `/${parts.join('/')}`
   } else url.pathname = path.replace(/\\/gu, '%5C')
   if (file.targetKind === 'directory' && !url.pathname.endsWith('/')) url.pathname += '/'
-  const labelAtSend = file.targetKind === 'directory' ? file.labelAtSend.replace(/\/+$/u, '') + '/' : file.labelAtSend
-  const label = labelAtSend.replace(/[\u0000-\u001f\u007f]/gu, ' ').replace(/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/gu, '\\$&')
+  const label = escapeReferenceLinkLabel(fileName(fileReferencePath(file)).replace(/[\u0000-\u001f\u007f]/gu, ' '))
   return `[${label}](${url.href.replace(/\(/gu, '%28').replace(/\)/gu, '%29')})`
 }

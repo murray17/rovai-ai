@@ -20,7 +20,7 @@ ComposerDocument version 2 新增封闭 Atom：
 {type:'project_file_reference', threadId:string, rawReference:string, labelFallback:string,targetKind?:'file'|'directory'}
 ```
 
-targetKind 缺省为 file；新目录必须为 directory。未知枚举、null 和未知字段拒绝。文件发布继续省略默认类型，旧文件字节不变。
+targetKind 缺省为 file；新目录必须为 directory。未知枚举、null 和未知字段拒绝。文件发布继续省略默认类型，结构化字段不变。
 labelFallback 必填且保存完整项目相对路径，只用于显示，不能承担定位。rawReference 沿用
 File Preview 的 Base64URL `[rootIdentity, relativePath]`，UTF-8 最长 16 KiB；不采用普通 ID 的 256 字节限制。
 scopeId 只属于浏览生命周期，不进入文档。缺少字段、未知字段或私有 MIME 无效时使用既有纯文本回退。
@@ -67,9 +67,11 @@ reason 为 invalid_reference/thread_mismatch/root_unavailable/root_changed/file_
 
 ## 正文与预算
 
-统一 projector 在原位置输出 `[转义后的完整相对路径](file:///编码后的规范绝对路径)`。
+统一 projector 在原位置输出 `[转义后的名称](file:///编码后的规范绝对路径)`；名称从保存的完整相对路径取最后一段，
+不访问文件系统、不改写 labelAtSend／labelFallback。同名目标的正文标签可以相同，URI 与句内位置保留定位。
 URI 使用平台路径 URI 库，集中处理空格、Unicode、括号、井号、反斜线及平台路径。
-目录投影为 `[src/auth/](file:///project/src/auth/)`，标签与 URI 均有末尾 `/`；界面短标签不带该斜线。
+目录投影为 `[auth](file:///project/src/auth/)`，只有 URI 保留末尾 `/`。
+标签保留普通点号、短横线、括号等文字，仅转义可改变 Markdown/GFM 名称或结构的字符；两端使用同一组样例。
 模型通过既有文件工具按需读取；不展开目录或注入其文件集合，不加入 RUN_INPUT.files、不注入文件正文、不重复生成 SourceAttachment。
 初始输入、Steer、历史读取使用发布字段；已冻结模型输入维持原始字节，无历史文件 I/O。
 
