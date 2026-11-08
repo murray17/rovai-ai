@@ -189,6 +189,7 @@ import { AgentMessageContent } from './AgentMessageContent'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { useExecutionPreviewHost, useOptionalFilePreview } from './FilePreviewContext'
+import { EXECUTION_OVERVIEW_SCOPE, rememberExecutionTab, restoredExecutionTab } from './execution-tab-selection'
 import {
   agentRunFileChangeHasReviewableDiff,
   agentRunFileChangesPreviewTarget,
@@ -669,7 +670,10 @@ export type AgentExecutionProcess = {
   waitingDeliveries: MessageDeliveryView[]
 }
 
-const EXECUTION_OVERVIEW_SCOPE = '__execution_overview__'
+function executionTabForSnapshot(snapshot: ThreadSnapshot): string {
+  return restoredExecutionTab(snapshot.thread.id,
+    agentExecutionProcesses(snapshot.agentRuns, snapshot.messageDeliveries).map(process => process.agentId))
+}
 
 export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'waitReason'>): boolean {
   return NON_TERMINAL_RUNS.has(run.status)
@@ -2145,6 +2149,7 @@ export function ThreadWorkspace({
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
   )
+  const [workspaceEntryTab] = useState(() => workspaceEntrySelection ? executionTabForSnapshot(snapshot) : null)
   const workspaceEntryRunningRun = workspaceEntrySelection?.focusedRun ?? null
   const [executionPlacementPending, setExecutionPlacementPending] = useState(false)
   const [executionPlacementError, setExecutionPlacementError] = useState<{
@@ -2157,11 +2162,20 @@ export function ThreadWorkspace({
   )
   const [executionShortcutCollapsed, setExecutionShortcutCollapsed] = useState(false)
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(
-    workspaceEntrySelection?.selectedAgentId ?? null
+    workspaceEntryTab
   )
   const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(
-    workspaceEntrySelection?.focusedRun.id ?? null
+    workspaceEntryTab === EXECUTION_OVERVIEW_SCOPE ? workspaceEntrySelection?.focusedRun.id ?? null : null
   )
+  const executionSelectionClosed = useRef(false)
+  const executionSelectionSurface = useRef<string | null>(null)
+  const selectExecutionTab = useCallback((agentId: string | null): void => {
+    if (agentId !== null) {
+      executionSelectionClosed.current = false
+      rememberExecutionTab(snapshot.thread.id, agentId)
+    }
+    setExecutionDrawerAgentId(agentId)
+  }, [snapshot.thread.id])
   const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
     sequence: workspaceEntryRunningRun ? 1 : 0,
     moveDomFocus: false
@@ -2467,8 +2481,9 @@ export function ThreadWorkspace({
     if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) return
     const entrySelection = executionWorkspaceEntrySelection(snapshot.agentRuns)
     const runningRun = entrySelection?.focusedRun ?? null
-    setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
-    setExecutionDrawerFocusedRunId(entrySelection?.focusedRun.id ?? null)
+    const selectedTab = runningRun ? executionTabForSnapshot(snapshot) : null
+    selectExecutionTab(selectedTab)
+    setExecutionDrawerFocusedRunId(selectedTab === EXECUTION_OVERVIEW_SCOPE ? runningRun?.id ?? null : null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: false
@@ -2494,7 +2509,8 @@ export function ThreadWorkspace({
     snapshot.agentRuns,
     workspaceEntrySnapshotReady,
     suppressExecutionAutoOpen,
-    rightPreviewBlocksExecutionAutoOpen
+    rightPreviewBlocksExecutionAutoOpen,
+    selectExecutionTab
   ])
   useLayoutEffect(() => {
     if (workspaceEntryInspectorHandled.current) return
@@ -2526,8 +2542,9 @@ export function ThreadWorkspace({
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
     const runningRun = entrySelection?.focusedRun ?? null
-    setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
-    setExecutionDrawerFocusedRunId(entrySelection?.focusedRun.id ?? null)
+    const selectedTab = runningRun ? executionTabForSnapshot(snapshot) : null
+    selectExecutionTab(selectedTab)
+    setExecutionDrawerFocusedRunId(selectedTab === EXECUTION_OVERVIEW_SCOPE ? runningRun?.id ?? null : null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: false
@@ -2541,7 +2558,7 @@ export function ThreadWorkspace({
     } else if (runningRun && executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady])
+  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady, selectExecutionTab])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
@@ -2779,6 +2796,26 @@ export function ThreadWorkspace({
   const executionDrawerProfile = executionDrawerProcess && !executionDrawerOverview
     ? profileById.get(executionDrawerProcess.agentId) ?? null
     : null
+  useLayoutEffect(() => {
+    const visible = replyExecutionVisible || (executionPlacement === 'bottom'
+      ? executionDrawerAgentId !== null && !executionShortcutCollapsed
+      : executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab,
+        Boolean(filePreview?.paneVisible && filePreview.activeTab?.kind === 'execution')))
+    const surface = visible ? `${snapshot.thread.id}:${replyExecutionVisible ? 'reply' : executionPlacement}` : null
+    if (executionSelectionSurface.current !== surface) {
+      executionSelectionSurface.current = surface
+      executionSelectionClosed.current = false
+    }
+    // Closing a selection is intentional even when another host, such as reply details, stays visible.
+    if (!workspaceEntrySnapshotReady || !visible || executionSelectionClosed.current
+      || executionDrawerProcess || executionProcessByAgentId.size === 0) return
+    selectExecutionTab(restoredExecutionTab(snapshot.thread.id, executionProcessByAgentId.keys()))
+    setExecutionDrawerFocusedRunId(null)
+    setExecutionDrawerFocusRequest(request => ({ sequence: request.sequence + 1, moveDomFocus: false }))
+  }, [executionPlacement, executionDrawerAgentId, executionDrawerProcess, executionShortcutCollapsed,
+    inspectorVisible, inspectorSurfaceTab, filePreview?.paneVisible, filePreview?.activeTab?.kind,
+    replyExecutionVisible, workspaceEntrySnapshotReady, snapshot.thread.id, executionProcessByAgentId,
+    selectExecutionTab])
   const executionDrawerInstallation = executionDrawerProfile?.runtimeConfiguration
     ? runtimeEditorInstallation(
         installations,
@@ -3750,13 +3787,13 @@ export function ThreadWorkspace({
     } else if (executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-    setExecutionDrawerAgentId(run.agentId)
+    selectExecutionTab(run.agentId)
     setExecutionDrawerFocusedRunId(run.id)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: true
     }))
-  }, [executionPlacement, filePreview, inspectorTab, notificationFocus, onOpenInspector, snapshot.agentRuns, snapshot.thread.id])
+  }, [executionPlacement, filePreview, inspectorTab, notificationFocus, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, selectExecutionTab])
 
   useEffect(() => {
     if (!notificationFocus?.active || notificationFocus.kind === 'single_chat') return undefined
@@ -5012,7 +5049,7 @@ export function ThreadWorkspace({
       executionDrawerReturnAgentIdRef.current = null
     }
     setExecutionShortcutCollapsed(false)
-    setExecutionDrawerAgentId(agentId)
+    selectExecutionTab(agentId)
     setExecutionDrawerFocusedRunId(focusedRunId)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
@@ -5034,7 +5071,7 @@ export function ThreadWorkspace({
     if (trigger) executionDrawerTriggerRef.current = trigger
     setExecutionShortcutCollapsed(false)
     executionDrawerReturnAgentIdRef.current = EXECUTION_OVERVIEW_SCOPE
-    setExecutionDrawerAgentId(EXECUTION_OVERVIEW_SCOPE)
+    selectExecutionTab(EXECUTION_OVERVIEW_SCOPE)
     setExecutionDrawerFocusedRunId(null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
@@ -5042,9 +5079,16 @@ export function ThreadWorkspace({
     }))
   }
 
+  const openPreferredExecutionTab = (moveDomFocus = true, trigger: HTMLButtonElement | null = null): void => {
+    const agentId = restoredExecutionTab(snapshot.thread.id, executionProcessByAgentId.keys())
+    if (agentId === EXECUTION_OVERVIEW_SCOPE) openExecutionOverview(trigger, moveDomFocus)
+    else openExecutionProcess(agentId, trigger, { moveDomFocus })
+  }
+
   const closeExecutionProcess = (): void => {
     executionEntryInteractionThreadId.current = snapshot.thread.id
-    setExecutionDrawerAgentId(null)
+    executionSelectionClosed.current = true
+    selectExecutionTab(null)
     setExecutionDrawerFocusedRunId(null)
   }
 
@@ -5216,7 +5260,7 @@ export function ThreadWorkspace({
     const opened = executionPlacement === 'bottom' ? executionDrawerAgentId !== null && !executionShortcutCollapsed
       : executionPlacement === 'right' ? rightExecutionVisible : inspectorVisible && inspectorSurfaceTab === 'execution'
     if (!opened) {
-      if (executionDrawerAgentId === null) openExecutionOverview()
+      if (executionDrawerAgentId === null) openPreferredExecutionTab()
       else if (executionPlacement === 'right') filePreview?.openExecution()
       else if (executionPlacement === 'inspector') { setExecutionInspectorActive(true); onOpenInspector?.(inspectorTab) }
       else setExecutionShortcutCollapsed(false)
@@ -6116,7 +6160,7 @@ export function ThreadWorkspace({
                 if (tab === 'tasks' && !tasksEnabled) return
                 if (tab === 'execution' && executionPlacement === 'right') {
                   onCloseInspector()
-                  if (executionDrawerAgentId === null) openExecutionOverview(null, false)
+                  if (executionDrawerAgentId === null) openPreferredExecutionTab(false)
                   else filePreview?.openExecution()
                   return
                 }
@@ -6219,6 +6263,7 @@ export function ThreadWorkspace({
               selectedAgentId={executionShortcutCollapsed ? null : executionDrawerAgentId}
               onOpen={openExecutionProcess}
               onOpenOverview={openExecutionOverview}
+              onExpand={trigger => openPreferredExecutionTab(true, trigger)}
               onClose={closeExecutionProcess}
               onPlacementMenuIntent={captureExecutionPlacementMenuReadingPosition}
               onPlacementMenuOpenChange={trackExecutionPlacementMenu}
@@ -6931,6 +6976,7 @@ function RunPulse({
   revealRequest = 0,
   onOpen,
   onOpenOverview,
+  onExpand,
   onClose,
   onPlacementMenuIntent,
   onPlacementMenuOpenChange,
@@ -6949,6 +6995,7 @@ function RunPulse({
   revealRequest?: number
   onOpen(agentId: string, trigger: HTMLButtonElement): void
   onOpenOverview(trigger: HTMLButtonElement): void
+  onExpand?(trigger: HTMLButtonElement): void
   onClose(): void
   onPlacementMenuIntent(): void
   onPlacementMenuOpenChange(open: boolean): void
@@ -7078,7 +7125,10 @@ function RunPulse({
         aria-controls="agent-execution-drawer"
         aria-label={selectedAgentId === null ? uiAttribute("展开执行详情") : uiAttribute("收起执行详情")}
         onClick={(event) => {
-          if (selectedAgentId === null) onOpenOverview(event.currentTarget)
+          if (selectedAgentId === null) {
+            if (onExpand) onExpand(event.currentTarget)
+            else onOpenOverview(event.currentTarget)
+          }
           else onClose()
         }}
       >

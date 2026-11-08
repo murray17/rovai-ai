@@ -304,6 +304,12 @@ app.whenReady().then(async () => {
         throw new Error(`Entry preview condition timed out: ${expression}`)
       }
 
+      await run('window.campOpenTest.showEntryPreview(0)')
+      await run('window.campOpenTest.completeEntrySnapshot()')
+      await settle()
+      assert.equal((await run('window.campOpenTest.entryState()')).selectedAgentId, '__execution_overview__',
+        'a fresh formal entry without a saved Tab defaults to overview')
+
       await run('window.campOpenTest.showEntryPreview(1)')
       await waitFor('document.querySelectorAll(".run-pulse-chip[data-agent-id]").length >= 3')
       await run('document.querySelector(".run-pulse-chip[data-agent-id=agent-2]").click()')
@@ -335,9 +341,10 @@ app.whenReady().then(async () => {
       await run('window.campOpenTest.completeEntrySnapshot()')
       await settle()
       entryState = await run('window.campOpenTest.entryState()')
-      assert.equal(entryState.selectedAgentId, '__execution_overview__', 'formal readiness auto-opens overview around the running Run when untouched')
+      assert.equal(entryState.selectedAgentId, 'agent-1', 'formal readiness restores the last member Tab when this entry is untouched')
+      assert.equal(entryState.focusedRunId, 'entry-running-3', 'restoring a Tab selects its current Run instead of retaining the old Run')
       assert.equal(entryState.expanded, true)
-      console.log(JSON.stringify({ ok: true, mode, checks: ['historical-selection', 'closed-stays-closed', 'untouched-overview-auto-open'] }))
+      console.log(JSON.stringify({ ok: true, mode, checks: ['fresh-overview', 'historical-selection', 'closed-stays-closed', 'restored-tab-current-run'] }))
       window.destroy()
       app.quit()
       return

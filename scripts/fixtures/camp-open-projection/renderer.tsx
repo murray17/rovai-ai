@@ -678,6 +678,7 @@ Object.assign(window, { campOpenTest: {
   }),
   entryState: () => ({
     selectedAgentId: document.querySelector<HTMLElement>('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector<HTMLElement>('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
     expanded: document.querySelector('.execution-bottom-collapse-button')?.getAttribute('aria-expanded') === 'true',
     drawerLabel: document.querySelector('.execution-drawer')?.getAttribute('aria-label') ?? null
   }),
