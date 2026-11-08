@@ -1621,9 +1621,8 @@ export class DingTalkChannelSettingsService {
         if (source) {
           const params = dingtalkNativeQuestionCard(source)
           if (externalId) {
-            const text = nativeCardResultText({ status: source.interaction.status })
             await api.updateCard(externalId, params, { cardUpdateOptions: { updateCardDataByKey: true, updatePrivateDataByKey: true },
-              ...(source.ownerUserId ? { privateData: { [source.ownerUserId]: { cardParamMap: { question_desc: text } } } } : {}) })
+              ...(source.ownerUserId ? { privateData: { [source.ownerUserId]: { cardParamMap: { question_desc: params.question_desc } } } } : {}) })
           } else if (source.interaction.status === 'pending') {
             if (!source.ownerUserId) throw new Error('native_card_owner_identity_missing')
             const sent = await api.createAndDeliverCard({ outTrackId: DINGTALK_NATIVE_CARD_PREFIX + source.deliveryId,

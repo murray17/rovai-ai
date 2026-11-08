@@ -3,10 +3,15 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-11-06
+last_updated: 2026-11-08
 ---
 
 # 钉钉渠道架构
+
+Pi 原生问答完成后，既有 Outbox 更新原卡，消费 Core 保存的问题与首次成功答案的有限预览。
+公共正文与操作者私有提示使用相同结果文本，避免清理错误时退回仅有“已发送”。继续使用现有官方 Form 模板，
+其描述最多两行，不能视为与飞书/Lark 相同的多行展示。精确行为见
+[Native Interactions v1](../contracts/native-interactions-v1.md#钉钉只读结果卡)。
 
 字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v14](../contracts/dingtalk-channel-v14.md)，当前异步入站/外发语义见
 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)，credential 与 Developer Session 持久化见

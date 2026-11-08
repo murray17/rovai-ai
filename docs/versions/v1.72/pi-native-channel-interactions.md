@@ -2,7 +2,7 @@
 document_type: implementation-record
 version: v1.72
 status: in-progress
-last_updated: 2026-11-07
+last_updated: 2026-11-08
 ---
 
 # Pi 原生问答渠道桥接
@@ -170,3 +170,33 @@ Pi 配置及 MCP 路径独立；日常 App 未重启或停止，临时模型凭�
 
 同一 Bot 的其他连接在验收时仍在线，部分点击未到测试连接；本轮不宣称竞争连接下的首击可靠性，
 也没有为验收增加产品答案重试。客户端截图随 Thread 交付，手机端和钉钉跨企业验收继续保留未完成边界。
+
+## 钉钉结果卡补齐与 Lark 核对（2026-11-08）
+
+Work item: 钉钉完成卡保留问题和实际回答，核对 Lark/飞书展示一致性。
+Worktree: `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-dingtalk-native-result-cards`。
+Branch: `rovai/dingtalk-native-result-cards`；Base: `e12d3eaf2d65182402e147405422acab11262306`。
+Governance: none；复用既有有限预览与 Outbox；不改变原生问答、权限或运行收尾合同。
+Status: ready；本分支独立推送，等待后续 PR 指令。
+
+钉钉补用同一 `questionPreview / answerPreview`，完成后标题保留队员与原问题，正文显示实际回答，
+已有角标显示结果，移除表单控件。操作者的私有错误覆盖也写入同一结果正文，避免公共卡片更新正确但
+本人仍只见“已发送”。旧投递不回填；既有原生 writer、首次成功保护和卡片更新重试不变。
+
+官方通用 Form 模板的描述 `BaseText.maxLine=2`。真实桌面客户端确认长内容被省略，点击也不会展开；
+因此将问题放标题，为正文保留答案空间。长标题会压缩角标，长文本仍受两行限制；这项改动不能宣称与
+飞书/Lark 完全相同的多行视觉效果。继续复用原模板，不增加专属模板、展开、分页或新的结果消息。
+
+Lark 与飞书共用 `ChannelSettingsService`、卡片 renderer 与回调流程，仅由 Provider Profile 注入域和
+请求前缀。两 Profile 的现有测试同时覆盖完成卡和更新重试；本轮未修改这条共用路径。本机飞书再次确认
+已有完成卡保留问题与答案；Lark 本机已退出登录，本轮没有重新做 Lark 客户端作答，不能把代码/测试核对
+写成新的真实 Lark 回调验收。
+
+本轮钉钉使用生产 renderer/OpenAPI 在真实客户端展示四种方法及跳过的合成完成卡，并将最初展示测试的
+同一个 outTrackId 更新为选择结果；该展示 fixture 不启动 Core/Runtime/LLM，不替代完整原生回路。
+真实发布账号凭据只读入内存，不写入 fixture。展示边界与当前源 hash 记录在
+[验收证据](evidence/dingtalk-native-result-cards-2026-11-08.json)。
+
+现有卡片、钉钉 Main 与双 Profile 服务测试共 166 条通过，typecheck、Desktop build 与默认 Rust workspace
+484 条通过（1 条既有 ignored）。原 Rust 渠道归属 owner 定向通过；只扩展原 owner 的预览断言，
+没有新增 Rust 测试函数。完整问题与原生答案处理没有新增存储或提交路径。

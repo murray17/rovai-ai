@@ -121,6 +121,9 @@ export async function sendFeishuNativeQuestion(client: Pick<LarkChannel['rawClie
 export function dingtalkNativeQuestionCard(source: NativeCardSource): Record<string, string> {
   const question = source.interaction.questions[0]
   const pending = source.interaction.status === 'pending'
+  const resultText = nativeCardResultText({ status: source.interaction.status })
+  const resultState = source.interaction.status === 'sent' ? '回答已发送' : resultText
+  const hasResultPreview = !pending && source.questionPreview != null
   const supported = question && source.interaction.questions.length === 1 && source.interaction.canSkip
     && (question.prefill?.length ?? 0) <= 4000 && (question.placeholder?.length ?? 0) <= 200
     && question.title.length <= 500 && (question.description?.length ?? 0) <= 4000
@@ -137,9 +140,10 @@ export function dingtalkNativeQuestionCard(source: NativeCardSource): Record<str
   }
   const params: Record<string, string> = {
     question_id: DINGTALK_QUESTION_ACTION_PREFIX + Buffer.from(JSON.stringify(metadata)).toString('base64url'),
-    question_title: `${source.agentDisplayName} · Pi`,
-    question_desc: pending ? supported ? deadline(source) ?? '' : fallback : nativeCardResultText({ status: source.interaction.status }),
-    card_status: pending && supported ? 'pending' : 'submitted', form_btn_text: pending ? '提交' : nativeCardResultText({ status: source.interaction.status }),
+    question_title: `${source.agentDisplayName} · ${hasResultPreview ? source.questionPreview : 'Pi'}`,
+    question_desc: pending ? supported ? deadline(source) ?? '' : fallback
+      : hasResultPreview ? source.interaction.status === 'sent' ? source.answerPreview ?? resultState : resultState : resultText,
+    card_status: pending && supported ? 'pending' : 'submitted', form_btn_text: pending ? '提交' : hasResultPreview ? resultState : resultText,
     form: JSON.stringify({ fields })
   }
   if (Buffer.byteLength(JSON.stringify(params)) > 24_000) return { ...params, card_status: 'submitted', question_desc: fallback, form: '{"fields":[]}' }

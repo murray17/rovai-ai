@@ -16006,7 +16006,7 @@ mod tests {
             assert_eq!(source.2.thread_id, thread);
             assert_eq!(
                 source.2.question_preview.as_deref(),
-                (provider == FEISHU_PROVIDER).then_some("原问题\n\n 原说明\n第二行 ")
+                Some("原问题\n\n 原说明\n第二行 ")
             );
             assert!(source.2.answer_preview.is_none());
             assert!(
@@ -16120,10 +16120,7 @@ mod tests {
                     .unwrap()
                     .unwrap()
                     .2;
-            assert_eq!(
-                completed.answer_preview.as_deref(),
-                (provider == FEISHU_PROVIDER).then_some(preview.as_str())
-            );
+            assert_eq!(completed.answer_preview.as_deref(), Some(preview.as_str()));
             assert_eq!(
                 native_interactions::authorize_answer(&mut db, &actor, provider, &answer)
                     .unwrap()
@@ -16164,11 +16161,6 @@ mod tests {
                     .iter()
                     .all(|p| !p.contains("未提交的预填文本") && !p.contains("late duplicate"))
             );
-            if provider == DINGTALK_PROVIDER {
-                assert!(payloads.iter().all(|p| !p.contains("private answer")
-                    && !p.contains("questionPreview")
-                    && !p.contains("answerPreview")));
-            }
             let skipped =
                 native_interactions::source_reference(&db, provider, &second.delivery_id, app)
                     .unwrap()
