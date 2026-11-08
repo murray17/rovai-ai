@@ -3,10 +3,22 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-07
+last_updated: 2026-11-08
 ---
 
 # v1.72 实施与验收
+
+## 手机会话身份行对齐（2026-11-08）
+
+按已确认交互稿，在 [`mobile.css`](../../../apps/web/src/mobile.css) 中统一队员消息与独立执行行的身份高度：
+44px 身份行内居中 32px 头像和姓名，模型摘要保留 44px 点击区；静态身份与换行摘要遵循同一首行对齐规则。
+连续消息仍通过既有分组省略重复身份。规则见 [Mobile 会话模型信息](../../ui/host-web-mobile.md#会话模型信息)。
+
+使用既有 `run-presence` 生产组件夹具，在独立 Chrome profile 中检查 360/390/430px 竖屏和 844px 横屏、
+五套配色、长姓名、运行中、长模型名、模型未记录、离队身份、连续消息及减少动效，共 45 组通过；
+头像与姓名中心偏差为 0px，模型点击区至少 44px，无消息区横向溢出，切换配色保留输入草稿。
+另核对三种桌面尺寸的原有身份几何；`pnpm typecheck`、`pnpm build:web` 与既有
+`node --test scripts/lib/run-presence.test.mjs` 通过。此处记录的是生产组件浏览器模拟验收。
 
 ## 项目文件引用（2026-11-07，功能分支验收）
 

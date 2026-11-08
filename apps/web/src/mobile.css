@@ -146,6 +146,26 @@ html[data-mobile-web="true"] .execution-drawer .tool-call-result-scroll { paddin
 html[data-mobile-web="true"] .command-expand-cue { opacity: 1; }
 html[data-mobile-web="true"] .timeline-scroll { padding: 12px 14px 16px; }
 html[data-mobile-web="true"] .conversation-bubble { max-width: 100%; min-width: 0; }
+/* Keep the 32px portrait centered on the model summary's 44px touch row. */
+html[data-mobile-web="true"] .conversation-bubble.agent > .message-author-avatar-trigger {
+  height: 44px;
+}
+html[data-mobile-web="true"] .conversation-bubble.agent > .member-avatar {
+  margin-top: 6px;
+}
+html[data-mobile-web="true"] .conversation-bubble.agent > .message-body > .bubble-meta {
+  min-height: 44px;
+  align-content: flex-start;
+}
+html[data-mobile-web="true"] .conversation-bubble.agent > .message-body > .bubble-meta > :is(.message-author-name-trigger, strong) {
+  display: inline-flex;
+  min-height: 44px;
+  max-width: 100%;
+  align-items: center;
+  margin-block: 0;
+  line-height: 1.4;
+  text-align: left;
+}
 html[data-mobile-web="true"] .conversation-bubble.system { margin-left: 0; }
 html[data-mobile-web="true"] .conversation-bubble.user { width: fit-content; max-width: 90%; margin-left: auto; }
 html[data-mobile-web="true"] .conversation-bubble.user .bubble-meta { justify-content: flex-end; }
