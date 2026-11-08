@@ -9,7 +9,7 @@ confirmed_by: User
 confirmed_at: 2026-11-08T13:56:07Z
 confirmed_revision: 1
 confirmation_message_id: 26011e50-403b-4f3a-a6e7-37e7614b5991
-implementation_status: in_progress
+implementation_status: implemented
 last_updated: 2026-11-08
 base_commit: cab7f7788eddaad3308a9d5574de649ecb1ae6e5
 ---
@@ -41,6 +41,7 @@ User sequence 51 提供完整前后方案，sequence 53 明确未上线功能不
 对话和使命保留完整标题及目标 ID，不取 basename。
 标签仅保护 Markdown/GFM 中可改变文字或结构的 `\ [] * _ ~ < & |` 及反引号；点号、短横线、括号等保持原样。
 两端共用同一组输入输出样例。调用方原有控制字符和标题空白处理保持，URI 编码不与标签转义混用。
+新生成的 Markdown 导出复用同一正文投影，保留结构化引用的链接目标；HTML/PNG 继续静态展示。
 
 ## 明确不变
 
@@ -69,3 +70,24 @@ User sequence 51 提供完整前后方案，sequence 53 明确未上线功能不
 复用正式 Desktop／认证 Web 验收，检查目录详情动作、正常无重试、错误可重试、焦点与复制。
 真实读取沿用现有同名和特殊路径任务，不新增兼容矩阵、性能框架或平台资格测试。
 PR/实施结果记录实际命令与通过、失败和未测范围。
+
+### 实际结果
+
+- `pnpm typecheck` 通过；`TZ=UTC pnpm exec vitest run --maxWorkers=4`：274 文件、3187 项通过，2 项原有跳过。
+- `cargo test --workspace --jobs 4 -- --test-threads=4`：484 项通过，1 项原有忽略；
+  extended-tests 下现有 `camp_content::` 16 项、`thread_reference::` 1 项通过，共用 15 组标签样例。
+- `pnpm test:message-export-ui` 三组通过：Markdown 保留结构化引用目标，HTML/PNG 及回复摘要仍静态展示；
+  原有代码围栏、网页链接、图片、窄屏与完整会话导出检查通过。
+- `CARGO_BUILD_JOBS=4 pnpm package:mac:daily` 完成 arm64 ad-hoc 验签；
+  `node scripts/accept-project-file-references.mjs --packaged` 的 Desktop／认证 Web 25 项通过。
+  [界面结果](reference-projection-simplification-ui-evidence.json)包含正常文件/目录菜单、目录消息结构化复制、
+  失效/协议错误与重试、迟到响应不能清除发送拒绝、草稿恢复、键盘、输入法、触屏和日夜窄屏。
+- [真实读取证据](reference-projection-simplification-evidence.json)：Codex CLI 与 Claude Code 各运行同名文件、
+  同名目录任务，共 4 项通过。实际冻结输入只有短标签与完整定位；运行时读取选中目标的随机值，未误读另一同名目标。
+  文件内容不注入输入。Core 投影测试源为 `6ffc92493`，后续仅补导出、验收和文档，没有改写该投影。
+- `pnpm docs:test` 10 项通过。本地主 checkout 的通用链接检查受原有未跟踪 `docs/prototypes` 中的失效链接影响；
+  未移动或修改这些原型，也未增加 checker 例外。PR 的干净 checkout 继续执行通用文档门禁。
+
+真实 Runtime 本轮只重跑与短标签定位直接相关的同名文件／目录任务；特殊字符由共享 TS/Rust 样例与
+生产 Markdown/GFM 解析覆盖，没有重跑全运行时特殊路径、工作树资格或性能矩阵。
+没有升级数据库、Host、输入格式或 Charter，没有迁移、历史改写或新增兼容分支。

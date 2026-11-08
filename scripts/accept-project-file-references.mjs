@@ -164,6 +164,8 @@ try {
     await surface.click("document.querySelector('.file-preview-toggle')")
     await clear(surface)
     const directoryCopy="[...document.querySelectorAll('.camp-timeline .inline-project-file button')].filter(node=>node.textContent==='auth').at(-1).closest('[data-message-id]').querySelector('.message-copy-button')"
+    const copyHover=await surface.evaluate(`(()=>{const r=(${directoryCopy}).closest('[data-message-id]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    await surface.send('Input.dispatchMouseEvent',{type:'mouseMoved',...copyHover})
     await surface.click(directoryCopy)
     await surface.wait(`${directoryCopy}.getAttribute('aria-label')==='已复制这条消息'`)
     await surface.click("document.querySelector('#camp-message')"); await key(surface,'v',4)
