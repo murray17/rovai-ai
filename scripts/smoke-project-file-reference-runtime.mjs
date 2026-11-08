@@ -9,13 +9,13 @@ import { launchHost } from './lib/host-test-client.mjs'
 import { pause } from './lib/host-web-browser.mjs'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 import { isolatedFileReferenceRuntimeEnvironment, configureFileReferenceRuntime } from './lib/project-file-reference-runtime-env.mjs'
-if (!process.argv.includes('--real-runtime')) throw Error('Explicit --real-runtime is required (paid model calls; seven original inputs or eight complex-location inputs).')
+if (!process.argv.includes('--real-runtime')) throw Error('Explicit --real-runtime is required (paid model calls; six file-read inputs or eight complex-location inputs).')
 const repository = resolve(import.meta.dirname, '..')
 const identityCases = process.argv.includes('--identity-cases')
 const resumeIndex = process.argv.indexOf(identityCases ? '--remaining-identity-cases' : '--remaining-live-cases')
 const resume = resumeIndex >= 0 ? resolve(process.argv[resumeIndex+1]) : null
-if (identityCases && process.argv.includes('--remaining-live-cases')) throw Error('Complex-location cases cannot resume or rewrite the original R1/R3 evidence.')
-const plannedInputs = identityCases ? 8 : 7
+if (identityCases && process.argv.includes('--remaining-live-cases')) throw Error('Complex-location cases cannot resume or rewrite the original file-read evidence.')
+const plannedInputs = identityCases ? 8 : 6
 const fixture = resume ?? await realpath(await mkdtemp(join(tmpdir(), 'rovai-file-reference-runtime-')))
 const report = resume ? JSON.parse(await readFile(join(fixture,'private-evidence.json'),'utf8')) : { fixture, realRuntime:true, cases:[], qualification:[], startedAt:new Date().toISOString() }
 if (resume && identityCases) {
@@ -156,18 +156,12 @@ try{
     const a=randomBytes(12).toString('hex'),b=randomBytes(12).toString('hex'),log=randomBytes(12).toString('hex')
     await writeFile(join(project,`${suffix}-one.txt`),'NONCE_ONE='+a+'\n');await writeFile(join(project,`${suffix}-two.txt`),'NONCE_TWO='+b+'\n');await writeFile(join(project,`${suffix}-log.txt`),'LOG_NONCE='+log+'\n')
     const threadId=await create(runtime,'Project file real read '+suffix)
-    const first=await input(runtime,threadId,[{kind:'text',text:'Read both referenced files with your file tools and report their NONCE values to this conversation. Do not edit files. After that, when I provide a log file in the next message, read it and report LOG_NONCE. Ask me to provide that log. '},await reference(threadId,`${suffix}-one.txt`),{kind:'text',text:' '},await reference(threadId,`${suffix}-two.txt`)],'R1-'+suffix)
+    const first=await input(runtime,threadId,[{kind:'text',text:'Read both referenced files with your file tools and report their NONCE values to this conversation. Do not edit files. After that, when I provide a log file in the next message, read it and report LOG_NONCE. Ask me to provide that log. '},await reference(threadId,`${suffix}-one.txt`),{kind:'text',text:' '},await reference(threadId,`${suffix}-two.txt`)],'Read-files-'+suffix)
     const result=await first.wait();assert.equal(result.status,'succeeded');assert.ok(result.reply.includes(a)&&result.reply.includes(b),'Actual file nonce values must appear in reply');assert.ok(!result.bodyProjection.includes(a)&&!result.bodyProjection.includes(b),'File bytes are absent from user body');result.success=true
-    const follow=await input(runtime,threadId,[await reference(threadId,`${suffix}-log.txt`)],'R2-file-only-'+suffix)
+    const follow=await input(runtime,threadId,[await reference(threadId,`${suffix}-log.txt`)],'Follow-up-file-'+suffix)
     const followResult=await follow.wait();assert.equal(followResult.status,'succeeded');assert.ok(followResult.reply.includes(log));followResult.success=true
     console.log(JSON.stringify({completed:[result.case,followResult.case],runtime:runtime.kind,nonceRead:true}))
   }
-  const runtime=configured[0]
-  const unknown=await create(runtime,'File only without task')
-  await writeFile(join(project,'unassigned.txt'),'An unrelated fixture. No work has been requested.\n')
-  const unclear=await input(runtime,unknown,[await reference(unknown,'unassigned.txt')],'R3-new-file-only')
-  const unclearResult=await unclear.wait();assert.equal(unclearResult.status,'succeeded')
-  assert.match(unclearResult.reply,/[?？]|需要|what|would|please.*task/iu);assert.equal(await readFile(join(project,'unassigned.txt'),'utf8'),'An unrelated fixture. No work has been requested.\n');unclearResult.success=true
   }
   if (!identityCases) {
   const runtime=configured[0]
@@ -175,7 +169,7 @@ try{
     const name=failure?'unreadable.txt':'live.txt', gate=failure?'read-error.ready':'live.ready', old=randomBytes(12).toString('hex'),next=randomBytes(12).toString('hex')
     await writeFile(join(project,name),'NONCE='+old+'\n')
     const threadId=await create(runtime,'File live/read-error acceptance')
-    const request=await input(runtime,threadId,[{kind:'text',text:`First use your shell tool to wait up to 30 seconds for ${join(project,gate)} to exist. Only after the gate exists, read the referenced file and report its NONCE. If reading fails, report the real error and do not change permissions, retry alternate paths, or modify any files. `},await reference(threadId,name)],failure?'R4-permission-error':'R4-live-content')
+    const request=await input(runtime,threadId,[{kind:'text',text:`First use your shell tool to wait up to 30 seconds for ${join(project,gate)} to exist. Only after the gate exists, read the referenced file and report its NONCE. If reading fails, report the real error and do not change permissions, retry alternate paths, or modify any files. `},await reference(threadId,name)],failure?'Read-permission-error':'Live-content')
     if(failure)await chmod(join(project,name),0);else await writeFile(join(project,name),'NONCE='+next+'\n')
     await writeFile(join(project,gate),'ready\n')
     const result=await request.wait()

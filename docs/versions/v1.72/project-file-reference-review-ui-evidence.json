@@ -48,7 +48,7 @@
   "limitations": [
     "Controlled delivery is deterministic race validation, not a performance benchmark.",
     "Touch and narrow viewport are browser emulation, not real mobile hardware.",
-    "Existing unrelated file preview/navigation baseline failures and the original R3 model-behavior failure are not reclassified."
+    "Existing unrelated file preview/navigation baseline failures are not reclassified."
   ],
   "followUp": {
     "userSequence": 30,

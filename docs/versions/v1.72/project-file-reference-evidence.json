@@ -5,7 +5,7 @@
   "platform": "macOS arm64",
   "scope": "Production Host/Core and actual native Runtime file tools in private fixtures",
   "overallPassed": false,
-  "limitation": "R3 did not ask the User for a task; supplemental R2 Charter proposal is pending. No unconfirmed guidance was injected.",
+  "limitation": "Historical seven-case report. User sequence 37 withdrew the file-specific task-clarification criterion. Original execution outcomes are preserved; the six file-read cases passed.",
   "cases": [
     {
       "case": "R1-codex",
@@ -202,5 +202,11 @@
         }
       ]
     }
-  ]
+  ],
+  "withdrawnAcceptance": {
+    "case": "R3-new-file-only",
+    "byUserMessage": "00029219-aab3-4bce-b3c2-cba60e90970d",
+    "sequence": 37,
+    "reason": "File-specific task clarification is no longer required or a product gate. Original output and passed:false remain unchanged."
+  }
 }
