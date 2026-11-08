@@ -155,6 +155,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     assert_eq!(snapshot(database.connection()), before);
     assert_eq!(indexes(database.connection()), before_indexes);
     database.migrate_project_file_references().unwrap();
+    database.migrate_project_directory_references().unwrap();
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),
         DatabaseContractClassification::Current(_)
