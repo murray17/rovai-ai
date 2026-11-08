@@ -1,5 +1,5 @@
 //! A NativeInteraction is the question authority. The channel Outbox stores only
-//! its routing/terminal markers and card identity. Feishu/Lark additionally keep
+//! its routing/terminal markers and card identity. The three providers also keep
 //! bounded display previews for updating the original card after completion.
 use super::*;
 use crate::native_interaction::{
@@ -116,11 +116,7 @@ pub fn project_pending(
             created_at: question.created_at,
             expires_at: question.expires_at,
             status: Status::Pending,
-            question_preview: if matches!(provider, FEISHU_PROVIDER | LARK_PROVIDER) {
-                question.questions.first().map(|q| q.display_preview())
-            } else {
-                None
-            },
+            question_preview: question.questions.first().map(|q| q.display_preview()),
             answer_preview: None,
         };
         tx.execute("INSERT INTO channel_delivery(id,channel_binding_id,dedupe_key,delivery_kind,priority,target_app_id,source_agent_id,payload_json,status,attempt_count,available_at,created_at,updated_at)

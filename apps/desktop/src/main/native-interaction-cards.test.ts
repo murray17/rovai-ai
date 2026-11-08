@@ -148,6 +148,26 @@ describe('native channel question cards', () => {
     }
     const item = source('input', true), form = JSON.parse(dingtalkNativeQuestionCard(item).form)
     expect(form.fields.find((field: { name: string }) => field.name === 'answer')).toMatchObject({ type: 'TEXT_AREA', required: false, defaultValue: '  初始\n中文  ' })
+    for (const [kind, multiline, answerPreview] of [
+      ['confirm', false, '回答：否'], ['select', false, '已选择：Type something.'],
+      ['input', false, '已提交空文本'], ['input', true, '回答：\n  第一行\n第二行  ']
+    ] as const) {
+      const completed = source(kind, multiline)
+      completed.questionPreview = '原问题'
+      completed.answerPreview = answerPreview
+      completed.interaction.status = 'sent'
+      completed.interaction.questions = []
+      const result = dingtalkNativeQuestionCard(completed)
+      expect(result).toMatchObject({ question_title: '爱丽丝 · 原问题', question_desc: answerPreview,
+        card_status: 'submitted', form_btn_text: '回答已发送', form: '{"fields":[]}' })
+      for (const [status, text] of [['skipped', '已跳过，未提交回答'], ['expired', '回答期限已过'], ['unavailable', '请求已失效']] as const) {
+        completed.interaction.status = status
+        expect(dingtalkNativeQuestionCard(completed)).toMatchObject({ question_title: '爱丽丝 · 原问题', question_desc: text, form_btn_text: text, form: '{"fields":[]}' })
+      }
+      delete completed.questionPreview
+      completed.interaction.status = 'sent'
+      expect(dingtalkNativeQuestionCard(completed)).toMatchObject({ question_title: '爱丽丝 · Pi', question_desc: '已发送' })
+    }
   })
 
   it('keeps an ordinary selection and a later unrelated input as independent native questions', () => {
