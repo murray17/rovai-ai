@@ -4,7 +4,6 @@ import { useTaskCapability } from './TaskCapabilityProvider'
 import { WindowCloseSettings } from './WindowCloseSettings'
 import { GeneralLeadSelect } from './GeneralLeadSelect'
 import { NewConversationQuickHelp } from './NewConversationQuickHelp'
-import { useMobileLayout } from './MobileLayout'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -64,7 +63,6 @@ export function GeneralSettings({
 }): React.JSX.Element {
   if (!api) throw new Error(uiAttribute('通用设置缺少客户端偏好适配。'))
   const tasks = useTaskCapability()
-  const mobile = useMobileLayout()
   const t = useUiText()
   const interfaceLanguage = useInterfaceLanguage()
   const [preferences, setPreferences] = useState<GeneralPreferencesSnapshot | null>(initialPreferences)
@@ -452,7 +450,6 @@ export function GeneralSettings({
         <section className="section-block general-settings-section" aria-labelledby="general-conversation-heading">
           <div className="section-heading"><div><h2 id="general-conversation-heading"><UiText zh={"会话"} /></h2><p><UiText zh={"执行、任务与阅读偏好"} /></p></div></div>
           <div className="general-section-body">
-            {!mobile && <>
             <div className="general-world-map-setting general-execution-auto-open-setting" aria-busy={executionAutoOpenBusy}>
               <span className="general-conversation-title">
                 <label htmlFor="general-execution-auto-open"><strong><UiText zh="自动打开执行台" /></strong></label>
@@ -466,7 +463,6 @@ export function GeneralSettings({
             </div>
             <div className="sr-only" role="status">{executionAutoOpenBusy && <UiText zh="正在保存会话偏好…" />}</div>
             {executionAutoOpenError && <div className="general-inline-status is-error" role="alert"><span>{executionAutoOpenError}</span></div>}
-            </>}
             <div className="general-world-map-setting general-task-setting" aria-busy={tasks.saving}>
               <span className="general-conversation-title">
                 <label htmlFor="general-task-enabled"><strong><UiText zh="会话任务" /></strong></label>

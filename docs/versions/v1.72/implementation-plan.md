@@ -19,9 +19,9 @@ last_updated: 2026-11-08
 同一准入也覆盖初始 snapshot、延迟 snapshot 和 Thread 重入。关闭偏好会消费待处理导航，后续开启不补跳；
 不收起已打开面板，手动导航和现有执行 Tab 恢复继续保留。三项设置顺序和说明遵循
 [通用设置 brief](../../ui/surfaces/settings-workspace.md#通用)，复用现有生产问号帮助组件。
-通用设置复用同一 MobileLayout：移动布局移除自动打开行、问号与保存反馈；回到宽屏保留已保存值。
-设置 owner 通过生产 `useMobileViewport` 实际跨越 767／768 CSS 像素边界验证隐藏与恢复，
-同时确认会话任务和世界地图仍保留；本项类型检查、GeneralSettings 五项及隔离设置 owner 均通过。
+通用设置在 Desktop、Web、Mobile 均展示同一开关、问号与保存反馈，不按视口或布局隐藏。
+Mobile 允许正常开关和保存；执行入口仍始终手动，不受该值影响。设置 owner 切换生产 MobileLayout
+上下文验证三项均展示、开关双向保存和布局切换后保留值；执行选择 owner 继续覆盖 Mobile 开启时不自动打开。
 
 隔离 Electron 执行选择 owner 已通过三种承载位置的关闭／开启、运行中进入、延迟 Run 发布、
 关闭时保留选择、显式通知定位、等待期间关闭及 Mobile 强制手动场景；原有队员／总览记忆、文件保护、

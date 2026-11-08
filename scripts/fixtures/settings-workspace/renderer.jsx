@@ -4,7 +4,7 @@ import { ThreadNavigation } from '@renderer/ThreadNavigation'
 import { WindowDragStrip } from '@renderer/BusinessApp'
 import { HostWebSettings } from '@renderer/HostWebSettings'
 import { GeneralSettings } from '@renderer/GeneralSettings'
-import { MobileLayoutProvider, useMobileViewport } from '@renderer/MobileLayout'
+import { MobileLayoutProvider } from '@renderer/MobileLayout'
 import { AppearanceSettings } from '@renderer/AppearanceSettings'
 import { NotificationSettings } from '@renderer/NotificationSettings'
 import { editableSnapshot, configurationFromSnapshot, withSnapshotValue } from '@renderer/runtime-startup-editor'
@@ -170,7 +170,7 @@ Object.assign(window, { rovai: {
 } })
 
 function Fixture() {
-  const mobile = useMobileViewport(true)
+  const [mobile, setMobile] = useState(false)
   const [page, setPage] = useState('general')
   const [remotePort, setRemotePort] = useState(null)
   const [generation, setGeneration] = useState(0)
@@ -179,6 +179,7 @@ function Fixture() {
   const [updateError, setUpdateError] = useState(null)
   const [runtimeHealth, setRuntimeHealth] = useState(fixture.healthSnapshot)
   Object.assign(window.settingsTest, {
+    setMobile,
     setRuntimeChecking: (runtimeKind, checking) => setRuntimeHealth(health => ({
       ...health, runtimeAvailability: health.runtimeAvailability.map(item => item.runtimeKind === runtimeKind ? { ...item, checking, status: checking ? 'checking' : 'ready' } : item)
     })),
