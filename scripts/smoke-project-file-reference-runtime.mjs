@@ -13,10 +13,12 @@ if (!process.argv.includes('--real-runtime')) throw Error('Explicit --real-runti
 const repository = resolve(import.meta.dirname, '..')
 const directoryCases = process.argv.includes('--directory-cases')
 const identityCases = directoryCases || process.argv.includes('--identity-cases')
+const sameNameOnly = process.argv.includes('--same-name-only')
+if (sameNameOnly && !identityCases) throw Error('--same-name-only requires file or directory identity cases')
 const resumeIndex = process.argv.indexOf(directoryCases ? '--remaining-directory-cases' : identityCases ? '--remaining-identity-cases' : '--remaining-live-cases')
 const resume = resumeIndex >= 0 ? resolve(process.argv[resumeIndex+1]) : null
 if (identityCases && process.argv.includes('--remaining-live-cases')) throw Error('Complex-location cases cannot resume or rewrite the original file-read evidence.')
-const plannedInputs = identityCases ? 8 : 6
+const plannedInputs = sameNameOnly ? 2 : identityCases ? 8 : 6
 const fixtureIndex = process.argv.indexOf('--fixture')
 const explicitFixture = fixtureIndex >= 0 ? resolve(process.argv[fixtureIndex+1]) : null
 if(explicitFixture&&!resume)assert.equal((await readdir(explicitFixture)).length,0,'Explicit fixture must be empty')
@@ -29,6 +31,7 @@ if (resume && identityCases) {
   delete report.error
 }
 report.scope = directoryCases ? 'directory-locations' : identityCases ? 'complex-file-locations' : 'original-R1-matrix'
+report.caseSubset = sameNameOnly ? 'same-name' : 'all'
 const data = join(fixture,'data'), project = join(fixture,'project'), binaries = join(fixture,'bin')
 for(const directory of [data, project, binaries])await mkdir(directory,{mode:0o700,recursive:true})
 for(const name of ['rovai-host','rovai'])await cp(join(repository,'target/debug',name),join(binaries,name))
@@ -116,6 +119,10 @@ try{
       const result=await work.wait();assert.equal(result.status,'succeeded');assert.ok(result.reply.includes(selected));assert.ok(!result.reply.includes(decoy));assert.ok(!result.bodyProjection.includes(selected)&&!result.bodyProjection.includes(decoy))
       assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').pathAtSend,await realpath(path))
       if(directoryCases){assert.equal(result.content.find(segment=>segment.kind==='project_file_reference').targetKind,'directory');assert.ok(result.bodyProjection.includes('/)'))}
+      const shortName=relative.split('/').at(-1)
+      assert.ok(result.bodyProjection.includes(`[${shortName}](`),'Body uses the short name')
+      assert.ok(result.frozenInputs.some(text=>text.includes(`[${shortName}](`)),'Short name survives input freezing')
+      assert.ok(result.frozenInputs.every(text=>!text.includes(selected)&&!text.includes(decoy)),'File contents are not injected')
       result.expectedPath=await realpath(path);result.selectedNonce=selected;result.decoyNonce=decoy;result.success=true
       return result
     }
@@ -128,6 +135,7 @@ try{
       if(directoryCases){await mkdir(join(project,'src/billing/config'),{recursive:true});await writeFile(join(project,'src/billing/config/marker.txt'),selected)}else await writeFile(join(project,'src/billing/config.ts'),`export const NONCE = '${selected}'\n`)
       await verify(runtime,await create(runtime,'Same-name file identity '+suffix),directoryCases?'src/billing/config':'src/billing/config.ts',join(project,directoryCases?'src/billing/config':'src/billing/config.ts'),selected,decoy,'I1-same-name-'+suffix)
       }
+      if (sameNameOnly) continue
       if (!done('I2-special-path-'+suffix)) {
       selected=randomBytes(12).toString('hex');decoy=randomBytes(12).toString('hex')
       const special=directoryCases?'src/中文 目录/参数 (草稿)#1':'src/中文 目录/参数 (草稿)#1.ts'

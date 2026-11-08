@@ -1503,3 +1503,6 @@ User 已确认目录与文件共用候选及发送链路，模型只获得目录
 根层省略辅助路径，四个候选 Tab 分开，桌面宽度 480px。正式目录 URI 仍保留尾斜线。
 范围与确认见[独立 R1](model-context-change-project-directory-reference.md)，
 工作目录、冻结验证及实际结果见[实施记录](project-directory-reference-implementation.md)。
+
+引用正文精简按 [R1](model-context-change-reference-projection-simplification.md)收敛：文件／目录只投影名称，完整 URI 和身份保持；
+链接标签采用必要转义，详情按类型与状态精简。按 User 明确的未上线范围，不升级格式号、不增加迁移或兼容分支。

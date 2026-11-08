@@ -30,7 +30,17 @@ describe('message export boundaries', () => {
   it('preserves code/link Markdown, projects internal references and treats names as literal text', () => {
     const code = '\n```diff\n-old\n+new\n```\n[site](https://example.com)'
     const result = exportMessageMarkdown('', [{ kind: 'member_mention', agentId: 'a' }, { kind: 'text', text: code }, { kind: 'thread_reference', threadId: 'secret-id', titleAtSend: '[thread]' }], new Map([['a', '<img src=x>']]), '你')
-    expect(result).toContain(code); expect(result).toContain('\\[thread\\]'); expect(result).not.toContain('secret-id'); expect(result).toContain('\\<img src=x\\>')
+    expect(result).toContain(code); expect(result).toContain('[\\[thread\\]](rovai://thread/secret-id)'); expect(result).toContain('\\<img src=x\\>')
+  })
+  it('exports published file, directory and mission links through their shared projectors', () => {
+    const result = exportMessageMarkdown('', [
+      { kind: 'project_file_reference', threadId: 't', rawReference: 'file', pathAtSend: '/workspace/src/中文 (draft)#1.ts', labelAtSend: 'src/中文 (draft)#1.ts' },
+      { kind: 'text', text: '\n' },
+      { kind: 'project_file_reference', threadId: 't', rawReference: 'directory', pathAtSend: '/workspace/src/auth', labelAtSend: 'src/auth', targetKind: 'directory' },
+      { kind: 'text', text: '\n[untrusted](file:///private/other.ts) ' },
+      { kind: 'mission_reference', missionId: 'mission-id', titleAtSend: '登录-重构 v1.2' }
+    ], new Map(), '你')
+    expect(result).toBe('[中文 (draft)#1.ts](file:///workspace/src/%E4%B8%AD%E6%96%87%20%28draft%29%231.ts)\n[auth](file:///workspace/src/auth/)\nuntrusted [登录-重构 v1.2](rovai://mission/mission-id)')
   })
   it('exports file/internal links as labels while leaving literal code and web links intact', () => {
     const code = '`[source](file:///private/source.ts)`\n\n```md\n[thread](rovai://thread/example)\n```'

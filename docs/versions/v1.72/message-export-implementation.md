@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.72
 lifecycle: current
 authority: message-export-implementation
-last_updated: 2026-11-04
+last_updated: 2026-11-08
 ---
 
 # 消息导出实施记录
@@ -20,7 +20,8 @@ HTML/PNG 的头像、作者、时间、发送对象默认勾选；Markdown 不�
   不遍历公屏执行区；内部动作转为静态元素，清洗消息 HTML，仅 HTTP(S) 链接保留可跳转行为。
   原图经既有 `ImageGallery` 受控附件/输出图读取和 Blob 缓存进入导出，不新增路径读取或上传接口。
 - HTML 内嵌栅格图片原始字节与计算后的主题样式，保留可重排的正文布局，提供固定复制代码/图片放大行为。
-  PNG 从固定 720px 阅读面生成，超限明确失败而不截断；Markdown 保留原围栏和链接文本、结构化引用的展示名。
+  PNG 从固定 720px 阅读面生成，超限明确失败而不截断；Markdown 保留原围栏，结构化引用复用正文链接投影。
+  文件／目录使用短名称与完整 URI，对话／使命使用完整标题与原目标；普通文本中非 HTTP(S) 链接仍降为静态文字。
 - `MessageQuotes` 的原生选区浮条只保留引用，不改引用保存、复制与定位语义。
 - `ConversationExportReader` 从新的 `threads.open` 连续尾部开始分页穷尽历史，固定消息序号上界，
   独立于浏览缓存、远端定位窗口和主会话滚动。任务代际隔离取消、切换与迟到响应；撤回/删除或重同步

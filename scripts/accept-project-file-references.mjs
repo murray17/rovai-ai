@@ -90,6 +90,13 @@ try {
   }
   const type = (surface, text) => surface.send('Input.insertText', { text })
   const rendered = surface => surface.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))')
+  const openFileActions = async surface => {
+    await surface.wait("!document.querySelector('.project-file-actions')")
+    await rendered(surface)
+    const point=await surface.evaluate("(()=>{const r=document.querySelector('#camp-message .project-file-reference').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()")
+    for(const type of ['mouseMoved','mousePressed','mouseReleased']) await surface.send('Input.dispatchMouseEvent',{type,...point,button:'right',clickCount:1})
+    await surface.wait("Boolean(document.querySelector('.project-file-actions'))")
+  }
   const choose = async (surface, query, name) => {
     await surface.evaluate("window.__fileInputEvents=[];for(const name of ['beforeinput','input','compositionstart','compositionend'])document.querySelector('#camp-message').addEventListener(name,event=>window.__fileInputEvents.push({name,data:event.data,inputType:event.inputType}),true)")
     await type(surface, '@'+query)
@@ -129,7 +136,10 @@ try {
     await surface.wait(`Boolean(JSON.parse(localStorage.getItem('rovai.camp-composer-draft.v1:${thread}')??'null')?.content?.segments.some(s=>s.kind==='atom'&&s.atom.targetKind==='directory'))`)
     const draft = await surface.evaluate(`JSON.parse(localStorage.getItem('rovai.camp-composer-draft.v1:${thread}')??'null').content`)
     assert.equal(draft.segments.find(s=>s.kind==='atom').atom.targetKind,'directory')
-    await surface.click("document.querySelector('#camp-message .project-file-reference')")
+    await openFileActions(surface)
+    assert.deepEqual(await surface.evaluate("[...document.querySelectorAll('.project-file-actions button')].map(node=>node.textContent)"), ['打开目录','重新选择','移除引用'])
+    assert.equal(await surface.evaluate("document.querySelectorAll('.project-file-actions .project-folder-icon').length"),1)
+    await surface.click("[...document.querySelectorAll('.project-file-actions button')].find(node=>node.textContent==='打开目录')")
     await surface.wait("Boolean(document.querySelector('.project-files-row[aria-selected=true][title=\"src/auth\"]'))")
     assert.deepEqual(await surface.evaluate("[...document.querySelectorAll('.project-files-row[aria-level=\"1\"]')].map(node=>node.title)"), ['bulk','missing.log','package.json','README.md','src'])
     assert.equal(await surface.evaluate("document.querySelector('.project-files-row[aria-selected=true]').getAttribute('aria-expanded')"),'true')
@@ -153,7 +163,18 @@ try {
     await surface.wait("Boolean(document.querySelector('.project-files-row[aria-selected=true][title=\"src/auth\"]'))")
     await surface.click("document.querySelector('.file-preview-toggle')")
     await clear(surface)
-    checks.push((surface === desktop ? 'Desktop' : 'Web')+' file/folder candidates use mixed name order; directory selection has no slash, keeps targetKind, uses 480px aligned single-category candidates, publishes and reopens in the file tree')
+    const directoryCopy="[...document.querySelectorAll('.camp-timeline .inline-project-file button')].filter(node=>node.textContent==='auth').at(-1).closest('[data-message-id]').querySelector('.message-copy-button')"
+    const copyHover=await surface.evaluate(`(()=>{const r=(${directoryCopy}).closest('[data-message-id]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    await surface.send('Input.dispatchMouseEvent',{type:'mouseMoved',...copyHover})
+    await surface.click(directoryCopy)
+    await surface.wait(`${directoryCopy}.getAttribute('aria-label')==='已复制这条消息'`)
+    await surface.click("document.querySelector('#camp-message')"); await key(surface,'v',4)
+    await surface.wait("Boolean(document.querySelector('#camp-message .project-folder-icon'))")
+    await surface.wait(`JSON.parse(localStorage.getItem('rovai.camp-composer-draft.v1:${thread}')??'null')?.content?.segments.some(s=>s.kind==='atom'&&s.atom.targetKind==='directory')`)
+    const restored = await surface.evaluate(`JSON.parse(localStorage.getItem('rovai.camp-composer-draft.v1:${thread}')).content.segments.find(s=>s.kind==='atom'&&s.atom.type==='project_file_reference').atom`)
+    assert.deepEqual(restored,draft.segments.find(s=>s.kind==='atom'&&s.atom.type==='project_file_reference').atom)
+    await clear(surface)
+    checks.push((surface === desktop ? 'Desktop' : 'Web')+' mixed name order, short directory labels and lean directory actions work; publication, tree activation and message copy preserve directory identity')
   }
   await directoryFlow(desktop)
   await choose(desktop, 'package.json', 'package.json')
@@ -314,17 +335,14 @@ try {
   await browser.wait("Boolean(document.querySelector('#camp-message .project-file-reference'))")
   checks.push('published file renders and previews; whole-message copy restores a structured file atom')
   await clear(browser); await choose(browser,'missing.log','missing.log')
+  let refreshSequence=0
   const checkFile = async (override) => {
-    const token="document.querySelector('#camp-message .project-file-reference')"
-    // Let Radix finish closing/restoring focus before another native context menu.
-    await browser.wait("!document.querySelector('.project-file-actions')")
-    await browser.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))')
-    await browser.wait(`(()=>{const element=${token};const r=element.getBoundingClientRect();return element.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()`)
-    const point=await browser.evaluate(`(()=>{const r=${token}.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-    for(const type of ['mouseMoved','mousePressed','mouseReleased'])await browser.send('Input.dispatchMouseEvent',{type,...point,button:'right',clickCount:1})
-    await browser.wait("Boolean(document.querySelector('.project-file-actions'))")
+    await openFileActions(browser)
+    if(await browser.evaluate("document.querySelector('#camp-message .project-file-reference').getAttribute('data-availability')==='available'")) assert.deepEqual(await browser.evaluate("[...document.querySelectorAll('.project-file-actions button')].map(node=>node.textContent)"),['打开预览','重新选择','移除引用'])
     const held=await holdProjectFileRequest(browser,'projectFileReferences.resolve',undefined,override)
-    await browser.click("[...document.querySelectorAll('.project-file-actions button')].find(node=>node.textContent==='重新检查')")
+    // Existing directory invalidation refreshes availability without a normal-state Retry action.
+    const snapshot=await call('threads.open',{threadId:quick,traceId:randomUUID()})
+    assert.equal((await call('threads.rename',{commandId:randomUUID(),command:{threadId:quick,expectedVersion:snapshot.thread.version,title:`Project files · refresh ${++refreshSequence}`}})).status,'applied')
     return held()
   }
   const rootFailure=await checkFile({ok:false,error:{code:'root_unavailable'}})
@@ -332,14 +350,14 @@ try {
   await browser.wait("document.querySelector('.project-file-actions [role=status]')?.textContent.includes('引用当前不可用')")
   assert.equal(await browser.evaluate(`${sendAction}.disabled`),true)
   assert.equal(await browser.evaluate("document.querySelector('.project-file-actions').textContent.includes('连接失败')"),false)
-  await browser.click("[...document.querySelectorAll('.project-file-actions button')].find(node=>node.textContent==='重新检查')")
+  await browser.click("[...document.querySelectorAll('.project-file-actions button')].find(node=>node.textContent==='重试')")
   await browser.wait("!document.querySelector('#camp-message .is-unavailable')")
   await key(browser,'Escape')
   const protocolFailure=await checkFile({ok:true,value:[]})
   await releaseProjectFileRequest(browser,protocolFailure)
   await browser.wait("document.querySelector('.project-file-actions [role=status]')?.textContent.includes('文件服务响应异常')")
   assert.equal(await browser.evaluate(`${sendAction}.disabled`),true)
-  await browser.click("[...document.querySelectorAll('.project-file-actions button')].find(node=>node.textContent==='重新检查')")
+  await browser.click("[...document.querySelectorAll('.project-file-actions button')].find(node=>node.textContent==='重试')")
   await browser.wait("!document.querySelector('#camp-message .is-unavailable')")
   await key(browser,'Escape')
   checks.push('controlled request-level business and protocol errors have distinct UI states and block sending without claiming a connection failure')

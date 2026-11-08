@@ -35,8 +35,11 @@ describe('complete export source projection', () => {
     expect(entries.map((entry, i) => exportEntryShowsTime(entry, entries[i + 1]))).toEqual([true, false, true])
     const markdown = messageExportMarkdown('完整会话', entries, defaultMessageExportOptions('markdown'))
     for (const expected of ['旧消息根正文', '@Bob', '[site](https://example.com)', '关联讨论', '报告\\.pdf', 'output\\.png']) expect(markdown).toContain(expected)
-    expect(markdown).not.toContain('internal-id')
+    expect(markdown).toContain('[关联讨论](rovai://thread/internal-id)')
     expect(source).toEqual(untouched)
+    const quoted = conversationExportEntries(projection(), [response, message(4, { replyToThreadMessageId: response.id })], user)
+    expect(quoted[1].reply).toContain('关联讨论')
+    expect(quoted[1].reply).not.toContain('internal-id')
   })
   it('never leaks a withdrawn or deleted reply parent, while preserving captured quote text', () => {
     const parent = message(1, { withdrawn: true, body: '撤回后的旧正文' })

@@ -4,6 +4,8 @@ import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import type { Root, RootContent } from 'mdast'
 import { uiAttribute } from './interface-language'
+import { projectFileLink } from './project-file-reference'
+import { projectReference } from './thread-reference'
 
 export type MessageExportFormat = 'html' | 'png' | 'markdown'
 export type MessageExportOptions = { avatars: boolean; authors: boolean; times: boolean; recipients: boolean }
@@ -40,7 +42,7 @@ export function createMessageExportEntry(message: ThreadMessageView, context: {
   const quoted = (message.quotes ?? []).map(q => `${q.authorAtCapture?.displayName ?? ''}：${q.text}`)
   const reply = message.replyToThreadMessageId
     ? parent && !parent.withdrawn
-      ? `${uiAttribute('回复')} ${campMessageAuthorLabel(parent, memberById, currentUserName)} · ${exportMessageMarkdown(parent.body, parent.content, names, currentUserName).replace(/\\([\\`*_{}\[\]()<>#+.!|~-])/g, '$1').slice(0, 240)}`
+      ? `${uiAttribute('回复')} ${campMessageAuthorLabel(parent, memberById, currentUserName)} · ${staticReferenceMarkdown(exportMessageMarkdown(parent.body, parent.content, names, currentUserName)).replace(/\\([\\`*_{}\[\]()<>#+.!|~-])/g, '$1').slice(0, 240)}`
       : uiAttribute('引用的消息当前不可用')
     : ''
   return { message: structuredClone(message), author: campMessageAuthorLabel(message, memberById, currentUserName),
@@ -65,13 +67,15 @@ export function toggleExportSelection(ids: ReadonlySet<string>, messages: readon
 }
 export const literalMarkdown = (text: string): string => text.replace(/([\\`*_{}\[\]()<>#+.!|~-])/g, '\\$1')
 const markdownParser = unified().use(remarkParse)
-/** Project internal/file links as text without rewriting fences or ordinary web links. */
-function staticReferenceMarkdown(source: string): string {
+/** Preserve published reference projections; flatten other internal/file links without rewriting code or web links. */
+function staticReferenceMarkdown(source: string, publishedReferences?: ReadonlySet<string>): string {
   const tree = markdownParser.parse(source) as Root
   const definitions = new Map(tree.children.flatMap(n => n.type === 'definition' ? [[n.identifier, n.url]] as const : []))
   const edits: { from: number; to: number; text: string }[] = []
   const label = (node: RootContent): string => 'children' in node ? node.children.map(child => label(child as RootContent)).join('') : 'value' in node ? node.value : 'alt' in node ? node.alt ?? '' : ''
   const visit = (node: RootContent): void => {
+    if (node.type === 'link' && node.position?.start.offset !== undefined && node.position.end.offset !== undefined
+      && publishedReferences?.has(source.slice(node.position.start.offset, node.position.end.offset))) return
     const url = node.type === 'link' || node.type === 'definition' ? node.url : node.type === 'linkReference' || node.type === 'imageReference' ? definitions.get(node.identifier) : undefined
     if (url !== undefined && !/^https?:\/\//i.test(url) && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
       edits.push({ from: node.position.start.offset, to: node.position.end.offset, text: node.type === 'definition' ? '' : literalMarkdown(node.type === 'imageReference' ? `图片：${node.alt ?? ''}（${url}）` : label(node)) })
@@ -83,17 +87,21 @@ function staticReferenceMarkdown(source: string): string {
 }
 export function exportMessageMarkdown(body: string, content: StructuredThreadMessageContent | null, names: ReadonlyMap<string, string>, currentUser: string): string {
   if (!content?.length) return staticReferenceMarkdown(body)
+  const publishedReferences = new Set<string>()
   return staticReferenceMarkdown(content.map(s => {
     if (s.kind === 'text') return s.text
     if (s.kind === 'member_mention') return literalMarkdown('@' + (names.get(s.agentId) ?? '不可用队员'))
     if (s.kind === 'current_user_mention') return literalMarkdown('@' + currentUser)
     if (s.kind === 'all_members_mention') return '@所有队员'
-    if (s.kind === 'project_file_reference') return literalMarkdown(s.labelAtSend)
+    if (s.kind === 'project_file_reference' || s.kind === 'thread_reference' || s.kind === 'mission_reference') {
+      const link = s.kind === 'project_file_reference' ? projectFileLink(s) : projectReference(s)
+      publishedReferences.add(link)
+      return link
+    }
     if (s.kind === 'skill_mention') return literalMarkdown('/' + s.nameAtSend)
-    if (s.kind === 'thread_reference' || s.kind === 'mission_reference') return literalMarkdown(s.titleAtSend)
     return '> ' + literalMarkdown(s.senderDisplayName + '：' + s.body).replaceAll('\n', '\n> ')
       + s.attachmentSummaries.map(a => '\n> ' + literalMarkdown(a.name)).join('')
-  }).join(''))
+  }).join(''), publishedReferences)
 }
 export function messageExportMarkdown(title: string, entries: readonly MessageExportEntry[], options: MessageExportOptions): string {
   return '# ' + literalMarkdown(title) + '\n\n' + entries.map(e => {
