@@ -1,7 +1,7 @@
 ---
 document_type: implementation-plan
 version: v1.72
-status: in_progress
+status: verified
 last_updated: 2026-11-08
 ---
 
@@ -12,12 +12,12 @@ last_updated: 2026-11-08
 | 字段 | 当前记录 |
 | --- | --- |
 | Work item | 项目文件/目录共同提及与候选显示收敛 |
-| Worktree | `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-project-directory-references` |
+| Worktree（实施期间） | `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-project-directory-references` |
 | Branch | `rovai/project-directory-references` |
 | Base | `e12d3eaf2d65182402e147405422acab11262306` |
 | Governance | none；无主线先行要求；R1 由 User sequence 47 确认 |
-| Status | active |
-| Next | 实现、定向和集成检查、PR/合并、非终止本机安装、清理 worktree |
+| Status | implementation verified |
+| Delivery | [PR #1031](https://github.com/murray17/rovai-ai/pull/1031)；合并、本机非终止安装与工作目录清理以 PR 和公共 Thread 的实际回执为准 |
 
 ## 实施范围
 
@@ -70,4 +70,21 @@ Codex CLI 0.166.0 与 Claude Code 2.1.311 各完成同名目录、中文特殊�
 
 ### 完整门禁与交付
 
-完整 JS/Rust 门禁、PR 检查和打包安装仍在收口；以下记录将在实际完成后更新，不能从上述定向通过推断其已完成。
+实施代码固定为 `3ef52b19c6c6d5bb722621440619b695abb33c9b`（含当时最新 main）；以下证据只对该代码及其后纯文档补记成立。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| `pnpm test` 全部步骤 | 通过；本地设置 `TZ=UTC`、Vitest 4 workers，273 个文件中 3171 通过／2 原有跳过；后续 Node owner 377 通过／2 平台跳过，文档／Skill／Electron 支持门禁均通过 |
+| `cargo test --workspace --jobs 4 -- --test-threads=4` | 默认 workspace 484 通过／1 原有 ignored，零失败，doc-tests 通过 |
+| `cargo test -p rovai-core --features extended-tests,slow-tests --lib <owner> --jobs 4` | camp_content 16、project_files 3、Pending 原子事务 1 全部通过 |
+| `DOCS_BASE_REF=aa3aee51e pnpm docs:check:ci` | 通用版本、文档与决定门禁通过，无特例 |
+| PR 初次 CI gate | TypeScript、默认并行 Vitest、文档、Rust fmt/check 全通过；最终文档补记继续接受同一 CI |
+| `CARGO_BUILD_JOBS=4 pnpm package:mac:daily` | arm64 Release 构建、App/Host/CLI ad-hoc 签名及 Bundle ID 验证通过 |
+| `node scripts/accept-project-file-references.mjs --packaged` | 打包正式界面与认证 Web 再次 25 项通过；[结构化证据](project-directory-reference-ui-evidence.json)保存实际检查项与 schema 172 记录，未启动模型 |
+
+默认高并行的本地 JS 首轮发生既有 watcher／worker 时序超时；限制并行后全步骤通过，PR CI 的默认并行也通过。
+测试修正只更新真实产品已有的预览选择器及协议／schema 预期，不降低断言或隐藏失败。
+本次没有执行 Windows 真机安装、其他 Runtime 的新增目录任务或大项目响应时延基准；Windows/UNC 路径仅由确定性 URI owner 覆盖。
+
+安装使用上述已验证产物；合并后核对 main 与该产物来源的产品代码一致。当前会话宿主保持运行，下一次从规范应用路径启动才加载新版本；
+旧 App 保留为显式备份，不把磁盘安装表述为当前进程热升级。
