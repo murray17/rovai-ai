@@ -283,9 +283,12 @@ Web 新旧组合以协议准入失败。新客户端连接缺能力 Host 时不�
 ## 实施证据（2026-11-07）
 
 实际版本为 schema 170／migration 220、Host Web protocol 6，ComposerDocument 2 与上述 Context／Bootstrap 轴保持。
+该记录对应主线整合前的功能分支验收；合并 `4984480ac` 时主线的原生交互已占用 schema 170／migration 220，
+文件引用准入标记顺延为 schema 171／migration 221，在主线迁移之后执行。没有改变文件输入 shape、预算、
+Charter 或冻结语义；先前 fixture 的原始版本与哈希保持，不重写成新版本证据。
 实现、真实 UI 与确定性门禁结果见[实施记录](project-file-reference-implementation.md#实际实现与验收)，
 实际模型输入哈希与文件工具证据见[脱敏记录](project-file-reference-evidence.json)。
-真实 Runtime 七例中六例通过，R3 的主动追问失败保留；新增指导属于[待确认补充 R2](model-context-change-project-file-reference-clarification.md)，
+真实 Runtime 七例中六例通过，R3 的主动追问失败保留；新增指导属于[待确认补充 R2](https://github.com/murray17/rovai-ai/blob/1e3dec453ce2358c3863ad2e2cae90cbc7a3c4f2/docs/versions/v1.72/model-context-change-project-file-reference-clarification.md)，
 未写入本次 Charter，不把本 R1 的确认移用于新规则。当前选文按既有 quote_text 保存可见文本快照，
 不重算旧 quote 或 URI 偏移；本次不改变其字段或版本轴。
 

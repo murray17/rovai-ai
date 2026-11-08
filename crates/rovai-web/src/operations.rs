@@ -321,6 +321,8 @@ pub enum Operation {
     WithdrawMessage,
     #[serde(rename = "action.approvals.resolve")]
     Approval,
+    #[serde(rename = "nativeInteractions.respond")]
+    NativeInteraction,
     #[serde(rename = "agentRuns.cancel")]
     CancelRun,
     #[serde(rename = "agentRuns.continue")]
@@ -571,6 +573,7 @@ impl Operation {
             Self::Send => "camp.messages.send",
             Self::WithdrawMessage => "camp.messages.withdraw",
             Self::Approval => "action.approvals.resolve",
+            Self::NativeInteraction => "nativeInteractions.respond",
             Self::CancelRun => "agentRuns.cancel",
             Self::ContinueRun => "agentRuns.continue",
             Self::Reconcile => "commands.reconcile",

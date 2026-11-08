@@ -353,6 +353,7 @@ const allowedMethods = new Set<CoreMethod>([
   'thread.messages.withdraw',
   'userAutomation.thread.send',
   'action.approvals.resolve',
+  'nativeInteractions.respond',
   'notifications.inbox',
   'notifications.threadInterruptions',
   'notifications.changesSince',

@@ -1,5 +1,6 @@
 import { DWClient, TOPIC_CARD, TOPIC_ROBOT, type DWClientDownStream } from 'dingtalk-stream'
 import { normalizeDingTalkRobotMessage, type DingTalkInboundMessage } from './dingtalk-inbound'
+import { DINGTALK_NATIVE_CARD_PREFIX, dingtalkNativeFailure } from './native-interaction-cards'
 
 type DingTalkStreamClient = {
   readonly connected: boolean
@@ -22,6 +23,7 @@ export type DingTalkStreamRegistryOptions = {
   createClient?: (credential: { appKey: string; appSecret: string }) => DingTalkStreamClient
   onMessage(message: DingTalkInboundMessage): Promise<void>
   onCard(callback: DingTalkCardCallback): Promise<void>
+  onNativeCard?(callback: DingTalkCardCallback): Promise<Record<string, unknown>>
   onFailure?(appKey: string, error: unknown): void
   connectTimeoutMs?: number
 }
@@ -72,6 +74,23 @@ export class DingTalkStreamRegistry {
       )
     })
     client.registerCallbackListener(TOPIC_CARD, (message) => {
+      if (this.#options.onNativeCard && this.#clients.get(input.appKey) === client) {
+        let payload: Record<string, unknown> | null = null
+        try { payload = JSON.parse(message.data) } catch { /* Ordinary malformed callbacks still receive the existing ACK below. */ }
+        if (payload && typeof payload.outTrackId === 'string' && payload.outTrackId.startsWith(DINGTALK_NATIVE_CARD_PREFIX)) {
+          const fallback = dingtalkNativeFailure('提交结果待核对，内容已保留')
+          let timer: ReturnType<typeof setTimeout> | undefined
+          // Form callbacks need a normal business response. Other callbacks keep
+          // their immediate ACK; no model output or human wait occupies this budget.
+          void Promise.race([
+            Promise.resolve().then(() => this.#options.onNativeCard!({ appKey: input.appKey, messageId: message.headers.messageId, payload: payload! })).catch(() => fallback),
+            new Promise<Record<string, unknown>>(resolve => { timer = setTimeout(() => resolve(fallback), 2500) })
+          ]).then(response => {
+            if (this.#clients.get(input.appKey) === client) client.socketCallBackResponse(message.headers.messageId, response)
+          }).catch(error => this.#options.onFailure?.(input.appKey, error)).finally(() => clearTimeout(timer))
+          return
+        }
+      }
       acknowledge(client, message)
       defer(async () => {
         if (this.#clients.get(input.appKey) !== client) return

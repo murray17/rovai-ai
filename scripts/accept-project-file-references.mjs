@@ -12,12 +12,14 @@ import { installProjectFileReferenceNetworkControl, holdProjectFileRequest, rele
 // A Runtime profile enables member eligibility; no execution is requested here.
 // Real Runtime file-read evidence has a separate opt-in owner.
 const repository = resolve(import.meta.dirname, '..')
+const packaged = process.argv.includes('--packaged')
+const app = join(repository, 'dist/mac-arm64/Rovai AI.app')
 const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-file-reference-ui-')))
 const userData = join(fixture, 'userData'), skills = join(userData, 'managed-skill-library'), binaries = join(fixture, 'bin'), project = join(fixture, 'project')
 for (const dir of [binaries, project, userData, skills, join(project, 'src/auth'), join(project, 'src/billing')]) await mkdir(dir, { recursive: true })
-for (const name of ['rovai-host', 'rovai']) await cp(join(repository, 'target/debug', name), join(binaries, name))
+for (const name of ['rovai-host', 'rovai']) await cp(packaged ? join(app, 'Contents/Resources/bin', name) : join(repository, 'target/debug', name), join(binaries, name))
 for (const [path, text] of Object.entries({ 'package.json':'{"name":"file-reference-acceptance"}', 'README.md':'# File reference fixture', 'missing.log':'readable before deletion', 'src/auth/index.ts':'export const auth = true', 'src/billing/index.ts':'export const billing = true', 'src/auth/composer-trigger.test.ts':'export const test = true', 'src/auth/中文 (draft)#1.ts':'export const nonce = "only-on-disk"' })) await writeFile(join(project, path), text)
-console.log(JSON.stringify({ channel:'automatic_acceptance', fixture, userData, skills, mcp:join(userData,'mcp.json'), realRuntime:false }))
+console.log(JSON.stringify({ channel:'automatic_acceptance', fixture, userData, skills, mcp:join(userData,'mcp.json'), packaged, realRuntime:false }))
 const native = await isolatedFileReferenceRuntimeEnvironment(fixture)
 let desktop, browser
 const checks = [], screenshots = []
@@ -31,7 +33,7 @@ const key = async (surface, key, modifiers = 0) => {
 }
 try {
   const env = { ...native.env, ROVAI_ALLOW_ISOLATED_INSTANCE:'1', ROVAI_HOST_BIN:join(binaries,'rovai-host') }; delete env.ELECTRON_RUN_AS_NODE
-  desktop = await launchAcceptanceBrowser({ executable:electron, args:[repository, `--user-data-dir=${userData}`, '--remote-debugging-port=0'], env })
+  desktop = await launchAcceptanceBrowser({ executable:packaged ? join(app,'Contents/MacOS/Rovai AI') : electron, args:[...(!packaged ? [repository] : []), `--user-data-dir=${userData}`, '--remote-debugging-port=0'], env })
   await desktop.send('Emulation.setFocusEmulationEnabled', {enabled:true})
   await desktop.wait('Boolean(window.rovai?.request)')
   await desktop.wait("window.rovai.supervisor.getSnapshot().then(state => state.fullCoreState === 'ready')", 40000)
@@ -345,8 +347,8 @@ try {
   await key(browser,'Escape')
   checks.push('narrow touch long-press exposes the full path and 44px actions without opening a preview')
   assert.deepEqual(desktop.errors, []); assert.deepEqual(browser.errors, [])
-  await writeFile(join(fixture,'result.json'), JSON.stringify({checks,screenshots,realRuntime:false},null,2))
-  console.log(JSON.stringify({passed:checks,screenshots,fixture,realRuntime:false}))
+  await writeFile(join(fixture,'result.json'), JSON.stringify({checks,screenshots,packaged,realRuntime:false},null,2))
+  console.log(JSON.stringify({passed:checks,screenshots,fixture,packaged,realRuntime:false}))
 } catch(error) {
   if (desktop) {
     const diagnostics = await desktop.evaluate(`({thread:document.querySelector('#camp-message')?.dataset.threadId,html:document.querySelector('#camp-message')?.innerHTML,clipboard:window.__fileClipboardEvents,drafts:Object.fromEntries(Object.entries(localStorage).filter(([key])=>key.startsWith('rovai.camp-composer-draft.v1:')))})`).catch(()=>null)

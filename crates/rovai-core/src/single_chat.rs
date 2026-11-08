@@ -188,6 +188,8 @@ pub struct SingleChatRunView {
 pub struct SingleChatSnapshot {
     pub conversation: SingleChatConversationView,
     pub approvals: Vec<crate::read_model::ApprovalView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_interactions: Option<Vec<crate::native_interaction::NativeInteractionView>>,
     pub messages: Vec<SingleChatMessageView>,
     pub draft: SingleChatComposerDraftView,
     pub pending_inputs: SingleChatPendingInputsView,
@@ -1670,6 +1672,7 @@ impl SingleChatService {
         }
         crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(Some(SingleChatSnapshot {
+            native_interactions: None,
             approvals: crate::read_model::load_conversation_approvals(
                 database.connection(),
                 &conversation.camp_id,

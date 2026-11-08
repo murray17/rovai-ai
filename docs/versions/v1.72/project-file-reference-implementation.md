@@ -20,9 +20,9 @@ User 已在 sequence 21 确认 R1，现开始正式实现。v5.1 原型只作为
 | Branch | `rovai/project-file-references` |
 | Base | `55a83f89733393cfcad76b046e344c222577abe1`（已核对 origin/main） |
 | Governance | none；无主线文档先行要求；R1 已由 User sequence 21 二次确认 |
-| Status | active；sequence 26 的三个前端边界已修复并补齐复杂定位证据；R3 模型行为仍未通过，保留平台与既有测试限制 |
+| Status | ready；User sequence 32 要求本次 PR 合入 main，sequence 33 要求安装；R3 原失败保持，未确认 R2 为独立后续工作 |
 | Validation | 见下方实际实现、确定性门禁、真实 UI 及 Runtime 分项结果 |
-| Next | 补充 R2 revision 2 独立待确认；获准后验证应询问和应继续的三种任务，不改判 R3 原失败或扩大已测平台范围 |
+| Next | 通过主线整合门禁后合并并执行隔离 daily 安装验收；R2 revision 2 单独待确认，不随本 PR 修改 Charter |
 
 保留此 worktree 跨后续 Run 复用。完成后按用户当前偏好提交并推送同名远端分支，不自动创建或重开 PR；
 合入前不清理 worktree，不触碰其他活跃目录或日常 App 数据。
@@ -149,7 +149,8 @@ User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺�
   完整路径仍保存在身份中。选择直接回编辑，无装饰性加载动画；点击和键盘打开原预览。
 - 恢复：补齐输入历史、私有剪贴板、整条消息复制、本机草稿和失败留稿；未知格式保留原记录并阻止覆盖。
   文件树／预览共用插入函数，文件加其他引用和仅文件均构成实际输入，不参与成员寻址。
-- 兼容：ComposerDocument 保持 2；schema 169→170 由 migration 220 仅更新准入标记，无新业务表或历史重写。
+- 兼容：ComposerDocument 保持 2；基线功能分支 schema 169→170／migration 220 仅更新准入标记。
+  整合新主线后该标记顺延为 schema 171／migration 221，无新业务表或历史重写。
   Host Web 协议 5→6；app.info 的能力声明同时通过 Desktop 与过滤后的 HTTP 投影提供，仍不暴露 dataDir。
   相关新版本合同、当前路由、UI 和操作指南已同步。
 
@@ -158,8 +159,8 @@ User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺�
 | 验证 | 实际结果 |
 | --- | --- |
 | TypeScript / 生产构建 | `pnpm typecheck`、`pnpm build:desktop` 通过 |
-| 全量 Vitest | 复核修复后 271 文件，3,146 通过、2 项既有 skip；使用 UTC 运行既有日期断言 |
-| Rust 默认 workspace | 全过：Core 438 通过／1 项既有 ignored；其余 crate 与 CLI 通过 |
+| 全量 Vitest | 整合主线后 273 文件，3,167 通过、2 项既有 skip；UTC 的完整 pnpm test 通过，末尾 Node 测试 377 通过、2 项平台 skip |
+| Rust 默认 workspace | 原 R1 基线 Core 438 通过／1 项既有 ignored，其余 crate 与 CLI 通过；本次主线整合采用 4 个测试线程复验，完整结果随 PR 登记 |
 | 定向 Rust owner | camp_content 16 项、Pending 原子发送 1 项、初始／Steer 冻结 1 项通过；project_files 根边界由既有 3 项 owner 覆盖 |
 | 原生 Composer | 3 个 Electron owner 通过，包含成员邀请、输入、IME、恢复和 Web 链接 |
 | 原生项目目录 | 既有真实 Host 项目目录 owner 通过，包括预览、编辑保存、主题、窄屏及缩放；不据此宣称文件 Mention 的 200% 专项已测 |
@@ -167,7 +168,7 @@ User 对固定提交 `4c3b5d330` 的复核提出三个前端边界和证据缺�
 | Host Desktop＋Web 主 owner | 通过；Core 生命周期、HTTP 投影、权限、旧协议及文件编辑均保持 |
 | 正式文件界面 | sequence 30 后 Desktop＋认证 Web 22 项通过，保留原 20 项路径并增加快速对话隐藏文件类别及键盘跳过；结果见[界面证据](project-file-reference-review-ui-evidence.json) |
 | 布局 | day／night × 390／1040／1440／2560；实际输入框与文件扩展名可见，无页面横向溢出 |
-| 文档治理 | docs:test 10 项及 require-base 的决定／链接门禁通过；version 门禁仅余补充 R2 的 4 项真实确认记录，未补造确认 |
+| 文档治理 | 整合后 docs:test 10 项、完整 docs:check:ci 及 require-base 决定／链接门禁通过；本 PR 只包含已确认 R1，未确认 R2 提案完整保留在不可变历史与 Thread 附件 |
 
 `composer-trigger` 扩展了路径、扩展名、Unicode 和邮箱／URL 的既有边界 owner。
 文件 URI 的共用 golden 覆盖 Unicode、空格、括号、井号、百分号、Unix 反斜线、Windows drive、UNC 及 canonicalize 的 verbatim 前缀；只规范 URI，不改冻结路径字段。
@@ -191,7 +192,7 @@ macOS arm64 的真实 Codex CLI 0.166.0 与 Claude Code 2.1.311 使用新的 Cor
 
 共七例，六例通过；没有把执行终态 succeeded 等同于产品验收通过。首个漏带 execution 的夹具只发布而未运行，
 修正夹具后才进行真实调用。后续只补跑未执行的 R4，不重复消耗已通过的四个读取任务。
-[补充 R2](model-context-change-project-file-reference-clarification.md)提出公开 Charter 的一句澄清规则，仍为 pending；
+[补充 R2](https://github.com/murray17/rovai-ai/blob/1e3dec453ce2358c3863ad2e2cae90cbc7a3c4f2/docs/versions/v1.72/model-context-change-project-file-reference-clarification.md)提出公开 Charter 的一句澄清规则，仍为 pending；
 本次不修改 Charter 26、Bootstrap v6、Binding compatibility 16 或冻结输入，不将 R1 确认移作 R2 确认。
 
 ### Sequence 26 实际修复与复验（2026-11-07）
@@ -228,6 +229,21 @@ User 要求快速对话移除不可用的文件 Tab。当前关联项目的会�
 `pnpm typecheck`、`pnpm build:desktop` 通过。既有生产 Desktop＋认证 Web owner 扩展后 22 项通过，
 新增两个快速对话场景，并明确核对项目会话仍有四类入口。本轮未重复真实 Runtime 读取或 Rust 测试；
 此前证据及 R2 待确认状态保持，文档门禁仍不能因未确认 R2 记作全通过。
+
+### 合并范围与迁移整合（User sequence 32／33）
+
+User 要求提交 PR 合入 main，并安装到本机日常 App。本 PR 只合入已确认 R1 与后续前端修复；
+未确认 R2 从本次实施变更中拆出，完整提案保留在上方不可变提交链接及本 Thread 附件中，仍为 pending。
+不伪造确认、不修改 Charter、不把 R3 原失败改判为通过，也不修改通用 checker。
+
+整合主线 `4984480ac` 的原生交互后，主线 migration 220／schema 170 保留；文件引用的只读准入标记
+顺延至 migration 221／schema 171。两条升级路径均先执行原生交互迁移，再提交文件引用标记。
+原迁移 owner 保留回滚、旧数据不变及准入验证，沿用 populated fixture，不新增 Rust 测试函数。
+整合后 `pnpm typecheck`、UTC 完整 `pnpm test` 及以 `4984480ac` 为 base 的 `docs:check:ci` 通过。
+旧 Product Contract Fingerprint 的 schema 170 断言同步至实际 171；没有禁用测试或放宽判定。
+首次默认 Rust 运行有一个既有 Cursor alias 探测 fixture 返回 runtime_probe_timed_out；该项隔离复验 0.35 秒通过。
+完整 workspace 复验控制为 4 个测试线程，保留首轮记录，不修改探测超时。完整结果随本次 PR 登记。
+前述功能分支原始证据保持对应的旧版本和哈希。待安装 daily 包另使用隔离生产 App 验收，当前日常进程与用户数据保持。
 
 ### 已知限制与交接
 

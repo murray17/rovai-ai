@@ -50,6 +50,10 @@ class ConnectionUnavailable extends Error {
   constructor() { super('服务连接已中断，请恢复连接后重试。') }
 }
 
+function interactionId(params: unknown): unknown {
+  return params && typeof params === 'object' && 'interactionId' in params ? params.interactionId : undefined
+}
+
 export type WorkspaceListing = { name: string; projectPath: string; parentPath: string | null; roots: string[]; directories: { name: string; projectPath: string }[]; nextOffset: number | null }
 
 export const WEB_OPERATIONS = [
@@ -197,6 +201,7 @@ export const WEB_OPERATIONS = [
   'thread.messages.send',
   'thread.messages.withdraw',
   'action.approvals.resolve',
+  'nativeInteractions.respond',
   'agentRuns.cancel', 'agentRuns.continue',
   'commands.reconcile',
   'threads.create',
@@ -276,7 +281,7 @@ const RECONCILABLE_COMMANDS = new Set<WebOperation>([
   'automations.delete',
   'automations.run',
 
-  'thread.messages.send', 'thread.messages.withdraw', 'action.approvals.resolve', 'agentRuns.cancel', 'agentRuns.continue',
+  'thread.messages.send', 'thread.messages.withdraw', 'action.approvals.resolve', 'nativeInteractions.respond', 'agentRuns.cancel', 'agentRuns.continue',
   'threads.create', 'threads.changeDefaultLead', 'threads.members.add', 'threads.members.remove',
   'members.create', 'members.update', 'members.avatar.set', 'members.runtime.set', 'members.runtime.clear',
   'messageQuotes.mutateDraft'
@@ -692,10 +697,18 @@ export class ConsoleClient {
   async requestWithSource<T>(operation: WebOperation, params: unknown = {}): Promise<RequestResult<T>> {
     const commandId = params && typeof params === 'object' && 'commandId' in params ? params.commandId : undefined
     if (!RECONCILABLE_COMMANDS.has(operation) || typeof commandId !== 'string') return { result: await this.#rpc<T>(operation, params), source: 'direct' }
-    if (!this.authenticated) throw new SessionRequired()
-    this.#assertConnected()
-    if ([...this.#pending.values()].some(entry => entry.operation === operation)) throw new Error('同类操作的原提交仍待核对，请先核对原提交结果。')
-    if (this.#pending.has(commandId)) throw new Error('原命令仍在核对中，请等待其结果。')
+    try {
+      if (!this.authenticated) throw new SessionRequired()
+      this.#assertConnected()
+      if ([...this.#pending.values()].some(entry => entry.operation === operation
+        && (operation !== 'nativeInteractions.respond' || interactionId(entry.params) === interactionId(params)))) {
+        throw new Error('同类操作的原提交仍待核对，请先核对原提交结果。')
+      }
+      if (this.#pending.has(commandId)) throw new Error('原命令仍在核对中，请等待其结果。')
+    } catch (error) {
+      // These checks precede dispatch. The caller can keep its draft and allow another attempt.
+      throw Object.assign(error as Error, { requestNotSent: true })
+    }
     // Keep the original request and promise alive through connection/session
     // loss. Shared production handlers retain their submitting state; no new ID
     // or automatic redispatch is manufactured by the Web adapter.
@@ -714,7 +727,7 @@ export class ConsoleClient {
         this.#pending.delete(commandId); this.#notifyPending(); entry.resolve(value, preserveUnknown ? 'recovery' : 'direct')
       }).catch(async error => {
         if (!preserveUnknown && (error instanceof ConnectionUnavailable || error instanceof HttpRequestError && ['operation_not_admitted', 'workspace_not_authorized', 'request_capacity'].includes(error.code))) {
-          if (this.#pending.get(commandId) === entry) { this.#pending.delete(commandId); this.#notifyPending(); entry.reject(error) }
+          if (this.#pending.get(commandId) === entry) { this.#pending.delete(commandId); this.#notifyPending(); entry.reject(Object.assign(error, { requestNotSent: true })) }
           return
         }
         if (error instanceof CoreRequestError || !preserveUnknown && error instanceof SessionRequired) {
@@ -730,7 +743,7 @@ export class ConsoleClient {
 
   async #settleKnownFailure(commandId: string, entry: PendingCommand, error: Error): Promise<void> {
     if (error instanceof SessionRequired) {
-      if (this.#pending.get(commandId) === entry) { this.#pending.delete(commandId); this.#notifyPending(); entry.reject(error) }
+      if (this.#pending.get(commandId) === entry) { this.#pending.delete(commandId); this.#notifyPending(); entry.reject(Object.assign(error, { requestNotSent: true })) }
       return
     }
     try {

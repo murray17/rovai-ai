@@ -17,7 +17,7 @@ last_updated: 2026-11-07
 分组搜索、跨对话恢复与仅文件输入以 [R1 独立说明](model-context-change-project-file-reference.md)
 为已确认范围（User sequence 21）。Core 与 Desktop／Web 主链已实现；类型、事务、恢复和真实界面通过，
 真实 Runtime 七例中六例通过。新对话只有文件时未主动追问，按 R3 原标准保留失败；
-[补充 R2](model-context-change-project-file-reference-clarification.md)仍待确认，未修改 Charter。
+[补充 R2](https://github.com/murray17/rovai-ai/blob/1e3dec453ce2358c3863ad2e2cae90cbc7a3c4f2/docs/versions/v1.72/model-context-change-project-file-reference-clarification.md)仍待确认，未修改 Charter。
 sequence 26 复核的三处前端边界已修复，全量 Vitest 3,146 项通过。
 sequence 30 已隐藏快速对话的文件类别并同步键盘导航；Desktop／认证 Web 扩展至 22 项通过。
 另补同名、特殊路径与 Mission 工作副本三组真实定位，Codex／Claude 六次读取通过，两个准备任务另计，
@@ -1490,3 +1490,11 @@ Windows 实测与残余边界见[Windows Preview 开放](command-code-native-sim
 
 原路径附件显示名、ACP 恢复等待、原生 Skill 正文预览与普通任务的 Mission 等待按独立提交收窄。
 工作边界、回归证据与未验证项见[实施记录](usability-check-simplification.md)。
+
+## Pi 原生交互桥接（2026-11-05）
+
+Pi 四类原生问答复用现有待处理区域；协议、答案和运行归属保持原生语义，未扩展其他 Runtime。
+范围、代码归属和验证边界见[实施记录](pi-native-interactions-implementation.md)。
+
+飞书/Lark 与钉钉的后续桥接另见[渠道实施记录](pi-native-channel-interactions.md)。共用提交与卡片适配已实现，
+钉钉模板跨企业和真实客户端验收仍待完成，不以本地 fixture 宣告交付。

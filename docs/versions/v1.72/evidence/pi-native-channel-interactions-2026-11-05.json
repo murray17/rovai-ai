@@ -1,0 +1,125 @@
+{
+  "workItem": "Pi native interaction channel bridge",
+  "base": "12c7babff059c12cc1ea3323137d44ef3a7653d7",
+  "status": "in_progress",
+  "platform": "macOS arm64",
+  "checks": [
+    {
+      "command": "cargo test --workspace",
+      "passed": 484,
+      "ignored": 1,
+      "result": "passed"
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib channel::",
+      "passed": 39,
+      "result": "passed"
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery",
+      "passed": 1,
+      "result": "passed after unknown draft-preservation case added"
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib db::tests::",
+      "result": "not green",
+      "initialPassed": 85,
+      "initialFailed": 8,
+      "resolved": [
+        "database_contract_preflight_admits_current_and_rejects_future_store",
+        "legacy_feishu_migration_marker_collision_reconciles_without_quarantine"
+      ],
+      "resolvedEvidence": "both targeted reruns passed",
+      "remaining": [
+        "v103_adds_trae_delivery_without_overriding_custom_skill_assignments",
+        "v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills",
+        "v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills",
+        "v107_adds_grok_catalog_and_preserves_runtime_and_skill_rows",
+        "v95_invalidates_native_session_context_and_nonterminal_runs",
+        "v98_invalidates_profile_v3_context_and_preserves_public_messages"
+      ],
+      "baselineComparison": {
+        "commit": "12c7babff059c12cc1ea3323137d44ef3a7653d7",
+        "tests": 4,
+        "result": "same four v103/v104/v105/v107 failures reproduced in a clean detached checkout with its own target directory",
+        "cause": "historical skill_group_assignment CHECK excludes newly enumerated Runtime groups",
+        "comparisonCheckoutRemoved": true
+      },
+      "otherFailures": "v95/v98 assert an unchanged literal formatter_version SQL ending at 42; current source includes formatter 43. Outside channel feature; not reported as passed."
+    },
+    {
+      "command": "TZ=UTC pnpm test",
+      "vitest": {
+        "files": 271,
+        "passed": 3145,
+        "skipped": 2
+      },
+      "node": {
+        "passed": 376,
+        "failed": 1,
+        "skipped": 2
+      },
+      "followup": "Only failing product-contract schema golden was updated from 169 to 170; its targeted node test then passed. Full command is not represented as one green run."
+    },
+    {
+      "command": "pnpm typecheck",
+      "result": "passed"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "result": "passed"
+    },
+    {
+      "command": "pnpm test:desktop-bridge",
+      "passed": 1,
+      "result": "passed"
+    },
+    {
+      "command": "pnpm docs:test",
+      "passed": 10,
+      "result": "passed"
+    },
+    {
+      "command": "DOCS_BASE_REF=12c7babff059c12cc1ea3323137d44ef3a7653d7 pnpm docs:check:ci",
+      "result": "passed"
+    }
+  ],
+  "runtimeRegression": {
+    "fixture": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-pi-native-interactions-L0Spxe",
+    "piVersion": "1.1.0",
+    "extension": {
+      "name": "@juicesharp/rpiv-ask-user-question",
+      "version": "2.15.0"
+    },
+    "groupsPassed": 6,
+    "externalModelCalls": 0,
+    "scope": "Existing Desktop/Core native RPC path using actual Pi and controlled local provider; not real platform card acceptance"
+  },
+  "livePlatforms": {
+    "feishu": false,
+    "lark": false,
+    "dingtalk": false,
+    "dingtalkCrossEnterprise": false,
+    "externalTestMessagesSent": 0,
+    "rovaiTemplateCreatedOrPublished": false
+  },
+  "dingtalkCandidate": {
+    "templateId": "c2a6355b-9724-4f7e-9653-d33fcb3311bb.schema",
+    "source": "https://github.com/DingTalk-Real-AI/dingtalk-openclaw-connector",
+    "status": "candidate only; cross-enterprise use unverified",
+    "knownGaps": [
+      "confirmation/select requires form submit",
+      "cancel label fixed by template",
+      "desktop/mobile empty-input callback shapes need real-client verification"
+    ]
+  },
+  "sourceSha256": {
+    "crates/rovai-core/src/channel/native_interactions.rs": "aad3d7792c1b7da75a41578d546f045d12b8443702cb32e6335b9d3906925bb0",
+    "crates/rovai-core/src/db_channel_native.rs": "1485010b43cc7d5cf7ac66946343bc72e280aafa67e422e5c7908e44acc4b6d1",
+    "crates/rovai-core/src/application.rs": "c60c3b3c4aca90bb619b12805ea96d09d504239039d1d5236cce0d4868508986",
+    "apps/desktop/src/main/native-interaction-cards.ts": "805c7fb20d04e573d88def3b36978cb831ee8ed9169d7ab9e4f291fc8ab4ddce",
+    "apps/desktop/src/main/channel-settings.ts": "58a77ad99969ee550bf46bfda088868b36d5a7e8b9b421fb53568b97d6a862bc",
+    "apps/desktop/src/main/dingtalk-channel-settings.ts": "e9013f2307673cfaeeb8b9e1b4a5dfbdaf6ef75e06dfdf9e4536a96e98a69ef7",
+    "apps/desktop/src/main/dingtalk-stream-registry.ts": "54159e69a60dcd6745be3ef1194df102a1ae6d2deb3c8f1958bd46945cd12bc2"
+  }
+}

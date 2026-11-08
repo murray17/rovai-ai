@@ -2614,8 +2614,8 @@ describe('task event projections', () => {
     }))
     expect(campMarkup).toContain('Quick Chat')
     expect(campMarkup).not.toContain('运行中 1')
-    expect(campMarkup).toContain('待审批 1')
-    expect(campMarkup).toContain('aria-label="待审批 1，定位输入框上方审批"')
+    expect(campMarkup).toContain('待处理 1')
+    expect(campMarkup).toContain('aria-label="待处理 1，定位输入框上方待处理区域"')
     expect(campMarkup).toContain('camp-detail-entry-host')
     expect(campMarkup).not.toContain('topbar-inspector-toggle')
 
@@ -5005,13 +5005,13 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
 
-    expect(markup).toContain('aria-label="2 项待审批"')
+    expect(markup).toContain('aria-label="2 项待处理"')
     expect(markup).toContain('洛可 · Codex CLI')
     expect(markup).not.toContain('洛可、沐瓦')
     expect(markup).not.toContain('只允许当前请求。')
     expect(markup).toContain('data-approval-summary')
     expect(markup).toContain('运行 pnpm test')
-    expect(markup).toContain('aria-label="收起审批详情"')
+    expect(markup).toContain('aria-label="收起待处理"')
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
     expect((markup.match(/class="camp-detail-entry(?: [^"]*)?"/g) ?? []).length).toBe(4)

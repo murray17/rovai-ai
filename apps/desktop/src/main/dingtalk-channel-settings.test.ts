@@ -38,6 +38,7 @@ import {
 } from './dingtalk-open-api'
 import { DingTalkStreamRegistry } from './dingtalk-stream-registry'
 import { DingTalkProvisioningError } from './dingtalk-member-bot-provisioner'
+import { DINGTALK_QUESTION_TEMPLATE_ID, type NativeCardSource } from './native-interaction-cards'
 
 // These service tests inject their ports; Electron behavior has separate owners.
 vi.mock('electron', () => ({
@@ -46,6 +47,35 @@ vi.mock('electron', () => ({
 }))
 
 describe('DingTalk channel account connection', () => {
+  it('delivers independent native cards and closes the same outTrackId after a Desktop answer', async () => {
+    const common = { provider: 'dingtalk', requestId: null, targetAppId: 'ding-app-a', credentialRef: 'dingtalk-credential-a',
+      chatId: 'group-a', topicKey: '', conversationKind: 'group', attemptCount: 1, recipientOpenId: 'owner-a', recallMessageId: null, deliveryKind: 'native_interaction' }
+    const fixture = completedBotFixture({ credentialPresent: true, deliveries: [
+      { ...common, deliveryId: 'native-send', updateMessageId: null, payload: { nativeInteraction: { interactionId: 'question-a' } } },
+      { ...common, deliveryId: 'native-close', updateMessageId: 'rovai_native_native-send', payload: { nativeInteraction: { interactionId: 'question-a' } } }
+    ] })
+    const source: NativeCardSource = { deliveryId: 'native-send', agentDisplayName: '芝士', ownerUserId: 'owner-a', interaction: {
+      id: 'question-a', agentRunId: 'run-a', executionEpoch: 2, createdAt: 1, expiresAt: null, canSkip: true, status: 'pending',
+      questions: [{ id: 'question-a', kind: 'input', title: '原生问题', description: null, options: [], multiline: true, prefill: '  预填\n正文 ', placeholder: null }]
+    } }
+    const original = fixture.core.request.bind(fixture.core)
+    vi.spyOn(fixture.core, 'request').mockImplementation((method, params) => method === 'channels.dingtalk.nativeInteractions.source'
+      ? Promise.resolve({ ...source, interaction: { ...source.interaction, status: (params as { deliveryId: string }).deliveryId === 'native-close' ? 'sent' : 'pending' } })
+      : original(method, params))
+    const update = vi.spyOn(fixture.api, 'updateCard').mockResolvedValue(undefined)
+    try {
+      await fixture.service.start()
+      await vi.waitFor(() => expect(update).toHaveBeenCalledOnce())
+      expect(fixture.welcomeCard).toHaveBeenCalledWith(expect.objectContaining({ outTrackId: 'rovai_native_native-send',
+        openSpaceId: 'dtv1.card//IM_GROUP.group-a', cardTemplateId: DINGTALK_QUESTION_TEMPLATE_ID, creatorUserId: 'owner-a' }))
+      const sent = fixture.commandPayloads.find(item => item.method === 'channels.dingtalk.deliveries.settle' && item.command.deliveryId === 'native-send')!.command
+      expect(sent).toMatchObject({ outcome: 'sent', externalDeliveryMessageId: 'carrier:rovai_native_native-send', externalUpdateMessageId: 'rovai_native_native-send' })
+      expect(update).toHaveBeenCalledWith('rovai_native_native-send', expect.objectContaining({ card_status: 'submitted' }),
+        expect.objectContaining({ privateData: { 'owner-a': { cardParamMap: { question_desc: '已发送' } } } }))
+      expect(fixture.commands).not.toContain('channels.dingtalk.nativeInteractions.respond')
+    } finally { await fixture.service.stop() }
+  })
+
   it.each([
     'dingtalk_open_platform_unavailable', 'dingtalk_open_platform_timeout', 'channel_storage_unavailable',
     'dingtalk_open_platform_access_denied', 'dingtalk_open_platform_response_invalid', 'dingtalk_web_session_store_invalid'

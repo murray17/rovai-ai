@@ -207,6 +207,7 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
   'agent_run.terminal',
+  'agent_run.interaction_changed',
   'agent_run.images.updated',
   'agent_run.file_changes_completed'
 ])
@@ -503,6 +504,7 @@ export function campOpenProjectionAsSnapshot(
     agentRunImages: projection.agentRunImages ?? [],
     contextManifests: [],
     approvals: projection.approvals,
+    nativeInteractions: projection.nativeInteractions ?? [],
     actions: [],
     timeline: [],
     openCoverage: {
@@ -4023,7 +4025,7 @@ export function BusinessApp({
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setThreadSnapshot(snapshot)
     } catch (nextError) {
-      setError(errorMessage(nextError))
+      throw nextError
     } finally {
       setBusy(null)
     }
@@ -4538,8 +4540,16 @@ export function BusinessApp({
             onPreviewMemberRemoval={previewThreadMemberRemoval}
             onRemoveMember={removeThreadMember}
             onTasksChanged={() => refreshActiveThreadSnapshot(activeThreadId)}
-            onResolveApproval={(approval, decision) => {
-              void resolveActionApproval(approval, decision)
+            onResolveApproval={resolveActionApproval}
+            onRespondInteraction={async (interaction, answer) => {
+              const threadId = activeThreadId!
+              const result = await client.request<import('@contracts').NativeInteractionResult>('nativeInteractions.respond', {
+                commandId: newCommandId(), threadId,
+                agentRunId: interaction.agentRunId, executionEpoch: interaction.executionEpoch,
+                interactionId: interaction.id, answer
+              })
+              void refreshActiveThreadSnapshot(threadId).catch(() => undefined)
+              return result
             }}
             cancellingTurnIds={activeCancellingTurnIds}
             cancellingRunIds={activeCancellingRunIds}

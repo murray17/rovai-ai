@@ -10,6 +10,21 @@ import {
 afterEach(() => vi.useRealTimers())
 
 describe('AdaptiveChannelHostPump', () => {
+  it('wakes dormant providers for native questions even without an execution card', async () => {
+    vi.useFakeTimers()
+    const classifier = (event: Parameters<typeof trackedExecutionCoreEventWake>[0]) => trackedExecutionCoreEventWake(event, () => false)
+    for (const classifyCoreEvent of [undefined, classifier]) {
+      const run = vi.fn(async () => false)
+      const pump = new AdaptiveChannelHostPump({ run, onError: vi.fn(), classifyCoreEvent })
+      pump.start()
+      await vi.advanceTimersByTimeAsync(0)
+      pump.handleCoreEvent({ method: 'agent_run.interaction_changed', params: { agentRunId: 'run-1' } })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(run).toHaveBeenCalledTimes(2)
+      pump.stop()
+    }
+  })
+
   it('never wakes a public channel for the local Compaction display sidecar', () => {
     const hasLiveExecutionCard = vi.fn(() => true)
     expect(trackedExecutionCoreEventWake({

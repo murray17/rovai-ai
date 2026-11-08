@@ -3,10 +3,14 @@ document_type: protocol-contract
 contract: channel-message-bridge-v1
 status: accepted
 target_version: v1.60
-last_updated: 2026-09-28
+last_updated: 2026-11-05
 ---
 
 # Channel Message Bridge v1
+
+Pi native question cards use a distinct `native_interaction` kind in this same Outbox, rather than a
+published chat message or execution card. The ephemeral source, trusted callback ownership, exact native
+answer and terminal-update contract are owned by [Native Interactions v1](native-interactions-v1.md#渠道投影与答复).
 
 A Channel is an asynchronous bridge, not a synchronous request/response wrapper around an AgentRun.
 Inbound receipt completes when one external-principal `CampMessage` and its target Delivery are committed.
