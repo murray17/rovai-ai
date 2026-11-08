@@ -4,7 +4,7 @@ name: Native Interactions
 version: v1
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-07
+last_updated: 2026-11-08
 ---
 
 # Native Interactions v1
@@ -109,9 +109,9 @@ Pi 没有答案 ACK，也不为扩展自行触发的 AbortSignal 取消发送独
 刷新上一题的卡片来展示下一题。去重、领取、有限次卡片发送/状态更新重试沿用现有 Outbox。
 Migration 220 将 projection schema 从 169 升至 170，只扩展既有 delivery kind 与 bound-delivery CHECK；
 不新建问卷表。payload 保存请求/Thread/Run/epoch、时间、状态、根 delivery 与外部卡片标识。
-飞书/Lark 新生成的投递记录另在 `nativeInteraction` 中保存可选 `questionPreview / answerPreview` 两段有限展示文本；
+三个 Provider 新生成的投递记录另在 `nativeInteraction` 中保存可选 `questionPreview / answerPreview` 两段有限展示文本；
 问题标题与必要说明在首次投影时组合，回答预览只取原生写入成功的答案。完整问题和答案不进入 Outbox，
-待答卡的完整问题仍从 Runtime 内存读取。钉钉不保存这两段预览。
+待答卡的完整问题仍从 Runtime 内存读取。
 
 以下接口只接受对应的可信渠道 Host，不开放给 Renderer、Web 或 Agent CLI：
 
@@ -167,3 +167,14 @@ failed/unknown 继续沿用原待答卡与错误反馈，不能写入答案预�
 
 这两段有限文本仅服务原卡更新，保留原有可见范围，不写普通日志或聊天消息；旧记录没有问题摘要时继续显示
 原有状态文字，不回填历史数据，不增加 Migration。卡片更新失败只重试已有 Outbox 更新，不能再次回复 Pi。
+
+### 钉钉只读结果卡
+
+钉钉沿用同一首次成功答案、有限预览与原卡 Outbox 更新，使用现有官方 Form 模板的标题、描述和状态字段。
+完成后清空表单控件，标题保留队员与问题，正文显示实际回答，已有角标显示“回答已发送”。
+没有成功答案时标题仍保留问题，正文和角标区分跳过、过期和失效。
+更新操作者私有错误提示时写入相同结果正文，不能再用“已发送”覆盖已保存的问题和答案。
+旧投递没有预览时继续显示原状态，不回填历史记录。
+
+现有通用模板的描述组件固定最多两行，真实桌面客户端会继续省略较长内容；传入的 300 字符预览不等于全部可见。
+本次沿用该模板，不新增专属模板、展开、分页或另发结果消息，因此不能承诺与飞书/Lark 相同的多行结果展示。

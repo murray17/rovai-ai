@@ -54,7 +54,8 @@ describe('DingTalk channel account connection', () => {
       { ...common, deliveryId: 'native-send', updateMessageId: null, payload: { nativeInteraction: { interactionId: 'question-a' } } },
       { ...common, deliveryId: 'native-close', updateMessageId: 'rovai_native_native-send', payload: { nativeInteraction: { interactionId: 'question-a' } } }
     ] })
-    const source: NativeCardSource = { deliveryId: 'native-send', agentDisplayName: '芝士', ownerUserId: 'owner-a', interaction: {
+    const source: NativeCardSource = { deliveryId: 'native-send', agentDisplayName: '芝士', ownerUserId: 'owner-a',
+      questionPreview: '原生问题', answerPreview: '回答：\n  最终正文\n保留换行 ', interaction: {
       id: 'question-a', agentRunId: 'run-a', executionEpoch: 2, createdAt: 1, expiresAt: null, canSkip: true, status: 'pending',
       questions: [{ id: 'question-a', kind: 'input', title: '原生问题', description: null, options: [], multiline: true, prefill: '  预填\n正文 ', placeholder: null }]
     } }
@@ -70,8 +71,10 @@ describe('DingTalk channel account connection', () => {
         openSpaceId: 'dtv1.card//IM_GROUP.group-a', cardTemplateId: DINGTALK_QUESTION_TEMPLATE_ID, creatorUserId: 'owner-a' }))
       const sent = fixture.commandPayloads.find(item => item.method === 'channels.dingtalk.deliveries.settle' && item.command.deliveryId === 'native-send')!.command
       expect(sent).toMatchObject({ outcome: 'sent', externalDeliveryMessageId: 'carrier:rovai_native_native-send', externalUpdateMessageId: 'rovai_native_native-send' })
-      expect(update).toHaveBeenCalledWith('rovai_native_native-send', expect.objectContaining({ card_status: 'submitted' }),
-        expect.objectContaining({ privateData: { 'owner-a': { cardParamMap: { question_desc: '已发送' } } } }))
+      const preview = '回答：\n  最终正文\n保留换行 '
+      expect(update).toHaveBeenCalledWith('rovai_native_native-send', expect.objectContaining({
+        card_status: 'submitted', question_title: '芝士 · 原生问题', question_desc: preview, form: '{"fields":[]}' }),
+        expect.objectContaining({ privateData: { 'owner-a': { cardParamMap: { question_desc: preview } } } }))
       expect(fixture.commands).not.toContain('channels.dingtalk.nativeInteractions.respond')
     } finally { await fixture.service.stop() }
   })

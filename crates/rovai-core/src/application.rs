@@ -13727,7 +13727,7 @@ impl Core {
                 already_handled: false,
             }
         };
-        // Feishu/Lark keep only the bounded preview of the first native answer.
+        // Channel result cards keep only the bounded preview of the first native answer.
         {
             let mut database = self.database.lock().await;
             if let Err(error) = rovai_core::channel::native_interactions::record_status(
