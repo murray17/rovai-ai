@@ -339,7 +339,7 @@ export const model = {
     for (const message of messages) message.replyToThreadMessageId = parents[message.id] ?? null
     if (long) for (let i = 10; i <= 120; i++) {
       // Cross the public-message grouping height when the detail pane closes.
-      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(16) : ''}`
+      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(grouped ? 15 : 16) : ''}`
       messages.push({ ...makeMessage(`long-${i}`,i,body,0,grouped ? 'run-alice' : null), replyToThreadMessageId:'reply-g' })
     }
     const run = { ...makeRun('run-alice',0,'running',['reply-c','reply-d']),anchorMessageId:'reply-d',publicTailSequenceAtStart:4 }
