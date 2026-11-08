@@ -93,7 +93,7 @@ html[data-mobile-web="true"] .mobile-camp-menu > [role="menuitem"] { display: fl
 html[data-mobile-web="true"] .mobile-camp-menu > [role="menuitem"] > svg { flex: none; width: 18px; height: 18px; color: var(--muted); }
 html[data-mobile-web="true"] .mobile-camp-menu > [data-highlighted] { background: var(--surface-hover); outline: none; }
 html[data-mobile-web="true"] .camp-topbar:has(.mobile-camp-more[data-secondary="true"]):not(.has-file-preview) { height: 52px; min-height: 52px; }
-html[data-mobile-web="true"] .file-preview-toggle-group { display: none; }
+html[data-mobile-web="true"] :is(.file-preview-toggle-group, .project-files-fixed-controls) { display: none; }
 html[data-mobile-web="true"] .workspace-grid { grid-template-columns: minmax(0, 1fr); }
 html[data-mobile-web="true"] .mobile-empty-camp-welcome { width: 100%; min-height: 100%; padding: 24px 20px 52px; }
 html[data-mobile-web="true"] .mobile-empty-camp-welcome h2 { font-size: 20px; font-weight: 600; line-height: 1.35; letter-spacing: -.025em; }
