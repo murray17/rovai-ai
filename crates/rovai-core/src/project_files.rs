@@ -594,10 +594,10 @@ fn browse(scope: &Scope, request: &Request, cancel: &AtomicBool) -> Result<Value
         }
     }
     entries.sort_by(|a, b| {
-        b.directory
-            .cmp(&a.directory)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-            .then(a.name.cmp(&b.name))
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.name.cmp(&b.name))
     });
     Ok(json!({"entries":entries,"partial":partial}))
 }
@@ -733,6 +733,38 @@ mod tests {
         )
         .await;
         assert_eq!(opened_directory["value"]["targetKind"], "directory");
+        let mixed = fixture.0.join("name-order");
+        fs::create_dir(&mixed).unwrap();
+        for name in ["auth", "zebra"] {
+            fs::create_dir(mixed.join(name)).unwrap();
+        }
+        for name in ["config.ts", "Login.ts"] {
+            fs::write(mixed.join(name), "").unwrap();
+        }
+        for (action, params) in [
+            (
+                "list",
+                json!({"entryId":format!("p:{}", URL_SAFE_NO_PAD.encode("name-order"))}),
+            ),
+            (
+                "search",
+                json!({"query":"name-order/", "queryRevision":100}),
+            ),
+        ] {
+            let result = call(&service, &fixture, action, Some(scope), params).await;
+            let names: Vec<_> = result["value"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| entry["name"].as_str().unwrap())
+                .collect();
+            assert_eq!(
+                names,
+                ["auth", "config.ts", "Login.ts", "zebra"],
+                "{action}"
+            );
+            assert_eq!(result["value"]["partial"], false);
+        }
         call(&service, &fixture, "release", Some(scope), json!({})).await;
     }
     #[tokio::test]

@@ -116,6 +116,13 @@ try {
   { const oldOrigin=await desktop.evaluate('performance.timeOrigin'); await desktop.send('Page.reload'); await desktop.wait(`performance.timeOrigin !== ${oldOrigin} && Boolean(document.querySelector('.conversation-jump'))`, 25000) }
   await openThread(desktop, thread)
   const directoryFlow = async surface => {
+    await clear(surface); await type(surface, '@')
+    await surface.click("[...document.querySelectorAll('.ref-filters [role=tab]')].find(node=>node.textContent==='文件')")
+    await surface.wait("document.querySelectorAll('.ref-options [data-option-kind=file]').length===5")
+    assert.deepEqual(await surface.evaluate("[...document.querySelectorAll('.ref-options [data-option-kind=file] strong')].map(node=>node.textContent)"), ['bulk','missing.log','package.json','README.md','src'])
+    await clear(surface); await type(surface, '@src')
+    await surface.wait("document.querySelectorAll('.ref-options [data-option-kind=file]').length===7")
+    assert.deepEqual(await surface.evaluate("[...document.querySelectorAll('.ref-options [data-option-kind=file] strong')].map(node=>node.textContent)"), ['auth','billing','composer-trigger.test.ts','index.ts','index.ts','src','中文 (draft)#1.ts'])
     await clear(surface); await choose(surface, 'src/auth', 'auth')
     assert.equal(await surface.evaluate("document.querySelector('#camp-message .project-file-reference').textContent"), 'auth')
     assert.equal(await surface.evaluate("document.querySelectorAll('#camp-message .project-folder-icon').length"), 1)
@@ -124,6 +131,7 @@ try {
     assert.equal(draft.segments.find(s=>s.kind==='atom').atom.targetKind,'directory')
     await surface.click("document.querySelector('#camp-message .project-file-reference')")
     await surface.wait("Boolean(document.querySelector('.project-files-row[aria-selected=true][title=\"src/auth\"]'))")
+    assert.deepEqual(await surface.evaluate("[...document.querySelectorAll('.project-files-row[aria-level=\"1\"]')].map(node=>node.title)"), ['bulk','missing.log','package.json','README.md','src'])
     assert.equal(await surface.evaluate("document.querySelector('.project-files-row[aria-selected=true]').getAttribute('aria-expanded')"),'true')
     await surface.capture(join(fixture, surface === desktop ? 'directory-desktop.png' : 'directory-web.png'))
     await surface.click("document.querySelector('.file-preview-toggle')")
@@ -145,7 +153,7 @@ try {
     await surface.wait("Boolean(document.querySelector('.project-files-row[aria-selected=true][title=\"src/auth\"]'))")
     await surface.click("document.querySelector('.file-preview-toggle')")
     await clear(surface)
-    checks.push((surface === desktop ? 'Desktop' : 'Web')+' directory selection has no slash, keeps targetKind, uses 480px aligned single-category candidates, publishes and reopens in the file tree')
+    checks.push((surface === desktop ? 'Desktop' : 'Web')+' file/folder candidates use mixed name order; directory selection has no slash, keeps targetKind, uses 480px aligned single-category candidates, publishes and reopens in the file tree')
   }
   await directoryFlow(desktop)
   await choose(desktop, 'package.json', 'package.json')
