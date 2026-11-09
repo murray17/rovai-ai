@@ -64,7 +64,9 @@ import {
 } from './runtime-status'
 import {
   openRuntimeModelCatalog,
-  requestProductRuntimeCheck
+  requestProductRuntimeCheck,
+  runtimeCheckFeedback,
+  type RuntimeCheckFeedbackMessage
 } from './runtime-check'
 import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import {
@@ -1506,7 +1508,7 @@ export function RuntimeInstallationsPanel({
   const rescanPending = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<{ runtimeKind: AdapterKind; mode: 'install' | 'login' } | null>(null)
-  const [checkFeedback, setCheckFeedback] = useState<Partial<Record<AdapterKind, string>>>({})
+  const [checkFeedback, setCheckFeedback] = useState<Partial<Record<AdapterKind, RuntimeCheckFeedbackMessage>>>({})
   const guideId = useId()
   const availability = health?.runtimeAvailability ?? []
   const hasEnabledRuntime =
@@ -1525,12 +1527,14 @@ export function RuntimeInstallationsPanel({
       try {
         const result = await requestProductRuntimeCheck(runtimeKind, client.request)
         if (result.outcome === 'deferred') throw new Error(uiAttribute('检查未完成，程序或启动设置已变化，请重新检查。'))
-        if (!result.ready) throw new Error(uiAttribute('本次检查未通过，请查看当前状态；保留的历史结果不代表本次检查通过。'))
+        if (!result.ready) setCheckFeedback(current => ({ ...current, [runtimeKind]: {
+          kind: 'check_failed', message: uiAttribute('本次检查未通过，请查看当前状态；保留的历史结果不代表本次检查通过。')
+        } }))
       } finally {
         await onReload()
       }
     } catch (nextError) {
-      setCheckFeedback(current => ({ ...current, [runtimeKind]: errorMessage(nextError) }))
+      setCheckFeedback(current => ({ ...current, [runtimeKind]: { kind: 'request_error', message: errorMessage(nextError) } }))
     } finally {
       pendingChecks.current.delete(runtimeKind)
       setCheckingKinds(new Set(pendingChecks.current))
@@ -1614,9 +1618,10 @@ export function RuntimeInstallationsPanel({
             // A stale server snapshot must not lock retry after this row's request
             // settles. The badge still presents server state; Core coalesces checks.
             const checking = checkingKinds.has(runtimeKind)
-            const feedback = checkFeedback[runtimeKind] ? (
+            const { versionFailure, message: feedbackMessage } = runtimeCheckFeedback(item, checkFeedback[runtimeKind])
+            const feedback = feedbackMessage ? (
               <p className="runtime-guide-feedback is-error" role="alert">
-                {checkFeedback[runtimeKind]}
+                {feedbackMessage}
               </p>
             ) : null
             return (
@@ -1647,7 +1652,7 @@ export function RuntimeInstallationsPanel({
                 </button>}
                 <button type="button" className="quiet-button runtime-product-settings" aria-label={uiAttribute("{0} 启动设置", String(adapterLabel(runtimeKind)))}
                   title={uiAttribute("启动设置")} disabled={checking || !allowed} onClick={() => setSettingsRuntime(runtimeKind)}><DialogControlIcon name="settings" /></button>
-                {item?.failure && <RuntimeFailureNotice failure={item.failure} />}
+                {item?.failure && !versionFailure && <RuntimeFailureNotice failure={item.failure} />}
                 {isOpen && guide && expanded ? <RuntimeInstallationGuide
                   id={`${guideId}-${runtimeKind}`} label={adapterLabel(runtimeKind)} guide={guide}
                   mode={expanded.mode} busy={checking} checking={checking} feedback={feedback}

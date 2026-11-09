@@ -100,6 +100,22 @@ Pi 没有答案 ACK，也不为扩展自行触发的 AbortSignal 取消发送独
 所属 Run/Host 生命周期和自身写入状态清理请求，不按后续文字或无关工具事件猜测题目已失效。
 该原生边界不能用“已发送”宣称插件仍在等待或已经采纳答案。
 
+## 应用内待回答提醒
+
+`nativeInteractions.notifications` 为 Desktop 和已认证 Web 返回当前 pending 来源列表，每项只含
+`id / thread{id,title,channelSource} / agentRunId / executionEpoch / agentDisplayName / singleChat /
+createdAt / expiresAt`。`singleChat` 为 null 或原始 `conversationId / agentId / agentDisplayName /
+agentRunId`，不得替换为该队员的新单聊。停止、旧 epoch、运行/Host 退出、过期、成员离开或原单聊结束
+不返回来源；unknown 也不再提供作答提醒。不返回问题、预填或答案正文，不新增持久记录。
+
+Renderer 启动或重新建立基线只观察已有 ID；后续新 ID 进入现有审批提醒队列，共用
+`approvalHeadsUpEnabled`。关闭、静默或偏好关闭时观察过的 ID 不补弹；新请求不会抢焦点。
+移除来源及 expiresAt 撤下精确条目，不操作其他队员的问题或审批。运行进度不触发逐条扫描。
+
+`native_interaction_pending / open_native_interaction` 仅是 Runtime 来源的前端展示语义，
+不扩展持久 Notification Episode，也不调用通知 ACK 或审批接口。点击后重验来源并用
+`interactionId` 定位原待处理卡片；关掉浮层不等于跳过，原生答案仍只经已有 respond 入口提交。
+
 ## 渠道投影与答复
 
 飞书、Lark 与钉钉复用同一个 Runtime 请求及提交锁。渠道 Host tick 从当前 PiRuntime 取得问题，

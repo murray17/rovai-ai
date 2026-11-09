@@ -1005,11 +1005,12 @@ export type NotificationFocusTarget = {
   requestId: number
   conversationId?: string
   agentRunId?: string
-  kind: 'approval' | 'camp_turn' | 'agent_run' | 'camp_message' | 'single_chat' | 'mission' | 'task'
+  kind: 'native_interaction' | 'approval' | 'camp_turn' | 'agent_run' | 'camp_message' | 'single_chat' | 'mission' | 'task'
   subjectId?: string
   threadTurnId: string | null
   messageId?: string
   approvalId?: string
+  interactionId?: string
   active?: boolean
 }
 export type VisibleNotificationSources = {
@@ -3774,7 +3775,7 @@ export function ThreadWorkspace({
   }, [memberCreation, snapshot.thread.id, snapshot.thread.activationState, busy, draftLoadState.state])
 
   useEffect(() => {
-    if (!notificationFocus?.active || ['approval', 'single_chat'].includes(notificationFocus.kind)) return
+    if (!notificationFocus?.active || ['approval', 'native_interaction', 'single_chat'].includes(notificationFocus.kind)) return
     setConversationView('conversation')
     if (notificationFocus.kind === 'task' && notificationFocus.subjectId) {
       if (!tasksEnabled) return
@@ -3830,7 +3831,7 @@ export function ThreadWorkspace({
       frame = window.requestAnimationFrame(present)
     }
     const present = (): void => {
-      if (notificationFocus.kind === 'approval') {
+      if (['approval', 'native_interaction'].includes(notificationFocus.kind)) {
         return
       }
       if (notificationFocus.kind === 'task' || notificationFocus.kind === 'mission') {
@@ -6350,11 +6351,11 @@ export function ThreadWorkspace({
               busy={busy}
               onResolve={onResolveApproval}
               containerRef={approvalDockRef}
-              focusRequest={notificationFocus?.kind === 'approval' && notificationFocus.active
+              focusRequest={notificationFocus && ['approval', 'native_interaction'].includes(notificationFocus.kind) && notificationFocus.active
                 ? notificationFocus.requestId
                 : null}
-              focusApprovalId={notificationFocus?.kind === 'approval'
-                ? notificationFocus.approvalId ?? null
+              focusApprovalId={notificationFocus && ['approval', 'native_interaction'].includes(notificationFocus.kind)
+                ? notificationFocus.interactionId ?? notificationFocus.approvalId ?? null
                 : null}
               onFocusPresented={onNotificationFocusPresented}
           />

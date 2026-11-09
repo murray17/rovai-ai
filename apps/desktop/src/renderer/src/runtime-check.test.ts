@@ -1,5 +1,30 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createRuntimeRefresh, openRuntimeModelCatalog, requestProductRuntimeCheck } from './runtime-check'
+import { createRuntimeRefresh, openRuntimeModelCatalog, requestProductRuntimeCheck, runtimeCheckFeedback } from './runtime-check'
+import type { ProductRuntimeAvailability } from '@contracts'
+
+describe('Runtime check feedback ownership', () => {
+  it.each(['runtime_version_failed', 'runtime_version_empty', 'runtime_version_output_truncated'])(
+    'supersedes only a read failure after success and keeps newer request errors visible: %s', code => {
+      const availability = {
+        failure: { runtimeKind: 'codex-cli', origin: 'environment', phase: 'spawn', code,
+          summary: '旧版本读取失败', detail: '旧原因', retryable: true },
+        discovery: { versionProbeSucceeded: false }
+      } as ProductRuntimeAvailability
+      expect(runtimeCheckFeedback(availability).message).toBe('旧版本读取失败\n旧原因')
+      expect(runtimeCheckFeedback(availability, { kind: 'check_failed', message: '完整检查未通过' }).message).toBe('旧版本读取失败\n旧原因')
+      for (const message of ['本次请求异常', '检查未完成，程序或启动设置已变化，请重新检查。']) {
+        expect(runtimeCheckFeedback(availability, { kind: 'request_error', message }).message).toBe(message)
+      }
+      availability.discovery.versionProbeSucceeded = true
+      expect(runtimeCheckFeedback(availability).message).toBeUndefined()
+      expect(runtimeCheckFeedback(availability, { kind: 'request_error', message: '本次请求异常' }).message).toBe('本次请求异常')
+      expect(runtimeCheckFeedback(availability, { kind: 'check_failed', message: '旧完整检查未通过' }).message).toBeUndefined()
+      availability.failure!.code = 'runtime_version_below_minimum'
+      expect(runtimeCheckFeedback(availability).versionFailure).toBeNull()
+      expect(runtimeCheckFeedback(availability, { kind: 'check_failed', message: '完整检查未通过' }).message).toBe('完整检查未通过')
+    }
+  )
+})
 
 describe('explicit Runtime check targeting', () => {
   afterEach(() => vi.unstubAllGlobals())

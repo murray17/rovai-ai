@@ -6,10 +6,24 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-08
+last_updated: 2026-11-09
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## Pi 待回答提醒（2026-11-08）
+
+Pi 原生待答来源接入现有审批提醒队列，共用开关、静默、定位和主题小点；不新增问卷持久化或改动
+答复协议。实现和验收范围见[实施记录](implementation-plan.md#pi-待回答提醒2026-11-08)。
+
+## Hermes 思考强度（2026-11-08）
+
+复用队员模型参数保存与官方 ACP 设置 `reasoning_effort`。按 User 2026-11-09 修正，界面只保留通用
+“跟随模型默认值”和原生档位；清除强度字段后由 Hermes 适配器发送 `default`，清除原生旧覆盖。
+队员摘要与已有历史默认值使用同一通用文案，`none` 仍保留原生关闭语义。
+已知旧 ACP 有覆盖在 prompt 前报错，无覆盖继续使用；回显沿用尽力处理，不增加生效确认或历史观测。
+规则见[Hermes 合同](../../contracts/hermes-managed-runtime-v1.md#模型权限skills-与-mcp)，官方版本、Provider 参数与
+覆盖见[验收记录](../../research/hermes-runtime/README.md#通用默认交互2026-11-09)。
 
 ## 执行台自动打开偏好（2026-11-08）
 

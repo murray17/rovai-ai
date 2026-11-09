@@ -1136,6 +1136,44 @@ pub async fn discover_runtime_version(
     .await;
 }
 
+/// Project this observation's version failure without replacing retained health
+/// attempts. Passive discovery has no version outcome and creates no failure.
+pub fn version_probe_failure(
+    observation: &RuntimeDiscoveryObservation,
+) -> Option<crate::runtime_failure::RuntimeFailureView> {
+    if observation.version_probe_succeeded != Some(false) {
+        return None;
+    }
+    let diagnostic = observation
+        .diagnostic_code
+        .as_deref()
+        .unwrap_or("runtime_version_failed");
+    let code = if diagnostic.starts_with("runtime_")
+        && diagnostic
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+    {
+        diagnostic
+    } else {
+        "runtime_version_failed"
+    };
+    Some(crate::runtime_failure::public_runtime_failure_from_output(
+        observation.runtime_kind,
+        crate::runtime_failure::RuntimeFailureOrigin::Environment,
+        crate::runtime_failure::RuntimeFailurePhase::Spawn,
+        code,
+        "智能体版本读取失败，请重试检查。",
+        Some(diagnostic),
+        &observation
+            .executable_path
+            .as_deref()
+            .map(|path| (Path::new(path), "<runtime-executable>"))
+            .into_iter()
+            .collect::<Vec<_>>(),
+        true,
+    ))
+}
+
 async fn discover_runtime_version_scoped(
     observation: &mut RuntimeDiscoveryObservation,
     search: &RuntimeSearchEnvironment,

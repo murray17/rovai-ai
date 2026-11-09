@@ -16088,6 +16088,165 @@ mod tests {
                 (thread.clone(), question("native-a")),
                 (thread.clone(), question("native-b")),
             ];
+            let notice = crate::native_interaction::notification_source(
+                db.connection(),
+                &thread,
+                &questions[0].1,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(notice["thread"]["id"], thread);
+            assert_eq!(notice["thread"]["channelSource"]["provider"], provider);
+            assert_eq!(notice["id"], "native-a");
+            assert!(notice["singleChat"].is_null());
+            assert!(notice.get("questions").is_none());
+            assert!(notice.get("answer").is_none());
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    "other-thread",
+                    &questions[0].1
+                )
+                .unwrap()
+                .is_none()
+            );
+            let mut stale_notice = question("stale-notice");
+            stale_notice.execution_epoch += 1;
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &stale_notice
+                )
+                .unwrap()
+                .is_none()
+            );
+            stale_notice.execution_epoch = epoch;
+            stale_notice.expires_at = Some(0);
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &stale_notice
+                )
+                .unwrap()
+                .is_none()
+            );
+            stale_notice.expires_at = None;
+            stale_notice.status = Status::Unknown;
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &stale_notice
+                )
+                .unwrap()
+                .is_none()
+            );
+            db.connection()
+                .execute_batch("SAVEPOINT native_notice_scope")
+                .unwrap();
+            db.connection()
+                .execute(
+                    "UPDATE agent_run SET cancel_requested_at=datetime('now'),cancel_reason_code='user_cancelled' WHERE id=?1",
+                    [&runs[0]],
+                )
+                .unwrap();
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &questions[0].1
+                )
+                .unwrap()
+                .is_none()
+            );
+            db.connection()
+                .execute_batch("ROLLBACK TO native_notice_scope; RELEASE native_notice_scope")
+                .unwrap();
+            let mut private_open = actor_envelope(
+                &ActorRef::User {
+                    user_id: "local_user".into(),
+                },
+                "native-notice-private".into(),
+                crate::single_chat::OpenSingleChatCommand {
+                    draft_client: Default::default(),
+                    camp_id: thread.clone(),
+                    agent_id: "agent_1".into(),
+                },
+            );
+            private_open.camp_id = Some(thread.clone());
+            let opened = crate::single_chat::SingleChatService::default()
+                .open(&mut db, &private_open)
+                .unwrap();
+            assert_eq!(opened.result.status, CommandResultStatus::Applied);
+            let private_id = opened.result.payload["conversationId"].as_str().unwrap();
+            let mut private_send = actor_envelope(
+                &ActorRef::User {
+                    user_id: "local_user".into(),
+                },
+                "native-notice-private-send".into(),
+                crate::single_chat::SendSingleChatMessageCommand {
+                    draft_client: Default::default(),
+                    camp_id: thread.clone(),
+                    conversation_id: private_id.into(),
+                    body: "验证原单聊问答提醒".into(),
+                    draft_revision: 0,
+                },
+            );
+            private_send.camp_id = Some(thread.clone());
+            let sent = crate::single_chat::SingleChatService::default()
+                .send(&mut db, &private_send)
+                .unwrap();
+            assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+            let mut private_question = question("native-private");
+            private_question.agent_run_id =
+                sent.result.payload["agentRunId"].as_str().unwrap().into();
+            private_question.execution_epoch = db
+                .connection()
+                .query_row(
+                    "SELECT execution_epoch FROM agent_run WHERE id=?1",
+                    [&private_question.agent_run_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            // A native dialog can only arrive after the admitted Run starts.
+            db.connection()
+                .execute(
+                    "UPDATE agent_run SET status='running',started_at=datetime('now') WHERE id=?1",
+                    [&private_question.agent_run_id],
+                )
+                .unwrap();
+            let private_notice = crate::native_interaction::notification_source(
+                db.connection(),
+                &thread,
+                &private_question,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(private_notice["singleChat"]["conversationId"], private_id);
+            assert_eq!(private_notice["singleChat"]["agentId"], "agent_1");
+            db.connection()
+                .execute_batch("SAVEPOINT native_notice_private")
+                .unwrap();
+            db.connection()
+                .execute(
+                    "UPDATE conversation SET ended_at=datetime('now'),ended_reason='user_ended',ended_binding_generation=native_binding_generation WHERE id=?1",
+                    [private_id],
+                )
+                .unwrap();
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &private_question
+                )
+                .unwrap()
+                .is_none()
+            );
+            db.connection()
+                .execute_batch("ROLLBACK TO native_notice_private; RELEASE native_notice_private")
+                .unwrap();
             native_interactions::project_pending(&mut db, provider, &questions).unwrap();
             native_interactions::project_pending(&mut db, provider, &questions).unwrap();
             assert_eq!(

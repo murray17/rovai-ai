@@ -63,7 +63,7 @@ export function memberRuntimeConfigurationPresentation(
           ? uiAttribute('思考强度')
           : uiAttribute('推理强度'),
         value: typeof rawEffort === 'string' && rawEffort
-          ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [])
+          ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [], configuration.adapterKind)
           : configuration.adapterKind === 'pi' ? uiAttribute('跟随 Pi 原生设置') : uiAttribute("跟随模型默认值")
       }
     : null
@@ -78,8 +78,10 @@ export function memberRuntimeConfigurationPresentation(
 
 function runtimeEffortValueLabel(
   value: string,
-  choices: Array<{ value: string; label: string }>
+  choices: Array<{ value: string; label: string }>,
+  adapterKind?: string
 ): string {
+  if (adapterKind === 'hermes-cli' && value === 'default') return uiAttribute('跟随模型默认值')
   return choices.find((choice) => choice.value === value)?.label ?? value
 }
 
@@ -100,7 +102,7 @@ export function messageRuntimeModelPresentation(
     model: descriptor?.displayName.trim() || model.modelId || uiAttribute('智能体默认'),
     effort: model.reasoningEffort ? {
       label: model.adapterKind === 'claude-code-cli' || model.adapterKind === 'pi' ? uiAttribute('思考强度') : uiAttribute('推理强度'),
-      value: runtimeEffortValueLabel(model.reasoningEffort, choices)
+      value: runtimeEffortValueLabel(model.reasoningEffort, choices, model.adapterKind)
     } : null
   }
 }

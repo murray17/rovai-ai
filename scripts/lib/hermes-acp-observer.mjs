@@ -24,10 +24,13 @@ function observe(direction,bytes){
       if(direction==='out'&&m.method==='session/request_permission')permissions.set(m.id,{sessionId:p.sessionId});
       const permission=direction==='in'&&!m.method?permissions.get(m.id):undefined;
       const request=requests.get(m.id),method=m.method||(permission?'session/request_permission':request?.method);
-      if(!['initialize','session/new','session/resume','session/load','session/set_model','session/set_mode','session/prompt','session/update','session/request_permission'].includes(method))continue;
+      if(!['initialize','session/new','session/resume','session/load','session/set_model','session/set_mode','session/set_config_option','session/prompt','session/update','session/request_permission'].includes(method))continue;
       const meta=r._meta||u._meta||{},native=meta.hermes||{},provenance=native.sessionProvenance;
       const record={pid:process.pid,direction,id:m.id,method,label:request?.label,
         sessionId:p.sessionId||r.sessionId||permission?.sessionId||request?.sessionId,modelId:p.modelId,modeId:p.modeId,
+        configId:method==='session/set_config_option'?p.configId:undefined,
+        configValue:method==='session/set_config_option'&&p.configId==='reasoning_effort'?p.value:undefined,
+        reasoningOptions:r.configOptions?.filter(o=>o.id==='reasoning_effort').map(o=>({currentValue:o.currentValue,category:o.category,values:o.options?.map(v=>v.value)})),
         permissionToolId:method==='session/request_permission'?p.toolCall?.toolCallId:undefined,
         permissionOptions:p.options?.map(o=>({optionId:o.optionId,kind:o.kind})),
         permissionOutcome:r.outcome?{outcome:r.outcome.outcome,optionId:r.outcome.optionId}:undefined,

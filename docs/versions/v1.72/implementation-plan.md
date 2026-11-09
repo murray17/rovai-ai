@@ -4846,3 +4846,23 @@ r3 两项失败已闭环：`project_files.rs:737` 比较前 canonicalize 实际�
 - 迁移验证扩展既有聊天升级来源、Subagent/native-channel 回滚及迁移状态矩阵 owner，
   不新增 Rust 测试函数。当前 macOS 结果记录在本轮交付消息；不据此宣称 Windows 账户隔离、
   真实飞书账号或真实旧库完成实机验收。
+
+## Pi 待回答提醒（2026-11-08）
+
+在 `rovai/pi-native-question-notifications` 从 main `958784f6e` 实施。Pi 待回答通过只读轻量来源接入
+既有 heads-up 队列，不新增数据库表、问卷服务或持久 Notification 语义。共用审批提醒开关，支持
+中英文、公屏/原单聊精确定位、多个独立请求、已有请求基线、原生期限及已处理来源撤下；小点使用现有主题映射。
+规则见[通知架构](../../architecture/notification-episodes.md#原生待回答的临时来源)、
+[原生交互合同](../../contracts/native-interactions-v1.md#应用内待回答提醒)及
+[提醒 UI](../../ui/components/notification-center.md#应用内提醒)。
+
+验证复用 NotificationAttentionController / NotificationSettings / App、Web 失效解码与现有隔离 Electron
+通知夹具。Core 扩展既有 `native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery`，
+覆盖公屏/原单聊来源、原单聊结束、旧 epoch、过期、unknown 与停止；不增加 Rust 测试函数，不引入另一份 SQLite fixture。
+最小 Rust 命令为 `cargo test -p rovai-core --features extended-tests --lib native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery`。
+已通过 `pnpm typecheck`、`TZ=UTC pnpm test`（Vitest 3,194 通过、2 跳过）、
+`pnpm test:notification-attention`（3 项隔离 Electron 回归）、上述 Core 扩展 owner、
+`pnpm test:rust:pr`（workspace 484 通过、1 ignored）、`pnpm build:desktop` 和通用文档门禁。
+本机 HST 下两个既有更新日期测试依赖 UTC 日期；以显式 `TZ=UTC` 完成全量测试，未改动它们。
+隔离 UI 覆盖混合队列、独立请求、原单聊定位、日夜蓝点、到期/处理撤下及刷新静默。
+本次未运行真实模型/Pi 或 Windows 原生验收，不把受控 Runtime 元数据与 Electron 夹具当作此类证据。

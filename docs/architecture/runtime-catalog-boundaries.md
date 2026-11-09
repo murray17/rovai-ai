@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-04
+last_updated: 2026-11-09
 ---
 
 # Runtime Catalog Boundaries
@@ -243,7 +243,7 @@ Windows 沿用 Registry／PATH 规则；只采集 PATH，失败仍走既有回�
 精确范围见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md)。
 
 启动只静态解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity，不运行 Runtime。
-手动 rescan 保留未知或变化程序的有界版本补读，不执行认证或协议深检；单项检查只检查选中的 Runtime。
+手动 rescan 对每种 Runtime 本轮选中的入口重新有界读取版本，不执行认证或协议深检；单项检查只检查选中的 Runtime。
 发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
 安装记录不伪造 Ready、认证或能力；旧健康证据只供主动诊断和模型 Picker 参考，已知版本的展示复用单独判断。
 

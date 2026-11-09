@@ -2870,6 +2870,12 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
+    if adapter_kind == AdapterKind::HermesCli {
+        for option in models.iter_mut().flat_map(|model| &mut model.options) {
+            option.scope = RuntimeOptionScope::Session;
+            option.default_value = None;
+        }
+    }
     if adapter_kind == AdapterKind::MinimaxCodeCli {
         let current = acp_runtime_model_id_from_session(session_result);
         let effort = session_result["configOptions"]
@@ -4069,6 +4075,13 @@ mod tests {
                 *models,
                 "normalization is idempotent"
             );
+        }
+        let hermes = acp_model_catalog_for_adapter(AdapterKind::HermesCli, &acp).unwrap();
+        for option in hermes.iter().flat_map(|model| &model.options) {
+            assert_eq!(option.scope, RuntimeOptionScope::Session);
+            assert_eq!(option.default_value, None);
+            assert!(!option.values.iter().any(|choice| choice.value == "default"));
+            assert!(option.values.iter().any(|choice| choice.value == "high"));
         }
         let auto = catalogs[0].iter().find(|model| model.id == "auto").unwrap();
         assert_eq!(auto.display_name, "Auto");

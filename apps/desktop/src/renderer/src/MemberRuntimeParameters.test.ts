@@ -2,6 +2,7 @@ import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { RuntimeParameterSelect } from './RuntimeParameterSelect'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -84,6 +85,7 @@ describe('member chat controls', () => {
     expect(memberStyles).toContain('.member-chat-bot > button { flex: 0 0 auto; white-space: nowrap; }')
   })
 })
+vi.mock('./RuntimeParameterSelect', { spy: true })
 
 describe('runtime model catalog source', () => {
   it('keeps expired same-environment history displayable without accepting invalidated history', () => {
@@ -411,6 +413,57 @@ describe('member runtime parameters', () => {
     installation.snapshot!.models[0].options = []
     expect(render()).toContain('尚未核对 · high')
     expect(draft.model.options).toEqual({ thought_level: 'high' })
+  })
+
+  it('uses the common model default for Hermes and preserves native effort levels', () => {
+    const installation = runtimeInstallation('hermes-cli')
+    installation.snapshot!.models[0].options[0].values = ['high', 'none', 'default'].map(value => ({value, label: value}))
+    for (const [value, label] of [['', '跟随模型默认值'], ['high', 'high'], ['none', 'none'], ['default', '跟随模型默认值']] as const) {
+      const model = {mode: 'explicit' as const, modelId: 'runtime/model', options: value ? {reasoning_effort: value} : {}}
+      const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+        adapterKind: 'hermes-cli', installation, model, disabled: false, onChange: () => undefined
+      }))
+      expect(markup).toContain(`aria-label="推理强度，${label}"`)
+      const changed = explicitSelection({...installation.snapshot!.models[0], id: 'other', options: []}, model)
+      expect(changed.mode === 'explicit' && changed.options).toEqual(model.options)
+    }
+    installation.snapshot!.models[0].options = []
+    const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+      adapterKind: 'hermes-cli', installation, disabled: false, onChange: () => undefined,
+      model: {mode: 'explicit', modelId: 'runtime/model', options: {reasoning_effort: 'future'}}
+    }))
+    expect(markup).toContain('尚未核对 · future')
+  })
+
+  it('keeps one common Hermes default with or without a model catalog', () => {
+    for (const catalog of ['missing-model', 'empty', 'native-reset'] as const) {
+      const installation = runtimeInstallation('hermes-cli')
+      installation.snapshot!.models[0].options[0].values = ['high', 'default', 'default']
+        .map(value => ({ value, label: value }))
+      if (catalog === 'empty') installation.snapshot!.models = []
+      for (const value of ['high', 'default']) {
+        vi.mocked(RuntimeParameterSelect).mockClear()
+        const model = {
+          mode: 'explicit' as const,
+          modelId: catalog === 'native-reset' ? 'runtime/model' : 'custom:manual:unlisted',
+          options: { reasoning_effort: value }
+        }
+        const onChange = vi.fn()
+        const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+          adapterKind: 'hermes-cli', installation, model, disabled: false, onChange
+        }))
+        const [field] = vi.mocked(RuntimeParameterSelect).mock.calls.at(-1)!
+        expect(field.choices.map(choice => choice.value)).not.toContain('default')
+        expect(field.defaultChoice).toEqual({ value: '', label: '跟随模型默认值' })
+        expect(markup).toContain(value === 'default'
+          ? 'aria-label="推理强度，跟随模型默认值"'
+          : catalog === 'native-reset' ? 'aria-label="推理强度，high"' : '尚未核对 · high')
+        expect(onChange).not.toHaveBeenCalled()
+        field.onChange(field.defaultChoice!.value)
+        expect(onChange).toHaveBeenLastCalledWith({ ...model, options: {} })
+        expect(model.options).toEqual({ reasoning_effort: value })
+      }
+    }
   })
 
   it('does not present an approval mode for native Pi tool execution', () => {
