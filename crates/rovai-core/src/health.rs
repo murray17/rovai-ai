@@ -20,9 +20,9 @@ use rovai_core::{
     },
     managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
-        RuntimeLaunchPurpose, configure_active_runtime_command, configure_runtime_command,
-        discover_static_runtime_version, is_cursor_agent_version, is_executable_file,
-        runtime_launch_allowed,
+        RUNTIME_VERSION_TIMEOUT, RuntimeLaunchPurpose, configure_active_runtime_command,
+        configure_runtime_command, discover_static_runtime_version, is_cursor_agent_version,
+        is_executable_file, runtime_launch_allowed,
     },
     runtime_failure::{
         RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -150,17 +150,11 @@ async fn runtime_version_output(path: &Path, kind: AdapterKind) -> Result<Bounde
     if kind == AdapterKind::Pi {
         command.stdin(Stdio::null());
     }
-    bounded_output(
-        &mut command,
-        Duration::from_secs(if kind == AdapterKind::Pi { 5 } else { 15 }),
-    )
-    .await
+    bounded_output(&mut command, RUNTIME_VERSION_TIMEOUT).await
 }
 
 pub(crate) async fn read_opencode_version(path: &Path) -> Result<String> {
-    let mut command = runtime_command(path, Some(AdapterKind::OpencodeCli));
-    command.arg("--version");
-    let output = bounded_output(&mut command, Duration::from_secs(15))
+    let output = runtime_version_output(path, AdapterKind::OpencodeCli)
         .await
         .context("OpenCode initialization could not read the selected executable's version")?;
     if !output.status.success() {
