@@ -4,7 +4,7 @@ name: Hermes Managed Runtime
 version: v1
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-08
+last_updated: 2026-11-09
 ---
 
 # Hermes Managed Runtime v1
@@ -131,15 +131,16 @@ Hermes 不可用，也不合成猜测的模型项。原生默认沿用会话状�
 别名模糊匹配；不同或缺失时把用户选择的完整 ID 原样交给原生设置。
 相同 `currentModeId` 同样跳过模式设置。不增加状态查询、跨 Run 缓存或 warm 管理。
 显式模型的 `options.reasoning_effort` 沿用成员保存与 Run 冻结配置，在模型设置后通过官方
-`session/set_config_option` 原样下发一次。无字段不设置；`none` 是原生关闭值；`default` 是恢复
-Hermes 配置默认的持久意图，每次准备都下发，不以删除字段代替恢复。内部 `runtime_default`
-不能作为强度值发送。仅支持此字段，不开放任意 Hermes 配置项，也不修改原生配置文件。
-已知 ACP 低于 0.22.6 时，有覆盖在任务 prompt 前报兼容性错误；无覆盖保留最低版本 0.22.4。
+`session/set_config_option` 下发一次。界面复用通用“跟随模型默认值”：选回默认时删除强度 override，
+Hermes 适配器把缺省强度转换成原生 `default`，清除 Session 的旧覆盖。已保存的 `default` 使用同一
+默认文案与原生行为；`none` 仍是原生关闭值。内部 `runtime_default` 不能作为强度值发送。
+仅支持此字段，不开放任意 Hermes 配置项，也不修改原生配置文件。
+已知 ACP 低于 0.22.6 时，有覆盖在任务 prompt 前报兼容性错误；无字段仍沿用原生配置，保留最低版本 0.22.4。
 目录缺失、未列出保存值、未知版本或 setter 缺回显不构成新的执行门槛；原生拒绝、超时与断线
 沿用准备失败处理，不提交任务或自动重放。新客户端连接旧 Gateway 按官方实际结果处理，不自动重启。
-目录保留原生档位与名称，声明 Session 作用域；当前值不是成员默认覆盖。原生支持的 `default`
-恢复值可补入已有强度选项。界面区分“不覆盖原生会话设置”和“恢复 Hermes 配置默认”；目录
-刷新与模型切换不删除显式覆盖。回显复用已有内存 Session 元数据，不验证值相等、不确认即时生效、
+目录保留原生档位与名称，声明 Session 作用域；当前值不是成员默认覆盖。菜单只显示一个通用默认项
+和原生强度档位，不额外显示原生 `default` 或内部标记。队员摘要与已有历史默认值使用同一通用文案；
+目录刷新与模型切换不删除显式覆盖。回显复用已有内存 Session 元数据，不验证值相等、不确认即时生效、
 不增加观测持久化或配置状态管理。0.23.0 原生忙碌时可能延后应用；正常回包不承诺已立即应用。
 成员摘要与历史中的强度仍表达冻结配置意图，不是 Provider 最终参数。Fast 继续沿原生配置。
 权限请求走共享 ACP，文件审批模式不是命令审批或 OS sandbox；CoreEnforced read-only 仍拒绝。

@@ -560,20 +560,16 @@ function ModelFields({
   const storedOptionValue = explicit && optionKey
     ? stringValue(explicit.options[optionKey])
     : ''
-  const optionValue = adapterKind === 'hermes-cli' && storedOptionValue === 'runtime_default'
+  const optionValue = adapterKind === 'hermes-cli' && (storedOptionValue === 'runtime_default' || storedOptionValue === 'default')
     ? '' : storedOptionValue
-  const optionChoices = adapterKind === 'hermes-cli'
-    ? [
-        { value: 'default', label: uiAttribute('恢复 Hermes 配置默认') },
-        ...(option?.values ?? []).filter(choice => choice.value !== 'default' && choice.value !== 'runtime_default')
-      ]
-    : option?.values ?? []
+  const optionChoices = (option?.values ?? []).filter(choice => adapterKind !== 'hermes-cli'
+    || (choice.value !== 'default' && choice.value !== 'runtime_default'))
   const optionInvalid = optionValue
     ? !optionChoices.some((candidate) => candidate.value === optionValue)
     : false
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
-    : isDsh ? !optionsKnown || option || optionValue : option || optionValue
+    : isDsh ? !optionsKnown || option || optionValue : option || storedOptionValue
 
   return (
     <>
@@ -597,8 +593,7 @@ function ModelFields({
           loadingLabel={isDsh && pageActive && !disabled && readStatus === 'loading' && optionLoadingKey === targetKey
             ? uiAttribute('正在读取可选思考强度，当前选择仍可保存') : undefined}
           defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
-            : adapterKind === 'hermes-cli' ? uiAttribute('不覆盖原生会话设置')
-              : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
+            : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
           choices={[
             ...(optionInvalid ? [{ value: optionValue, label: uiAttribute('尚未核对 · {0}', optionValue) }] : []),
             ...optionChoices.map(choice => ({

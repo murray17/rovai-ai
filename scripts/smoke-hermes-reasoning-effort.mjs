@@ -145,7 +145,7 @@ async function run(tid, agentId, label, effort, expected = 'succeeded', selected
   const captured = requests.filter(r => r.main && r.label === label)
   if (expected === 'succeeded') {
     assert(captured.length > 0, 'No main Provider request for ' + label)
-    const expectedEffort = effort === 'default' ? 'low' : effort
+    const expectedEffort = effort === 'default' || effort === null && !legacy ? 'low' : effort
     if (expectedEffort !== null) for (const r of captured) assert.equal(r.effort, expectedEffort, label)
     const sends = db.prepare("SELECT source_agent_run_id,author_id FROM camp_message WHERE camp_id=? AND body=?").all(tid, 'EFFORT_OK_' + label)
     assert.equal(sends.length, 1); assert.equal(sends[0].source_agent_run_id, ended.id); assert.equal(sends[0].author_id, agentId)
@@ -155,9 +155,10 @@ async function run(tid, agentId, label, effort, expected = 'succeeded', selected
   const connection = prompt ? trace.filter(r => r.pid === prompt.pid && r.direction === 'in') : []
   const setterIndex = connection.findIndex(r => r.method === 'session/set_config_option')
   if (expected === 'succeeded') {
-    if (effort === null) assert.equal(setterIndex, -1)
+    if (effort === null && legacy) assert.equal(setterIndex, -1)
     else {
       assert(setterIndex >= 0 && setterIndex < connection.findIndex(r => r.method === 'session/prompt'))
+      assert.equal(connection[setterIndex].configValue, effort ?? 'default')
       const modelIndex = connection.findIndex(r => r.method === 'session/set_model')
       if (modelIndex >= 0) assert(modelIndex < setterIndex)
     }
@@ -191,8 +192,8 @@ try {
     await writeFile(join(project, 'deferred-release'), 'release')
     await running
     assert.equal(await run(a, 'agent_2', 'AFTER_DEFER', null), session)
-    assert.equal(requests.findLast(r => r.main && r.label === 'AFTER_DEFER').effort, 'high')
-    nativeChecks.push({name: 'native_deferred_choice_applies_at_boundary', providerEffort: 'high'})
+    assert.equal(requests.findLast(r => r.main && r.label === 'AFTER_DEFER').effort, 'low')
+    nativeChecks.push({name: 'next_run_model_default_clears_deferred_override', providerEffort: 'low'})
   } else if (legacy) {
     await run(a, 'agent_2', 'LEGACY_BASE', null)
     await run(a, 'agent_2', 'LEGACY_OVERRIDE', 'high', 'failed')
@@ -203,11 +204,13 @@ try {
     if (!realModel) {
       assert.equal(await run(a, 'agent_2', 'A3', 'none'), sa)
       assert.equal(await run(a, 'agent_2', 'A4', null), sa)
-      assert.equal(requests.findLast(r => r.main && r.label === 'A4').effort, 'none', 'absence preserves Session setting')
+      assert.equal(requests.findLast(r => r.main && r.label === 'A4').effort, 'low', 'model default clears Session setting')
       assert.equal(await run(a, 'agent_2', 'A5', 'default'), sa)
       assert.equal(await run(a, 'agent_2', 'A6', 'high', 'succeeded', 'other-probe'), sa)
       await run(b, 'agent_3', 'BAD', 'not-a-native-effort', 'failed')
     }
+    assert.equal(await run(a, 'agent_2', 'A7', 'high'), sa)
+    assert.equal(await run(a, 'agent_2', 'A8', null), sa)
   }
   const trace = await acp()
   for (const c of cases) {

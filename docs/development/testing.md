@@ -158,7 +158,7 @@ Hermes 思考强度扩展已有 `model_selection_matches_native_provider_forms_w
 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs` 与
 `real_acp_session_model_selection_respects_native_adapter_boundaries` owners，不新增 Rust 测试函数。
 纯函数覆盖已知旧 ACP、字段形状及无目录值；原有协议进程 fixture 覆盖 new/cold resume、同模型
-设置、模型后设置、none/default、拒绝、缺回显和延后回显不阻断。最小命令：
+设置、模型后设置、通用默认在适配器内转换为 default、none、拒绝、缺回显和延后回显不阻断。最小命令：
 `cargo test -p rovai-core --lib hermes::`、
 `cargo test -p rovai-core --features extended-tests --lib grouped_acp_models`、
 `cargo test -p rovai-core --features extended-tests --lib real_acp_session_model_selection`。
