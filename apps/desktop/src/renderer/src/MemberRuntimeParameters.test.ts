@@ -351,6 +351,26 @@ describe('member runtime parameters', () => {
     expect(draft.model.options).toEqual({ thought_level: 'high' })
   })
 
+  it('keeps Hermes native values, reset and no override distinct', () => {
+    const installation = runtimeInstallation('hermes-cli')
+    installation.snapshot!.models[0].options[0].values = ['high', 'none', 'default'].map(value => ({value, label: value}))
+    for (const [value, label] of [['', '不覆盖原生会话设置'], ['high', 'high'], ['none', 'none'], ['default', '恢复 Hermes 配置默认']] as const) {
+      const model = {mode: 'explicit' as const, modelId: 'runtime/model', options: value ? {reasoning_effort: value} : {}}
+      const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+        adapterKind: 'hermes-cli', installation, model, disabled: false, onChange: () => undefined
+      }))
+      expect(markup).toContain(`aria-label="推理强度，${label}"`)
+      const changed = explicitSelection({...installation.snapshot!.models[0], id: 'other', options: []}, model)
+      expect(changed.mode === 'explicit' && changed.options).toEqual(model.options)
+    }
+    installation.snapshot!.models[0].options = []
+    const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+      adapterKind: 'hermes-cli', installation, disabled: false, onChange: () => undefined,
+      model: {mode: 'explicit', modelId: 'runtime/model', options: {reasoning_effort: 'future'}}
+    }))
+    expect(markup).toContain('尚未核对 · future')
+  })
+
   it('does not present an approval mode for native Pi tool execution', () => {
     const installation = runtimeInstallation('pi')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {

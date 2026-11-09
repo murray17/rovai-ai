@@ -154,6 +154,19 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 
 ## Rust 测试准入与退役门槛
 
+Hermes 思考强度扩展已有 `model_selection_matches_native_provider_forms_without_suffix_matching`、
+`grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs` 与
+`real_acp_session_model_selection_respects_native_adapter_boundaries` owners，不新增 Rust 测试函数。
+纯函数覆盖已知旧 ACP、字段形状及无目录值；原有协议进程 fixture 覆盖 new/cold resume、同模型
+设置、模型后设置、none/default、拒绝、缺回显和延后回显不阻断。最小命令：
+`cargo test -p rovai-core --lib hermes::`、
+`cargo test -p rovai-core --features extended-tests --lib grouped_acp_models`、
+`cargo test -p rovai-core --features extended-tests --lib real_acp_session_model_selection`。
+官方端到端入口 `node scripts/smoke-hermes-reasoning-effort.mjs <official-source> <prepared-python>`
+使用隔离用户 Home/Profile/Gateway 与生产 Core/CLI；追加 `--legacy` 验旧 ACP 无覆盖可用且有覆盖
+不提交任务，追加 `--real-model` 使用已授权 Responses Provider。Provider 参数断言与 ACP observer
+均仅存在于验收脚本，不进入生产执行。实际版本及覆盖见[Hermes 研究记录](../research/hermes-runtime/README.md)。
+
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess
 根进程清理均扩展原 owner；迁移/历史读取仍保留。原私有 Home controller、维护 CLI 与其专属测试
 随生产路径删除，不保留失效的 smoke 入口。完整退役与 successor 见 [测试归属](../research/hermes-runtime/README.md#rust-测试归属)。
