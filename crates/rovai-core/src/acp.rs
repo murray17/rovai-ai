@@ -14346,6 +14346,15 @@ for line in sys.stdin:
                     vec!["session/set_config_option"],
                 ),
                 (
+                    "effort-model-default",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
                     "effort-no-echo",
                     "explicit",
                     Some("provider-a/model"),
@@ -14385,6 +14394,7 @@ for line in sys.stdin:
                 let effort = match case {
                     "effort-none" => Some("none"),
                     "effort-default" => Some("default"),
+                    "effort-model-default" => None,
                     value if value.starts_with("effort-") => Some("high"),
                     _ => None,
                 };
@@ -14410,7 +14420,7 @@ for line in sys.stdin:
                 std::fs::write(
                     executable.with_extension("json"),
                     serde_json::to_vec(&json!({
-                        "session": session, "failure":failure, "case":case, "version":if effort.is_some() { "0.23.0" } else { "0.22.4" },
+                        "session": session, "failure":failure, "case":case, "version":if case.starts_with("effort-") { "0.23.0" } else { "0.22.4" },
                     }))
                     .unwrap(),
                 )
@@ -14549,7 +14559,10 @@ for line in sys.stdin:
                     }
                     if request["method"] == "session/set_config_option" {
                         assert_eq!(request["params"]["configId"], "reasoning_effort");
-                        assert_eq!(request["params"]["value"].as_str(), effort);
+                        assert_eq!(
+                            request["params"]["value"].as_str(),
+                            Some(effort.unwrap_or("default"))
+                        );
                     }
                     if request["method"] == "session/set_mode" {
                         assert_eq!(request["params"]["modeId"], "dont_ask");

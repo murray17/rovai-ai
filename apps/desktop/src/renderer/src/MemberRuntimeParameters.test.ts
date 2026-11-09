@@ -354,10 +354,10 @@ describe('member runtime parameters', () => {
     expect(draft.model.options).toEqual({ thought_level: 'high' })
   })
 
-  it('keeps Hermes native values, reset and no override distinct', () => {
+  it('uses the common model default for Hermes and preserves native effort levels', () => {
     const installation = runtimeInstallation('hermes-cli')
     installation.snapshot!.models[0].options[0].values = ['high', 'none', 'default'].map(value => ({value, label: value}))
-    for (const [value, label] of [['', '不覆盖原生会话设置'], ['high', 'high'], ['none', 'none'], ['default', '恢复 Hermes 配置默认']] as const) {
+    for (const [value, label] of [['', '跟随模型默认值'], ['high', 'high'], ['none', 'none'], ['default', '跟随模型默认值']] as const) {
       const model = {mode: 'explicit' as const, modelId: 'runtime/model', options: value ? {reasoning_effort: value} : {}}
       const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
         adapterKind: 'hermes-cli', installation, model, disabled: false, onChange: () => undefined
@@ -374,7 +374,7 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('尚未核对 · future')
   })
 
-  it('keeps one Hermes reset choice without a matching model catalog and saves its explicit intent', () => {
+  it('keeps one common Hermes default with or without a model catalog', () => {
     for (const catalog of ['missing-model', 'empty', 'native-reset'] as const) {
       const installation = runtimeInstallation('hermes-cli')
       installation.snapshot!.models[0].options[0].values = ['high', 'default', 'default']
@@ -392,17 +392,13 @@ describe('member runtime parameters', () => {
           adapterKind: 'hermes-cli', installation, model, disabled: false, onChange
         }))
         const [field] = vi.mocked(RuntimeParameterSelect).mock.calls.at(-1)!
-        const resets = field.choices.filter(choice => choice.value === 'default')
-        expect(resets).toHaveLength(1)
-        expect(resets[0].label).toBe('恢复 Hermes 配置默认')
-        expect(field.defaultChoice).toEqual({ value: '', label: '不覆盖原生会话设置' })
+        expect(field.choices.map(choice => choice.value)).not.toContain('default')
+        expect(field.defaultChoice).toEqual({ value: '', label: '跟随模型默认值' })
         expect(markup).toContain(value === 'default'
-          ? 'aria-label="推理强度，恢复 Hermes 配置默认"'
+          ? 'aria-label="推理强度，跟随模型默认值"'
           : catalog === 'native-reset' ? 'aria-label="推理强度，high"' : '尚未核对 · high')
         expect(onChange).not.toHaveBeenCalled()
-        field.onChange(resets[0].value)
-        expect(onChange).toHaveBeenLastCalledWith({ ...model, options: { reasoning_effort: 'default' } })
-        field.onChange('')
+        field.onChange(field.defaultChoice!.value)
         expect(onChange).toHaveBeenLastCalledWith({ ...model, options: {} })
         expect(model.options).toEqual({ reasoning_effort: value })
       }

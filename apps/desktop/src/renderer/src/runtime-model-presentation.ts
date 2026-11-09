@@ -64,8 +64,7 @@ export function memberRuntimeConfigurationPresentation(
           : uiAttribute('推理强度'),
         value: typeof rawEffort === 'string' && rawEffort
           ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [], configuration.adapterKind)
-          : configuration.adapterKind === 'pi' ? uiAttribute('跟随 Pi 原生设置')
-            : configuration.adapterKind === 'hermes-cli' ? uiAttribute('不覆盖原生会话设置') : uiAttribute("跟随模型默认值")
+          : configuration.adapterKind === 'pi' ? uiAttribute('跟随 Pi 原生设置') : uiAttribute("跟随模型默认值")
       }
     : null
 
@@ -82,7 +81,7 @@ function runtimeEffortValueLabel(
   choices: Array<{ value: string; label: string }>,
   adapterKind?: string
 ): string {
-  if (adapterKind === 'hermes-cli' && value === 'default') return uiAttribute('恢复 Hermes 配置默认')
+  if (adapterKind === 'hermes-cli' && value === 'default') return uiAttribute('跟随模型默认值')
   return choices.find((choice) => choice.value === value)?.label ?? value
 }
 

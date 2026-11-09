@@ -1,0 +1,853 @@
+{
+  "date": "2026-11-09",
+  "rovaiBase": "eace211d82d722537b7bf4cdd769b3c860577e78",
+  "testedCoreSha256": "ee1b812da3a95430882d45fa61612844090474fcd305930532e176d022e86677",
+  "reproductionScriptSha256": "dc616dbf7524530643e3b73ef0e1e6f9c561ef6f84e8e6a097990f897caabc55",
+  "productionScope": "One common model-default choice; absent reasoning_effort becomes native default in the Hermes adapter on supported ACP; known older ACP without an override remains usable; no new state or observation gate",
+  "channel": "Production Core/CLI with isolated user Home/Profile/Gateway, Core data, Skills and MCP; official Hermes sources unchanged; Provider capture is test-only",
+  "records": [
+    {
+      "kind": "controlled_0230",
+      "fixture": "rovai-hermes-effort-EhLyrZ",
+      "rawResultSha256": "6fb619c7b625dfc537c78ac9a1bf4da4b10b8dbfa491b83b08c3ba2a76193725",
+      "nativeVersion": "v0.23.0",
+      "nativeCommit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "gatewayVersion": "v0.23.0",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "providerRequests": 47,
+      "mainProviderRequests": 20,
+      "cases": [
+        {
+          "label": "A0",
+          "runId": "f7ef0d87-f365-4890-906f-0b30657e0415",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/new"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "method": "session/set_mode"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "high"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "B0",
+          "runId": "e7e3192f-704e-498c-93db-452f3d28ca9a",
+          "status": "succeeded",
+          "session": "local-2234aa4db83a9946bc90aa72f1498cf4e8ee9efe51cc2e03f05114ac5665281f",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/new"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "method": "session/set_mode"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "A1",
+          "runId": "9e305749-079a-4447-8a25-708161205486",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "A2",
+          "runId": "ed11cd8e-8fd5-4d5d-85e3-05794bba9305",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "A3",
+          "runId": "2f722ee3-5d66-459b-abb2-b04ee66508a7",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "none"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "none"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "none"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "A4",
+          "runId": "5a0f7bea-7bf2-4d26-94da-09d769739982",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "A5",
+          "runId": "16c6298c-8af1-4c68-a051-52651b5949a3",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "A6",
+          "runId": "53365b9f-7155-49dc-8981-47bd6a5f1636",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:other-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_model"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "high"
+          ],
+          "providerModels": [
+            "other-probe"
+          ]
+        },
+        {
+          "label": "BAD",
+          "runId": "e050142c-9781-4c60-9b5d-2172dad49905",
+          "status": "failed",
+          "session": "local-2234aa4db83a9946bc90aa72f1498cf4e8ee9efe51cc2e03f05114ac5665281f",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "not-a-native-effort"
+            }
+          },
+          "errorCode": "runtime_launch_failed",
+          "mainProviderRequests": 0,
+          "providerEfforts": [],
+          "providerModels": []
+        },
+        {
+          "label": "A7",
+          "runId": "9e8e07b9-f736-4f03-8682-8d276732a56e",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_model"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "high"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "A8",
+          "runId": "c64f28cf-4256-4e75-88a2-432536b1a2f1",
+          "status": "succeeded",
+          "session": "local-d8acb074bae5b202e74b0a921d371aab72d18a623cc59fcc39ccfe6348a2b940",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        }
+      ],
+      "highToModelDefaultSameSession": true
+    },
+    {
+      "kind": "legacy_0224",
+      "fixture": "rovai-hermes-effort-M7EwOY",
+      "rawResultSha256": "26b75f25cdc665886aeb309732548f0204083d35ea5421c1a16306d10766336e",
+      "nativeVersion": "v0.22.4",
+      "nativeCommit": "4d04303818b61bf3aa09278af48356315515965b",
+      "gatewayVersion": "v0.22.4",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "providerRequests": 8,
+      "mainProviderRequests": 2,
+      "cases": [
+        {
+          "label": "LEGACY_BASE",
+          "runId": "fdfc38ff-73af-4a08-ae79-c4bd8474ad34",
+          "status": "succeeded",
+          "session": "local-d4e55a446102aaf132bbb0a3433435c8a3515d6763237cf6ab018adc476b6a31",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/new"
+            },
+            {
+              "method": "session/set_mode"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "LEGACY_OVERRIDE",
+          "runId": "54babd8e-e3eb-4401-99e8-ae73018afa1e",
+          "status": "failed",
+          "session": "local-d4e55a446102aaf132bbb0a3433435c8a3515d6763237cf6ab018adc476b6a31",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "errorCode": "runtime_launch_failed",
+          "mainProviderRequests": 0,
+          "providerEfforts": [],
+          "providerModels": []
+        }
+      ]
+    },
+    {
+      "kind": "native_deferred_0230",
+      "fixture": "rovai-hermes-effort-3TAztF",
+      "rawResultSha256": "204c2b83d6683055bf3dc849a43eb4140156765ac6bfd68b97333bbedd1fd80a",
+      "nativeVersion": "v0.23.0",
+      "nativeCommit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "gatewayVersion": "v0.23.0",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [
+        {
+          "name": "busy_native_setter",
+          "requested": "high",
+          "reportedBeforeBoundary": "low"
+        },
+        {
+          "name": "next_run_model_default_clears_deferred_override",
+          "providerEffort": "low"
+        }
+      ],
+      "providerRequests": 14,
+      "mainProviderRequests": 5,
+      "cases": [
+        {
+          "label": "DEFER",
+          "runId": "8dd63290-e1c5-4ab3-af98-442268199f31",
+          "status": "succeeded",
+          "session": "local-8504c72266acf0dd4a7f387cf9020a3a292d6a9244a4610255072cde2b03ffea",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/new"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/set_mode"
+            },
+            {
+              "method": "session/prompt"
+            },
+            {
+              "method": "session/request_permission"
+            }
+          ],
+          "mainProviderRequests": 3,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        },
+        {
+          "label": "AFTER_DEFER",
+          "runId": "64f8898f-7f23-47d5-8b6c-d34f57e9eeb4",
+          "status": "succeeded",
+          "session": "local-8504c72266acf0dd4a7f387cf9020a3a292d6a9244a4610255072cde2b03ffea",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "native-probe"
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "real_0230",
+      "fixture": "rovai-hermes-effort-WguvGz",
+      "rawResultSha256": "3c032eb476d06f56f0fe2fe5cb501f0e23ae5723a4f9a233637737c312a1f149",
+      "nativeVersion": "v0.23.0",
+      "nativeCommit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "gatewayVersion": "v0.23.0",
+      "realModel": true,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "providerRequests": 22,
+      "mainProviderRequests": 20,
+      "cases": [
+        {
+          "label": "B0",
+          "runId": "6f5cab32-557c-4429-8a1d-98cababe990c",
+          "status": "succeeded",
+          "session": "local-96696a538b7055118f2de0a90bae457ad5061011b5e614a99428e90dc9d035d9",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/new"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "method": "session/set_mode"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 2,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "gpt-6.1-sol"
+          ],
+          "providerHttpStatuses": [
+            200
+          ]
+        },
+        {
+          "label": "A0",
+          "runId": "924fc084-7afe-472a-8859-9a931ce70f46",
+          "status": "succeeded",
+          "session": "local-44b59994ac12ed8e28bf96ef20d0f8a267304178d5b880c1c346de75b313d10b",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/new"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "method": "session/set_mode"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 6,
+          "providerEfforts": [
+            "high"
+          ],
+          "providerModels": [
+            "gpt-6.1-sol"
+          ],
+          "providerHttpStatuses": [
+            200
+          ]
+        },
+        {
+          "label": "A1",
+          "runId": "6cf795d5-0db7-4455-9d2f-827873cc1683",
+          "status": "succeeded",
+          "session": "local-44b59994ac12ed8e28bf96ef20d0f8a267304178d5b880c1c346de75b313d10b",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 3,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "gpt-6.1-sol"
+          ],
+          "providerHttpStatuses": [
+            200
+          ]
+        },
+        {
+          "label": "A2",
+          "runId": "9d7e6419-e54b-4173-8263-862f5e28e140",
+          "status": "succeeded",
+          "session": "local-44b59994ac12ed8e28bf96ef20d0f8a267304178d5b880c1c346de75b313d10b",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 3,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "gpt-6.1-sol"
+          ],
+          "providerHttpStatuses": [
+            200
+          ]
+        },
+        {
+          "label": "A7",
+          "runId": "b25fdc45-17ea-4f6b-b78a-8cc042cb6bdf",
+          "status": "succeeded",
+          "session": "local-44b59994ac12ed8e28bf96ef20d0f8a267304178d5b880c1c346de75b313d10b",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 3,
+          "providerEfforts": [
+            "high"
+          ],
+          "providerModels": [
+            "gpt-6.1-sol"
+          ],
+          "providerHttpStatuses": [
+            200
+          ]
+        },
+        {
+          "label": "A8",
+          "runId": "39d2e9b3-08f5-4827-9a21-49ba919e7b75",
+          "status": "succeeded",
+          "session": "local-44b59994ac12ed8e28bf96ef20d0f8a267304178d5b880c1c346de75b313d10b",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {}
+          },
+          "errorCode": null,
+          "acpRequests": [
+            {
+              "method": "initialize"
+            },
+            {
+              "method": "session/resume"
+            },
+            {
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "method": "session/prompt"
+            }
+          ],
+          "mainProviderRequests": 3,
+          "providerEfforts": [
+            "low"
+          ],
+          "providerModels": [
+            "gpt-6.1-sol"
+          ],
+          "providerHttpStatuses": [
+            200
+          ]
+        }
+      ],
+      "highToModelDefaultSameSession": true
+    }
+  ],
+  "limitations": [
+    "macOS arm64 execution only; no Desktop interaction acceptance or daily App installation for this branch",
+    "Model default resolves to low only because that is the isolated Profile configuration; no universal Provider default is inferred",
+    "Native replies remain best-effort metadata; existing protocol owner covers missing and deferred echo without an equality gate",
+    "Known legacy explicit overrides and the invalid native level are expected failures, not successful setting claims"
+  ]
+}

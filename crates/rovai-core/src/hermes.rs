@@ -10,7 +10,8 @@ pub fn supported_version(version: Option<&str>) -> bool {
 }
 
 /// Only this native Session option is supported. Missing catalog metadata is
-/// not a reason to discard a saved choice; older ACP entries silently ACK it.
+/// not a reason to discard a saved choice. Model default clears a supported
+/// Session's override; known older ACP entries cannot apply that setting.
 pub fn reasoning_effort<'a>(options: &'a Value, version: Option<&str>) -> Result<Option<&'a str>> {
     let options = options
         .as_object()
@@ -19,8 +20,11 @@ pub fn reasoning_effort<'a>(options: &'a Value, version: Option<&str>) -> Result
         options.keys().all(|key| key == "reasoning_effort"),
         "Hermes ACP only supports the reasoning_effort model option"
     );
+    let supported = !version
+        .and_then(crate::agent_runtime_adapter::parse_reported_runtime_version)
+        .is_some_and(|(version, _)| version < [0, 22, 6]);
     let Some(value) = options.get("reasoning_effort") else {
-        return Ok(None);
+        return Ok(supported.then_some("default"));
     };
     let value = value
         .as_str()
@@ -30,9 +34,7 @@ pub fn reasoning_effort<'a>(options: &'a Value, version: Option<&str>) -> Result
         "Hermes reasoning_effort requires a native value; use default to restore the Hermes configuration"
     );
     anyhow::ensure!(
-        !version
-            .and_then(crate::agent_runtime_adapter::parse_reported_runtime_version)
-            .is_some_and(|(version, _)| version < [0, 22, 6]),
+        supported,
         "Hermes reasoning_effort requires ACP 0.22.6 or newer; the installed ACP entry does not apply this setting"
     );
     Ok(Some(value))
@@ -177,6 +179,10 @@ mod tests {
             assert!(reasoning_effort(&json!({"reasoning_effort":"high"}), version).is_err());
         }
         for version in [None, Some("0.22.6"), Some("0.23.0")] {
+            assert_eq!(
+                reasoning_effort(&json!({}), version).unwrap(),
+                Some("default")
+            );
             for effort in ["high", "low", "none", "default", "future-native-value"] {
                 assert_eq!(
                     reasoning_effort(&json!({"reasoning_effort":effort}), version).unwrap(),
