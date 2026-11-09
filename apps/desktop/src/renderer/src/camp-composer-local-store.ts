@@ -1,4 +1,5 @@
-import { validReferenceAtom, isReferenceAtom, projectReference } from './thread-reference'
+import { validateComposerDocument } from './composer-document'
+import { isReferenceAtom, projectReference } from './thread-reference'
 import type {
   ThreadComposerContinuationIntentView,
   ThreadComposerDraftView,
@@ -10,7 +11,6 @@ import type {
 
 const STORAGE_PREFIX = 'rovai.camp-composer-draft.v1:'
 const MAX_STORED_DRAFT_BYTES = 4 * 1024 * 1024
-const MAX_SEGMENTS = 4_096
 export const MAX_LOCAL_COMPOSER_ATTACHMENTS = 10
 const MAX_QUOTES = 32
 
@@ -34,22 +34,7 @@ function uuid(value: unknown): value is string {
 }
 
 function isComposerDocument(value: unknown): value is ComposerDocument {
-  if (!object(value) || value.version !== 2 || !Array.isArray(value.segments)
-    || value.segments.length > MAX_SEGMENTS) return false
-  return value.segments.every((segment) => {
-    if (!object(segment)) return false
-    if (segment.kind === 'text') return string(segment.text)
-    if (segment.kind !== 'atom' || !object(segment.atom)) return false
-    if (segment.atom.type === 'thread_reference' || segment.atom.type === 'mission_reference') return validReferenceAtom(segment.atom)
-    if (segment.atom.type === 'all_members') return true
-    if (segment.atom.type === 'member') {
-      return string(segment.atom.agentId, 512)
-        && (segment.atom.labelFallback === undefined || string(segment.atom.labelFallback, 512))
-    }
-    return segment.atom.type === 'skill'
-      && string(segment.atom.skillId, 512)
-      && string(segment.atom.nameAtSend, 512)
-  })
+  return validateComposerDocument(value)
 }
 
 function isQuote(value: unknown): value is MessageQuoteSnapshot {
@@ -158,10 +143,18 @@ export function loadLocalThreadComposerDraft(
         delete parsed.continuationIntent.sourceCampMessageId
       }
     }
+    if (object(parsed) && object(parsed.content) && !validateComposerDocument(parsed.content)) {
+      throw new UnsupportedComposerDocumentError()
+    }
     return isStoredDraft(parsed, threadId) ? parsed : null
-  } catch {
+  } catch (error) {
+    if (error instanceof UnsupportedComposerDocumentError) throw error
     return null
   }
+}
+
+export class UnsupportedComposerDocumentError extends Error {
+  constructor() { super('草稿来自不兼容的版本，原始内容已保留；请升级后恢复'); this.name = 'UnsupportedComposerDocumentError' }
 }
 
 export function localThreadComposerDraftIsEmpty(draft: ThreadComposerDraftView): boolean {
@@ -177,6 +170,8 @@ export function saveLocalThreadComposerDraft(
   storage: DraftStorage | null = browserStorage()
 ): void {
   if (!storage) return
+  loadLocalThreadComposerDraft(draft.threadId, storage)
+  if (!validateComposerDocument(draft.content)) throw new Error('当前草稿格式无效，原始内容已保留')
   if (localThreadComposerDraftIsEmpty(draft)) {
     storage.removeItem(storageKey(draft.threadId))
     return
@@ -204,7 +199,7 @@ export function clearLocalThreadComposerDraft(
   threadId: string,
   storage: DraftStorage | null = browserStorage()
 ): void {
-  storage?.removeItem(storageKey(threadId))
+  if (storage) { loadLocalThreadComposerDraft(threadId, storage); storage.removeItem(storageKey(threadId)) }
 }
 
 export function composerBodyForContent(
@@ -216,6 +211,7 @@ export function composerBodyForContent(
     const atom = segment.atom
     if (atom.type === 'all_members') return '@所有成员'
     if (atom.type === 'skill') return `$${atom.nameAtSend}`
+    if (atom.type === 'project_file_reference') return atom.labelFallback
     if (isReferenceAtom(atom)) return projectReference(atom)
     return `@${members.find((member) => member.agentId === atom.agentId)?.displayName
       ?? atom.labelFallback

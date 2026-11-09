@@ -72,7 +72,10 @@ use crate::{
 pub const CONTEXT_FORMATTER_VERSION: i64 = AGENT_RUN_CONTEXT_FORMATTER_VERSION;
 pub const DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES: usize = 256 * 1024;
 const MIN_CONTEXT_PAYLOAD_BYTES: usize = 8 * 1024;
-pub const MAX_SESSION_BOOTSTRAP_BYTES: usize = 128 * 1024;
+pub const MAX_SESSION_BOOTSTRAP_BYTES: usize = 256 * 1024;
+// Historical message_delivery preflight keeps its original selection budget.
+// This fixed reserve is independent of current Adapter body admission.
+const LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES: usize = 128 * 1024;
 fn run_facts_schema_version(manifest_version: i64, invocation_kind: &str) -> i64 {
     if invocation_kind == "batch" {
         match manifest_version {
@@ -1805,7 +1808,7 @@ impl ContextService {
         // the dynamic bytes themselves remain frozen here and are never
         // re-selected on retry/recovery.
         let reserve = if run_snapshot_adapter_kind(&snapshot)? == AdapterKind::HermesCli {
-            MAX_SESSION_BOOTSTRAP_BYTES + hermes_rules::envelope("update", "").len() + 2
+            LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES + hermes_rules::envelope("update", "").len() + 2
         } else {
             bootstrap_payload_reserve(
                 request.charter_delivery_mode,
@@ -3829,9 +3832,9 @@ fn render_bootstrap_redelivery_overlay(bootstrap: &str) -> String {
 
 fn bootstrap_payload_reserve(mode: CharterDeliveryMode, required: bool, redelivery: bool) -> usize {
     if redelivery {
-        MAX_SESSION_BOOTSTRAP_BYTES + render_bootstrap_redelivery_overlay("").len() + 2
+        LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES + render_bootstrap_redelivery_overlay("").len() + 2
     } else if mode == CharterDeliveryMode::FirstPayload && required {
-        MAX_SESSION_BOOTSTRAP_BYTES + 2
+        LEGACY_DELIVERY_BOOTSTRAP_RESERVE_BYTES + 2
     } else {
         0
     }
@@ -9479,6 +9482,34 @@ mod slow_tests {
             render_session_bootstrap("charter", &identity, Some(""), None, "entrypoint").unwrap(),
             formatted
         );
+        let long_identity = MemberIdentityBootstrapProjection {
+            working_principles: "\0".repeat(3_000),
+            growth_topic: "\"\\\n\0中😀".repeat(500),
+            ..identity
+        };
+        let long_bootstrap =
+            render_session_bootstrap("charter", &long_identity, None, None, "entrypoint").unwrap();
+        let long_json = long_bootstrap
+            .split("[MEMBER_IDENTITY]\n")
+            .nth(1)
+            .unwrap()
+            .split("\n[/MEMBER_IDENTITY]")
+            .next()
+            .unwrap();
+        assert_eq!(
+            long_json,
+            serde_json::to_string_pretty(&long_identity).unwrap()
+        );
+        let recovered: serde_json::Value = serde_json::from_str(long_json).unwrap();
+        assert_eq!(
+            recovered["workingPrinciples"],
+            long_identity.working_principles
+        );
+        assert_eq!(recovered["growthTopic"], long_identity.growth_topic);
+        assert!(
+            long_json.len() > 26_000,
+            "JSON escaping must be retained in full"
+        );
         let legacy = bootstrap_evidence_digest_for(
             "native_session_bootstrap_v5",
             "charter",
@@ -9525,14 +9556,20 @@ mod slow_tests {
                 assert_eq!(
                     bootstrap_payload_reserve(mode, required, false),
                     if mode == CharterDeliveryMode::FirstPayload && required {
-                        MAX_SESSION_BOOTSTRAP_BYTES + 2
+                        128 * 1024 + 2
                     } else {
                         0
                     }
                 );
                 assert_eq!(
                     bootstrap_payload_reserve(mode, required, true),
-                    MAX_SESSION_BOOTSTRAP_BYTES + render_bootstrap_redelivery_overlay("").len() + 2
+                    128 * 1024 + render_bootstrap_redelivery_overlay("").len() + 2
+                );
+                assert!(
+                    DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES
+                        - bootstrap_payload_reserve(mode, required, true)
+                        > 120 * 1024,
+                    "the enlarged body cap must leave the legacy small-input budget intact"
                 );
             }
         }
@@ -13023,7 +13060,7 @@ mod slow_tests {
     #[test]
     fn redelivery_overlay_is_frozen_at_prepare_and_acknowledges_only_its_revision() {
         let mut fixture = fixture();
-        let long_responsibilities = "😀".repeat(10_000);
+        let long_responsibilities = "😀".repeat(30_000);
         fixture
             .database
             .connection()
@@ -14462,13 +14499,40 @@ mod slow_tests {
             )
             .unwrap();
         // Worst JSON expansion: each valid scalar becomes six serialized bytes.
-        let long_responsibilities = "\0".repeat(10_000);
+        let long_responsibilities = "\0".repeat(30_000);
+        let long_principles = "😀".repeat(3_000);
+        let long_growth = "\"\\\n\0中😀".repeat(500);
         fixture
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET professional_responsibilities=?1 WHERE id='agent_1'",
-                [&long_responsibilities],
+                "UPDATE agent_profile SET professional_responsibilities=?1, working_principles=?2, growth_topic=?3 WHERE id='agent_1'",
+                params![long_responsibilities, long_principles, long_growth],
+            )
+            .unwrap();
+        crate::memory::MemoryService::default()
+            .create(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "capacity-memory-entrypoint".to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::memory::CreateMemoryCommand {
+                        scope: MemoryScopeKind::Hearth,
+                        kind: crate::memory::MemoryKind::Preference,
+                        body: "MEMORY_BODY_MUST_NOT_ENTER_BOOTSTRAP_INDEX".to_string(),
+                        retrieval_keys: vec!["capacity-index".to_string()],
+                        companion_agent_id: None,
+                        relationship_agent_ids: Vec::new(),
+                        direction: None,
+                        directed_actor_agent_id: None,
+                        review_after: None,
+                    },
+                },
             )
             .unwrap();
         bind_fixture_feishu_channel(&fixture);
@@ -14523,6 +14587,7 @@ mod slow_tests {
             1
         );
         assert!(!prepared.rendered_payload.contains("TEAM_GUIDANCE"));
+        assert!(prepared.runtime_payload.contains("capacity-index"));
         assert!(
             fixture
                 .database
@@ -14535,6 +14600,14 @@ mod slow_tests {
         );
         let full_json = serde_json::to_string(&long_responsibilities).unwrap();
         assert!(prepared.runtime_payload.contains(&full_json));
+        for value in [&long_principles, &long_growth] {
+            assert!(
+                prepared
+                    .runtime_payload
+                    .contains(&serde_json::to_string(value).unwrap())
+            );
+        }
+        assert!(prepared.runtime_payload.len() <= DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES);
         assert_eq!(
             prepared
                 .runtime_payload
@@ -14558,6 +14631,10 @@ mod slow_tests {
             panic!("recovery should retain full identity");
         };
         assert_eq!(recovered.runtime_payload, prepared.runtime_payload);
+        assert_eq!(
+            sha256_text(&recovered.runtime_payload),
+            sha256_text(&prepared.runtime_payload)
+        );
         assert!(!prepared.requires_new_native_session);
         assert_eq!(prepared.expected_binding_generation, 1);
         assert!(prepared.bootstrap_in_runtime_payload);
@@ -16911,6 +16988,18 @@ mod slow_tests {
     #[test]
     fn replacement_binding_bootstrap_keeps_history_on_demand_after_the_accepted_watermark() {
         let mut fixture = fixture();
+        let long_responsibilities = "😀".repeat(30_000);
+        let long_principles = "中".repeat(3_000);
+        let long_growth = "e\u{0301}".repeat(1_500);
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET professional_responsibilities=?1, working_principles=?2, growth_topic=?3 WHERE id='agent_1'",
+                params![long_responsibilities, long_principles, long_growth],
+            )
+            .unwrap();
+        freeze_fixture_claim(&mut fixture);
         let context = ContextService;
         let runtime = ExecutionRuntimeService::default();
         let store = ManagedBlobStore::new(&fixture.directory);
@@ -17175,7 +17264,7 @@ mod slow_tests {
             .database
             .connection()
             .execute(
-                "UPDATE agent_profile SET display_name = '替换会话狐狸' WHERE id = 'agent_1'",
+                "UPDATE agent_profile SET display_name = '替换会话狐狸', professional_responsibilities='edited-after-claim', working_principles='principles-edited-after-claim', growth_topic='growth-edited-after-claim' WHERE id = 'agent_1'",
                 [],
             )
             .unwrap();
@@ -17195,6 +17284,23 @@ mod slow_tests {
             panic!("replacement-generation Bootstrap should be ready");
         };
         assert_eq!(replacement_context.expected_binding_generation, 2);
+        for value in [&long_principles, &long_growth] {
+            assert!(
+                replacement_context
+                    .runtime_payload
+                    .contains(&serde_json::to_string(value).unwrap())
+            );
+        }
+        assert!(
+            !replacement_context
+                .runtime_payload
+                .contains("principles-edited-after-claim")
+        );
+        assert!(
+            !replacement_context
+                .runtime_payload
+                .contains("growth-edited-after-claim")
+        );
         assert_eq!(
             replacement_context
                 .runtime_payload
@@ -17241,6 +17347,16 @@ mod slow_tests {
                 .starts_with("[SESSION_CHARTER]")
         );
         assert!(replacement_context.bootstrap_in_runtime_payload);
+        assert!(
+            replacement_context
+                .runtime_payload
+                .contains(&long_responsibilities)
+        );
+        assert!(
+            !replacement_context
+                .runtime_payload
+                .contains("edited-after-claim")
+        );
         assert!(
             replacement_context
                 .runtime_payload

@@ -2,6 +2,8 @@
 mod attachment_paths;
 #[path = "db_automation_naming.rs"]
 mod automation_naming;
+#[path = "db_channel_native.rs"]
+mod channel_native;
 #[path = "db_chat_reply.rs"]
 mod chat_reply;
 #[path = "db_claim_context.rs"]
@@ -65,6 +67,11 @@ pub(crate) fn assert_task_capability_upgrade(database: &mut Database) {
 #[cfg(test)]
 pub(crate) fn assert_subagent_classifier_upgrade(database: &mut Database) {
     subagent::assert_upgrade(database);
+}
+
+#[cfg(all(test, feature = "extended-tests"))]
+pub(crate) fn assert_native_channel_upgrade(database: &mut Database) {
+    channel_native::assert_upgrade(database);
 }
 #[cfg(test)]
 pub(crate) fn assert_single_chat_facts_upgrade(database: &mut Database) {
@@ -510,7 +517,7 @@ impl MainThreadMigrationSource {
 }
 
 pub(crate) const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.72";
-pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 174;
+pub(crate) const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 177;
 const V147_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.54";
 const V147_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 96;
 const V145_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.53";
@@ -1010,6 +1017,9 @@ struct CurrentMigrationState {
     v222: bool,
     v223: bool,
     v224: bool,
+    v225: bool,
+    v226: bool,
+    v227: bool,
 }
 
 impl CurrentMigrationState {
@@ -1031,6 +1041,30 @@ impl CurrentMigrationState {
     }
 
     fn admits(&self, contract: &str, schema: i64, classifier: &str) -> bool {
+        if self.v227 {
+            let mut previous = *self;
+            previous.v227 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 177
+                && self.v226
+                && previous.admits("v1.72", 176, classifier);
+        }
+        if self.v226 {
+            let mut previous = *self;
+            previous.v226 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 176
+                && self.v225
+                && previous.admits("v1.72", 175, classifier);
+        }
+        if self.v225 {
+            let mut previous = *self;
+            previous.v225 = false;
+            return contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == 175
+                && self.v224
+                && previous.admits("v1.72", 174, classifier);
+        }
         if self.v224 {
             let mut previous = *self;
             previous.v224 = false;
@@ -1050,18 +1084,12 @@ impl CurrentMigrationState {
         if self.v222 {
             let mut previous = *self;
             previous.v222 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == 172
-                && self.v221
-                && previous.admits("v1.72", 171, classifier);
+            return schema == 172 && previous.admits(contract, 171, classifier);
         }
         if self.v221 {
             let mut previous = *self;
             previous.v221 = false;
-            return contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == 171
-                && self.v220
-                && previous.admits("v1.72", 170, classifier);
+            return schema == 171 && previous.admits(contract, 170, classifier);
         }
         if self.v220 {
             let mut previous = *self;
@@ -3394,6 +3422,9 @@ fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite:
                         | 167
                         | 168
                         | 174
+                        | 175
+                        | 176
+                        | 177
                         | 173
                         | 169
                         | 170
@@ -3765,7 +3796,7 @@ pub(super) fn downgrade_chat_extensions_for_test(connection: &Connection) {
     chat_reply::downgrade_for_test(connection);
     if !connection
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=220)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=223)",
             [],
             |row| row.get::<_, bool>(0),
         )
@@ -3810,8 +3841,8 @@ pub(super) fn downgrade_chat_extensions_for_test(connection: &Connection) {
              CASE WHEN project_binding_kind='directory' THEN 'directory:'||project_path ELSE 'quick-chat' END,
              COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id
          ) WHERE deletion_operation_id IS NULL;
-         DELETE FROM schema_migration WHERE version BETWEEN 220 AND 224;
-         UPDATE rovai_data_contract SET projection_schema_version=169 WHERE singleton=1;",
+         DELETE FROM schema_migration WHERE version BETWEEN 223 AND 227;
+         UPDATE rovai_data_contract SET projection_schema_version=172 WHERE singleton=1;",
     ).unwrap();
     tx.commit().unwrap();
     connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
@@ -3825,14 +3856,14 @@ pub(crate) fn assert_chat_tool_upgrade_sources(database: &mut Database) {
     database.migrate(false).unwrap();
     chat_reply::assert_legacy_chat_upgrade_sources();
     chat_reply::assert_upgrade(database);
-    for source in [221, 220, 219] {
-        database.connection.execute_batch("DROP INDEX camp_navigation_window_idx; ALTER TABLE camp DROP COLUMN navigation_is_chat_bot; DELETE FROM schema_migration WHERE version=223; CREATE INDEX camp_navigation_window_idx ON camp (CASE WHEN project_binding_kind='directory' THEN 'directory:'||project_path ELSE 'quick-chat' END,COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id) WHERE deletion_operation_id IS NULL;").unwrap();
-        database.connection.execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=222;").unwrap();
-        if source < 221 {
-            database.connection.execute_batch("DROP TABLE channel_chat_conversation; ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled; ALTER TABLE agent_profile DROP COLUMN chat_materials_path; ALTER TABLE conversation DROP COLUMN permission_override_json; DELETE FROM schema_migration WHERE version=221;").unwrap();
+    for source in [224, 223, 222] {
+        database.connection.execute_batch("DROP INDEX camp_navigation_window_idx; ALTER TABLE camp DROP COLUMN navigation_is_chat_bot; DELETE FROM schema_migration WHERE version=226; CREATE INDEX camp_navigation_window_idx ON camp (CASE WHEN project_binding_kind='directory' THEN 'directory:'||project_path ELSE 'quick-chat' END,COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id) WHERE deletion_operation_id IS NULL;").unwrap();
+        database.connection.execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=225;").unwrap();
+        if source < 224 {
+            database.connection.execute_batch("DROP TABLE channel_chat_conversation; ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled; ALTER TABLE agent_profile DROP COLUMN chat_materials_path; ALTER TABLE conversation DROP COLUMN permission_override_json; DELETE FROM schema_migration WHERE version=224;").unwrap();
         }
-        if source < 220 {
-            database.connection.execute_batch("DROP TABLE channel_chat_outbound; DROP TABLE channel_chat_item; DROP TABLE channel_chat_turn; DROP TABLE channel_chat_message; DROP TABLE channel_chat_credential; DROP TABLE channel_chat_bot; DELETE FROM schema_migration WHERE version=220;").unwrap();
+        if source < 223 {
+            database.connection.execute_batch("DROP TABLE channel_chat_outbound; DROP TABLE channel_chat_item; DROP TABLE channel_chat_turn; DROP TABLE channel_chat_message; DROP TABLE channel_chat_credential; DROP TABLE channel_chat_bot; DELETE FROM schema_migration WHERE version=223;").unwrap();
         }
         // The synthetic source keeps the marker of its own step so the chain sees a
         // consistent intermediate layout instead of the current projection.
@@ -3917,7 +3948,7 @@ fn classify_chat_schema_with_receipt_offset(
                 WHERE name='permission_override_json'),
             (SELECT COUNT(*) FROM sqlite_master WHERE type='table'
                 AND name='channel_chat_conversation')",
-        [220 - offset, 221 - offset],
+        [223 - offset, 224 - offset],
         |row| {
             Ok((
                 row.get(0)?,
@@ -3940,11 +3971,11 @@ fn classify_chat_schema_with_receipt_offset(
         member_columns == 0 && conversation_columns == 0 && mapping_tables == 0
     };
     let (tool_receipt, navigation_receipt): (bool, bool) = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=?1), EXISTS(SELECT 1 FROM schema_migration WHERE version=?2)", [222 - offset, 223 - offset], |r| Ok((r.get(0)?,r.get(1)?)),
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=?1), EXISTS(SELECT 1 FROM schema_migration WHERE version=?2)", [225 - offset, 226 - offset], |r| Ok((r.get(0)?,r.get(1)?)),
     )?;
     let reply_receipt: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=?1)",
-        [224 - offset],
+        [227 - offset],
         |r| r.get(0),
     )?;
     let reply_valid = !reply_receipt
@@ -4008,7 +4039,7 @@ fn legacy_chat_migration_source(
     )?;
     if !receipts
         || !matches!(
-            classify_chat_schema_with_receipt_offset(connection, marker.clone(), 11)?,
+            classify_chat_schema_with_receipt_offset(connection, marker.clone(), 14)?,
             DatabaseContractClassification::Current(_)
                 | DatabaseContractClassification::SupportedMigrationSource(_)
         )
@@ -4068,7 +4099,39 @@ fn shifted_chat_migration_source(
         && (!reply || chat_reply::schema_matches(connection)?)
         && (marker.projection_schema_version < 173 || reply)
         && matches!(
-            classify_chat_schema_with_receipt_offset(connection, marker.clone(), 1)?,
+            classify_chat_schema_with_receipt_offset(connection, marker.clone(), 4)?,
+            DatabaseContractClassification::Current(_)
+                | DatabaseContractClassification::SupportedMigrationSource(_)
+        ))
+}
+
+// PR #986 also shipped the chat chain after activity-v5, before main assigned
+// 220..222 to native cards and project references. Recognize the complete chat
+// layouts rather than interpreting those receipts as main migrations.
+fn activity_v5_chat_migration_source(
+    connection: &Connection,
+    marker: &DatabaseContractMarker,
+) -> rusqlite::Result<bool> {
+    if marker.contract_version != CURRENT_DATA_CONTRACT_VERSION
+        || marker.classifier_version != crate::canonical_activity::CLASSIFIER_VERSION
+        || !(170..=174).contains(&marker.projection_schema_version)
+    {
+        return Ok(false);
+    }
+    let complete: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=219)
+            AND EXISTS(SELECT 1 FROM schema_migration WHERE version=220)
+            AND EXISTS(SELECT 1 FROM schema_migration WHERE version=?1)
+            AND NOT EXISTS(SELECT 1 FROM schema_migration WHERE version>224)",
+        [marker.projection_schema_version + 50],
+        |row| row.get(0),
+    )?;
+    Ok(complete
+        && quote_text::schema_matches(connection)?
+        && (marker.projection_schema_version < 174 || chat_reply::schema_matches(connection)?)
+        && !channel_native::schema_matches(connection)?
+        && matches!(
+            classify_chat_schema_with_receipt_offset(connection, marker.clone(), 3)?,
             DatabaseContractClassification::Current(_)
                 | DatabaseContractClassification::SupportedMigrationSource(_)
         ))
@@ -4163,6 +4226,7 @@ pub(crate) fn classify_database_contract(
     };
     if legacy_chat_migration_source(connection, &marker)?
         || shifted_chat_migration_source(connection, &marker)?
+        || activity_v5_chat_migration_source(connection, &marker)?
     {
         return Ok(DatabaseContractClassification::SupportedMigrationSource(
             marker,
@@ -4197,6 +4261,9 @@ pub(crate) fn classify_database_contract(
                 | 167
                 | 168
                 | 174
+                | 175
+                | 176
+                | 177
                 | 173
                 | 169
                 | 170
@@ -4211,6 +4278,8 @@ pub(crate) fn classify_database_contract(
             |row| row.get(0),
         )?;
         let valid = completed
+            && (marker.projection_schema_version < 170
+                || channel_native::schema_matches(connection)?)
             && (marker.projection_schema_version < 168 || quote_text::schema_matches(connection)?)
             && (marker.projection_schema_version < 167
                 || hermes::rules_schema_matches(connection)?)
@@ -4246,7 +4315,7 @@ pub(crate) fn classify_database_contract(
                 } else if marker.projection_schema_version == 148 {
                     claim_context::schema_matches(connection)
                 } else {
-                    if marker.projection_schema_version >= 174 {
+                    if marker.projection_schema_version >= 177 {
                         chat_reply::schema_matches(connection)?
                     } else if marker.projection_schema_version >= 160 {
                         notification_interruption::exit_schema_matches(connection)?
@@ -4255,7 +4324,7 @@ pub(crate) fn classify_database_contract(
                     } else if marker.projection_schema_version == 158 {
                         single_chat_facts::schema_matches(connection)?
                             && (connection.query_row("SELECT NOT EXISTS(SELECT 1 FROM sqlite_master WHERE name='agent_run_input_v43_only_insert' OR (name='context_manifest' AND sql LIKE '%context_manifest_version = 43%'))", [], |r| r.get::<_,bool>(0))?
-                                || (chat_reply::legacy_schema_matches(connection)? && connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=224)", [], |r| r.get::<_,bool>(0))?))
+                                || (chat_reply::legacy_schema_matches(connection)? && connection.query_row("SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=227)", [], |r| r.get::<_,bool>(0))?))
                     } else if marker.projection_schema_version == 157 {
                         task_capability::schema_matches(connection)?
                     } else if marker.projection_schema_version == 156 {
@@ -6600,7 +6669,10 @@ fn load_current_migration_state(
             EXISTS(SELECT 1 FROM schema_migration WHERE version=221),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=222),
             EXISTS(SELECT 1 FROM schema_migration WHERE version=223),
-            EXISTS(SELECT 1 FROM schema_migration WHERE version=224)
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=224),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=225),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=226),
+            EXISTS(SELECT 1 FROM schema_migration WHERE version=227)
         "#,
         [],
         |row| {
@@ -6760,6 +6832,9 @@ fn load_current_migration_state(
                 v222: row.get(152)?,
                 v223: row.get(153)?,
                 v224: row.get(154)?,
+                v225: row.get(155)?,
+                v226: row.get(156)?,
+                v227: row.get(157)?,
             })
         },
     )
@@ -10060,24 +10135,33 @@ impl Database {
                 migration_step!("migration_219", subagent::migrate(self));
             }
             if !self.schema_migration_applied(220)? {
-                migration_step!("migration_220", crate::channel_chat::migrate(self));
+                migration_step!("migration_220", channel_native::migrate(self));
             }
             if !self.schema_migration_applied(221)? {
-                migration_step!("migration_221", self.migrate_chat_bot_member_reuse());
+                migration_step!("migration_221", self.migrate_project_file_references());
             }
-            self.reconcile_chat_navigation_receipt()?;
             if !self.schema_migration_applied(222)? {
-                migration_step!("migration_222", crate::channel_chat_tools::migrate(self));
+                migration_step!("migration_222", self.migrate_project_directory_references());
             }
             if !self.schema_migration_applied(223)? {
-                migration_step!("migration_223", self.migrate_chat_bot_navigation());
+                migration_step!("migration_223", crate::channel_chat::migrate(self));
+            }
+            if !self.schema_migration_applied(224)? {
+                migration_step!("migration_224", self.migrate_chat_bot_member_reuse());
+            }
+            self.reconcile_chat_navigation_receipt()?;
+            if !self.schema_migration_applied(225)? {
+                migration_step!("migration_225", crate::channel_chat_tools::migrate(self));
+            }
+            if !self.schema_migration_applied(226)? {
+                migration_step!("migration_226", self.migrate_chat_bot_navigation());
             }
             migration_step!(
                 "migration_chat_projection",
                 self.reconcile_chat_projection_marker()
             );
-            if !self.schema_migration_applied(224)? {
-                migration_step!("migration_224", chat_reply::migrate(self));
+            if !self.schema_migration_applied(227)? {
+                migration_step!("migration_227", chat_reply::migrate(self));
             }
             migration_step!(
                 "migration_chat_projection",
@@ -10966,24 +11050,33 @@ impl Database {
             migration_step!("migration_219", subagent::migrate(self));
         }
         if !self.schema_migration_applied(220)? {
-            migration_step!("migration_220", crate::channel_chat::migrate(self));
+            migration_step!("migration_220", channel_native::migrate(self));
         }
         if !self.schema_migration_applied(221)? {
-            migration_step!("migration_221", self.migrate_chat_bot_member_reuse());
+            migration_step!("migration_221", self.migrate_project_file_references());
         }
-        self.reconcile_chat_navigation_receipt()?;
         if !self.schema_migration_applied(222)? {
-            migration_step!("migration_222", crate::channel_chat_tools::migrate(self));
+            migration_step!("migration_222", self.migrate_project_directory_references());
         }
         if !self.schema_migration_applied(223)? {
-            migration_step!("migration_223", self.migrate_chat_bot_navigation());
+            migration_step!("migration_223", crate::channel_chat::migrate(self));
+        }
+        if !self.schema_migration_applied(224)? {
+            migration_step!("migration_224", self.migrate_chat_bot_member_reuse());
+        }
+        self.reconcile_chat_navigation_receipt()?;
+        if !self.schema_migration_applied(225)? {
+            migration_step!("migration_225", crate::channel_chat_tools::migrate(self));
+        }
+        if !self.schema_migration_applied(226)? {
+            migration_step!("migration_226", self.migrate_chat_bot_navigation());
         }
         migration_step!(
             "migration_chat_projection",
             self.reconcile_chat_projection_marker()
         );
-        if !self.schema_migration_applied(224)? {
-            migration_step!("migration_224", chat_reply::migrate(self));
+        if !self.schema_migration_applied(227)? {
+            migration_step!("migration_227", chat_reply::migrate(self));
         }
         migration_step!(
             "migration_chat_projection",
@@ -10994,6 +11087,32 @@ impl Database {
         {
             eprintln!("Notification Episode startup retention failed: {error:#}");
         }
+        Ok(())
+    }
+
+    fn migrate_project_directory_references(&mut self) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&tx)?, DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 171),
+            "Project directory references require schema 171"
+        );
+        tx.execute_batch("INSERT INTO schema_migration VALUES(222,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=172, updated_at=datetime('now') WHERE singleton=1;")?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn migrate_project_file_references(&mut self) -> Result<()> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        anyhow::ensure!(
+            matches!(classify_database_contract(&tx)?, DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 170),
+            "Project file references require schema 170"
+        );
+        tx.execute_batch("INSERT INTO schema_migration VALUES(221,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=171, updated_at=datetime('now') WHERE singleton=1;")?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -11204,7 +11323,7 @@ impl Database {
             chat_bot_member_reuse_v210_schema_matches(&transaction)?,
             "chat Bot member reuse schema did not apply"
         );
-        transaction.execute_batch("INSERT INTO schema_migration VALUES(221,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=171,updated_at=datetime('now') WHERE singleton=1;")?;
+        transaction.execute_batch("INSERT INTO schema_migration VALUES(224,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=174,updated_at=datetime('now') WHERE singleton=1;")?;
         transaction.commit()?;
         Ok(())
     }
@@ -11216,7 +11335,8 @@ impl Database {
         };
         let legacy = legacy_chat_migration_source(self.connection(), &marker)?;
         let shifted = shifted_chat_migration_source(self.connection(), &marker)?;
-        if !legacy && !shifted {
+        let activity_v5 = activity_v5_chat_migration_source(self.connection(), &marker)?;
+        if !legacy && !shifted && !activity_v5 {
             return Ok(());
         }
         let tx = self
@@ -11225,29 +11345,38 @@ impl Database {
         anyhow::ensure!(
             if legacy {
                 legacy_chat_migration_source(&tx, &marker)?
-            } else {
+            } else if shifted {
                 shifted_chat_migration_source(&tx, &marker)?
+            } else {
+                activity_v5_chat_migration_source(&tx, &marker)?
             },
             "Legacy chat source changed before reconciliation"
         );
         if legacy {
             tx.execute(
-                "UPDATE schema_migration SET version=version+11 WHERE version BETWEEN 209 AND 213",
+                "UPDATE schema_migration SET version=version+14 WHERE version BETWEEN 209 AND 213",
                 [],
             )?;
         } else {
             // Descending updates avoid a primary-key collision with the next receipt.
-            for version in (219..=223).rev() {
+            let (first, last, delta) = if shifted {
+                (219, 223, 4)
+            } else {
+                (220, 224, 3)
+            };
+            for version in (first..=last).rev() {
                 tx.execute(
-                    "UPDATE schema_migration SET version=version+1 WHERE version=?1",
-                    [version],
+                    "UPDATE schema_migration SET version=version+?2 WHERE version=?1",
+                    params![version, delta],
                 )?;
             }
         }
         let projection = if legacy {
             marker.projection_schema_version.min(158)
-        } else {
+        } else if shifted {
             168
+        } else {
+            169
         };
         tx.execute("UPDATE rovai_data_contract SET projection_schema_version=?1,updated_at=datetime('now') WHERE singleton=1", [projection])?;
         anyhow::ensure!(
@@ -11265,11 +11394,11 @@ impl Database {
             [],
             |row| row.get(0),
         )?;
-        let reply_applied = self.schema_migration_applied(224)?;
+        let reply_applied = self.schema_migration_applied(227)?;
         let target = if reply_applied {
             CURRENT_PROJECTION_SCHEMA_VERSION
         } else {
-            173
+            176
         };
         if marker < 145 {
             return Ok(());
@@ -11312,7 +11441,7 @@ impl Database {
     }
 
     fn reconcile_chat_navigation_receipt(&mut self) -> Result<()> {
-        if !self.schema_migration_applied(222)? || self.schema_migration_applied(223)? {
+        if !self.schema_migration_applied(225)? || self.schema_migration_applied(226)? {
             return Ok(());
         }
         if !chat_bot_navigation_schema_matches(self.connection())? {
@@ -11327,12 +11456,12 @@ impl Database {
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         if tools {
-            tx.execute("INSERT INTO schema_migration(version,applied_at) SELECT 223,applied_at FROM schema_migration WHERE version=222",[])?;
+            tx.execute("INSERT INTO schema_migration(version,applied_at) SELECT 226,applied_at FROM schema_migration WHERE version=225",[])?;
         } else {
             // Preserve the old navigation receipt and its timestamp under its
             // unambiguous number before applying the still-missing tools.
             tx.execute(
-                "UPDATE schema_migration SET version=223 WHERE version=222",
+                "UPDATE schema_migration SET version=226 WHERE version=225",
                 [],
             )?;
         }
@@ -11367,7 +11496,7 @@ impl Database {
                  navigation_activity_sequence DESC, id
              ) WHERE deletion_operation_id IS NULL;",
         )?;
-        transaction.execute_batch("INSERT INTO schema_migration VALUES(223,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=173,updated_at=datetime('now') WHERE singleton=1;")?;
+        transaction.execute_batch("INSERT INTO schema_migration VALUES(226,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=176,updated_at=datetime('now') WHERE singleton=1;")?;
         anyhow::ensure!(
             chat_bot_navigation_schema_matches(&transaction)?,
             "navigation migration layout mismatch"
@@ -41142,16 +41271,16 @@ mod tests {
              VALUES ('nav-worker','Worker','directory','/repo','2026-01-02','2026-01-02');
              DROP INDEX camp_navigation_window_idx;
              ALTER TABLE camp DROP COLUMN navigation_is_chat_bot;
-             DELETE FROM schema_migration WHERE version=223;
+             DELETE FROM schema_migration WHERE version=226;
              CREATE INDEX camp_navigation_window_idx ON camp (
                  CASE WHEN project_binding_kind = 'directory' THEN 'directory:' || project_path ELSE 'quick-chat' END,
                  COALESCE(navigation_activity_at, created_at) DESC, navigation_activity_sequence DESC, id
              ) WHERE deletion_operation_id IS NULL;
              CREATE TEMP TRIGGER reject_bot_navigation_receipt BEFORE INSERT ON schema_migration
-             WHEN NEW.version=223 BEGIN SELECT RAISE(ABORT,'Bot navigation receipt failure'); END;",
+             WHEN NEW.version=226 BEGIN SELECT RAISE(ABORT,'Bot navigation receipt failure'); END;",
         ).unwrap();
         assert!(reopened.migrate_chat_bot_navigation().is_err());
-        assert!(!reopened.schema_migration_applied(223).unwrap());
+        assert!(!reopened.schema_migration_applied(226).unwrap());
         assert_eq!(reopened.connection().query_row(
             "SELECT COUNT(*) FROM pragma_table_info('camp') WHERE name='navigation_is_chat_bot'",
             [], |row| row.get::<_, i64>(0),
@@ -41162,7 +41291,7 @@ mod tests {
             .unwrap();
         drop(reopened);
         let mut migrated = Database::open(&directory).unwrap();
-        assert!(migrated.schema_migration_applied(223).unwrap());
+        assert!(migrated.schema_migration_applied(226).unwrap());
         assert_eq!(tables(&migrated), before_bot_migration);
         let bots = crate::read_model::ReadModelService
             .navigation_snapshot(&mut migrated)
@@ -43022,6 +43151,9 @@ mod tests {
             v222: version >= 222,
             v223: version >= 223,
             v224: version >= 224,
+            v225: version >= 225,
+            v226: version >= 226,
+            v227: version >= 227,
         }
     }
 
@@ -43124,10 +43256,10 @@ mod tests {
     fn current_migration_state_admission_matrix() {
         let supported = [
             (
-                "v1.72/schema 173 before chat reply context",
+                "v1.72/schema 176 before chat reply context",
                 "v1.72",
-                173,
-                223,
+                176,
+                226,
             ),
             (
                 "v1.72/schema 168 before subagent classifier",
@@ -43279,7 +43411,7 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                224,
+                227,
             ),
             (
                 "v1.72/schema 167 before literal quote text",
@@ -43863,7 +43995,7 @@ mod tests {
         }
 
         assert!(migration_state_through(141).admits("v1.52", 92, V142_CLASSIFIER_VERSION));
-        let current = migration_state_through(224);
+        let current = migration_state_through(227);
         assert!(current.admits(
             CURRENT_DATA_CONTRACT_VERSION,
             CURRENT_PROJECTION_SCHEMA_VERSION,
@@ -43943,7 +44075,7 @@ mod tests {
         let mut missing_single_chat_facts = current;
         missing_single_chat_facts.v208 = false;
         let mut missing_chat_reply = current;
-        missing_chat_reply.v224 = false;
+        missing_chat_reply.v227 = false;
         let mut missing_subagent_classifier = current;
         missing_subagent_classifier.v219 = false;
         let rejected = [
@@ -44632,7 +44764,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(224));
+        assert_eq!(state, migration_state_through(227));
         assert!(state.admits(&contract, schema, &classifier));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -44694,7 +44826,7 @@ mod tests {
                 }
                 "current_receipt" => {
                     connection
-                        .execute("DELETE FROM schema_migration WHERE version=224", [])
+                        .execute("DELETE FROM schema_migration WHERE version=227", [])
                         .unwrap();
                 }
                 "steer_identity" => {
@@ -44787,7 +44919,7 @@ mod tests {
         database
             .connection()
             .execute_batch(
-                "DELETE FROM schema_migration WHERE version<217;
+                "DELETE FROM schema_migration WHERE version<220;
              DROP TABLE runtime_usage_run_summary;",
             )
             .unwrap();

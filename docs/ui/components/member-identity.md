@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-member-identity
 status: accepted
-last_updated: 2026-10-30
+last_updated: 2026-11-04
 ---
 
 # 队员身份与图像
@@ -89,6 +89,10 @@ GIF 保持动画；各 `MemberAvatar` 用同一取景区域显示原动画。旧
 
 Pi 的可调模型显示“思考强度”与“跟随 Pi 原生设置”；无覆盖且已知只有 off/空档位或能力未知时隐藏字段。
 清除只删除 override，不重置 Session 原生值。Pi 目录按独立观察身份展示，不受旧健康失败限制；切模不发起逐模型探测。
+
+CodeBuddy 的“推理强度”使用原生 `thought_level`，候选值来自 Core 的该模型选项，沿用现有选择控件。
+没有候选但有已存值时仍可显示和清除；目录更新不覆盖草稿，摘要与消息强度显示使用同一键。
+原生响应归属与兼容规则见 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#codebuddy-原生档位)。
 
 目录缓存状态沿用 Core 投影，Renderer 不自行计算 TTL。同一环境和身份的过期目录仍可用于选择。
 读取失败显示“模型与参数尚未核对”，保留当前模型、参数与有效缓存；未枚举的已存值显示“尚未核对 · 值”，
@@ -201,9 +205,12 @@ AI 草稿复用普通会话所有结构，新会话按当前界面语言预填�
 入队回执、配置跳转、手动降级、中英文及手机原生输入；`ROVAI_KEEP_MEMBER_CREATION_FIXTURE=1` 保留截图。
 它与既有 member-editor 测试共同保护右侧设置。
 
-专业职责按 trim 后的 Unicode scalar 数显示 `已输入 / 10,000`，不使用 HTML maxlength 替代校验。
-超过上限显示“专业职责最多 10,000 个字符。”并保留草稿；后台同样验证，失败不能部分保存。
-其他身份字段计数/上限与现有布局保持。
+专业职责按 trim 后的 Unicode scalar 数显示 `已输入 / 30,000`，不使用 HTML maxlength 替代校验。
+超过上限显示“专业职责最多 30,000 个字符。”并保留草稿；后台同样验证，失败不能部分保存。
+工作准则、成长课题各最多 3,000 个 Unicode scalar，计数器分母均为 `3,000`；沿用现有原始草稿计数，
+提交与校验沿用 JS trim。超限分别显示“工作准则最多 3,000 个字符。”和“成长课题最多 3,000 个字符。”，
+保留完整草稿并定位字段；不使用 HTML maxlength 截断，不开始后续头像提交。其他字段及布局保持。
+两字段的 Core／工具入口继续各自现有首尾空白规则，完整对照见[已确认 R1](../../versions/v1.72/model-context-change-identity-guidance-3000.md)。
 
 ## 永久移除影响
 

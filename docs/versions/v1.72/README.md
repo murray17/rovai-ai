@@ -6,10 +6,115 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-01
+last_updated: 2026-11-08
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 执行台自动打开偏好（2026-11-08）
+
+按 User 确认，在“通用 → 会话”增加默认关闭的“自动打开执行台”，统一控制 Desktop／宽屏 Web
+发送后及进入运行中会话时的自动展开与选中；手机展示同一开关并正常保存，但仍保持手动打开。关闭时不追踪补跳，保留主动查看、通知定位、
+执行 Tab 记忆及当前阅读。设置顺序为自动打开执行台、会话任务、世界地图；前两项说明收进问号，
+任务保留原文，地图保留行下说明。规则和 schema 8 兼容边界见
+[设置 brief](../../ui/surfaces/settings-workspace.md#通用)及[会话执行过程](../../ui/components/conversation-workspace.md#thread-执行过程)。
+实施与验证见[实施记录](implementation-plan.md#执行台自动打开偏好2026-11-08)。
+
+## 项目文件引用（2026-11-07，功能分支验收）
+
+已按 User 的正式实施请求建立独立 worktree。公开 Active／普通 Pending 的文件身份、短标签、
+分组搜索、跨对话恢复与仅文件输入以 [R1 独立说明](model-context-change-project-file-reference.md)
+为已确认范围（User sequence 21）。Core 与 Desktop／Web 主链已实现；类型、事务、恢复和真实界面通过，
+六项真实文件读取通过。User sequence 37 已取消专属任务询问规则及其专项验收，相关测试与待办已移除。
+sequence 26 复核的三处前端边界已修复，全量 Vitest 3,146 项通过。
+sequence 30 已隐藏快速对话的文件类别并同步键盘导航；Desktop／认证 Web 扩展至 22 项通过。
+另补同名、特殊路径与 Mission 工作副本三组真实定位，Codex／Claude 六次读取通过，两个准备任务另计，
+见[复杂定位证据](project-file-reference-identity-evidence.json)与[延迟界面验证](project-file-reference-review-ui-evidence.json)。
+模块、逐项验证及已知限制见[实施记录](project-file-reference-implementation.md#实际实现与验收)，
+真实输入哈希、文件读取及早期执行记录见[脱敏证据](project-file-reference-evidence.json)。主功能经 PR #1028 合入 main，安装按 User 请求继续。
+
+## 执行 Tab 恢复与空选中回退（2026-11-05）
+
+按 User 确认的最小范围，当前窗口按 Thread 记住队员／总览 Tab；可见执行页恢复有效选择或回退总览。
+显式关闭只清除当前选择，不被可见空选中的补选逻辑撤销；再次打开仍恢复 Tab。
+不保存具体 Run、历史开合、卡片展开或滚动，不改变当前执行／历史呈现及自动开合条件。
+规则见[会话执行过程](../../ui/components/conversation-workspace.md#thread-执行过程)，实现与验证见
+[实施记录](implementation-plan.md#执行-tab-恢复与空选中回退2026-11-05)。
+
+## 会话执行查询取消旧 Turn 回退（2026-11-05）
+
+按 User 确认，公开运行计数、运行列表、文件变更卡片与 `thread.runs` 统一按 Run 的直接会话归属读取；
+旧 Turn-only 公开运行不再显示这些执行卡片，不迁移或回填历史数据，当前单聊与消息正文保持。
+当前规则见 [Camp Open Projection v31](../../contracts/camp-open-projection-v31.md)、[Thread Runs v2](../../contracts/thread-runs-v2.md) 与
+[读取架构](../../architecture/camp-open-read-path.md)，取舍见 [D75](decisions.md#v1-72-d75)，
+代码与验证见[实施记录](implementation-plan.md#会话执行查询取消旧-turn-回退2026-11-05)。
+
+## 原生成功与空最终文字（2026-11-04，Issue #1012）
+
+按 User 确认的可用性优先规则，Pi、Codex、共享 ACP 与 Antigravity 的有效原生成功允许没有最终文字，
+与 Claude 对齐；空文字不生成消息或 Missing-Send 候选，非空文字继续沿用发送／补发去重。
+ACP 删除整轮问卷否决状态，局部取消保留诊断和不代答语义；真实原生失败、整轮取消、缺少终态及
+Antigravity legacy 空输出／print 超时继续失败。无新状态、重试、Schema、模型输入或界面。
+当前规范为 [Runtime Launch v75](../../contracts/runtime-launch-and-verification-v75.md)与
+[Missing-Send v4](../../contracts/missing-send-recovery-publication-v4.md)；测试归属见
+[开发验证](../../development/testing.md#全-runtime-空成功结果)。已完成定向 Rust、默认 workspace、
+`pnpm typecheck`、`TZ=UTC pnpm test` 与通用文档门禁；本机 Honolulu 时区的两项既有日期断言在 UTC 下通过。
+macOS arm64 使用真实 MiniMax 0.6.12 与本地受控 Provider，通过 completion-only 五项与 questionnaires-only
+十二项场景，覆盖空成功、消息不重复、原生错误、问卷无答案、后继与普通 allow/deny。
+未调用外部模型或进行跨平台真实 Runtime 验收；历史 Run 不回填，不宣称问卷界面已接入。
+
+## 消息导出（2026-11-03）
+
+按 User 确认的中性灰多选方案，在现有公开会话接入整条消息/选文导出、HTML/PNG/Markdown 预览与下载。
+HTML/PNG 的头像、作者、时间、发送对象默认开启；Markdown 无头像，其余默认开启。复用当前主题和消息正文，
+不导出独立 Diff Card 或执行记录，不改变消息存储、寻址与模型上下文。
+当前规则见[会话工作区](../../ui/components/conversation-workspace.md#消息导出)，实施与验证见
+[交付记录](message-export-implementation.md)。
+
+## 工作准则与成长课题 3,000 字符（2026-11-03）
+
+已按 User 确认将两个字段各从 300 放宽至 3,000，沿用现有清理、冻结与投递规则。
+Bootstrap 正文和默认执行包均保持 256 KiB，无数据库迁移或预算重构。
+范围与既有入口空白差异见 [R1 方案](model-context-change-identity-guidance-3000.md)；User 已在 sequence 28 确认，现已实现。
+Rust 工作区 484 项、存储／上下文定向 4 项、前端 8 项及字段 UI 场景通过；完整编辑器夹具停在既有 Runtime 菜单检查，
+实际范围与限制见[验证证据](evidence/identity-guidance-3000-2026-11-03.json)。未运行真实模型矩阵。
+
+待后续版本发布：工作准则、成长课题上限各提升至 3,000 字符，保留完整正文与内部格式。
+此条作为后续发布说明候选，不改写已经发布的 v0.5.6 发布记录。
+
+## Markdown Mermaid 审阅（2026-11-03）
+
+Issue #979 在文件与消息正文中交付自动绘图、源码/图形切换与完整复制、大图缩放和滚动、局部失败及手动重试。
+流式正文按已完整到达的闭合围栏立即出图，同回合明确对应的单聊最终回复保留图表阅读状态。
+复用现有图片展示与代码复制，在专用受限 iframe 内离线渲染和清洗，不新增后端协议；执行控制台保持轻量。
+当前边界见[文件预览架构](../../architecture/file-preview.md#markdown-图表渲染)与
+[图表阅读 UI](../../ui/components/file-preview.md#markdown-图表阅读)；实现、生产验收及资源体积见
+[交付记录](markdown-mermaid.md)。
+
+## 原生 Skills 可用性修复（2026-11-02）
+
+按 User 收敛后的最小范围，统一宽松发现与重验、canonical 目录名称缺省、去重结果一致登记，
+原生名称不再套用受管格式；四类轻量诊断支持定位和刷新。受管校验、访问边界与冻结投递不变。
+确认、输入前后差异和验证归[独立说明](model-context-change-native-skills-availability.md)，
+当前规则归 [Skills Rebuild v2](../../contracts/skills-rebuild-v2.md#原生文档接受与诊断)。
+
+## 专业职责 30,000 字符（2026-11-02）
+
+[R2 独立变更说明](model-context-change-professional-responsibilities-30000.md)合并五点评审与 User 收紧的范围：
+职责 30,000 scalar、相关 Bootstrap 正文 256 KiB、执行包默认 256 KiB；保留现有 claim，隔离旧分派固定预留。
+文内列出最小改动、版本轴不变的依据、内容保留、定向回归及复用 12 Case Gate 的边界。
+已完成字段扩容、正文上限及旧预留解耦；工程与定向回归、OpenCode／Command Code 实跑通过。
+User 后续要求停止通用模型矩阵，已停止并留证；Cline 实跑受现有平台资格限制。
+结果见 [R2 实施记录](model-context-change-professional-responsibilities-30000.md#实施与验收记录2026-11-02)与
+[验收证据](evidence/professional-responsibilities-30000-2026-11-02.json)。User 已授权 [PR #987](https://github.com/murray17/rovai-ai/pull/987) 合入 main；
+smoke 摘要匹配补齐同一条 accepted 投递约束，构造数据与既有证据复核通过，未重跑真实模型。
+
+## 取消执行条统一保留（2026-11-02）
+
+公开取消 Run 的会话执行条与继续入口改为按 `cancelled` 状态判断，覆盖 App 退出与其他取消原因。
+沿用每位队员最新未受理继续、新 Run 替换与刷新恢复规则；“你已中断”仍仅用于手动停止。
+当前规范见 [Run Process Detail Surface v59](../../contracts/run-process-detail-surface-v59.md)，
+改动和验证归[实施记录](implementation-plan.md#取消执行条统一保留2026-11-02)。
 
 ## 项目目录浏览（2026-11-01）
 
@@ -457,9 +562,10 @@ Migration 205 从 schema 154 升至 **155**，保留业务行、索引、触发�
 [接入矩阵](../../research/minimax-code-runtime/README.md)分别记录脚本模型、真实模型与未验范围，
 实现交付不等同 Checklist 的 First-Class 资格。没有更换 current_version 或宣布本版本完成。
 
-User seq35/37 确认问卷采用取消、不代答。沿用现有原生 dismiss 与审批防代答，新增准确的
-`runtime_questionnaire_unsupported` 公开提示，非空结束文字或已发送消息不掩盖未承接问卷。
-不改原生配置、Host/Session 身份或模型上下文；后继新指令按原路径继续。
+User seq35/37 确认问卷采用取消、不代答。保留原生 dismiss 与审批防代答，不改原生配置、Host/Session
+身份或模型上下文。原先的整轮 `runtime_questionnaire_unsupported` 覆盖已由
+[Runtime Launch v75](../../contracts/runtime-launch-and-verification-v75.md#局部问卷取消)替代：局部取消保留诊断，
+随后有效原生成功正常完成，后继新指令按原路径继续。
 
 Linux 目标主机按维护者要求完成 14 轴验收，见[独立报告](../../research/minimax-code-runtime/linux-qualification-2026-10-18.md)
 与[不可变证据](../../../qualification/runtime-platform/linux-x64-minimax-code-v1.json)。覆盖真实 Provider、
@@ -1393,4 +1499,23 @@ Windows 实测与残余边界见[Windows Preview 开放](command-code-native-sim
 工作边界、回归证据与未验证项见[实施记录](usability-check-simplification.md)。
 ## 飞书回复来源与普通自动回复（2026-10-28）
 
-按已确认 [revision3](model-context-change-feishu-reply-routing.md) 实施逐输入 CHAT_REPLY_CONTEXT、六段 guidance 及 Manifest 冻结；public43/Facts11/Profile15、当时迁移 213/schema159 保留旧 40 输入与 Blob，non-batch42/13/16、Bootstrap、Transport44、Host 出站及 Runtime 权限不变。真实模型专项与固定 Judge 通用 Gate 尚未完整通过，不宣称误拒答已修复。取舍见 [V1.72-D75](decisions.md#v1-72-d75)（原分支 D53／前次合流 D70，编号更正见决定末尾勘误），合同见 [Manifest43](../../contracts/context-manifest-evidence-v43.md) 与 [聊天Bot v3](../../contracts/feishu-chat-bot-v3.md)。
+按已确认 [revision3](model-context-change-feishu-reply-routing.md) 实施逐输入 CHAT_REPLY_CONTEXT、六段 guidance 及 Manifest 冻结；public43/Facts11/Profile15、当时迁移 213/schema159 保留旧 40 输入与 Blob，non-batch42/13/16、Bootstrap、Transport44、Host 出站及 Runtime 权限不变。真实模型专项与固定 Judge 通用 Gate 尚未完整通过，不宣称误拒答已修复。取舍见 [V1.72-D76](decisions.md#v1-72-d76)（原分支 D53／前次合流 D70，编号更正见决定末尾勘误），合同见 [Manifest43](../../contracts/context-manifest-evidence-v43.md) 与 [聊天Bot v3](../../contracts/feishu-chat-bot-v3.md)。
+
+
+## Pi 原生交互桥接（2026-11-05）
+
+Pi 四类原生问答复用现有待处理区域；协议、答案和运行归属保持原生语义，未扩展其他 Runtime。
+范围、代码归属和验证边界见[实施记录](pi-native-interactions-implementation.md)。
+
+飞书/Lark 与钉钉的后续桥接另见[渠道实施记录](pi-native-channel-interactions.md)。共用提交与卡片适配已实现，
+钉钉模板跨企业和真实客户端验收仍待完成，不以本地 fixture 宣告交付。
+
+## 项目目录引用（2026-11-08）
+
+User 已确认目录与文件共用候选及发送链路，模型只获得目录路径，按需读取。目录名不带显示用尾斜线；
+根层省略辅助路径，四个候选 Tab 分开，桌面宽度 480px。正式目录 URI 仍保留尾斜线。
+范围与确认见[独立 R1](model-context-change-project-directory-reference.md)，
+工作目录、冻结验证及实际结果见[实施记录](project-directory-reference-implementation.md)。
+
+引用正文精简按 [R1](model-context-change-reference-projection-simplification.md)收敛：文件／目录只投影名称，完整 URI 和身份保持；
+链接标签采用必要转义，详情按类型与状态精简。按 User 明确的未上线范围，不升级格式号、不增加迁移或兼容分支。

@@ -31,6 +31,13 @@ let steerSent: {mode: string | undefined; attachments: number; recipients: strin
 const now = '2026-08-31T00:00:00Z'
 const threadId = 'rvcamp_01m0wzxbb8e1ht984tsbjmysfe'
 const inputHistoryMode = new URLSearchParams(location.search).has('inputHistory')
+const singleChatEntryMode = new URLSearchParams(location.search).has('singleChatEntry')
+const singleChatEntryReads: string[] = []
+let singleChatEntryPending = true
+let releaseSingleChatEntryList: () => void
+const singleChatEntryGate = new Promise<void>(resolve => {
+  releaseSingleChatEntryList = () => { singleChatEntryPending = false; resolve() }
+})
 const inputHistoryReads: string[] = []
 const inputHistorySends: ComposerDocument[] = []
 const recallContent: ComposerDocument = { version: 2, segments: [
@@ -359,6 +366,14 @@ Object.assign(window, { rovai: {
     beforeSequence?: number | null
     limit?: number
   }): Promise<unknown> => {
+    if (singleChatEntryMode && method.startsWith('singleChat.')) singleChatEntryReads.push(method)
+    if (method === 'singleChat.list') {
+      if (!singleChatEntryMode) return []
+      await singleChatEntryGate
+      return [{ id: 'entry-single-chat', threadId, agentId: agent.agentId, version: 1, status: 'active',
+        lastMessageSequence: 0, lastAcceptedPublicBoundarySequence: 0, activeAgentRunId: null,
+        createdAt: now, updatedAt: now, endedAt: null }]
+    }
     if (inputHistoryMode && method.startsWith('thread.messages.')) inputHistoryReads.push(method)
     if (steerFixture && method === 'thread.messages.anchors') return {schemaVersion:1,threadId,throughGlobalSequence:current.throughGlobalSequence,totalCount:0,items:[]}
     if (method === 'agentRunExecution.page') {
@@ -502,7 +517,7 @@ function Fixture({ executionPlacement = 'bottom', windowed = false, entryPreview
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<ThreadInspectorTab>(attachmentReviewMode ? 'members' : 'tasks')
   const [entryHost, setEntryHost] = useState<HTMLElement | null>(null)
-  const [entrySnapshotReady, setEntrySnapshotReady] = useState(!entryPreview)
+  const [entrySnapshotReady, setEntrySnapshotReady] = useState(!entryPreview && !singleChatEntryMode)
   updateSnapshot = setSnapshot
   updateCurrentUserProfile = setProfile
   updateMessageHistory = setMessageHistory
@@ -654,8 +669,16 @@ Object.assign(window, { campOpenTest: {
     reactRoot.render(<Fixture key={`entry-preview-${sample}`} entryPreview />)
   },
   completeEntrySnapshot: () => completeEntrySnapshot(),
+  releaseSingleChatEntryList: () => releaseSingleChatEntryList(),
+  singleChatEntryState: () => ({
+    reads: [...singleChatEntryReads], pending: singleChatEntryPending,
+    count: document.querySelector('[data-detail="single-chat"] small')?.textContent,
+    messages: document.querySelectorAll('[data-message-id]').length,
+    editable: document.querySelector('#camp-message')?.getAttribute('contenteditable') === 'true'
+  }),
   entryState: () => ({
     selectedAgentId: document.querySelector<HTMLElement>('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector<HTMLElement>('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
     expanded: document.querySelector('.execution-bottom-collapse-button')?.getAttribute('aria-expanded') === 'true',
     drawerLabel: document.querySelector('.execution-drawer')?.getAttribute('aria-label') ?? null
   }),

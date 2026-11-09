@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: single-chat
 authority: single-chat-component-boundaries-and-data-flow
-last_updated: 2026-10-18
+last_updated: 2026-11-02
 ---
 
 # Single Chat Architecture
@@ -80,7 +80,7 @@ non-batch 推进者。通知各自保留一个合并许可，读取状态与进�
 User 上下键输入历史从当前快照的正式 User 消息及活动 Pending 同步提取本轮内容。
 沿用消息顺序后接队列顺序，从末尾向前浏览；本轮固定，结束后释放，下一轮读取最新快照。
 不增加查询、回执缓存、Pending 身份映射或原提交时间排序，不找回已离开快照的取消项。
-见 [Input History v1](../contracts/input-history-v1.md)；这是 User 编辑器能力，与下述模型 `single_chat.history` 分开。
+见 [Input History v2](../contracts/input-history-v2.md)；这是 User 编辑器能力，与下述模型 `single_chat.history` 分开。
 
 ```text
 AgentRun.trigger_conversation_message_id
@@ -142,12 +142,17 @@ tool 与 command 分组；终态自动折叠过程而不是删除 Evidence，fin
 Snapshot 的 Run 同时携带 `executionEvidenceChangeSequence`；执行窗口按独立 change cursor 合并原位更新，不能把
 `executionEvidenceCount` 当作 revision。私有 thought/reasoning 正文在 Renderer state 前丢弃，只保留 content-free phase。
 
+进入 Thread 的正式快照就绪后，独立异步读取 active Conversation 列表，供收起状态下仍可见的入口显示数量与运行标记；
+缓存预览期间不自动读取列表，主会话的展示与输入就绪不等待列表结果。用户主动打开 Panel 时仍可按打开路径读取。
+列表监听当前 Thread 的
+`single_chat.changed` 与客户端失效通知，不依赖 Panel 可见性，也不设轮询。列表读取串行合并，读取期间的新通知触发一次补读，
+离开 Thread 或组件卸载后旧读取不可写回。
 Panel 打开或切换对象时由 Renderer 唯一决定 target、清空旧 Snapshot 并管理 loading；一个 target request
 sequence 同时校验当前队员，阻止迟到结果跨目标写回。后台 `refreshList` 只更新 active Conversation 列表和
-运行标记；`refreshCurrent` 只读当前完整 Snapshot，以一个 in-flight 标记串行化同一目标的读取，期间重复刷新合并为完成后
+运行标记；`refreshCurrent` 只在 Panel 可见时读取当前完整 Snapshot，以一个 in-flight 标记串行化同一目标的读取，期间重复刷新合并为完成后
 的一次补读。Mutation 返回的 Snapshot 可立即呈现，但仍通过同一补读入口确保修改前的在途读取不会成为最后结果。
 这些后台读取不切换目标、不清空 Snapshot，也不修改 loading。空闲时无计时器；运行期约每 800ms 只读当前 Conversation，
-Panel 收起、Thread 离开或组件卸载使旧 target request 失效并停止刷新。
+Panel 收起、Thread 离开或组件卸载使旧 target request 失效并停止正文刷新。
 
 ## 取消、结束与并发
 

@@ -80,7 +80,7 @@ use rovai_core::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
         PiProbeObservation, executable_fingerprint as fingerprint_executable,
-        observe_executable_file_identity, verify_executable_integrity,
+        executable_identity_is_current, observe_executable_identity, verify_executable_integrity,
     },
     authority_migration::{
         AuthorityMigrationProgress, AuthorityMigrationRunner, trace_startup_stage,
@@ -751,6 +751,17 @@ fn validate_lark_request_actor(method: &str, params: &Value) -> Result<()> {
     Ok(())
 }
 
+fn native_channel_provider(method: &str) -> Result<&'static str> {
+    channel_request_host_component(method)?;
+    Ok(if method.starts_with("channels.dingtalk.") {
+        "dingtalk"
+    } else if method.starts_with("channels.lark.") {
+        "lark"
+    } else {
+        "feishu"
+    })
+}
+
 fn channel_request_host_component(method: &str) -> Result<&'static str> {
     match method {
         "channels.feishu.account.upsert"
@@ -772,6 +783,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.executionConsole.recentOutput.authorize"
         | "channels.executionConsole.agentRun.cancel"
         | "channels.executionConsole.page.authorize"
+        | "channels.nativeInteractions.source"
+        | "channels.nativeInteractions.respond"
         | "channels.deliveries.settle" => Ok(crate::channel::FEISHU_SPEC.host_component),
         "channels.dingtalk.account.upsert"
         | "channels.dingtalk.account.commitConnection"
@@ -791,6 +804,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.dingtalk.executionConsole.recentOutput.authorize"
         | "channels.dingtalk.executionConsole.agentRun.cancel"
         | "channels.dingtalk.executionConsole.page.authorize"
+        | "channels.dingtalk.nativeInteractions.source"
+        | "channels.dingtalk.nativeInteractions.respond"
         | "channels.dingtalk.deliveries.settle" => Ok("dingtalk-channel-host"),
         "channels.lark.account.upsert"
         | "channels.lark.account.commitConnection"
@@ -810,6 +825,8 @@ fn channel_request_host_component(method: &str) -> Result<&'static str> {
         | "channels.lark.executionConsole.recentOutput.authorize"
         | "channels.lark.executionConsole.agentRun.cancel"
         | "channels.lark.executionConsole.page.authorize"
+        | "channels.lark.nativeInteractions.source"
+        | "channels.lark.nativeInteractions.respond"
         | "channels.lark.deliveries.settle" => Ok(rovai_core::channel::LARK_SPEC.host_component),
         _ => anyhow::bail!("request does not identify a channel Host"),
     }
@@ -820,6 +837,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
         method,
         "health.check"
             | "projectFiles.request"
+            | "projectFileReferences.resolve"
             | "runtime.status.get"
             | "diagnostics.check"
             | "diagnostics.export"
@@ -861,6 +879,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "singleChat.end"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
+            | "nativeInteractions.respond"
             | "runtime.pendingExecution.cancel"
             | "runtime.subsystems.retry"
     )
@@ -2175,10 +2194,10 @@ async fn run_identity_checked_probe<T>(
     executable_path: &Path,
     probe: impl Future<Output = Result<T>>,
 ) -> IdentityCheckedProbe<T> {
-    let before = observe_executable_file_identity(executable_path).ok();
+    let before = observe_executable_identity(executable_path).ok();
     let result = probe.await;
     let superseded = before.as_ref().is_some_and(|before| {
-        observe_executable_file_identity(executable_path)
+        observe_executable_identity(executable_path)
             .map(|after| after != *before)
             .unwrap_or(true)
     });
@@ -2925,7 +2944,14 @@ impl Core {
         };
         let thread = params.camp_id.clone();
         let reference = params.raw_reference.clone().unwrap_or_default();
+        let expected = params.expected_path_at_send.clone();
         tokio::task::spawn_blocking(move || {
+            if let Some(expected) = expected {
+                let file = crate::project_file_reference::resolve(&binding, &reference).ok()?;
+                if file.path != expected {
+                    return None;
+                }
+            }
             crate::project_files::resolve_source(binding, thread, &reference).ok()
         })
         .await
@@ -4326,13 +4352,19 @@ impl Core {
         // file work off the async executor and outside the global database lock.
         let executable_path = installation.executable_path.clone();
         let locator = target.locator.clone();
+        let expected_identity = recorded_identity.clone();
         let observed = tokio::task::spawn_blocking(move || {
             if !rovai_core::runtime_discovery::entrypoint_locator_identity_is_current(
                 locator.as_ref(),
             ) {
                 return None;
             }
-            observe_executable_file_identity(Path::new(&executable_path)).ok()
+            executable_identity_is_current(
+                Path::new(&executable_path),
+                &expected_identity.1,
+                &expected_identity.0,
+            )
+            .then_some(expected_identity.1)
         })
         .await
         .context("Runtime supervisor file identity worker failed")?;
@@ -4935,8 +4967,7 @@ impl Core {
             health::refresh_model_catalog(&path, kind).await
         })
         .await;
-        let identity_current = observe_executable_file_identity(&path).ok().as_ref()
-            == Some(&identity)
+        let identity_current = executable_identity_is_current(&path, &identity, fingerprint)
             && rovai_core::runtime_discovery::entrypoint_locator_identity_is_current(
                 observation.entrypoint_locator_identity.as_ref(),
             );
@@ -5074,7 +5105,7 @@ impl Core {
         let Some(_update) = self.runtime_check_update_guard(&search).await else {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         };
-        if observe_executable_file_identity(path).ok().as_ref() != Some(&identity) {
+        if !executable_identity_is_current(path, &identity, fingerprint) {
             let mut database = self.database.lock().await;
             service.mark_runtime_integrity_changed(
                 &mut database,
@@ -8093,7 +8124,15 @@ impl Core {
         let Some(outcome) = outcome else {
             return Ok(None);
         };
-        let projection = outcome.projection;
+        let mut projection = outcome.projection;
+        projection.native_interactions = self.pi.pending_interactions(&projection.camp.id).await;
+        projection.native_interactions.retain(|request| {
+            projection.agent_runs.iter().any(|run| {
+                run.id == request.agent_run_id
+                    && matches!(run.status.as_str(), "running" | "waiting")
+                    && run.cancel_requested_at.is_none()
+            })
+        });
         let projection_ms = outcome.projection_duration.as_millis();
         let serialization_started_at = Instant::now();
         let value = serde_json::to_value(&projection)?;
@@ -8143,6 +8182,32 @@ impl Core {
                 Ok(json!({ "released": true }))
             }
             "commands.reconcile" => {
+                if request.params.get("operation").and_then(Value::as_str)
+                    == Some("nativeInteractions.respond")
+                {
+                    let params: crate::native_interaction::RespondNativeInteraction =
+                        serde_json::from_value(request.params["params"].clone())?;
+                    let status = if let Some(runtime) = self
+                        .pi
+                        .get_agent_run(&params.agent_run_id, params.execution_epoch)
+                        .await
+                    {
+                        anyhow::ensure!(
+                            runtime.camp_id() == params.thread_id,
+                            "Native interaction belongs to another Thread"
+                        );
+                        runtime.interaction_status(&params.interaction_id).await
+                    } else {
+                        crate::native_interaction::NativeInteractionStatus::Unavailable
+                    };
+                    return Ok(
+                        if status == crate::native_interaction::NativeInteractionStatus::Pending {
+                            json!({"state":"unknown"})
+                        } else {
+                            json!({"state":"recorded", "result":{"status":status}})
+                        },
+                    );
+                }
                 let database = self.database.lock().await;
                 web_commands::reconcile(
                     &database,
@@ -9235,6 +9300,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.dingtalk.host.tick" => {
+                self.sync_channel_native_interactions("dingtalk").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9573,6 +9639,7 @@ impl Core {
                 Ok(serde_json::to_value(execution.result)?)
             }
             "channels.host.tick" => {
+                self.sync_channel_native_interactions("feishu").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9587,6 +9654,7 @@ impl Core {
                 Ok(serde_json::to_value(tick)?)
             }
             "channels.lark.host.tick" => {
+                self.sync_channel_native_interactions("lark").await?;
                 let params: ChannelHostTickRequest =
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
@@ -9599,6 +9667,44 @@ impl Core {
                 )?;
                 self.notify_delivery_batch_scheduler_if_pending(&database);
                 Ok(serde_json::to_value(tick)?)
+            }
+            "channels.nativeInteractions.source"
+            | "channels.lark.nativeInteractions.source"
+            | "channels.dingtalk.nativeInteractions.source" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::SourceParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.channel_native_interaction_source(provider, &params)
+                    .await
+            }
+            "channels.nativeInteractions.respond"
+            | "channels.lark.nativeInteractions.respond"
+            | "channels.dingtalk.nativeInteractions.respond" => {
+                let provider = native_channel_provider(&request.method)?;
+                let params: rovai_core::channel::native_interactions::AnswerParams =
+                    serde_json::from_value(request.params.clone())?;
+                let (command, known_status) = {
+                    let mut database = self.database.lock().await;
+                    rovai_core::channel::native_interactions::authorize_answer(
+                        &mut database,
+                        &ActorRef::System {
+                            component_id: channel_request_host_component(&request.method)?
+                                .to_string(),
+                        },
+                        provider,
+                        &params,
+                    )?
+                };
+                use crate::native_interaction::{
+                    NativeInteractionResult, NativeInteractionStatus as Status,
+                };
+                if known_status != Status::Pending {
+                    return Ok(serde_json::to_value(NativeInteractionResult {
+                        status: known_status,
+                        already_handled: matches!(known_status, Status::Sent | Status::Skipped),
+                    })?);
+                }
+                self.answer_native_interaction(&command).await
             }
             "channels.executionConsole.source" => {
                 let params: ChannelExecutionConsoleSourceParams =
@@ -9929,6 +10035,7 @@ impl Core {
                 "name": "Rovai-ai",
                 "version": env!("CARGO_PKG_VERSION"),
                 "dataDir": self.data_dir,
+                "composerProjectFileReferenceVersion": 2,
             })),
             "memberAvatars.read" => {
                 #[derive(Deserialize)]
@@ -10649,6 +10756,7 @@ impl Core {
                 }
                 let runtime_search = self.runtime_search_environment.read().await.clone();
                 let mut references = Vec::new();
+                let mut diagnostics = Vec::new();
                 let discovery = self.native_skill_discovery.clone();
                 let refresh = params.refresh;
                 let scans = tokio::task::spawn_blocking(move || {
@@ -10678,7 +10786,11 @@ impl Core {
                 for (member_id, scan) in scans {
                     match scan {
                         Ok(scan) => {
-                            errors.extend(scan.errors);
+                            for diagnostic in scan.diagnostics {
+                                if !diagnostics.contains(&diagnostic) {
+                                    diagnostics.push(diagnostic);
+                                }
+                            }
                             for skill in scan.skills {
                                 if old_projection_paths.contains(
                                     &std::path::Path::new(&skill.entry_path)
@@ -10694,12 +10806,16 @@ impl Core {
                                     .entry(id.clone())
                                     .or_default()
                                     .insert(member_id.clone());
-                                candidates.entry(id.clone()).or_insert_with(|| json!({"id": id, "name": skill.name, "description": skill.description, "source": "native", "sourceScope": skill.source_scope, "entryPath": skill.entry_path}));
                                 references.push(skill);
                             }
                         }
                         Err(error) => errors.push(format!("{member_id}: {error}")),
                     }
+                }
+                // Display and register exactly the same deduplicated native candidates.
+                rovai_core::native_skills::deduplicate_native_skills(&mut references);
+                for skill in &references {
+                    candidates.insert(skill.id.clone(), json!({"id": skill.id, "name": skill.name, "description": skill.description, "source": "native", "sourceScope": skill.source_scope, "entryPath": skill.entry_path}));
                 }
                 let mut database = self.database.lock().await;
                 rovai_core::native_skills::remember_native_skill_references(
@@ -10714,7 +10830,7 @@ impl Core {
                         Ok(value)
                     })
                     .collect::<Result<Vec<Value>>>()?;
-                Ok(json!({"skills": skills, "errors": errors}))
+                Ok(json!({"skills": skills, "errors": errors, "diagnostics": diagnostics}))
             }
             "skills.get" => {
                 let params: SkillIdParams = serde_json::from_value(request.params.clone())?;
@@ -11360,10 +11476,24 @@ impl Core {
                 let params: SingleChatSnapshotParams =
                     serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    SingleChatService::for_client(request.client.clone())
-                        .snapshot(&database, &params.conversation_id)?,
-                )?)
+                let mut snapshot = SingleChatService::for_client(request.client.clone())
+                    .snapshot(&database, &params.conversation_id)?;
+                drop(database);
+                if let Some(snapshot) = snapshot.as_mut() {
+                    let mut interactions = self
+                        .pi
+                        .pending_interactions(&snapshot.conversation.camp_id)
+                        .await;
+                    interactions.retain(|request| {
+                        snapshot.agent_runs.iter().any(|run| {
+                            run.id == request.agent_run_id
+                                && matches!(run.status.as_str(), "running" | "waiting")
+                                && run.cancel_requested_at.is_none()
+                        })
+                    });
+                    snapshot.native_interactions = Some(interactions);
+                }
+                Ok(serde_json::to_value(snapshot)?)
             }
             "singleChat.sourceAttachments.addFromPath" => {
                 let params: AddSingleChatSourceAttachmentFromPathParams =
@@ -11515,7 +11645,7 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
-                let projection = outcome.projection;
+                let mut projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
                 if outcome.navigation_changed {
@@ -11529,6 +11659,15 @@ impl Core {
                     .reconcile_duration
                     .map(|duration| duration.as_millis())
                     .unwrap_or(0);
+                projection.native_interactions =
+                    self.pi.pending_interactions(&projection.camp.id).await;
+                projection.native_interactions.retain(|request| {
+                    projection.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
                 let value = serde_json::to_value(&projection)?;
@@ -11557,9 +11696,18 @@ impl Core {
                 let db_lock_ms = lock_started_at.elapsed().as_millis();
                 let database_started_at = std::time::Instant::now();
                 let outcome = ThreadOpenService.open(&mut database, params.camp_id.as_str())?;
-                let projection = outcome.projection;
+                let mut projection = outcome.projection;
                 let database_ms = database_started_at.elapsed().as_millis();
                 drop(database);
+                projection.native_interactions =
+                    self.pi.pending_interactions(&projection.camp.id).await;
+                projection.native_interactions.retain(|request| {
+                    projection.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
                 let value = serde_json::to_value(&projection)?;
@@ -11800,9 +11948,19 @@ impl Core {
             "camps.snapshot" => {
                 let params: ThreadIdParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
-                )?)
+                let mut snapshot =
+                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?;
+                drop(database);
+                snapshot.native_interactions =
+                    self.pi.pending_interactions(params.camp_id.as_str()).await;
+                snapshot.native_interactions.retain(|request| {
+                    snapshot.agent_runs.iter().any(|run| {
+                        run.id == request.agent_run_id
+                            && matches!(run.status.as_str(), "running" | "waiting")
+                            && run.cancel_requested_at.is_none()
+                    })
+                });
+                Ok(serde_json::to_value(snapshot)?)
             }
             "agentRunImages.read" => {
                 let params: AgentRunImageParams = serde_json::from_value(request.params.clone())?;
@@ -12399,6 +12557,21 @@ impl Core {
                 .context("Desktop Attachment target verification task failed")??;
                 Ok(serde_json::to_value(target)?)
             }
+            "projectFileReferences.resolve" => {
+                let params: crate::project_file_reference::ResolveRequest =
+                    serde_json::from_value(request.params.clone())?;
+                let bindings = {
+                    let database = self.database.lock().await;
+                    crate::project_file_reference::bindings(database.connection(), &params)
+                };
+                match bindings {
+                    Ok(bindings) => Ok(tokio::task::spawn_blocking(move || {
+                        crate::project_file_reference::resolve_references(params, bindings)
+                    })
+                    .await?),
+                    Err(_) => Ok(json!({"ok":false,"error":{"code":"root_unavailable"}})),
+                }
+            }
             "projectFiles.request" => {
                 let params: crate::project_files::Request =
                     serde_json::from_value(request.params.clone())?;
@@ -12540,6 +12713,11 @@ impl Core {
                     );
                 }
                 Ok(serde_json::to_value(view)?)
+            }
+            "nativeInteractions.respond" => {
+                let params: crate::native_interaction::RespondNativeInteraction =
+                    serde_json::from_value(request.params.clone())?;
+                self.answer_native_interaction(&params).await
             }
             "action.approvals.resolve" => {
                 let params: ResolveActionApprovalParams =
@@ -12919,6 +13097,16 @@ impl Core {
                 "pendingExecution": null,
             }));
         }
+        let binding = {
+            let database = self.database.lock().await;
+            crate::project_files::binding(&database, &envelope.payload.camp_id).ok()
+        };
+        let thread = envelope.payload.camp_id.clone();
+        let document = envelope.payload.content.clone();
+        let files = tokio::task::spawn_blocking(move || {
+            crate::project_file_reference::Preflight::prepare(thread, &document, binding)
+        })
+        .await?;
         let execution = {
             let _attachments = if envelope.payload.source_attachments.is_empty() {
                 None
@@ -12926,7 +13114,11 @@ impl Core {
                 Some(self.pasted_text_operations.lock().await)
             };
             let mut database = self.database.lock().await;
-            CollaborationService::default().send_user_camp_message(&mut database, &envelope)?
+            CollaborationService::default().send_user_camp_message_with_files(
+                &mut database,
+                &envelope,
+                Some(&files),
+            )?
         };
         if execution.result.status != CommandResultStatus::Rejected {
             emit_navigation_invalidated(
@@ -13818,6 +14010,198 @@ impl Core {
         keys.extend(self.claude_code_cli.active_execution_keys());
         keys.extend(self.antigravity_app.active_execution_keys().await);
         keys.into_iter().collect()
+    }
+
+    async fn answer_native_interaction(
+        &self,
+        params: &crate::native_interaction::RespondNativeInteraction,
+    ) -> Result<Value> {
+        use crate::native_interaction::{
+            NativeInteractionResult, NativeInteractionStatus as Status,
+        };
+        let valid = {
+            let database = self.database.lock().await;
+            database.connection().query_row(
+                "SELECT EXISTS(SELECT 1 FROM agent_run LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id WHERE agent_run.id = ?1 AND agent_run.execution_epoch = ?2 AND COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?3 AND agent_run.status IN ('running', 'waiting') AND agent_run.cancel_requested_at IS NULL)",
+                rusqlite::params![params.agent_run_id, params.execution_epoch, params.thread_id], |row| row.get::<_, bool>(0))?
+        };
+        let mut answer_preview = None;
+        let result = if valid {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&params.agent_run_id, params.execution_epoch)
+                .await
+            {
+                anyhow::ensure!(
+                    runtime.camp_id() == params.thread_id,
+                    "Native interaction belongs to another Thread"
+                );
+                let result = runtime
+                    .answer_interaction(&params.interaction_id, &params.answer)
+                    .await?;
+                answer_preview = runtime.interaction_result(&params.interaction_id).await.1;
+                result
+            } else {
+                NativeInteractionResult {
+                    status: Status::Unavailable,
+                    already_handled: false,
+                }
+            }
+        } else {
+            NativeInteractionResult {
+                status: Status::Unavailable,
+                already_handled: false,
+            }
+        };
+        // Channel result cards keep only the bounded preview of the first native answer.
+        {
+            let mut database = self.database.lock().await;
+            if let Err(error) = rovai_core::channel::native_interactions::record_status(
+                &mut database,
+                &params.interaction_id,
+                result.status,
+                answer_preview.as_deref(),
+            ) {
+                eprintln!("Native channel card marker update failed: {error:#}");
+            }
+        }
+        emit(
+            &self.output,
+            "agent_run.interaction_changed",
+            json!({"threadId":params.thread_id,"agentRunId":params.agent_run_id}),
+        );
+        Ok(serde_json::to_value(result)?)
+    }
+
+    async fn native_card_result(
+        &self,
+        card: &rovai_core::channel::native_interactions::CardReference,
+    ) -> Result<(
+        crate::native_interaction::NativeInteractionStatus,
+        Option<String>,
+    )> {
+        use crate::native_interaction::NativeInteractionStatus as Status;
+        if card.status != Status::Pending {
+            return Ok((card.status, card.answer_preview.clone()));
+        }
+        if let Some(runtime) = self
+            .pi
+            .get_agent_run(&card.agent_run_id, card.execution_epoch)
+            .await
+        {
+            let (status, answer_preview) = runtime.interaction_result(&card.interaction_id).await;
+            if status != Status::Pending {
+                return Ok((status, answer_preview));
+            }
+            // The pending list also fences stop, dead Host and changed Session.
+            if runtime
+                .pending_interactions()
+                .await
+                .iter()
+                .any(|question| question.id == card.interaction_id)
+            {
+                let database = self.database.lock().await;
+                let valid=database.connection().query_row("SELECT EXISTS(SELECT 1 FROM agent_run WHERE id=?1 AND execution_epoch=?2 AND status IN ('running','waiting') AND cancel_requested_at IS NULL)",rusqlite::params![card.agent_run_id,card.execution_epoch],|r|r.get::<_,bool>(0))?;
+                if valid {
+                    return Ok((Status::Pending, None));
+                }
+            }
+        }
+        Ok((Status::Unavailable, None))
+    }
+
+    async fn sync_channel_native_interactions(&self, provider: &str) -> Result<()> {
+        let questions = self.pi.channel_interactions().await;
+        let cards = {
+            let mut database = self.database.lock().await;
+            rovai_core::channel::native_interactions::project_pending(
+                &mut database,
+                provider,
+                &questions,
+            )?;
+            rovai_core::channel::native_interactions::references(&database, provider)?
+        };
+        for card in cards {
+            let (status, answer_preview) = self.native_card_result(&card).await?;
+            if status != crate::native_interaction::NativeInteractionStatus::Pending {
+                rovai_core::channel::native_interactions::record_status(
+                    &mut *self.database.lock().await,
+                    &card.interaction_id,
+                    status,
+                    answer_preview.as_deref(),
+                )?;
+            }
+        }
+        rovai_core::channel::native_interactions::reconcile_delivered(
+            &mut *self.database.lock().await,
+            provider,
+        )
+    }
+
+    async fn channel_native_interaction_source(
+        &self,
+        provider: &str,
+        params: &rovai_core::channel::native_interactions::SourceParams,
+    ) -> Result<Value> {
+        use crate::native_interaction::{NativeInteractionStatus as Status, NativeInteractionView};
+        let record = rovai_core::channel::native_interactions::source_reference(
+            &*self.database.lock().await,
+            provider,
+            &params.delivery_id,
+            &params.app_id,
+        )?;
+        let Some((delivery_id, agent_display_name, card)) = record else {
+            return Ok(Value::Null);
+        };
+        let (status, answer_preview) = self.native_card_result(&card).await?;
+        let mut interaction = NativeInteractionView {
+            id: card.interaction_id.clone(),
+            agent_run_id: card.agent_run_id.clone(),
+            execution_epoch: card.execution_epoch,
+            created_at: card.created_at,
+            expires_at: card.expires_at,
+            status,
+            questions: vec![],
+            can_skip: false,
+        };
+        if status == Status::Pending {
+            if let Some(runtime) = self
+                .pi
+                .get_agent_run(&card.agent_run_id, card.execution_epoch)
+                .await
+            {
+                if let Some(question) = runtime
+                    .pending_interactions()
+                    .await
+                    .into_iter()
+                    .find(|q| q.id == card.interaction_id)
+                {
+                    interaction = question;
+                } else {
+                    interaction.status = Status::Unavailable;
+                }
+            } else {
+                interaction.status = Status::Unavailable;
+            }
+        }
+        Ok(serde_json::to_value(
+            rovai_core::channel::native_interactions::CardSource {
+                delivery_id,
+                agent_display_name,
+                owner_user_id: rovai_core::channel::native_interactions::owner_user_id(
+                    &*self.database.lock().await,
+                    provider,
+                    &params.app_id,
+                )?,
+                interaction,
+                answer_preview: if card.question_preview.is_some() {
+                    answer_preview
+                } else {
+                    None
+                },
+                question_preview: card.question_preview,
+            },
+        )?)
     }
 
     async fn collect_delivery_batch_dispatch_candidates(
@@ -16174,7 +16558,11 @@ impl Core {
                         proposed_binding_id: Some(credential.native_binding_id.clone()),
                         adapter_installation_id: credential.adapter_installation_id.clone(),
                         native_session_id: native_session_id.to_string(),
-                        binding_compatibility_digest: credential
+                        // The acquired Host may have completed program/version
+                        // selection after this credential was prepared. Keep its
+                        // binding ID and previous identity; use this Run's final target.
+                        binding_compatibility_digest: execution
+                            .runtime
                             .binding_compatibility_digest
                             .clone(),
                     },
@@ -16502,9 +16890,9 @@ impl Core {
                 effective_version: None,
             });
         }
-        // Command's process preparation runs only inside Fleet's spawn closure.
-        // Admission above still honors platform policy and disabled/deleted installations.
-        if runtime.adapter_kind == AdapterKind::CommandCodeCli {
+        // Resident adapters select the actual program inside Fleet's spawn closure.
+        // Admission still honors platform policy and disabled/deleted installations.
+        if runtime.adapter_kind.reuses_process() {
             return Ok((runtime, candidate.version));
         }
         match self
@@ -16557,28 +16945,36 @@ impl Core {
             .await
     }
 
-    async fn prepare_acp_cold_runtime(
+    async fn prepare_cold_runtime(
         &self,
         runtime: FrozenAgentRuntimeConfig,
         workspace: &AgentRunWorkspace,
     ) -> std::result::Result<FrozenAgentRuntimeConfig, RuntimeDispatchFailure> {
-        if runtime.adapter_kind != AdapterKind::CommandCodeCli {
+        if !runtime.adapter_kind.reuses_process() {
             return Ok(runtime);
         }
         // Keep the Run's logical choices; select current installation evidence
         // only when Fleet actually needs a new process. No Run/Binding rotation.
-        let runtime = AgentProfileService::default()
+        let rebound = AgentProfileService::default()
             .resolve_rebound_runtime(&*self.database.lock().await, &runtime)
             .map_err(|error| RuntimeDispatchFailure {
                 code: "runtime_configuration_invalid".to_string(),
                 error,
                 effective_version: None,
-            })?
-            .map_err(|blocker| RuntimeDispatchFailure {
-                code: blocker.code,
-                error: anyhow::anyhow!("{}", blocker.payload),
-                effective_version: None,
             })?;
+        let runtime = match rebound {
+            Ok(runtime) => runtime,
+            Err(blocker) if runtime_blocker_is_refreshable(&blocker.code) => {
+                return self.refresh_runtime_for_launch(runtime, workspace).await;
+            }
+            Err(blocker) => {
+                return Err(RuntimeDispatchFailure {
+                    code: blocker.code,
+                    error: anyhow::anyhow!("{}", blocker.payload),
+                    effective_version: None,
+                });
+            }
+        };
         match self
             .inspect_runtime_integrity(&runtime)
             .await
@@ -16587,11 +16983,83 @@ impl Core {
                 error,
                 effective_version: None,
             })? {
-            RuntimeIntegrityPreflight::Verified => self.prepare_runtime_identity(runtime).await,
+            RuntimeIntegrityPreflight::Verified => {
+                let runtime = self.prepare_runtime_identity(runtime).await?;
+                acp::freeze_native_session_compatibility(runtime, workspace).map_err(|error| {
+                    RuntimeDispatchFailure {
+                        code: "runtime_configuration_invalid".into(),
+                        error,
+                        effective_version: None,
+                    }
+                })
+            }
             RuntimeIntegrityPreflight::DriftDetected(_) => {
                 self.refresh_runtime_for_launch(runtime, workspace).await
             }
         }
+    }
+
+    // Finalize program evidence from the Host actually acquired. This is still
+    // initialization: no user input has been dispatched, and logical choices stay frozen.
+    async fn bind_acquired_runtime(
+        &self,
+        execution: &AgentRunExecution,
+        launched: &FrozenAgentRuntimeConfig,
+    ) -> Result<AgentRunExecution> {
+        if !execution.runtime.adapter_kind.reuses_process() {
+            return Ok(execution.clone());
+        }
+        let mut runtime = execution.runtime.clone();
+        anyhow::ensure!(
+            runtime.adapter_kind == launched.adapter_kind
+                && runtime.installation_id == launched.installation_id
+                && runtime.auth_scope == launched.auth_scope,
+            "Acquired Host does not belong to the selected Runtime"
+        );
+        runtime.executable_path = launched.executable_path.clone();
+        runtime.executable_fingerprint = launched.executable_fingerprint.clone();
+        runtime.reported_version = launched.reported_version.clone();
+        runtime.installation_generation = launched.installation_generation;
+        runtime.search_environment_generation = launched.search_environment_generation;
+        runtime.protocol_version = launched.protocol_version.clone();
+        runtime.capabilities = launched.capabilities.clone();
+        runtime = acp::freeze_native_session_compatibility(runtime, &execution.workspace)?;
+        runtime.refresh_config_digest()?;
+        if runtime == execution.runtime {
+            return Ok(execution.clone());
+        }
+        let mut database = self.database.lock().await;
+        let rebound = ExecutionRuntimeService::default().rebind_agent_run_runtime(
+            &mut database,
+            &CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "agent-run-scheduler".into(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: RebindAgentRunRuntimeCommand {
+                    agent_run_id: execution.agent_run_id.clone(),
+                    expected_version: execution.version,
+                    drift_reason: "runtime_host_acquired".into(),
+                    effective_runtime: runtime,
+                },
+            },
+        )?;
+        anyhow::ensure!(
+            rebound.result.status == CommandResultStatus::Applied,
+            "{}: {}",
+            rebound.result.code,
+            rebound.result.payload
+        );
+        ExecutionRuntimeService::default()
+            .load_agent_run_execution(
+                &database,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+            )?
+            .context("AgentRun changed during Runtime initialization")
     }
 
     async fn refresh_runtime_for_launch(
@@ -16627,11 +17095,6 @@ impl Core {
             });
         }
 
-        if frozen_runtime.adapter_kind != AdapterKind::CommandCodeCli {
-            self.runtime_fleet
-                .invalidate_adapter(frozen_runtime.adapter_kind)
-                .await;
-        }
         // Resolve only this installation. No independent protocol process is launched.
         // Refresh the GUI search environment once if its cached paths cannot resolve
         // the entry, so a normal run can recover after an environment repair.
@@ -17068,19 +17531,34 @@ impl Core {
         launch_permit.check_cancelled()?;
         let runtime = self
             .codex_cli
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: &execution.workspace.isolation,
-                agent_run_id: &execution.agent_run_id,
-                execution_epoch: execution.execution_epoch,
-                camp_id: &execution.camp_id,
-                agent_id: &execution.agent_id,
-                native_binding_id: &initial_binding.native_binding_id,
-                cwd: &execution_root,
-                frozen_runtime: &execution.runtime,
-                runtime_compatibility_digest: &runtime_compatibility_digest,
-                builtin_tool_factory: &builtin_tool_factory,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: &execution.workspace.isolation,
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    camp_id: &execution.camp_id,
+                    agent_id: &execution.agent_id,
+                    native_binding_id: &initial_binding.native_binding_id,
+                    cwd: &execution_root,
+                    frozen_runtime: &execution.runtime,
+                    runtime_compatibility_digest: &runtime_compatibility_digest,
+                    builtin_tool_factory: &builtin_tool_factory,
+                },
+                {
+                    let core = self.clone();
+                    let workspace = execution.workspace.clone();
+                    move |runtime| async move {
+                        core.prepare_cold_runtime(runtime, &workspace)
+                            .await
+                            .map_err(|failure| failure.error.context(failure.code))
+                    }
+                },
+            )
             .await?;
+        let acquired_execution = self
+            .bind_acquired_runtime(execution, runtime.launch_runtime())
+            .await?;
+        let execution = &acquired_execution;
         if !mcp_projection.servers.is_empty() {
             let native_mcp_server_names = runtime
                 .discover_native_mcp_server_names(&execution_root)
@@ -17352,7 +17830,10 @@ impl Core {
         Ok(())
     }
 
-    async fn launch_pi_agent_run(&self, launch: PreparedPiRuntimeLaunch<'_>) -> Result<()> {
+    async fn launch_pi_agent_run(
+        self: &Arc<Self>,
+        launch: PreparedPiRuntimeLaunch<'_>,
+    ) -> Result<()> {
         let PreparedPiRuntimeLaunch {
             execution,
             resume_disposition,
@@ -17411,23 +17892,34 @@ impl Core {
         launch_permit.check_cancelled()?;
         let runtime_result = self
             .pi
-            .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
-                agent_run_id: &execution.agent_run_id,
-                execution_epoch: execution.execution_epoch,
-                camp_id: &execution.camp_id,
-                agent_id: &execution.agent_id,
-                cwd: &execution_root,
-                workspace_isolation: &execution.workspace.isolation,
-                frozen_runtime: &execution.runtime,
-                runtime_compatibility_digest: &runtime_compatibility_digest,
-                native_session_id: binding_credential.native_session_id.as_deref(),
-                delivery_id: &delivery_id,
-                native_prompt_id: &native_prompt_id,
-                native_binding_id: &binding_credential.native_binding_id,
-                native_binding_generation: binding_credential.native_binding_generation,
-                bootstrap: &session_bootstrap,
-                builtin_tool_factory: &builtin_tool_factory,
-            })
+            .ensure_agent_run_runtime(
+                PiAgentRunRuntimeRequest {
+                    workspace_isolation: &execution.workspace.isolation,
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    camp_id: &execution.camp_id,
+                    agent_id: &execution.agent_id,
+                    cwd: &execution_root,
+                    frozen_runtime: &execution.runtime,
+                    runtime_compatibility_digest: &runtime_compatibility_digest,
+                    native_session_id: binding_credential.native_session_id.as_deref(),
+                    delivery_id: &delivery_id,
+                    native_prompt_id: &native_prompt_id,
+                    native_binding_id: &binding_credential.native_binding_id,
+                    native_binding_generation: binding_credential.native_binding_generation,
+                    bootstrap: &session_bootstrap,
+                    builtin_tool_factory: &builtin_tool_factory,
+                },
+                {
+                    let core = self.clone();
+                    let workspace = execution.workspace.clone();
+                    move |runtime| async move {
+                        core.prepare_cold_runtime(runtime, &workspace)
+                            .await
+                            .map_err(|failure| failure.error.context(failure.code))
+                    }
+                },
+            )
             .await;
         let runtime = match runtime_result {
             Ok(runtime) => runtime,
@@ -17482,7 +17974,8 @@ impl Core {
                 launch_permit.check_cancelled()?;
                 let replacement = self
                     .pi
-                    .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
+                    .ensure_agent_run_runtime(
+                        PiAgentRunRuntimeRequest {
                         agent_run_id: &execution.agent_run_id,
                         execution_epoch: execution.execution_epoch,
                         camp_id: &execution.camp_id,
@@ -17498,7 +17991,16 @@ impl Core {
                         native_binding_generation: replacement_binding.native_binding_generation,
                         bootstrap: &replacement_bootstrap,
                         builtin_tool_factory: &builtin_tool_factory,
-                    })
+                        },
+                        {
+                            let core = self.clone();
+                            let workspace = execution.workspace.clone();
+                            move |runtime| async move {
+                                core.prepare_cold_runtime(runtime, &workspace)
+                                    .await.map_err(|failure| failure.error.context(failure.code))
+                            }
+                        },
+                    )
                     .await
                     .with_context(|| {
                         format!(
@@ -17512,6 +18014,10 @@ impl Core {
             }
             Err(error) => return Err(error).context("Pi Native Session activation failed closed"),
         };
+        let acquired_execution = self
+            .bind_acquired_runtime(execution, runtime.launch_runtime())
+            .await?;
+        let execution = &acquired_execution;
         let active_builtin_tools = runtime
             .builtin_tool_process_config()
             .context("Pi Runtime has no Built-in Tool process context")?
@@ -19085,7 +19591,7 @@ impl Core {
                     let core = self.clone();
                     let workspace = execution.workspace.clone();
                     move |runtime| async move {
-                        core.prepare_acp_cold_runtime(runtime, &workspace)
+                        core.prepare_cold_runtime(runtime, &workspace)
                             .await
                             .map_err(|failure| failure.error.context(failure.code))
                     }
@@ -19163,7 +19669,7 @@ impl Core {
                                 let core = self.clone();
                                 let workspace = execution.workspace.clone();
                                 move |runtime| async move {
-                                    core.prepare_acp_cold_runtime(runtime, &workspace)
+                                    core.prepare_cold_runtime(runtime, &workspace)
                                         .await
                                         .map_err(|failure| failure.error.context(failure.code))
                                 }
@@ -19292,7 +19798,7 @@ impl Core {
                             let core = self.clone();
                             let workspace = execution.workspace.clone();
                             move |runtime| async move {
-                                core.prepare_acp_cold_runtime(runtime, &workspace)
+                                core.prepare_cold_runtime(runtime, &workspace)
                                     .await
                                     .map_err(|failure| failure.error.context(failure.code))
                             }
@@ -19329,6 +19835,10 @@ impl Core {
             }
             Err(error) => return Err(error),
         };
+        let acquired_execution = self
+            .bind_acquired_runtime(execution, runtime.launch_runtime())
+            .await?;
+        let execution = &acquired_execution;
         // Freeze Bootstrap against the prepared Binding before recording the
         // native Session ID. Once bound, a missing evidence row is a continuity
         // violation and ContextService must reject materialization.
@@ -22054,6 +22564,7 @@ async fn process_pi_events(
                 native_prompt_id,
                 delivery_id,
                 sequence,
+                received_at,
                 message,
             } => {
                 if let Err(error) = process_agent_run_pi_message(
@@ -22066,6 +22577,7 @@ async fn process_pi_events(
                     &native_prompt_id,
                     &delivery_id,
                     sequence,
+                    received_at,
                     message,
                     &mut runtime_route_permit,
                 )
@@ -22135,6 +22647,7 @@ async fn process_agent_run_pi_message(
     native_prompt_id: &str,
     delivery_id: &str,
     sequence: u64,
+    received_at: i64,
     message: Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) -> Result<()> {
@@ -22196,6 +22709,15 @@ async fn process_agent_run_pi_message(
         match message.get("method").and_then(Value::as_str) {
             Some("setStatus") => return Ok(()),
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
+            Some("confirm" | "select" | "input" | "editor") => {
+                runtime.register_interaction(&message, received_at).await?;
+                emit(
+                    output,
+                    "agent_run.interaction_changed",
+                    json!({"threadId": runtime.camp_id(), "agentRunId": agent_run_id}),
+                );
+                return Ok(());
+            }
             _ => {
                 let response = match pi::unsupported_extension_ui_cancellation(&message) {
                     Ok(response) => response,
@@ -22350,13 +22872,7 @@ async fn persist_pi_prompt_completion(
 ) -> Result<()> {
     let (final_message, stop_reason) = runtime.terminal().await;
     let stop_reason = stop_reason.unwrap_or_else(|| "unknown".to_string());
-    let outcome = if stop_reason == "stop" && final_message.is_some() {
-        RuntimeTerminalOutcome::Succeeded
-    } else if stop_reason == "aborted" {
-        RuntimeTerminalOutcome::Cancelled
-    } else {
-        RuntimeTerminalOutcome::Failed
-    };
+    let outcome = pi_prompt_terminal_outcome(&stop_reason);
     let delivery_status = if outcome == RuntimeTerminalOutcome::Failed {
         let database = core.database.lock().await;
         ContextService.runtime_input_delivery_status(&database, runtime.delivery_id())?
@@ -22365,11 +22881,7 @@ async fn persist_pi_prompt_completion(
     };
     let manual_retry_allowed = outcome == RuntimeTerminalOutcome::Failed
         && delivery_status.as_deref() == Some("not_accepted");
-    let base_error_code = if stop_reason == "stop" {
-        "runtime_missing_final_output".to_string()
-    } else {
-        format!("runtime_prompt_{stop_reason}")
-    };
+    let base_error_code = format!("runtime_prompt_{stop_reason}");
     let error_detail = format!("Native prompt result ended the prompt as {stop_reason}");
     let public_failure = (outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(
@@ -22484,9 +22996,6 @@ async fn persist_pi_prompt_completion(
             .observe_run_git(&execution.project_binding_kind, &execution.project_path)
             .await;
         let terminal = if outcome == RuntimeTerminalOutcome::Succeeded {
-            let final_output = final_message
-                .clone()
-                .context("Native successful terminal has no final message")?;
             let mut database = core.database.lock().await;
             let envelope = CommandEnvelope {
                 command_id: uuid::Uuid::new_v4().to_string(),
@@ -22501,11 +23010,13 @@ async fn persist_pi_prompt_completion(
                     expected_version: execution.version,
                     execution_epoch,
                     native_turn_id: prompt_id.clone(),
-                    final_output: final_output.clone(),
-                    missing_send_recovery_candidate: Some(MissingSendRecoveryCandidate::new(
-                        MissingSendRecoveryBoundary::PiAgentSettled,
-                        final_output,
-                    )),
+                    final_output: final_message.clone().unwrap_or_default(),
+                    missing_send_recovery_candidate: final_message.clone().map(|body| {
+                        MissingSendRecoveryCandidate::new(
+                            MissingSendRecoveryBoundary::PiAgentSettled,
+                            body,
+                        )
+                    }),
                     ending_git_observation: ending_git_observation.clone(),
                 },
             };
@@ -25156,10 +25667,6 @@ async fn persist_acp_prompt_completion(
             execution_epoch,
         )?
     };
-    let settled_for_empty_final = runtime
-        .allows_empty_final_after_public_send(prompt_id)
-        .await;
-    let unsupported_questionnaire = runtime.has_unsupported_questionnaire(prompt_id).await;
     let missing_send_recovery_candidate = if stop_reason == "end_turn" {
         runtime
             .missing_send_recovery_candidate(prompt_id)
@@ -25177,14 +25684,7 @@ async fn persist_acp_prompt_completion(
     } else {
         None
     };
-    let planned_outcome = acp_prompt_terminal_outcome(
-        stop_reason,
-        response_error.is_some(),
-        final_agent_message.is_some(),
-        committed_public_send,
-        settled_for_empty_final,
-        unsupported_questionnaire,
-    );
+    let planned_outcome = acp_prompt_terminal_outcome(stop_reason, response_error.is_some());
     let delivery_status = if planned_outcome == RuntimeTerminalOutcome::Failed {
         let delivery_id = params
             .get("deliveryId")
@@ -25197,49 +25697,27 @@ async fn persist_acp_prompt_completion(
     };
     let manual_retry_allowed =
         acp_prompt_manual_retry_allowed(planned_outcome, delivery_status.as_deref())
-            && !committed_public_send
-            && !unsupported_questionnaire;
+            && !committed_public_send;
     let base_error_code = if response_error.is_some() {
         "runtime_prompt_runtime_error".to_string()
-    } else if stop_reason == "end_turn" && unsupported_questionnaire {
-        "runtime_questionnaire_unsupported".to_string()
-    } else if stop_reason == "end_turn" && !settled_for_empty_final && final_agent_message.is_none()
-    {
-        "runtime_unsettled_activity".to_string()
-    } else if stop_reason == "end_turn" {
-        "runtime_missing_final_output".to_string()
     } else {
         format!("runtime_prompt_{stop_reason}")
     };
-    let questionnaire_failure = base_error_code == "runtime_questionnaire_unsupported";
-    let error_detail = response_error.map(str::to_string).unwrap_or_else(|| {
-        if questionnaire_failure {
-            format!(
-                "{}原生问卷暂不受支持，未提交答案。请发送新消息，在对话中补充信息或继续任务。",
-                if committed_public_send {
-                    "消息已发送；"
-                } else {
-                    ""
-                }
-            )
-        } else {
-            format!("ACP prompt ended as {stop_reason}")
-        }
-    });
+    let error_detail = response_error
+        .map(str::to_string)
+        .or_else(|| {
+            acp::AcpRpcError::from_prompt_result(adapter_kind, params.get("result")?)
+                .map(|error| error.to_string())
+        })
+        .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}"));
     let mut public_failure = (planned_outcome == RuntimeTerminalOutcome::Failed).then(|| {
         public_runtime_failure_from_output(
             adapter_kind,
-            if questionnaire_failure {
-                RuntimeFailureOrigin::Compatibility
-            } else {
-                RuntimeFailureOrigin::Runtime
-            },
+            RuntimeFailureOrigin::Runtime,
             RuntimeFailurePhase::Execution,
             &base_error_code,
             &if committed_public_send {
                 "消息已发送，但运行结束校验失败".to_string()
-            } else if questionnaire_failure {
-                "原生问卷暂不受支持".to_string()
             } else {
                 format!("{} 未能完成运行", runtime_display_name(adapter_kind))
             },
@@ -25573,22 +26051,20 @@ async fn persist_acp_prompt_completion(
     Ok(())
 }
 
-fn acp_prompt_terminal_outcome(
-    stop_reason: &str,
-    has_error: bool,
-    has_final: bool,
-    committed_public_send: bool,
-    settled_for_empty_final: bool,
-    unsupported_questionnaire: bool,
-) -> RuntimeTerminalOutcome {
+fn pi_prompt_terminal_outcome(stop_reason: &str) -> RuntimeTerminalOutcome {
+    match stop_reason {
+        "stop" => RuntimeTerminalOutcome::Succeeded,
+        "aborted" => RuntimeTerminalOutcome::Cancelled,
+        _ => RuntimeTerminalOutcome::Failed,
+    }
+}
+
+fn acp_prompt_terminal_outcome(stop_reason: &str, has_error: bool) -> RuntimeTerminalOutcome {
     if has_error {
         RuntimeTerminalOutcome::Failed
     } else if stop_reason == "cancelled" {
         RuntimeTerminalOutcome::Cancelled
-    } else if stop_reason == "end_turn"
-        && !unsupported_questionnaire
-        && (has_final || (committed_public_send && settled_for_empty_final))
-    {
+    } else if stop_reason == "end_turn" {
         RuntimeTerminalOutcome::Succeeded
     } else {
         RuntimeTerminalOutcome::Failed
@@ -26397,7 +26873,9 @@ async fn process_agent_run_codex_message(
         "Codex terminal run={agent_run_id} epoch={execution_epoch} host={host_instance_id} native={} disposition={release_disposition:?}",
         completed.status
     );
-    let planned_outcome = if completed.status == "completed" && final_agent_message.is_some() {
+    let planned_outcome = if completed.error.is_some() {
+        RuntimeTerminalOutcome::Failed
+    } else if completed.status == "completed" {
         RuntimeTerminalOutcome::Succeeded
     } else if completed.status == "cancelled" {
         RuntimeTerminalOutcome::Cancelled
@@ -26406,19 +26884,19 @@ async fn process_agent_run_codex_message(
     } else {
         RuntimeTerminalOutcome::Failed
     };
-    let base_error_code = match completed.status.as_str() {
-        "completed" => "runtime_missing_final_output".to_string(),
-        "interrupted" => "runtime_interrupted".to_string(),
-        status => format!("runtime_turn_{status}"),
+    let base_error_code = if completed.error.is_some() {
+        "runtime_turn_failed".to_string()
+    } else {
+        match completed.status.as_str() {
+            "interrupted" => "runtime_interrupted".to_string(),
+            status => format!("runtime_turn_{status}"),
+        }
     };
     let error_detail = match &completed.error {
         Some(error) => format!(
             "Codex Native Turn {} ended as {}: {}",
             completed.turn_id, completed.status, error
         ),
-        None if completed.status == "completed" => {
-            "Codex completed the Turn without an Agent message".to_string()
-        }
         None => format!(
             "Codex Native Turn {} ended as {}",
             completed.turn_id, completed.status
@@ -26426,7 +26904,7 @@ async fn process_agent_run_codex_message(
     };
     let error_detail = runtime.redact_text(&error_detail);
     let mut public_failure = (planned_outcome == RuntimeTerminalOutcome::Failed).then(|| {
-        if completed.status == "failed" {
+        if completed.status == "failed" || completed.error.is_some() {
             rovai_core::runtime_failure::public_codex_terminal_failure(
                 &base_error_code,
                 completed.error.as_ref(),
@@ -26438,7 +26916,7 @@ async fn process_agent_run_codex_message(
                 RuntimeFailureOrigin::Rovai,
                 RuntimeFailurePhase::Terminal,
                 &base_error_code,
-                "Codex CLI 未能交付最终回复",
+                "Codex CLI 未能完成运行",
                 None,
                 true,
             )
@@ -26578,70 +27056,41 @@ async fn process_agent_run_codex_message(
         let ending_git_observation = core
             .observe_run_git(&execution.project_binding_kind, &execution.project_path)
             .await;
-        let terminal = if completed.status == "completed" {
-            if let Some(final_output) = final_agent_message.clone() {
-                let mut database = core.database.lock().await;
-                let envelope = CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex".to_string(),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: SucceedAgentRunCommand {
-                        agent_run_id: agent_run_id.to_string(),
-                        expected_version: execution.version,
-                        execution_epoch,
-                        native_turn_id: completed.turn_id.clone(),
-                        final_output,
-                        missing_send_recovery_candidate: missing_send_recovery_candidate.clone(),
-                        ending_git_observation: ending_git_observation.clone(),
-                    },
-                };
-                let service = ExecutionRuntimeService::default();
-                if cleanup_required {
-                    service.succeed_agent_run_requiring_cleanup(
-                        &mut database,
-                        &envelope,
-                        terminal_admission.planned_permit(),
-                    )
-                } else {
-                    match terminal_admission.planned_permit() {
-                        Some(permit) => service.succeed_agent_run_during_planned_shutdown(
-                            &mut database,
-                            permit,
-                            &envelope,
-                        ),
-                        None => service.succeed_agent_run(&mut database, &envelope),
-                    }
-                }
+        let terminal = if planned_outcome == RuntimeTerminalOutcome::Succeeded {
+            let mut database = core.database.lock().await;
+            let envelope = CommandEnvelope {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                actor: ActorRef::System {
+                    component_id: "runtime-adapter:codex".to_string(),
+                },
+                camp_id: Some(execution.camp_id.clone()),
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload: SucceedAgentRunCommand {
+                    agent_run_id: agent_run_id.to_string(),
+                    expected_version: execution.version,
+                    execution_epoch,
+                    native_turn_id: completed.turn_id.clone(),
+                    final_output: final_agent_message.clone().unwrap_or_default(),
+                    missing_send_recovery_candidate: missing_send_recovery_candidate.clone(),
+                    ending_git_observation: ending_git_observation.clone(),
+                },
+            };
+            let service = ExecutionRuntimeService::default();
+            if cleanup_required {
+                service.succeed_agent_run_requiring_cleanup(
+                    &mut database,
+                    &envelope,
+                    terminal_admission.planned_permit(),
+                )
             } else {
-                let mut database = core.database.lock().await;
-                let envelope = CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "runtime-adapter:codex".to_string(),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: FailAgentRunCommand {
-                        agent_run_id: agent_run_id.to_string(),
-                        expected_version: execution.version,
-                        execution_epoch,
-                        error_code: error_code.clone(),
-                        error_detail: Some(error_detail.clone()),
-                        failure: public_failure.clone(),
-                        manual_retry_allowed: !execution.camp_turn_id.is_empty(),
-                        ending_git_observation: ending_git_observation.clone(),
-                    },
-                };
-                let service = ExecutionRuntimeService::default();
-                if cleanup_required {
-                    service.fail_agent_run_requiring_cleanup(&mut database, &envelope)
-                } else {
-                    service.fail_agent_run(&mut database, &envelope)
+                match terminal_admission.planned_permit() {
+                    Some(permit) => service.succeed_agent_run_during_planned_shutdown(
+                        &mut database,
+                        permit,
+                        &envelope,
+                    ),
+                    None => service.succeed_agent_run(&mut database, &envelope),
                 }
             }
         } else {
@@ -28574,6 +29023,8 @@ fn parse_mcp_config_path_from(args: impl IntoIterator<Item = String>) -> Result<
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests {
     use super::*;
+    #[cfg(any(windows, feature = "slow-tests"))]
+    use crate::agent_runtime_adapter::observe_executable_file_identity;
     #[cfg(feature = "slow-tests")]
     use std::fs;
 
@@ -28767,104 +29218,27 @@ mod tests {
     }
 
     #[test]
-    fn acp_prompt_failure_is_retryable_only_when_input_was_not_accepted() {
-        for (reason, error, final_text, sent, settled, expected) in [
-            (
-                "end_turn",
-                false,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Succeeded,
-            ),
-            (
-                "end_turn",
-                false,
-                false,
-                false,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                false,
-                false,
-                true,
-                false,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                true,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                true,
-                true,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "cancelled",
-                false,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Cancelled,
-            ),
-            (
-                "max_turn_requests",
-                false,
-                true,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "unknown",
-                false,
-                false,
-                true,
-                true,
-                RuntimeTerminalOutcome::Failed,
-            ),
-            (
-                "end_turn",
-                false,
-                true,
-                false,
-                true,
-                RuntimeTerminalOutcome::Succeeded,
-            ),
+    fn native_prompt_failure_is_retryable_only_when_input_was_not_accepted() {
+        for (reason, error, expected) in [
+            ("end_turn", false, RuntimeTerminalOutcome::Succeeded),
+            ("end_turn", true, RuntimeTerminalOutcome::Failed),
+            ("cancelled", false, RuntimeTerminalOutcome::Cancelled),
+            ("cancelled", true, RuntimeTerminalOutcome::Failed),
+            ("refusal", false, RuntimeTerminalOutcome::Failed),
+            ("max_turn_requests", false, RuntimeTerminalOutcome::Failed),
+            ("unknown", false, RuntimeTerminalOutcome::Failed),
         ] {
-            assert_eq!(
-                acp_prompt_terminal_outcome(reason, error, final_text, sent, settled, false),
-                expected
-            );
+            assert_eq!(acp_prompt_terminal_outcome(reason, error), expected);
         }
-        for has_final in [false, true] {
-            for sent in [false, true] {
-                assert_eq!(
-                    acp_prompt_terminal_outcome("end_turn", false, has_final, sent, true, true),
-                    RuntimeTerminalOutcome::Failed,
-                    "text or a committed send cannot answer an unsupported questionnaire"
-                );
-            }
+        for (reason, expected) in [
+            ("stop", RuntimeTerminalOutcome::Succeeded),
+            ("aborted", RuntimeTerminalOutcome::Cancelled),
+            ("error", RuntimeTerminalOutcome::Failed),
+            ("length", RuntimeTerminalOutcome::Failed),
+            ("unknown", RuntimeTerminalOutcome::Failed),
+        ] {
+            assert_eq!(pi_prompt_terminal_outcome(reason), expected);
         }
-        assert_eq!(
-            acp_prompt_terminal_outcome("cancelled", false, true, true, true, true),
-            RuntimeTerminalOutcome::Cancelled
-        );
-        assert_eq!(
-            acp_prompt_terminal_outcome("cancelled", true, true, true, true, true),
-            RuntimeTerminalOutcome::Failed,
-            "a native error still takes precedence"
-        );
         assert!(acp_prompt_manual_retry_allowed(
             RuntimeTerminalOutcome::Failed,
             Some("not_accepted")
@@ -29536,17 +29910,27 @@ mod tests {
         // Follow the prepared identity through the production rebind and claim
         // seam. A version-only update used to leave its digest stale and reject
         // ordinary Pi/Qwen runs before a Runtime could even start.
-        for adapter in [AdapterKind::Pi, AdapterKind::QwenCode] {
-            for reported in [Some("1.1.0"), None] {
+        for adapter in [
+            AdapterKind::Pi,
+            AdapterKind::QwenCode,
+            AdapterKind::OpencodeCli,
+        ] {
+            let version = if adapter == AdapterKind::OpencodeCli {
+                "2.0.26"
+            } else {
+                "1.1.0"
+            };
+            for reported in [Some(version), None] {
+                if adapter == AdapterKind::OpencodeCli && reported.is_none() {
+                    continue;
+                }
                 core.runtime_discovery.write().await.clear();
                 let executable = root.join(format!("{}-{}", adapter.as_str(), reported.is_some()));
                 write_runtime_resolution_executable(
                     &executable,
-                    if reported.is_some() {
-                        "#!/bin/sh\nprintf '1.1.0\\n'\n"
-                    } else {
-                        "#!/bin/sh\nexit 1\n"
-                    },
+                    &reported
+                        .map(|version| format!("#!/bin/sh\nprintf '{version}\\n'\n"))
+                        .unwrap_or_else(|| "#!/bin/sh\nexit 1\n".into()),
                 );
                 let camp_id = {
                     let mut database = core.database.lock().await;
@@ -29676,16 +30060,96 @@ mod tests {
                 };
                 let frozen = candidate.frozen_runtime().unwrap();
                 assert_eq!(frozen.reported_version, None);
-                let (prepared, version) = core
+                #[cfg(feature = "extended-tests")]
+                let warm_peers = if adapter == AdapterKind::QwenCode && reported.is_some() {
+                    let mut peers = Vec::new();
+                    for name in ["idle-peer", "busy-peer"] {
+                        let compatibility = runtime_fleet::RuntimeCompatibilityKey::member(
+                            "other-camp",
+                            name,
+                            "original-host-config",
+                        );
+                        let lease = core
+                            .runtime_fleet
+                            .acquire(
+                                runtime_fleet::FleetAcquireRequest {
+                                    agent_run_id: name.into(),
+                                    execution_epoch: 1,
+                                    adapter_kind: adapter,
+                                    compatibility: compatibility.clone(),
+                                },
+                                move || async move {
+                                    Ok(runtime_fleet::fake_runtime_process_host(name))
+                                },
+                            )
+                            .await
+                            .unwrap();
+                        if name == "idle-peer" {
+                            core.runtime_fleet
+                                .release(name, 1, runtime_fleet::FleetReleaseDisposition::Reusable)
+                                .await;
+                        }
+                        peers.push((name, compatibility, lease.process_id));
+                    }
+                    // Disk replacement requires this launch to refresh. Other live
+                    // Hosts of the same adapter must keep their own startup identity.
+                    write_runtime_resolution_executable(
+                        &executable,
+                        "#!/bin/sh\nprintf '1.1.0\\n'\n# replaced program\n",
+                    );
+                    peers
+                } else {
+                    Vec::new()
+                };
+                let (admitted, version) = core
                     .prepare_runtime_for_dispatch(
                         &candidate,
-                        frozen,
+                        frozen.clone(),
                         &candidate.execution_workspace(),
                     )
                     .await
                     .map_err(|failure| failure.error)
                     .unwrap();
+                assert_eq!(admitted, frozen, "dispatch does not inspect the program");
+                let prepared = core
+                    .prepare_cold_runtime(admitted, &candidate.execution_workspace())
+                    .await
+                    .map_err(|failure| failure.error)
+                    .unwrap();
                 assert_eq!(prepared.reported_version.as_deref(), reported);
+                assert_eq!(
+                    prepared.executable_fingerprint,
+                    fingerprint_executable(&executable).unwrap()
+                );
+                #[cfg(feature = "extended-tests")]
+                for (name, compatibility, process_id) in warm_peers {
+                    if name == "busy-peer" {
+                        core.runtime_fleet
+                            .release(name, 1, runtime_fleet::FleetReleaseDisposition::Reusable)
+                            .await;
+                    }
+                    let successor = format!("{name}-next");
+                    let lease = core
+                        .runtime_fleet
+                        .acquire(
+                            runtime_fleet::FleetAcquireRequest {
+                                agent_run_id: successor.clone(),
+                                execution_epoch: 1,
+                                adapter_kind: adapter,
+                                compatibility,
+                            },
+                            || async {
+                                panic!("one cold refresh must not retire other healthy Hosts")
+                            },
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(lease.process_id, process_id);
+                    core.runtime_fleet
+                        .release(&successor, 1, runtime_fleet::FleetReleaseDisposition::Stop)
+                        .await;
+                }
+
                 if adapter == AdapterKind::Pi && reported.is_some() {
                     core.database.lock().await.connection().execute_batch(
                         "CREATE TEMP TRIGGER fail_version_cache BEFORE UPDATE OF reported_version
@@ -29717,7 +30181,17 @@ mod tests {
                     .unwrap();
                 let snapshot = installed.snapshot.unwrap();
                 assert_eq!(snapshot.reported_version.as_deref(), reported);
-                assert_eq!(snapshot.probe_status, "light_ready");
+                assert_eq!(
+                    snapshot.probe_status,
+                    if cfg!(feature = "extended-tests")
+                        && adapter == AdapterKind::QwenCode
+                        && reported.is_some()
+                    {
+                        "installed_unverified"
+                    } else {
+                        "light_ready"
+                    }
+                );
                 assert!(snapshot.last_successful_probe_at.is_none());
                 let claimed = ExecutionRuntimeService::default()
                     .claim_agent_run(
@@ -29731,7 +30205,7 @@ mod tests {
                             expected_versions: Vec::new(),
                             execution_epoch: None,
                             payload: ClaimAgentRunCommand {
-                                agent_run_id: candidate.agent_run_id,
+                                agent_run_id: candidate.agent_run_id.clone(),
                                 expected_version: version,
                                 lease_owner: "launch-version-test".into(),
                                 lease_seconds: 60,
@@ -29742,6 +30216,78 @@ mod tests {
                     )
                     .unwrap();
                 assert_eq!(claimed.result.code, "agent_run.claimed", "{claimed:?}");
+                let epoch = claimed.result.payload["executionEpoch"].as_i64().unwrap();
+                let execution = ExecutionRuntimeService::default()
+                    .load_agent_run_execution(&database, &candidate.agent_run_id, epoch)
+                    .unwrap()
+                    .unwrap();
+                let credential = TeamToolService::default()
+                    .prepare_binding_credential(
+                        &mut database,
+                        &execution.agent_run_id,
+                        epoch,
+                        false,
+                    )
+                    .unwrap();
+                drop(database);
+                let bound = core
+                    .bind_acquired_runtime(&execution, &prepared)
+                    .await
+                    .unwrap();
+                assert_eq!(bound.runtime.reported_version, prepared.reported_version);
+                assert_eq!(
+                    bound.runtime.executable_fingerprint,
+                    prepared.executable_fingerprint
+                );
+                if adapter == AdapterKind::OpencodeCli {
+                    assert_ne!(
+                        credential.binding_compatibility_digest,
+                        bound.runtime.binding_compatibility_digest
+                    );
+                }
+                core.bind_prepared_native_session(
+                    &bound,
+                    &credential,
+                    &format!("fixture-session-{}", bound.agent_run_id),
+                )
+                .await
+                .unwrap();
+                let actual_binding: String = core
+                    .database
+                    .lock()
+                    .await
+                    .connection()
+                    .query_row(
+                        "SELECT native_binding_id FROM conversation WHERE id=?1",
+                        [&bound.conversation_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(actual_binding, credential.native_binding_id);
+                // Initialization is the only point that may select Host evidence.
+                if bound.runtime != execution.runtime {
+                    core.database
+                        .lock()
+                        .await
+                        .connection()
+                        .execute(
+                            "UPDATE agent_run SET wait_reason=NULL WHERE id=?1",
+                            [&bound.agent_run_id],
+                        )
+                        .unwrap();
+                    let mut other_program = prepared.clone();
+                    other_program.executable_fingerprint = "sha256:later-program".into();
+                    let error = core
+                        .bind_acquired_runtime(&bound, &other_program)
+                        .await
+                        .unwrap_err();
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("agent_run.runtime_rebind_fenced")
+                    );
+                }
+
                 // The fixture creates protected attachment views. Restore only
                 // its known directories so the final test-root cleanup can run.
                 let camps = core.attachment_views.root().join("camps");
@@ -29805,7 +30351,7 @@ mod tests {
         };
         let workspace = AgentRunWorkspace::runtime_managed_path(root.display().to_string());
         assert_eq!(
-            core.prepare_acp_cold_runtime(frozen.clone(), &workspace)
+            core.prepare_cold_runtime(frozen.clone(), &workspace)
                 .await
                 .map_err(|failure| failure.error)
                 .unwrap()
@@ -29814,7 +30360,7 @@ mod tests {
         );
         write_runtime_resolution_executable(&executable, "#!/bin/sh\nprintf '1.89.0\\n'\n");
         let refreshed = core
-            .prepare_acp_cold_runtime(frozen.clone(), &workspace)
+            .prepare_cold_runtime(frozen.clone(), &workspace)
             .await
             .map_err(|failure| failure.error)
             .unwrap();
@@ -29847,7 +30393,7 @@ mod tests {
             );
         }
         let failure = core
-            .prepare_acp_cold_runtime(frozen.clone(), &workspace)
+            .prepare_cold_runtime(frozen.clone(), &workspace)
             .await
             .err()
             .expect("cold launch must reject the missing entry");
@@ -31663,13 +32209,14 @@ done
         std::fs::remove_dir_all(root).unwrap();
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn identity_checked_probe_discards_updated_results_and_keeps_stable_errors() {
+        #[cfg(unix)]
         use std::os::unix::fs::PermissionsExt;
 
         fn write_executable(path: &Path, body: &[u8]) {
             std::fs::write(path, body).unwrap();
+            #[cfg(unix)]
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
 
@@ -31678,7 +32225,11 @@ done
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&directory).unwrap();
-        let executable = directory.join("fake-runtime");
+        let executable = directory.join(if cfg!(windows) {
+            "fake-runtime.exe"
+        } else {
+            "fake-runtime"
+        });
         write_executable(&executable, b"#!/bin/sh\nexit 0\n");
 
         let replacement = directory.join("replacement");
@@ -31743,6 +32294,59 @@ done
             Some(now + RUNTIME_PROBE_UPDATE_RETRY_DELAY)
         );
         assert_eq!(runtime_probe_update_retry_at(full_deadline, now), None);
+
+        #[cfg(windows)]
+        {
+            let (shim, manifest) =
+                crate::runtime_discovery_windows::tests::node_package_shim(&directory, false);
+            let observed = observe_executable_file_identity(&shim).unwrap();
+            let replaced = run_identity_checked_probe(&shim, async {
+                let package = std::fs::read_to_string(&manifest)
+                    .unwrap()
+                    .replace("1.0.0", "2.0.0");
+                std::fs::write(&manifest, package).unwrap();
+                Ok::<_, anyhow::Error>("obsolete-package-result")
+            })
+            .await;
+            assert!(matches!(replaced, IdentityCheckedProbe::Superseded));
+            assert_eq!(observe_executable_file_identity(&shim).unwrap(), observed);
+
+            // The outer check captures a candidate before entering the Probe
+            // wrapper. A missing initial manifest must not let a recovered,
+            // different package cross that candidate's final verification.
+            let candidate = crate::agent_profile::VerifiedDiscoveredRuntimeEntry::discover(
+                AdapterKind::CodebuddyCli,
+                canonical_runtime_path(&shim).to_string_lossy().into_owned(),
+                InstallationSource::Manual,
+                None,
+                None,
+            )
+            .unwrap();
+            let original_package = std::fs::read_to_string(&manifest).unwrap();
+            for package_changed in [false, true] {
+                std::fs::remove_file(&manifest).unwrap();
+                assert!(observe_executable_identity(&shim).is_err());
+                let recovered = run_identity_checked_probe(&shim, async {
+                    let restored = if package_changed {
+                        original_package.replace("2.0.0", "3.0.0")
+                    } else {
+                        original_package.clone()
+                    };
+                    std::fs::write(&manifest, restored).unwrap();
+                    Ok::<_, anyhow::Error>("recovered-probe-success")
+                })
+                .await;
+                assert!(matches!(recovered, IdentityCheckedProbe::Stable(Ok(_))));
+                // This is the same verification called by verify_runtime_entry
+                // before any successful Probe is allowed to reach SQL commit.
+                let final_entry = candidate
+                    .entry()
+                    .clone()
+                    .verify(Some(candidate.executable_file_identity()));
+                assert_eq!(final_entry.is_ok(), !package_changed);
+                assert_eq!(observe_executable_file_identity(&shim).unwrap(), observed);
+            }
+        }
 
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -37403,12 +38007,14 @@ for line in sys.stdin:
     #[tokio::test]
     async fn codex_native_terminal_controls_host_independently_of_business_delivery() {
         use std::os::unix::fs::PermissionsExt;
-        for (native_status, final_reply, expected_business, reusable) in [
-            ("completed", true, "succeeded", true),
-            ("completed", false, "failed", true),
-            ("failed", false, "failed", false),
-            ("cancelled", false, "failed", false),
-            ("interrupted", false, "failed", false),
+        for (native_status, final_reply, native_error, expected_business, reusable) in [
+            ("completed", true, false, "succeeded", true),
+            ("completed", false, false, "succeeded", true),
+            ("completed", true, true, "failed", false),
+            ("completed", false, true, "failed", false),
+            ("failed", false, true, "failed", false),
+            ("cancelled", false, false, "failed", false),
+            ("interrupted", false, false, "failed", false),
         ] {
             let root =
                 std::env::temp_dir().join(format!("rovai-codex-terminal-{}", uuid::Uuid::new_v4()));
@@ -37445,18 +38051,21 @@ for line in sys.stdin:
             let tools = BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &root);
             let runtime = core
                 .codex_cli
-                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                    workspace_isolation: "shared",
-                    agent_run_id: &run_id,
-                    execution_epoch: epoch,
-                    camp_id: &camp_id,
-                    agent_id: &execution.agent_id,
-                    native_binding_id: "fixture-binding",
-                    cwd: &workspace,
-                    frozen_runtime: &frozen,
-                    runtime_compatibility_digest: "fixture",
-                    builtin_tool_factory: &tools,
-                })
+                .ensure_agent_run_runtime(
+                    CodexAgentRunRuntimeRequest {
+                        workspace_isolation: "shared",
+                        agent_run_id: &run_id,
+                        execution_epoch: epoch,
+                        camp_id: &camp_id,
+                        agent_id: &execution.agent_id,
+                        native_binding_id: "fixture-binding",
+                        cwd: &workspace,
+                        frozen_runtime: &frozen,
+                        runtime_compatibility_digest: "fixture",
+                        builtin_tool_factory: &tools,
+                    },
+                    |runtime| async move { Ok(runtime) },
+                )
                 .await
                 .unwrap();
             runtime
@@ -37497,7 +38106,7 @@ for line in sys.stdin:
             let terminal = json!({"method":"turn/completed","params":{"threadId":"native-fixture", "turn":{
                 "id":"native-turn", "status":native_status,
                 "items": if final_reply { json!([{"type":"agentMessage","text":"Tool output: 401; quoted unauthorized"}]) } else { json!([]) },
-                "error": if native_status == "failed" { json!({"message":"opaque","codexErrorInfo":"unauthorized"}) } else { Value::Null }
+                "error": if native_error { json!({"message":"opaque","codexErrorInfo":"unauthorized"}) } else { Value::Null }
             }}});
             let mut route = core.planned_shutdown.enter_runtime_route().await.unwrap();
             // Simulate a periodic collector stuck in native I/O. Terminal
@@ -37537,8 +38146,21 @@ for line in sys.stdin:
                     Some("native-fixture"),
                     "trusted native terminal must preserve the original session"
                 );
-                if native_status == "failed" {
+                if native_error {
                     assert_eq!(state.2.as_deref(), Some("runtime_authentication_required"));
+                }
+                if expected_business == "succeeded" && !final_reply {
+                    assert!(state.2.is_none());
+                    let messages: i64 = database.connection().query_row(
+                        "SELECT COUNT(*) FROM camp_message WHERE source_agent_run_id=?1 AND author_type='agent'",
+                        [&run_id], |row| row.get(0),
+                    ).unwrap();
+                    assert_eq!(messages, 0, "empty success must not manufacture a message");
+                    let digest: Option<String> = database.connection().query_row(
+                        "SELECT json_extract(payload_json,'$.finalOutputDigest') FROM event_log WHERE entity_id=?1 AND event_type='agent_run.succeeded'",
+                        [&run_id], |row| row.get(0),
+                    ).unwrap();
+                    assert!(digest.is_none());
                 }
             }
             if !reusable {
@@ -37557,18 +38179,21 @@ for line in sys.stdin:
             }
             let next = core
                 .codex_cli
-                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                    workspace_isolation: "shared",
-                    agent_run_id: "successor",
-                    execution_epoch: 1,
-                    camp_id: &camp_id,
-                    agent_id: &execution.agent_id,
-                    native_binding_id: "fixture-binding",
-                    cwd: &workspace,
-                    frozen_runtime: &frozen,
-                    runtime_compatibility_digest: "fixture",
-                    builtin_tool_factory: &tools,
-                })
+                .ensure_agent_run_runtime(
+                    CodexAgentRunRuntimeRequest {
+                        workspace_isolation: "shared",
+                        agent_run_id: "successor",
+                        execution_epoch: 1,
+                        camp_id: &camp_id,
+                        agent_id: &execution.agent_id,
+                        native_binding_id: "fixture-binding",
+                        cwd: &workspace,
+                        frozen_runtime: &frozen,
+                        runtime_compatibility_digest: "fixture",
+                        builtin_tool_factory: &tools,
+                    },
+                    |runtime| async move { Ok(runtime) },
+                )
                 .await
                 .unwrap();
             assert_eq!(next.host_instance_id() == host_id, reusable);
@@ -38021,18 +38646,21 @@ for line in sys.stdin:
             tokio::time::sleep(Duration::from_millis(1700)).await;
             let runtime = core
                 .codex_cli
-                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                    workspace_isolation: "shared",
-                    agent_run_id: "late-host",
-                    execution_epoch: 1,
-                    camp_id: "cleanup-camp",
-                    agent_id: "cleanup-agent",
-                    native_binding_id: "fixture-binding",
-                    cwd: &root,
-                    frozen_runtime: &runtime_config,
-                    runtime_compatibility_digest: "cleanup-compatible",
-                    builtin_tool_factory: &builtin_tools,
-                })
+                .ensure_agent_run_runtime(
+                    CodexAgentRunRuntimeRequest {
+                        workspace_isolation: "shared",
+                        agent_run_id: "late-host",
+                        execution_epoch: 1,
+                        camp_id: "cleanup-camp",
+                        agent_id: "cleanup-agent",
+                        native_binding_id: "fixture-binding",
+                        cwd: &root,
+                        frozen_runtime: &runtime_config,
+                        runtime_compatibility_digest: "cleanup-compatible",
+                        builtin_tool_factory: &builtin_tools,
+                    },
+                    |runtime| async move { Ok(runtime) },
+                )
                 .await
                 .unwrap();
             drop(late_permit);

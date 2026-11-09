@@ -74,8 +74,8 @@ pub fn migrate(database: &mut Database) -> Result<()> {
             department TEXT,
             UNIQUE(agent_run_id,execution_epoch,input_id,external_id)
         );
-        INSERT INTO schema_migration VALUES(222,datetime('now'));
-        UPDATE rovai_data_contract SET projection_schema_version=172,updated_at=datetime('now') WHERE singleton=1;
+        INSERT INTO schema_migration VALUES(225,datetime('now'));
+        UPDATE rovai_data_contract SET projection_schema_version=175,updated_at=datetime('now') WHERE singleton=1;
     "#)?;
     anyhow::ensure!(schema_matches(&tx)?, "chat tool migration layout mismatch");
     tx.commit()?;

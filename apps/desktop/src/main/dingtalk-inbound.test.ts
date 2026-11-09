@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { hasCanonicalSingleDingTalkBotTarget } from './dingtalk-channel-settings'
 import { normalizeDingTalkRobotMessage } from './dingtalk-inbound'
+
+// Importing the settings predicate must not load the real Electron package in CI.
+vi.mock('electron', () => ({
+  BrowserWindow: vi.fn(), session: { fromPartition: vi.fn() },
+  nativeImage: { createFromBuffer: vi.fn() }
+}))
 
 const binding = { appKey: 'ding-app-a', robotCode: 'ding-app-a' }
 

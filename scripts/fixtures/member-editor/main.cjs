@@ -404,7 +404,8 @@ app
       'runtime menu has every admitted product icon and keyboard focus return',
       async () => {
         await click(`${active}[data-member-runtime-select]`)
-        const menuCount = await run('window.memberFixture.installations.length + 1')
+        // This fixture has no platform admission, so Hermes stays undisclosed.
+        const menuCount = await run('window.memberFixture.installations.filter(item => item.adapterKind !== "hermes-cli").length + 1')
         await wait(
           `document.querySelectorAll(".member-runtime-menu-item").length === ${menuCount}`
         )
@@ -414,6 +415,7 @@ app
         assert.equal(labels[0], '暂不配置')
         assert.equal(labels.at(-1), 'PI')
         assert.ok(!labels.includes('Cursor Agent'))
+        assert.ok(!labels.includes('Hermes Agent'))
         assert.equal(
           await run(
             'document.querySelectorAll(".member-runtime-menu-item .member-runtime-glyph").length'
@@ -482,28 +484,46 @@ app
       'disclosure, save failure and retry preserve draft values',
       async () => {
         await click(`${active}.member-editor-disclosure`)
-        await fill(
-          `${active}.member-editor-extra-fields textarea`,
-          '认真验证交付'
-        )
+        const guidance = { workingPrinciples: '中'.repeat(3000), growthTopic: '😀'.repeat(3000) }
+        for (const [field, value] of Object.entries(guidance)) {
+          await fill(`${active}textarea[id$="-${field}"]`, value)
+        }
         await click(`${active}.member-editor-disclosure`)
         await click(`${active}.member-editor-disclosure`)
-        assert.equal(
-          await run(
-            `document.querySelector('${active}.member-editor-extra-fields textarea').value`
-          ),
-          '认真验证交付'
-        )
+        for (const [field, value] of Object.entries(guidance)) {
+          const selector = `${active}textarea[id$="-${field}"]`
+          const node = `document.querySelector(${JSON.stringify(selector)})`
+          assert.equal(await run(`${node}.value`), value)
+          assert.equal(await run(`${node}.getAttribute('maxlength')`), null)
+          assert.equal(await run(`${node}.closest('.member-editor-field').querySelector('.member-editor-counter').textContent.trim()`), '3000 / 3,000')
+          await fill(selector, value + '界')
+          const mutations = "window.memberFixture.calls.filter(call => ['members.update','members.avatar.set'].includes(call.method)).length"
+          const before = await run(mutations)
+          await saveIdentity()
+          await wait(`${node}.getAttribute('aria-invalid') === 'true'`)
+          assert.equal(await run(`${node}.value`), value + '界')
+          assert.equal(await run(`${node}.closest('.member-editor-field').querySelector('.member-editor-counter').textContent.trim()`), '3001 / 3,000')
+          assert.match(await run(`${node}.closest('.member-editor-field').querySelector('[role=alert]').textContent`), /最多 3,000 个字符/)
+          assert.equal(await run(mutations), before)
+          await fill(selector, value)
+        }
         await run('window.memberFixture.fail("members.update")')
         await saveIdentity()
         await wait(
           `document.querySelector('${active}.member-editor-submit-error')`
         )
         assert.equal(await roleValue(), '保留职责草稿')
+        for (const [field, value] of Object.entries(guidance)) {
+          assert.equal(await run(`document.querySelector('${active}textarea[id$="-${field}"]').value`), value)
+        }
         await saveIdentity()
         await wait(
           `window.memberFixture.profiles()[0].teamRole === '保留职责草稿'`
         )
+        for (const [field, value] of Object.entries(guidance)) {
+          assert.equal(await run(`window.memberFixture.profiles()[0][${JSON.stringify(field)}]`), value)
+        }
+        await wait(`document.querySelector('${active}.member-identity-form button[type=submit]').disabled && !document.querySelector('${active}.member-identity-form button[type=submit]').textContent.includes('正在保存')`)
       }
     )
     await check(

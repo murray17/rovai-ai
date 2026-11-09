@@ -1,3 +1,4 @@
+import { useProjectFileComposer } from './ProjectFileComposerContext'
 import { useFileEdits } from './FileEditContext'
 import { fileEditDirty } from './file-edit-store'
 import { useShortcutAction } from './ShortcutProvider'
@@ -7,7 +8,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom'
 import { useFilePreview, useFilePreviewApi, canDownloadFile } from './FilePreviewContext'
 import { FilePreviewTabIcon } from './FilePreviewTabIcon'
-import { ProjectFileIcon, DirectoryTreeIcon } from './ProjectFileIcon'
+import { ProjectFileIcon, ProjectFolderIcon } from './ProjectFileIcon'
 import { Icon } from './MissionControls'
 import { ExecutionIcon } from './ExecutionIcons'
 import { previewTabLabel, previewTabLabels, previewTabPresentation } from './file-preview-tab-presentation'
@@ -58,6 +59,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
     toggleHtmlSource,
     reopen
   } = useFilePreview()
+  const composer = useProjectFileComposer()
   const listRef = useRef<HTMLDivElement>(null)
   const leftButtonRef = useRef<HTMLButtonElement>(null)
   const rightButtonRef = useRef<HTMLButtonElement>(null)
@@ -66,6 +68,8 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
   const [edges, setEdges] = useState({ left: false, right: false })
   const menuRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<{ tabId: string; left: number; top: number } | null>(null)
+  const [referenceError, setReferenceError] = useState(false)
+  useEffect(() => setReferenceError(false), [menu?.tabId])
   const [announcement, setAnnouncement] = useState('')
   const tabLabels = useMemo(() => previewTabLabels(tabs, language), [tabs, language])
 
@@ -338,7 +342,7 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
                   onClick={() => activate(tab.id)}
                   onKeyDown={(event) => handleTabKeyDown(event, index)}
                 >
-                  {tab.kind === 'file_picker' ? <DirectoryTreeIcon className="file-preview-tab-icon" /> : tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
+                  {tab.kind === 'file_picker' ? <ProjectFolderIcon className="file-preview-tab-icon" /> : tab.kind === 'mission_activity' ? <Icon name="history" /> : tab.kind === 'execution' ? (
                     <ExecutionIcon className="icon file-preview-execution-icon" />
                   ) : tab.kind === 'file' ? <ProjectFileIcon fileName={fileName} /> : <FilePreviewTabIcon
                     kind={icon}
@@ -397,7 +401,12 @@ export function FilePreviewTabs({ compact = false }: { compact?: boolean } = {})
             aria-label={uiAttribute("{0} 操作", String(tabLabels.get(tab.id) ?? previewTabLabel(tab, language)))}
             style={{ left: menu.left, top: menu.top }}
           >
+            {referenceError && <p className="ref-source-note" role="status">{uiAttribute('暂时无法引用此文件，请重试')}</p>}
             {tab.kind === 'file' && <>
+            {tab.sourceRequest?.kind === 'project_file' && composer?.target?.enabled && composer.target.threadId === tab.sourceRequest.threadId && <button type="button" role="menuitem" onClick={() => {
+              if (tab.sourceRequest?.kind === 'project_file') void composer.reference(tab.sourceRequest.threadId, tab.sourceRequest).then(() => setMenu(null)).catch(() => setReferenceError(true))
+            }}>{uiAttribute('引用到输入框')}</button>}
+
             {canDownloadFile(tab, api) && <button role="menuitem" type="button"
               disabled={tab.downloadState === 'preparing' || tab.isRefreshing || tab.loadState === 'opening'} onClick={() => {
                 setMenu(null)

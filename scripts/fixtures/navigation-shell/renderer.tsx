@@ -6,9 +6,10 @@ import { ThreadNavigation } from '../../../apps/desktop/src/renderer/src/ThreadN
 import { createDesktopNavigation, type NavigationTarget } from '../../../apps/desktop/src/renderer/src/desktop-navigation'
 import { WindowDragStrip } from '../../../apps/desktop/src/renderer/src/App'
 import { navigationThreadReadState } from '../../../apps/desktop/src/renderer/src/navigation-unread'
+import { createNavigationWindowReader, type NavigationGroupLimits } from '../../../apps/desktop/src/renderer/src/navigation-window-reader'
 import { browserPreferences } from '../../../apps/web/src/preferences'
 import type { ConsoleClient } from '../../../apps/web/src/client'
-import type { NavigationThreadItem, NavigationPin, NavigationSnapshot, NavigationThreadReadState } from '@contracts'
+import type { NavigationThreadItem, NavigationPin, NavigationSnapshot, NavigationSnapshotRequest, NavigationThreadReadState } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/web/src/styles.css'
 
@@ -53,8 +54,50 @@ const navigationSnapshot = {
 const navigationPins = [{
   kind: 'camp', targetKey: pinnedCamp.id, pinnedAt: '2026-09-17T00:00:03Z'
 }] satisfies NavigationPin[]
+const paginationReads: NavigationSnapshotRequest[] = []
+const paginationErrors: string[] = []
+let paginationTitleVersion = 0
+let holdPaginationRead = false
+let releasePaginationRead: ((fail: boolean) => void) | undefined
+function paginationSnapshot(request: NavigationSnapshotRequest): NavigationSnapshot {
+  const group = (key: string, base: NavigationThreadItem) => ({
+    totalCount: 28,
+    recentThreads: Array.from({ length: Math.min(28, request.groupLimits?.[key] ?? 5) }, (_, index) => ({
+      ...base, id: index === 0 ? base.id : `${base.id}-${index}`,
+      title: `分页 ${paginationTitleVersion} · ${index + 1}`
+    }))
+  })
+  return {
+    schemaVersion: 3, throughGlobalSequence: paginationTitleVersion + 2,
+    quickChat: group('quick-chat', ordinaryCamp),
+    projects: [
+      { ...navigationSnapshot.projects[0], ...group('directory:/fixture/rovai-ai', runningCamp) },
+      { ...navigationSnapshot.projects[0], projectKey: 'directory:/fixture/pinned', projectPath: '/fixture/pinned',
+        name: '置顶项目', ...group('directory:/fixture/pinned', { ...runningCamp, id: 'pinned-project-thread', projectPath: '/fixture/pinned' }) }
+    ].filter(project => !request.groupKeys || request.groupKeys.includes(project.projectKey))
+  }
+}
 function Content(): React.JSX.Element { renders++; return <div style={{ paddingTop: 60 }}><textarea aria-label="保留的草稿" defaultValue="未发送内容" /></div> }
 function Fixture(): React.JSX.Element {
+  const [pagination, setPagination] = useState<{ snapshot: NavigationSnapshot; limits: NavigationGroupLimits } | null>(null)
+  const paginationReader = useMemo(() => createNavigationWindowReader(async request => {
+    paginationReads.push(request)
+    const snapshot = paginationSnapshot(request)
+    if (holdPaginationRead) {
+      holdPaginationRead = false
+      await new Promise<void>((resolve, reject) => {
+        releasePaginationRead = fail => {
+          releasePaginationRead = undefined
+          if (fail) reject(new Error('Obsolete pagination read failed'))
+          else resolve()
+        }
+      })
+    }
+    return snapshot
+  }, (snapshot, limits) => setPagination({ snapshot, limits }), {
+    readThreads: async () => ({ throughGlobalSequence: 2, groupKeys: [], threads: [] })
+  }), [])
+  useEffect(() => () => paginationReader.dispose(), [paginationReader])
   const [threadReadStates, setReadStates] = useState<Record<string, NavigationThreadReadState>>({})
   const [running, setRunning] = useState(true)
   const [longLabels, setLongLabels] = useState(false)
@@ -82,6 +125,11 @@ function Fixture(): React.JSX.Element {
   document.documentElement.dataset.rovaiSurface = browser ? 'web' : 'desktop'
   Object.assign(window, { navigationTest: {
     renders: () => renders, setSettings, setPlatform, setDisabled, setBrowser, navigation, target, actions, setRunning, setLongLabels,
+    startPagination: () => paginationReader.refresh('explicit'), paginationReads, paginationErrors,
+    paginationLimits: pagination?.limits,
+    holdPaginationRead: () => { holdPaginationRead = true },
+    releasePaginationRead: (fail: boolean) => releasePaginationRead?.(fail),
+    revisePaginationTitles: () => { paginationTitleVersion++ },
     threadReadStates, preferences, bots, groupLimits, pins, activeThreadId,
     projectPreferences: browserPreferences('project-concurrency-fixture', { request: async () => undefined } as unknown as ConsoleClient).preferences.navigationPreferences,
     hostNavigation: (direction: 'back' | 'forward') => navigationListeners.forEach(listener => listener(direction)),
@@ -90,12 +138,12 @@ function Fixture(): React.JSX.Element {
   } })
   return <><WindowsApplicationMenu /><NavigationShell platform={platform} browser={browser} disabled={disabled} settings={settings} navigation={navigation} nativeWindowControls={browser ? undefined : window.rovai.windowControls}>
     <ThreadNavigation platform={platform} view={settings ? 'settings' : 'compose'} state="ready"
-      navigation={{ ...navigationSnapshot, chatBot: { totalCount: bots.length, recentThreads: bots }, projects: navigationSnapshot.projects.map(project => ({ ...project,
+      navigation={pagination?.snapshot ?? { ...navigationSnapshot, chatBot: { totalCount: bots.length, recentThreads: bots }, projects: navigationSnapshot.projects.map(project => ({ ...project,
         name: longLabels ? 'Rovai AI 长期协作工作区与菜单栏交互完整项目名称' : project.name,
         recentThreads: [{ ...runningCamp, title: longLabels ? '会话长标题在侧栏和搜索结果中只做末尾透明度淡出，切换宽度与短名称后重新判断是否需要截断' : runningCamp.title,
           marker: running ? 'loading' : 'none' }] })) }}
-      pins={pins} activeThreadId={activeThreadId} pendingMemoryCount={0} threadReadStates={threadReadStates}
-      groupLimits={groupLimits} onGroupLimitChange={async (key, limit) => setGroupLimits(current => ({ ...current, [key]: limit }))}
+      pins={pagination ? [{ kind: 'project', targetKey: 'directory:/fixture/pinned', pinnedAt: '' }] : pins} activeThreadId={pagination ? runningCamp.id : activeThreadId} pendingMemoryCount={0} threadReadStates={threadReadStates}
+      groupLimits={pagination?.limits ?? groupLimits} onGroupLimitChange={pagination ? paginationReader.resizeGroup : async (key, limit) => setGroupLimits(current => ({ ...current, [key]: limit }))}
       onTogglePin={async (kind, targetKey) => setPins(current => current.some(pin => pin.kind === kind && pin.targetKey === targetKey)
         ? current.filter(pin => pin.kind !== kind || pin.targetKey !== targetKey)
         : [...current, { kind, targetKey, pinnedAt: new Date().toISOString() }])}
@@ -108,7 +156,7 @@ function Fixture(): React.JSX.Element {
       }} onRemoveProject={async () => undefined}
       onRename={async (thread, title) => { setBots(current => current.map(item => item.id === thread.id ? { ...item, title } : item)) }}
       onDelete={async thread => { setBots(current => current.filter(item => item.id !== thread.id)) }}
-      onError={error => { throw error }}
+      onError={error => { if (pagination) paginationErrors.push(String(error)); else throw error }}
       onRevealProject={browser ? undefined : async project => { actions.push('reveal:' + project.projectPath) }}
       onProjectPathCopied={() => { actions.push('copied-path') }}
       onSetThreadUnread={async (thread, unread) => { await preferences.setThreadReadState(thread.id, navigationThreadReadState(thread, unread, threadReadStates[thread.id])) }} />

@@ -5,7 +5,7 @@ authority: builtin-tool-transport
 status: accepted
 version: 45
 source_version: v1.72
-last_updated: 2026-10-29
+last_updated: 2026-11-03
 ---
 
 # Built-in Tool Transport v45
@@ -59,3 +59,20 @@ Transport/CLI 45、capability builtin_cli.transport.v45、Agent Output 15；IPC 
 执行证据：新增操作接入现有证据投影，输入只保留授权引用和正文长度/摘要，结果只记录状态、请求引用及集合计数，不复制联系人姓名、询问正文、回复正文或 SDK 原始错误。
 
 验证边界：须覆盖 CLI help/输入输出 schema、受认证调用、Host 查询与回执、权限拒绝、歧义、跨范围调用、重复请求、重启及 unknown 不重发；真实飞书账号/联系人和真实模型调用须另行授权。
+
+## 专业职责容量
+
+按[已确认 R2](../versions/v1.72/model-context-change-professional-responsibilities-30000.md)，
+`professionalResponsibilities` 沿既有 ECMAScript trim 后按 Unicode scalar 计数，上限由 10,000
+放宽至 **30,000**。create/update schema 共用 Core 常量，CLI 先规范化再执行 schema 校验。
+内部换行、缩进和合法字符原样保留；空字符串清空，create 省略为空，update 省略保留，null 仍拒绝。
+超限整次身份写入拒绝并保留编辑草稿；CLI/Core 配套交付，不保证旧 CLI 接受新增合法长度。
+命令、字段 shape、授权和投递语义不变，Transport/CLI 45 保持；历史冻结输入与摘要不回填。
+
+## 工作准则与成长课题容量
+
+按[已确认 R1](../versions/v1.72/model-context-change-identity-guidance-3000.md)，`workingPrinciples` 与
+`growthTopic` 各由 300 放宽至 **3,000 Unicode scalar**；create/update schema 引用各自 Core 上限常量。
+这两个字段沿用既有原始字符串 maxLength 校验，再由 Core 按 Rust trim 保存；不套用专业职责的 schema 前规范化。
+create 省略为空、update 省略保留、空串清空、null 拒绝均不变；内部格式和合法字符完整保留。
+字段、授权、幂等与所有版本轴保持，旧冻结输入不回填。CLI/Core 配套交付，旧版本可能拒绝超过 300 的新资料。

@@ -2,8 +2,20 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { SafeMarkdown } from './SafeMarkdown'
+import { DocumentMarkdown } from './DocumentMarkdown'
 
 describe('SafeMarkdown default HTML sanitization', () => {
+  it('dispatches exact Mermaid languages only in documents, retaining source and copy during loading', () => {
+    const source = '```MeRmAiD\nflowchart LR\n A[中文] --> B\n```'
+    const document = renderToStaticMarkup(createElement(DocumentMarkdown, { children: source }))
+    expect(document).toContain('data-mermaid-state="loading"')
+    expect(document).toContain('flowchart LR\n A[中文] --&gt; B\n')
+    expect(document).toContain('markdown-code-copy')
+    expect(renderToStaticMarkup(createElement(SafeMarkdown, { children: source }))).not.toContain('data-mermaid-state')
+    expect(renderToStaticMarkup(createElement(DocumentMarkdown, { children: source.replace('MeRmAiD', 'mermaid-extra') })))
+      .not.toContain('data-mermaid-state')
+  })
+
   it('renders allowed HTML and keeps code and escaped tags literal', () => {
     const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
       children: '| 项目 | 说明 |\n| --- | --- |\n| <b>粗体</b> | 一<br>二<br/>三 |\n\n`<br>` &lt;b&gt;字面&lt;/b&gt;\\<br>\n\n```html\n<br/><script>literal</script>\n```'
@@ -69,9 +81,8 @@ describe('SafeMarkdown file preview references', () => {
   })
 
   it('renders fenced document code through the static source highlighter surface', () => {
-    const markup = renderToStaticMarkup(createElement(SafeMarkdown, {
+    const markup = renderToStaticMarkup(createElement(DocumentMarkdown, {
       children: '```tsx\nconst App = () => <main />\n```\n\n```\nplain text\n```',
-      mode: 'document',
       theme: 'night'
     }))
 

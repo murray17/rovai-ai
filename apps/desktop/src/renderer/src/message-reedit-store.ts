@@ -26,8 +26,9 @@ function browserStorage(): LocalStorage | null {
 /** Only authored text and explicit people mentions. No display prefixes or attachment/reply authority. */
 export function messageReeditDocument(message: Pick<ThreadMessageView, 'content' | 'body'>): ComposerDocument | null {
   const document = message.content.length
-    ? composerDocumentFromLegacyContent(message.content.filter(segment =>
-      segment.kind === 'text' || segment.kind === 'member_mention' || segment.kind === 'all_members_mention'))
+    ? composerDocumentFromLegacyContent(message.content.flatMap(segment =>
+      segment.kind === 'project_file_reference' ? [{ kind: 'text' as const, text: segment.labelAtSend }]
+        : segment.kind === 'text' || segment.kind === 'member_mention' || segment.kind === 'all_members_mention' ? [segment] : []))
     : composerDocumentFromText(message.body)
   return document.segments.some(segment => segment.kind === 'atom' || segment.text.trim()) ? document : null
 }

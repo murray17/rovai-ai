@@ -690,7 +690,6 @@ struct AcpPromptObservation {
     assistant_suffix: AcpAssistantSuffixCollector,
     observed_tools: HashMap<String, ObservedToolMetadata>,
     execution_display: crate::runtime_subagent::AcpExecutionDisplay,
-    unsupported_interaction: bool,
     questionnaire_request_ids: BTreeSet<String>,
     native_usage_message_ids: BTreeSet<String>,
     native_usage_tool_call_ids: BTreeSet<String>,
@@ -705,7 +704,6 @@ impl AcpPromptObservation {
             assistant_suffix: AcpAssistantSuffixCollector::default(),
             observed_tools: HashMap::new(),
             execution_display: crate::runtime_subagent::AcpExecutionDisplay::default(),
-            unsupported_interaction: false,
             questionnaire_request_ids: BTreeSet::new(),
             native_usage_message_ids: BTreeSet::new(),
             native_usage_tool_call_ids: BTreeSet::new(),
@@ -1321,6 +1319,7 @@ impl AcpRpcError {
                 data.as_str()
                     .or_else(|| data.get("error").and_then(Value::as_str))
                     .or_else(|| data.get("details").and_then(Value::as_str))
+                    .or_else(|| data.get("message").and_then(Value::as_str))
             })
             .and_then(|detail| sanitize_public_runtime_error(detail, &[]))
             .filter(|detail| detail != &message);
@@ -1366,6 +1365,25 @@ impl AcpRpcError {
             message,
             provider_detail,
         }
+    }
+
+    pub(crate) fn from_prompt_result(kind: AdapterKind, result: &Value) -> Option<Self> {
+        if kind != AdapterKind::CodebuddyCli || result.get("stopReason")?.as_str()? != "refusal" {
+            return None;
+        }
+        // CodeBuddy wraps model-request errors in a successful ACP response.
+        // Read only its terminal error envelope, never arbitrary update metadata.
+        let raw = result
+            .pointer("/_meta/codebuddy.ai~1errorMessage")?
+            .as_str()?;
+        if raw.len() > 64 * 1024 {
+            return None;
+        }
+        let error: Value = serde_json::from_str(raw).ok()?;
+        if error.get("message")?.as_str()?.trim().is_empty() {
+            return None;
+        }
+        Some(Self::from_response(&error))
     }
 
     // Called only for a correlated session/resume or session/load response.
@@ -1454,7 +1472,7 @@ async fn filesystem_close_owned(
 pub(crate) struct AcpHost {
     credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     adapter_kind: AdapterKind,
-    reported_version: Option<String>,
+    launch_runtime: FrozenAgentRuntimeConfig,
     opencode_program_identity: Option<String>,
     client_terminal_mode: AcpClientTerminalMode,
     client_terminal_bridge: Option<AcpClientTerminalBridge>,
@@ -2111,7 +2129,7 @@ impl AcpHost {
                 .as_ref()
                 .map(|env| env.redactor()),
             adapter_kind: frozen_runtime.adapter_kind,
-            reported_version: frozen_runtime.reported_version.clone(),
+            launch_runtime: frozen_runtime.clone(),
             opencode_program_identity: if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
                 Some(crate::opencode_compat::program_identity(frozen_runtime)?)
             } else {
@@ -2228,8 +2246,9 @@ impl AcpHost {
             // readiness budget, and the subsequent official ACP import/handshake.
             Duration::from_secs(90)
         } else if host.adapter_kind == AdapterKind::OpencodeCli
-            && crate::opencode_compat::Generation::from_version(host.reported_version.as_deref())
-                == Some(crate::opencode_compat::Generation::V1)
+            && crate::opencode_compat::Generation::from_version(
+                host.launch_runtime.reported_version.as_deref(),
+            ) == Some(crate::opencode_compat::Generation::V1)
         {
             // V1 installs plugin dependencies during catalog discovery. If that
             // process exits first, its native lock expires after 60 seconds.
@@ -2247,7 +2266,7 @@ impl AcpHost {
                     && let Some(version) =
                         result.pointer("/agentInfo/version").and_then(Value::as_str)
                     && crate::opencode_compat::Generation::require(
-                        host.reported_version.as_deref(),
+                        host.launch_runtime.reported_version.as_deref(),
                     )?
                     .conflicts_with(version)
                 {
@@ -3926,8 +3945,9 @@ impl AcpHost {
         display_owner: Option<AcpRuntimeOwner>,
     ) {
         if self.adapter_kind == AdapterKind::OpencodeCli
-            && crate::opencode_compat::Generation::from_version(self.reported_version.as_deref())
-                != Some(crate::opencode_compat::Generation::V2)
+            && crate::opencode_compat::Generation::from_version(
+                self.launch_runtime.reported_version.as_deref(),
+            ) != Some(crate::opencode_compat::Generation::V2)
         {
             return;
         }
@@ -4163,14 +4183,15 @@ impl AcpHost {
         (self.is_alive()
             && !self.protocol_violated.load(Ordering::Acquire)
             && self.opencode_program_identity.as_deref() == Some(identity))
-        .then(|| self.reported_version.clone())
+        .then(|| self.launch_runtime.reported_version.clone())
         .flatten()
     }
 
     fn is_opencode_v2(&self) -> bool {
         self.adapter_kind == AdapterKind::OpencodeCli
-            && crate::opencode_compat::Generation::from_version(self.reported_version.as_deref())
-                == Some(crate::opencode_compat::Generation::V2)
+            && crate::opencode_compat::Generation::from_version(
+                self.launch_runtime.reported_version.as_deref(),
+            ) == Some(crate::opencode_compat::Generation::V2)
     }
 
     async fn project_opencode_child_update(&self, message: &Value) -> Option<Value> {
@@ -6385,7 +6406,6 @@ impl AcpRuntime {
             {
                 return Ok(());
             }
-            observation.unsupported_interaction = true;
         }
         // This is a client capability limit, never a user answer or refusal.
         eprintln!("ACP native questionnaire cancelled by unsupported client: {kind:?}");
@@ -6442,9 +6462,6 @@ impl AcpRuntime {
         }
         if method == "session/request_permission" {
             observation.assistant_suffix.observe_tool_activity();
-            observation.unsupported_interaction |=
-                classify_permission_request(self.adapter_kind(), params)
-                    != AcpPermissionRequestKind::Execution;
             return Ok(None);
         }
         if method != "session/update" {
@@ -6484,7 +6501,9 @@ impl AcpRuntime {
                 Some("ask_user" | "request_feature_enable")
             )
         {
-            observation.unsupported_interaction = true;
+            self.host.send_host_diagnostic(
+                "MiniMax native questionnaire has no supported user interface".to_string(),
+            );
         }
         if session_update == Some("agent_message_chunk")
             && crate::runtime::is_root_output(params)
@@ -6598,30 +6617,6 @@ impl AcpRuntime {
             .map(|text| self.redact_text(&text))
     }
 
-    pub async fn has_unsupported_questionnaire(&self, native_prompt_id: &str) -> bool {
-        self.active_observation
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|observation| {
-                observation.prompt_id == native_prompt_id && observation.unsupported_interaction
-            })
-    }
-
-    /// Empty assistant output may only finish an already-published turn once
-    /// native tools have settled and no unsupported questionnaire was invoked.
-    pub async fn allows_empty_final_after_public_send(&self, native_prompt_id: &str) -> bool {
-        self.active_observation
-            .lock()
-            .await
-            .as_ref()
-            .is_some_and(|observation| {
-                observation.prompt_id == native_prompt_id
-                    && observation.observed_tools.is_empty()
-                    && !observation.unsupported_interaction
-            })
-    }
-
     pub async fn missing_send_recovery_candidate(&self, native_prompt_id: &str) -> Option<String> {
         let candidate = self
             .active_observation
@@ -6713,8 +6708,12 @@ impl AcpRuntime {
         self.host.adapter_kind
     }
 
+    pub fn launch_runtime(&self) -> &FrozenAgentRuntimeConfig {
+        &self.host.launch_runtime
+    }
+
     pub fn reported_version(&self) -> Option<&str> {
-        self.host.reported_version.as_deref()
+        self.host.launch_runtime.reported_version.as_deref()
     }
 
     pub fn execution_epoch(&self) -> i64 {
@@ -6734,7 +6733,7 @@ impl AcpRuntime {
             | AdapterKind::TraeCnCli => true,
             AdapterKind::OpencodeCli => {
                 crate::opencode_compat::Generation::from_version(
-                    self.host.reported_version.as_deref(),
+                    self.host.launch_runtime.reported_version.as_deref(),
                 ) != Some(crate::opencode_compat::Generation::V2)
             }
             _ => false,
@@ -7344,11 +7343,7 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::QwenCode {
         compatibility["nativeQuestionnairePolicy"] = json!("exclude-ask-user-question-v1");
     }
-    if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli
-        && crate::opencode_compat::Generation::from_version(
-            frozen_runtime.reported_version.as_deref(),
-        ) == Some(crate::opencode_compat::Generation::V2)
-    {
+    if frozen_runtime.adapter_kind == AdapterKind::OpencodeCli {
         compatibility["nativeQuestionnairePolicy"] = json!("deny-question-v1");
     }
     if is_grok {
@@ -7389,11 +7384,7 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::ZcodeApp {
         compatibility["nativeQuestionnairePolicy"] = json!("deny-ask-user-question-v1");
         compatibility["zcodeNativeConfigurationDigest"] = json!(
-            crate::zcode::NativeConfig::load_for_executable(
-                &execution_root,
-                Path::new(&frozen_runtime.executable_path),
-            )?
-            .digest
+            crate::zcode::NativeConfig::host_configuration_digest(&execution_root)?
         );
     }
     canonical_json_digest(&compatibility).map(Some)
@@ -7465,11 +7456,7 @@ pub(crate) fn freeze_native_session_compatibility(
     }
     if adapter_kind == AdapterKind::ZcodeApp {
         compatibility["zcodeNativeConfigurationDigest"] = json!(
-            crate::zcode::NativeConfig::load_for_executable(
-                &execution_root,
-                Path::new(&frozen_runtime.executable_path),
-            )?
-            .digest
+            crate::zcode::NativeConfig::host_configuration_digest(&execution_root)?
         );
     }
     let compatibility_digest = canonical_json_digest(&compatibility)?;
@@ -10597,8 +10584,52 @@ mod tests {
         );
 
         for data in [
+            json!({"details": "401 Invalid API key", "message": "shorter message"}),
+            json!({"message": "401 Invalid API key", "private": "must remain private"}),
+        ] {
+            let result = json!({
+                "stopReason": "refusal",
+                "_meta": {"codebuddy.ai/errorMessage": json!({
+                    "code": -32603, "message": "Internal error", "data": data
+                }).to_string()}
+            });
+            let error =
+                AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).unwrap();
+            assert_eq!(
+                error.diagnostic(),
+                "ACP error -32603: Internal error: 401 Invalid API key"
+            );
+            assert!(AcpRpcError::from_prompt_result(AdapterKind::TraeCnCli, &result).is_none());
+            for reason in ["end_turn", "cancelled", "unknown"] {
+                let mut result = result.clone();
+                result["stopReason"] = json!(reason);
+                assert!(
+                    AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).is_none()
+                );
+            }
+        }
+
+        for raw in [
+            Value::Null,
+            json!({"message": "not a serialized envelope"}),
+            json!("not JSON"),
+            json!("[]"),
+            json!(r#"{"message":null}"#),
+            json!(r#"{"message":"  "}"#),
+            json!(
+                json!({"message":"must remain private", "padding":" ".repeat(64 * 1024)})
+                    .to_string()
+            ),
+        ] {
+            let result = json!({"stopReason":"refusal", "_meta":{"codebuddy.ai/errorMessage":raw}});
+            assert!(AcpRpcError::from_prompt_result(AdapterKind::CodebuddyCli, &result).is_none());
+        }
+
+        for data in [
             json!("provider failed with api_key=must-not-leak"),
             json!({ "error": "provider failed with api_key=must-not-leak" }),
+            json!({ "details": "provider failed with api_key=must-not-leak" }),
+            json!({ "message": "provider failed with api_key=must-not-leak" }),
         ] {
             let redacted_detail = AcpRpcError::from_response(&json!({
                 "code": -32603,
@@ -10615,6 +10646,8 @@ mod tests {
             json!({ "detail": "must remain private" }),
             json!({ "error": { "message": "must remain private" } }),
             json!({ "error": ["must remain private"] }),
+            json!({ "message": { "error": "must remain private" } }),
+            json!({ "details": ["must remain private"] }),
             json!(["must remain private"]),
             json!(42),
             json!(false),
@@ -15322,6 +15355,29 @@ while IFS= read -r ignored; do :; done
         receive_through_prompt_completion(&mut receiver).await;
         adapter.complete_agent_run("agent-run-one", 1).await;
 
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if std::fs::read_to_string(&invocation_log)
+                    .unwrap()
+                    .lines()
+                    .any(|line| line.ends_with("models --json"))
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("initial catalog observation reached the old program");
+        let previous = root.join("traecli-previous");
+        std::fs::rename(&executable, &previous).unwrap();
+        make_executable(
+            &executable,
+            &(std::fs::read_to_string(&previous).unwrap() + "\n# upgraded\n"),
+        );
+        let mut upgraded = frozen.clone();
+        upgraded.executable_fingerprint = "sha256:upgraded".into();
+        upgraded.reported_version = Some("9.0.0".into());
         let blocked_root = root.join("blocked-runtime-root");
         std::fs::write(&blocked_root, "not a directory").unwrap();
         let warm_factory = BuiltinToolProcessConfigFactory::new(&cli, &endpoint, &blocked_root);
@@ -15334,7 +15390,7 @@ while IFS= read -r ignored; do :; done
                 "fixture-binding",
                 &workspace,
                 PermissionSemantics::RuntimeManagedV2,
-                &frozen,
+                &upgraded,
                 &warm_factory,
                 &BTreeMap::new(),
                 "sha256:mcp",
@@ -15350,6 +15406,14 @@ while IFS= read -r ignored; do :; done
             .await
             .unwrap();
         assert_eq!(second.host_instance_id(), first_host);
+        assert_eq!(
+            second.launch_runtime().reported_version,
+            frozen.reported_version
+        );
+        assert_eq!(
+            second.launch_runtime().executable_fingerprint,
+            frozen.executable_fingerprint
+        );
         assert_eq!(cold_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(
             second.builtin_tool_process_config().unwrap().context_path(),
@@ -15955,24 +16019,28 @@ while IFS= read -r ignored; do :; done
         );
         assert!(
             !runtime
-                .allows_empty_final_after_public_send(prompt_id)
-                .await,
-            "tool still in progress"
+                .active_observation
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .observed_tools
+                .is_empty()
         );
         runtime.observe_message(prompt_id, "session/update", &json!({"update":{
             "sessionUpdate":"tool_call_update", "toolCallId":"tool-read", "status":"completed"
         }})).await.unwrap();
         assert!(
             runtime
-                .allows_empty_final_after_public_send(prompt_id)
+                .active_observation
+                .lock()
                 .await
+                .as_ref()
+                .unwrap()
+                .observed_tools
+                .is_empty()
         );
-        assert!(!runtime.has_unsupported_questionnaire(prompt_id).await);
-        assert!(
-            !runtime
-                .allows_empty_final_after_public_send("stale-prompt")
-                .await
-        );
+        assert!(runtime.final_agent_message("stale-prompt").await.is_none());
         runtime
             .observe_message(
                 prompt_id,
@@ -15983,14 +16051,7 @@ while IFS= read -r ignored; do :; done
             )
             .await
             .unwrap();
-        assert!(
-            !runtime
-                .allows_empty_final_after_public_send(prompt_id)
-                .await,
-            "dismissed question is not a completed answer"
-        );
-        assert!(runtime.has_unsupported_questionnaire(prompt_id).await);
-        assert!(!runtime.has_unsupported_questionnaire("stale-prompt").await);
+        assert!(runtime.final_agent_message(prompt_id).await.is_none());
         runtime
             .observe_message(
                 prompt_id,
@@ -16002,10 +16063,9 @@ while IFS= read -r ignored; do :; done
             )
             .await
             .unwrap();
-        assert!(runtime.final_agent_message(prompt_id).await.is_some());
-        assert!(
-            runtime.has_unsupported_questionnaire(prompt_id).await,
-            "assistant text does not resolve a dismissed questionnaire"
+        assert_eq!(
+            runtime.final_agent_message(prompt_id).await.as_deref(),
+            Some("Waiting for your answer.")
         );
 
         host.shutdown().await;
@@ -16840,7 +16900,7 @@ while IFS= read -r ignored; do :; done
             v2.native_session_compatibility_key,
             patch.native_session_compatibility_key
         );
-        assert_ne!(v2.host_config_digest, patch.host_config_digest);
+        assert_eq!(v2.host_config_digest, patch.host_config_digest);
         opencode.reported_version = None;
         assert!(freeze_native_session_compatibility(opencode, &workspace).is_err());
         let first = runtime_compatibility_digest(
@@ -17065,9 +17125,12 @@ while IFS= read -r ignored; do :; done
             }
         }
 
-        // Only the V2 launch policy changes; V1 and native Session identity
-        // retain their existing compatibility inputs.
-        for (runtime, policy) in [(&v1, None), (&v2, Some("deny-question-v1"))] {
+        // Host policy is independent of the disk program's current generation.
+        // The acquired Host keeps its native Session and launch dialect.
+        for (runtime, policy) in [
+            (&v1, Some("deny-question-v1")),
+            (&v2, Some("deny-question-v1")),
+        ] {
             let digest = runtime_compatibility_digest(
                 runtime,
                 &workspace,

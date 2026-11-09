@@ -80,8 +80,8 @@ pub fn member_create_input_schema() -> Value {
                 "type": "array", "maxItems": 6, "default": [],
                 "items": {"type": "string", "minLength": 1, "maxLength": 16}
             },
-            "workingPrinciples": {"type": "string", "maxLength": 300, "default": ""},
-            "growthTopic": {"type": "string", "maxLength": 300, "default": ""},
+            "workingPrinciples": {"type": "string", "maxLength": crate::agent_profile::WORKING_PRINCIPLES_MAX_SCALARS, "default": ""},
+            "growthTopic": {"type": "string", "maxLength": crate::agent_profile::GROWTH_TOPIC_MAX_SCALARS, "default": ""},
             "avatarFile": {
                 "type": "string", "minLength": 1, "maxLength": 4096,
                 "description": "Optional run-readable local PNG, JPEG or GIF path. Rovai normalizes and imports it; the path is never persisted."
@@ -401,12 +401,12 @@ mod tests {
         ] {
             assert_eq!(
                 schema["properties"]["professionalResponsibilities"]["maxLength"],
-                10_000
+                30_000
             );
             for text in [
-                "中".repeat(10_000),
-                "😀".repeat(10_000),
-                "e\u{0301}".repeat(5_000),
+                "中".repeat(30_000),
+                "😀".repeat(30_000),
+                "e\u{0301}".repeat(15_000),
             ] {
                 input["professionalResponsibilities"] = json!(format!(" \u{feff}{text}\n"));
                 validate(operation, &input).unwrap();
@@ -420,6 +420,32 @@ mod tests {
             validate(operation, &input).unwrap();
             input["professionalResponsibilities"] = Value::Null;
             assert!(validate(operation, &input).is_err());
+            input["professionalResponsibilities"] = json!("");
+            for field in ["workingPrinciples", "growthTopic"] {
+                assert_eq!(schema["properties"][field]["maxLength"], 3_000);
+                for text in [
+                    "中".repeat(3_000),
+                    "😀".repeat(3_000),
+                    "e\u{0301}".repeat(1_500),
+                ] {
+                    input[field] = json!(text);
+                    validate(operation, &input).unwrap();
+                    assert_eq!(
+                        normalize_identity_tool_input(operation, input.clone()).unwrap()[field],
+                        input[field]
+                    );
+                    for overlong in [format!("{text}界"), format!(" {text}")] {
+                        input[field] = json!(overlong);
+                        assert!(validate(operation, &input).is_err(), "{operation}: {field}");
+                    }
+                }
+                input[field] = Value::Null;
+                assert!(validate(operation, &input).is_err());
+                input[field] = json!("");
+                validate(operation, &input).unwrap();
+                input.as_object_mut().unwrap().remove(field);
+                validate(operation, &input).unwrap();
+            }
         }
         assert!(validate("member.list", &json!({"agentId":"agent_1"})).is_err());
         assert!(validate("member.get", &json!({"agentId":"agent_1","runtime":true})).is_err());

@@ -626,6 +626,7 @@ describe('active Thread event invalidation', () => {
     let snapshot = campOpenProjectionAsSnapshot(projection('running'), null)
     const renderThread = (): string => renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
+      executionAutoOpen: true,
       projectName: null,
       agents: [agentProfile()],
       busy: false,
@@ -2616,8 +2617,8 @@ describe('task event projections', () => {
     }))
     expect(campMarkup).toContain('Quick Chat')
     expect(campMarkup).not.toContain('运行中 1')
-    expect(campMarkup).toContain('待审批 1')
-    expect(campMarkup).toContain('aria-label="待审批 1，定位输入框上方审批"')
+    expect(campMarkup).toContain('待处理 1')
+    expect(campMarkup).toContain('aria-label="待处理 1，定位输入框上方待处理区域"')
     expect(campMarkup).toContain('camp-detail-entry-host')
     expect(campMarkup).not.toContain('topbar-inspector-toggle')
 
@@ -2987,8 +2988,8 @@ describe('task event projections', () => {
   })
 
   it('defines the final unified Thread and Project menu labels', () => {
-    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '删除'])
-    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '删除'])
+    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
+    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
     expect(projectNavigationMenuLabels(false)).toEqual(['新建对话', '置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
     expect(projectNavigationMenuLabels(true)).toEqual(['新建对话', '取消置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
   })
@@ -4201,6 +4202,7 @@ describe('task event projections', () => {
 
     const workspaceProps: Parameters<typeof ThreadWorkspace>[0] = {
       snapshot: groupedSnapshot,
+      executionAutoOpen: true,
       executionPlacement: 'bottom',
       projectName: 'Rovai',
       agents: [profile],
@@ -4218,6 +4220,11 @@ describe('task event projections', () => {
       onStop: () => undefined
     }
     const markup = renderToStaticMarkup(createElement(ThreadWorkspace, workspaceProps))
+    const manualExecutionMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
+      ...workspaceProps, executionAutoOpen: false
+    }))
+    expect(manualExecutionMarkup).not.toContain('class="execution-drawer execution-drawer-bottom')
+    expect(manualExecutionMarkup).toContain('data-presence-run="run-muwa"')
     const suppressedMissionDrawerMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       missionBoard: createElement('section', null, 'Mission board'),
@@ -4424,6 +4431,7 @@ describe('task event projections', () => {
 
     const inspectorMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: groupedSnapshot,
+      executionAutoOpen: true,
       projectName: 'Rovai',
       agents: [profile],
       busy: false,
@@ -4574,6 +4582,7 @@ describe('task event projections', () => {
 
     const cancellingMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
+      executionAutoOpen: true,
       projectName: 'Rovai',
       agents: [profile],
       liveRuntimeEvents: [],
@@ -5008,16 +5017,17 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
 
-    expect(markup).toContain('aria-label="2 项待审批"')
+    expect(markup).toContain('aria-label="2 项待处理"')
     expect(markup).toContain('洛可 · Codex CLI')
     expect(markup).not.toContain('洛可、沐瓦')
     expect(markup).not.toContain('只允许当前请求。')
     expect(markup).toContain('data-approval-summary')
     expect(markup).toContain('运行 pnpm test')
-    expect(markup).toContain('aria-label="收起审批详情"')
+    expect(markup).toContain('aria-label="收起待处理"')
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
     expect((markup.match(/class="camp-detail-entry(?: [^"]*)?"/g) ?? []).length).toBe(4)
+    expect(markup).not.toContain('message-export-entry-button')
     expect(markup).toContain('>执行</span><small>0</small></span></button>')
     expect(markup).toContain('>任务</span><small>0</small>')
     expect(markup).toContain('>队员</span><small>2</small>')

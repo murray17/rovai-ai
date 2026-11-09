@@ -73,6 +73,7 @@ pub(super) fn reconcile(
         "camps.retryDeletion" => user!(RetryThreadDeletionCommand),
         "camps.discardPending" => camp!(DiscardPendingThreadCommand),
         "camps.members.fast.set" => camp!(rovai_core::camp_fast::SetThreadMemberFastCommand),
+        "members.presence.set" => user!(SetMemberPresenceCommand),
         "members.remove" => user!(RemoveMemberCommand),
         "members.reorder" => user!(ReorderAgentProfilesCommand),
         "notifications.preference.update" => user!(UpdateNotificationPreferenceCommand),

@@ -194,29 +194,130 @@ test('DSH official prompt seam binds immutable root identity per session and fai
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
 
-test('DSH bootstrap publishes ACP readiness only after native MCP entries settle', async () => {
-  let release
-  const activation = new Promise(resolve => { release = resolve })
-  const calls = []
-  const nativeMcp = {
-    disabled: false,
-    options: { name: '@deepseek-ai/dsh-mcp-client' },
-    async refresh() { calls.push('refresh'); await activation },
-    async _await() { calls.push('await') }
+test('DSH bootstrap publishes ACP readiness only after native MCP entries settle', async t => {
+  const entry = overrides => ({ disabled: false,
+    options: { name: '@deepseek-ai/dsh-mcp-client' }, async refresh() {}, ...overrides })
+  const gate = () => {
+    let release
+    const promise = new Promise(resolve => { release = resolve })
+    return { promise, release }
   }
-  let ready = false
-  const pending = apply({
-    loader: { entries: () => [nativeMcp] },
-    tools: { schemas: () => [] },
-    systemPrompt: { variable: () => {}, section: () => {} },
-    on: () => {},
-    provide: key => { assert.equal(key, readinessService); ready = true }
-  }, { bindingRoot: '/unused', observationRoot: '/unused', mcpServerNames: [] })
-  await Promise.resolve()
-  assert.equal(ready, false)
-  assert.deepEqual(calls, ['refresh'])
-  release()
-  await pending
-  assert.equal(ready, true)
-  assert.deepEqual(calls, ['refresh', 'await'])
+  const settle = () => new Promise(resolve => setImmediate(resolve))
+  const start = entries => {
+    const state = { ready: false }
+    state.pending = apply({
+      loader: { entries: () => entries },
+      tools: { schemas: () => [] },
+      systemPrompt: { variable: () => {}, section: () => {} }, on: () => {},
+      provide: key => { assert.equal(key, readinessService); state.ready = true }
+    }, { bindingRoot: '/unused', observationRoot: '/unused', mcpServerNames: [] })
+    return state
+  }
+
+  await t.test('ignores absent, disabled and unrelated MCP entries', async () => {
+    const ignored = { refresh() { assert.fail('ignored entry was refreshed') },
+      _await() { assert.fail('ignored entry was awaited') } }
+    for (const entries of [[], [entry({ ...ignored, disabled: true })],
+      [entry({ ...ignored, options: { name: 'another-plugin' } })]]) {
+      const state = start(entries)
+      await state.pending
+      assert.equal(state.ready, true)
+    }
+  })
+
+  for (const legacy of [true, false]) {
+    await t.test(`${legacy ? 'legacy' : 'Fiber'} waits for refresh and delayed activation`, async () => {
+      const refreshed = gate(), activated = gate(), calls = []
+      const wait = async () => { calls.push('await'); await activated.promise }
+      const native = entry({ async refresh() {
+        calls.push('refresh')
+        await refreshed.promise
+        if (!legacy) native.fiber = { state: 0, async await() { await wait(); this.state = 2 } }
+      }, ...(legacy ? { _await: wait } : {}) })
+      const state = start([native])
+      await settle()
+      assert.equal(state.ready, false)
+      assert.deepEqual(calls, ['refresh'])
+      refreshed.release()
+      await settle()
+      assert.equal(state.ready, false)
+      assert.deepEqual(calls, ['refresh', 'await'])
+      activated.release()
+      await state.pending
+      assert.equal(state.ready, true)
+      assert.deepEqual(calls, ['refresh', 'await'])
+    })
+  }
+
+  await t.test('prefers the legacy interface without imposing new state checks', async () => {
+    let waited = 0
+    const state = start([entry({ async _await() { waited++ },
+      fiber: { state: 0, await() { assert.fail('legacy entry was awaited twice') } } })])
+    await state.pending
+    assert.equal(waited, 1)
+    assert.equal(state.ready, true)
+  })
+
+  for (const phase of ['refresh', 'legacy', 'Fiber']) {
+    await t.test(`propagates ${phase} errors without falling back or publishing ready`, async () => {
+      const error = new Error('native startup failure')
+      const native = entry({ fiber: { state: 2,
+        async await() { if (phase !== 'Fiber') assert.fail('unexpected Fiber fallback'); throw error } } })
+      if (phase === 'refresh') native.refresh = async () => { throw error }
+      if (phase !== 'Fiber') native._await = async () => {
+        if (phase !== 'legacy') assert.fail('waited after refresh failed')
+        throw error
+      }
+      const state = start([native])
+      await assert.rejects(state.pending, actual => actual === error)
+      assert.equal(state.ready, false)
+    })
+  }
+
+  await t.test('rejects missing or unrecognized lifecycle interfaces', async () => {
+    for (const fiber of [undefined, {}, { await: true }]) {
+      const state = start([entry({ _await: true, fiber })])
+      await assert.rejects(state.pending, /rovai_dsh_native_mcp_lifecycle_unavailable/)
+      assert.equal(state.ready, false)
+    }
+  })
+
+  await t.test('rejects a settled Fiber that is not ACTIVE, including missing dependencies', async () => {
+    for (const status of [0, 1, 3, 4, 5, undefined]) {
+      const state = start([entry({ fiber: { state: status, async await() {} } })])
+      await assert.rejects(state.pending, /rovai_dsh_native_mcp_not_active/)
+      assert.equal(state.ready, false)
+    }
+  })
+
+  for (const fail of [false, true]) {
+    await t.test(`multiple MCP entries ${fail ? 'cannot publish ready after one fails' : 'must all complete'}`, async () => {
+      const first = gate(), second = gate(), error = new Error('one MCP failed')
+      const state = start([
+        entry({ async _await() { await first.promise; if (fail) throw error } }),
+        entry({ fiber: { state: 0, async await() { await second.promise; this.state = 2 } } })
+      ])
+      const result = fail ? assert.rejects(state.pending, actual => actual === error) : state.pending
+      await settle()
+      first.release()
+      await settle()
+      assert.equal(state.ready, false)
+      second.release()
+      await result
+      await settle()
+      assert.equal(state.ready, !fail)
+    })
+  }
+
+  await t.test('respects native tolerant activation and strict startup failure with no tools', async () => {
+    for (const strict of [false, true]) {
+      const error = new Error('initial connection failed')
+      const state = start([entry({ options: { name: '@deepseek-ai/dsh-mcp-client',
+        config: { failOnStartupError: strict } },
+        fiber: { state: 0, async await() { if (strict) throw error; this.state = 2 } } })])
+      if (strict) await assert.rejects(state.pending, actual => actual === error)
+      else await state.pending
+      assert.equal(state.ready, !strict)
+    }
+  })
 })

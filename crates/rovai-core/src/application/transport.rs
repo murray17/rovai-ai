@@ -337,6 +337,10 @@ fn is_control_request(method: &str) -> bool {
             | "singleChat.end"
             | "runtime.pendingExecution.cancel"
             | "action.approvals.resolve"
+            | "nativeInteractions.respond"
+            | "channels.nativeInteractions.respond"
+            | "channels.lark.nativeInteractions.respond"
+            | "channels.dingtalk.nativeInteractions.respond"
             | "channels.executionConsole.agentRun.cancel"
             | "channels.dingtalk.executionConsole.agentRun.cancel"
     )

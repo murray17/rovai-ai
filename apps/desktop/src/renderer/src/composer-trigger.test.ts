@@ -61,6 +61,16 @@ describe('Composer bounded trigger scan', () => {
     expect(match(member)).toMatchObject({
       kind: 'member', query: 'Ali', fromOffset: 3, toOffset: 7
     })
+    for (const query of ['src/', 'package.json', 'composer-trigger.test.ts', '中文_文件-name.ts', 'src\\auth\\index.ts']) {
+      const editor = createComposerEditor(`检查 @${query}`)
+      selectEnd(editor)
+      expect(match(editor)).toMatchObject({ kind: 'member', query, fromOffset: 3, toOffset: 4 + query.length })
+    }
+    for (const text of ['user@package.json', 'https://example.com/@src/index.ts', '@with spaces.ts']) {
+      const editor = createComposerEditor(text)
+      selectEnd(editor)
+      expect(match(editor)).toBeNull()
+    }
 
     const skill = createComposerEditor('请处理：/review')
     selectEnd(skill)
@@ -68,7 +78,18 @@ describe('Composer bounded trigger scan', () => {
       kind: 'skill', query: 'review', fromOffset: 4, toOffset: 11
     })
 
-    for (const value of ['https://example.com/a/b', 'src/components/a/b.ts', 'word/review']) {
+    for (const query of ['', 'Native_Name', 'afms_eu_api_test_gen', '中文', '技能１２٣', 'review-pr']) {
+      const editor = createComposerEditor(`请处理：/${query}`)
+      selectEnd(editor)
+      expect(match(editor)).toMatchObject({
+        kind: 'skill', query, fromOffset: 4, toOffset: 5 + query.length
+      })
+    }
+
+    for (const value of [
+      'https://example.com/a/b', 'src/components/a/b.ts', 'word/review',
+      'https://example.com/中文', 'src/Native_Name', 'word/中文', '/中文 技能'
+    ]) {
       const editor = createComposerEditor(value)
       selectEnd(editor)
       expect(match(editor)).toBeNull()

@@ -133,11 +133,11 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         let marker = match classify_database_contract(&tx)? {
             DatabaseContractClassification::SupportedMigrationSource(m)
-                if m.projection_schema_version == 173 =>
+                if m.projection_schema_version == 176 =>
             {
                 m
             }
-            _ => anyhow::bail!("Chat reply context requires complete schema 173"),
+            _ => anyhow::bail!("Chat reply context requires complete schema 176"),
         };
         anyhow::ensure!(
             matches!(
@@ -151,7 +151,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
             extend_legacy_reply_schema(&tx)?;
         }
         tx.execute_batch("DROP TRIGGER IF EXISTS agent_run_input_v43_only_insert; CREATE TRIGGER agent_run_input_v43_only_insert BEFORE INSERT ON agent_run_input WHEN NEW.context_manifest_version IS NOT 43 AND NEW.context_manifest_version IS NOT 44 BEGIN SELECT RAISE(ABORT,'new public Thread AgentRunInput must use ContextManifest v43/v44'); END;")?;
-        tx.execute_batch("INSERT INTO schema_migration VALUES(224,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=174,updated_at=datetime('now') WHERE singleton=1;")?;
+        tx.execute_batch("INSERT INTO schema_migration VALUES(227,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=177,updated_at=datetime('now') WHERE singleton=1;")?;
         validate_migration_foreign_keys(
             &tx,
             &[
@@ -182,7 +182,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 pub(super) fn downgrade_for_test(c: &Connection) {
     if !c
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=224)",
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=227)",
             [],
             |r| r.get::<_, bool>(0),
         )
@@ -196,8 +196,8 @@ pub(super) fn downgrade_for_test(c: &Connection) {
     // ContextManifest v44 database; the fence trigger is recreated by migrate.
     tx.execute_batch(
         "DROP TRIGGER IF EXISTS agent_run_input_v43_only_insert;
-         DELETE FROM schema_migration WHERE version=224;
-         UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1;",
+         DELETE FROM schema_migration WHERE version=227;
+         UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;",
     )
     .unwrap();
     tx.commit().unwrap();
@@ -216,8 +216,8 @@ pub(crate) fn assert_legacy_chat_upgrade_sources() {
         let tx = database.connection_mut().transaction().unwrap();
         extend_legacy_reply_schema(&tx).unwrap();
         tx.execute_batch("CREATE TRIGGER agent_run_input_v43_only_insert BEFORE INSERT ON agent_run_input WHEN NEW.context_manifest_version IS NOT 43 BEGIN SELECT RAISE(ABORT,'new public Thread AgentRunInput must use ContextManifest v43'); END;
-        INSERT INTO schema_migration VALUES(224,'legacy-reply-time');
-        UPDATE schema_migration SET version=version-11 WHERE version BETWEEN 220 AND 224;
+        INSERT INTO schema_migration VALUES(227,'legacy-reply-time');
+        UPDATE schema_migration SET version=version-14 WHERE version BETWEEN 223 AND 227;
         UPDATE rovai_data_contract SET projection_schema_version=159 WHERE singleton=1;").unwrap();
         tx.commit().unwrap();
         database
@@ -286,7 +286,7 @@ pub(crate) fn assert_legacy_chat_upgrade_sources() {
             database
                 .connection()
                 .query_row(
-                    "SELECT applied_at FROM schema_migration WHERE version=224",
+                    "SELECT applied_at FROM schema_migration WHERE version=227",
                     [],
                     |row| row.get::<_, String>(0)
                 )
@@ -298,29 +298,33 @@ pub(crate) fn assert_legacy_chat_upgrade_sources() {
         let schema_after: String = database.connection().query_row("SELECT group_concat(version) FROM (SELECT version FROM schema_migration ORDER BY version)",[],|row|row.get(0)).unwrap();
         assert_eq!(schema_before, schema_after);
     }
-    for (source_version, last_receipt) in [
-        (158, 209),
-        (158, 210),
-        (158, 211),
-        (158, 212),
-        (169, 219),
-        (170, 220),
-        (171, 221),
-        (172, 222),
-        (173, 223),
+    for (source_version, first_receipt, last_receipt) in [
+        (158, 209, 209),
+        (158, 209, 210),
+        (158, 209, 211),
+        (158, 209, 212),
+        (169, 219, 219),
+        (170, 219, 220),
+        (171, 219, 221),
+        (172, 219, 222),
+        (173, 219, 223),
+        (170, 220, 220),
+        (171, 220, 221),
+        (172, 220, 222),
+        (173, 220, 223),
+        (174, 220, 224),
     ] {
         let mut historical = crate::test_support::seeded_runtime_database_owned();
-        if last_receipt >= 219 {
+        if first_receipt >= 219 {
             subagent::downgrade_for_test(historical.connection());
         } else {
             notification_interruption::downgrade_for_test(historical.connection());
         }
+        if first_receipt == 220 {
+            subagent::migrate(&mut historical).unwrap();
+        }
         crate::channel_chat::migrate(&mut historical).unwrap();
-        let step = if last_receipt < 219 {
-            last_receipt - 209
-        } else {
-            last_receipt - 219
-        };
+        let step = last_receipt - first_receipt;
         if step >= 1 {
             historical.migrate_chat_bot_member_reuse().unwrap();
         }
@@ -332,11 +336,16 @@ pub(crate) fn assert_legacy_chat_upgrade_sources() {
         }
         if step >= 4 {
             // The old branch already carried the current quote schema, but not activity-v5.
-            historical.connection().execute_batch("CREATE TRIGGER agent_run_input_v43_only_insert BEFORE INSERT ON agent_run_input WHEN NEW.context_manifest_version IS NOT 43 AND NEW.context_manifest_version IS NOT 44 BEGIN SELECT RAISE(ABORT,'new public Thread AgentRunInput must use ContextManifest v43/v44'); END; INSERT INTO schema_migration VALUES(224,'retained-reply-time');").unwrap();
+            historical.connection().execute_batch("CREATE TRIGGER agent_run_input_v43_only_insert BEFORE INSERT ON agent_run_input WHEN NEW.context_manifest_version IS NOT 43 AND NEW.context_manifest_version IS NOT 44 BEGIN SELECT RAISE(ABORT,'new public Thread AgentRunInput must use ContextManifest v43/v44'); END; INSERT INTO schema_migration VALUES(227,'retained-reply-time');").unwrap();
         }
-        let delta = if last_receipt < 219 { 11 } else { 1 };
-        historical.connection().execute_batch(&format!("UPDATE schema_migration SET version=version-{delta} WHERE version BETWEEN 220 AND 224;
-            UPDATE rovai_data_contract SET projection_schema_version={source_version},classifier_version='activity-v4' WHERE singleton=1;")).unwrap();
+        let delta = 223 - first_receipt;
+        let classifier = if first_receipt == 220 {
+            "activity-v5"
+        } else {
+            "activity-v4"
+        };
+        historical.connection().execute_batch(&format!("UPDATE schema_migration SET version=version-{delta} WHERE version BETWEEN 223 AND 227;
+            UPDATE rovai_data_contract SET projection_schema_version={source_version},classifier_version='{classifier}' WHERE singleton=1;")).unwrap();
         historical.connection().execute_batch("INSERT INTO channel_chat_credential VALUES('feishu','prefix-app','prefix-secret',123);").unwrap();
         assert!(
             matches!(classify_startup_contract(historical.connection()).unwrap(),
@@ -344,7 +353,7 @@ pub(crate) fn assert_legacy_chat_upgrade_sources() {
             "receipt {last_receipt}"
         );
         // A false completion receipt or partial layout is not a repairable prefix.
-        let false_receipt = if last_receipt < 219 { 213 } else { 223 };
+        let false_receipt = first_receipt + 4;
         if step < 4 {
             historical
                 .connection()
@@ -422,10 +431,7 @@ pub(crate) fn assert_legacy_chat_upgrade_sources() {
                 .unwrap(),
             "prefix-secret"
         );
-        for (version, at) in before
-            .into_iter()
-            .filter(|(v, _)| *v >= if last_receipt < 219 { 209 } else { 219 })
-        {
+        for (version, at) in before.into_iter().filter(|(v, _)| *v >= first_receipt) {
             assert_eq!(
                 historical
                     .connection()
@@ -448,7 +454,7 @@ pub(crate) fn assert_legacy_chat_upgrade_sources() {
 pub(super) fn assert_upgrade(db: &mut Database) {
     downgrade_for_test(db.connection());
     let before = public_history_claim_preserved_evidence_digest(db.connection()).unwrap();
-    db.connection().execute_batch("CREATE TEMP TRIGGER reject_chat_reply_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=224 BEGIN SELECT RAISE(ABORT,'chat reply rollback'); END;").unwrap();
+    db.connection().execute_batch("CREATE TEMP TRIGGER reject_chat_reply_receipt BEFORE INSERT ON schema_migration WHEN NEW.version=227 BEGIN SELECT RAISE(ABORT,'chat reply rollback'); END;").unwrap();
     let error = migrate(db).unwrap_err();
     assert!(
         error.to_string().contains("chat reply rollback"),
@@ -459,7 +465,7 @@ pub(super) fn assert_upgrade(db: &mut Database) {
         public_history_claim_preserved_evidence_digest(db.connection()).unwrap()
     );
     assert!(
-        matches!(classify_database_contract(db.connection()).unwrap(),DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version==173)
+        matches!(classify_database_contract(db.connection()).unwrap(),DatabaseContractClassification::SupportedMigrationSource(ref m) if m.projection_schema_version==176)
     );
     assert_eq!(
         db.connection()

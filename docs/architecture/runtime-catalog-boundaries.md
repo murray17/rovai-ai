@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-01
+last_updated: 2026-11-04
 ---
 
 # Runtime Catalog Boundaries
@@ -19,10 +19,17 @@ last_updated: 2026-11-01
 
 ## 原生提问边界
 
+Pi 已接入 `confirm / select / input / editor` 的当前运行问答，复用 Pi RPC 和会话待处理区域；
+请求仅保存在当前 Runtime 内存。审批和问答共用展示，权限决策和原生答案仍分流；
+不引入新 Prompt、重跑或跨重启恢复。精确状态、期限和提交边界由
+[Native Interactions v1](../contracts/native-interactions-v1.md)拥有。下述问卷禁用不扩展到该 Pi 路径。
+
 问卷承载用户输入，不能进入执行审批来选择答案。Claude、Copilot、Qwen 在统一正式启动处关闭已验证的
 提问工具；Copilot、Qwen 策略属于 Host 兼容输入，不改变原生会话绑定。Kimi 与 Qwen 的意外请求复用 ACP 当前请求归属、
 Prompt 观察与终态，先识别并取消，再让普通权限进入现有审批。已识别但损坏的问卷也不能自动允许。
-Claude 控制通道拒绝意外问卷并把观察传到现有整轮结果校验；不新增用户回复或自动重跑机制。
+Claude 控制通道拒绝意外问卷并按请求 ID 去重。各 Runtime 的局部取消诊断均不覆盖后续有效原生成功；
+本轮成功允许最终文字为空，沿用发布／补发去重，空文字不生成消息。
+不新增用户回复或自动重跑机制；终态边界见 [Runtime Launch v75](../contracts/runtime-launch-and-verification-v75.md#原生终态与文字发布)。
 具体字段与优先级见 [Runtime Launch v67](../contracts/runtime-launch-and-verification-v67.md)。
 MiniMax 保留现有行为，不以修改用户配置关闭问卷；本轮不扩大到其他适配器。
 
@@ -224,7 +231,8 @@ V1/V2 未知且无法确定必需配置时报告初始化错误；握手冲突�
 Host 的程序指纹与 Native Session 的协议／存储来源分别判断，普通补丁更新不自动丢弃会话。
 权限保留一般 allow/ask/deny 与 Shell、Skill 放行例外，V2 用原生有序规则覆盖 build/plan，
 全局和这两个 Agent 的规则末尾统一拒绝 `question`，由原生过滤模型工具集合；V1 不变。
-其他自定义／子 agent 仍有原生规则。问卷策略只进入 V2 Host compatibility，不改变会话绑定。
+其他自定义／子 agent 仍有原生规则。问卷策略保留在 Host compatibility；代际行为由取得的 Host
+启动身份决定，不按磁盘版本变化强制退役，也不改变会话绑定。
 细节与测试边界见
 [OpenCode V1/V2 实施记录](../versions/v1.72/opencode-v1-v2-implementation.md)。
 
@@ -239,13 +247,19 @@ Windows 沿用 Registry／PATH 规则；只采集 PATH，失败仍走既有回�
 发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
 安装记录不伪造 Ready、认证或能力；旧健康证据只供主动诊断和模型 Picker 参考，已知版本的展示复用单独判断。
 
+Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统一采集，发现、检查和目录发布前复核
+复用同一证据。包变化沿既有失效与 Superseded 路径处理；具体字段与边界见
+[Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#windows-标准包装入口的包身份)。
+
 已知程序版本复用现有快照保存，独立于健康状态：本次静态发现未读取版本或版本读取失败时，Core
 仅在 Installation 路径与当前发现一致、非空 executable fingerprint 匹配时复用已知版本。
 搜索代次变化不改变这条取值规则；程序身份变化或缺失时不显示旧版本。快照写入的空版本也不得
 清空同一程序已有的版本。设置与队员配置统一使用 Core 的版本投影，不各自回退历史快照。
 这不新增检查、轮询、运行准入或第二套持久缓存；字段规则见 [Runtime Launch v64](../contracts/runtime-launch-and-verification-v64.md)。
 
-配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台、目标及文件身份后启动真实 Host。
+配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台与目标；已有驻留能力的 Adapter 由 Fleet
+实际取得健康且兼容的 Host，磁盘文件身份只在创建进程分支检查。取得的 Host 启动身份在首次输入前进入本轮，
+磁盘升级不改写执行中 Run，也不单独退役健康 Host；精确边界见当前 Runtime 启动合同。
 真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
 默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
 运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。
@@ -337,11 +351,14 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 公开 detail 必须先脱敏、去控制字符并有界化，不能包含 Prompt、用户消息、Tool input 或完整 Tool output。
 
 ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界 message。通用 ACP Host 还可以从
-精确白名单标量路径提取 Provider detail；接受字符串 `error.data`，或对象中的字符串 `error.data.error`，
+精确白名单标量路径提取 Provider detail；依次接受字符串 `error.data`、`error.data.error`、
+`error.data.details`、`error.data.message`，
 并在进入诊断或公开 failure 前复用统一的路径、凭据、控制字符和长度清洗。其他对象字段、非字符串值及完整原始对象一律忽略，
 不能由各 Adapter 自行扩展或把原始 `error.data` 交给 Renderer。Prompt activity 与 matching response 已证明
 输入 accepted 时，公开 failure 的 retryable 必须为 false，不能用 Provider 可重试分类覆盖 Core 的防重放门禁。
-字段与历史读取规则见 [Runtime Launch v71](../contracts/runtime-launch-and-verification-v71.md)。
+CodeBuddy matching Prompt 的 `refusal` 可从原生 `_meta["codebuddy.ai/errorMessage"]` JSON 字符串
+提取同一错误封装，复用上述解析与公开 failure；成功与取消不使用这段元数据。
+字段与历史读取规则见 [Runtime Launch v76](../contracts/runtime-launch-and-verification-v76.md)。
 
 `runtime` 只表示 Runtime/Provider 明确报错；协议、参数和输出格式问题是 `compatibility`，executable/cwd/
 权限/附件目录问题是 `environment`，只有明确 Core 状态、持久化或配置生成证据才能是 `rovai`，否则为
@@ -630,6 +647,8 @@ Host＋通用＋队员环境按 [v68](../contracts/runtime-launch-and-verificati
 当前 Host。会话重置通过既有 native binding 身份隔离，原生配置与协议兼容判断继续保留，不新增环境摘要。
 CodeBuddy 的显式模型通过 Host 启动参数 `--model` 选择，因此它参与进程兼容；Runtime-default
 不传该参数，Session/Turn 选项变化不因完整 Run 配置摘要而重启 Host。
+CodeBuddy 的原生档位在现有目录、编辑器、参数透传和消息投影间使用一致的 `thought_level`；
+逐模型来源和旧版 Session 响应的兼容边界见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md#codebuddy-原生档位)。
 
 ACP Client FS 不把这些权限 descriptor 复制成 Core allowlist。`fs/read_text_file` / `fs/write_text_file` 对当前
 fenced Run 只作协议与参数校验，绝对路径按 Runtime 请求执行，相对路径以 execution root 解析；是否能读写、是否
@@ -847,10 +866,9 @@ Write 的 Boolean `created` 与 Write/Edit 的结果 `details.patch`；编号/�
 
 原生问卷暂不承接为 Rovai 表单。客户端不广告 elicitation form，MiniMax 无可用答题路径时由
 原生 dismiss；`questionnaire:` permission options 在普通审批和免审批之前返回 `cancelled`，
-不能用允许执行代替选择答案。已观察到未承接问卷的 Prompt 不因非空文字或已公开发送而成功；
-原生错误与取消仍先按各自终态处理。正常 `end_turn` 下公开失败为
-`runtime_questionnaire_unsupported`，说明问卷不受支持、未提交答案并引导 User 发新消息继续。
-已发消息保留，问卷 Run 不自动重放；后继沿既有 Session/Fleet 路径运行，不额外换 Host。
+不能用允许执行代替选择答案。保留问卷取消诊断，随后匹配本轮且无 error 的 `end_turn` 正常成功，
+不要求最终文字或此前公开发送；原生错误、拒绝与整轮取消继续按实际终态处理。
+已发消息保留，不自动重放 Run；后继沿既有 Session/Fleet 路径运行，不额外换 Host。
 这不等于隐藏工具或自动转为 Thread 提问，不修改日常原生配置，各平台准入分别按上文记录。
 
 运行中输入使用 `mcode/session/steer(text, clientRequestId)`，只在冻结版本已验证且当前 Prompt

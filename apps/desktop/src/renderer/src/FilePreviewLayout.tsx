@@ -280,7 +280,7 @@ export function FilePreviewWorkspace({ children, hidden }: { children: ReactNode
     className={`workspace-grid inspector-collapsed ${layout?.className ?? ''}${layout?.visible ? ' file-preview-open' : ''}${browser?.store ? ' project-files-workspace' : ''}`}
     style={layout?.style}
     hidden={hidden}
-  >{children}<ProjectFilesPane /></div>
+  >{children}{!layout?.directoryDrawer && <ProjectFilesPane />}</div>
 }
 
 export function FilePreviewResizeHandle({ onClose }: { onClose(): void }): React.JSX.Element | null {

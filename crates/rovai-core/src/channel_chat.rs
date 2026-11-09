@@ -300,7 +300,7 @@ pub(crate) fn schema_matches(connection: &Connection) -> rusqlite::Result<bool> 
     Ok(true)
 }
 
-/// Additive migration 220. Every table is chat-only state and never feeds Camp.
+/// Additive migration 223. Every table is chat-only state and never feeds Camp.
 pub(crate) fn migrate(database: &mut Database) -> Result<()> {
     let transaction = database
         .connection_mut()
@@ -406,7 +406,7 @@ pub(crate) fn migrate(database: &mut Database) -> Result<()> {
     )?;
     // Additive chat tables do not change any existing projection, so the
     // projection schema marker stays at 154.
-    transaction.execute_batch("INSERT INTO schema_migration VALUES(220,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=170,updated_at=datetime('now') WHERE singleton=1;")?;
+    transaction.execute_batch("INSERT INTO schema_migration VALUES(223,datetime('now')); UPDATE rovai_data_contract SET projection_schema_version=173,updated_at=datetime('now') WHERE singleton=1;")?;
     transaction.commit()?;
     Ok(())
 }
@@ -2772,8 +2772,8 @@ mod tests {
             crate::db::DatabaseContractClassification::Unknown(_)
         ));
         database.connection().execute("ALTER TABLE channel_chat_target_grant RENAME COLUMN broken_department TO department",[]).unwrap();
-        database.connection().execute_batch("DELETE FROM schema_migration WHERE version=224; UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1;").unwrap();
-        database.connection().execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=222;").unwrap();
+        database.connection().execute_batch("DELETE FROM schema_migration WHERE version=227; UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;").unwrap();
+        database.connection().execute_batch("DROP TABLE channel_chat_target_grant; DROP TABLE channel_chat_tool_request; DROP TABLE channel_chat_input; ALTER TABLE channel_chat_message DROP COLUMN mentions_json; ALTER TABLE channel_chat_outbound DROP COLUMN target_kind; ALTER TABLE channel_chat_outbound DROP COLUMN lease_token; ALTER TABLE channel_chat_outbound DROP COLUMN item_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id; ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch; DELETE FROM schema_migration WHERE version=225;").unwrap();
         assert!(matches!(
             crate::db::classify_database_contract(database.connection()).unwrap(),
             crate::db::DatabaseContractClassification::SupportedMigrationSource(_)
@@ -2784,7 +2784,7 @@ mod tests {
         assert!(matches!(
             crate::db::classify_database_contract(database.connection()).unwrap(),
             crate::db::DatabaseContractClassification::SupportedMigrationSource(ref m)
-                if m.projection_schema_version == 172
+                if m.projection_schema_version == 175
         ));
         crate::db::assert_chat_tool_upgrade_sources(&mut database);
         let columns: i64 = database
@@ -2810,7 +2810,7 @@ mod tests {
         let applied: i64 = database
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 221",
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 224",
                 [],
                 |row| row.get(0),
             )

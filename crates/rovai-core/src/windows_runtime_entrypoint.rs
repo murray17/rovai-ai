@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::runtime_discovery_windows::{CommandShimPackageIdentity, command_shim_package_identity};
 use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use windows_sys::Win32::{
@@ -43,6 +44,7 @@ pub(crate) struct WindowsCommandShimIdentity {
     pub(crate) content_digest: String,
     pub(crate) interpreter: PathBuf,
     pub(crate) interpreter_fingerprint: String,
+    pub(crate) package: Option<CommandShimPackageIdentity>,
 }
 
 impl WindowsCommandShimIdentity {
@@ -56,6 +58,11 @@ impl WindowsCommandShimIdentity {
         digest.update([0]);
         update_digest_with_windows_path(&mut digest, &self.interpreter);
         digest.update(self.interpreter_fingerprint.as_bytes());
+        if let Some(package) = &self.package {
+            digest.update(b"\0npm-package.v1\0");
+            update_digest_with_windows_path(&mut digest, &package.root);
+            digest.update(package.manifest_digest.as_bytes());
+        }
         format!("sha256:{:x}", digest.finalize())
     }
 }
@@ -134,7 +141,13 @@ pub(crate) fn capture_windows_command_shim(path: &Path) -> Result<WindowsCommand
             shim.display()
         );
     }
-    let content_digest = bounded_file_sha256(&shim, MAX_WINDOWS_COMMAND_SHIM_BYTES)?;
+    let mut contents = Vec::with_capacity(metadata.len() as usize);
+    File::open(&shim)?
+        .take(MAX_WINDOWS_COMMAND_SHIM_BYTES + 1)
+        .read_to_end(&mut contents)?;
+    ensure_bounded_shim_contents(&contents)?;
+    let content_digest = format!("sha256:{:x}", Sha256::digest(&contents));
+    let package = command_shim_package_identity(&shim, &contents)?;
     let interpreter = system_cmd_executable()?;
     let interpreter_fingerprint = file_sha256(&interpreter)?;
     Ok(WindowsCommandShimIdentity {
@@ -143,7 +156,15 @@ pub(crate) fn capture_windows_command_shim(path: &Path) -> Result<WindowsCommand
         content_digest,
         interpreter,
         interpreter_fingerprint,
+        package,
     })
+}
+
+fn ensure_bounded_shim_contents(contents: &[u8]) -> Result<()> {
+    if contents.len() as u64 > MAX_WINDOWS_COMMAND_SHIM_BYTES {
+        bail!("managed_process.invalid_application: command shim exceeds bounded size");
+    }
+    Ok(())
 }
 
 pub(crate) fn capture_resolved_windows_command_shim(
@@ -260,28 +281,6 @@ pub(crate) fn serialize_command_shim_command_line(
     Ok(command_line)
 }
 
-fn bounded_file_sha256(path: &Path, limit: u64) -> Result<String> {
-    let mut file = File::open(path)
-        .with_context(|| format!("failed to open command shim {}", path.display()))?;
-    let mut digest = Sha256::new();
-    let mut total = 0_u64;
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        total = total.saturating_add(read as u64);
-        if total > limit {
-            bail!(
-                "managed_process.invalid_application: command shim exceeds the bounded read limit"
-            );
-        }
-        digest.update(&buffer[..read]);
-    }
-    Ok(format!("sha256:{:x}", digest.finalize()))
-}
-
 fn file_sha256(path: &Path) -> Result<String> {
     let mut file =
         File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
@@ -306,7 +305,7 @@ fn update_digest_with_windows_path(digest: &mut Sha256, path: &Path) {
     digest.update([0, 0]);
 }
 
-fn windows_process_visible_path(path: PathBuf) -> PathBuf {
+pub(crate) fn windows_process_visible_path(path: PathBuf) -> PathBuf {
     let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
     let verbatim = r"\\?\".encode_utf16().collect::<Vec<_>>();
     let verbatim_unc = r"\\?\UNC\".encode_utf16().collect::<Vec<_>>();

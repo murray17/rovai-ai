@@ -486,7 +486,7 @@ test('authority recovery errors produce a retryable refusal rather than a crash 
 // The shipped Host must migrate before profile-dependent RPCs become available.
 // Fresh-database health checks cannot detect missing additive upgrade steps.
 test('chat schema upgrades before member reads and diagnostics on an existing authority', { timeout: 240_000 }, async (t) => {
-  for (const source of [219, 220, 221, 'tools222', 'navigation222', 'both222', 'navigation223']) {
+  for (const source of [222, 223, 224, 'tools225', 'navigation225', 'both225', 'navigation226']) {
     await t.test('migration ' + source, async () => {
       const fixture = await realpath(await mkdtemp(join(tmpdir(), 'rovai-chat-admission-')))
       const dataDir = process.platform === 'win32'
@@ -509,15 +509,15 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         const threadId = created.payload.threadId
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
-        writer.exec('DROP TRIGGER IF EXISTS agent_run_input_v43_only_insert; DELETE FROM schema_migration WHERE version=224; UPDATE rovai_data_contract SET projection_schema_version=169 WHERE singleton=1;')
-        if (!['navigation222', 'both222', 'navigation223'].includes(source)) {
+        writer.exec('DROP TRIGGER IF EXISTS agent_run_input_v43_only_insert; DELETE FROM schema_migration WHERE version=227; UPDATE rovai_data_contract SET projection_schema_version=172 WHERE singleton=1;')
+        if (!['navigation225', 'both225', 'navigation226'].includes(source)) {
           writer.exec(
             "DROP INDEX camp_navigation_window_idx; ALTER TABLE camp DROP COLUMN navigation_is_chat_bot;" +
             "CREATE INDEX camp_navigation_window_idx ON camp (CASE WHEN project_binding_kind = 'directory' THEN 'directory:' || project_path ELSE 'quick-chat' END, COALESCE(navigation_activity_at,created_at) DESC,navigation_activity_sequence DESC,id) WHERE deletion_operation_id IS NULL;"
           )
         }
-        writer.exec('DELETE FROM schema_migration WHERE version=223')
-        if (!['tools222', 'both222'].includes(source)) writer.exec(
+        writer.exec('DELETE FROM schema_migration WHERE version=226')
+        if (!['tools225', 'both225'].includes(source)) writer.exec(
           'DROP TABLE channel_chat_target_grant;' +
           'DROP TABLE channel_chat_tool_request;' +
           'DROP TABLE channel_chat_input;' +
@@ -527,34 +527,34 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
           'ALTER TABLE channel_chat_outbound DROP COLUMN item_id;' +
           'ALTER TABLE channel_chat_outbound DROP COLUMN source_run_id;' +
           'ALTER TABLE channel_chat_outbound DROP COLUMN source_execution_epoch;' +
-          'DELETE FROM schema_migration WHERE version=222;'
+          'DELETE FROM schema_migration WHERE version=225;'
         )
-        if (source < 221) {
+        if (source < 224) {
           writer.exec(
             'DROP TABLE channel_chat_conversation;' +
             'ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled;' +
             'ALTER TABLE agent_profile DROP COLUMN chat_materials_path;' +
             'ALTER TABLE conversation DROP COLUMN permission_override_json;' +
-            'DELETE FROM schema_migration WHERE version=221;'
+            'DELETE FROM schema_migration WHERE version=224;'
           )
         }
-        if (source === 219) {
+        if (source === 222) {
           writer.exec(
             'DROP TABLE channel_chat_outbound; DROP TABLE channel_chat_item;' +
             'DROP TABLE channel_chat_turn; DROP TABLE channel_chat_message;' +
             'DROP TABLE channel_chat_credential; DROP TABLE channel_chat_bot;' +
-            'DELETE FROM schema_migration WHERE version=220;'
+            'DELETE FROM schema_migration WHERE version=223;'
           )
         }
-        if (source !== 219) {
+        if (source !== 222) {
           writer.exec("INSERT INTO channel_chat_message(id,provider,app_id,chat_id,conversation_kind,author_external_id,author_name,body,external_message_id,dedupe_key,received_at) VALUES('retained-inbound','feishu','fixture-app','fixture-chat','p2p','ou_fixture','Fixture','Retained chat body','retained-external','retained-key',1)")
         }
-        if (source === 'navigation222') writer.exec("INSERT INTO schema_migration VALUES(222,'retained-navigation-receipt')")
-        if (source === 'navigation223') writer.exec("INSERT INTO schema_migration VALUES(223,'retained-navigation-receipt')")
-        if (source === 'both222') writer.exec("UPDATE schema_migration SET applied_at='retained-combined-receipt' WHERE version=222")
+        if (source === 'navigation225') writer.exec("INSERT INTO schema_migration VALUES(225,'retained-navigation-receipt')")
+        if (source === 'navigation226') writer.exec("INSERT INTO schema_migration VALUES(226,'retained-navigation-receipt')")
+        if (source === 'both225') writer.exec("UPDATE schema_migration SET applied_at='retained-combined-receipt' WHERE version=225")
         if (typeof source === 'string') {
           writer.prepare("INSERT INTO channel_chat_conversation VALUES('feishu','fixture-app','fixture-chat',?,0)").run(threadId)
-          if (source !== 'tools222') writer.prepare('UPDATE camp SET navigation_is_chat_bot=1 WHERE id=?').run(threadId)
+          if (source !== 'tools225') writer.prepare('UPDATE camp SET navigation_is_chat_bot=1 WHERE id=?').run(threadId)
         }
         writer.close()
         writer = null
@@ -569,11 +569,11 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
         assert.equal(writer.prepare('SELECT title FROM camp WHERE id=?').get(threadId).title, 'Upgrade preserved thread')
-        if (source !== 219) assert.equal(writer.prepare("SELECT body FROM channel_chat_message WHERE id='retained-inbound'").get().body, 'Retained chat body')
-        const receipts = writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (220,221,222,223) ORDER BY version').all()
-        assert.deepEqual(receipts.map(row => row.version), [220, 221, 222, 223])
-        if (source === 'navigation222' || source === 'navigation223') assert.equal(receipts.find(row => row.version === 223).applied_at, 'retained-navigation-receipt')
-        if (source === 'both222') assert.equal(receipts.find(row => row.version === 222).applied_at, 'retained-combined-receipt')
+        if (source !== 222) assert.equal(writer.prepare("SELECT body FROM channel_chat_message WHERE id='retained-inbound'").get().body, 'Retained chat body')
+        const receipts = writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (223,224,225,226) ORDER BY version').all()
+        assert.deepEqual(receipts.map(row => row.version), [223, 224, 225, 226])
+        if (source === 'navigation225' || source === 'navigation226') assert.equal(receipts.find(row => row.version === 226).applied_at, 'retained-navigation-receipt')
+        if (source === 'both225') assert.equal(receipts.find(row => row.version === 225).applied_at, 'retained-combined-receipt')
         writer.close()
         writer = null
         core = startCore(dataDir, skillRoot, mcpPath)
@@ -581,11 +581,11 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         assert.deepEqual(await core.request('members.list'), before)
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
-        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (220,221,222,223) ORDER BY version').all(), receipts)
+        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (223,224,225,226) ORDER BY version').all(), receipts)
         // An incomplete historical upgrade source is corruption, not an old source.
-        writer.exec('DELETE FROM schema_migration WHERE version=224; UPDATE rovai_data_contract SET projection_schema_version=173 WHERE singleton=1;')
+        writer.exec('DELETE FROM schema_migration WHERE version=227; UPDATE rovai_data_contract SET projection_schema_version=176 WHERE singleton=1;')
         if (typeof source === 'string') writer.exec('DROP INDEX camp_navigation_window_idx')
-        else if (source === 221) writer.exec('DROP TABLE channel_chat_target_grant')
+        else if (source === 224) writer.exec('DROP TABLE channel_chat_target_grant')
         else writer.exec('ALTER TABLE agent_profile DROP COLUMN chat_bot_enabled')
         writer.close()
         writer = null
@@ -593,10 +593,10 @@ test('chat schema upgrades before member reads and diagnostics on an existing au
         await assert.rejects(core.ready, error => error.startupStatus === 'blocked' || error.startupStatus === 'failed')
         await core.close()
         writer = new DatabaseSync(join(dataDir, 'rovai.sqlite'))
-        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (220,221,222,223) ORDER BY version').all(), receipts)
+        assert.deepEqual(writer.prepare('SELECT version, applied_at FROM schema_migration WHERE version IN (223,224,225,226) ORDER BY version').all(), receipts)
         const missing = typeof source === 'string'
           ? writer.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name='camp_navigation_window_idx'").get()
-          : source === 221
+          : source === 224
           ? writer.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name='channel_chat_target_grant'").get()
           : writer.prepare("SELECT COUNT(*) AS count FROM pragma_table_info('agent_profile') WHERE name='chat_bot_enabled'").get()
         assert.equal(missing.count, 0)

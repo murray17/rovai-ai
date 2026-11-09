@@ -33,6 +33,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 #[cfg(test)]
 pub(super) fn downgrade_for_test(connection: &Connection) {
     super::downgrade_chat_extensions_for_test(connection);
+    super::channel_native::downgrade_for_test(connection);
     if !connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version=219)",
@@ -81,6 +82,43 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .execute_batch("DROP TRIGGER reject_subagent_classifier_marker;")
         .unwrap();
     migrate(database).unwrap();
+    super::channel_native::migrate(database).unwrap();
+    // The next reader-admission marker has no data rewrite; a failed marker update must roll back.
+    database.connection().execute_batch("CREATE TEMP TRIGGER reject_file_reference_marker BEFORE UPDATE ON rovai_data_contract WHEN NEW.projection_schema_version=171 BEGIN SELECT RAISE(ABORT,'file reference marker rollback'); END;").unwrap();
+    assert!(
+        database
+            .migrate_project_file_references()
+            .unwrap_err()
+            .to_string()
+            .contains("file reference marker rollback")
+    );
+    assert!(
+        matches!(classify_database_contract(database.connection()).unwrap(), DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 170)
+    );
+    assert!(!database.schema_migration_applied(221).unwrap());
+    database
+        .connection()
+        .execute_batch("DROP TRIGGER reject_file_reference_marker;")
+        .unwrap();
+    database.migrate_project_file_references().unwrap();
+    database.connection().execute_batch("CREATE TEMP TRIGGER reject_directory_reference_marker BEFORE UPDATE ON rovai_data_contract WHEN NEW.projection_schema_version=172 BEGIN SELECT RAISE(ABORT,'directory reference marker rollback'); END;").unwrap();
+    assert!(
+        database
+            .migrate_project_directory_references()
+            .unwrap_err()
+            .to_string()
+            .contains("directory reference marker rollback")
+    );
+    assert!(!database.schema_migration_applied(222).unwrap());
+    assert!(
+        matches!(classify_database_contract(database.connection()).unwrap(), DatabaseContractClassification::SupportedMigrationSource(ref marker) if marker.projection_schema_version == 171)
+    );
+    assert_eq!(snapshot(database.connection()), before);
+    database
+        .connection()
+        .execute_batch("DROP TRIGGER reject_directory_reference_marker;")
+        .unwrap();
+    database.migrate_project_directory_references().unwrap();
     database.migrate(false).unwrap();
     assert_eq!(snapshot(database.connection()), before);
     assert!(matches!(

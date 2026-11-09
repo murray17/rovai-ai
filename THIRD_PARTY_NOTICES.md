@@ -92,6 +92,17 @@ the exact tarball SHA-256, published `gitHead`, and the later fixed upstream
 commit that added the explicit MIT text; that text is included in the binary
 notices. No unknown or custom license expression remains in the bundled set.
 
+Markdown diagram rendering adds `mermaid 12.2.0` (MIT) and `dompurify 3.4.17`
+(Apache-2.0 OR MPL-2.0; used under Apache-2.0). Their exact package license files
+are retained in `legal/licenses/javascript/mermaid@12.2.0/` and
+`legal/licenses/javascript/dompurify@3.4.17/`. The locally bundled distributions
+retain their upstream license comments, including Mermaid's bundled dependency
+notices. They are a supplement to the archived manifests above. SHA-256 of the
+unmodified npm distribution inputs:
+
+- `mermaid/dist/mermaid.min.js`: `a8a6a6f805b074a8261a2825c86f99c8054acb3b35f50bb7e24a4f9f2c3c3b9f`
+- `dompurify/dist/purify.min.js`: `cd37898f9782adf54820c413191b5691803f0f137c799d6edcfd38523b4c2c31`
+
 ## 7. Rust Dependencies and SQLite
 
 The macOS arm64 release graph contains Rovai Core plus 119 third-party crates.
@@ -137,3 +148,11 @@ Rovai AI does not claim rights in third-party product names, logos,
 trademarks, characters, or people merely because a compatibility surface,
 notice, schema, or project artwork refers to them. All such rights remain with
 their respective owners.
+
+## 10. Phosphor Folder Icon
+
+The shared project-folder glyph uses Phosphor's regular `folder-open.svg`,
+under the MIT License. Its geometry is unchanged; the React wrapper applies
+Rovai's existing sizes, `currentColor`, and decorative accessibility attributes.
+Source: https://github.com/phosphor-icons/core/blob/main/assets/regular/folder-open.svg.
+The complete license is retained in `legal/licenses/phosphor-icons/LICENSE`.

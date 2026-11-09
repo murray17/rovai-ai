@@ -28,6 +28,8 @@ export type HostBoundChannelRequest =
   | 'roster.reconcile'
   | 'deliveries.settle'
   | 'host.tick'
+  | 'nativeInteractions.source'
+  | 'nativeInteractions.respond'
   | 'executionConsole.page.authorize'
   | 'executionConsole.recentOutput.authorize'
   | 'executionConsole.agentRun.cancel'

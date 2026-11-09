@@ -130,6 +130,14 @@ describe('DingTalk OpenAPI client', () => {
       imRobotOpenDeliverModel: { spaceType: 'IM_ROBOT' }
     })
     expect(calls[2]?.body.imRobotOpenDeliverModel).not.toHaveProperty('robotCode')
+    await client.createAndDeliverCard({ outTrackId: 'native-card', openSpaceId: 'dtv1.card//IM_GROUP.group-1', robotCode: 'ding-app', space: 'group',
+      cardTemplateId: 'native-question-template', creatorUserId: 'owner-1', cardParamMap: { question_id: 'native-question' } })
+    expect(calls[3]?.body).toMatchObject({ cardTemplateId: 'native-question-template', userId: 'owner-1', userIdType: 1, callbackType: 'STREAM' })
+    await client.updateCard('native-card', { card_status: 'submitted' }, {
+      privateData: { 'owner-1': { cardParamMap: { question_desc: '已发送' } } },
+      cardUpdateOptions: { updateCardDataByKey: true, updatePrivateDataByKey: true }
+    })
+    expect(calls[5]?.body).toMatchObject({ outTrackId: 'native-card', privateData: { 'owner-1': { cardParamMap: { question_desc: '已发送' } } } })
   })
 
   it.each([

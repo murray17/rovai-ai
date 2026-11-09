@@ -1,3 +1,10 @@
+import { InlineProjectFileReference } from './InlineProjectFileReference'
+import { projectFileLink } from './project-file-reference'
+import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
+import type { NativeInteractionView, NativeInteractionAnswer, NativeInteractionResult } from '@contracts'
+import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
+import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
+import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
 import { isReferenceAtom, isReferenceSegment, projectReference } from './thread-reference'
 import { ReplyDetails } from './ReplyDetails'
@@ -29,7 +36,7 @@ import type { MemberCreationView } from '@contracts'
 import { CopyIcon } from './CopyIcon'
 import { newCommandId } from '../../shared/command-id'
 import { useMobileLayout } from './MobileLayout'
-import { useThreadClient, useEditingRecovery, type ThreadClient } from './camp-client'
+import { useThreadClient, useThreadConnection, useEditingRecovery, type ThreadClient } from './camp-client'
 import { useExecutionDisclosureAnchor } from './useExecutionDisclosureAnchor'
 import { useExecutionMetrics, useExecutionMetricsVisibility } from './useExecutionMetrics'
 import { executionUsageTotal } from './execution-metrics-reader'
@@ -179,10 +186,12 @@ import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { mentionCandidateRuntime } from './mention-runtime'
 import { SafeMarkdown } from './SafeMarkdown'
+import { MessageMarkdown } from './MessageMarkdown'
 import { AgentMessageContent } from './AgentMessageContent'
 import { FilePreviewPane } from './FilePreviewPane'
 import { FilePreviewResizeHandle, FilePreviewWorkspace, useInitializeFilePreviewMinimumWidth, useOptionalFilePreviewLayout } from './FilePreviewLayout'
 import { useExecutionPreviewHost, useOptionalFilePreview } from './FilePreviewContext'
+import { EXECUTION_OVERVIEW_SCOPE, rememberExecutionTab, restoredExecutionTab } from './execution-tab-selection'
 import {
   agentRunFileChangeHasReviewableDiff,
   agentRunFileChangesPreviewTarget,
@@ -663,7 +672,10 @@ export type AgentExecutionProcess = {
   waitingDeliveries: MessageDeliveryView[]
 }
 
-const EXECUTION_OVERVIEW_SCOPE = '__execution_overview__'
+function executionTabForSnapshot(snapshot: ThreadSnapshot): string {
+  return restoredExecutionTab(snapshot.thread.id,
+    agentExecutionProcesses(snapshot.agentRuns, snapshot.messageDeliveries).map(process => process.agentId))
+}
 
 export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'waitReason'>): boolean {
   return NON_TERMINAL_RUNS.has(run.status)
@@ -1472,6 +1484,7 @@ export function structuredThreadContentPlainText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   const parts = content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return `@${currentUserName}`
@@ -1514,6 +1527,7 @@ function structuredThreadContentMarkdownText(
   const names = new Map(members.map((member) => [member.agentId, member.displayName]))
   return content.map((segment) => {
     if (segment.kind === 'text') return segment.text
+    if (segment.kind === 'project_file_reference') return projectFileLink(segment)
     if (isReferenceSegment(segment)) return projectReference(segment)
     if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
     if (segment.kind === 'member_mention') {
@@ -1637,7 +1651,8 @@ export function ThreadWorkspace({
   userAnchorNavigation,
   missionBoard = null,
   previewTabsInPane = false,
-  suppressExecutionAutoOpen = false,
+  executionAutoOpen = false,
+  suppressExecutionAutoOpen: suppressExecutionAutoOpenForSurface = false,
   initialComposerDraft = null,
   memberCreation = false,
   onPendingDraftChange,
@@ -1664,6 +1679,7 @@ export function ThreadWorkspace({
   onRemoveMember,
   onTasksChanged,
   onResolveApproval,
+  onRespondInteraction,
   cancellingTurnIds = new Set<string>(),
   cancellingRunIds = new Set<string>(),
   confirmingRunIds = new Set<string>(),
@@ -1700,6 +1716,7 @@ export function ThreadWorkspace({
   userAnchorNavigation?: ThreadUserAnchorNavigation
   missionBoard?: React.ReactNode
   previewTabsInPane?: boolean
+  executionAutoOpen?: boolean
   suppressExecutionAutoOpen?: boolean
   initialComposerDraft?: ThreadComposerDraftView | null
   memberCreation?: boolean
@@ -1726,7 +1743,8 @@ export function ThreadWorkspace({
   onPreviewMemberRemoval?(agentId: string): Promise<ThreadMemberRemovalPreview>
   onRemoveMember?(preview: ThreadMemberRemovalPreview): Promise<ThreadMemberRemoveOutcome>
   onTasksChanged(): Promise<void>
-  onResolveApproval(approval: ActionApprovalView, optionId: string): void
+  onResolveApproval(approval: ActionApprovalView, optionId: string): void | Promise<void>
+  onRespondInteraction?(interaction: NativeInteractionView, answer: NativeInteractionAnswer): Promise<NativeInteractionResult>
   cancellingTurnIds?: ReadonlySet<string>
   cancellingRunIds?: ReadonlySet<string>
   confirmingRunIds?: ReadonlySet<string>
@@ -1855,6 +1873,7 @@ export function ThreadWorkspace({
     hasUnavailableAtom: false,
     memberAgentIds: []
   })
+  const [fileInsertionPending, setFileInsertionPending] = useState(false)
   const singleChatLeaveGuardRef = useRef<(() => ThreadLeavePreparation) | null>(null)
   const bindSingleChatLeaveGuard = useCallback((guard: (() => ThreadLeavePreparation) | null): void => {
     singleChatLeaveGuardRef.current = guard
@@ -1868,6 +1887,7 @@ export function ThreadWorkspace({
   const [composerInviteMessage, setComposerInviteMessage] = useState<string | null>(null)
   const [routingMutating, setRoutingMutating] = useState(false)
   const mobile = useMobileLayout()
+  const suppressExecutionAutoOpen = !executionAutoOpen || mobile || suppressExecutionAutoOpenForSurface
   const composerSubmittingRef = useRef(false)
   const routingMutatingRef = useRef(false)
   const composerLockAwaitingDisabledCommitRef = useRef(false)
@@ -1892,7 +1912,7 @@ export function ThreadWorkspace({
     candidates: ComposerSkillCandidates
     status: 'loading' | 'ready' | 'error'
     refreshFailed: boolean
-  }>({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
+  }>({ candidates: { skills: [], errors: [], diagnostics: [] }, status: 'loading', refreshFailed: false })
   const [skillCatalogRefreshing, setSkillCatalogRefreshing] = useState(false)
   const refreshSkillCatalogRef = useRef<((refresh?: boolean) => void) | null>(null)
   const composerEditorRef = useRef<HTMLDivElement>(null)
@@ -2137,6 +2157,7 @@ export function ThreadWorkspace({
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
   )
+  const [workspaceEntryTab] = useState(() => workspaceEntrySelection ? executionTabForSnapshot(snapshot) : null)
   const workspaceEntryRunningRun = workspaceEntrySelection?.focusedRun ?? null
   const [executionPlacementPending, setExecutionPlacementPending] = useState(false)
   const [executionPlacementError, setExecutionPlacementError] = useState<{
@@ -2149,11 +2170,20 @@ export function ThreadWorkspace({
   )
   const [executionShortcutCollapsed, setExecutionShortcutCollapsed] = useState(false)
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(
-    workspaceEntrySelection?.selectedAgentId ?? null
+    workspaceEntryTab
   )
   const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(
-    workspaceEntrySelection?.focusedRun.id ?? null
+    workspaceEntryTab === EXECUTION_OVERVIEW_SCOPE ? workspaceEntrySelection?.focusedRun.id ?? null : null
   )
+  const executionSelectionClosed = useRef(false)
+  const executionSelectionSurface = useRef<string | null>(null)
+  const selectExecutionTab = useCallback((agentId: string | null): void => {
+    if (agentId !== null) {
+      executionSelectionClosed.current = false
+      rememberExecutionTab(snapshot.thread.id, agentId)
+    }
+    setExecutionDrawerAgentId(agentId)
+  }, [snapshot.thread.id])
   const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
     sequence: workspaceEntryRunningRun ? 1 : 0,
     moveDomFocus: false
@@ -2356,7 +2386,7 @@ export function ThreadWorkspace({
     let cancelled = false
     let requestSequence = 0
     let requested = false
-    setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
+    setComposerSkillCatalog({ candidates: { skills: [], errors: [], diagnostics: [] }, status: 'loading', refreshFailed: false })
     setSkillCatalogRefreshing(false)
     const loadSkillCatalog = async (refresh = false): Promise<void> => {
       if (requested && !refresh) return
@@ -2380,7 +2410,7 @@ export function ThreadWorkspace({
     const invalidate = (): void => {
       requestSequence += 1
       requested = false
-      setComposerSkillCatalog({ candidates: { skills: [], errors: [] }, status: 'loading', refreshFailed: false })
+      setComposerSkillCatalog({ candidates: { skills: [], errors: [], diagnostics: [] }, status: 'loading', refreshFailed: false })
     }
     const unsubscribeInvalidation = client.onInvalidated?.(invalidate)
     const unsubscribe = client.onEvent?.((event) => {
@@ -2459,8 +2489,9 @@ export function ThreadWorkspace({
     if (suppressExecutionAutoOpen || rightPreviewBlocksExecutionAutoOpen) return
     const entrySelection = executionWorkspaceEntrySelection(snapshot.agentRuns)
     const runningRun = entrySelection?.focusedRun ?? null
-    setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
-    setExecutionDrawerFocusedRunId(entrySelection?.focusedRun.id ?? null)
+    const selectedTab = runningRun ? executionTabForSnapshot(snapshot) : null
+    selectExecutionTab(selectedTab)
+    setExecutionDrawerFocusedRunId(selectedTab === EXECUTION_OVERVIEW_SCOPE ? runningRun?.id ?? null : null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: false
@@ -2486,7 +2517,8 @@ export function ThreadWorkspace({
     snapshot.agentRuns,
     workspaceEntrySnapshotReady,
     suppressExecutionAutoOpen,
-    rightPreviewBlocksExecutionAutoOpen
+    rightPreviewBlocksExecutionAutoOpen,
+    selectExecutionTab
   ])
   useLayoutEffect(() => {
     if (workspaceEntryInspectorHandled.current) return
@@ -2518,8 +2550,9 @@ export function ThreadWorkspace({
       ? executionWorkspaceEntrySelection(snapshot.agentRuns)
       : null
     const runningRun = entrySelection?.focusedRun ?? null
-    setExecutionDrawerAgentId(entrySelection?.selectedAgentId ?? null)
-    setExecutionDrawerFocusedRunId(entrySelection?.focusedRun.id ?? null)
+    const selectedTab = runningRun ? executionTabForSnapshot(snapshot) : null
+    selectExecutionTab(selectedTab)
+    setExecutionDrawerFocusedRunId(selectedTab === EXECUTION_OVERVIEW_SCOPE ? runningRun?.id ?? null : null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: false
@@ -2533,7 +2566,7 @@ export function ThreadWorkspace({
     } else if (runningRun && executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady])
+  }, [executionPlacement, filePreview, inspectorTab, mobile, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, suppressExecutionAutoOpen, rightPreviewBlocksExecutionAutoOpen, workspaceEntrySnapshotReady, selectExecutionTab])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
@@ -2603,6 +2636,7 @@ export function ThreadWorkspace({
     runSourceNavigation.messages, anchoredMessages, anchorNavigation.navigation.windowMessages(), optimisticMessages, snapshot.messages
   ).filter(message => !message.missionStart),
   [runSourceNavigation.messages, anchoredMessages, anchorNavigation.window, anchorNavigation.anchors, anchorNavigation.navigation, optimisticMessages, snapshot.messages])
+  const messageExport = useMessageExport(snapshot.thread.id, visibleThreadMessages)
   const normalStart = messageHistory?.oldestLoadedSequence ?? snapshot.messages[0]?.sequence ?? null
   const anchorWindowEnd = anchorNavigation.window?.messages.at(-1)?.sequence ?? null
   const hasAnchorGap = normalStart !== null && anchorWindowEnd !== null && anchorWindowEnd < normalStart
@@ -2736,10 +2770,10 @@ export function ThreadWorkspace({
   }, [effectiveComposerDraft, composerSkillCatalog.status, composerSkills, snapshot.thread.id])
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
-  const composerInteractionDisabled = draftLoadState.state !== 'ready'
+  const composerInteractionDisabled = messageExport.selecting || draftLoadState.state !== 'ready'
     || routingMutating
     || composerSubmitting
-  const composerSendDisabled = composerSendIsDisabled({
+  const composerSendDisabled = fileInsertionPending || composerSendIsDisabled({
     hasSendablePayload,
     hasAvailableRecipient,
     hasUnavailableMention,
@@ -2770,6 +2804,26 @@ export function ThreadWorkspace({
   const executionDrawerProfile = executionDrawerProcess && !executionDrawerOverview
     ? profileById.get(executionDrawerProcess.agentId) ?? null
     : null
+  useLayoutEffect(() => {
+    const visible = replyExecutionVisible || (executionPlacement === 'bottom'
+      ? executionDrawerAgentId !== null && !executionShortcutCollapsed
+      : executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab,
+        Boolean(filePreview?.paneVisible && filePreview.activeTab?.kind === 'execution')))
+    const surface = visible ? `${snapshot.thread.id}:${replyExecutionVisible ? 'reply' : executionPlacement}` : null
+    if (executionSelectionSurface.current !== surface) {
+      executionSelectionSurface.current = surface
+      executionSelectionClosed.current = false
+    }
+    // Closing a selection is intentional even when another host, such as reply details, stays visible.
+    if (!workspaceEntrySnapshotReady || !visible || executionSelectionClosed.current
+      || executionDrawerProcess || executionProcessByAgentId.size === 0) return
+    selectExecutionTab(restoredExecutionTab(snapshot.thread.id, executionProcessByAgentId.keys()))
+    setExecutionDrawerFocusedRunId(null)
+    setExecutionDrawerFocusRequest(request => ({ sequence: request.sequence + 1, moveDomFocus: false }))
+  }, [executionPlacement, executionDrawerAgentId, executionDrawerProcess, executionShortcutCollapsed,
+    inspectorVisible, inspectorSurfaceTab, filePreview?.paneVisible, filePreview?.activeTab?.kind,
+    replyExecutionVisible, workspaceEntrySnapshotReady, snapshot.thread.id, executionProcessByAgentId,
+    selectExecutionTab])
   const executionDrawerInstallation = executionDrawerProfile?.runtimeConfiguration
     ? runtimeEditorInstallation(
         installations,
@@ -2777,7 +2831,11 @@ export function ThreadWorkspace({
       )
     : null
   const pendingApprovals = snapshot.approvals.filter((approval) => approval.status === 'pending')
-  const previousPendingApprovalCount = useRef(pendingApprovals.length)
+  const nativeInteractions = snapshot.nativeInteractions ?? []
+  useEffect(() => {
+    if (snapshot.nativeInteractions) retainInteractionDrafts({ threadId: snapshot.thread.id, conversationId: null }, new Set(snapshot.nativeInteractions.map(request => request.id)))
+  }, [snapshot.thread.id, snapshot.nativeInteractions])
+  const previousPendingInteractionCount = useRef(pendingApprovals.length + nativeInteractions.length)
   const executionEventsByRunId = useMemo(
     () => groupExecutionEventsByRunId(
       snapshot.agentRuns,
@@ -3677,14 +3735,14 @@ export function ThreadWorkspace({
   }), [draftCoordinator, snapshot.thread.id, publishedMessageSequence])
 
   useEffect(() => {
-    const previousCount = previousPendingApprovalCount.current
-    previousPendingApprovalCount.current = pendingApprovals.length
-    if (conversationFind.open) return
-    if (pendingApprovals.length >= previousCount) return
-    if (pendingApprovals.length === 0) {
+    const previousCount = previousPendingInteractionCount.current
+    const count = pendingApprovals.length + nativeInteractions.length
+    previousPendingInteractionCount.current = count
+    if (conversationFind.open || count >= previousCount) return
+    if (count === 0 && (document.activeElement === document.body || approvalDockRef.current?.contains(document.activeElement))) {
       composerEditorRef.current?.focus()
     }
-  }, [conversationFind.open, pendingApprovals.length])
+  }, [conversationFind.open, pendingApprovals.length, nativeInteractions.length])
 
   useEffect(() => {
     if (
@@ -3737,13 +3795,13 @@ export function ThreadWorkspace({
     } else if (executionPlacement === 'right') {
       filePreview?.openExecution()
     }
-    setExecutionDrawerAgentId(run.agentId)
+    selectExecutionTab(run.agentId)
     setExecutionDrawerFocusedRunId(run.id)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
       moveDomFocus: true
     }))
-  }, [executionPlacement, filePreview, inspectorTab, notificationFocus, onOpenInspector, snapshot.agentRuns, snapshot.thread.id])
+  }, [executionPlacement, filePreview, inspectorTab, notificationFocus, onOpenInspector, snapshot.agentRuns, snapshot.thread.id, selectExecutionTab])
 
   useEffect(() => {
     if (!notificationFocus?.active || notificationFocus.kind === 'single_chat') return undefined
@@ -4258,7 +4316,7 @@ export function ThreadWorkspace({
     ) return
     const threadId = snapshot.thread.id
     const composerHandle = composerHandleRef.current
-    if (!composerHandle) return
+    if (!composerHandle || composerHandle.hasPendingFileInsertion()) return
     followTimelineAfterUserSend(threadId)
     composerSubmittingRef.current = true
     setComposerSubmitting(true)
@@ -4271,13 +4329,14 @@ export function ThreadWorkspace({
     try {
       composerHandle.adoptHistoryPreview()
       await attachmentPreparationQueue.current
-      const flushed = await composerHandle.flush()
+      const flushed = await composerHandle.flush({ forSubmission: true })
       const frozenDraft = flushed.draft ?? draftCoordinator.getCurrentDraft()
       if (!frozenDraft) throw new Error(uiAttribute('Composer Draft 尚未就绪。'))
       const currentSnapshot = activeSnapshotRef.current
       const routedDraft = materializeLocalContinuation(frozenDraft, currentSnapshot.members)
       if (routedDraft.content.segments.some(segment => segment.kind === 'atom' && isReferenceAtom(segment.atom))
         && !routedDraft.content.segments.some(segment => segment.kind === 'text' && segment.text.trim())
+        && !routedDraft.content.segments.some(segment => segment.kind === 'atom' && (segment.atom.type === 'project_file_reference' || segment.atom.type === 'skill'))
         && !routedDraft.attachments.length) throw new Error(uiAttribute('请补充本轮内容'))
       // Flush can change recipients; keep the execution snapshot from this
       // submission so an ended target cannot turn into a successor's Steer.
@@ -4314,6 +4373,7 @@ export function ThreadWorkspace({
         pendingDraftPersistence.current!.acknowledgeActivation(threadId)
       }
       if (mountedThreadId.current === threadId
+        && !suppressExecutionAutoOpen
         && (sendReceipt.deliveryIds.length || sendReceipt.agentRunIds.length)) {
         setSubmittedExecutionRequests((current) => [...current, {
           ...sendReceipt,
@@ -4999,7 +5059,7 @@ export function ThreadWorkspace({
       executionDrawerReturnAgentIdRef.current = null
     }
     setExecutionShortcutCollapsed(false)
-    setExecutionDrawerAgentId(agentId)
+    selectExecutionTab(agentId)
     setExecutionDrawerFocusedRunId(focusedRunId)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
@@ -5021,7 +5081,7 @@ export function ThreadWorkspace({
     if (trigger) executionDrawerTriggerRef.current = trigger
     setExecutionShortcutCollapsed(false)
     executionDrawerReturnAgentIdRef.current = EXECUTION_OVERVIEW_SCOPE
-    setExecutionDrawerAgentId(EXECUTION_OVERVIEW_SCOPE)
+    selectExecutionTab(EXECUTION_OVERVIEW_SCOPE)
     setExecutionDrawerFocusedRunId(null)
     setExecutionDrawerFocusRequest((request) => ({
       sequence: request.sequence + 1,
@@ -5029,9 +5089,16 @@ export function ThreadWorkspace({
     }))
   }
 
+  const openPreferredExecutionTab = (moveDomFocus = true, trigger: HTMLButtonElement | null = null): void => {
+    const agentId = restoredExecutionTab(snapshot.thread.id, executionProcessByAgentId.keys())
+    if (agentId === EXECUTION_OVERVIEW_SCOPE) openExecutionOverview(trigger, moveDomFocus)
+    else openExecutionProcess(agentId, trigger, { moveDomFocus })
+  }
+
   const closeExecutionProcess = (): void => {
     executionEntryInteractionThreadId.current = snapshot.thread.id
-    setExecutionDrawerAgentId(null)
+    executionSelectionClosed.current = true
+    selectExecutionTab(null)
     setExecutionDrawerFocusedRunId(null)
   }
 
@@ -5119,7 +5186,7 @@ export function ThreadWorkspace({
     || conversationFindTotal <= 0
 
   // Share message semantics with the timeline; only the reader's outer layout differs.
-  const renderPublicMessageBody = (message: ThreadMessageView, context: 'timeline' | 'reply', forceExpanded = false): JSX.Element => {
+  const renderPublicMessageBody = (message: ThreadMessageView, context: 'timeline' | 'reply' | 'export', forceExpanded = false): JSX.Element => {
     const onFileReference: FileReferenceActivation = (rawReference, source, target) => {
       if (!filePreview) return
       if (context === 'reply') closeReplyDetails()
@@ -5135,7 +5202,7 @@ export function ThreadWorkspace({
         onFileReference={onFileReference} />
     }
     return <TruncatedStructuredMessageBody body={message.body} content={message.content} members={snapshot.members}
-      pendingMemberProfiles={pendingMemberProfiles} leadingRecipientAgentId={defaultRecipientMentionAgentId(message)}
+      pendingMemberProfiles={pendingMemberProfiles} leadingRecipientAgentId={context === 'export' ? null : defaultRecipientMentionAgentId(message)}
       truncate={context === 'timeline' && (message.authorType === 'user' || message.authorType === 'external_principal')}
       forceExpanded={forceExpanded} renderLeadingCurrentUserMarkdown={message.authorType === 'agent'}
       onActivateCurrentUserMention={openCurrentUserProfilePopover} onActivateMemberMention={openMemberProfilePopover}
@@ -5143,6 +5210,24 @@ export function ThreadWorkspace({
       onActivateSkillMention={openSkillPreview} onFileReference={onFileReference} />
   }
 
+  const groupingMessage = (message: ThreadMessageView): ThreadMessageView => ({
+    ...message,
+    threadTurnId: message.threadTurnId
+      ?? (message.sourceAgentRunId ? runById.get(message.sourceAgentRunId)?.threadTurnId : null)
+      ?? null
+  })
+  const publicMessagesJoin = (message: ThreadMessageView, next: ThreadMessageView): boolean =>
+    shortPublicMessages.has(message.id) && samePublicMessageSegment(groupingMessage(message), groupingMessage(next))
+  const exportEntry = (message: ThreadMessageView): MessageExportEntry => {
+    const names = new Map(messageMentionNames.map(member => [member.agentId, member.displayName]))
+    const parent = message.replyToThreadMessageId ? replyParentById.get(message.replyToThreadMessageId) : null
+    const index = presenceTimeline.findIndex(item => item.kind === 'camp_message' && item.message.id === message.id)
+    const next = index >= 0 ? presenceTimeline[index + 1] : undefined
+    return createMessageExportEntry(message, { memberById, names, currentUserName, avatarDataUrl: currentUserProfile.avatarDataUrl, parent,
+      nextGroupedMessageId: next?.kind === 'camp_message' && publicMessagesJoin(message, next.message) ? next.message.id : null,
+      runtimeImages: presenceTimeline.flatMap(item => item.kind === 'camp_message' && item.message.id === message.id ? item.runtimeImageGroups.flatMap(group => group.images) : []) })
+  }
+  const openSelectedExport = (): void => messageExport.open(messageExport.eligible.filter(m => messageExport.selected.has(m.id)).map(m => exportEntry(m)))
   const executionDrawer = executionDrawerProcess ? (
     <ExecutionDrawer
       key={executionDrawerProcess.agentId}
@@ -5185,7 +5270,7 @@ export function ThreadWorkspace({
     const opened = executionPlacement === 'bottom' ? executionDrawerAgentId !== null && !executionShortcutCollapsed
       : executionPlacement === 'right' ? rightExecutionVisible : inspectorVisible && inspectorSurfaceTab === 'execution'
     if (!opened) {
-      if (executionDrawerAgentId === null) openExecutionOverview()
+      if (executionDrawerAgentId === null) openPreferredExecutionTab()
       else if (executionPlacement === 'right') filePreview?.openExecution()
       else if (executionPlacement === 'inspector') { setExecutionInspectorActive(true); onOpenInspector?.(inspectorTab) }
       else setExecutionShortcutCollapsed(false)
@@ -5261,7 +5346,9 @@ export function ThreadWorkspace({
         navigateUserAnchor(messageId)
       }
     }}>
-    <section ref={workspaceShellRef} className={`workspace-shell camp-workspace${replyDetail.messageId ? ' reply-detail-open' : ''}${replyFull ? ' reply-detail-full' : ''}`} style={{ '--reply-detail-width': `${replyWidth}px` } as CSSProperties} data-mobile-panel={mobile && inspectorVisible ? inspectorSurfaceTab : undefined} data-mobile-execution-maximized={mobile && mobileExecutionMaximized || undefined} aria-label={uiAttribute("会话：{0}", String(formatThreadTitle(snapshot.thread, firstRunThreadId)))}>
+    <section ref={workspaceShellRef} className={`workspace-shell camp-workspace${messageExport.selecting ? ' message-export-selecting' : ''}${replyDetail.messageId ? ' reply-detail-open' : ''}${replyFull ? ' reply-detail-full' : ''}`} style={{ '--reply-detail-width': `${replyWidth}px` } as CSSProperties} data-mobile-panel={mobile && inspectorVisible ? inspectorSurfaceTab : undefined} data-mobile-execution-maximized={mobile && mobileExecutionMaximized || undefined} aria-label={uiAttribute("会话：{0}", String(formatThreadTitle(snapshot.thread, firstRunThreadId)))}>
+      <MessageExportDialog key={snapshot.thread.id} threadId={snapshot.thread.id} title={formatThreadTitle(snapshot.thread, firstRunThreadId)}
+        entries={messageExport.entries} renderBody={message => renderPublicMessageBody(message, 'export', true)} onClose={messageExport.close} />
       <FilePreviewWorkspace
       >
         <RevealNotificationConversation active={!!notificationFocus?.active
@@ -5666,18 +5753,10 @@ export function ThreadWorkspace({
                     && previousMessageAuthorKey === messageAuthorKey
                   const previousItem = presenceTimeline[timelineIndex - 1]
                   const nextItem = presenceTimeline[timelineIndex + 1]
-                  const groupingMessage = (message: ThreadMessageView): ThreadMessageView => ({
-                    ...message,
-                    threadTurnId: message.threadTurnId
-                      ?? (message.sourceAgentRunId ? runById.get(message.sourceAgentRunId)?.threadTurnId : null)
-                      ?? null
-                  })
                   const isGroupContinuation = previousItem?.kind === 'camp_message'
-                    && shortPublicMessages.has(previousItem.message.id)
-                    && samePublicMessageSegment(groupingMessage(previousItem.message), groupingMessage(campMessage))
+                    && publicMessagesJoin(previousItem.message, campMessage)
                   const joinsNextMessage = nextItem?.kind === 'camp_message'
-                    && shortPublicMessages.has(campMessage.id)
-                    && samePublicMessageSegment(groupingMessage(campMessage), groupingMessage(nextItem.message))
+                    && publicMessagesJoin(campMessage, nextItem.message)
                   const messageTime = messageTimeParts(campMessage.createdAt, interfaceLanguage, messageTimeDate)
                   const messageTimestamp = !joinsNextMessage && messageTime ? (
                     <time className="message-action-time" dateTime={campMessage.createdAt} tabIndex={0}
@@ -5687,8 +5766,10 @@ export function ThreadWorkspace({
                   ) : undefined
                   const campMessageDeliveries = snapshot.messageDeliveries.filter((delivery) =>
                     delivery.deliveryKind === 'public_a2a'
-                    && !delivery.continuationRequest
-                    && delivery.messageId === campMessage.id
+                    && (delivery.continuationRequest
+                      ? campMessage.authorType === 'user'
+                        && (delivery.inputMessageIds ?? [delivery.messageId]).includes(campMessage.id)
+                      : delivery.messageId === campMessage.id)
                   )
                   const userMessageRuns = campMessage.authorType === 'user'
                     ? snapshot.agentRuns.filter((run) =>
@@ -5761,11 +5842,16 @@ export function ThreadWorkspace({
                       className={messageClasses}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
+                      data-export-selected={messageExport.selecting && messageExport.selected.has(campMessage.id) || undefined}
                       data-camp-turn-id={campMessage.threadTurnId ?? sourceRun?.threadTurnId}
                       aria-label={uiAttribute("{0}，{1}，第{2}条消息", String(author), String(messageClockTime(campMessage.createdAt)), String(campMessage.sequence))}
                       tabIndex={-1}
                       style={member ? { '--agent-accent': identityColorToken(member.agentId) } as React.CSSProperties : undefined}
                     >
+                      {messageExport.selecting && messageExport.eligible.some(m => m.id === campMessage.id) && <label className="message-export-check" data-quote-exclude>
+                        <input type="checkbox" checked={messageExport.selected.has(campMessage.id)} onChange={() => undefined}
+                          onClick={event => messageExport.toggle(campMessage.id, event.shiftKey)} aria-label={uiAttribute('选择 {0} 的消息', author)} />
+                      </label>}
                       {campMessage.authorType === 'agent' && (authorProfileAvailable
                         ? (
                             <MessageAuthorProfileTrigger
@@ -5856,6 +5942,7 @@ export function ThreadWorkspace({
                                 ) : undefined}
                                 onReply={humanAuthored ? undefined : handleReply}
                                 onCopy={handleCopy}
+                                onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                               >
                                 <MessageQuotes history quotes={campMessage.quotes ?? []} onReveal={revealQuote} />
 
@@ -5926,6 +6013,7 @@ export function ThreadWorkspace({
                                     className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                                     onReply={handleReply}
                                     onCopy={handleCopy}
+                                    onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                                   />
                                 )}
                               </div>
@@ -5986,6 +6074,7 @@ export function ThreadWorkspace({
                           className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                           onReply={handleReply}
                           onCopy={handleCopy}
+                          onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                         />
                       </div>
                     )
@@ -6081,7 +6170,7 @@ export function ThreadWorkspace({
                 if (tab === 'tasks' && !tasksEnabled) return
                 if (tab === 'execution' && executionPlacement === 'right') {
                   onCloseInspector()
-                  if (executionDrawerAgentId === null) openExecutionOverview(null, false)
+                  if (executionDrawerAgentId === null) openPreferredExecutionTab(false)
                   else filePreview?.openExecution()
                   return
                 }
@@ -6166,6 +6255,7 @@ export function ThreadWorkspace({
                 members={snapshot.members}
                 entryHost={detailEntryHost}
                 visible={singleChatVisible}
+                prefetchEnabled={workspaceEntrySnapshotReady}
                 onOpen={onOpenSingleChat}
                 onClose={mobile ? closeMobileSecondaryPanel : onCloseSingleChat}
                 onNotify={onNotify}
@@ -6183,6 +6273,7 @@ export function ThreadWorkspace({
               selectedAgentId={executionShortcutCollapsed ? null : executionDrawerAgentId}
               onOpen={openExecutionProcess}
               onOpenOverview={openExecutionOverview}
+              onExpand={trigger => openPreferredExecutionTab(true, trigger)}
               onClose={closeExecutionProcess}
               onPlacementMenuIntent={captureExecutionPlacementMenuReadingPosition}
               onPlacementMenuOpenChange={trackExecutionPlacementMenu}
@@ -6248,9 +6339,13 @@ export function ThreadWorkspace({
           onDragLeave={leaveAttachmentDropSurface}
           onDrop={dropAttachments}
         >
-          {pendingApprovals.length > 0 && (
-            <ApprovalDock
+          <ApprovalDock
               approvals={pendingApprovals}
+              interactions={nativeInteractions}
+              agentRuns={snapshot.agentRuns}
+              threadId={snapshot.thread.id}
+              onRespond={onRespondInteraction}
+              onNotice={onNotify}
               profileById={profileById}
               busy={busy}
               onResolve={onResolveApproval}
@@ -6262,8 +6357,7 @@ export function ThreadWorkspace({
                 ? notificationFocus.approvalId ?? null
                 : null}
               onFocusPresented={onNotificationFocusPresented}
-            />
-          )}
+          />
 
           {runtimeRecovery && runtimeRecovery.targets.length > 0 && (
             <RuntimeRecoveryDock
@@ -6275,7 +6369,10 @@ export function ThreadWorkspace({
             />
           )}
 
+          <div className="message-composer-selection-slot">
+          <MessageSelectionDock selection={messageExport} onExport={openSelectedExport} />
           <form
+        style={{ visibility: messageExport.selecting ? 'hidden' : undefined }} inert={messageExport.selecting}
         className={[
           'composer',
           attachmentDragState ? 'is-dragging-attachments' : ''
@@ -6513,7 +6610,7 @@ export function ThreadWorkspace({
             <StructuredMentionComposer
               ref={composerHandleRef}
               id="camp-message"
-              referenceScope={{ threadId: snapshot.thread.id, client }}
+              referenceScope={{ threadId: snapshot.thread.id, client, projectBound: snapshot.thread.projectBindingKind === 'directory' }}
               draftIdentity={`${snapshot.thread.id}:composer`}
               inputHistory={() => threadInputHistory(visibleThreadMessages)}
               onEffectiveDocumentChange={content => {
@@ -6531,6 +6628,7 @@ export function ThreadWorkspace({
               persistDocument={(content) => saveStructuredDraft(snapshot.thread.id, content)}
               waitForDraftAuthority={() => draftCoordinator.waitForIdle().then(() => undefined)}
               onLocalStatusChange={setComposerLocalStatus}
+              onFileInsertionPendingChange={setFileInsertionPending}
               onPersistenceErrorChange={setComposerPersistenceError}
               onBackspaceAtStart={composerDraft?.replyIntent
                 ? () => cancelReply('start')
@@ -6544,7 +6642,7 @@ export function ThreadWorkspace({
               pendingInviteIds={pendingInviteIds}
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
-              skillCatalogErrors={composerSkillCatalog.candidates.errors}
+              skillCatalogErrors={[...composerSkillCatalog.candidates.errors, ...nativeSkillCatalogNotices(composerSkillCatalog.candidates.diagnostics ?? [])]}
               skillCatalogRefreshFailed={composerSkillCatalog.refreshFailed}
               skillCatalogRefreshing={skillCatalogRefreshing}
               onNeedSkills={() => refreshSkillCatalogRef.current?.()}
@@ -6654,6 +6752,7 @@ export function ThreadWorkspace({
         </div>
         </div>
           </form>
+          </div>
         </div>
         {attachmentDragState && (
           <div
@@ -6888,6 +6987,7 @@ function RunPulse({
   revealRequest = 0,
   onOpen,
   onOpenOverview,
+  onExpand,
   onClose,
   onPlacementMenuIntent,
   onPlacementMenuOpenChange,
@@ -6906,6 +7006,7 @@ function RunPulse({
   revealRequest?: number
   onOpen(agentId: string, trigger: HTMLButtonElement): void
   onOpenOverview(trigger: HTMLButtonElement): void
+  onExpand?(trigger: HTMLButtonElement): void
   onClose(): void
   onPlacementMenuIntent(): void
   onPlacementMenuOpenChange(open: boolean): void
@@ -7035,7 +7136,10 @@ function RunPulse({
         aria-controls="agent-execution-drawer"
         aria-label={selectedAgentId === null ? uiAttribute("展开执行详情") : uiAttribute("收起执行详情")}
         onClick={(event) => {
-          if (selectedAgentId === null) onOpenOverview(event.currentTarget)
+          if (selectedAgentId === null) {
+            if (onExpand) onExpand(event.currentTarget)
+            else onOpenOverview(event.currentTarget)
+          }
           else onClose()
         }}
       >
@@ -8374,21 +8478,37 @@ function UserMessageDeliveryReceipt({
     if (!runByAgentId.has(run.agentId)) runByAgentId.set(run.agentId, run)
   }
   const ordered = message.addressedAgentIds.map((agentId) => {
-    const delivery = deliveries.find(d => d.recipientAgentId === agentId)
-    const run = allRuns.find(r => r.id === delivery?.targetAgentRunId) ?? runByAgentId.get(agentId) ?? null
+    let delivery = deliveries.find(d => d.recipientAgentId === agentId && !d.continuationRequest)
+    const boundRun = allRuns.find(r => r.id === delivery?.targetAgentRunId)
+    const latestRun = runByAgentId.get(agentId)
+    let run = delivery?.requestedMode === 'steer' ? boundRun ?? latestRun ?? null
+      : latestRun && (!boundRun || latestRun.createdAt >= boundRun.createdAt) ? latestRun : boundRun ?? null
+    if (delivery?.requestedMode !== 'steer') {
+      const continuation = deliveries.filter(d => d.recipientAgentId === agentId && d.continuationRequest)
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0]
+      const runDelivery = deliveries.find(d => d.targetAgentRunId === run?.id)
+      // A queued continuation has no Run yet. Once claimed, its own Run or a
+      // newer input Run owns the receipt; the original Delivery stays historical.
+      if (continuation && (!run || continuation.targetAgentRunId === run.id
+        || continuation.createdAt >= (runDelivery?.createdAt ?? run.createdAt))) {
+        delivery = continuation
+        run = allRuns.find(r => r.id === continuation.targetAgentRunId) ?? null
+      }
+    }
+    const deliveryOwnsStatus = delivery?.requestedMode === 'steer' || !run || delivery?.targetAgentRunId === run.id
     // Classify each target once. A Steer receipt describes delivery, even when
     // its target Run later finishes; ordinary targets describe execution.
     const status = delivery?.requestedMode === 'steer' && delivery.inputDeliveryStatus === 'accepted' ? 'steered'
-      : delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
-      : delivery?.status === 'failed' || run?.status === 'failed' ? 'failed'
-      : delivery?.status === 'cancelled' || run?.status === 'cancelled' ? 'stopped'
+      : deliveryOwnsStatus && delivery?.inputDeliveryStatus === 'delivery_unknown' ? 'unknown'
+      : (deliveryOwnsStatus && delivery?.status === 'failed') || run?.status === 'failed' ? 'failed'
+      : (deliveryOwnsStatus && delivery?.status === 'cancelled') || run?.status === 'cancelled' ? 'stopped'
       : delivery?.requestedMode === 'steer' && delivery.status === 'claimed' ? delivery.dispatchPhase === 'attempting' ? 'steerSending' : 'steerPending'
       : run?.status === 'succeeded' || (!run && delivery?.status === 'settled') ? 'completed'
       : run && agentRunIsStarting(run) ? 'starting'
-      : delivery?.status === 'waiting' || !run ? 'pending'
+      : (deliveryOwnsStatus && delivery?.status === 'waiting') || !run ? 'pending'
       : 'inProgress'
     return { agentId, delivery, run, status }
-  })
+  }).filter(item => item.run !== null || item.delivery !== undefined)
   const steered = ordered.filter(item => item.status === 'steered')
   const unknown = ordered.filter(item => item.status === 'unknown')
   const steerPending = ordered.filter(item => item.status === 'steerPending')
@@ -8453,6 +8573,7 @@ function UserMessageDeliveryReceipt({
               const displayName = member?.displayName ?? agentId
               const statusLabel = status === 'failed' ? uiAttribute('执行失败')
                 : status === 'stopped' ? uiAttribute('已停止')
+                : status === 'pending' ? uiAttribute('待处理')
                 : delivery?.requestedMode === 'steer'
                   ? delivery.inputDeliveryStatus === 'accepted' ? uiAttribute('运行时已接收')
                     : delivery.inputDeliveryStatus === 'delivery_unknown' ? uiAttribute('是否送达待核对')
@@ -8461,7 +8582,7 @@ function UserMessageDeliveryReceipt({
               return <div className="user-message-receipt-recipient" key={agentId}>
                 <MemberAvatar agentId={agentId} avatarRef={member?.avatarRef ?? null} displayName={displayName} size="mention" decorative />
                 <span><strong>{displayName}</strong><small>{statusLabel}</small></span>
-                {delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
+                {status === 'unknown' && delivery?.inputDeliveryStatus === 'delivery_unknown' && onReconcile ? <button type="button" disabled={checking === delivery.id} onClick={async () => {
                   setChecking(delivery.id); setCheckResult(null)
                   try {
                     const status = await onReconcile(delivery.id)
@@ -9378,179 +9499,225 @@ function ThreadMembersPanel({
   )
 }
 
+const connectedSnapshot = (): boolean => true
+const noConnectionSubscription = (): (() => void) => () => undefined
+
 export function ApprovalDock({
-  approvals,
-  profileById,
-  busy,
-  onResolve,
-  containerRef,
-  focusRequest,
-  focusApprovalId,
-  onFocusPresented
+  approvals, interactions = [], agentRuns = [], threadId = '', conversationId = null, onRespond, onNotice,
+  profileById, busy, onResolve, containerRef, focusRequest, focusApprovalId, onFocusPresented
 }: {
   approvals: ActionApprovalView[]
+  interactions?: NativeInteractionView[]
+  agentRuns?: Pick<AgentRunView, 'id' | 'agentId'>[]
+  threadId?: string
+  conversationId?: string | null
+  onRespond?(interaction: NativeInteractionView, answer: NativeInteractionAnswer): Promise<NativeInteractionResult>
+  onNotice?(message: string): void
   profileById: Map<string, AgentProfile>
   busy: boolean
-  onResolve(approval: ActionApprovalView, optionId: string): void
+  onResolve(approval: ActionApprovalView, optionId: string): void | Promise<void>
   containerRef: RefObject<HTMLElement | null>
   focusRequest: number | null
   focusApprovalId: string | null
   onFocusPresented?(requestId: number): void
-}): JSX.Element {
+}): JSX.Element | null {
   const t = useUiText()
-  const [activeIndex, setActiveIndex] = useState(0)
+  const connection = useThreadConnection()
+  const draftScope = useMemo(() => ({ threadId, conversationId }), [threadId, conversationId])
+  const connected = useSyncExternalStore(connection?.subscribe ?? noConnectionSubscription, connection?.getSnapshot ?? connectedSnapshot, connectedSnapshot)
+  const [uncertain, setUncertain] = useState<Set<string>>(() => new Set())
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [expandedReasonIds, setExpandedReasonIds] = useState<Set<string>>(() => new Set())
+  const [completed, setCompleted] = useState<Set<string>>(() => new Set())
+  const [submitting, setSubmitting] = useState<Set<string>>(() => new Set())
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [now, setNow] = useState(Date.now)
+  const inFlight = useRef(new Set<string>())
   const contentId = useId()
   const presentedFocusRequest = useRef<number | null>(null)
-  const currentIndex = Math.min(activeIndex, approvals.length - 1)
-  const approval = approvals[currentIndex]
-  const previousApprovals = useRef({ ids: approvals.map((item) => item.id), activeId: approval.id })
-  const sourceLabel = `${profileById.get(approval.agentId)?.displayName ?? approval.agentId} · ${runtimeAdapterLabel(approval.adapterKind)}`
-  const showReason = Boolean(approval.reason?.trim())
-    && normalizedApprovalText(approval.reason ?? '') !== normalizedApprovalText(approval.actionSummary)
+  const arrival = useRef(new Map<string, number>())
+  const pending = [
+    ...approvals.map(approval => ({ id: approval.id, approval, interaction: null as NativeInteractionView | null, createdAt: 0 })),
+    ...interactions.map(interaction => ({ id: interaction.id, approval: null as ActionApprovalView | null, interaction, createdAt: interaction.createdAt }))
+  ].map(item => {
+    if (!arrival.current.has(item.id)) arrival.current.set(item.id, arrival.current.size)
+    return { ...item, order: arrival.current.get(item.id)! }
+  }).filter(item => !completed.has(item.id) && (!item.interaction?.expiresAt || now < item.interaction.expiresAt || inFlight.current.has(item.id)))
+    .sort((a, b) => a.order - b.order)
+  const currentIndex = Math.max(0, pending.findIndex(item => item.id === activeId))
+  const item = pending[currentIndex]
+  const approval = item?.approval
+  const interaction = item?.interaction
+  const question = interaction?.questions[0]
+  const agentId = approval?.agentId ?? agentRuns.find(run => run.id === interaction?.agentRunId)?.agentId ?? ''
+  const sourceLabel = `${profileById.get(agentId)?.displayName ?? agentId} · ${approval ? runtimeAdapterLabel(approval.adapterKind) : 'Pi'}`
+  const previousActive = useRef<string | null>(null)
 
   useEffect(() => {
-    if (activeIndex >= approvals.length) setActiveIndex(Math.max(approvals.length - 1, 0))
-  }, [activeIndex, approvals.length])
-
+    if (!interactions.some(request => request.expiresAt !== null)) return
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [interactions])
   useEffect(() => {
-    const previous = previousApprovals.current
-    const ids = approvals.map((item) => item.id)
-    previousApprovals.current = { ids, activeId: approval.id }
-    if (ids.some((id) => !previous.ids.includes(id))) setCollapsed(false)
-    setExpandedReasonIds((expanded) => {
-      const retained = new Set([...expanded].filter((id) => ids.includes(id)))
-      return retained.size === expanded.size ? expanded : retained
-    })
-    if (ids.includes(previous.activeId)) return undefined
-    setCollapsed(false)
-    const frame = window.requestAnimationFrame(() => {
-      containerRef.current
-        ?.querySelector<HTMLElement>('[data-approval-summary]')
-        ?.focus({ preventScroll: true })
-    })
-    return () => window.cancelAnimationFrame(frame)
-  }, [approvals, approval.id, containerRef])
-
+    retainInteractionDrafts(draftScope, new Set(interactions.filter(request =>
+      !completed.has(request.id) && (request.expiresAt === null || request.expiresAt > now || inFlight.current.has(request.id))
+    ).map(request => request.id)))
+  }, [draftScope, interactions, completed, now])
+  useEffect(() => {
+    const old = previousActive.current
+    const ids = pending.map(request => request.id)
+    if (!ids.includes(activeId ?? '') && item) setActiveId(item.id)
+    previousActive.current = item?.id ?? null
+    setExpandedReasonIds(expanded => new Set([...expanded].filter(id => ids.includes(id))))
+    // Appending another member's question never changes the current request or focus.
+    if (old && !ids.includes(old) && item && (document.activeElement === document.body || containerRef.current?.contains(document.activeElement))) {
+      containerRef.current?.querySelector<HTMLElement>('[data-approval-summary]')?.focus({ preventScroll: true })
+    }
+  }, [pending.map(request => request.id).join('|'), activeId, item?.id, containerRef])
   useEffect(() => {
     if (focusRequest === null || presentedFocusRequest.current === focusRequest) return
     setCollapsed(false)
-    if (focusApprovalId) {
-      const targetIndex = approvals.findIndex((candidate) => candidate.id === focusApprovalId)
-      if (targetIndex >= 0) setActiveIndex(targetIndex)
-    }
-  }, [approvals, focusApprovalId, focusRequest])
-
+    if (focusApprovalId && pending.some(request => request.id === focusApprovalId)) setActiveId(focusApprovalId)
+  }, [focusRequest, focusApprovalId, pending.map(request => request.id).join('|')])
   useEffect(() => {
-    if (focusRequest === null || presentedFocusRequest.current === focusRequest || collapsed) return undefined
-    if (focusApprovalId && approval.id !== focusApprovalId) return undefined
-    let frame: number | null = null
-    let scrolled = false
-    let focusObserved = false
-    const present = (): void => {
-      const target = containerRef.current?.querySelector<HTMLElement>(focusApprovalId
-        ? `[data-approval-summary="${CSS.escape(focusApprovalId)}"]`
-        : '[data-approval-summary]')
-      if (!target) {
-        frame = window.requestAnimationFrame(present)
-        return
-      }
-      if (!scrolled) {
-        scrolled = true
-        target.scrollIntoView({
-          block: 'center',
-          behavior: prefersReducedMotion() ? 'auto' : 'smooth'
-        })
-      }
-      if (focusObserved && document.activeElement === target) {
-        presentedFocusRequest.current = focusRequest
-        onFocusPresented?.(focusRequest)
-        return
-      }
-      target.focus({ preventScroll: true })
-      focusObserved = document.activeElement === target
-      frame = window.requestAnimationFrame(present)
-    }
-    frame = window.requestAnimationFrame(present)
-    return () => {
-      if (frame !== null) window.cancelAnimationFrame(frame)
-    }
-  }, [activeIndex, approval.id, collapsed, containerRef, focusApprovalId, focusRequest, onFocusPresented])
+    if (focusRequest === null || presentedFocusRequest.current === focusRequest || collapsed || !item) return
+    if (focusApprovalId && item.id !== focusApprovalId) return
+    const frame = requestAnimationFrame(() => {
+      const target = containerRef.current?.querySelector<HTMLElement>('[data-approval-summary]')
+      target?.scrollIntoView({ block: 'center', behavior: prefersReducedMotion() ? 'auto' : 'smooth' })
+      target?.focus({ preventScroll: true })
+      if (document.activeElement === target) { presentedFocusRequest.current = focusRequest; onFocusPresented?.(focusRequest) }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [item?.id, collapsed, focusRequest, focusApprovalId, containerRef, onFocusPresented])
 
-  return (
-    <section className={collapsed ? 'approval-dock is-collapsed' : 'approval-dock'} aria-label={uiAttribute("{0} 项待审批", String(approvals.length))} ref={containerRef}>
-      <header>
-        <div className="approval-dock-heading" tabIndex={-1} data-approval-summary={approval.id}
-          aria-label={`${approval.actionSummary}, ${sourceLabel}`}>
-          <strong title={approval.actionSummary}>{approval.actionSummary}</strong>
-          <span title={sourceLabel}>{sourceLabel}</span>
-        </div>
-        <nav aria-label={uiAttribute("审批请求控制")}>
-          {approvals.length > 1 && (
-            <>
-            <button type="button" aria-label={uiAttribute("上一项审批")} aria-disabled={currentIndex === 0} onClick={(event) => {
-              event.currentTarget.focus({ preventScroll: true })
-              if (currentIndex > 0) setActiveIndex(currentIndex - 1)
-            }}>‹</button>
-            <span>{currentIndex + 1} / {approvals.length}</span>
-            <button type="button" aria-label={uiAttribute("下一项审批")} aria-disabled={currentIndex === approvals.length - 1} onClick={(event) => {
-              event.currentTarget.focus({ preventScroll: true })
-              if (currentIndex < approvals.length - 1) setActiveIndex(currentIndex + 1)
-            }}>›</button>
-            </>
-          )}
-          <button
-            className="approval-dock-collapse"
-            type="button"
-            aria-label={collapsed ? uiAttribute("展开审批详情") : uiAttribute("收起审批详情")}
-            aria-expanded={!collapsed}
-            aria-controls={contentId}
-            onClick={() => setCollapsed((value) => !value)}
-          >
-            {collapsed ? '⌄' : '⌃'}
-          </button>
-        </nav>
-      </header>
-      {!collapsed && <div
-        className="approval-dock-scroll"
-        id={contentId}
-        data-approval-id={approval.id}
-      >
-        {showReason && <ApprovalReason key={approval.id} reason={approval.reason!}
-          expanded={expandedReasonIds.has(approval.id)}
-          onToggle={() => setExpandedReasonIds((previous) => {
-            const next = new Set(previous)
-            if (next.has(approval.id)) next.delete(approval.id)
-            else next.add(approval.id)
-            return next
-          })} />}
-        <pre tabIndex={0} role="region" aria-label={uiAttribute("完整审批请求，可滚动")}>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
-        <div className="approval-dock-actions">
-          {approval.options.map(option => {
-            const label = approvalOptionLabel(approval, option, t)
-            return (
-              <button
-                className={`runtime-option option-${option.kind}`}
-                type="button"
-                key={option.optionId}
-                data-option-id={option.optionId}
-                onClick={() => onResolve(approval, option.optionId)}
-                disabled={busy}
-                title={label}
-                aria-label={label}
-              >
-                {label}
-              </button>
-            )
-          })}
-          {approval.options.length === 0 && (
-            <p className="approval-option-error"><UiText zh={"当前智能体未提供可无损回传的原生选项，请求无法提交。"} /></p>
-          )}
-        </div>
+  if (!item) return null
+  const requestBusy = submitting.has(item.id) || (Boolean(approval) && busy)
+  const questionDisabled = requestBusy || !connected || uncertain.has(item.id) || interaction?.status === 'unknown' || !onRespond
+  const showReason = approval && Boolean(approval.reason?.trim())
+    && normalizedApprovalText(approval.reason ?? '') !== normalizedApprovalText(approval.actionSummary)
+  const changeRequest = (index: number): void => {
+    if (pending[index]) setActiveId(pending[index].id)
+  }
+  const submit = async (answer: NativeInteractionAnswer | string): Promise<void> => {
+    if (inFlight.current.has(item.id)) return
+    inFlight.current.add(item.id)
+    setSubmitting(current => new Set(current).add(item.id))
+    setErrors(current => { const next = { ...current }; delete next[item.id]; return next })
+    try {
+      if (approval && typeof answer === 'string') await onResolve(approval, answer)
+      else if (interaction && typeof answer !== 'string' && onRespond) {
+        const result = await onRespond(interaction, answer)
+        if (result.status === 'failed') { setErrors(current => ({ ...current, [item.id]: t('提交失败，内容已保留') })); return }
+        if (result.status === 'unknown' || result.status === 'pending') {
+          setUncertain(current => new Set(current).add(item.id))
+          setErrors(current => ({ ...current, [item.id]: t('提交结果待核对，内容已保留') }))
+          return
+        }
+        if (result.status === 'expired' || result.status === 'unavailable') {
+          onNotice?.(t(result.status === 'expired' ? '回答期限已过' : '请求已失效'))
+        }
+        setCompleted(current => new Set(current).add(item.id))
+      }
+    } catch (error) {
+      const resultUncertain = Boolean(interaction) && !(error && typeof error === 'object' && 'requestNotSent' in error && error.requestNotSent === true)
+      if (resultUncertain) setUncertain(current => new Set(current).add(item.id))
+      setErrors(current => ({ ...current, [item.id]: t(resultUncertain ? '提交结果待核对，内容已保留' : '提交失败，内容已保留') }))
+    } finally {
+      inFlight.current.delete(item.id)
+      setSubmitting(current => { const next = new Set(current); next.delete(item.id); return next })
+    }
+  }
+  return <section className={`approval-dock pending-dock${interaction ? ' is-question' : ''}${collapsed ? ' is-collapsed' : ''}`}
+    aria-label={uiAttribute('{0} 项待处理', String(pending.length))} ref={containerRef}>
+    <header>
+      <div className="approval-dock-heading" tabIndex={-1} data-approval-summary={item.id}
+        aria-label={`${approval?.actionSummary ?? question?.title ?? ''}, ${sourceLabel}`}>
+        <strong title={approval?.actionSummary}>{approval?.actionSummary ?? t('等待回答')}</strong>
+        {approval && <span title={sourceLabel}>{sourceLabel}</span>}
+      </div>
+      <nav className="pending-pagination" aria-label={uiAttribute('待处理请求控制')}>
+        <button type="button" aria-label={uiAttribute('上一项请求')} aria-disabled={currentIndex === 0}
+          onClick={event => { event.currentTarget.focus({ preventScroll: true }); changeRequest(currentIndex - 1) }}><PendingChevron direction="left" /></button>
+        <span className="pending-page-count">{currentIndex + 1} / {pending.length}</span>
+        <button type="button" aria-label={uiAttribute('下一项请求')} aria-disabled={currentIndex === pending.length - 1}
+          onClick={event => { event.currentTarget.focus({ preventScroll: true }); changeRequest(currentIndex + 1) }}><PendingChevron direction="right" /></button>
+        <button className="approval-dock-collapse" type="button"
+          aria-label={collapsed ? uiAttribute('展开待处理') : uiAttribute('收起待处理')}
+          aria-expanded={!collapsed} aria-controls={contentId} onClick={() => setCollapsed(value => !value)}>
+          <PendingChevron direction={collapsed ? 'up' : 'down'} />
+        </button>
+      </nav>
+    </header>
+    {!collapsed && <div className="approval-dock-scroll pending-content" id={contentId} data-approval-id={item.id}>
+      {approval ? <>
+        {showReason && <ApprovalReason key={approval.id} reason={approval.reason!} expanded={expandedReasonIds.has(approval.id)}
+          onToggle={() => setExpandedReasonIds(previous => { const next = new Set(previous); if (next.has(approval.id)) next.delete(approval.id); else next.add(approval.id); return next })} />}
+        <pre tabIndex={0} role="region" aria-label={uiAttribute('完整审批请求，可滚动')}>{JSON.stringify(approval.canonicalInput, null, 2)}</pre>
+        <div className="approval-dock-actions">{approval.options.map(option => {
+          const label = approvalOptionLabel(approval, option, t)
+          return <button className={`runtime-option option-${option.kind}`} type="button" key={option.optionId}
+            data-option-id={option.optionId} onClick={() => void submit(option.optionId)} disabled={requestBusy || !connected}
+            title={label} aria-label={label}>{label}</button>
+        })}{approval.options.length === 0 && <p className="approval-option-error"><UiText zh="当前智能体未提供可无损回传的原生选项，请求无法提交。" /></p>}</div>
+      </> : interaction && question && <div>
+        <div className="pending-owner"><MemberAvatar agentId={agentId} avatarRef={profileById.get(agentId)?.avatarRef ?? null}
+          displayName={profileById.get(agentId)?.displayName ?? agentId} size="execution" decorative />{sourceLabel}</div>
+        <h3 id={`native-question-${interaction.id}`}>{question.title}</h3>
+        {question.description !== null && <p className="native-question-description">{question.description}</p>}
+        {question.kind === 'select' && <div className="native-question-options" role="group" aria-labelledby={`native-question-${interaction.id}`}>
+          {question.options.map(option => <button type="button" className="native-question-option" key={option.id}
+            disabled={questionDisabled} onClick={() => void submit({ kind: 'select', optionId: option.id })}>
+            <span>{option.label}</span><PendingChevron direction="right" /></button>)}
+        </div>}
+        <NativeQuestionAnswer key={interaction.id} interaction={interaction} draftScope={draftScope} disabled={questionDisabled}
+          submitting={requestBusy} now={now} onSubmit={answer => void submit(answer)} />
       </div>}
-    </section>
-  )
+      {(errors[item.id] || interaction?.status === 'unknown') && <p className="pending-error" role="alert">{errors[item.id] ?? t('提交结果待核对，内容已保留')}</p>}
+    </div>}
+  </section>
+}
+
+function PendingChevron({ direction }: { direction: 'left' | 'right' | 'up' | 'down' }): JSX.Element {
+  return <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={direction === 'left' ? 'm12 5-5 5 5 5' : direction === 'right' ? 'm8 5 5 5-5 5' : direction === 'up' ? 'm5 12 5-5 5 5' : 'm5 7 5 5 5-5'} />
+  </svg>
+}
+
+function NativeQuestionAnswer({ interaction, draftScope, disabled, submitting, now, onSubmit }: {
+  interaction: NativeInteractionView; draftScope: InteractionDraftScope; disabled: boolean; submitting: boolean; now: number
+  onSubmit(answer: NativeInteractionAnswer): void
+}): JSX.Element {
+  const t = useUiText()
+  const question = interaction.questions[0]
+  const [text, setText] = useState(() => interactionDraft(draftScope, interaction.id, question.prefill ?? ''))
+  const inputProps = { className: 'native-question-input', value: text,
+    'aria-labelledby': `native-question-${interaction.id}`, placeholder: question.placeholder ?? undefined,
+    // Connection recovery keeps this draft mounted; only actions are fenced.
+    readOnly: submitting,
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setText(event.target.value); saveInteractionDraft(draftScope, interaction.id, event.target.value)
+    },
+    onKeyDown: (event: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      if (event.key === 'Enter' && !event.nativeEvent.isComposing && !disabled && (!question.multiline || event.metaKey || event.ctrlKey)) {
+        event.preventDefault(); onSubmit({ kind: 'input', value: text })
+      }
+    }
+  }
+  return <>
+    {question.kind === 'input' && (question.multiline ? <textarea {...inputProps} rows={4} /> : <input {...inputProps} type="text" />)}
+    <footer className="native-question-actions">
+      <span className="pending-submit-status" role="status">{submitting ? t('提交中…') : interaction.expiresAt !== null ? t('{0} 秒后失效', String(Math.max(0, Math.ceil((interaction.expiresAt - now) / 1000)))) : ''}</span>
+      <div>
+        {interaction.canSkip && <button className="quiet-button compact native-question-secondary" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'skip' })}><UiText zh="跳过" /></button>}
+        {question.kind === 'confirm' ? <>
+          <button className="quiet-button compact native-question-secondary" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'confirm', confirmed: false })}><UiText zh="否" /></button>
+          <button className="primary-button compact" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'confirm', confirmed: true })}><UiText zh="是" /></button>
+        </> : question.kind === 'input' && <button className="primary-button compact" type="button" disabled={disabled} onClick={() => onSubmit({ kind: 'input', value: text })}><UiText zh="提交" /></button>}
+      </div>
+    </footer>
+  </>
 }
 
 function approvalOptionLabel(
@@ -9969,17 +10136,6 @@ export function defaultRecipientMentionAgentId(
     : null
 }
 
-function campMessageAuthorLabel(
-  message: ThreadMessageView,
-  memberById: ReadonlyMap<string, ThreadSnapshot['members'][number]>,
-  currentUserName: string
-): string {
-  // Channel admission is Owner-only; this label does not change the stored author.
-  if (message.authorType === 'user' || message.authorType === 'external_principal') return currentUserName
-  if (message.authorType === 'system') return uiAttribute("系统")
-  return memberById.get(message.authorId)?.displayName ?? message.authorId
-}
-
 function ReplyParentQuote({
   parent,
   projectedBody,
@@ -10020,6 +10176,7 @@ function MessageSurface({
   actionAfter,
   onReply,
   onCopy,
+  onSelect,
   onWithdraw,
   withdrawing = false,
   children
@@ -10031,6 +10188,7 @@ function MessageSurface({
   actionAfter?: React.ReactNode
   onReply?(modality: ReplyFocusModality): void
   onCopy(): void
+  onSelect?(): void
   onWithdraw?(): void
   withdrawing?: boolean
   children: React.ReactNode
@@ -10045,6 +10203,7 @@ function MessageSurface({
             copied={copied}
             onReply={onReply}
             onCopy={onCopy}
+            onSelect={onSelect}
             onWithdraw={onWithdraw}
             withdrawing={withdrawing}
           />
@@ -10062,6 +10221,7 @@ function MessageActions({
   className,
   onReply,
   onCopy,
+  onSelect,
   onWithdraw,
   withdrawing = false
 }: {
@@ -10071,6 +10231,7 @@ function MessageActions({
   className?: string
   onReply?(modality: ReplyFocusModality): void
   onCopy(): void
+  onSelect?(): void
   onWithdraw?(): void
   withdrawing?: boolean
 }): JSX.Element {
@@ -10111,6 +10272,7 @@ function MessageActions({
           <MessageReplyIcon />
         </button>
       )}
+      {onSelect && <MessageSelectButton onSelect={onSelect} />}
       {timeAfter && timestamp}
     </div>
   )
@@ -10175,6 +10337,7 @@ export function TruncatedStructuredMessageBody({
   const messageBody = (
     <StructuredMessageBody
       body={displayBody}
+      contentComplete={displayFullMessage}
       content={displayContent}
       members={members}
       pendingMemberProfiles={pendingMemberProfiles}
@@ -10225,6 +10388,7 @@ export function AgentMessageMarkdownBody({
   onActivateMemberMention(agentId: string, trigger: HTMLElement, focusPanel: boolean): void
   onFileReference?: FileReferenceActivation
 }): JSX.Element {
+  const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
   // Only authoritative leading tokens form a recipient prefix. Literal @names
   // stay Markdown text; the Renderer never derives addressing from the body.
   let prefixLength = 0
@@ -10236,7 +10400,7 @@ export function AgentMessageMarkdownBody({
     ? structuredThreadContentMarkdownText(content.slice(prefixLength), [...pendingMemberProfiles, ...members])
     : body
   if (!content || prefixLength === 0) {
-    return <SafeMarkdown onFileReference={onFileReference}>{body}</SafeMarkdown>
+    return <MessageMarkdown theme={theme} onFileReference={onFileReference}>{body}</MessageMarkdown>
   }
 
   const hasBody = markdownBody.trim().length > 0
@@ -10254,14 +10418,14 @@ export function AgentMessageMarkdownBody({
   return (
     <div className="member-mention-markdown-body" data-inline-body={inlineBody}>
       {hasBody ? (
-        <SafeMarkdown
+        <MessageMarkdown theme={theme}
           className="member-mention-markdown-content"
           leadingContent={prefix}
           inlineLeadingContent={inlineBody}
           onFileReference={onFileReference}
         >
           {markdownBody}
-        </SafeMarkdown>
+        </MessageMarkdown>
       ) : prefix}
     </div>
   )
@@ -10274,6 +10438,7 @@ export function StructuredMessageBody({
   pendingMemberProfiles = EMPTY_PENDING_MEMBER_PROFILES,
   leadingRecipientAgentId,
   inline = false,
+  contentComplete = true,
   renderLeadingCurrentUserMarkdown = false,
   onActivateCurrentUserMention,
   onActivateMemberMention,
@@ -10287,6 +10452,7 @@ export function StructuredMessageBody({
   pendingMemberProfiles?: readonly PendingMemberMentionProfile[]
   leadingRecipientAgentId?: string | null
   inline?: boolean
+  contentComplete?: boolean
   renderLeadingCurrentUserMarkdown?: boolean
   onActivateCurrentUserMention?(trigger: HTMLElement, focusPanel: boolean): void
   onActivateMemberMention?(
@@ -10298,6 +10464,7 @@ export function StructuredMessageBody({
   onActivateSkillMention?(skillId: string, trigger: HTMLElement): void
   onFileReference?: FileReferenceActivation
 }): JSX.Element {
+  const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
   const memberById = new Map(members.map((member) => [member.agentId, member]))
   const pendingProfileById = new Map(pendingMemberProfiles.map((profile) => [profile.agentId, profile]))
   const mentionNames = [...pendingMemberProfiles, ...members]
@@ -10327,9 +10494,9 @@ export function StructuredMessageBody({
           {markdownBody.length > 0 ? ' ' : ''}
         </span>
         {markdownBody.length > 0 && (
-          <SafeMarkdown className="current-user-markdown-content" onFileReference={onFileReference}>
+          <MessageMarkdown theme={theme} contentComplete={contentComplete} className="current-user-markdown-content" onFileReference={onFileReference}>
             {markdownBody}
-          </SafeMarkdown>
+          </MessageMarkdown>
         )}
       </div>
     )
@@ -10347,7 +10514,7 @@ export function StructuredMessageBody({
       }
       return token + (index === 0 && content.length > 1 ? ' ' : '')
     }).join('')
-    return <SafeMarkdown onFileReference={onFileReference} inlineContent={inlineContent}>{markdown}</SafeMarkdown>
+    return <MessageMarkdown theme={theme} contentComplete={contentComplete} onFileReference={onFileReference} inlineContent={inlineContent}>{markdown}</MessageMarkdown>
   }
   const Tag = inline ? 'span' : 'p'
   return (
@@ -10376,6 +10543,7 @@ export function StructuredMessageBody({
             </span>
           )
         }
+        if (segment.kind === 'project_file_reference') return <InlineProjectFileReference key={`file-${index}`} file={segment} files={content.filter(item => item.kind === 'project_file_reference')} />
         if (isReferenceSegment(segment)) return <InlineThreadReference key={`reference-${index}`} segment={segment} />
         if (segment.kind === 'skill_mention') {
           return (
@@ -10850,6 +11018,7 @@ function RunExecutionContent({
   onLoadHistoricalEvidence(): Promise<void>
   onFileOpenError(message: string): void
 }): JSX.Element {
+  const theme = useOptionalFilePreview()?.resolvedTheme ?? 'day'
   const client = useThreadClient()
   const mobile = useMobileLayout()
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
@@ -10923,11 +11092,13 @@ function RunExecutionContent({
   const finalKey = finalBody ? comparableMessageText(finalBody) : null
   const processItems = useMemo(() => (effectiveProgress?.items ?? []).map((item) =>
     item.kind === 'narration' && narrationBodies.has(item.key)
-      ? { ...item, body: narrationBodies.get(item.key)! }
+      ? { ...item, body: narrationBodies.get(item.key)!, contentComplete: narrationEvidence.some(evidence =>
+          item.key === `narration:${evidence.id}` && !evidence.outputTruncated
+          && (evidence.payload as { status?: string }).status === 'completed') }
       : item
   ).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
-  ), [effectiveProgress?.items, finalKey, narrationBodies])
+  ), [effectiveProgress?.items, finalKey, narrationBodies, narrationEvidence])
   const groupedProcessItems = useMemo(() => {
     if (!windowedEvidence) return groupConsecutiveToolItems(processItems)
     return windowPage.blocks.flatMap((block): GroupedExecutionProgressItem[] => {
@@ -11074,8 +11245,8 @@ function RunExecutionContent({
         if (item.kind === 'narration') {
           return (
             <div className={`process-copy stream-${item.kind}`} key={item.key} data-execution-item-key={item.key}>
-              {windowedEvidence ? <ExecutionNarration threadId={threadId} evidence={narrationByKey.get(item.key)} preview={item.body} />
-                : <SafeMarkdown>{item.body}</SafeMarkdown>}
+              {windowedEvidence ? <ExecutionNarration threadId={threadId} evidence={narrationByKey.get(item.key)} preview={item.body} Body={MessageMarkdown} theme={theme} contentComplete={item.contentComplete} />
+                : <MessageMarkdown theme={theme} contentComplete={item.contentComplete === true}>{item.body}</MessageMarkdown>}
             </div>
           )
         }

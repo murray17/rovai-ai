@@ -223,6 +223,14 @@ jobs:
           --target x86_64-pc-windows-msvc
           managed_process
 
+      - name: Exercise Runtime program identity and native model options
+        shell: pwsh
+        run: |
+          foreach ($owner in @('runtime_discovery::', 'runtime_discovery_windows::', 'windows_runtime_entrypoint::', 'identity_checked_probe', 'grouped_acp_models', 'read_model::message_model::')) {
+            cargo test -p rovai-core --features extended-tests --lib --target x86_64-pc-windows-msvc $owner
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
       - name: Exercise Windows Fleet cleanup receipts
         run: >-
           cargo test -p rovai-core --lib --features extended-tests

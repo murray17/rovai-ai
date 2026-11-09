@@ -3,12 +3,12 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-delivery-and-agent-run-boundaries
 status: accepted
-last_updated: 2026-10-31
+last_updated: 2026-11-05
 ---
 
 # Public Thread Message、Delivery 与 AgentRun
 
-本架构定义公开 Thread 的统一消息执行主链。字段合同见 [Camp Message Send v29](../contracts/camp-message-send-v29.md)、
+本架构定义公开 Thread 的统一消息执行主链。字段合同见 [Camp Message Send v30](../contracts/camp-message-send-v31.md)、
 [Message Delivery v18](../contracts/message-delivery-v18.md)、[ContextManifest v43/v44](../contracts/context-manifest-evidence-v44.md)
 与 [Camp History v17](../contracts/camp-history-v17.md)。Single Chat 不使用本主链。
 
@@ -136,10 +136,12 @@ PublicOnly 只抑制 Agent 路由，仍允许用户提及；通知沿用当前�
 
 ## 公开执行查询
 
-[Thread Runs v1](../contracts/thread-runs-v1.md) 由 `thread_runs` 只读模块拥有：复用 `camp_history` 的实时目标解析与消息正文投影，
+[Thread Runs v2](../contracts/thread-runs-v2.md) 由 `thread_runs` 只读模块拥有：复用 `camp_history` 的实时目标解析与消息正文投影，
 同一事务中筛选公共 Run、聚合 waiting Delivery 并生成预览。Single Chat Run 先从候选集排除；私有调用方沿用封闭 policy。
 公开结果统一为 items，不暴露内部来源分类；未形成 Run 的队列条目仅以 null agentRunId 和 queued 表达。
 输入数量使用全部冻结关联，首条预览按 ordinal；队列使用当前队首，不保证未来一次 claim 会处理整组。
+实际 Run 只按其直接 `camp_id` 会话索引选择，不读取旧 CampTurn 或合并 Turn-only Run；
+普通、active 与 status 筛选使用同一范围。旧记录不回填或删除，waiting Delivery 聚合保持。
 本查询不建立快照分页、缓存或调度管理机制；动态页间变化按命令说明保留明确限制。
 
 用户主动继续复用此队列，但单独成批，普通消息合批不跨过续做请求；旧 Run 与旧投递终态不变。

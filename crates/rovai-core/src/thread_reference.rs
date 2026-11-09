@@ -100,18 +100,17 @@ pub fn validate_label(label: &str) -> Result<()> {
 }
 
 pub fn render_link(kind: ReferenceKind, id: &str, title: &str) -> String {
-    let mut escaped = String::new();
-    for c in title.chars() {
-        let c = if c.is_whitespace() || c.is_control() {
-            ' '
-        } else {
-            c
-        };
-        if c.is_ascii_punctuation() {
-            escaped.push('\\');
-        }
-        escaped.push(c);
-    }
+    let title: String = title
+        .chars()
+        .map(|c| {
+            if c.is_whitespace() || c.is_control() {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let escaped = crate::reference_markdown::escape_link_label(&title);
     format!("[{escaped}](rovai://{}/{id})", kind.path())
 }
 
@@ -349,6 +348,38 @@ mod tests {
     // Pending invitation transaction test, not a second full Runtime fixture here.
     #[test]
     fn directory_search_pages_all_matches_and_retains_only_public_targets() {
+        let labels: Vec<serde_json::Value> = serde_json::from_str(include_str!(
+            "../../../packages/contracts/fixtures/reference-link-labels.json"
+        ))
+        .unwrap();
+        for case in labels {
+            let label = case["label"].as_str().unwrap();
+            let escaped = case["escaped"].as_str().unwrap();
+            assert_eq!(crate::reference_markdown::escape_link_label(label), escaped);
+            for kind in [ReferenceKind::Thread, ReferenceKind::Mission] {
+                assert_eq!(
+                    render_link(kind, "target", label),
+                    format!("[{escaped}](rovai://{}/target)", kind.path())
+                );
+            }
+            if !label.contains('/') {
+                for kind in [
+                    crate::camp_content::ProjectFileTargetKind::File,
+                    crate::camp_content::ProjectFileTargetKind::Directory,
+                ] {
+                    let slash = if kind.is_file() { "" } else { "/" };
+                    assert_eq!(
+                        crate::project_file_reference::render_target_link(
+                            "/project/target",
+                            &format!("deep/path/{label}"),
+                            kind,
+                        )
+                        .unwrap(),
+                        format!("[{escaped}](file:///project/target{slash})")
+                    );
+                }
+            }
+        }
         let connection = Connection::open_in_memory().unwrap();
         connection.execute_batch("CREATE TABLE camp(id TEXT PRIMARY KEY,title TEXT,project_binding_kind TEXT,project_path TEXT,deletion_operation_id TEXT,activation_state TEXT,navigation_activity_at TEXT,created_at TEXT); CREATE TABLE mission(id TEXT PRIMARY KEY,camp_id TEXT,title TEXT);").unwrap();
         let invalidations: Vec<serde_json::Value> = serde_json::from_str(include_str!(

@@ -1,3 +1,4 @@
+import { reportProjectFileReferenceRejection } from './useProjectFileAvailability'
 import { prepareFileEditsForQuit } from './file-edit-store'
 import { ThreadReferencePreviewProvider } from './ThreadReferencePreview'
 import { MessageReeditStore } from './message-reedit-store'
@@ -17,9 +18,10 @@ import { hasPendingThreadDraftInput } from './pending-thread-draft'
 import { memberCreationHelper, memberCreationInitialDraft, navigationWithMemberCreationDrafts, type MemberCreationDraft } from './member-creation-flow'
 import { navigationThreadReadState, saveNavigationThreadReadState } from './navigation-unread'
 import { newCommandId } from '../../shared/command-id'
+import { ConversationExportDialog, useConversationExport } from './ConversationExport'
 import type { BusinessEnvironment } from './business-environment'
 import { AppHeader } from './AppHeader'
-import { MobileLayoutProvider, MobilePageHeader, useMobilePageTransition, useMobileViewport } from './MobileLayout'
+import { MobileConversationDrawer, MobileLayoutProvider, MobilePageHeader, useMobilePageTransition, useMobileViewport } from './MobileLayout'
 import { MobileSettingsLayout } from './MobileSettingsLayout'
 export { AppHeader } from './AppHeader'
 import { CurrentUserProfileProvider } from './CurrentUserProfile'
@@ -205,6 +207,7 @@ const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
   'agent_run.terminal',
+  'agent_run.interaction_changed',
   'agent_run.images.updated',
   'agent_run.file_changes_completed'
 ])
@@ -501,6 +504,7 @@ export function campOpenProjectionAsSnapshot(
     agentRunImages: projection.agentRunImages ?? [],
     contextManifests: [],
     approvals: projection.approvals,
+    nativeInteractions: projection.nativeInteractions ?? [],
     actions: [],
     timeline: [],
     openCoverage: {
@@ -1138,6 +1142,7 @@ export function BusinessApp({
   const [currentProject, setCurrentProject] = useState<CurrentProject>(() => readCurrentProject())
   const [currentWorkspaceHint, setCurrentWorkspaceHint] = useState<WorkspaceSelection | null>(null)
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null)
+  const conversationExport = useConversationExport(client, `${view}:${activeThreadId ?? ''}`)
   const campInspectorVisible = activeThreadId !== null && campInspectorThreadId === activeThreadId
   const singleChatVisible = activeThreadId !== null && singleChatThreadId === activeThreadId
   const [notificationFocus, setNotificationFocus] = useState<NotificationFocusTarget | null>(null)
@@ -3920,6 +3925,10 @@ export function BusinessApp({
         throw new Error(uiAttribute('消息提交结果暂时不可用，请稍后重试。'))
       }
       if (result.commandResult.status === 'rejected') {
+        if (result.commandResult.code === 'project_file_reference_unavailable') {
+          const payload = result.commandResult.payload
+          if (typeof payload.rawReference === 'string') reportProjectFileReferenceRejection(threadId, payload.rawReference, String(payload.reason ?? 'invalid_reference'))
+        }
         const recovery = runtimeRecoveryFromCommandResult(threadId, result.commandResult)
         if (recovery) {
           rejectedForRuntime = true
@@ -3935,10 +3944,13 @@ export function BusinessApp({
         ? result.commandResult.payload.sequence
         : optimisticMessage.sequence
       if (threadMessageId) {
-        setOptimisticThreadMessages((current) => [...current, {
-          threadId, commandId,
-          message: { ...optimisticMessage, id: threadMessageId, sequence, threadTurnId: null }
-        }])
+        // File publication fields arrive from Core's projection; never display a fabricated file segment.
+        if (!draft.content.segments.some(segment => segment.kind === 'atom' && segment.atom.type === 'project_file_reference')) {
+          setOptimisticThreadMessages((current) => [...current, {
+            threadId, commandId,
+            message: { ...optimisticMessage, id: threadMessageId, sequence, threadTurnId: null }
+          }])
+        }
         void refreshActiveThreadSnapshot(threadId)
           .then(async () => {
             if (selectionGeneration !== campSelectionGeneration.current) return
@@ -4016,7 +4028,7 @@ export function BusinessApp({
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setThreadSnapshot(snapshot)
     } catch (nextError) {
-      setError(errorMessage(nextError))
+      throw nextError
     } finally {
       setBusy(null)
     }
@@ -4407,6 +4419,7 @@ export function BusinessApp({
       })
     }}
     onThread={(target) => { setMobileConversationDrawerOpen(false); chooseThread(target) }}
+    onExportThread={conversationExport.reader.open}
     onTogglePin={toggleNavigationPin}
     onRemoveProject={removeNavigationProject}
     onRenameProject={renameProject}
@@ -4423,7 +4436,9 @@ export function BusinessApp({
     <ThreadInterruptionAttentionContext.Provider value={interruptionAttention}>
     <MobileLayoutProvider value={mobile}>
     <FilePreviewProvider api={environment.files} threadId={view === 'camp' ? activeThreadId : null} resolvedTheme={appearance.resolvedTheme}
+      projectFilesEnabled={!!activeProjectPath}
       missionActivity={activeMission && view === 'camp' ? <MissionActivityDocument mission={activeMission} agents={agents} onSource={missionSource} onNotify={notify} onWorkspaceCleanupRequested={refreshMissionAfterWorkspaceCleanup}/> : null}>
+    <ConversationExportDialog state={conversationExport.state} reader={conversationExport.reader} />
     <ThreadReferencePreviewProvider threadId={view === 'camp' ? activeThreadId : null} onOpen={async reference => {
       if (reference.kind === 'thread') await activateThread(reference.id, { reconcileDefaultLead: false })
       else {
@@ -4482,13 +4497,15 @@ export function BusinessApp({
           <MissionSurface key={activeThreadId} enabled={!!activeMission} full={!missionDrawer} onExpand={() => setMissionPresentation('full')} onClose={returnToMissions}>
           {activeMission && <MissionHeader mission={activeMission} drawer={missionDrawer} thread={visibleThreadSnapshot} projectName={activeThreadProject?.name ?? activeThreadContextLabel}
             openRequest={missionOpenRequest} onExpand={() => setMissionPresentation('full')} onFold={() => setMissionPresentation('drawer')}
-            executionTakesPreviewPriority={generalPreferences.executionConsolePlacement === 'right'
+            executionTakesPreviewPriority={generalPreferences.executionConsoleAutoOpen
+              && generalPreferences.executionConsolePlacement === 'right'
               && visibleThreadSnapshot.agentRuns.some((run) => run.status === 'running')}
             onClose={returnToMissions} onFocusApprovals={focusThreadApprovals} detailEntryHostRef={setThreadDetailEntryHost}/>}
           <ThreadWorkspace
             key={activeThreadId}
             missionBoard={activeMission ? <MissionIntro mission={activeMission} projects={displayNavigation?.projects ?? []}/> : null}
             previewTabsInPane={false}
+            executionAutoOpen={generalPreferences.executionConsoleAutoOpen}
             suppressExecutionAutoOpen={missionDrawerSuppressesExecutionAutoOpen(
               missionDrawer,
               generalPreferences.executionConsolePlacement
@@ -4528,8 +4545,16 @@ export function BusinessApp({
             onPreviewMemberRemoval={previewThreadMemberRemoval}
             onRemoveMember={removeThreadMember}
             onTasksChanged={() => refreshActiveThreadSnapshot(activeThreadId)}
-            onResolveApproval={(approval, decision) => {
-              void resolveActionApproval(approval, decision)
+            onResolveApproval={resolveActionApproval}
+            onRespondInteraction={async (interaction, answer) => {
+              const threadId = activeThreadId!
+              const result = await client.request<import('@contracts').NativeInteractionResult>('nativeInteractions.respond', {
+                commandId: newCommandId(), threadId,
+                agentRunId: interaction.agentRunId, executionEpoch: interaction.executionEpoch,
+                interactionId: interaction.id, answer
+              })
+              void refreshActiveThreadSnapshot(threadId).catch(() => undefined)
+              return result
             }}
             cancellingTurnIds={activeCancellingTurnIds}
             cancellingRunIds={activeCancellingRunIds}
@@ -4708,32 +4733,10 @@ export function BusinessApp({
         )}
       </main>
 
-      {mobile && <Dialog.Root open={mobileConversationDrawerOpen} onOpenChange={setMobileConversationDrawerOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="mobile-conversation-scrim" />
-          <Dialog.Content id="mobile-app-menu" className="mobile-conversation-drawer app-menu" aria-describedby={undefined} tabIndex={-1}
-            onOpenAutoFocus={event => {
-              event.preventDefault()
-              const menu = document.getElementById('mobile-app-menu')
-              const list = menu?.querySelector<HTMLElement>('.navigation-scroll')
-              if (list) list.scrollTop = mobileMenuScroll.current
-              menu?.focus()
-            }}
-            onScrollCapture={event => { if (event.target instanceof HTMLElement && event.target.classList.contains('navigation-scroll')) mobileMenuScroll.current = event.target.scrollTop }}
-            onCloseAutoFocus={(event) => {
-            event.preventDefault()
-            const trigger = mobileConversationListButtonRef.current
-            const visibleTrigger = trigger?.getClientRects().length ? trigger
-              : [...document.querySelectorAll<HTMLButtonElement>('.app-shell [aria-label="打开主菜单"]')].find(button => button.getClientRects().length)
-            visibleTrigger?.focus({ preventScroll: true })
-          }}>
-            <header className="app-menu-heading"><Dialog.Title>Rovai AI</Dialog.Title>
-              <Dialog.Close asChild><button className="mobile-icon-button" type="button" aria-label={uiAttribute("关闭主菜单")}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></Dialog.Close>
-            </header>
-            {renderNavigation(true)}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>}
+      {mobile && <MobileConversationDrawer open={mobileConversationDrawerOpen} onOpenChange={setMobileConversationDrawerOpen}
+        triggerRef={mobileConversationListButtonRef} scrollPosition={mobileMenuScroll}>
+        {renderNavigation(true)}
+      </MobileConversationDrawer>}
 
       <NewConversationDialog
         open={newConversationOpen}
@@ -5205,7 +5208,7 @@ export function optimisticThreadMessage(
     sourceAgentRunId: null,
     quotes: draft.quotes,
     body: draft.body,
-    content: composerDocumentToStructuredContent(draft.content),
+    content: composerDocumentToStructuredContent({ ...draft.content, segments: draft.content.segments.map(segment => segment.kind === 'atom' && segment.atom.type === 'project_file_reference' ? { kind: 'text', text: segment.atom.labelFallback } : segment) }),
     attachments: draft.attachments,
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
     addressedAgentIds,

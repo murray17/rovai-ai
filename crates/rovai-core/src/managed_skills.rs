@@ -349,7 +349,11 @@ pub fn set_toolbox_members(
 
 fn toolbox_member_ids(connection: &Connection, name: &str) -> Result<Vec<String>> {
     let mut statement = connection.prepare(
-        "SELECT agent_id FROM member_toolbox_skill WHERE skill_name = ?1 ORDER BY agent_id",
+        "SELECT selection.agent_id
+         FROM member_toolbox_skill AS selection
+         JOIN agent_profile AS profile ON profile.id = selection.agent_id
+         WHERE selection.skill_name = ?1 AND profile.profile_status <> 'removed'
+         ORDER BY selection.agent_id",
     )?;
     Ok(statement
         .query_map([name], |row| row.get::<_, String>(0))?
@@ -481,6 +485,100 @@ mod tests {
             toolbox_member_ids(database.connection(), "member-studio").unwrap(),
             with_new_member,
         );
+
+        // Reproduce a legacy removal that left both Skill assignments behind.
+        database
+            .connection()
+            .execute_batch(
+                "INSERT INTO member_toolbox_skill(agent_id, skill_name, updated_at)
+             VALUES ('agent-first', 'campfire', 'configured-at');
+             UPDATE agent_profile SET profile_status = 'removed', removed_at = 'removed-at'
+             WHERE id = 'agent-first';",
+            )
+            .unwrap();
+        let visible_members = with_new_member
+            .iter()
+            .filter(|id| id.as_str() != "agent-first")
+            .cloned()
+            .collect::<Vec<_>>();
+        let managed = ManagedSkills {
+            root: directory.join("managed-skills"),
+            resources: directory.join("skill-resources"),
+        };
+        let view = managed
+            .list_toolbox(database.connection())
+            .unwrap()
+            .into_iter()
+            .find(|skill| skill.name == "member-studio")
+            .unwrap();
+        assert_eq!(view.member_ids, visible_members);
+        assert!(
+            view.member_ids.contains(&"agent-second".to_string()),
+            "away members keep their toolbox configuration"
+        );
+        assert_eq!(
+            view.version,
+            toolbox_members_version(&visible_members).unwrap()
+        );
+        assert_eq!(
+            configured_toolbox_names(database.connection(), "agent-first").unwrap(),
+            vec!["campfire", "member-studio"],
+            "reading the toolbox must leave legacy rows unchanged",
+        );
+
+        let stale_removal = CommandEnvelope {
+            command_id: Uuid::new_v4().to_string(),
+            payload: SetToolboxMembersCommand {
+                skill_name: "member-studio".to_string(),
+                member_ids: with_new_member.clone(),
+                expected_version: toolbox_members_version(&with_new_member).unwrap(),
+            },
+            ..envelope.clone()
+        };
+        assert_eq!(
+            set_toolbox_members(&mut database, &stale_removal)
+                .unwrap()
+                .result
+                .code,
+            "toolbox.members.conflict",
+        );
+        let invalid_member = CommandEnvelope {
+            command_id: Uuid::new_v4().to_string(),
+            payload: SetToolboxMembersCommand {
+                expected_version: view.version.clone(),
+                ..stale_removal.payload.clone()
+            },
+            ..envelope.clone()
+        };
+        assert_eq!(
+            set_toolbox_members(&mut database, &invalid_member)
+                .unwrap()
+                .result
+                .code,
+            "toolbox.member_unavailable",
+        );
+
+        let save = CommandEnvelope {
+            command_id: Uuid::new_v4().to_string(),
+            payload: SetToolboxMembersCommand {
+                skill_name: "member-studio".to_string(),
+                member_ids: vec!["agent-second".to_string()],
+                expected_version: view.version,
+            },
+            ..envelope
+        };
+        let saved = set_toolbox_members(&mut database, &save).unwrap();
+        assert_eq!(saved.result.code, "toolbox.members.updated");
+        assert_eq!(saved.result.payload["memberIds"], json!(["agent-second"]));
+        assert_eq!(
+            toolbox_member_ids(database.connection(), "member-studio").unwrap(),
+            vec!["agent-second"],
+        );
+        assert_eq!(
+            configured_toolbox_names(database.connection(), "agent-first").unwrap(),
+            vec!["campfire"],
+            "saving one Skill cleans only that Skill's legacy assignments",
+        );
         drop(database);
         fs::remove_dir_all(directory).unwrap();
     }
@@ -523,6 +621,15 @@ mod tests {
         );
         assert_eq!(index["skills"][0]["desc"], entries[0].desc);
         assert_eq!(managed.root(), canonical);
+        for invalid in [
+            "# Plain",
+            "---\n---\nBody",
+            "---\nname: [broken\n---\nBody",
+            "---\nname: campfire\ndescription: [bad]\n---\n",
+        ] {
+            fs::write(&path, invalid).unwrap();
+            assert!(read_frontmatter(&path, "campfire").is_err());
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

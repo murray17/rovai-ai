@@ -24,7 +24,7 @@ function eligibleConversationRuns(runs: readonly AgentRunView[], continuedRunIds
   }
   return publicRuns.filter(run => run.status === 'running' || agentRunIsStarting(run)
     || run.status === 'waiting' && run.startedAt !== null
-    || (run.status === 'failed' && run.invocationKind === 'batch' || isUserInterruptedRun(run))
+    || (run.status === 'failed' && run.invocationKind === 'batch' || run.status === 'cancelled')
       && (run.failure?.code === 'context_payload_too_large' || latestByAgent.get(run.agentId)?.id === run.id)
       && !run.hasAcceptedContinuation && !continuedRunIds?.has(run.id))
 }

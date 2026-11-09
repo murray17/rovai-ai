@@ -28,6 +28,8 @@ pub struct ResolveFilePreviewSourceParams {
     #[serde(default)]
     pub raw_reference: Option<String>,
     #[serde(default)]
+    pub expected_path_at_send: Option<String>,
+    #[serde(default)]
     pub agent_run_id: Option<String>,
     #[serde(default)]
     pub execution_epoch: Option<i64>,
@@ -1002,6 +1004,7 @@ mod tests {
             params![skill.id, skill.name, skill.entry_path, skill.canonical_path],
         ).unwrap();
         let request = ResolveFilePreviewSourceParams {
+            expected_path_at_send: None,
             kind: "skill_reference".to_string(),
             camp_id: "preview-camp".to_string(),
             message_id: None,
@@ -1016,6 +1019,18 @@ mod tests {
         assert!(
             matches!(resolve_skill_preview_source(&database, &data_dir, &request).unwrap(), Some(ResolvedFilePreviewSource::FileTarget { source_kind, .. }) if source_kind == "skill_reference")
         );
+        for text in [
+            "# Plain",
+            "---\nname: [broken\n---\nBody",
+            "---\nname: unclosed",
+        ] {
+            std::fs::write(&entry, text).unwrap();
+            assert!(
+                resolve_skill_preview_source(&database, &data_dir, &request)
+                    .unwrap()
+                    .is_some()
+            );
+        }
         let mut changed = request.clone();
         changed.raw_reference = Some("other.md".to_string());
         assert!(
@@ -1100,6 +1115,7 @@ mod tests {
             database,
             &ManagedBlobStore::new(data_dir),
             ResolveFilePreviewSourceParams {
+                expected_path_at_send: None,
                 kind: "run_evidence".to_string(),
                 camp_id: "preview-camp".to_string(),
                 message_id: None,
@@ -1191,6 +1207,7 @@ mod tests {
             database,
             &ManagedBlobStore::new(data_dir),
             ResolveFilePreviewSourceParams {
+                expected_path_at_send: None,
                 kind: "run_activity_file".to_string(),
                 camp_id: camp_id.to_string(),
                 message_id: None,

@@ -122,16 +122,20 @@ describe('inline member identity save', () => {
         ...receipt(5),
         status: 'rejected',
         code: 'agent_profile.version_conflict'
-      }
+      },
+      new Error('专业职责最多 30,000 个字符。'),
+      new Error('AgentProfile workingPrinciples must not exceed 3000 characters'),
+      new Error('AgentProfile growthTopic must not exceed 3000 characters')
     ]) {
       const request = vi.fn()
       if (failure instanceof Error) request.mockRejectedValue(failure)
       else request.mockResolvedValue(failure)
       const accepted = vi.fn()
+      const draft = { ...identityDraftFor(profile), teamRole: '开发者', professionalResponsibilities: '😀'.repeat(30_001), workingPrinciples: '中'.repeat(3_001), growthTopic: '😀'.repeat(3_001) }
       await expect(
         saveMemberIdentity({
           agent: profile,
-          draft: { ...identityDraftFor(profile), teamRole: '开发者' },
+          draft,
           avatarRef: 'rovai://member-avatar/builtin/luoke/v1',
           request,
           onCommitted: accepted
@@ -139,6 +143,9 @@ describe('inline member identity save', () => {
       ).rejects.toThrow()
       expect(request).toHaveBeenCalledTimes(1)
       expect(accepted).not.toHaveBeenCalled()
+      expect(draft.professionalResponsibilities).toBe('😀'.repeat(30_001))
+      expect(draft.workingPrinciples).toBe('中'.repeat(3_001))
+      expect(draft.growthTopic).toBe('😀'.repeat(3_001))
     }
   })
 })

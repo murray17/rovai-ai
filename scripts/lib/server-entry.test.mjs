@@ -70,7 +70,7 @@ test('Native Server default and custom roots retain data and token, reject anoth
   }
   const wait = (promise, step = 'Server entry step') => Promise.race([promise, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error(`${step} timed out`)), 20000); timer.unref() })])
   const call = async (host, token, operation, params = {}) => {
-    const login = await fetch(`${host.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 5, administratorToken: token }) })
+    const login = await fetch(`${host.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, administratorToken: token }) })
     assert.equal(login.status, 200)
     const session = await login.json()
     const deadline = Date.now() + 15_000
@@ -148,7 +148,7 @@ test('Native Server default and custom roots retain data and token, reject anoth
       assert.ok(serverPaths.runtimeCampFilesRoot.startsWith(join(data, 'instances') + sep))
       assert.equal(serverPaths.runtimeCampFilesRoot.startsWith(desktop + sep), false)
       await assert.rejects(access(join(serverPaths.runtimeCampFilesRoot, '.runtime-camp-files-root.json')), { code: 'ENOENT' })
-      const loginBeforeExit = await fetch(`${first.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 5, administratorToken: token }) })
+      const loginBeforeExit = await fetch(`${first.origin()}/api/v1/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 7, administratorToken: token }) })
       assert.equal(loginBeforeExit.status, 200)
       const durableSession = await loginBeforeExit.json()
       const before = await call(first, token, 'navigation.snapshot')

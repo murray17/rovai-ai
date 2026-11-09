@@ -195,7 +195,7 @@ export type RunInputDisplayItem = {
 
 export type ExecutionProgressItem =
   | { key: string; kind: 'input'; input: RunInputDisplayItem }
-  | { key: string; kind: 'narration'; body: string }
+  | { key: string; kind: 'narration'; body: string; contentComplete?: boolean }
   | { key: string; kind: 'plan'; explanation: string; plan: ExecutionPlanStep[] }
   | { key: string; kind: 'diagnostic'; diagnostic: RuntimeDiagnostic }
   | { key: string; kind: 'fast'; state: 'unknown' | 'standard' | 'fast' | 'cooldown'; disabledReason: string | null }
@@ -597,6 +597,7 @@ export function buildLiveExecutionProgress(
 ): LiveExecutionProgress {
   const narrationByItem = new Map<string, string>()
   const settledNarration = new Set<string>()
+  const completeNarration = new Set<string>()
   let anonymousNarrationSegment = 0
   let activeAnonymousNarrationItemId: string | null = null
   let planExplanation = ''
@@ -710,6 +711,10 @@ export function buildLiveExecutionProgress(
       rememberItem(`narration:${itemId}`)
       narrationByItem.set(itemId, stringField(payload, 'text') ?? '')
       if (payload.status !== 'streaming') settledNarration.add(itemId)
+      const text = stringField(payload, 'text') ?? ''
+      if (payload.status === 'completed' && !event.outputTruncated
+        && (numberField(payload, 'textLength') ?? text.length) <= text.length) completeNarration.add(itemId)
+      else completeNarration.delete(itemId)
       continue
     }
     if (event.eventType === 'agent.text.delta') {
@@ -950,10 +955,11 @@ export function buildLiveExecutionProgress(
     }
     if (key.startsWith('narration:')) {
       const itemId = key.slice('narration:'.length)
-      const narration = (narrationByItem.get(itemId) ?? '').trim()
+      // The trailing line ending is meaningful while a Markdown fence streams.
+      const narration = narrationByItem.get(itemId) ?? ''
       const body = options.textMode === 'live_tail' ? narration.slice(-4_000) : narration
       return safeMarkdownHasRenderableContent(body)
-        ? [{ key, kind: 'narration', body }]
+        ? [{ key, kind: 'narration', body, ...(completeNarration.has(itemId) && body === narration ? { contentComplete: true } : {}) }]
         : []
     }
     if (key.startsWith('input:')) {

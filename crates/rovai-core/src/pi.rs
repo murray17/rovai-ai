@@ -1,4 +1,5 @@
 mod host;
+mod interactions;
 
 use std::{fmt, path::Path, time::Duration};
 
@@ -99,6 +100,7 @@ pub enum PiIncoming {
         native_prompt_id: String,
         delivery_id: String,
         sequence: u64,
+        received_at: i64,
         message: Value,
     },
     Exited {
@@ -128,13 +130,7 @@ pub fn unsupported_extension_ui_cancellation(request: &Value) -> Result<Value> {
         .filter(|id| !id.is_null())
         .cloned()
         .context("Pi Extension UI request omitted id")?;
-    Ok(
-        if request.get("method").and_then(Value::as_str) == Some("confirm") {
-            json!({"type": "extension_ui_response", "id": id, "confirmed": false})
-        } else {
-            json!({"type": "extension_ui_response", "id": id, "cancelled": true})
-        },
-    )
+    Ok(json!({"type": "extension_ui_response", "id": id, "cancelled": true}))
 }
 
 pub fn normalize_event(message: &Value) -> (&'static str, Value) {
@@ -357,9 +353,6 @@ pub(crate) fn runtime_compatibility_digest(
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
-    let executable = Path::new(&frozen_runtime.executable_path)
-        .canonicalize()
-        .context("failed to resolve qualified Pi executable")?;
     canonical_json_digest(&json!({
         "schemaVersion": 4,
         "adapterKind": AdapterKind::Pi,
@@ -367,9 +360,6 @@ pub(crate) fn runtime_compatibility_digest(
         "executionRoot": cwd,
         "workspaceIsolation":workspace_isolation,
         "windowsAccount":rovai_core::managed_process::WindowsAccountLaunch::for_isolation(workspace_isolation)?.map(|account|account.compatibility_digest()).transpose()?,
-        "executablePath": executable,
-        "reportedVersion": frozen_runtime.reported_version,
-        "executableFingerprint": frozen_runtime.executable_fingerprint,
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "managedExtensionVersion": PI_HOST_EXTENSION_VERSION,
         "managedExtensionDigest": format!("{:x}", Sha256::digest(include_str!("pi/managed-host.ts").as_bytes())),
@@ -862,7 +852,224 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_native_extension_ui_is_cancelled_without_managed_interpretation() {
+    fn native_extension_ui_preserves_answers_and_expires_without_default_answers() {
+        use crate::native_interaction::{
+            NativeInteractionAnswer as Answer, NativeInteractionStatus as Status,
+        };
+        let mut dialogs = interactions::PiInteractions::default();
+        for method in ["confirm", "select", "input", "editor"] {
+            let request = json!({"type":"extension_ui_request", "method":method, "id":format!("native-{method}"),
+                "title":"原问题\n第二行", "message":" 保留说明 ", "options":["A", "A", "Type something."],
+                "placeholder":" 原提示 ", "prefill":"  初始\n中文  ", "timeout":10});
+            assert!(dialogs.register(&request, "run-1", 7, 100).unwrap());
+            assert!(
+                dialogs.register(&request, "run-1", 7, 999).unwrap(),
+                "duplicate ingress must not renew its deadline"
+            );
+            let entry = dialogs
+                .entries
+                .values_mut()
+                .find(|entry| entry.native_id == request["id"])
+                .unwrap();
+            assert_eq!(entry.view.questions[0].title, "原问题\n第二行");
+            assert_eq!(
+                entry.view.questions[0].description.as_deref(),
+                Some(" 保留说明 ")
+            );
+            assert_eq!(entry.view.can_skip, true);
+            let question = &entry.view.questions[0];
+            assert_eq!(question.display_preview(), "原问题\n第二行\n\n 保留说明 ");
+            assert_eq!(question.answer_preview(&Answer::Skip), None);
+            assert_eq!(
+                entry.response(&Answer::Skip).unwrap(),
+                json!({"type":"extension_ui_response", "id":request["id"], "cancelled":true})
+            );
+            match method {
+                "confirm" => {
+                    for confirmed in [false, true] {
+                        assert_eq!(
+                            entry.view.questions[0].answer_preview(&Answer::Confirm { confirmed }),
+                            Some(format!("回答：{}", if confirmed { "是" } else { "否" }))
+                        );
+                        assert_eq!(
+                            entry.response(&Answer::Confirm { confirmed }).unwrap()["confirmed"],
+                            confirmed
+                        );
+                    }
+                }
+                "select" => {
+                    assert_eq!(entry.view.questions[0].options.len(), 3);
+                    assert_eq!(
+                        entry.view.questions[0].answer_preview(&Answer::Select {
+                            option_id: "2".into()
+                        }),
+                        Some("已选择：Type something.".into())
+                    );
+                    let mut long = entry.view.questions[0].clone();
+                    long.options[0].label = "🪴".repeat(350);
+                    long.title = "🪴".repeat(350);
+                    assert_eq!(
+                        long.display_preview(),
+                        format!("{}……（仅展示部分内容）", "🪴".repeat(300))
+                    );
+                    assert_eq!(
+                        long.answer_preview(&Answer::Select {
+                            option_id: "0".into()
+                        })
+                        .unwrap(),
+                        format!("已选择：{}……（仅展示部分内容）", "🪴".repeat(296))
+                    );
+                    assert_eq!(
+                        entry
+                            .response(&Answer::Select {
+                                option_id: "2".into()
+                            })
+                            .unwrap()["value"],
+                        "Type something."
+                    );
+                    assert!(
+                        entry
+                            .response(&Answer::Input {
+                                value: "custom text must wait for native input".into()
+                            })
+                            .is_err()
+                    );
+                    assert!(
+                        entry
+                            .response(&Answer::Select {
+                                option_id: "missing".into()
+                            })
+                            .is_err()
+                    );
+                }
+                _ => {
+                    for text in ["", "  ", "  中文\n保留空格  "] {
+                        assert_eq!(
+                            entry.view.questions[0]
+                                .answer_preview(&Answer::Input { value: text.into() }),
+                            Some(if text.is_empty() {
+                                "已提交空文本".into()
+                            } else {
+                                format!("回答：\n{text}")
+                            })
+                        );
+                        assert_eq!(
+                            entry
+                                .response(&Answer::Input { value: text.into() })
+                                .unwrap()["value"],
+                            text
+                        );
+                        assert_eq!(
+                            entry.view.questions[0].prefill.as_deref(),
+                            Some("  初始\n中文  ")
+                        );
+                        assert_eq!(entry.view.questions[0].multiline, method == "editor");
+                    }
+                    let text = "🪴".repeat(350);
+                    assert_eq!(
+                        entry
+                            .response(&Answer::Input {
+                                value: text.clone()
+                            })
+                            .unwrap()["value"],
+                        text
+                    );
+                    assert_eq!(
+                        entry.view.questions[0]
+                            .answer_preview(&Answer::Input { value: text })
+                            .unwrap(),
+                        format!("回答：\n{}……（仅展示部分内容）", "🪴".repeat(296))
+                    );
+                }
+            }
+            entry.expire(109);
+            assert_eq!(entry.view.status, Status::Pending);
+            entry.expire(110);
+            assert_eq!(
+                entry.view.status,
+                if method == "editor" {
+                    Status::Pending
+                } else {
+                    Status::Expired
+                }
+            );
+        }
+        assert_eq!(
+            dialogs.pending(1000).len(),
+            1,
+            "editor has no native timeout"
+        );
+        for method in ["confirm", "select", "input"] {
+            let request = json!({"method":method, "id":format!("zero-timeout-{method}"),
+                "title":"No deadline", "options":["A"], "timeout":0});
+            assert!(dialogs.register(&request, "run-1", 7, 100).unwrap());
+            let entry = dialogs
+                .entries
+                .values_mut()
+                .find(|entry| entry.native_id == request["id"])
+                .unwrap();
+            assert_eq!(
+                entry.view.expires_at, None,
+                "Pi does not start a timer for timeout: 0"
+            );
+            entry.expire(i64::MAX);
+            assert_eq!(entry.view.status, Status::Pending);
+            assert!(entry.response(&Answer::Skip).is_ok());
+        }
+        assert!(
+            !dialogs
+                .register(&json!({"method":"notify"}), "run-1", 7, 100)
+                .unwrap()
+        );
+        assert!(
+            dialogs
+                .register(
+                    &json!({"method":"select", "id":"malformed", "title":"bad", "options":[1]}),
+                    "run-1",
+                    7,
+                    100
+                )
+                .is_err()
+        );
+        // Native select does not declare a relationship with a later input.
+        let mut independent = interactions::PiInteractions::default();
+        independent.register(&json!({"method":"select","id":"platform","title":"选择平台","options":["Windows","macOS"]}), "run", 1, 1).unwrap();
+        let select = independent.pending(1).pop().unwrap();
+        let entry = independent.entries.get_mut(&select.id).unwrap();
+        assert_eq!(
+            entry
+                .response(&Answer::Select {
+                    option_id: "0".into()
+                })
+                .unwrap(),
+            json!({"type":"extension_ui_response","id":"platform","value":"Windows"})
+        );
+        entry.view.status = Status::Sent;
+        entry.view.questions.clear();
+        independent
+            .register(
+                &json!({"method":"input","id":"project","title":"项目名称"}),
+                "run",
+                1,
+                2,
+            )
+            .unwrap();
+        let input = independent.pending(2).pop().unwrap();
+        assert_ne!(select.id, input.id);
+        assert_eq!(input.questions[0].title, "项目名称");
+        assert!(input.questions[0].options.is_empty());
+        let value = serde_json::to_value(&input).unwrap();
+        assert!(value.get("selection").is_none());
+        assert!(value.get("presentationId").is_none());
+        assert_eq!(
+            independent.entries[&input.id]
+                .response(&Answer::Input {
+                    value: "  示例项目  ".into()
+                })
+                .unwrap(),
+            json!({"type":"extension_ui_response","id":"project","value":"  示例项目  "})
+        );
+        // Unsupported requests and system cleanup use cancellation, never a synthetic negative answer.
         for method in ["select", "input", "editor"] {
             let request = json!({
                 "type": "extension_ui_request",
@@ -890,7 +1097,7 @@ mod tests {
             json!({
                 "type": "extension_ui_response",
                 "id": "ui-confirm",
-                "confirmed": false,
+                "cancelled": true,
             })
         );
     }

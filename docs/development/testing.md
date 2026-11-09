@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-10-26
+last_updated: 2026-11-04
 ---
 
 # 测试与 Smoke Test
@@ -140,7 +140,7 @@ ACP suffix、审批 option、失败重试和 native cursor owners；Usage 生命
 
 `--questionnaires-only` 保持原生问卷工具启用，验证单选、多选、发送后问卷、default 权限模式、
 取消后新指令、Core 重启精确恢复，以及后继普通命令 allow/deny。断言原生问卷为 dismissed、
-答案与注入字段为空、`runtime_questionnaire_unsupported` 及可操作公开提示、失败 Run 不可自动重放；
+答案与注入字段为空、局部取消后原生正常结束仍成功，无最终文字不制造消息，已有公开发送不重复；
 已经发送的消息保留。Host 观察使用 Core 直属子进程
 PID 集合，不能替代跨 Session 或并发 Fleet 资格。该矩阵不假造问卷 permission 请求；
 `questionnaire:` option 的防代答反例由既有 extended owner
@@ -210,6 +210,20 @@ owner，而不是继续增加平行 fixture 和断言。
 
 ### 单项 Runtime 检查减重
 
+Issue #997 扩展既有 `windows_command_shim_content_changes_compatibility_fingerprint`，通过真实发现入口
+验证 npm/pnpm 包升级但包装脚本内容和文件属性不变、旧证据拒收、重复发现身份稳定及损坏 manifest/bin
+不回退弱身份。`identity_checked_probe_discards_updated_results_and_keeps_stable_errors` 扩展至 Windows，
+验证只在 Probe 期间更新包也沿用 Superseded；起始 manifest 缺失后 Probe 成功时，恢复新包仍被
+现有候选身份的发布前复核拒收，恢复原包则允许通过。普通初始路径错误保持 Stable(Err)，不扩大重试。
+原自定义脚本与 Codex 原生目标 owner 保持。
+CodeBuddy 的逐模型/旧 Session 档位扩展 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`；
+消息强度扩展 `model_metadata_uses_frozen_options_and_default_only_observation`。新增独立 Rust 测试函数为零，
+仅使用临时静态文件和现有纯函数/Probe future，不建立数据库或真实 Runtime fixture。
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib grouped_acp_models`、
+`cargo test -p rovai-core --features extended-tests --lib identity_checked_probe` 与
+`cargo test -p rovai-core --lib read_model::message_model::`；Windows 额外运行
+`cargo test -p rovai-core --lib windows_command_shim_content_changes_compatibility_fingerprint`。
+
 `runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_complete_options`
 拥有 MiniMax 的新健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
 目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功
@@ -230,6 +244,91 @@ owner，而不是继续增加平行 fixture 和断言。
 Codex 原认证 fixture 同时拥有普通 Schema 有／无 Fast 字段时的进程计数：可信版本与普通静态证据有效时
 仅一个 app-server，Fast 专用 experimental 导出为零；普通导出顺带取得或同程序已有的正向证据保留。
 安装变化、超时归属、进程清理与 Fast 保存／实际参数映射继续运行原 owner，不另建计数或性能测试框架。
+
+### Claude 收尾简化
+
+Claude 收尾简化扩展既有 `claude::tests::native_permissions_do_not_block_stdout_or_replace_the_last_result`
+reader/writer owner：覆盖 result／插话的两种顺序、提前回执、写入后的迟到 idle、30 秒及 601 秒虚拟等待，
+并分别结算最终结果和缺失回执。该 owner 在修复前会被原 10／600 秒读流分支中断。
+`later_claude_result_controls_failure_and_invalid_frames_still_fail` 增加新前台活动后无 result 的 EOF，
+防止借用旧成功；原权限、后台任务、错误与脱敏 case 保留。`claude_control::tests` 只退役已删除计时的
+断言，保留串行写入、关闭与取消边界。没有新增或删除 Rust 测试函数。
+进程 owner `launch_files_are_removed_after_a_normal_claude_exit` 覆盖同一 Adapter 的连续执行、缺少 idle
+的自然退出、真实非零退出及确认结束后的退出清理；`interrupt_during_stdin_write_keeps_files_until_the_tree_is_reaped`
+补充等待 idle 时停止、停止清理完成后再执行。最低命令为
+`cargo test -p rovai-core --features extended-tests --lib claude`；默认 workspace 回归仍需通过。
+真实连续交互沿用 `node scripts/smoke-claude-runtime.mjs` 的隔离 Core／Skill／MCP，不能以仅出现首条文本代替终态。
+该入口显式读取所需模型目录，配置辅助函数接受成员静态 `installed_unverified`，仍校验原生探测 `ready`。
+实际等待连续两条 Run 成功、取消终态及停止后新提交消息成功，并输出 Run ID；不把静态配置状态当作执行验证。
+
+同一进程 owner 的退出清理 case 在真实终止请求之后注入一次错误，验证原生成功保留；自然非零退出仍失败。
+reader/writer owner 另覆盖“写入 → 旧 result → 旧 idle → 后续失败”：当前会关闭 stdin，但 reader 仍收取后续结果，
+不会把已收到的后续失败变成旧成功。这只证明协议读流边界，不证明真实 CLI 在该精确次序及 stdin EOF 后的行为。
+真实运行中插话复用 `probe-steer-version.mjs` 的单项过滤，与上面的 Run 成功后续发 smoke 分开记账；
+未观察到的原生精确时序保留为验证边界，不据此增加轮次计数、回执门槛或业务超时。
+
+### Claude 空结果与问卷局部拒绝
+
+扩展既有 Claude terminal、reader/control 和进程清理 owners：空 success 可完成，问卷仍拒绝及去重，
+后续成功不被覆盖；原生失败、Session 不匹配与缺少当前最终结果仍失败。
+共享结算扩展 `accepted_send_suppresses_missing_send_recovery_for_recipient_matrix`（slow-tests），
+验证有／无先前公开发送的空 success 都成功、无空消息及无重复发送。
+单聊既有 Pending FIFO owner 以空 success 推进下一条，断言不产生空私聊回复；常规非空终态 owner 保留。
+不新增 Rust 测试函数，不把受控协议／数据库测试表述为真实模型验收。
+
+### 全 Runtime 空成功结果
+
+沿用既有 owner，不新增 Rust 测试函数：`native_prompt_failure_is_retryable_only_when_input_was_not_accepted`
+覆盖 Pi／ACP 的原生成功、拒绝、错误、整轮取消与未知；Codex 的
+`codex_native_terminal_controls_host_independently_of_business_delivery` 原空 completed case
+改为成功，校验无空消息、无 final digest、同 Host 后继及迟到旧终态围栏。
+同一 owner 保留携带原生 error 的 completed 为失败并退役 Host。
+Pi 的 `active_input_receipts_and_late_abort_keep_exact_rpc_correlation` 增加最后 assistant 无正文时清除旧进度的断言。
+Antigravity 的 `stream_json_projects_tool_lifecycle_and_command_output` 扩展为空白／null／省略 response 的
+成功及非法类型拒绝，原结构化失败、超时和 legacy 缺少结果 owners 保留。
+ACP suffix owner 继续覆盖工具归属、最终文字采集与问卷取消后的正文，不再测试已删除的整轮问卷否决状态。
+共享公开发布、Single Chat Pending FIFO 和审批选项沿用现有 owners；补发已有文字与无文字成功分开断言。
+
+最小命令为 `cargo test -p rovai-core --features slow-tests --lib native_prompt_failure`、
+`cargo test -p rovai-core --features slow-tests --lib codex_native_terminal`、
+`cargo test -p rovai-core --features slow-tests --lib antigravity::tests::` 及
+`cargo test -p rovai-core --features slow-tests --lib final_agent_message_uses_complete_assistant_suffix`。
+`smoke-minimax-runtime.mjs --completion-only`／`--questionnaires-only` 的受控 Provider 断言已同步新规则；
+未执行这些入口时，不把协议夹具通过表述为真实 CLI 或模型验收。默认 workspace 仍需通过。
+
+### CodeBuddy 原生失败详情
+
+扩展 `acp_rpc_error_keeps_only_allowlisted_bounded_fields` 的既有解析矩阵，覆盖 CodeBuddy refusal 的
+序列化错误、`data.details/message`、脱敏、非法或超限元数据及成功／取消／其他 Runtime 的反例。
+原有 TRAE 字符串与对象错误、输入接受和错误结算 owners 保留，不新增 Rust 测试函数。
+Renderer 既有 `RuntimeFailureNotice` owner 覆盖 CodeBuddy 的 RunCard 详情展示；原生完整链路另以
+两个官方 CodeBuddy 版本及 loopback Provider 验证，不调用外部模型，不冒充 Windows 真机验收。
+最小命令：`cargo test -p rovai-core --features extended-tests --lib acp_rpc_error_keeps_only_allowlisted_bounded_fields`、
+`cargo test -p rovai-core --features extended-tests --lib prompt_error_after_activity` 及
+`pnpm exec vitest run apps/desktop/src/renderer/src/RuntimeFailureNotice.test.ts`。
+
+### 补充输入未知后的独立新输入
+
+扩展既有 `active_inputs_preserve_initial_context_and_unsubmitted_sources`：A 提交后回执未知，
+B 仍以独立输入 ID 路由、物化、提交和 accepted，A 保持未知且无法再次 dispatch；错误 epoch 拒绝。
+首条 accepted 前等待、真实终态／取消后的不可提交与未发送回队列反例继续保留。
+Adapter 的关闭通道拒绝仍由既有 active-input／Claude control owners 覆盖，未增加 Runtime 探活用例。
+最小命令：`cargo test -p rovai-core --features extended-tests,slow-tests --lib active_input`。
+
+### 冷启动刷新不整类退役
+
+扩展既有 `launch_version_uses_the_frozen_program_without_blocking_ordinary_execution`：替换 Qwen
+程序后，本次启动取得当前指纹，同时同类型的 IdleWarm 和 Busy Host 在释放后仍能实际 acquire 原进程。
+使用现有 Fake Host 控制 Fleet 生命周期；不宣称是真实 CLI 升级验证。Command 原冷启动更新／缺失程序、
+安装禁用与删除反例保留；配置失效继续由 `runtime_configuration_writes_preserve_startups_and_retire_changed_command_hosts` 拥有。
+最小命令：`cargo test -p rovai-core --features extended-tests,slow-tests --lib launch_version_uses_the_frozen_program`。
+同一 owner 现验证驻留 Adapter 的调度不读程序、冷启动补齐版本／指纹、实际 Host 身份在初始化阶段进入本轮，
+离开初始化阶段后不可改写，并覆盖 OpenCode 首次确定 V2 后仍以原 Binding ID 绑定当前程序证据。
+ZCode 原 native layers owner 覆盖不读取安装包仍可形成 warm 兼容摘要、用户 Provider 配置变化仍生效；
+原 bundle-layout owner 继续验证 cold 所需资源。Codex 的 `run_local_changes_reuse_codex_host_and_host_change_reaps_old_writer` 与
+ACP 的 `trae_completed_run_enters_lru_and_reuses_the_same_host_session` 原 owner 增加磁盘替换：warm 不调用
+冷启动工厂、沿用原进程身份，配置改变或 Host 退出后的 cold 仍调用准备／拒绝路径。兼容摘要与 Pi 现有 owner
+验证程序版本不再构成复用门槛；不新增真实模型调用或跨平台矩阵。
 
 ### 新增独立测试
 

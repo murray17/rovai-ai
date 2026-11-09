@@ -26,7 +26,7 @@ test('Web disconnect recovery blocks portals and shortcuts, preserves drafts and
       logLevel: 'error', build: { outDir: dist, emptyOutDir: true } })
     let online = true, loss = null, rejectRetry = false, holdProbe = false, holdEvents = false, releaseProbe
     const dispatches = [], receipts = new Map()
-    const identity = { protocolVersion: 5, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'fixture' }
+    const identity = { protocolVersion: 7, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'fixture' }
     server = createServer(async (request, response) => {
       const path = new URL(request.url, 'http://fixture').pathname
       const json = (value, status = 200) => { response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(value)) }

@@ -106,6 +106,7 @@ last_updated: 2026-10-30
 | `--memory-muted` | `#626262` |
 | `--memory-input-line` | `#dedede` |
 | `--neutral-selected` | `#eee4e6` |
+| `--conversation-selection-surface` | `#e6e6e6` |
 | `--neutral-hover` | `#f4edef` |
 | `--conversation-action` | `#ce3e4e` |
 | `--conversation-action-ink` | `#373437` |

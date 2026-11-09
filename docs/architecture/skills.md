@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skills
 authority: current-skills-source-configuration-and-delivery-boundaries
 status: accepted
-last_updated: 2026-10-19
+last_updated: 2026-11-08
 ---
 
 # Skills 来源、配置与模型投递
@@ -21,6 +21,11 @@ Skills 是模型可按需读取的文件指南，不改变工具、权限、消�
 
 受管文件同步仅操作九个 Rovai 发布目录，且不跟随来源或目标的符号链接。受管根来自执行 Host 的 Core data-dir 规则，不能使用 Renderer 前台路径或模型侧 `~`。旧 Library 的启停和 Runtime group assignment 不转为队员配置；迁移及新建队员只默认选择 `member-studio`。用户显式关闭后，Core 重启不重新开启。
 
+队员永久移除在同一领域命令事务中删除其全部 `member_toolbox_skill` 当前配置；历史身份和已冻结的 Run 输入保留。
+工具箱名单和保存时的配置版本共用有效队员查询，只排除 `profile_status = 'removed'`，保留暂离队员。
+旧版本留下的失效关联在读取时被排除，读取不写库；该 Skill 下次成功保存时，现有全量替换事务清掉其残留。
+提交仍校验配置版本与每位队员的当前有效性；旧页面发生冲突后重读，不静默接受失效队员。
+
 诊断读取旧派发 observation 的数量；Windows 另对已登记且 `active` 的项目根，只读检查已知 Skill 组下九个固定名称（`analyze-agent-codebase`、`campfire`、`cli-operations`、`grill-duo`、`grill-duo-with-docs`、`member-studio`、`memory-stewardship`、`review-duo`、`worktree`）的精确路径，补入没有 observation 的现存入口。用户点击唯一清理动作时，Core 逐项重新确认 root `active`、可访问性、运行中 Run、精确 group 路径和普通目录 no-reparse 条件；Windows 固定名称入口不要求旧 operation、NTFS file identity、内容 digest 或 observation 一致。其他入口继续按原有受管归属证据确认；无法确认则保留。清理只移除精确入口及其存在的旧 observation；`access_state` 继续由 Navigation 的项目移除／恢复维护，清理命令不调用 `remove_execution_root`。Core 启动与升级不触发旧入口文件清理。
 
 ## 选择到投递的数据流
@@ -35,6 +40,13 @@ Renderer / 结构化 SkillMention(skillId, nameAtSend)
 ```
 
 `rovai:<name>` 只指向工具箱闭合集；`native:<canonical-path-hash>` 只指向已由 Core 发现登记的原生入口；旧 UUID 按历史来源处理。同名不同文件保持不同身份，同一真实文件的多入口按目标归并。失效引用仍随消息发送，解析为 unavailable 并省略消息局部文件链接；不能改绑同名技能。模型可见的 `skills[{name,path}]` 仅在该条消息实际选择且来源仍可用时出现。原生 Skill 不进入任一 Rovai 索引。
+
+原生发现与来源重验共用宽松文档读取：元数据问题不排除可读文档，名称缺省稳定取 canonical
+文件所属目录名；候选去重后的同一结果用于登记。原生名称不受受管目录命名格式限制。读取失败、
+可恢复元数据问题以轻量诊断交给列表与选择器，均不注入模型。原生发现完整枚举既定范围，
+不以目录条目数截断；文件预览可作有界的大文件降级，资源菜单的递归保护保持。具体正文、错误与预算边界
+由 [Skills Rebuild v2](../contracts/skills-rebuild-v2.md#原生文档接受与诊断)拥有；不改变受管校验、
+缓存权威、投递版本轴或已有冻结 Selection／Resolution／Manifest 的恢复。
 
 平台索引随本 Run 的启动材料冻结，具体投递由 Runtime 规则决定；后续 Run 可以使用当前材料，不以旧 Binding 的 Bootstrap 为续聊门槛。`TEAM_GUIDANCE` 位于身份之后、平台索引之前。公共 claim 同时固定动态工具箱索引和实际字节预算，见 [Profile 13](../contracts/context-delivery-profile-v13.md)。同一 Run/Binding/generation 的已准备输入保持冻结，不重新读取后续配置；补发也使用该次适用的完整 Bootstrap，不发送第二条只含 Skills 的任务消息。新 Manifest 不复制退役的独立 proof/digest，恢复边界见 [Input Snapshot Storage](../contracts/input-snapshot-storage-v1.md)。
 

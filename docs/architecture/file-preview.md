@@ -2,7 +2,7 @@
 document_type: architecture
 authority: file-preview-components-and-boundaries
 status: accepted
-last_updated: 2026-11-01
+last_updated: 2026-11-02
 ---
 
 # File Preview Architecture
@@ -247,6 +247,46 @@ Markdown 继续使用 `rovai-preview://asset/<tab-token>/<segments>`，在 app.r
 
 不支持格式在来源与本地文件校验后直接交给系统默认应用，并在返回前释放一次性解析材料；它不进入上述长期资源图。
 
+## Markdown 图表渲染
+
+`DocumentMarkdown` 与消息正文的 `MessageMarkdown` 向 `SafeMarkdown` 注入稳定的代码块组件；模块级
+`pre` renderer 通过 context 消费它。语言名忽略大小写精确为 `mermaid` 时复用 `MarkdownMermaidBlock`，
+其他文档代码继续高亮，普通消息代码保留原有 `pre` 和结构化 children。基础 Markdown 不直接引入图表引擎；执行控制台消费轻量预览 context，
+不间接引入 Provider 和文件查看器。`MarkdownCodeFrame` 继续拥有
+原始代码复制与手动复制回退。图表的局部状态、候选图片解码与 Blob URL 生命周期归展示组件。
+
+消息的围栏准入使用同一次 remark 解析产生的围栏 sequence token，不重复解析整篇正文。
+只有解析器确认的闭合围栏且行结束符已到达，才允许未完成正文绘图；正式完整正文允许 Markdown 的 EOF 隐式闭合。
+元信息按本次解析源码的节点 offset 关联到清洗后的代码块，不添加 HTML 属性白名单。展示投影保留原始行尾；
+正文完成、全文读取和 Run 终态分别判断。`renderReady` 共同约束提交、界面和旧请求失效，未就绪时仅显示源码。
+单聊仅在同一 Run 内正文唯一对应时移动已有正文容器，保留图表实例；没有全局图形缓存或跨消息状态匹配。
+
+`mermaid-renderer` 仅提供 `renderMermaid(source, theme)`，按窗口懒建一个专用 iframe，以 Promise 链串行
+初始化和渲染。Mermaid、DOMPurify 与专用启动脚本作为本地静态资源打包，首次需要时才加载。
+正式 Desktop 与 Web 由同一 Vite 多入口构建共享模块和资源，安装包仅保留 `web-ui/assets` 中的一份；
+Desktop 从 `web-ui/desktop.html` 加载，Host Web 继续使用 `web-ui/index.html`。开发时沿用原 Electron Vite HMR 入口。
+HTTP 入口通过 nonce 标记的经典脚本满足宿主继承的 `script-src 'self'`；Desktop file 入口由宿主读取同一份
+资源，再放入 nonce 页面壳，避免 opaque iframe 直接读取文件。两种宿主共用同一启动入口和消息协议，
+不放宽宿主 CSP。iframe 使用 `sandbox="allow-scripts"`，不开放同源权限、Preload、
+Host API 或文件能力；CSP 禁止图片、字体、连接、子 frame、worker、object、表单与 base URL。图源通过
+数据消息传递，不进入页面壳或可执行脚本。双向匹配窗口引用、实例代次及请求身份，不信任 opaque origin 的
+`null` 字符串作为身份。
+
+初始化固定 strict、禁用 HTML labels 与引擎错误图；保留默认受保护项并锁定已知配置段。原始源码先按
+50,000 个 JS 字符限额检查，并将同一限额和 500 条边限制交给引擎。SVG 使用 DOMPurify 的 SVG profile
+清洗，禁止脚本、HTML 嵌入、图片和外部 href，保留本图内部箭头引用。结果仅用于 Blob-backed `img`，
+不插入宿主 DOM，也不提供可脱离图片上下文运行的 SVG 导出。
+
+加载和单次渲染分别有 15 秒等待期限。超时统一使实例失效，结算旧代当前及排队请求并断开旧队列；新请求
+重新创建实例，不迁移或自动重试旧任务。期限不承诺中断同步计算。语法错误只结算当前块，后续任务继续。
+Desktop 仅缓存已经读取成功的脚本文本；未完成读取不跨代复用，故下一次手动重试可重新读取。
+组件用请求序号拒绝过期结果：旧请求只释放自己未提交的候选 URL，不能修改当前视图或释放当前图片。
+已提交 URL 在替换或卸载后释放。大图与正文共用已解码结果，打开大图不重渲染。
+图片查看器按内容身份重置：同一图源的主题换图保留尺寸、缩放及原生滚动位置；图源变化仍关闭大图。
+普通图片的阅读位置通过实际 `.file-preview-image-scroll` 容器保存与恢复。
+
+用户交互和查找边界见[文件预览图表阅读](../ui/components/file-preview.md#markdown-图表阅读)。
+
 ## 轻量文本编辑
 
 `FilePreviewResources` 持有窗口级 `FileEditStore`，按 Host 文件 key 复用草稿与 CodeMirror 状态。
@@ -264,7 +304,7 @@ Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core �
 由现有预览 session 持有不占文件句柄的 `file_picker` 空标签；第一次目录文件打开后替换为普通文件标签。
 文件标签的 `openedFromDirectory` 标记随 session 保留、去重时合并；最后一个目录来源标签关闭后收起目录，
 不连带关闭仅从会话链接打开的标签。目录可单独折叠，sidecar 隐藏时暂停目录显示和监听，保留浏览状态。
-`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v26.md) 请求。
+`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v28.md) 请求。
 Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；该命令不进入普通写命令队列或数据库事务。
 
 每个正在浏览的作用域共享一组非递归目录监听；变更通知只使可见目录缓存失效，与现有文件预览监听各负其责。
@@ -273,3 +313,9 @@ Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；�
 普通条目直接使用目录遍历返回的类型，链接及实际访问时再解析目标。监听忽略打开、读取等非变更事件。
 目录条目不读取正文；树、搜索、标签共用现有 `ProjectFileIcon`，导航使用界面字体，代码正文沿用 CodeMirror 等宽字体。
 没有文件管理、工作副本选择器、后台索引、搜索续传或新的编辑框架。目录中的不支持格式只显示信息与现有主动打开/下载操作。
+
+## 项目目录引用
+
+项目条目的选择来源允许文件与目录，二者保留明确类型。目录激活复用当前 Thread 的文件树，并在 Host
+校验原根、目录类型和历史冻结位置后揭示祖先链；不创建文件读取 handle 或递归加载整个目录。
+界面与草稿合同见[项目引用 v2](../contracts/project-file-reference-v2.md)，元数据 API 见[预览 v28](../contracts/file-preview-v28.md)。

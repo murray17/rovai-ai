@@ -5,7 +5,7 @@ import type { AgentRunExecutionBlock, AgentRunExecutionEvidenceView, AgentRunVie
 import { useExecutionGroupWindow } from './useExecutionGroupWindow'
 import { RunningText } from './RunningText'
 import { ExecutionStatusGlyph } from './ExecutionStatusGlyph'
-import { useOptionalFilePreview } from './FilePreviewContext'
+import { useOptionalFilePreview } from './file-preview-context'
 import { exactMutationDiffLines, inlineDiffLines } from './file-changes-presentation'
 import { openAgentRunActivityFilePreview, runFileOperationEvidencePath } from './agent-run-file-preview'
 import { readErrorMessage } from './error-message'

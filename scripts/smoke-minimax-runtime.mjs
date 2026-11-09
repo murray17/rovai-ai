@@ -296,16 +296,12 @@ else if(stage!=='EMPTY'){writeFileSync(output,token+'\\n');console.log('CONTROL_
         const before = runs().length
         await send(`CONTROL_CASE=${name}; this is a synthetic questionnaire cancellation test.`)
         const run = await terminal(before)
-        assert.equal(run.status, 'failed', JSON.stringify(run))
-        assert.equal(run.last_error_code, 'runtime_questionnaire_unsupported')
-        assert.equal(published(run.id), name === 'SEND_ASK' ? 1 : 0)
+        assert.equal(run.status, 'succeeded', JSON.stringify(run))
+        assert.equal(run.last_error_code, null)
+        assert.equal(published(run.id), name === 'SEND_ASK' ? 1 : 0, 'Native dismissal produces no extra final text or empty message')
+        assert.equal(db.prepare("SELECT json_extract(payload_json,'$.finalOutputDigest') AS digest FROM event_log WHERE entity_id=? AND event_type='agent_run.succeeded'").get(run.id).digest, null)
         assert.deepEqual(binding(), originalBinding)
-        const failure = JSON.parse(db.prepare('SELECT public_runtime_failure_json AS failure FROM agent_run WHERE id=?').get(run.id).failure)
-        assert.equal(failure.retryable, false, 'An accepted questionnaire turn must not be replayed')
-        assert.equal(failure.origin, 'compatibility')
-        assert.equal(failure.detail, `${name === 'SEND_ASK' ? '消息已发送；' : ''}原生问卷暂不受支持，未提交答案。请发送新消息，在对话中补充信息或继续任务。`)
-        if (name === 'SEND_ASK') assert.equal(failure.summary, '消息已发送，但运行结束校验失败')
-        else assert.equal(failure.summary, '原生问卷暂不受支持')
+        assert.equal(db.prepare('SELECT public_runtime_failure_json AS failure FROM agent_run WHERE id=?').get(run.id).failure, null)
         const rows = nativeDb.prepare(`SELECT request_id,status,answered_at,reply_payload,injected_at,dismissed_at
           FROM questionnaire_requests WHERE session_id=? AND json_extract(request_json,'$.title')=?`).all(originalBinding.native_session_id, name)
         assert.equal(rows.length, 1, 'Exactly one native questionnaire must be created')
@@ -317,8 +313,7 @@ else if(stage!=='EMPTY'){writeFileSync(output,token+'\\n');console.log('CONTROL_
         const snapshot = await core.request('camps.snapshot', { threadId })
         assert.equal(snapshot.approvals.filter(a => a.status === 'pending').length, 0)
         report.cases.push({ name, status: 'passed', run: run.id, nativeQuestionnaires: rows,
-          runOutcome: run.status, publicSendCount: published(run.id), retryable: failure.retryable,
-          failure: { code: failure.code, origin: failure.origin, summary: failure.summary, detail: failure.detail } })
+          runOutcome: run.status, publicSendCount: published(run.id) })
         const pids = await hostPids()
         if (name === 'ASK_MULTIPLE') { await core.stop(); await start() }
         stage = `AFTER_${name}`; step = 0
@@ -405,11 +400,10 @@ else if(stage!=='EMPTY'){writeFileSync(output,token+'\\n');console.log('CONTROL_
         await new Promise(resolve => setTimeout(resolve, 100))
       }
       const run = runs().at(-1)
-      assert.equal(run.status, 'failed', JSON.stringify(run))
+      assert.equal(run.status, name === 'EMPTY_NO_SEND' ? 'succeeded' : 'failed', JSON.stringify(run))
       assert.equal(messageCount(run.id), name === 'SEND_ERROR' ? 1 : 0)
-      if (name === 'EMPTY_NO_SEND') assert.equal(run.last_error_code, 'runtime_missing_final_output')
+      if (name === 'EMPTY_NO_SEND') assert.equal(run.last_error_code, null)
       else {
-        assert.notEqual(run.last_error_code, 'runtime_missing_final_output')
         const failure = db.prepare('SELECT public_runtime_failure_json AS failure FROM agent_run WHERE id=?').get(run.id)
         assert.equal(JSON.parse(failure.failure).retryable, false)
         assert.equal(JSON.parse(failure.failure).summary, '消息已发送，但运行结束校验失败')

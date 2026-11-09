@@ -1057,12 +1057,17 @@ mod tests {
     fn long_bootstrap_bindings_preserve_utf8_and_enforce_body_limits() {
         let root =
             std::env::temp_dir().join(format!("rovai-bootstrap-capacity-{}", uuid::Uuid::new_v4()));
-        let text = format!(
+        let mut text = format!(
             "[MEMBER_IDENTITY]\n{}\n[/MEMBER_IDENTITY]",
-            serde_json::to_string(&json!({"professionalResponsibilities":"😀".repeat(10_000)}))
+            serde_json::to_string(&json!({"professionalResponsibilities":"\0".repeat(30_000)}))
                 .unwrap()
         );
-        assert!(text.len() > 32 * 1024);
+        assert!(
+            text.len() > 128 * 1024,
+            "JSON escaping exceeds the old body cap"
+        );
+        text.push_str(&"x".repeat(262_144 - text.len()));
+        assert_eq!(text.len(), crate::context::MAX_SESSION_BOOTSTRAP_BYTES);
         fs::create_dir_all(root.join("config/rules")).unwrap();
         fs::create_dir_all(root.join("bootstrap")).unwrap();
         bind_bootstrap(&root, "long-session", &text).unwrap();
@@ -1072,10 +1077,7 @@ mod tests {
                 .unwrap()
                 .contains(&text)
         );
-        for invalid in [
-            "x".repeat(crate::context::MAX_SESSION_BOOTSTRAP_BYTES + 1),
-            String::new(),
-        ] {
+        for invalid in [format!("{text}x"), String::new()] {
             assert!(bind_bootstrap(&root, "invalid", &invalid).is_err());
         }
         assert!(bind_bootstrap(&root, "long-session", "changed").is_err());

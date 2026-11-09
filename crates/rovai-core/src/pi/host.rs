@@ -202,6 +202,7 @@ impl PiManagedContextUsage {
             native_prompt_id: owner.native_prompt_id,
             delivery_id: owner.delivery_id,
             sequence,
+            received_at: chrono::Utc::now().timestamp_millis(),
             message: json!({"type":"rovai.context_usage", "usedTokens":self.used_tokens,
                 "windowTokens":self.window_tokens, "provider":self.provider, "modelId":self.model_id}),
         }
@@ -300,6 +301,7 @@ pub(crate) struct PiHost {
     streaming: AtomicBool,
     retire_after_steer: AtomicBool,
     sequence: AtomicU64,
+    launch_runtime: std::sync::OnceLock<FrozenAgentRuntimeConfig>,
     executable_path: PathBuf,
     builtin_tools: Option<BuiltinToolProcessConfig>,
     config_root: PathBuf,
@@ -602,6 +604,7 @@ impl PiHost {
             streaming: AtomicBool::new(false),
             retire_after_steer: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
+            launch_runtime: std::sync::OnceLock::new(),
             executable_path: launch.executable.to_path_buf(),
             builtin_tools: launch.builtin_tools.clone(),
             config_root,
@@ -913,6 +916,7 @@ impl PiHost {
             native_prompt_id: owner.native_prompt_id,
             delivery_id: owner.delivery_id,
             sequence,
+            received_at: chrono::Utc::now().timestamp_millis(),
             message,
         });
     }
@@ -1509,10 +1513,22 @@ pub struct PiRuntime {
     input_submission: Mutex<()>,
     #[cfg(windows)]
     account_filesystem: Option<rovai_core::managed_process::AccountFilesystem>,
+    interactions: Mutex<super::interactions::PiInteractions>,
     stopping: AtomicBool,
 }
 
 impl PiRuntime {
+    pub(crate) fn camp_id(&self) -> &str {
+        &self.camp_id
+    }
+
+    pub fn launch_runtime(&self) -> &FrozenAgentRuntimeConfig {
+        self.host
+            .launch_runtime
+            .get()
+            .expect("Fleet Host has its launch identity")
+    }
+
     pub(crate) fn redact_output(&self, value: &Value) -> Value {
         self.host
             .credential_redactor
@@ -1544,6 +1560,7 @@ impl PiRuntime {
             model_fingerprint: activation.model_fingerprint,
             text_state: Mutex::new(super::PiTextState::default()),
             input_submission: Mutex::new(()),
+            interactions: Mutex::new(super::interactions::PiInteractions::default()),
             stopping: AtomicBool::new(false),
         })
     }
@@ -1732,13 +1749,17 @@ impl PiRuntime {
     pub async fn cancel(&self) -> Result<()> {
         self.stopping.store(true, Ordering::Release);
         self.host.streaming.store(false, Ordering::Release);
-        let _submission = self.input_submission.lock().await;
+        let submission = self.input_submission.lock().await;
+        self.cancel_interactions().await?;
         // Pi abort may drain queued input. This path must remove it first;
         // waking the steer waiter alone does not establish native write order.
         if self.host.retire_after_steer.load(Ordering::Acquire) {
             self.host.clear_steering_queue().await?;
         }
-        self.host.command("abort", json!({})).await?;
+        let response = self.host.submit_command("abort", json!({})).await?;
+        // A dialog can race with abort. Keep reading/cancelling it while native abort waits for idle.
+        drop(submission);
+        PiHost::command_response("abort", response).await?;
         Ok(())
     }
 
@@ -1755,6 +1776,153 @@ impl PiRuntime {
         self.host.send(response).await
     }
 
+    pub(crate) async fn register_interaction(
+        &self,
+        request: &Value,
+        received_at: i64,
+    ) -> Result<bool> {
+        let _submission = self.input_submission.lock().await;
+        if self.stopping.load(Ordering::Acquire) {
+            self.host
+                .send(super::unsupported_extension_ui_cancellation(request)?)
+                .await?;
+            return Ok(true);
+        }
+        self.interactions.lock().await.register(
+            request,
+            &self.owner.agent_run_id,
+            self.owner.execution_epoch,
+            received_at,
+        )
+    }
+
+    pub(crate) async fn pending_interactions(
+        &self,
+    ) -> Vec<crate::native_interaction::NativeInteractionView> {
+        if self.stopping.load(Ordering::Acquire) || !self.host.alive.load(Ordering::Acquire) {
+            return Vec::new();
+        }
+        if *self.host.session_id.read().await != self.session_id {
+            return Vec::new();
+        }
+        self.interactions
+            .lock()
+            .await
+            .pending(chrono::Utc::now().timestamp_millis())
+    }
+
+    pub(crate) async fn interaction_status(
+        &self,
+        id: &str,
+    ) -> crate::native_interaction::NativeInteractionStatus {
+        self.interaction_result(id).await.0
+    }
+
+    pub(crate) async fn interaction_result(
+        &self,
+        id: &str,
+    ) -> (
+        crate::native_interaction::NativeInteractionStatus,
+        Option<String>,
+    ) {
+        use crate::native_interaction::NativeInteractionStatus as Status;
+        let mut dialogs = self.interactions.lock().await;
+        let Some(entry) = dialogs.entries.get_mut(id) else {
+            return (Status::Unavailable, None);
+        };
+        entry.expire(chrono::Utc::now().timestamp_millis());
+        (entry.view.status, entry.answer_preview.clone())
+    }
+
+    pub(crate) async fn answer_interaction(
+        &self,
+        id: &str,
+        answer: &crate::native_interaction::NativeInteractionAnswer,
+    ) -> Result<crate::native_interaction::NativeInteractionResult> {
+        use crate::native_interaction::{
+            NativeInteractionAnswer, NativeInteractionResult, NativeInteractionStatus as Status,
+        };
+        let _submission = self.input_submission.lock().await;
+        let owner = self.host.owner.read().await;
+        let session = self.host.session_id.read().await;
+        let mut dialogs = self.interactions.lock().await;
+        let Some(entry) = dialogs.entries.get_mut(id) else {
+            return Ok(NativeInteractionResult {
+                already_handled: false,
+                status: Status::Unavailable,
+            });
+        };
+        entry.expire(chrono::Utc::now().timestamp_millis());
+        if entry.view.status != Status::Pending {
+            return Ok(NativeInteractionResult {
+                already_handled: matches!(entry.view.status, Status::Sent | Status::Skipped),
+                status: entry.view.status,
+            });
+        }
+        if owner.as_ref() != Some(&self.owner)
+            || *session != self.session_id
+            || self.stopping.load(Ordering::Acquire)
+            || !self.host.is_alive()
+        {
+            entry.view.status = Status::Unavailable;
+            entry.view.questions.clear();
+            return Ok(NativeInteractionResult {
+                already_handled: false,
+                status: Status::Unavailable,
+            });
+        }
+        let response = entry.response(answer)?;
+        // This failure is known to precede every native byte. The user may edit and submit again.
+        if serde_json::to_vec(&response)?.len() > PI_MAX_OUTBOUND_RECORD_BYTES {
+            return Ok(NativeInteractionResult {
+                already_handled: false,
+                status: Status::Failed,
+            });
+        }
+        entry.view.status = match self.host.send(response).await {
+            Ok(()) if matches!(answer, NativeInteractionAnswer::Skip) => Status::Skipped,
+            Ok(()) => Status::Sent,
+            // A write/flush error cannot prove the native peer received zero bytes. Never replay.
+            Err(_) => {
+                self.mark_failed_closed();
+                Status::Unknown
+            }
+        };
+        if entry.view.status == Status::Sent {
+            entry.answer_preview = entry
+                .view
+                .questions
+                .first()
+                .and_then(|q| q.answer_preview(answer));
+        }
+        if entry.view.status != Status::Unknown {
+            entry.view.questions.clear();
+        }
+        Ok(NativeInteractionResult {
+            already_handled: false,
+            status: entry.view.status,
+        })
+    }
+
+    async fn cancel_interactions(&self) -> Result<()> {
+        use crate::native_interaction::NativeInteractionStatus as Status;
+        let mut dialogs = self.interactions.lock().await;
+        for entry in dialogs.entries.values_mut() {
+            entry.expire(chrono::Utc::now().timestamp_millis());
+            if entry.view.status != Status::Pending {
+                continue;
+            }
+            entry.view.status = Status::Unavailable;
+            entry.view.questions.clear();
+            self.host
+                .send(
+                    json!({"type":"extension_ui_response", "id":entry.native_id, "cancelled":true}),
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
     pub async fn observe(&self, mut message: Value) -> Result<(Value, Option<CompletedAcpAction>)> {
         match message.get("type").and_then(Value::as_str) {
             Some("message_end") => {
@@ -1768,9 +1936,7 @@ impl PiRuntime {
                     .get("stopReason")
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                if let Some(text) = assistant_message_text(assistant) {
-                    *self.final_message.write().await = Some(text);
-                }
+                *self.final_message.write().await = assistant_message_text(assistant);
             }
             Some("tool_execution_start" | "tool_execution_update") => {
                 if let Some(tool_call_id) = message.get("toolCallId").and_then(Value::as_str)
@@ -1863,6 +2029,9 @@ impl PiRuntime {
     }
 
     async fn cleanup_for_release(&self) -> Result<()> {
+        self.stopping.store(true, Ordering::Release);
+        let _submission = self.input_submission.lock().await;
+        self.cancel_interactions().await?;
         #[cfg(windows)]
         let image_scope_result = if let Some(filesystem) = &self.account_filesystem {
             filesystem.close_run().await
@@ -1941,10 +2110,15 @@ impl PiRpcRuntimeAdapter {
         create_private_directory(&self.private_runtime_dir)
     }
 
-    pub async fn ensure_agent_run_runtime(
+    pub async fn ensure_agent_run_runtime<F, Fut>(
         &self,
         request: PiAgentRunRuntimeRequest<'_>,
-    ) -> Result<Arc<PiRuntime>> {
+        prepare_cold: F,
+    ) -> Result<Arc<PiRuntime>>
+    where
+        F: FnOnce(FrozenAgentRuntimeConfig) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<FrozenAgentRuntimeConfig>> + Send + 'static,
+    {
         if request.frozen_runtime.adapter_kind != AdapterKind::Pi {
             bail!("Pi Runtime received a non-Pi AgentRun");
         }
@@ -2009,7 +2183,7 @@ impl PiRpcRuntimeAdapter {
         };
         let locator_root =
             session_locator_root(&self.private_runtime_dir, request.camp_id, request.agent_id)?;
-        let spawn_executable = PathBuf::from(&request.frozen_runtime.executable_path);
+        let spawn_runtime = request.frozen_runtime.clone();
         let spawn_cwd = request.cwd.to_path_buf();
         let spawn_account = rovai_core::managed_process::WindowsAccountLaunch::for_isolation(
             request.workspace_isolation,
@@ -2018,7 +2192,6 @@ impl PiRpcRuntimeAdapter {
         let spawn_seed = seed.clone();
         let spawn_incoming = self.incoming.clone();
         let spawn_builtin_tool_factory = request.builtin_tool_factory.clone();
-        let spawn_environment = request.frozen_runtime.environment.clone();
         let spawn_environment_source = rovai_core::member_environment::launch_source();
         let lease = self
             .fleet
@@ -2035,9 +2208,11 @@ impl PiRpcRuntimeAdapter {
                     ),
                 },
                 move || async move {
+                    let spawn_runtime = prepare_cold(spawn_runtime).await?;
+                    let spawn_executable = PathBuf::from(&spawn_runtime.executable_path);
                     let spawn_environment = rovai_core::member_environment::resolve_for_launch(
                         spawn_environment_source,
-                        spawn_environment,
+                        spawn_runtime.environment.clone(),
                     )
                     .await?;
                     let host = PiHost::spawn(PiHostLaunch {
@@ -2053,6 +2228,7 @@ impl PiRpcRuntimeAdapter {
                         builtin_tools: Some(spawn_builtin_tool_factory.create()?),
                     })
                     .await?;
+                    let _ = host.launch_runtime.set(spawn_runtime);
                     Ok(RuntimeProcessHost::Pi(host))
                 },
             )
@@ -2131,6 +2307,49 @@ impl PiRpcRuntimeAdapter {
                 .await;
         }
         Ok(runtime)
+    }
+
+    pub(crate) async fn channel_interactions(
+        &self,
+    ) -> Vec<(String, crate::native_interaction::NativeInteractionView)> {
+        let runtimes = self
+            .active
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut questions = Vec::new();
+        for runtime in runtimes {
+            questions.extend(
+                runtime
+                    .pending_interactions()
+                    .await
+                    .into_iter()
+                    .map(|question| (runtime.camp_id().to_owned(), question)),
+            );
+        }
+        questions
+    }
+
+    pub(crate) async fn pending_interactions(
+        &self,
+        camp_id: &str,
+    ) -> Vec<crate::native_interaction::NativeInteractionView> {
+        let runtimes = self
+            .active
+            .lock()
+            .await
+            .values()
+            .filter(|runtime| runtime.belongs_to_camp(camp_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut pending = Vec::new();
+        for runtime in runtimes {
+            pending.extend(runtime.pending_interactions().await);
+        }
+        pending.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+        pending
     }
 
     pub async fn get_agent_run(
@@ -3438,6 +3657,7 @@ request_log="$fixture_dir/requests.jsonl"
 trap 'exit 0' TERM INT
 queued_probe=''
 delayed_id=''
+abort_count=0
 while IFS= read -r request; do
   printf '%s\n' "$request" >> "$request_log"
   request_id=$(printf '%s\n' "$request" | /usr/bin/sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
@@ -3459,8 +3679,16 @@ while IFS= read -r request; do
         delayed_id=''
       fi
       ;;
+    extension_ui_response)
+      ;;
     abort)
+      abort_count=$((abort_count + 1))
       printf '%s' "$queued_probe" > "$fixture_dir/queued-at-abort"
+      if [ "$abort_count" = 2 ]; then
+        printf '{"type":"extension_ui_request","id":"dialog-late-stop","method":"confirm","title":"late dialog"}\n'
+        IFS= read -r late_cancellation
+        printf '%s\n' "$late_cancellation" >> "$request_log"
+      fi
       /bin/sleep 0.15
       printf '{"type":"response","id":"%s","success":true,"command":"abort","data":{}}\n' "$request_id"
       ;;
@@ -3483,7 +3711,7 @@ done
             bootstrap_payload_digest: format!("{:x}", Sha256::digest(bootstrap.as_bytes())),
             bootstrap,
         };
-        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
         let host = PiHost::spawn(PiHostLaunch {
             environment: None,
             account: None,
@@ -3516,6 +3744,25 @@ done
         );
 
         host.bind(runtime.owner.clone()).await.unwrap();
+        *host.session_id.write().await = runtime.session_id.clone();
+        runtime
+            .observe(json!({"type":"message_end","message":{
+                "role":"assistant","stopReason":"toolUse",
+                "content":[{"type":"text","text":"Earlier progress"}]
+            }}))
+            .await
+            .unwrap();
+        runtime
+            .observe(json!({"type":"message_end","message":{
+                "role":"assistant","stopReason":"stop","content":[]
+            }}))
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime.terminal().await,
+            (None, Some("stop".to_string())),
+            "an empty native final must not borrow the earlier progress text"
+        );
         assert!(
             runtime
                 .steer("idle", &[])
@@ -3553,6 +3800,77 @@ done
         // it. The fake withholds the steer ACK until clear_queue: stop cannot
         // depend on either that ACK or the steer task winning the schedule.
         host.streaming.store(true, Ordering::Release);
+        use crate::native_interaction::{
+            NativeInteractionAnswer as Answer, NativeInteractionStatus as Status,
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        runtime.register_interaction(&json!({"type":"extension_ui_request", "id":"dialog-once", "method":"select", "title":"选择", "options":["原始选项", "Type something."]}), now).await.unwrap();
+        let dialog = runtime.pending_interactions().await.pop().unwrap();
+        let answer = Answer::Select {
+            option_id: "0".into(),
+        };
+        let other_answer = Answer::Select {
+            option_id: "1".into(),
+        };
+        let (first, duplicate) = tokio::join!(
+            runtime.answer_interaction(&dialog.id, &answer),
+            runtime.answer_interaction(&dialog.id, &other_answer)
+        );
+        let (first, duplicate) = (first.unwrap(), duplicate.unwrap());
+        assert_eq!(first.status, Status::Sent);
+        assert_eq!(duplicate.status, Status::Sent);
+        assert_ne!(first.already_handled, duplicate.already_handled);
+        let sent_preview = if !first.already_handled {
+            "已选择：原始选项"
+        } else {
+            "已选择：Type something."
+        };
+        assert_eq!(
+            runtime.interaction_result(&dialog.id).await,
+            (Status::Sent, Some(sent_preview.into()))
+        );
+        assert!(
+            runtime.interactions.lock().await.entries[&dialog.id]
+                .view
+                .questions
+                .is_empty()
+        );
+        assert!(
+            runtime
+                .answer_interaction(&dialog.id, &Answer::Skip)
+                .await
+                .unwrap()
+                .already_handled
+        );
+        assert_eq!(
+            runtime.interaction_result(&dialog.id).await.1.as_deref(),
+            Some(sent_preview)
+        );
+        runtime.register_interaction(&json!({"type":"extension_ui_request", "id":"stale-session", "method":"input", "title":"Session fence"}), now).await.unwrap();
+        let stale = runtime.pending_interactions().await.pop().unwrap();
+        *host.session_id.write().await = "another-session".to_string();
+        assert_eq!(
+            runtime
+                .answer_interaction(
+                    &stale.id,
+                    &Answer::Input {
+                        value: "must not cross Session".into()
+                    }
+                )
+                .await
+                .unwrap()
+                .status,
+            Status::Unavailable
+        );
+        *host.session_id.write().await = runtime.session_id.clone();
+        runtime
+            .register_interaction(
+                &json!({"type":"extension_ui_request", "id":"dialog-stop", "method":"confirm", "title":"停止不等于否"}),
+                now,
+            )
+            .await
+            .unwrap();
+        let stopped_dialog = runtime.pending_interactions().await.pop().unwrap();
         let locked_stdin = host.stdin.lock().await;
         let steering = runtime.steer("STOP_PROBE", &[]);
         tokio::pin!(steering);
@@ -3589,6 +3907,34 @@ done
             "",
             "abort must see an empty native queue"
         );
+        let writes = std::fs::read_to_string(root.join("requests.jsonl")).unwrap();
+        assert_eq!(
+            writes
+                .lines()
+                .filter(|line| line.contains("dialog-once"))
+                .count(),
+            1,
+            "two windows may only write one native answer; abort receipt orders the fixture observation"
+        );
+        let cancellation = writes
+            .lines()
+            .find(|line| line.contains("dialog-stop"))
+            .unwrap();
+        let cancellation: Value = serde_json::from_str(cancellation).unwrap();
+        assert_eq!(cancellation["cancelled"], true);
+        assert!(cancellation.get("confirmed").is_none());
+        assert!(
+            writes.find("dialog-stop").unwrap() < writes.find("\"type\":\"abort\"").unwrap(),
+            "cancel the dialog before waiting on abort"
+        );
+        assert_eq!(
+            runtime
+                .answer_interaction(&stopped_dialog.id, &Answer::Confirm { confirmed: true })
+                .await
+                .unwrap()
+                .status,
+            Status::Unavailable
+        );
         // Native agent_start can race with cancellation too. It must not reopen
         // this Runtime's input admission, even if streaming becomes true again.
         host.streaming.store(true, Ordering::Release);
@@ -3600,16 +3946,32 @@ done
                 .is::<rovai_core::steer::ActiveInputNotAccepted>()
         );
         assert!(host.retire_after_steer.load(Ordering::Acquire));
+        let second_cancel = runtime.cancel();
+        tokio::pin!(second_cancel);
+        let late = timeout(Duration::from_secs(2), async {
+            loop {
+                tokio::select! {
+                    result = second_cancel.as_mut() => panic!("abort cannot settle before dialog cleanup: {result:?}"),
+                    event = receiver.recv() => {
+                        if let Some(PiIncoming::Message { message, .. }) = event {
+                            if message["id"] == "dialog-late-stop" { break message; }
+                        }
+                    }
+                }
+            }
+        }).await.expect("the resident reader must deliver a dialog while abort waits");
+        timeout(
+            Duration::from_secs(1),
+            runtime.register_interaction(&late, now),
+        )
+        .await
+        .expect("abort receipt must not lock out late dialog cleanup")
+        .unwrap();
         assert!(
-            timeout(Duration::from_millis(20), runtime.cancel())
+            timeout(Duration::from_millis(20), second_cancel.as_mut())
                 .await
                 .is_err(),
             "the outer cancellation deadline should be allowed to stop waiting"
-        );
-        tokio::time::sleep(Duration::from_millis(220)).await;
-        assert!(
-            host.is_alive(),
-            "a late abort response must not poison the Host"
         );
         host.command("get_state", json!({})).await.unwrap();
         assert!(host.pending.lock().await.is_empty());
@@ -3623,6 +3985,18 @@ done
         assert_eq!(
             first_steer["images"],
             serde_json::to_value(&images).unwrap()
+        );
+        let late: Value = serde_json::from_str(
+            requests
+                .lines()
+                .find(|line| line.contains("dialog-late-stop"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(late["cancelled"], true);
+        assert!(
+            late.get("confirmed").is_none(),
+            "system cancellation must not impersonate No"
         );
         let commands = requests
             .lines()
@@ -3639,11 +4013,14 @@ done
                 "get_state",
                 "steer",
                 "steer",
+                "extension_ui_response",
                 "steer",
+                "extension_ui_response",
                 "clear_queue",
                 "abort",
                 "clear_queue",
                 "abort",
+                "extension_ui_response",
                 "get_state"
             ]
         );

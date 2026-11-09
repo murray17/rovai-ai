@@ -90,6 +90,7 @@ export function browserGeneralPreferences(scope: string | null): Omit<GeneralPre
     setStartupLocationMode: startupLocationMode => commit({ startupLocationMode }),
     setLastSettingsSection: lastSettingsSection => commit({ lastSettingsSection }),
     setExecutionConsolePlacement: executionConsolePlacement => commit({ executionConsolePlacement }),
+    setExecutionConsoleAutoOpen: executionConsoleAutoOpen => commit({ executionConsoleAutoOpen }),
     setWorldMapEnabled: worldMapEnabled => commit({ worldMapEnabled }),
     setNewConversationDefaults: newConversationDefaults => commit({ newConversationDefaults }),
     setOneClickNewConversationEnabled: oneClickNewConversationEnabled => commit({ oneClickNewConversationEnabled }),

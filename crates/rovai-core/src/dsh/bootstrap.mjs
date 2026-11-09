@@ -8,6 +8,8 @@ export const inject = ['loader', 'systemPrompt', 'tools']
 export const readinessService = 'rovaiDshReady'
 const MAX_OBSERVED_FILE_CONTENT_BYTES = 2 * 1024 * 1024
 const DSH_MCP_CLIENT = '@deepseek-ai/dsh-mcp-client'
+// @deepseek-ai/cordis 4.0.4: FiberState.ACTIVE (vendor/cordis/src/fiber.ts).
+const CORDIS_FIBER_ACTIVE = 2
 
 // The ACP app can claim stdio while sibling Loader entries are still starting.
 // Hold its injected readiness service until every configured native MCP client
@@ -18,7 +20,18 @@ async function awaitNativeMcpReadiness(ctx) {
     .filter(entry => !entry.disabled && entry.options.name === DSH_MCP_CLIENT)
   await Promise.all(entries.map(async entry => {
     await entry.refresh()
-    await entry._await()
+    if (typeof entry._await === 'function') {
+      await entry._await()
+      return
+    }
+    const fiber = entry.fiber
+    if (typeof fiber?.await !== 'function') {
+      throw new Error('rovai_dsh_native_mcp_lifecycle_unavailable')
+    }
+    await fiber.await()
+    if (fiber.state !== CORDIS_FIBER_ACTIVE) {
+      throw new Error('rovai_dsh_native_mcp_not_active')
+    }
   }))
 }
 

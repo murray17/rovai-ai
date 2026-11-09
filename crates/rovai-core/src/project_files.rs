@@ -57,7 +57,7 @@ fn entry_path(id: &str) -> Result<PathBuf> {
     Ok(relative.into())
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Binding {
     path: PathBuf,
     identity: String,
@@ -69,11 +69,18 @@ pub fn binding(database: &Database, thread: &str) -> Result<Binding> {
         !thread.is_empty() && thread.len() <= 128,
         "root_unavailable"
     );
-    let project: String = database.connection().query_row(
-        "SELECT project_path FROM camp WHERE id=?1 AND activation_state='active' AND deletion_operation_id IS NULL AND project_binding_kind='directory'",
+    binding_from_connection(database.connection(), thread)
+}
+
+pub(crate) fn binding_from_connection(
+    connection: &rusqlite::Connection,
+    thread: &str,
+) -> Result<Binding> {
+    let project: String = connection.query_row(
+        "SELECT project_path FROM camp WHERE id=?1 AND activation_state IN ('pending','active') AND deletion_operation_id IS NULL AND project_binding_kind='directory'",
         [thread], |row| row.get(0),
     ).context("root_unavailable")?;
-    let workspace: Option<(String, String, i64)> = database.connection().query_row(
+    let workspace: Option<(String, String, i64)> = connection.query_row(
         "SELECT w.id,w.working_directory,w.generation FROM mission_workspace w JOIN mission m ON m.id=w.mission_id WHERE m.camp_id=?1 AND w.state='ready' ORDER BY w.created_at LIMIT 1",
         [thread], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     ).optional()?;
@@ -89,7 +96,7 @@ pub fn binding(database: &Database, thread: &str) -> Result<Binding> {
     })
 }
 
-fn root(binding: &Binding) -> Result<(PathBuf, String)> {
+pub(crate) fn root(binding: &Binding) -> Result<(PathBuf, String)> {
     let path = fs::canonicalize(&binding.path).context("root_unavailable")?;
     let metadata = fs::metadata(&path).context("root_unavailable")?;
     ensure!(metadata.is_dir(), "root_unavailable");
@@ -109,6 +116,29 @@ fn root(binding: &Binding) -> Result<(PathBuf, String)> {
         ))
     );
     Ok((path, identity))
+}
+
+// Cross-thread equivalence deliberately excludes the Thread prefix, but retains workspace generation.
+pub(crate) fn same_effective_root(left: &Binding, right: &Binding) -> Result<bool> {
+    let (left_path, _) = root(left)?;
+    let (right_path, _) = root(right)?;
+    if left_path != right_path
+        || left.identity.split_once(':').map(|x| x.1) != right.identity.split_once(':').map(|x| x.1)
+    {
+        return Ok(false);
+    }
+    let left_metadata = fs::metadata(&left_path)?;
+    let right_metadata = fs::metadata(&right_path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok((left_metadata.dev(), left_metadata.ino())
+            == (right_metadata.dev(), right_metadata.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(left_metadata.created().ok() == right_metadata.created().ok())
+    }
 }
 
 /// A preview reference survives closing the browser, but never a root rebind/replacement.
@@ -155,6 +185,9 @@ pub fn resolve_source(
 pub struct Request {
     pub thread_id: String,
     pub action: String,
+    pub raw_reference: Option<String>,
+    pub target_kind: Option<crate::camp_content::ProjectFileTargetKind>,
+    pub expected_path_at_send: Option<String>,
     pub scope_id: Option<String>,
     pub entry_id: Option<String>,
     pub entry_ids: Option<Vec<String>>,
@@ -413,7 +446,8 @@ impl ProjectFiles {
             }
         }
         let binding = binding.context("root_unavailable")?;
-        let (_, identity) = tokio::task::spawn_blocking(move || root(&binding)).await??;
+        let root_binding = binding.clone();
+        let (_, identity) = tokio::task::spawn_blocking(move || root(&root_binding)).await??;
         ensure!(scope.identity == identity, "scope_expired");
         if request.action == "poll" {
             let notified = scope.changed.notified();
@@ -438,11 +472,48 @@ impl ProjectFiles {
             "open" => {
                 let id = request.entry_id.context("entry_unavailable")?;
                 let path = scope.path(&id)?;
-                ensure!(path.is_file(), "entry_unavailable");
+                ensure!(path.is_file() || path.is_dir(), "entry_unavailable");
+                let directory = path.is_dir();
+                if let Some(kind) = request.target_kind {
+                    ensure!(
+                        (kind == crate::camp_content::ProjectFileTargetKind::Directory)
+                            == directory,
+                        "entry_unavailable"
+                    );
+                }
                 let relative = entry_path(&id)?;
+                ensure!(!relative.as_os_str().is_empty(), "entry_unavailable");
+                if let Some(raw) = request.raw_reference.as_ref() {
+                    let admitted = crate::project_file_reference::resolve_target(
+                        &binding,
+                        raw,
+                        crate::camp_content::ProjectFileTargetKind::Directory,
+                    )
+                    .context("entry_unavailable")?;
+                    ensure!(
+                        admitted.label == relative
+                            && admitted.path == path.to_str().context("entry_unavailable")?,
+                        "entry_unavailable"
+                    );
+                    ensure!(
+                        request
+                            .expected_path_at_send
+                            .as_ref()
+                            .is_none_or(|expected| expected == &admitted.path),
+                        "entry_unavailable"
+                    );
+                } else {
+                    ensure!(request.expected_path_at_send.is_none(), "entry_unavailable");
+                }
                 let reference =
                     URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(&scope.identity, relative))?);
-                Ok(json!({"kind":"project_file","threadId":scope.thread,"rawReference":reference}))
+                let mut source =
+                    json!({"kind":"project_file","threadId":scope.thread,"rawReference":reference});
+                if directory {
+                    fs::read_dir(&path).context("read_failed")?;
+                    source["targetKind"] = json!("directory");
+                }
+                Ok(source)
             }
             "list" | "search" => browse(&scope, &request, &cancellation),
             _ => anyhow::bail!("read_failed"),
@@ -500,9 +571,6 @@ fn browse(scope: &Scope, request: &Request, cancel: &AtomicBool) -> Result<Value
             continue;
         }
         if searching {
-            if item.file_type().is_some_and(|t| t.is_dir()) {
-                continue;
-            }
             let relative = item
                 .path()
                 .strip_prefix(&scope.root)?
@@ -526,10 +594,10 @@ fn browse(scope: &Scope, request: &Request, cancel: &AtomicBool) -> Result<Value
         }
     }
     entries.sort_by(|a, b| {
-        b.directory
-            .cmp(&a.directory)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-            .then(a.name.cmp(&b.name))
+        a.name
+            .to_lowercase()
+            .cmp(&b.name.to_lowercase())
+            .then_with(|| a.name.cmp(&b.name))
     });
     Ok(json!({"entries":entries,"partial":partial}))
 }
@@ -641,6 +709,62 @@ mod tests {
                 .as_bool()
                 .unwrap()
         );
+        let directories = call(
+            &service,
+            &fixture,
+            "search",
+            Some(scope),
+            json!({"query":"src", "queryRevision":99}),
+        )
+        .await;
+        assert!(
+            directories["value"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["directory"] == true && entry["name"] == "src")
+        );
+        let opened_directory = call(
+            &service,
+            &fixture,
+            "open",
+            Some(scope),
+            json!({"entryId":format!("p:{}",URL_SAFE_NO_PAD.encode("src"))}),
+        )
+        .await;
+        assert_eq!(opened_directory["value"]["targetKind"], "directory");
+        let mixed = fixture.0.join("name-order");
+        fs::create_dir(&mixed).unwrap();
+        for name in ["auth", "zebra"] {
+            fs::create_dir(mixed.join(name)).unwrap();
+        }
+        for name in ["config.ts", "Login.ts"] {
+            fs::write(mixed.join(name), "").unwrap();
+        }
+        for (action, params) in [
+            (
+                "list",
+                json!({"entryId":format!("p:{}", URL_SAFE_NO_PAD.encode("name-order"))}),
+            ),
+            (
+                "search",
+                json!({"query":"name-order/", "queryRevision":100}),
+            ),
+        ] {
+            let result = call(&service, &fixture, action, Some(scope), params).await;
+            let names: Vec<_> = result["value"]["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| entry["name"].as_str().unwrap())
+                .collect();
+            assert_eq!(
+                names,
+                ["auth", "config.ts", "Login.ts", "zebra"],
+                "{action}"
+            );
+            assert_eq!(result["value"]["partial"], false);
+        }
         call(&service, &fixture, "release", Some(scope), json!({})).await;
     }
     #[tokio::test]
@@ -742,6 +866,143 @@ mod tests {
             .unwrap(),
             fs::canonicalize(fixture.0.join("same #1.txt")).unwrap()
         );
+        // File-reference admission owns the same containment and root-generation boundary.
+        let admitted =
+            crate::project_file_reference::resolve(&fixture.binding(), reference).unwrap();
+        assert_eq!(admitted.label, "same #1.txt");
+        let link =
+            crate::project_file_reference::render_link(&admitted.path, &admitted.label).unwrap();
+        assert!(link.ends_with("/same%20%231.txt)"));
+        let target = Binding {
+            path: fixture.0.clone(),
+            identity: "target:project".into(),
+        };
+        let resolve_paste = |target: Binding| {
+            crate::project_file_reference::resolve_references(
+            serde_json::from_value(json!({"threadId":"target", "references":[{"threadId":"thread","rawReference":reference}]})).unwrap(),
+            HashMap::from([("thread".into(), fixture.binding()), ("target".into(), target)]))
+        };
+        let pasted = resolve_paste(target.clone());
+        assert_eq!(pasted["value"][0]["status"], "available");
+        assert_eq!(pasted["value"][0]["reference"]["threadId"], "target");
+        assert_ne!(pasted["value"][0]["reference"]["rawReference"], reference);
+        assert_eq!(
+            resolve_paste(Binding {
+                path: other.0.clone(),
+                identity: "target:project".into()
+            })["value"][0]["status"],
+            "needs_reselect"
+        );
+        assert_eq!(
+            resolve_paste(Binding {
+                path: target.path.clone(),
+                identity: "target:workspace:2".into()
+            })["value"][0]["status"],
+            "needs_reselect"
+        );
+        let (root_path, root_identity) = root(&fixture.binding()).unwrap();
+        for relative in ["../escape", "/absolute", "cycle", "missing.txt"] {
+            let raw =
+                URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(&root_identity, relative)).unwrap());
+            assert!(crate::project_file_reference::resolve(&fixture.binding(), &raw).is_err());
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                other.0.join("same #1.txt"),
+                root_path.join("external-file"),
+            )
+            .unwrap();
+            std::os::unix::fs::symlink(
+                root_path.join("same #1.txt"),
+                root_path.join("internal-file"),
+            )
+            .unwrap();
+            let raw = |relative| {
+                URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(&root_identity, relative)).unwrap())
+            };
+            assert!(
+                crate::project_file_reference::resolve(&fixture.binding(), &raw("external-file"))
+                    .is_err()
+            );
+            assert!(
+                crate::project_file_reference::resolve(&fixture.binding(), &raw("internal-file"))
+                    .is_ok()
+            );
+        }
+        // Directories share root-bound sources, but never silently change into files or links.
+        use crate::camp_content::ProjectFileTargetKind;
+        let relative = "目录 (a)#";
+        fs::create_dir(root_path.join(relative)).unwrap();
+        let directory_raw =
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&(&root_identity, relative)).unwrap());
+        let directory = crate::project_file_reference::resolve_target(
+            &fixture.binding(),
+            &directory_raw,
+            ProjectFileTargetKind::Directory,
+        )
+        .unwrap();
+        assert_eq!(directory.label, relative);
+        assert!(
+            crate::project_file_reference::render_target_link(
+                &directory.path,
+                &directory.label,
+                directory.target_kind
+            )
+            .unwrap()
+            .ends_with("%E7%9B%AE%E5%BD%95%20%28a%29%23/)")
+        );
+        assert!(
+            crate::project_file_reference::resolve(&fixture.binding(), &directory_raw).is_err()
+        );
+        let available = crate::project_file_reference::resolve_references(
+            serde_json::from_value(json!({"threadId":"thread","references":[{"threadId":"thread","rawReference":directory_raw,"targetKind":"directory"}]})).unwrap(),
+            HashMap::from([("thread".into(), fixture.binding())]));
+        assert_eq!(
+            available["value"][0]["reference"]["targetKind"],
+            "directory"
+        );
+        fs::remove_dir(root_path.join(relative)).unwrap();
+        fs::write(root_path.join(relative), "now a file").unwrap();
+        assert!(
+            crate::project_file_reference::resolve_target(
+                &fixture.binding(),
+                &directory_raw,
+                ProjectFileTargetKind::Directory
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("target_kind_changed")
+        );
+        #[cfg(unix)]
+        {
+            fs::create_dir(root_path.join("physical-directory")).unwrap();
+            std::os::unix::fs::symlink(
+                root_path.join("physical-directory"),
+                root_path.join("directory-link"),
+            )
+            .unwrap();
+            let linked = URL_SAFE_NO_PAD
+                .encode(serde_json::to_vec(&(&root_identity, "directory-link")).unwrap());
+            assert!(
+                crate::project_file_reference::resolve_target(
+                    &fixture.binding(),
+                    &linked,
+                    ProjectFileTargetKind::Directory
+                )
+                .is_err()
+            );
+        }
+        fs::write(root_path.join("same #1.txt"), "changed live").unwrap();
+        assert_eq!(
+            crate::project_file_reference::resolve(&fixture.binding(), reference)
+                .unwrap()
+                .path,
+            admitted.path
+        );
+        fs::remove_file(root_path.join("same #1.txt")).unwrap();
+        assert!(crate::project_file_reference::resolve(&fixture.binding(), reference).is_err());
+        fs::write(root_path.join("same #1.txt"), "restored").unwrap();
         assert!(resolve_source(other.binding(), "thread".into(), reference).is_err());
         let mut rebound = fixture.binding();
         rebound.identity = "thread:workspace:2".into();

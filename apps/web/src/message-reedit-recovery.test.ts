@@ -27,7 +27,7 @@ it.each(['lookup', 'late-lookup', 'core-error-lookup', 'retry', 'direct'] as con
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const applied = { status: 'applied' } as StoredCommandResult
   const fetcher = vi.fn<typeof fetch>(async (url, init) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64),
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64),
       clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'local_user' })
     const { operation, params } = JSON.parse(String(init?.body))
     if (operation === 'thread.messages.withdraw') {

@@ -11,7 +11,7 @@ it('keeps an input rejection inspectable with zero evidence and no inline hint o
   const rejected = run({ invocationKind: 'batch', startedAt: null, executionEpoch: 0,
     executionEvidenceCount: 0, inputMessageIds: ['oversized-input'], failure: {
       runtimeKind: 'codex-cli', origin: 'rovai', phase: 'execution', code: 'context_payload_too_large',
-      summary: '输入内容过大', detail: '输入内容过大，无法开始执行。请改用文件附件，或拆分后发送。', retryable: false
+      summary: '输入内容过大', detail: '本次完整输入超过执行容量，未开始执行。已保存的队员资料和已提交消息保留。请精简当前输入或专业职责后重新提交；若需精简本对话已固定的团队指引，请使用精简后的指引新建对话并重新提交。', retryable: false
     } })
   const timeline = renderTimeline(snapshot([rejected], false, false))
   expect(timeline).toContain('输入内容过大 · 查看详情')
@@ -252,12 +252,19 @@ describe('Manual Run interruption in the conversation', () => {
   })
 
   it.each([
-    ['failed', null], ['cancelled', 'camp_turn_cancelled'], ['cancelled', 'single_chat_ended'],
+    ['failed', null], ['cancelled', 'app_shutdown_cancel_all'], ['cancelled', 'planned_shutdown_cancelled'],
+    ['cancelled', 'camp_turn_cancelled'], ['cancelled', 'single_chat_ended'],
     ['cancelled', 'execution_budget_exhausted'], ['cancelled', null], ['running', 'user_requested_agent_run_stop'],
     ['waiting', 'user_requested_agent_run_stop'], ['succeeded', 'user_requested_agent_run_stop']
   ] as const)('does not call %s / %s a user interruption', (status, cancelReasonCode) => {
     const candidate = snapshot([run({ status, cancelReasonCode, cancelRequestedAt: endedAt })])
-    expect(markers(renderTimeline(candidate))).toEqual([])
+    const markup = renderTimeline(candidate)
+    expect(markers(markup)).toEqual([])
+    if (status === 'cancelled') {
+      expect(markup).toContain('data-presence-run="run-1" data-presence-state="cancelled"')
+      expect(markup).toContain('已停止')
+      expect(markup).not.toContain('你已中断')
+    }
     expect(timeline({ ...candidate, agentRunFileChanges: [], agentRunImages: [] })).toEqual([])
   })
 })

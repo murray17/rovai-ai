@@ -1,0 +1,474 @@
+{
+  "scope": "short-reference-labels-same-name-targets",
+  "sourceCommit": "6ffc92493108f138e26fe743028573e1e4370686",
+  "sourceState": "Core projection and shared label fixtures unchanged by subsequent export, test and documentation edits",
+  "realRuntime": true,
+  "success": true,
+  "cases": [
+    {
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "threadId": "rvcamp_01m6xr5wdjfw9tvcsw31gkfs0k",
+      "messageId": "f3073b94-dcb4-4c57-a62f-461de7533364",
+      "bodyProjection": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [config.ts](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/billing/config.ts",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts",
+          "rawReference": "WyI3MjA4ZDU5Y2I1ZTVkYjFjMWFmMDIxNDAyMjE0ODYzNjE3ODE4ZDBkZDVlMDdlZmI4NzY1NTI2ODMzZDE0Mjc5Iiwic3JjL2JpbGxpbmcvY29uZmlnLnRzIl0",
+          "threadId": "rvcamp_01m6xr5wdjfw9tvcsw31gkfs0k"
+        }
+      ],
+      "setup": false,
+      "success": true,
+      "runId": "9f6067d1-6d59-49b8-bda6-cc612e29e1ea",
+      "status": "succeeded",
+      "runtimeVersion": {
+        "initial": null,
+        "observed": "codex-cli 0.166.0"
+      },
+      "reply": "NONCE: d754858e022b850bb49e58cf",
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_1\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-d674ecbbb8866e94da642fce493ef3e9f003e3b0197a891f04aa1e0bc6b57fde/attachments/rvcamp_01m6xr5wdjfw9tvcsw31gkfs0k\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@叮叮 Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [config.ts](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts)\",\"mentions\":[],\"messageId\":\"f3073b94-dcb4-4c57-a62f-461de7533364\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts",
+      "selectedNonce": "d754858e022b850bb49e58cf",
+      "decoyNonce": "43b49a05c3918035798dd1fb",
+      "targetKind": "file",
+      "frozenInputSha256": [
+        "e3f00fa22aefbbac65fceadf71f932e043b3e0461227678bd7078e35e508655d"
+      ]
+    },
+    {
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "threadId": "rvcamp_01m6xr6e1pes0s63nfy6k0mnax",
+      "messageId": "2e2ee3be-b8ee-4ba9-9583-c363870138de",
+      "bodyProjection": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [config.ts](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/billing/config.ts",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts",
+          "rawReference": "WyIxNzc5YjllNDg2NDM0ZDdlMWFkMGM3Mzc1ZmEyYjVlY2RiZTIyMjJjZTlkOWQwZDY0Yjg4ZWNlYmQxOGZjNTU4Iiwic3JjL2JpbGxpbmcvY29uZmlnLnRzIl0",
+          "threadId": "rvcamp_01m6xr6e1pes0s63nfy6k0mnax"
+        }
+      ],
+      "setup": false,
+      "success": true,
+      "runId": "8123af0e-527d-4aff-890d-563e99b0442f",
+      "status": "succeeded",
+      "runtimeVersion": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "reply": "NONCE: `2df8ec1cfc11e1d8f01e14fd`",
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_2\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-d674ecbbb8866e94da642fce493ef3e9f003e3b0197a891f04aa1e0bc6b57fde/attachments/rvcamp_01m6xr6e1pes0s63nfy6k0mnax\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@芝士 Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [config.ts](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts)\",\"mentions\":[],\"messageId\":\"2e2ee3be-b8ee-4ba9-9583-c363870138de\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts",
+      "selectedNonce": "2df8ec1cfc11e1d8f01e14fd",
+      "decoyNonce": "927117935d731f463fb8e696",
+      "targetKind": "file",
+      "frozenInputSha256": [
+        "c1492c8391dbffeac9ad931e595eebef51db02d9a77674c57c6eaba492b31ba3"
+      ]
+    },
+    {
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "threadId": "rvcamp_01m6xr7sdkftgsbx6f5a3ndz57",
+      "messageId": "654e7c31-525a-49df-b630-17c1f61a4f53",
+      "bodyProjection": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [config](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/billing/config",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config",
+          "rawReference": "WyJjNjA5NTVkNzViZGFjYTA0ZDEyMWZjN2RjNDFjNzdmNjhiNDMzOWRhZWMzZDJlZThmY2I4ZmQyNzMzMmEyMTc5Iiwic3JjL2JpbGxpbmcvY29uZmlnIl0",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xr7sdkftgsbx6f5a3ndz57"
+        }
+      ],
+      "setup": false,
+      "success": true,
+      "runId": "8c9ad95b-fec2-4b2a-8dcc-6fc941d12c61",
+      "status": "succeeded",
+      "runtimeVersion": {
+        "initial": null,
+        "observed": "codex-cli 0.166.0"
+      },
+      "reply": "Directory listing: marker.txt. NONCE: 5efc5e99f93be505d74b8f84",
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_1\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-c9acc4dfa14a7da21fce508cbe29b37bf32b0d18a55c4ed0b593465f860befd3/attachments/rvcamp_01m6xr7sdkftgsbx6f5a3ndz57\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@叮叮 List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [config](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/)\",\"mentions\":[],\"messageId\":\"654e7c31-525a-49df-b630-17c1f61a4f53\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config",
+      "selectedNonce": "5efc5e99f93be505d74b8f84",
+      "decoyNonce": "e9cac97927efb0def6d1ae4c",
+      "targetKind": "directory",
+      "frozenInputSha256": [
+        "70445f6ea599a0fcda00a32e314df8d8030323383203bd84971d284139c1d5e6"
+      ]
+    },
+    {
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "threadId": "rvcamp_01m6xr8d7yf78bye02bz16kr2c",
+      "messageId": "ffb9cd33-c535-4e25-b02f-8f75d357a475",
+      "bodyProjection": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [config](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/)",
+      "content": [
+        {
+          "kind": "text",
+          "text": "List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. "
+        },
+        {
+          "kind": "project_file_reference",
+          "labelAtSend": "src/billing/config",
+          "pathAtSend": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config",
+          "rawReference": "WyIyMzM3ZDg2OWM3ZmRkZTlkMjVhYTg3Y2E1NjFhNjE4OGJkZmZkZjQwNTA5MTNhZDVjNzdjNDU3OWUwM2YxNTU2Iiwic3JjL2JpbGxpbmcvY29uZmlnIl0",
+          "targetKind": "directory",
+          "threadId": "rvcamp_01m6xr8d7yf78bye02bz16kr2c"
+        }
+      ],
+      "setup": false,
+      "success": true,
+      "runId": "2a8895c1-a98c-4889-b4c1-0a8ce75ef8a3",
+      "status": "succeeded",
+      "runtimeVersion": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "reply": "Listed `src/billing/config/`; it contains `marker.txt`. Read that file. NONCE: `36acbb3e140d542de46b2821`.",
+      "frozenInputs": [
+        "[COLLABORATION_STATE]\n{\"defaultLeadAgentId\":\"agent_2\",\"peers\":[],\"selfIsDefaultLead\":true}\n[/COLLABORATION_STATE]\n\n[RUN_FACTS]\n{\"attachmentOutputRoot\":\"/Users/murray.xue/.rovai/instances/v1-c9acc4dfa14a7da21fce508cbe29b37bf32b0d18a55c4ed0b593465f860befd3/attachments/rvcamp_01m6xr8d7yf78bye02bz16kr2c\",\"historyHint\":\"All visible messages in this Thread are in RUN_INPUT or were written by you.\"}\n[/RUN_FACTS]\n\n[ROVAI_ADDITIONAL_SKILLS]\nCurrent for this run; replaces any earlier Rovai Additional Skills.\n{\"root\":\"/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/data/skills\",\"skills\":[{\"name\":\"member-studio\",\"desc\":\"Use to create a Rovai member or revise and confirm the unsaved identity card and avatar for that creation. Exclude profile questions, edits to existing members, and character or avatar designs without roster creation.\"}]}\n[/ROVAI_ADDITIONAL_SKILLS]\n\n[RUN_INPUT]\n{\"messages\":[{\"body\":\"@芝士 List the referenced directory with your file tools, then read its marker.txt and report its NONCE. Read only that directory. Do not edit files or delegate. [config](file:///private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/)\",\"mentions\":[],\"messageId\":\"ffb9cd33-c535-4e25-b02f-8f75d357a475\",\"senderId\":\"user\",\"senderType\":\"user\",\"sequence\":1}]}\n[/RUN_INPUT]\n\n"
+      ],
+      "expectedPath": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config",
+      "selectedNonce": "36acbb3e140d542de46b2821",
+      "decoyNonce": "aa8a5c8d51e49f7b16e8911d",
+      "targetKind": "directory",
+      "frozenInputSha256": [
+        "8e20a51f7d2d725ebd4900672345a64b76d88dc0194eccfac9949061228f92db"
+      ]
+    }
+  ],
+  "coreToolEvidence": [
+    {
+      "targetKind": "file",
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "sequence": 3,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'cat /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts'",
+          "commandActions": [
+            {
+              "name": "config.ts",
+              "path": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts",
+              "type": "read"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project",
+          "id": "exec-dfe0bb75-7ab9-47b6-ae88-322debef3caa",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "export const NONCE = 'd754858e022b850bb49e58cf'\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/billing/config.ts",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "codex-cli",
+            "observedRuntimeVersion": "codex-cli 0.166.0",
+            "sourceEventKind": "activity.commandExecution.read"
+          },
+          "status": "available"
+        }
+      }
+    },
+    {
+      "targetKind": "file",
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 2,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": null,
+        "kind": "read",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Read",
+        "toolCallId": "call_09fec9fa520d4dec8d19edbcfeade286",
+        "toolName": "Read"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/billing/config.ts",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        },
+        "status": "completed"
+      }
+    },
+    {
+      "targetKind": "directory",
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "sequence": 3,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'ls -la /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/'",
+          "commandActions": [
+            {
+              "name": null,
+              "path": "config",
+              "type": "listFiles"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project",
+          "id": "exec-164ebbc5-ffea-44bc-92b9-edc52b31a535",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 04:15 .\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 04:15 ..\n-rw-r--r--@ 1 murray.xue  staff  24 Nov  8 04:15 marker.txt\n",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        }
+      }
+    },
+    {
+      "targetKind": "directory",
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "sequence": 4,
+      "kind": "command",
+      "input": {
+        "item": {
+          "command": "/bin/zsh -c 'cat /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/marker.txt'",
+          "commandActions": [
+            {
+              "name": "marker.txt",
+              "path": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/marker.txt",
+              "type": "read"
+            }
+          ],
+          "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project",
+          "id": "exec-e1072d77-5fd8-4ca8-8918-3eaa0a42052e",
+          "server": null,
+          "status": "inProgress",
+          "title": null,
+          "tool": null,
+          "type": "commandExecution"
+        },
+        "reasonCode": null,
+        "runtimeToolType": null
+      },
+      "result": {
+        "item": {
+          "aggregatedOutput": "5efc5e99f93be505d74b8f84",
+          "durationMs": 0,
+          "exitCode": 0,
+          "status": "completed"
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/billing/config/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "codex-cli",
+            "observedRuntimeVersion": "codex-cli 0.166.0",
+            "sourceEventKind": "activity.commandExecution.read"
+          },
+          "status": "available"
+        }
+      }
+    },
+    {
+      "targetKind": "directory",
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 2,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": "ls -la /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/",
+        "kind": "execute",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Bash",
+        "toolCallId": "call_9891f891a8c447d090769405f26bc290",
+        "toolName": "Bash"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "output": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 04:15 .\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 04:15 ..\n-rw-r--r--@ 1 murray.xue  staff  24 Nov  8 04:16 marker.txt",
+        "status": "completed"
+      }
+    },
+    {
+      "targetKind": "directory",
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "sequence": 3,
+      "kind": "tool_result",
+      "input": {
+        "agentOutputDigest": null,
+        "authorizationDecision": null,
+        "canonicalTool": null,
+        "idempotentReplay": null,
+        "input": null,
+        "kind": "read",
+        "locationCount": null,
+        "operationId": null,
+        "operationProjection": null,
+        "rawInputDigest": null,
+        "receiptId": null,
+        "runtimeSource": null,
+        "runtimeToolType": null,
+        "sourceAuthority": null,
+        "status": "in_progress",
+        "title": "Read",
+        "toolCallId": "call_77b6e6737b0c4e8b8eefdf3758f174f9",
+        "toolName": "Read"
+      },
+      "result": {
+        "_rovaiLifecycle": {
+          "resultObserved": true
+        },
+        "runtimeFileOperation": {
+          "operationKind": "read",
+          "path": "src/billing/config/marker.txt",
+          "schemaVersion": 2,
+          "source": "runtime_reported",
+          "sourceMetadata": {
+            "adapterKind": "claude-code-cli",
+            "observedRuntimeVersion": "2.1.311 (Claude Code)",
+            "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+          },
+          "status": "available"
+        },
+        "status": "completed"
+      }
+    }
+  ],
+  "nativeFileTools": [
+    {
+      "targetKind": "file",
+      "type": "tool_use",
+      "id": "call_09fec9fa520d4dec8d19edbcfeade286",
+      "name": "Read",
+      "input": {
+        "file_path": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-file-9girws_n/project/src/billing/config.ts"
+      }
+    },
+    {
+      "targetKind": "file",
+      "tool_use_id": "call_09fec9fa520d4dec8d19edbcfeade286",
+      "type": "tool_result",
+      "content": "1\texport const NONCE = '2df8ec1cfc11e1d8f01e14fd'\n2\t"
+    },
+    {
+      "targetKind": "directory",
+      "type": "tool_use",
+      "id": "call_9891f891a8c447d090769405f26bc290",
+      "name": "Bash",
+      "input": {
+        "command": "ls -la /private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/",
+        "description": "List the referenced config directory"
+      }
+    },
+    {
+      "targetKind": "directory",
+      "tool_use_id": "call_9891f891a8c447d090769405f26bc290",
+      "type": "tool_result",
+      "content": "total 8\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 04:15 .\ndrwxr-xr-x@ 3 murray.xue  staff  96 Nov  8 04:15 ..\n-rw-r--r--@ 1 murray.xue  staff  24 Nov  8 04:16 marker.txt",
+      "is_error": false
+    },
+    {
+      "targetKind": "directory",
+      "type": "tool_use",
+      "id": "call_77b6e6737b0c4e8b8eefdf3758f174f9",
+      "name": "Read",
+      "input": {
+        "file_path": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-reference-short-directory-lxi0jfzf/project/src/billing/config/marker.txt"
+      }
+    },
+    {
+      "targetKind": "directory",
+      "tool_use_id": "call_77b6e6737b0c4e8b8eefdf3758f174f9",
+      "type": "tool_result",
+      "content": "1\t36acbb3e140d542de46b2821"
+    }
+  ]
+}

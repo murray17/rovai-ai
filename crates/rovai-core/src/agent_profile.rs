@@ -230,6 +230,13 @@ impl AdapterKind {
         }
     }
 
+    /// These adapters return completed Hosts to Fleet for another Run.
+    pub fn reuses_process(self) -> bool {
+        matches!(self, Self::CodexCli | Self::Pi)
+            || (self.uses_acp()
+                && !matches!(self, Self::KiroCli | Self::CursorAgent | Self::HermesCli))
+    }
+
     pub fn uses_acp(self) -> bool {
         matches!(
             self,
@@ -1146,13 +1153,13 @@ impl VerifiedDiscoveredRuntimeEntry {
     }
 
     pub fn is_current(&self) -> bool {
-        crate::agent_runtime_adapter::observe_executable_file_identity(Path::new(
-            &self.entry.executable_path,
-        ))
-        .is_ok_and(|identity| identity == self.identity)
-            && crate::runtime_discovery::entrypoint_locator_identity_is_current(
-                self.entry.entrypoint_locator_identity.as_ref(),
-            )
+        crate::agent_runtime_adapter::executable_identity_is_current(
+            Path::new(&self.entry.executable_path),
+            &self.identity,
+            &self.entry.executable_fingerprint,
+        ) && crate::runtime_discovery::entrypoint_locator_identity_is_current(
+            self.entry.entrypoint_locator_identity.as_ref(),
+        )
     }
 
     /// Static discovery performs one stable read, or reuses the identity already
@@ -1164,24 +1171,19 @@ impl VerifiedDiscoveredRuntimeEntry {
         entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
         previous: Option<(&str, &ExecutableFileIdentity)>,
     ) -> Result<Self> {
-        use crate::agent_runtime_adapter::{
-            executable_fingerprint, observe_executable_file_identity,
-        };
+        use crate::agent_runtime_adapter::{executable_fingerprint, observe_executable_identity};
         let path = Path::new(&executable_path);
-        let before = observe_executable_file_identity(path)?;
-        // Windows command shims retain their full dependency verification.
-        let reusable = !path.extension().is_some_and(|extension| {
-            cfg!(windows)
-                && matches!(
-                    extension.to_str().map(str::to_ascii_lowercase).as_deref(),
-                    Some("cmd" | "bat")
-                )
-        });
-        let fingerprint = match previous.filter(|(_, identity)| reusable && *identity == &before) {
-            Some((fingerprint, _)) => fingerprint.to_owned(),
-            None => executable_fingerprint(path)?,
+        let before = observe_executable_identity(path)?;
+        // Dependency-bearing entries always reuse the freshly captured digest,
+        // never just their unchanged wrapper metadata.
+        let fingerprint = match before.dependency_fingerprint.as_ref() {
+            Some(fingerprint) => fingerprint.clone(),
+            None => match previous.filter(|(_, identity)| *identity == &before.file_identity) {
+                Some((fingerprint, _)) => fingerprint.to_owned(),
+                None => executable_fingerprint(path)?,
+            },
         };
-        let after = observe_executable_file_identity(path)?;
+        let after = observe_executable_identity(path)?;
         anyhow::ensure!(
             before == after,
             "Runtime entry changed during installation discovery"
@@ -1200,7 +1202,7 @@ impl VerifiedDiscoveredRuntimeEntry {
                 executable_fingerprint: fingerprint,
                 entrypoint_locator_identity,
             },
-            identity: after,
+            identity: after.file_identity,
         })
     }
 }
@@ -1730,11 +1732,11 @@ impl AgentProfileService {
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
-        // A live Command Host is admitted by its installation identity. Disk
-        // entry observations belong to the Fleet's cold startup branch.
-        let command = runtime.adapter_kind == AdapterKind::CommandCodeCli;
+        // A resident Host is admitted by installation identity. Disk entry
+        // observations belong to Fleet's actual cold startup branch.
+        let resident = runtime.adapter_kind.reuses_process();
         if adapter_kind != runtime.adapter_kind.as_str()
-            || (!command
+            || (!resident
                 && (executable_path != runtime.executable_path
                     || generation != runtime.installation_generation
                     || executable_fingerprint.as_deref()
@@ -1745,7 +1747,7 @@ impl AgentProfileService {
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
-        if !command && path_state != "valid" {
+        if !resident && path_state != "valid" {
             return Ok(Some(runtime_blocker(
                 "runtime_path_invalid",
                 json!({
@@ -3534,6 +3536,10 @@ impl AgentProfileService {
                 )?;
                 settled_run_ids.extend(outcome.affected_run_ids);
             }
+            transaction.execute(
+                "DELETE FROM member_toolbox_skill WHERE agent_id = ?1",
+                [&envelope.payload.agent_id],
+            )?;
             transaction.execute(
                 r#"
                 UPDATE agent_profile
@@ -5442,8 +5448,10 @@ pub(crate) fn validate_member_identity_input(
     Ok(())
 }
 
-pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 10_000;
-pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 10,000 个字符。";
+pub const PROFESSIONAL_RESPONSIBILITIES_MAX_SCALARS: usize = 30_000;
+pub const PROFESSIONAL_RESPONSIBILITIES_TOO_LONG: &str = "专业职责最多 30,000 个字符。";
+pub const WORKING_PRINCIPLES_MAX_SCALARS: usize = 3_000;
+pub const GROWTH_TOPIC_MAX_SCALARS: usize = 3_000;
 
 /// ECMAScript String.trim whitespace, matching the existing identity editor.
 /// U+FEFF is trimmed; U+0085 is retained. Interior formatting is untouched.
@@ -5488,12 +5496,16 @@ pub(crate) fn normalize_member_identity(
         normalize_professional_responsibilities(professional_responsibilities)?;
     let working_principles = working_principles.trim().to_string();
     let growth_topic = growth_topic.trim().to_string();
-    for (field, value) in [
-        ("workingPrinciples", &working_principles),
-        ("growthTopic", &growth_topic),
+    for (field, value, max_scalars) in [
+        (
+            "workingPrinciples",
+            &working_principles,
+            WORKING_PRINCIPLES_MAX_SCALARS,
+        ),
+        ("growthTopic", &growth_topic, GROWTH_TOPIC_MAX_SCALARS),
     ] {
-        if value.chars().count() > 300 {
-            anyhow::bail!("AgentProfile {field} must not exceed 300 characters");
+        if value.chars().count() > max_scalars {
+            anyhow::bail!("AgentProfile {field} must not exceed {max_scalars} characters");
         }
     }
     let mut normalized_traits = Vec::with_capacity(personality_traits.len());
@@ -6032,12 +6044,12 @@ fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> Command
 #[cfg(test)]
 // Pure owner: normalization parity and the scalar boundary do not need a database fixture.
 #[test]
-fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
+fn member_identity_uses_field_specific_unicode_scalar_limits() {
     for text in [
-        "中".repeat(10_000),
-        "😀".repeat(10_000),
-        "e\u{0301}".repeat(5_000),
-        "\"\n\u{0000}中😀".repeat(2_000),
+        "中".repeat(30_000),
+        "😀".repeat(30_000),
+        "e\u{0301}".repeat(15_000),
+        "\"\n\u{0000}中😀".repeat(6_000),
     ] {
         let padded = format!(" \u{feff}\r\n{text}\u{3000} ");
         // A final newline/control may be content; padding is normalized before counting.
@@ -6046,7 +6058,7 @@ fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
             normalize_professional_responsibilities(&padded).unwrap(),
             expected
         );
-        let too_long = format!("中{}", "😀".repeat(10_000));
+        let too_long = format!("中{}", "😀".repeat(30_000));
         assert_eq!(
             normalize_professional_responsibilities(&too_long)
                 .unwrap_err()
@@ -6068,10 +6080,47 @@ fn professional_responsibilities_use_trimmed_unicode_scalar_limits() {
     );
     // Historical Rust-normalized FEFF remains readable without a rewrite.
     assert!(validate_stored_member_identity("A", "", "\u{feff}old\u{feff}", &[], "", "").is_ok());
+    for text in [
+        "中".repeat(3_000),
+        "😀".repeat(3_000),
+        "e\u{0301}".repeat(1_500),
+        "\"\\\n\0中😀".repeat(500),
+    ] {
+        let padded = format!(" \u{0085}\r\n{text}\u{3000} ");
+        let normalized = normalize_member_identity("A", "", "", &[], &padded, &padded).unwrap();
+        assert_eq!(normalized.working_principles, text);
+        assert_eq!(normalized.growth_topic, text);
+        validate_stored_member_identity("A", "", "", &[], &text, &text).unwrap();
+        for (field, principles, growth) in [
+            ("workingPrinciples", format!("{text}界"), text.clone()),
+            ("growthTopic", text.clone(), format!("{text}界")),
+        ] {
+            assert_eq!(
+                normalize_member_identity("A", "", "", &[], &principles, &growth)
+                    .unwrap_err()
+                    .to_string(),
+                format!("AgentProfile {field} must not exceed 3000 characters")
+            );
+        }
+    }
+    // These fields keep Rust trim semantics, including historical FEFF content.
+    let normalized =
+        normalize_member_identity("A", "", "", &[], "\u{0085}\n ", "\u{feff}old\u{feff}").unwrap();
+    assert_eq!(normalized.working_principles, "");
+    assert_eq!(normalized.growth_topic, "\u{feff}old\u{feff}");
+    validate_stored_member_identity(
+        "A",
+        "",
+        "",
+        &[],
+        "\u{feff}old\u{feff}",
+        "\u{feff}old\u{feff}",
+    )
+    .unwrap();
     for (role, principles, growth) in [
         ("x".repeat(121), String::new(), String::new()),
-        (String::new(), "x".repeat(301), String::new()),
-        (String::new(), String::new(), "x".repeat(301)),
+        (String::new(), "x".repeat(3_001), String::new()),
+        (String::new(), String::new(), "x".repeat(3_001)),
     ] {
         assert!(normalize_member_identity("A", &role, "", &[], &principles, &growth).is_err());
     }
@@ -6112,6 +6161,19 @@ mod slow_tests {
                 AdapterKind::ZcodeApp,
             ]
         );
+        for kind in AdapterKind::ALL {
+            assert_eq!(
+                kind.reuses_process(),
+                matches!(kind, AdapterKind::CodexCli | AdapterKind::Pi)
+                    || (acp_adapters.contains(&kind)
+                        && !matches!(
+                            kind,
+                            AdapterKind::KiroCli
+                                | AdapterKind::CursorAgent
+                                | AdapterKind::HermesCli
+                        ))
+            );
+        }
     }
 
     #[test]
@@ -9236,7 +9298,8 @@ mod slow_tests {
                 .runtime_dispatch_blocker(&database, &frozen)
                 .unwrap()
                 .map(|blocker| blocker.code),
-            Some("runtime_path_invalid".to_string())
+            None,
+            "disk availability is checked only if Fleet must create a process"
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -9508,6 +9571,24 @@ mod slow_tests {
                 |row| row.get::<_, String>(0),
             )
             .expect("legacy handle should remain internally readable");
+        for skill_name in crate::managed_skills::TOOLBOX_SKILLS {
+            database.connection().execute(
+                "INSERT OR IGNORE INTO member_toolbox_skill(agent_id, skill_name, updated_at) VALUES (?1, ?2, 'configured-at')",
+                params![profile.agent_id, skill_name],
+            ).unwrap();
+        }
+        let configured_skills = crate::managed_skills::configured_toolbox_names(
+            database.connection(),
+            &profile.agent_id,
+        )
+        .unwrap();
+        assert_eq!(
+            configured_skills.len(),
+            crate::managed_skills::TOOLBOX_SKILLS.len()
+        );
+        let other_member_skills =
+            crate::managed_skills::configured_toolbox_names(database.connection(), "agent_1")
+                .unwrap();
         let preview = service
             .removal_preview(&database, &profile.agent_id)
             .expect("preview should load")
@@ -9532,6 +9613,51 @@ mod slow_tests {
             mismatch.result.code,
             "agent_profile.confirmation_name_mismatch"
         );
+        assert_eq!(
+            crate::managed_skills::configured_toolbox_names(
+                database.connection(),
+                &profile.agent_id
+            )
+            .unwrap(),
+            configured_skills,
+        );
+
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER fail_member_removal BEFORE UPDATE OF profile_status ON agent_profile
+             WHEN NEW.id = 'agent_4' AND NEW.profile_status = 'removed'
+             BEGIN SELECT RAISE(ABORT, 'injected member removal failure'); END;",
+        ).unwrap();
+        let failed = service.remove_member(
+            &mut database,
+            &user_command(
+                "remove-qilu-failed",
+                RemoveMemberCommand {
+                    agent_id: profile.agent_id.clone(),
+                    expected_version: profile.version,
+                    confirmation_name: profile.display_name.clone(),
+                },
+            ),
+        );
+        assert!(format!("{:#}", failed.unwrap_err()).contains("injected member removal failure"));
+        assert_eq!(
+            crate::managed_skills::configured_toolbox_names(
+                database.connection(),
+                &profile.agent_id
+            )
+            .unwrap(),
+            configured_skills,
+            "a failed removal must roll back Skill cleanup",
+        );
+        let unchanged = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.version, profile.version);
+        assert_eq!(unchanged.presence, profile.presence);
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER fail_member_removal;")
+            .unwrap();
 
         let removed = service
             .remove_member(
@@ -9547,6 +9673,20 @@ mod slow_tests {
             )
             .expect("member should be removed");
         assert_eq!(removed.result.code, "agent_profile.removed");
+        assert!(
+            crate::managed_skills::configured_toolbox_names(
+                database.connection(),
+                &profile.agent_id
+            )
+            .unwrap()
+            .is_empty(),
+            "permanent removal must clear every current toolbox assignment",
+        );
+        assert_eq!(
+            crate::managed_skills::configured_toolbox_names(database.connection(), "agent_1")
+                .unwrap(),
+            other_member_skills,
+        );
         assert!(
             service
                 .get_profile(&database, &profile.agent_id)
@@ -9696,13 +9836,61 @@ mod slow_tests {
             .get_profile(&database, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
+        let principles = "😀".repeat(3_000);
+        let growth = "\"\\\n\0中😀".repeat(500);
+        let created = service
+            .create_profile(
+                &mut database,
+                &user_command(
+                    "create-long-guidance",
+                    CreateAgentProfileCommand {
+                        working_principles: principles.clone(),
+                        growth_topic: growth.clone(),
+                        ..create_identity("Long guidance", "")
+                    },
+                ),
+            )
+            .unwrap();
+        let created_id = created.result.payload["agentId"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        for (index, (working_principles, growth_topic)) in [
+            (format!("{principles}界"), growth.clone()),
+            (principles.clone(), format!("{growth}界")),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(
+                service
+                    .update_profile(
+                        &mut database,
+                        &user_command(
+                            &format!("reject-long-guidance-{index}"),
+                            UpdateAgentProfileCommand {
+                                working_principles,
+                                growth_topic,
+                                ..update_identity(&profile, "Must not be saved")
+                            }
+                        ),
+                    )
+                    .is_err()
+            );
+            let unchanged = service.get_profile(&database, "agent_4").unwrap().unwrap();
+            assert_eq!(unchanged.version, profile.version);
+            assert_eq!(unchanged.display_name, profile.display_name);
+            assert_eq!(unchanged.working_principles, profile.working_principles);
+            assert_eq!(unchanged.growth_topic, profile.growth_topic);
+        }
         service
             .update_profile(
                 &mut database,
                 &user_command(
                     "edit-qilu",
                     UpdateAgentProfileCommand {
-                        working_principles: "只在未来 Run 生效。".to_string(),
+                        working_principles: principles.clone(),
+                        growth_topic: growth.clone(),
                         ..update_identity(&profile, &profile.display_name)
                     },
                 ),
@@ -9715,7 +9903,14 @@ mod slow_tests {
             .get_profile(&reopened, "agent_4")
             .expect("profile should load")
             .expect("profile should exist");
-        assert_eq!(profile.working_principles, "只在未来 Run 生效。");
+        assert_eq!(profile.working_principles, principles);
+        assert_eq!(profile.growth_topic, growth);
+        let created = service
+            .get_profile(&reopened, &created_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(created.working_principles, principles);
+        assert_eq!(created.growth_topic, growth);
         drop(reopened);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

@@ -33,7 +33,7 @@ type RuntimeParameterProps = {
 }
 
 type ModelFieldsProps = RuntimeParameterProps & {
-  optionKey?: 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort'
+  optionKey?: 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
   optionLabel?: string
 }
 
@@ -459,11 +459,12 @@ function modelFieldsFor(
     case 'command-code-cli':
     case 'claude-code-cli':
       return <ModelFields {...props} optionKey="effort" optionLabel={uiAttribute("思考强度")} />
+    case 'codebuddy-cli':
+      return <ModelFields {...props} optionKey="thought_level" optionLabel={uiAttribute("推理强度")} />
     case 'codex-cli':
     case 'opencode-cli':
     case 'copilot-cli':
     case 'qoder-cli':
-    case 'codebuddy-cli':
     case 'qwen-code':
     case 'deepseek-harness':
     case 'hermes-cli':

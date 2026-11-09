@@ -19,3 +19,8 @@ last_updated: 2026-10-18
 文件/Git/外部系统修改仍服从专用 Charter 的明确请求要求。
 
 历史模型字段保留在旧冻结输入中，不迁移正文，不改变会话恢复、取消、结束或迟到输出隔离。
+
+有效原生成功结果可以没有最终文字：Run 正常成功并推进 Pending FIFO，但不写空的
+`conversation_message`，`finalConversationMessageId` 与 `finalOutputDigest` 为空。已有消息和产物保留；
+归属、epoch、取消与结束后的迟到 fence 不变。结果准入见
+[Runtime Launch v74](runtime-launch-and-verification-v74.md#claude-结果与局部问卷拒绝)。

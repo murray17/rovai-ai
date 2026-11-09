@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-10-27
+last_updated: 2026-11-05
 ---
 
 # Built-in Tool Runtime Architecture
@@ -15,7 +15,7 @@ last_updated: 2026-10-27
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History v16](../contracts/camp-history-v16.md)、
 [Durable Task v6](../contracts/durable-task-v6.md) 和
-[Camp Message Send v29](../contracts/camp-message-send-v29.md)、
+[Camp Message Send v30](../contracts/camp-message-send-v30.md)、
 [Current User Attention v8](../contracts/current-user-attention-v8.md)与
 [Missing-Send Recovery Publication v3](../contracts/missing-send-recovery-publication-v3.md) 为准；v19 及更早 Transport 只保留
 historical 语义。决策理由见
@@ -215,7 +215,7 @@ timeline 与回复链使用互斥的 `--before/--after`，`--after 0` 从最早�
 文件选择在 `--file` 的精确帮助中说明：普通引用优先 Markdown，明确请求的附件或渠道文件交付使用 `--file`。
 Summary 不再说明附件快照、路径优化或纯附件示例；输入 schema、纯附件发送和路径处理均不变。
 精确教学、User 寻址和三渠道 Session 的补充提示由
-[Camp Message Send v29](../contracts/camp-message-send-v29.md) 及其继承链拥有。
+[Camp Message Send v30](../contracts/camp-message-send-v30.md) 及其继承链拥有。
 
 Send `body` exact help 只说明正文 payload；Bootstrap、Send summary/schema/CLI help
 都不公开 inline fallback 机制。`--to` 只接受 canonical ID，并是 Agent 目标 authoring 的唯一推荐入口。Core
@@ -224,7 +224,7 @@ CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文或教学该 gramm
 `to/taskId` 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 目录静态复用，说明和 schema 不再计算目录摘要；真正不兼容的接口改动使用原协议版本。
 当前 Contract/CLI 与 Agent Output 版本由本页开头的 Transport 合同拥有；IPC 和 Envelope 沿现有封闭协议，不生成或校验结果摘要 receipt。
-[Thread Runs v1](../contracts/thread-runs-v1.md) 复用公开读取范围，用一个事务组合实际 Run 和按队员聚合的等待消息；不进入调度写路径。
+[Thread Runs v2](../contracts/thread-runs-v2.md) 复用公开读取范围，用一个事务组合直接属于目标 Thread 的实际 Run 和按队员聚合的等待消息；不回退旧 Turn，也不进入调度写路径。
 Thread History 由 [当前读取合同](../contracts/camp-history-v17.md) 定义。
 Antigravity 使用当前工具协议版本，不含目录指纹；目录与 Bootstrap 文案更新不轮换旧 Session。
 新 Binding 的 Bootstrap 与新 Run 的 Formatter/Manifest 以当前 ContextManifest 合同为准；原生恢复继续使用绑定已冻结的兼容身份。

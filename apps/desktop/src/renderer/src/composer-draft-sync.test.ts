@@ -49,6 +49,20 @@ function replaceText(editor: LexicalEditor, value: string): void {
 afterEach(() => vi.useRealTimers())
 
 describe('ComposerDraftSync', () => {
+  it('counts a file-only live edit as input and refreshes its availability without changing recipients', () => {
+    const editor = createComposerEditor()
+    const bindings = { atomIsAvailable: () => true }
+    const sync = new ComposerDraftSync(editor, editor.getEditorState(), bindings)
+    const stop = editor.registerUpdateListener(payload => sync.handleEditorUpdate(payload))
+    editor.update(() => $replaceEditorWithComposerDocument({ version: 2, segments: [
+      { kind: 'atom', atom: { type: 'project_file_reference', threadId: 'thread', rawReference: 'opaque', labelFallback: 'src/file.test.ts' } },
+      { kind: 'text', text: ' ' }
+    ] }), { discrete: true })
+    expect(sync.getStatus()).toMatchObject({ hasContent: true, hasExplicitRecipient: false, hasUnavailableAtom: false, memberAgentIds: [] })
+    sync.updateBindings({ atomIsAvailable: () => false })
+    expect(sync.getStatus()).toMatchObject({ hasContent: true, hasUnavailableAtom: true, memberAgentIds: [] })
+    stop(); sync.destroy()
+  })
   it('publishes effective reference identities when unsaved edits recover before persistence', async () => {
     vi.useFakeTimers()
     const editor = createComposerEditor()

@@ -11,7 +11,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use windows_sys::Win32::{
     Foundation::{ERROR_SUCCESS, TRUE},
     Globalization::{CSTR_EQUAL, CompareStringOrdinal},
@@ -43,6 +45,12 @@ pub(crate) enum PackageManagerShimKind {
 pub(crate) struct ResolvedCodexCmdShim {
     pub(crate) executable: PathBuf,
     pub(crate) package_manager: PackageManagerShimKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CommandShimPackageIdentity {
+    pub(crate) root: PathBuf,
+    pub(crate) manifest_digest: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -177,6 +185,99 @@ pub(crate) fn classify_package_manager_cmd_shim(
         .replace('\r', "\n");
     let target = unique_node_entrypoint_target(&shim)?;
     known_package_manager_shim_template(&shim, &target)
+}
+
+/// Observe only a recognized npm/pnpm wrapper's declared bin package. Unknown
+/// scripts retain their existing identity; a recognized but broken package must
+/// not silently fall back to that weaker identity.
+pub(crate) fn command_shim_package_identity(
+    shim_path: &Path,
+    contents: &[u8],
+) -> Result<Option<CommandShimPackageIdentity>> {
+    if !is_cmd_path(shim_path) {
+        return Ok(None);
+    }
+    let Ok(shim) = std::str::from_utf8(contents) else {
+        return Ok(None);
+    };
+    let shim = shim
+        .strip_prefix('\u{feff}')
+        .unwrap_or(shim)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let Some(target) = unique_node_entrypoint_target(&shim) else {
+        return Ok(None);
+    };
+    if !target.to_ascii_lowercase().contains(r"\node_modules\") {
+        return Ok(None);
+    }
+    if known_package_manager_shim_template(&shim, &target).is_none() {
+        return Ok(None);
+    }
+    let root = shim_path.parent().context("command shim has no parent")?;
+    let declared_entrypoint = shim_entrypoint_path(root, &target)
+        .context("recognized command shim package entrypoint cannot be resolved")?;
+    let entrypoint = declared_entrypoint
+        .canonicalize()
+        .context("recognized command shim package entrypoint is unavailable")?;
+    ensure!(
+        entrypoint.is_file(),
+        "command shim package entrypoint is not a file"
+    );
+    let package_root = declared_entrypoint
+        .ancestors()
+        .skip(1)
+        .take(16)
+        .find(|directory| {
+            let Some(parent) = directory.parent() else {
+                return false;
+            };
+            parent
+                .file_name()
+                .is_some_and(|name| os_strings_equal(name, OsStr::new("node_modules")))
+                || (parent
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().starts_with('@'))
+                    && parent
+                        .parent()
+                        .and_then(Path::file_name)
+                        .is_some_and(|name| os_strings_equal(name, OsStr::new("node_modules"))))
+        })
+        .context("recognized command shim target has no npm package root")?
+        .canonicalize()
+        .context("recognized command shim package is unavailable")?;
+    let manifest = read_bounded_utf8(&package_root.join("package.json"), MAX_PACKAGE_JSON_BYTES)
+        .context("recognized command shim package manifest is unavailable or too large")?;
+    let package: serde_json::Value = serde_json::from_str(&manifest)
+        .context("recognized command shim package manifest is invalid")?;
+    let bins = match package.get("bin") {
+        Some(serde_json::Value::String(bin)) => vec![bin.as_str()],
+        Some(serde_json::Value::Object(bins)) => bins
+            .values()
+            .filter_map(serde_json::Value::as_str)
+            .collect(),
+        _ => Vec::new(),
+    };
+    ensure!(
+        bins.iter().any(|bin| {
+            let bin = Path::new(bin);
+            !bin.components().any(|part| {
+                matches!(
+                    part,
+                    Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                )
+            }) && package_root
+                .join(bin)
+                .canonicalize()
+                .ok()
+                .is_some_and(|path| paths_equal(&path, &entrypoint))
+        }),
+        "recognized command shim target does not match package bin"
+    );
+    Ok(Some(CommandShimPackageIdentity {
+        root: package_root,
+        manifest_digest: format!("sha256:{:x}", Sha256::digest(manifest.as_bytes())),
+    }))
 }
 
 fn read_registry_string(root: HKEY, subkey: &str, value_name: &str) -> Option<OsString> {
@@ -406,7 +507,7 @@ fn unique_node_entrypoint_target(shim: &str) -> Option<String> {
     for quoted in shim.split('"').skip(1).step_by(2) {
         let normalized = quoted.replace('/', "\\");
         let lower = normalized.to_ascii_lowercase();
-        if !lower.ends_with(".js")
+        if lower.ends_with(r"\node.exe")
             || (!lower.contains(r"\node_modules\")
                 && !lower.starts_with(r"%dp0%\")
                 && !lower.starts_with(r"%~dp0\"))
@@ -447,6 +548,10 @@ fn unique_codex_entrypoint_target(shim: &str) -> Option<String> {
 }
 
 fn resolve_shim_entrypoint(shim_root: &Path, target: &str) -> Option<PathBuf> {
+    shim_entrypoint_path(shim_root, target)?.canonicalize().ok()
+}
+
+fn shim_entrypoint_path(shim_root: &Path, target: &str) -> Option<PathBuf> {
     let relative = target
         .strip_prefix(r"%dp0%\")
         .or_else(|| target.strip_prefix(r"%~dp0\"));
@@ -468,7 +573,7 @@ fn resolve_shim_entrypoint(shim_root: &Path, target: &str) -> Option<PathBuf> {
         }
         absolute
     };
-    unresolved.canonicalize().ok()
+    Some(unresolved)
 }
 
 fn codex_package_root(entrypoint: &Path) -> Option<&Path> {
@@ -589,7 +694,7 @@ fn path_is_within(path: &Path, root: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use serde_json::json;
     use uuid::Uuid;
@@ -721,6 +826,31 @@ mod tests {
             ),
             target = target
         )
+    }
+
+    pub(crate) fn node_package_shim(root: &Path, pnpm: bool) -> (PathBuf, PathBuf) {
+        let package_relative = if pnpm {
+            Path::new("node_modules/.pnpm/@fixture+codebuddy@1.0.0/node_modules/@fixture/codebuddy")
+        } else {
+            Path::new("node_modules/@fixture/codebuddy")
+        };
+        let package = root.join(package_relative);
+        fs::create_dir_all(package.join("bin")).unwrap();
+        fs::write(package.join("bin/codebuddy"), b"#!/usr/bin/env node\n").unwrap();
+        let manifest = package.join("package.json");
+        fs::write(&manifest, r#"{"name":"@fixture/codebuddy","version":"1.0.0","bin":{"codebuddy":"bin/codebuddy"}}"#).unwrap();
+        let shim = root.join("codebuddy.cmd");
+        let target = format!(
+            r"%dp0%\{}\bin\codebuddy",
+            windows_relative(package_relative)
+        );
+        let body = if pnpm {
+            pnpm_shim(&target.replace("%dp0%", "%~dp0"))
+        } else {
+            npm_current_shim(&target)
+        };
+        fs::write(&shim, body).unwrap();
+        (shim, manifest)
     }
 
     #[test]

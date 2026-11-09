@@ -229,6 +229,8 @@ export class DingTalkOpenApiClient {
     robotCode: string
     space: 'group' | 'p2p'
     cardParamMap: Record<string, string>
+    cardTemplateId?: string
+    creatorUserId?: string
   }): Promise<DingTalkCardDeliveryIdentity> {
     const expectedPrefix = input.space === 'group'
       ? 'dtv1.card//IM_GROUP.'
@@ -236,7 +238,7 @@ export class DingTalkOpenApiClient {
     if (!input.openSpaceId.startsWith(expectedPrefix)) {
       throw new Error('dingtalk_card_space_invalid')
     }
-    await this.createCardInstance(input.outTrackId, input.cardParamMap)
+    await this.createCardInstance(input.outTrackId, input.cardParamMap, input)
     const response = await this.#request('/v1.0/card/instances/deliver', {
       method: 'POST',
       body: JSON.stringify({
@@ -291,12 +293,14 @@ export class DingTalkOpenApiClient {
 
   async createCardInstance(
     outTrackId: string,
-    cardParamMap: Record<string, string>
+    cardParamMap: Record<string, string>,
+    options: { cardTemplateId?: string; creatorUserId?: string } = {}
   ): Promise<void> {
     await this.#request('/v1.0/card/instances', {
       method: 'POST',
       body: JSON.stringify({
-        cardTemplateId: DINGTALK_AI_CARD_TEMPLATE_ID,
+        cardTemplateId: options.cardTemplateId ?? DINGTALK_AI_CARD_TEMPLATE_ID,
+        ...(options.creatorUserId ? { userId: options.creatorUserId, userIdType: 1 } : {}),
         outTrackId,
         cardData: { cardParamMap },
         callbackType: 'STREAM',
@@ -306,12 +310,16 @@ export class DingTalkOpenApiClient {
     })
   }
 
-  async updateCard(outTrackId: string, cardParamMap: Record<string, string>): Promise<void> {
+  async updateCard(outTrackId: string, cardParamMap: Record<string, string>, options: {
+    privateData?: Record<string, { cardParamMap: Record<string, string> }>
+    cardUpdateOptions?: { updateCardDataByKey?: boolean; updatePrivateDataByKey?: boolean }
+  } = {}): Promise<void> {
     await this.#request('/v1.0/card/instances', {
       method: 'PUT',
       body: JSON.stringify({
         outTrackId,
-        cardData: { cardParamMap }
+        cardData: { cardParamMap },
+        ...options
       })
     })
   }

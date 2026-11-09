@@ -7,7 +7,7 @@ import {BusinessApp} from '../../../apps/desktop/src/renderer/src/BusinessApp'
 import {ThreadClientProvider} from '../../../apps/desktop/src/renderer/src/camp-client'
 import {CurrentUserProfileContext} from '../../../apps/desktop/src/renderer/src/CurrentUserProfile'
 import {createReviewModel} from '../../../scripts/fixtures/host-web-parity/model'
-import {initial, initialDraft, agents, installations, navigation, now} from '../../../scripts/fixtures/host-web-parity/data'
+import {initial, initialDraft, agents, installations, navigation, now, run} from '../../../scripts/fixtures/host-web-parity/data'
 import {DEFAULT_GENERAL_PREFERENCES} from '../../../apps/desktop/src/shared/general-preferences-model'
 import {DEFAULT_APPEARANCE} from '../../../apps/desktop/src/shared/appearance'
 import {EMPTY_SNAPSHOT} from '../../../apps/desktop/src/shared/navigation-preferences-model'
@@ -61,6 +61,7 @@ function snapshot(m:MissionRecord):ThreadOpenProjection {
  if(snapshots.has(m.threadId)) return snapshots.get(m.threadId)
  const s=JSON.parse(JSON.stringify(initial).replaceAll(initial.thread.id,m.threadId))
  s.thread={...s.thread,id:m.threadId,missionId:m.missionId,title:m.title,activationState:'active',projectPath:m.projectPath}
+ if(query.has('executionAutoOpen'))s.agentRuns=[{...structuredClone(run),threadTurnId:null,executionEvidenceCount:0,inputMessageIds:[s.messages[0].id],anchorMessageId:s.messages[0].id}]
  s.schemaVersion=9
  const collection=(n:number)=>({totalCount:n,loadedCount:n,omittedCount:0,complete:true})
  s.coverage={tasks:collection(s.tasks.length),messages:{...collection(s.messages.length),hasEarlier:false,oldestLoadedSequence:s.messages[0]?.sequence??null,newestLoadedSequence:s.messages.at(-1)?.sequence??null},messageDeliveries:collection(s.messageDeliveries.length),turns:collection(s.turns.length),agentRuns:collection(s.agentRuns.length),approvals:collection(s.approvals.length)}
@@ -71,6 +72,7 @@ const projects=[{projectKey:'directory:/workspace/rovai-ai',projectPath:'/worksp
 const populatedProjects=projects.map((project,index)=>({...project,totalCount:1,recentThreads:[{...navigation(initial).projects[0].recentThreads[0],id:`fixture-project-camp-${index}`,title:`${project.name} 的普通对话`,projectPath:project.projectPath}]}))
 const nav={schemaVersion:3,throughGlobalSequence:10,quickChat:{totalCount:0,recentThreads:[]},projects:populatedProjects}
 const prefs={...DEFAULT_GENERAL_PREFERENCES,interfaceLanguagePreference:'zh-CN',interfaceLanguage:'zh-CN',systemLanguage:'zh-CN',languageRevision:0,readError:null,newConversationDefaults:{memberAgentIds:profiles.map(a=>a.agentId),defaultLeadAgentId:profiles[0].agentId}}
+if(query.has('executionAutoOpen')){prefs.executionConsolePlacement='right';prefs.executionConsoleAutoOpen=query.get('executionAutoOpen')==='1'}
 const navigationPrefs={...structuredClone(EMPTY_SNAPSHOT),registeredProjects:projects.map(p=>p.projectPath),legacyProjectsSynced:true,projectOrder:projects.map(p=>p.projectKey)}
 // Team mode uses the production BusinessApp handoff with controllable list replies.
 const missionTeams = [

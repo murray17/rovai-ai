@@ -63,6 +63,8 @@ import {
 } from '../shared/channel-member-bot-copy'
 import type { FeishuExecutionPreviewHost } from './feishu-execution-preview'
 import { sendFeishuAgentOutput } from './feishu-agent-output-card'
+import { feishuNativeAnswer, feishuNativeQuestionCard, nativeCardResultText,
+  sendFeishuNativeQuestion, type NativeCardSource } from './native-interaction-cards'
 import { feishuPageCardResponse, feishuPageFailure, withFeishuPageDeadline, type FeishuCardActionResponse } from './feishu-card-action'
 import {
   feishuExecutionStateCard,
@@ -166,6 +168,7 @@ type ClaimedChannelDelivery = {
     | 'agent_output'
     | 'agent_attachment'
     | 'attention'
+    | 'native_interaction'
   targetAppId: string
   credentialRef: string
   chatId: string
@@ -2042,6 +2045,8 @@ export class ChannelSettingsService {
     if (this.#stopped) return
     const preview = await this.#dependencies?.executionPreview?.handleCardAction(managed.appId, event)
     if (preview) return preview
+    if (event.action.value && typeof event.action.value === 'object' && 'kind' in event.action.value
+      && event.action.value.kind === 'native_interaction') return this.#handleNativeCardAction(managed, event)
     const executionAction = executionConsoleCardAction(event.action.value)
     if (executionAction) {
       return this.#handleExecutionConsoleCardAction(managed, event, executionAction)
@@ -2458,6 +2463,37 @@ export class ChannelSettingsService {
     return conversationKind === 'topic' ? `${name} · 话题` : name
   }
 
+  async #handleNativeCardAction(managed: ManagedChannel, event: CardActionEvent): Promise<FeishuCardActionResponse> {
+    const raw = event.raw as RawCardActionEvent & { action?: { form_value?: unknown } } | undefined
+    let action: ReturnType<typeof feishuNativeAnswer>
+    try { action = feishuNativeAnswer(event.action.value, raw?.action?.form_value) }
+    catch { return { toast: { type: 'error', content: '未读取到有效回答，填写内容已保留' } } }
+    if (!action) return {}
+    try {
+      return await withFeishuPageDeadline(check => this.#enqueueExecutionCard(`native:${action.interactionId}`, async () => {
+        check()
+        if (raw?.app_id && raw.app_id !== managed.appId) throw new Error('native_card_app_mismatch')
+        const result = await this.#dependencies!.core.request<import('@contracts').NativeInteractionResult>(this.#hostMethod('nativeInteractions.respond'), {
+          ...action, appId: managed.appId, externalMessageId: event.messageId, chatId: event.chatId,
+          operatorOpenId: raw?.operator?.open_id ?? event.operator.openId ?? null,
+          operatorUserId: raw?.operator?.user_id ?? event.operator.userId ?? null,
+          operatorUnionId: raw?.operator?.union_id ?? null
+        })
+        this.#hostPump?.wake()
+        check()
+        if (result.status === 'failed' || result.status === 'pending' || result.status === 'unknown') {
+          return { toast: { type: 'error' as const, content: nativeCardResultText(result) + (result.status === 'unknown' ? '，内容已保留' : '') } }
+        }
+        // The existing Outbox owns this question's final card state.
+        return { toast: { type: 'info' as const, content: nativeCardResultText(result) } }
+      }))
+    } catch {
+      this.#hostPump?.wake()
+      // A lost Core response is not proof that the answer was never written.
+      return { toast: { type: 'error', content: '暂未取得提交结果，填写内容已保留，请核对问题状态' } }
+    }
+  }
+
   async #pumpOnce(): Promise<boolean> {
     if (!this.#dependencies || this.#stopped) return false
     const tick = await this.#dependencies.core.request<{
@@ -2572,6 +2608,10 @@ export class ChannelSettingsService {
   }
 
   async #deliver(delivery: ClaimedChannelDelivery): Promise<void> {
+    if (delivery.deliveryKind === 'native_interaction') {
+      const reference = delivery.payload.nativeInteraction as { interactionId: string }
+      return this.#enqueueExecutionCard(`native:${reference.interactionId}`, () => this.#deliverNow(delivery, null))
+    }
     if (delivery.deliveryKind === 'execution_console_upsert') {
       const agentRunId = requiredPayloadString(delivery.payload, 'agentRunId')
       return this.#enqueueExecutionCard(agentRunId, () => this.#deliverNow(delivery, agentRunId))
@@ -2649,6 +2689,24 @@ export class ChannelSettingsService {
           const state = this.#executionCardStates.get(executionAgentRunId)
           this.#dependencies?.executionView?.revokeExecutionViewUrl(state?.executionViewUrl ?? null)
           this.#executionCardStates.delete(executionAgentRunId)
+        }
+      } else if (delivery.deliveryKind === 'native_interaction') {
+        const source = await this.#dependencies!.core.request<NativeCardSource | null>(this.#hostMethod('nativeInteractions.source'), {
+          deliveryId: delivery.deliveryId, appId: managed.appId
+        })
+        if (source) {
+          const card = feishuNativeQuestionCard(source)
+          if (delivery.updateMessageId) {
+            await managed.channel.updateCard(delivery.updateMessageId, card)
+            messageId = delivery.updateMessageId
+          } else if (source.interaction.status === 'pending') {
+            messageId = await sendFeishuNativeQuestion(managed.channel.rawClient.im.v1.message, {
+              deliveryId: source.deliveryId, chatId: delivery.chatId, topicKey: delivery.topicKey, card
+            })
+          }
+          if (source.interaction.expiresAt !== null && source.interaction.status === 'pending') {
+            this.#hostPump?.wakeAt(new Date(source.interaction.expiresAt).toISOString())
+          }
         }
       } else if (delivery.deliveryKind === 'execution_console_upsert') {
         const source = await this.#dependencies!.core.request<ExecutionConsoleSource | null>(

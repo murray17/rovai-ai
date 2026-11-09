@@ -17,6 +17,7 @@ function localPreferences(initial: GeneralPreferencesSnapshot) {
     setStartupLocationMode: (startupLocationMode: GeneralPreferencesSnapshot['startupLocationMode']) => commit({ startupLocationMode }),
     setLastSettingsSection: (lastSettingsSection: GeneralPreferencesSnapshot['lastSettingsSection']) => commit({ lastSettingsSection }),
     setExecutionConsolePlacement: (executionConsolePlacement: GeneralPreferencesSnapshot['executionConsolePlacement']) => commit({ executionConsolePlacement }),
+    setExecutionConsoleAutoOpen: (executionConsoleAutoOpen: boolean) => commit({ executionConsoleAutoOpen }),
     setWorldMapEnabled: (worldMapEnabled: boolean) => commit({ worldMapEnabled }),
     setNewConversationDefaults: async () => structuredClone(snapshot),
     setOneClickNewConversationEnabled: async () => structuredClone(snapshot),
@@ -46,6 +47,7 @@ describe('Host-backed general preferences', () => {
     const updated = await preferences.setExecutionConsolePlacement('bottom')
 
     expect(updated.executionConsolePlacement).toBe('bottom')
+    expect((await preferences.setExecutionConsoleAutoOpen(true)).executionConsoleAutoOpen).toBe(true)
     expect(hostReads).toBe(1)
   })
 

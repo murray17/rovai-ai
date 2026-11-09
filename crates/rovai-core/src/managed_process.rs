@@ -17,7 +17,7 @@ use tokio::process::Command;
 #[cfg(windows)]
 use crate::windows_runtime_entrypoint::{
     WINDOWS_COMMAND_SHIM_PATH_ENVIRONMENT_KEY, WindowsCommandShimIdentity,
-    capture_windows_command_shim, command_shim_extension,
+    capture_windows_command_shim, command_shim_extension, windows_process_visible_path,
 };
 
 #[cfg(unix)]
@@ -361,6 +361,34 @@ impl ManagedProcessLaunchSpec {
                 self.account_launch_files.push((path, bytes));
             }
         }
+        Ok(self)
+    }
+
+    /// Opt in to the ordinary DOS spelling for native runtimes that reject verbatim paths.
+    /// The captured file identity remains authoritative and is checked again at spawn.
+    #[cfg(windows)]
+    pub fn with_windows_compatible_executable_path(mut self) -> Result<Self> {
+        if !matches!(
+            self.windows_entrypoint,
+            WindowsRuntimeEntrypoint::NativeExecutable { .. }
+        ) || !matches!(
+            self.application.components().next(),
+            Some(std::path::Component::Prefix(prefix))
+                if matches!(prefix.kind(), std::path::Prefix::VerbatimDisk(_))
+        ) {
+            return Ok(self);
+        }
+
+        let visible = windows_process_visible_path(self.application.clone());
+        if windows::capture_application_identity(&visible)? != self.application_identity {
+            bail!(
+                "managed_process.invalid_application: compatible executable path changed its identity"
+            );
+        }
+        self.application = visible.clone();
+        self.windows_entrypoint = WindowsRuntimeEntrypoint::NativeExecutable {
+            executable: visible,
+        };
         Ok(self)
     }
 
@@ -1586,27 +1614,117 @@ mod tests {
     async fn windows_backend_creates_an_already_managed_process() {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command.arg("--list");
-        let spec = ManagedProcessLaunchSpec::capture(
-            &command,
-            ManagedProcessPurpose::RuntimeProbe,
-            ManagedStdinPolicy::Null,
-            ManagedWindowsArgvDialect::MicrosoftCrt,
-            "probe:test",
-        )
-        .unwrap();
-        let mut process = ManagedProcess::spawn(spec).unwrap();
-        assert!(process.id().is_some());
-        let mut stdout = process.take_stdout().unwrap();
-        let reader = tokio::spawn(async move {
-            let mut output = Vec::new();
-            tokio::io::AsyncReadExt::read_to_end(&mut stdout, &mut output)
-                .await
-                .unwrap();
-            output
-        });
-        assert!(process.wait().await.unwrap().success());
-        process.force_terminate_tree().unwrap();
-        assert!(!reader.await.unwrap().is_empty());
+        for compatible_path in [false, true] {
+            let captured = ManagedProcessLaunchSpec::capture(
+                &command,
+                ManagedProcessPurpose::RuntimeProbe,
+                ManagedStdinPolicy::Null,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "probe:test",
+            )
+            .unwrap();
+            let spec = if compatible_path {
+                captured
+                    .clone()
+                    .with_windows_compatible_executable_path()
+                    .unwrap()
+            } else {
+                captured.clone()
+            };
+            let expected_path = if compatible_path {
+                windows_process_visible_path(captured.application.clone())
+            } else {
+                captured.application.clone()
+            };
+            assert_eq!(spec.application, expected_path);
+            assert_eq!(spec.application_identity, captured.application_identity);
+            assert_eq!(spec.arguments, captured.arguments);
+            assert_eq!(spec.working_directory, captured.working_directory);
+            assert_eq!(spec.environment, captured.environment);
+            assert_eq!(spec.ownership, captured.ownership);
+            assert!(matches!(
+                &spec.windows_entrypoint,
+                WindowsRuntimeEntrypoint::NativeExecutable { executable }
+                    if executable == spec.application()
+            ));
+            if compatible_path {
+                let repeated = spec
+                    .clone()
+                    .with_windows_compatible_executable_path()
+                    .unwrap();
+                assert_eq!(repeated.application, spec.application);
+                assert_eq!(repeated.application_identity, spec.application_identity);
+                for unsupported in [
+                    r"\\?\UNC\unavailable\share\fixture.exe",
+                    r"\\?\Volume{00000000-0000-0000-0000-000000000000}\fixture.exe",
+                ] {
+                    let mut excluded = captured.clone();
+                    excluded.application = PathBuf::from(unsupported);
+                    excluded.windows_entrypoint = WindowsRuntimeEntrypoint::NativeExecutable {
+                        executable: excluded.application.clone(),
+                    };
+                    let unchanged = excluded
+                        .clone()
+                        .with_windows_compatible_executable_path()
+                        .unwrap();
+                    assert_eq!(unchanged.application, excluded.application);
+                    assert_eq!(unchanged.windows_entrypoint, excluded.windows_entrypoint);
+                    assert_eq!(
+                        unchanged.application_identity,
+                        excluded.application_identity
+                    );
+                }
+            }
+            let mut process = ManagedProcess::spawn(spec).unwrap();
+            assert!(process.id().is_some());
+            let mut stdout = process.take_stdout().unwrap();
+            let reader = tokio::spawn(async move {
+                let mut output = Vec::new();
+                tokio::io::AsyncReadExt::read_to_end(&mut stdout, &mut output)
+                    .await
+                    .unwrap();
+                output
+            });
+            assert!(process.wait().await.unwrap().success());
+            process.force_terminate_tree().unwrap();
+            assert!(!reader.await.unwrap().is_empty());
+        }
+
+        let directory =
+            std::env::temp_dir().join(format!("rovai-path-identity-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let application = directory.join("fixture.exe");
+        // A size change deterministically exercises stale identity without depending on inode reuse.
+        for change_before_conversion in [true, false] {
+            std::fs::write(&application, b"original fixture").unwrap();
+            let captured = ManagedProcessLaunchSpec::capture(
+                &Command::new(&application),
+                ManagedProcessPurpose::RuntimeProbe,
+                ManagedStdinPolicy::Null,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "probe:path-identity",
+            )
+            .unwrap();
+            let error = if change_before_conversion {
+                std::fs::write(&application, b"changed fixture with different size").unwrap();
+                captured
+                    .with_windows_compatible_executable_path()
+                    .err()
+                    .unwrap()
+            } else {
+                let compatible = captured.with_windows_compatible_executable_path().unwrap();
+                std::fs::write(&application, b"changed fixture with different size").unwrap();
+                ManagedProcess::spawn(compatible).err().unwrap()
+            };
+            assert!(
+                error
+                    .to_string()
+                    .contains("managed_process.invalid_application")
+            );
+            assert!(error.to_string().contains("identity"));
+        }
+        std::fs::remove_file(application).unwrap();
+        std::fs::remove_dir(directory).unwrap();
     }
 
     #[cfg(windows)]

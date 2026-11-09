@@ -63,7 +63,25 @@ Bound menus to the available viewport. Invalid members remain recognizable and c
 Keep draft validation and the local error/save row with the shared save icon and “保存”.
 The one-click summary shows only saved teammate count and Lead; omit duplicate saved-state text and Project.
 
-World-map availability appears in a 会话 section immediately after 新对话 and before 窗口.
+The 会话 section appears immediately after 新对话 and before 窗口. Its rows are ordered
+自动打开执行台, 会话任务, 世界地图. The first two rows show only the title, a question-mark help
+button and the switch. Reuse the existing hover/focus/click help with Escape and outside dismissal;
+help interaction must not toggle the switch. 自动打开执行台 explains
+“发送消息后，或进入有队员正在执行的会话时，自动展开执行台。”; 会话任务 retains
+“在所有会话中提供任务面板和队员任务工具；关闭不删除已有任务记录。” in its help.
+世界地图 keeps “在对话中显示地图视图及切换入口。” beneath its title without an additional help button.
+
+Execution auto-open uses the client-local general preference `executionConsoleAutoOpen`, default false.
+General preference storage schema 8 adds this boolean to schema 7; valid schema 1–7 records migrate
+with false while retaining all other recognized choices. Invalid records remain recoverable and are
+not overwritten. Desktop Main serializes private writes; Web stores the choice in its existing scoped
+presentation record. Save failure preserves the last saved switch value and reports the error in its row.
+Desktop, Web and Mobile show the same enabled switch, help and save feedback without a viewport-based visibility condition.
+All three can turn it on or off and save the same client-local preference. The value controls submitted-Run navigation
+and running-Run entry on Desktop and wide Web; Mobile always remains manual regardless of the saved value.
+Full behavior belongs to [conversation execution](../components/conversation-workspace.md#thread-执行过程).
+
+World-map availability remains in this section.
 Read the saved availability; a profile without preferences starts disabled. Changes commit immediately.
 The row does not repeat the default as a badge, add a
 current-effective summary or add a conversation-page preview action. Turning it off forces Thread reading

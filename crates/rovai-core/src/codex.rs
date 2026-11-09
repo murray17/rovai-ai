@@ -145,6 +145,7 @@ pub(crate) struct CodexHost {
     ingress_fence: Mutex<()>,
     incoming: mpsc::UnboundedSender<CodexIncoming>,
     alive: AtomicBool,
+    launch_runtime: std::sync::OnceLock<FrozenAgentRuntimeConfig>,
     executable_path: PathBuf,
     account_compatibility: Option<String>,
     #[cfg(windows)]
@@ -484,6 +485,7 @@ impl CodexHost {
             ingress_fence: Mutex::new(()),
             incoming,
             alive: AtomicBool::new(true),
+            launch_runtime: std::sync::OnceLock::new(),
             executable_path: codex_path.to_path_buf(),
             account_compatibility,
             builtin_tools,
@@ -911,6 +913,13 @@ pub struct CodexAgentThreadOptions<'a> {
 }
 
 impl CodexRuntime {
+    pub fn launch_runtime(&self) -> &FrozenAgentRuntimeConfig {
+        self.host
+            .launch_runtime
+            .get()
+            .expect("Fleet Host has its launch identity")
+    }
+
     pub(crate) fn redact_output(&self, value: &Value) -> Value {
         self.host
             .credential_redactor
@@ -1536,10 +1545,15 @@ impl CodexCliRuntimeAdapter {
         }
     }
 
-    pub async fn ensure_agent_run_runtime(
+    pub async fn ensure_agent_run_runtime<F, Fut>(
         &self,
         request: CodexAgentRunRuntimeRequest<'_>,
-    ) -> Result<Arc<CodexRuntime>> {
+        prepare_cold: F,
+    ) -> Result<Arc<CodexRuntime>>
+    where
+        F: FnOnce(FrozenAgentRuntimeConfig) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<FrozenAgentRuntimeConfig>> + Send + 'static,
+    {
         let CodexAgentRunRuntimeRequest {
             agent_run_id,
             execution_epoch,
@@ -1588,13 +1602,11 @@ impl CodexCliRuntimeAdapter {
                 .release(agent_run_id, old_epoch, FleetReleaseDisposition::Stop)
                 .await;
         }
-        let spawn_executable = PathBuf::from(&frozen_runtime.executable_path);
+        let spawn_runtime = frozen_runtime.clone();
         let spawn_cwd = cwd.to_path_buf();
         let spawn_incoming = self.incoming.clone();
         let spawn_builtin_tool_factory = builtin_tool_factory.clone();
-        let mut spawn_custom_api = frozen_runtime.custom_api.clone();
         let spawn_environment_source = rovai_core::member_environment::launch_source();
-        let spawn_environment = frozen_runtime.environment.clone();
         let compatibility = RuntimeCompatibilityKey::member_session(
             camp_id,
             agent_id,
@@ -1616,11 +1628,14 @@ impl CodexCliRuntimeAdapter {
                     compatibility,
                 },
                 move || async move {
+                    let spawn_runtime = prepare_cold(spawn_runtime).await?;
+                    let spawn_executable = PathBuf::from(&spawn_runtime.executable_path);
                     let spawn_environment = rovai_core::member_environment::resolve_for_launch(
                         spawn_environment_source,
-                        spawn_environment,
+                        spawn_runtime.environment.clone(),
                     )
                     .await?;
+                    let mut spawn_custom_api = spawn_runtime.custom_api.clone();
                     if spawn_environment
                         .as_ref()
                         .is_some_and(|env| env.has_overlay())
@@ -1637,6 +1652,7 @@ impl CodexCliRuntimeAdapter {
                         account,
                     )
                     .await?;
+                    let _ = host.launch_runtime.set(spawn_runtime);
                     Ok(RuntimeProcessHost::Codex(host))
                 },
             )
@@ -2410,7 +2426,7 @@ pub struct CompletedTurn {
 
 impl CompletedTurn {
     pub(crate) fn release_disposition(&self) -> FleetReleaseDisposition {
-        if self.status == "completed" {
+        if self.status == "completed" && self.error.is_none() {
             FleetReleaseDisposition::Reusable
         } else {
             FleetReleaseDisposition::Stop
@@ -2572,36 +2588,42 @@ mod tests {
         let builtin_tools = BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &root);
         assert!(!root.join("builtin-tools").exists());
         let legacy = adapter
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_run_id: "legacy-run",
-                execution_epoch: 1,
-                camp_id: "camp-process-compatibility",
-                agent_id: "agent-1",
-                native_binding_id: "fixture-binding",
-                cwd: &root,
-                frozen_runtime: &frozen,
-                runtime_compatibility_digest: &legacy_digest,
-                builtin_tool_factory: &builtin_tools,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_run_id: "legacy-run",
+                    execution_epoch: 1,
+                    camp_id: "camp-process-compatibility",
+                    agent_id: "agent-1",
+                    native_binding_id: "fixture-binding",
+                    cwd: &root,
+                    frozen_runtime: &frozen,
+                    runtime_compatibility_digest: &legacy_digest,
+                    builtin_tool_factory: &builtin_tools,
+                },
+                |runtime| async move { Ok(runtime) },
+            )
             .await
             .unwrap();
         adapter
             .complete_agent_run("legacy-run", 1, FleetReleaseDisposition::Reusable)
             .await;
         let first = adapter
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_run_id: "run-1",
-                execution_epoch: 1,
-                camp_id: "camp-process-compatibility",
-                agent_id: "agent-1",
-                native_binding_id: "fixture-binding",
-                cwd: &root,
-                frozen_runtime: &frozen,
-                runtime_compatibility_digest: &first_digest,
-                builtin_tool_factory: &builtin_tools,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_run_id: "run-1",
+                    execution_epoch: 1,
+                    camp_id: "camp-process-compatibility",
+                    agent_id: "agent-1",
+                    native_binding_id: "fixture-binding",
+                    cwd: &root,
+                    frozen_runtime: &frozen,
+                    runtime_compatibility_digest: &first_digest,
+                    builtin_tool_factory: &builtin_tools,
+                },
+                |runtime| async move { Ok(runtime) },
+            )
             .await
             .unwrap();
         let first_host_id = first.host_instance_id().to_string();
@@ -2621,26 +2643,45 @@ mod tests {
             .await;
         // Any attempt to prepare a candidate context must fail, even if it
         // would be dropped immediately. Reuse needs no new private root.
+        let previous = root.join("codex-previous");
+        std::fs::rename(&executable, &previous).unwrap();
+        make_test_executable(
+            &executable,
+            &(std::fs::read_to_string(&previous).unwrap() + "\n# upgraded\n"),
+        );
+        next.executable_fingerprint = "sha256:upgraded".into();
+        next.reported_version = Some("9.0.0".into());
         let blocked_root = root.join("blocked-runtime-root");
         std::fs::write(&blocked_root, "not a directory").unwrap();
         let warm_factory =
             BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &blocked_root);
         let second = adapter
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_run_id: "run-2",
-                execution_epoch: 1,
-                camp_id: "camp-process-compatibility",
-                agent_id: "agent-1",
-                native_binding_id: "fixture-binding",
-                cwd: &root,
-                frozen_runtime: &next,
-                runtime_compatibility_digest: &next_digest,
-                builtin_tool_factory: &warm_factory,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_run_id: "run-2",
+                    execution_epoch: 1,
+                    camp_id: "camp-process-compatibility",
+                    agent_id: "agent-1",
+                    native_binding_id: "fixture-binding",
+                    cwd: &root,
+                    frozen_runtime: &next,
+                    runtime_compatibility_digest: &next_digest,
+                    builtin_tool_factory: &warm_factory,
+                },
+                |_| async { anyhow::bail!("warm reuse must not check the disk program") },
+            )
             .await
             .unwrap();
         assert_eq!(second.host_instance_id(), first_host_id);
+        assert_eq!(
+            second.launch_runtime().reported_version,
+            frozen.reported_version
+        );
+        assert_eq!(
+            second.launch_runtime().executable_fingerprint,
+            frozen.executable_fingerprint
+        );
         assert_eq!(
             second.builtin_tool_process_config().unwrap().context_path(),
             first_tools.context_path(),
@@ -2655,21 +2696,28 @@ mod tests {
             runtime_compatibility_digest(&next, &root, &attachment_authorization).unwrap();
         assert_ne!(replacement_digest, first_digest);
         let replacement = adapter
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_run_id: "run-3",
-                execution_epoch: 1,
-                camp_id: "camp-process-compatibility",
-                agent_id: "agent-1",
-                native_binding_id: "fixture-binding",
-                cwd: &root,
-                frozen_runtime: &next,
-                runtime_compatibility_digest: &replacement_digest,
-                builtin_tool_factory: &builtin_tools,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_run_id: "run-3",
+                    execution_epoch: 1,
+                    camp_id: "camp-process-compatibility",
+                    agent_id: "agent-1",
+                    native_binding_id: "fixture-binding",
+                    cwd: &root,
+                    frozen_runtime: &next,
+                    runtime_compatibility_digest: &replacement_digest,
+                    builtin_tool_factory: &builtin_tools,
+                },
+                |runtime| async move { Ok(runtime) },
+            )
             .await
             .unwrap();
         assert_ne!(replacement.host_instance_id(), first_host_id);
+        assert_eq!(
+            replacement.launch_runtime().reported_version,
+            next.reported_version
+        );
         assert_ne!(
             replacement
                 .builtin_tool_process_config()
@@ -2751,18 +2799,21 @@ for line in sys.stdin:
                 }
                 let run = format!("run-{round}");
                 let runtime = adapter
-                    .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                        workspace_isolation: "shared",
-                        agent_run_id: &run,
-                        execution_epoch: 1,
-                        camp_id: "camp-fixture",
-                        agent_id: "agent-fixture",
-                        native_binding_id: "fixture-binding",
-                        cwd: &root,
-                        frozen_runtime: &frozen,
-                        runtime_compatibility_digest: "stable",
-                        builtin_tool_factory: &tools,
-                    })
+                    .ensure_agent_run_runtime(
+                        CodexAgentRunRuntimeRequest {
+                            workspace_isolation: "shared",
+                            agent_run_id: &run,
+                            execution_epoch: 1,
+                            camp_id: "camp-fixture",
+                            agent_id: "agent-fixture",
+                            native_binding_id: "fixture-binding",
+                            cwd: &root,
+                            frozen_runtime: &frozen,
+                            runtime_compatibility_digest: "stable",
+                            builtin_tool_factory: &tools,
+                        },
+                        |runtime| async move { Ok(runtime) },
+                    )
                     .await
                     .unwrap();
                 hosts.push(runtime.host_instance_id().to_string());
@@ -2859,18 +2910,21 @@ for line in sys.stdin:
             // Reject a provider that silently starts a different thread.
             std::fs::write(root.join("wrong-thread"), "fixture").unwrap();
             let runtime = adapter
-                .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                    workspace_isolation: "shared",
-                    agent_run_id: "run-4",
-                    execution_epoch: 1,
-                    camp_id: "camp-fixture",
-                    agent_id: "agent-fixture",
-                    native_binding_id: "fixture-binding",
-                    cwd: &root,
-                    frozen_runtime: &frozen,
-                    runtime_compatibility_digest: "stable",
-                    builtin_tool_factory: &tools,
-                })
+                .ensure_agent_run_runtime(
+                    CodexAgentRunRuntimeRequest {
+                        workspace_isolation: "shared",
+                        agent_run_id: "run-4",
+                        execution_epoch: 1,
+                        camp_id: "camp-fixture",
+                        agent_id: "agent-fixture",
+                        native_binding_id: "fixture-binding",
+                        cwd: &root,
+                        frozen_runtime: &frozen,
+                        runtime_compatibility_digest: "stable",
+                        builtin_tool_factory: &tools,
+                    },
+                    |runtime| async move { Ok(runtime) },
+                )
                 .await
                 .unwrap();
             assert!(
@@ -2963,7 +3017,9 @@ for line in sys.stdin:
         save(&source, 0, "A").await;
         let first = with_launch_source(
             source.clone(),
-            adapter.ensure_agent_run_runtime(request("run-a", "camp-a")),
+            adapter.ensure_agent_run_runtime(request("run-a", "camp-a"), |runtime| async move {
+                Ok(runtime)
+            }),
         )
         .await
         .unwrap();
@@ -2979,7 +3035,9 @@ for line in sys.stdin:
         };
         let warm = with_launch_source(
             source.clone(),
-            adapter.ensure_agent_run_runtime(request("run-warm", "camp-a")),
+            adapter.ensure_agent_run_runtime(request("run-warm", "camp-a"), |runtime| async move {
+                Ok(runtime)
+            }),
         )
         .await
         .unwrap();
@@ -2993,7 +3051,10 @@ for line in sys.stdin:
             .await;
         let failed = with_launch_source(
             source.clone(),
-            adapter.ensure_agent_run_runtime(request("run-fail", "camp-cold")),
+            adapter
+                .ensure_agent_run_runtime(request("run-fail", "camp-cold"), |runtime| async move {
+                    Ok(runtime)
+                }),
         )
         .await;
         assert!(failed.is_err());
@@ -3004,11 +3065,14 @@ for line in sys.stdin:
         };
         let healthy = with_launch_source(
             other,
-            adapter.ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_id: "agent_2",
-                ..request("run-other", "camp-other")
-            }),
+            adapter.ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_id: "agent_2",
+                    ..request("run-other", "camp-other")
+                },
+                |runtime| async move { Ok(runtime) },
+            ),
         )
         .await
         .unwrap();
@@ -3021,7 +3085,9 @@ for line in sys.stdin:
         // after that point but before process creation must be observed.
         let pending = with_launch_source(
             source.clone(),
-            adapter.ensure_agent_run_runtime(request("run-next", "camp-a")),
+            adapter.ensure_agent_run_runtime(request("run-next", "camp-a"), |runtime| async move {
+                Ok(runtime)
+            }),
         );
         save(&source, 2, "C").await;
         fleet.invalidate_member("agent_1").await;
@@ -3343,18 +3409,21 @@ for line in sys.stdin:
                 };
                 let tools = BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &root);
                 let result = adapter
-                    .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                        workspace_isolation: "shared",
-                        agent_run_id: "launch-fixture",
-                        execution_epoch: 1,
-                        camp_id: "camp-fixture",
-                        agent_id: "agent-fixture",
-                        native_binding_id: "fixture-binding",
-                        cwd: &root,
-                        frozen_runtime: &frozen,
-                        runtime_compatibility_digest: "launch-fixture",
-                        builtin_tool_factory: &tools,
-                    })
+                    .ensure_agent_run_runtime(
+                        CodexAgentRunRuntimeRequest {
+                            workspace_isolation: "shared",
+                            agent_run_id: "launch-fixture",
+                            execution_epoch: 1,
+                            camp_id: "camp-fixture",
+                            agent_id: "agent-fixture",
+                            native_binding_id: "fixture-binding",
+                            cwd: &root,
+                            frozen_runtime: &frozen,
+                            runtime_compatibility_digest: "launch-fixture",
+                            builtin_tool_factory: &tools,
+                        },
+                        |runtime| async move { Ok(runtime) },
+                    )
                     .await;
                 if matches!(scenario, "init_failure" | "memory_rejected") {
                     assert!(result.is_err());
@@ -3599,35 +3668,41 @@ for line in sys.stdin:
         let first_builtin_tools =
             BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &directory);
         let first = adapter
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_run_id: "run-1",
-                execution_epoch: 1,
-                camp_id: "camp-1",
-                agent_id: "agent-1",
-                native_binding_id: "fixture-binding",
-                cwd: &workspace,
-                frozen_runtime: &runtime_config,
-                runtime_compatibility_digest: "test-digest-agent-1",
-                builtin_tool_factory: &first_builtin_tools,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_run_id: "run-1",
+                    execution_epoch: 1,
+                    camp_id: "camp-1",
+                    agent_id: "agent-1",
+                    native_binding_id: "fixture-binding",
+                    cwd: &workspace,
+                    frozen_runtime: &runtime_config,
+                    runtime_compatibility_digest: "test-digest-agent-1",
+                    builtin_tool_factory: &first_builtin_tools,
+                },
+                |runtime| async move { Ok(runtime) },
+            )
             .await
             .unwrap();
         let second_builtin_tools =
             BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &directory);
         let second = adapter
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_run_id: "run-2",
-                execution_epoch: 1,
-                camp_id: "camp-1",
-                agent_id: "agent-2",
-                native_binding_id: "fixture-binding",
-                cwd: &workspace,
-                frozen_runtime: &runtime_config,
-                runtime_compatibility_digest: "test-digest-agent-2",
-                builtin_tool_factory: &second_builtin_tools,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_run_id: "run-2",
+                    execution_epoch: 1,
+                    camp_id: "camp-1",
+                    agent_id: "agent-2",
+                    native_binding_id: "fixture-binding",
+                    cwd: &workspace,
+                    frozen_runtime: &runtime_config,
+                    runtime_compatibility_digest: "test-digest-agent-2",
+                    builtin_tool_factory: &second_builtin_tools,
+                },
+                |runtime| async move { Ok(runtime) },
+            )
             .await
             .unwrap();
         assert_ne!(first.process_id().await, second.process_id().await);
@@ -3713,18 +3788,21 @@ for line in sys.stdin:
         let successor_builtin_tools =
             BuiltinToolProcessConfigFactory::new(&executable, &endpoint, &directory);
         let successor = adapter
-            .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
-                workspace_isolation: "shared",
-                agent_run_id: "run-3",
-                execution_epoch: 1,
-                camp_id: "camp-1",
-                agent_id: "agent-1",
-                native_binding_id: "fixture-binding",
-                cwd: &workspace,
-                frozen_runtime: &runtime_config,
-                runtime_compatibility_digest: "test-digest-agent-1",
-                builtin_tool_factory: &successor_builtin_tools,
-            })
+            .ensure_agent_run_runtime(
+                CodexAgentRunRuntimeRequest {
+                    workspace_isolation: "shared",
+                    agent_run_id: "run-3",
+                    execution_epoch: 1,
+                    camp_id: "camp-1",
+                    agent_id: "agent-1",
+                    native_binding_id: "fixture-binding",
+                    cwd: &workspace,
+                    frozen_runtime: &runtime_config,
+                    runtime_compatibility_digest: "test-digest-agent-1",
+                    builtin_tool_factory: &successor_builtin_tools,
+                },
+                |runtime| async move { Ok(runtime) },
+            )
             .await
             .unwrap();
         assert_eq!(successor.host_instance_id(), first_host);

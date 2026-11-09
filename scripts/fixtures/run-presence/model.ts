@@ -1,6 +1,7 @@
 import { createReviewModel } from '../../../scripts/fixtures/host-web-parity/model'
 import { initial, run as runTemplate, agents as agentTemplates, initialDraft, installations } from '../../../scripts/fixtures/host-web-parity/data'
 export { installations }
+const exportAvatarRef = 'rovai://member-avatar/managed/123e4567-e89b-12d3-a456-426614174000'
 
 export const profiles = ['爱丽丝', '奥黛丽', '雾切响子', '药师寺惠'].map((name, i) => ({
   ...structuredClone(agentTemplates[i % 2]), agentId: `presence-member-${i}`, displayName: name,
@@ -246,13 +247,15 @@ function localSend(body: string, recipients = [aid(0)], draft?: any) {
   }, 4600)
 }
 const executionReadMode = new URLSearchParams(location.search).get('executionRead')
-const invalidationListeners = new Set<() => void>()
-const controls = { steerReview: false, holdContinue: false, holdStop: false, holdDispatch: false, holdContinuationProjection: false, holdEntrySnapshot: false,
+const invalidationListeners = new Set<(change?: import('@contracts').ThreadReadInvalidation) => void>()
+const controls = { holdExportImage: false, steerReview: false, holdContinue: false, holdStop: false, holdDispatch: false, holdContinuationProjection: false, holdEntrySnapshot: false,
   failNextExecutionPage: executionReadMode === 'fail', holdExecutionPage: executionReadMode === 'hold',
   holdExecutionChanges: false, liveEvidence: false,
   holdSourceRead: false, failNextSourceRead: false, wrongSourceOwner: false,
   persistServer: false, continuationMode: 'normal', stopError: false,
   executionReads: [] as any[], hiddenMessages: [] as any[],
+  exportHistory: null as any[] | null, exportReadDelay: 0, failNextExportPage: false, exportReads: [] as any[],
+  exportImageGroups: [] as any[],
   continueAttempts: [] as any[], stopAttempts: [] as any[], receipts: new Map<string, any>() }
 export const model = {
   controls,
@@ -265,6 +268,59 @@ export const model = {
   },
   get: () => state, subscribe: (fn: () => void) => { listeners.add(fn); return () => listeners.delete(fn) },
   note: (note: string) => update({ note }),
+  showExportCase() {
+    this.setScenario('stream'); halt()
+    const first = makeMessage('export-user', 1, '@爱丽丝 请整理消息。')
+    first.content = [{ kind: 'member_mention', agentId: aid(0) }, { kind: 'text', text: ' 请整理消息。' }, { kind: 'thread_reference', threadId: 'private-thread-id', titleAtSend: '关联讨论' }, { kind: 'mission_reference', missionId: 'private-mission-id', titleAtSend: '关联使命' }]
+    const second = makeMessage('export-code', 2, '[@药师寺惠](https://example.com) 普通网页。\n\n```diff\n-old\n+new\n```\n\n| 内容 | 结果 |\n| --- | --- |\n| 文件 | 完整 |\n\n<script>window.exportInjected=1</script>', 0)
+    second.body += '\n\n`inline()`\n\n- [x] 完成实现\n- [ ] 等待验收\n\n' + '[长链接' + 'url'.repeat(70) + '](https://example.com/long)'
+    second.body += '\n\n```js\nconst longLine = "' + 'visible-code-'.repeat(24) + '";\n```'
+    second.content = [{ kind: 'text', text: second.body }]
+    second.addressedAgentIds = [aid(1)]
+    second.attachments = [{ id: 'export-file', displayName: '报告.pdf', kind: 'file', fileCount: null, mediaType: 'application/pdf', byteSize: 4200, previewKind: 'none', availability: 'available' },
+      { id: 'export-image', displayName: '图片.png', kind: 'file', fileCount: null, mediaType: 'image/png', byteSize: 256, previewKind: 'image', availability: 'available' },
+      { id: 'export-missing', displayName: '缺失.png', kind: 'file', fileCount: null, mediaType: 'image/png', byteSize: 100, previewKind: 'image', availability: 'missing' }]
+    const third = makeMessage('export-reply', 3, '最后一条消息。', 1); third.replyToThreadMessageId = first.id
+    const withdrawn = makeMessage('export-withdrawn', 4, '不应导出的撤回内容'); withdrawn.withdrawn = true
+    update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, title: '消息导出' }, messages: [first, second, third, withdrawn], agentRuns: [], agentRunFileChanges: [], agentRunImages: [], messageDeliveries: [], executionEvidence: [],
+      members: state.snapshot.members.map((member: any) => member.agentId === aid(0) ? { ...member, avatarRef: exportAvatarRef } : member) },
+      draft: { ...state.draft, body: '保留的草稿', content: { version: 2, segments: [{ kind: 'text', text: '保留的草稿' }] } } })
+  },
+  showExportPendingCase() {
+    this.showExportCase(); controls.holdExportImage = true
+    update({ snapshot: { ...state.snapshot, messages: state.snapshot.messages.map((message: any) => message.id === 'export-code'
+      ? { ...message, attachments: message.attachments.map((attachment: any) => attachment.id === 'export-image' ? { ...attachment, id: 'export-image-pending' } : attachment) } : message) } })
+  },
+  showExportGroupCase() {
+    this.showExportCase()
+    const messages = [1, 2, 3].map(sequence => ({ ...makeMessage(`export-group-${sequence}`, sequence, `连续消息 ${sequence}。`, 0), threadTurnId: 'export-same-turn' }))
+    update({ snapshot: { ...state.snapshot, messages } })
+  },
+  showFullExportCase(count = 500, layout = 'gapped') {
+    this.showExportCase()
+    controls.exportReads = []; controls.exportReadDelay = 0; controls.failNextExportPage = false
+    const first = state.snapshot.messages.slice(0, 3).map((message: any) => structuredClone(message))
+    first[1].sourceAgentRunId = 'old-image-run'
+    const history = [...first, ...Array.from({ length: Math.max(0, count - 3) }, (_, i) => makeMessage(`history-${i + 4}`, i + 4, `历史正文 ${i + 4}`, i % 2 ? 0 : -1))].slice(0, count)
+    if (history[3]) { history[3].authorType = 'system'; history[3].body = '系统记录不导出' }
+    if (history[4]) { history[4].withdrawn = true; history[4].body = '已撤回正文不导出' }
+    controls.exportHistory = history
+    controls.exportImageGroups = [{ agentRunId: 'old-image-run', executionEpoch: 1, createdAt: first[1].createdAt,
+      images: [{ id: 'legacy-image', displayName: '旧关联输出.png', mediaType: 'image/png', byteSize: 32 }] }]
+    const window = layout === 'all' ? history : layout === 'tail' ? history.slice(-20) : [...history.slice(0, 1), ...history.slice(-20)]
+    update({ snapshot: { ...state.snapshot, messages: window, agentRunImages: [] } })
+  },
+  revealExportHistory() { update({ snapshot: { ...state.snapshot, messages: [...controls.exportHistory!] } }) },
+  appendExportMessage(showInTimeline = false) {
+    const history = controls.exportHistory!
+    history.push(makeMessage(`history-${history.at(-1).sequence + 1}`, history.at(-1).sequence + 1, '读取开始后新增的消息'))
+    if (showInTimeline) this.revealExportHistory()
+  },
+  removeExportMessage(id: string) {
+    controls.exportHistory = controls.exportHistory!.filter(message => message.id !== id)
+    invalidationListeners.forEach(listener => listener({ messages: [{ threadId: state.snapshot.thread.id, indexChanged: true,
+      unavailableMessageIds: [id], throughGlobalSequence: ++state.version }] }))
+  },
   showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false) {
     this.setScenario('stream'); halt()
     const messages = [
@@ -283,7 +339,7 @@ export const model = {
     for (const message of messages) message.replyToThreadMessageId = parents[message.id] ?? null
     if (long) for (let i = 10; i <= 120; i++) {
       // Cross the public-message grouping height when the detail pane closes.
-      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(16) : ''}`
+      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(grouped ? 15 : 16) : ''}`
       messages.push({ ...makeMessage(`long-${i}`,i,body,0,grouped ? 'run-alice' : null), replyToThreadMessageId:'reply-g' })
     }
     const run = { ...makeRun('run-alice',0,'running',['reply-c','reply-d']),anchorMessageId:'reply-d',publicTailSequenceAtStart:4 }
@@ -469,10 +525,10 @@ export const model = {
     update({ stopId: id })
   },
   restoreStopFocus() { if (stopTrigger?.isConnected) stopTrigger.focus() },
-  stop(id: string) {
+  stop(id: string, cancelReasonCode = 'user_requested_agent_run_stop') {
     const source = state.snapshot.agentRuns.find((r: any) => r.id === id && ['running','waiting'].includes(r.status))
     if (!source) { update({ stopId: null }); return }
-    halt(); stopped.set(id, { run: { ...source, status: 'cancelled', endedAt: new Date().toISOString(), cancelReasonCode: 'user_requested_agent_run_stop', cancelRequestedAt: new Date().toISOString() },
+    halt(); stopped.set(id, { run: { ...source, status: 'cancelled', endedAt: new Date().toISOString(), cancelReasonCode, cancelRequestedAt: new Date().toISOString() },
       publishedIds: state.snapshot.messages.filter((m: any) => m.sourceAgentRunId === id).map((m: any) => m.id) })
     refresh()
   },
@@ -482,7 +538,8 @@ export const model = {
     halt()
     const runId = `retry-run-${++serial}`, deliveryId = `retry-delivery-${serial}`
     extraDeliveries.push({ ...delivery(deliveryId, source.inputMessageIds[0], source.agentId, null),
-      continuationRequest: true, sourceAgentRunId: id, inputMessageIds: [...source.inputMessageIds] })
+      continuationRequest: true, sourceAgentRunId: id, inputMessageIds: [...source.inputMessageIds],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
     retries.set(id, { status: 'pending', runId, deliveryId }); refresh()
     scheduleRetry(source, runId, deliveryId)
     return deliveryId
@@ -516,8 +573,52 @@ export const model = {
   async changeLead(agentId: string) { update({ snapshot: { ...state.snapshot, thread: { ...state.snapshot.thread, defaultLeadAgentId: agentId }, members: state.snapshot.members.map((m: any) => ({ ...m, isDefaultLead: m.agentId === agentId })) } }) },
   fileApi: backing.fileApi,
   client: { ...backing.client,
-    onInvalidated: (listener: () => void) => { invalidationListeners.add(listener); return () => invalidationListeners.delete(listener) },
+    memberAvatars: { ...backing.client.memberAvatars, async read(avatarRef: string, rendition: any) {
+      if (avatarRef !== exportAvatarRef) return backing.client.memberAvatars.read(avatarRef, rendition)
+      const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 200
+      const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#c223a7'; ctx.fillRect(0, 0, 400, 200)
+      ctx.fillStyle = '#e5a01b'; ctx.fillRect(150, 50, 100, 100)
+      const blob = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'))
+      const crop = { centerX: .5, centerY: .5, size: .5 }
+      return { mediaType: 'image/png', bytes: new Uint8Array(await blob.arrayBuffer()), width: 400, height: 200, crop, displayCrop: crop }
+    } },
+    composerAttachments: { ...backing.client.composerAttachments, async preview(locator: any) {
+      if (locator.attachmentRefId === 'export-missing') return { availability: 'missing', preview: null }
+      if (locator.attachmentRefId === 'export-image' || locator.attachmentRefId === 'export-image-pending') {
+        while (locator.attachmentRefId === 'export-image-pending' && controls.holdExportImage) await new Promise(resolve => setTimeout(resolve, 20))
+        const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 100
+        const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#a2c6ad'; ctx.fillRect(0, 0, 160, 100); ctx.fillStyle = '#173b25'; ctx.fillText('Embedded original', 12, 48)
+        const blob = await new Promise<Blob>(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'))
+        return { availability: 'available', preview: { blob } }
+      }
+      return backing.client.composerAttachments.preview(locator)
+    } },
+    onInvalidated: (listener: (change?: import('@contracts').ThreadReadInvalidation) => void) => { invalidationListeners.add(listener); return () => invalidationListeners.delete(listener) },
     request: async (method: string, input: any = {}): Promise<any> => {
+      if (method === 'agentRunImages.read' && input.imageId === 'legacy-image') {
+        const canvas = document.createElement('canvas'); canvas.width = 80; canvas.height = 40
+        const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#23794b'; ctx.fillRect(0, 0, 80, 40)
+        return { mediaType: 'image/png', data: canvas.toDataURL('image/png').split(',')[1] }
+      }
+      if (method === 'threads.open' || method === 'thread.messages.page') {
+        controls.exportReads.push({ method, ...input })
+        const all = controls.exportHistory ?? state.snapshot.messages
+        const rows = method === 'threads.open' ? all.slice(-20) : all.filter((message: any) => message.sequence < input.beforeSequence).slice(-input.limit)
+        const hasMore = all.some((message: any) => message.sequence < rows[0]?.sequence)
+        const messages = structuredClone(rows)
+        const result = method === 'threads.open' ? { ...state.snapshot, schemaVersion: 9, throughGlobalSequence: state.version,
+          thread: { ...state.snapshot.thread, id: input.threadId, title: input.threadId === state.snapshot.thread.id ? state.snapshot.thread.title : '其他会话' }, messages,
+          agentRunImages: controls.exportImageGroups,
+          coverage: { messages: { hasEarlier: hasMore, complete: !hasMore, loadedCount: rows.length, totalCount: all.length,
+            oldestLoadedSequence: rows[0]?.sequence ?? null, newestLoadedSequence: rows.at(-1)?.sequence ?? null } } }
+          : { schemaVersion: 1, threadId: input.threadId, throughGlobalSequence: input.throughGlobalSequence,
+            requestedBeforeSequence: input.beforeSequence, messages, hasMore, nextBeforeSequence: hasMore ? rows[0].sequence : null }
+        const fail = method === 'thread.messages.page' && controls.failNextExportPage
+        if (fail) controls.failNextExportPage = false
+        if (controls.exportReadDelay) await new Promise(resolve => setTimeout(resolve, controls.exportReadDelay))
+        if (fail) throw new Error('Simulated export read failure')
+        return result
+      }
       if (['agentRunExecution.page', 'agentRunExecution.changes', 'agentRunEvidence.getContent', 'thread.messages.around', 'thread.messages.replies'].includes(method))
         controls.executionReads.push({ method, ...input })
       if (method === 'members.list') return profiles

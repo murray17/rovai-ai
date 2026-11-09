@@ -5,7 +5,7 @@ version: 26
 status: accepted
 authority: desktop-file-preview-wire
 source_version: v1.72
-last_updated: 2026-11-01
+last_updated: 2026-11-02
 ---
 
 # File Preview v26
@@ -34,6 +34,7 @@ Desktop 与 Web 共享 `FilePreviewApi.projectFiles`，通过现有 Host 请求�
 条目为 `id, name, relativePath, directory, unavailable`。`id` 为 `p:` 加 UTF-8 相对路径的 Base64URL 编码（无 padding）；根使用 `root`。
 它是可逆定位，不是逐文件许可。Host 不维护文件登记表，也没有累计浏览条目额度；使用时在当前作用域验证相对路径、根边界与存在性。
 作用域归当前 Desktop/Web client 和 Thread 所有。Core 在短数据库锁中取得当前业务工作目录，所有文件处理移到锁外。
+绑定目录的 Pending 与 Active Thread 均可读取项目目录并打开文件；浏览不激活草稿或发布消息。快速对话与删除中的 Thread 不签发目录作用域。
 已 ready 的 Mission 工作副本优先于 Thread 项目根；读取入口不准备工作副本。每次访问重新核对绑定和实际根身份。
 根身份包含业务工作副本代次、规范化路径和根文件系统对象身份；已删除或替换的根返回不可用，不回退到同名项目文件。
 

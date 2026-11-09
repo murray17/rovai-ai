@@ -6,10 +6,54 @@ import { campMessageSendParams } from '../../desktop/src/renderer/src/BusinessAp
 import { PendingThreadDraftPersistence } from '../../desktop/src/renderer/src/pending-thread-draft'
 import { ConsoleClient } from './client'
 import { createThreadAdapter } from './camp-adapter'
+import { newCommandId } from '../../desktop/src/shared/command-id'
 
 // Owns the production Web adapter + execution window seam. A Host-only HTTP
 // test bypasses this adapter's allowlist; a populated page hides missing deltas.
 afterEach(() => vi.unstubAllGlobals())
+it('routes member leave and return through the Web adapter and recovers a lost return receipt without resending', async () => {
+  const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
+  vi.stubGlobal('sessionStorage', storage)
+  vi.stubGlobal('localStorage', storage)
+  vi.stubGlobal('navigator', { platform: 'MacIntel' })
+  vi.stubGlobal('window', { sessionStorage: storage, history: { state: null } })
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  const leave = { commandId: newCommandId(), command: { agentId: 'member', expectedVersion: 1, presence: 'away' } }
+  const rejoin = { commandId: newCommandId(), command: { agentId: 'member', expectedVersion: 2, presence: 'present' } }
+  const left = { status: 'applied', payload: { agentId: 'member', version: 2 } }
+  const rejoined = { status: 'applied', payload: { agentId: 'member', version: 3 } }
+  const writes: unknown[] = []
+  let recorded = false
+  const fetcher = vi.fn<typeof fetch>(async (url, options) => {
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    const request = JSON.parse(String(options?.body))
+    if (request.operation === 'commands.reconcile') {
+      expect(request.params).toEqual({ operation: 'members.presence.set', params: rejoin })
+      return Response.json({ result: recorded ? { state: 'recorded', result: rejoined } : { state: 'unknown' } })
+    }
+    if (request.operation === 'app.info') return Response.json({ result: {} })
+    writes.push(request)
+    if (request.params.command.presence === 'present') throw new TypeError('reply lost after commit')
+    return Response.json({ result: left })
+  })
+  const transport = new ConsoleClient('http://127.0.0.1:8766', fetcher)
+  await transport.login('b'.repeat(64))
+  const client = createThreadAdapter(transport, async () => null).environment.client
+  try {
+    await expect(client.request('members.presence.set', leave)).resolves.toEqual(left)
+    const pending = client.request('members.presence.set', rejoin).then(value => ({ value }), error => ({ error }))
+    await vi.waitFor(() => {
+      expect(transport.connectionState).toBe('offline')
+      expect(transport.pendingCommandCount).toBe(1)
+    })
+    recorded = true
+    await transport.retryPending()
+    expect(await pending).toEqual({ value: rejoined })
+    expect(writes).toEqual([leave, rejoin].map(params => ({ operation: 'members.presence.set', params })))
+    expect(transport.pendingCommandCount).toBe(0)
+  } finally { transport.clear() }
+})
+
 it('routes public reference directory and availability reads through the Web adapter', async () => {
   const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
   vi.stubGlobal('sessionStorage', storage)
@@ -20,7 +64,7 @@ it('routes public reference directory and availability reads through the Web ada
   const requests: unknown[] = []
   const item = { kind: 'thread', id: 'rvcamp_01k87hrb9yfay8vvr14d2pf2db', title: '登录改造', projectBindingKind: 'directory', projectPath: '/project' }
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     const request = JSON.parse(String(options?.body))
     requests.push(request)
     return Response.json({ result: request.operation === 'threadReferences.list' ? { items: [item], nextCursor: null } : [item, null] })
@@ -49,7 +93,7 @@ it('loads a command after an initially empty Web Run and refreshes its completio
   let changeSequence = 0
   const operations: string[] = []
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     const { operation, params } = JSON.parse(String(options?.body))
     operations.push(operation)
     expect(params.projection).toBe('blocks')
@@ -120,7 +164,7 @@ it('通过 Web 适配器确认 Pending 输入框初始化和草稿 presence，�
   const requests: unknown[] = []
   let rejectPresence = false
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     expect(String(url)).toBe('http://127.0.0.1:8767/api/v1/request')
     requests.push(JSON.parse(String(options?.body)))
     return Response.json(rejectPresence
@@ -161,7 +205,7 @@ it('polls changes only while files are open and resumes after reopening', async 
   const actions: string[] = []
   const changed = { threadId: 'camp', previewKeys: ['file-key'] }
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     const { action } = JSON.parse(String(options?.body)); actions.push(action)
     if (action === 'open' || action === 'restore') return Response.json({ ok: true, value: { kind: 'file_preview', file: { handleId: action === 'restore' ? 'candidate' : 'file', displayPath: 'file.txt' } } })
     if (action === 'readText') {
@@ -214,7 +258,7 @@ it('confirms uploaded image bindings before reusing local bytes and falls back f
   const source = { id: attachmentId, sourcePath: '/tmp/upload/source', displayName: 'photo.png', kind: 'file', mediaType: 'image/png', observedByteSize: file.size }
   const actions: string[] = []
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
     if (String(url).endsWith('/uploads')) {
       digest = JSON.parse(String((options!.body as FormData).get('intent'))).sha256
       return Response.json({ draft: source })
@@ -279,7 +323,7 @@ it('preserves changed-file download errors for preview refresh without starting 
   vi.stubGlobal('window', { sessionStorage: storage, history: { state: null } })
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const fetcher = vi.fn<typeof fetch>(async url => String(url).endsWith('/login')
-    ? Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', fileTransfers: { nativeDownload: true } })
+    ? Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', fileTransfers: { nativeDownload: true } })
     : Response.json({ error: { code: 'file_changed' } }, { status: 409 }))
   const transport = new ConsoleClient('http://127.0.0.1:8768', fetcher)
   await transport.login('b'.repeat(64))
@@ -300,7 +344,7 @@ it('keeps generated paste identity through local drafts and sends, with explicit
     kind: 'file', mediaType: file.type, observedByteSize: file.size, pastedTextPreview: '😀 text' }
   let failedCleanup = false, uploaded = 0
   const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', fileTransfers: { uploadMaxBytes: 30 * 1024 * 1024 } })
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', fileTransfers: { uploadMaxBytes: 30 * 1024 * 1024 } })
     if (String(url).endsWith('/uploads')) {
       uploaded++
       const data = options!.body as FormData

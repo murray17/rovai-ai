@@ -36,8 +36,7 @@ export interface NavigationThreadLookup {
 export function startNavigationThreadLookup(
   threadId: string,
   publish: (result: NavigationThreadLookup) => void,
-  findThread: (threadId: string) => Promise<NavigationThreadTarget | null> = (id) =>
-    window.rovai.request('navigation.findThread', { threadId: id })
+  findThread: (threadId: string) => Promise<NavigationThreadTarget | null>
 ): () => void {
   let cancelled = false
   // A complete ID can still be edited quickly; only dispatch the settled input.

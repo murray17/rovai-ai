@@ -1,5 +1,8 @@
 /* Shared Porcelain Day / Steel Night tokens; owned by the existing Desktop theme contract. */
 :root {
+  /* User-requested paper buttons for pending decisions, invariant across palettes. */
+  --pending-secondary-canvas: #ffffff;
+  --pending-secondary-ink: #262626;
   /* Neutral project browsing and file reading canvas. */
   --file-canvas: #ffffff;
   --file-hover: #f0f0f0;
@@ -93,6 +96,7 @@
   --memory-muted: #626262;
   --memory-input-line: #dedede;
   --neutral-selected: #eeeef0;
+  --conversation-selection-surface: #efefef;
   --neutral-hover: #f3f3f4;
   --conversation-action: #2b2b2c;
   --conversation-action-ink: #2b2b2c;
@@ -306,6 +310,7 @@
   --memory-muted: #b6b6b6;
   --memory-input-line: #444444;
   --neutral-selected: #292e32;
+  --conversation-selection-surface: #2d2d2d;
   --neutral-hover: #23292e;
   --conversation-action: #e5e5e7;
   --conversation-action-ink: #e5e5e7;
@@ -501,6 +506,7 @@
   --memory-muted: #626262;
   --memory-input-line: #dedede;
   --neutral-selected: #e9e9e4;
+  --conversation-selection-surface: #e9e9e9;
   --neutral-hover: #eeeeea;
   --conversation-action: #303733;
   --conversation-action-ink: #303733;
@@ -702,6 +708,7 @@
   --memory-muted: #626262;
   --memory-input-line: #dedede;
   --neutral-selected: #eee4e6;
+  --conversation-selection-surface: #e6e6e6;
   --neutral-hover: #f4edef;
   --conversation-action: #ce3e4e;
   --conversation-action-ink: #373437;
@@ -903,6 +910,7 @@
   --memory-muted: #b6b6b6;
   --memory-input-line: #444444;
   --neutral-selected: #352728;
+  --conversation-selection-surface: #2a2a2a;
   --neutral-hover: #303030;
   --conversation-action: #cd3434;
   --conversation-action-ink: #e6e6e6;

@@ -1,4 +1,5 @@
 import { isThreadId, type ComposerAtom, type ReferenceCandidate, type ReferenceIdentity, type StructuredThreadMessageSegment } from '@contracts'
+import { escapeReferenceLinkLabel } from './reference-markdown'
 
 export type ReferenceAtom = Extract<ComposerAtom, { type: 'thread_reference' | 'mission_reference' }>
 export type ReferenceSegment = Extract<StructuredThreadMessageSegment, { kind: 'thread_reference' | 'mission_reference' }>
@@ -24,8 +25,7 @@ export function validReferenceAtom(value: Record<string, unknown>): value is Rec
 export function projectReference(value: ReferenceAtom | ReferenceSegment): string {
   const ref = referenceIdentity(value)
   const title = 'titleAtSend' in value ? value.titleAtSend : value.labelFallback ?? ref.id
-  const escaped = title.replace(/[\p{White_Space}\p{Cc}]/gu, ' ')
-    .replace(/[!"#$%&'()*+,\-./:;<=>?@[\]\\^_`{|}~]/gu, '\\$&')
+  const escaped = escapeReferenceLinkLabel(title.replace(/[\p{White_Space}\p{Cc}]/gu, ' '))
   return `[${escaped}](rovai://${ref.kind}/${ref.id})`
 }
 export function referenceProject(item: ReferenceCandidate): string {

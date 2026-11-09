@@ -1,13 +1,15 @@
 import { UiText, uiAttribute } from './interface-language'
 import { useThreadClient } from './camp-client'
-import { useContext, useEffect, useState } from 'react'
-import type { AgentRunExecutionEvidenceView } from '@contracts'
+import { useContext, useEffect, useState, type ComponentType } from 'react'
+import type { AgentRunExecutionEvidenceView, ResolvedTheme } from '@contracts'
 import { ExecutionContentContext } from './ExecutionVirtualList'
 import { SafeMarkdown } from './SafeMarkdown'
 
 /** Full narration is read only while its measured row is mounted near the viewport. */
-export function ExecutionNarration({ threadId, evidence, preview }: {
+export function ExecutionNarration({ threadId, evidence, preview, Body = SafeMarkdown, theme = 'day', contentComplete = false }: {
   threadId: string; evidence?: AgentRunExecutionEvidenceView; preview: string
+  Body?: ComponentType<{ children: string; theme: ResolvedTheme; contentComplete: boolean }>
+  theme?: ResolvedTheme; contentComplete?: boolean
 }) {
   const client = useThreadClient()
   const cache = useContext(ExecutionContentContext)
@@ -35,7 +37,10 @@ export function ExecutionNarration({ threadId, evidence, preview }: {
 
     return () => { disposed = true }
   }, [client, threadId, stamp, cache, retry])
-  return <><SafeMarkdown>{body?.stamp === stamp ? body.text : preview}</SafeMarkdown>
+  const loaded = body?.stamp === stamp
+  const complete = (contentComplete || (evidence?.payload as { status?: string } | undefined)?.status === 'completed')
+    && (!evidence?.isTruncated || loaded) && !evidence?.outputTruncated
+  return <><Body theme={theme} contentComplete={complete}>{loaded ? body.text : preview}</Body>
     {failed && <button className="camp-history-text-button" type="button" onClick={() => setRetry(value => value + 1)}><UiText zh={"正文读取失败，重试"} /></button>}
   </>
 }

@@ -141,8 +141,13 @@ export function parseOpenFilePreviewRequest(value: unknown): OpenFilePreviewRequ
         messageId: string(input.messageId, 128),
         rawReference: string(input.rawReference)
       }
+    case 'project_file': {
+      const rawReference = string(input.rawReference, 16384)
+      if (new TextEncoder().encode(rawReference).byteLength > 16384) throw new Error('Unsupported project reference')
+      return { kind: input.kind, threadId: threadId(input.threadId), rawReference,
+        ...(input.expectedPathAtSend === undefined ? {} : { expectedPathAtSend: string(input.expectedPathAtSend, 1048576) }) }
+    }
     case 'camp_workspace':
-    case 'project_file':
       return {
         kind: input.kind,
         threadId: threadId(input.threadId),

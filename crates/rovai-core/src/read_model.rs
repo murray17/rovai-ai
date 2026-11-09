@@ -794,6 +794,7 @@ pub struct ThreadSnapshot {
     pub agent_run_images: Vec<AgentRunImagesView>,
     pub context_manifests: Vec<ContextManifestView>,
     pub approvals: Vec<ApprovalView>,
+    pub native_interactions: Vec<crate::native_interaction::NativeInteractionView>,
     pub actions: Vec<ActionView>,
     pub timeline: Vec<DomainEventView>,
 }
@@ -852,6 +853,7 @@ pub struct ThreadOpenProjection {
     pub agent_run_file_changes: Vec<AgentRunFileChangesView>,
     pub agent_run_images: Vec<AgentRunImagesView>,
     pub approvals: Vec<ApprovalView>,
+    pub native_interactions: Vec<crate::native_interaction::NativeInteractionView>,
     pub coverage: ThreadOpenCoverage,
 }
 
@@ -1303,6 +1305,7 @@ impl ReadModelService {
             agent_run_images,
             context_manifests,
             approvals,
+            native_interactions: Vec::new(),
             actions,
             timeline,
         })
@@ -1366,6 +1369,7 @@ impl ReadModelService {
             agent_run_file_changes,
             agent_run_images,
             approvals,
+            native_interactions: Vec::new(),
             coverage,
         })
     }
@@ -1958,8 +1962,7 @@ fn load_camp_open_counts(
               (SELECT COUNT(*) FROM camp_turn WHERE camp_id = ?1 AND kind = 'camp'),
               (SELECT COUNT(*)
                FROM agent_run
-               LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-               WHERE COALESCE(agent_run.camp_id, camp_turn.camp_id) = ?1
+               WHERE agent_run.camp_id = ?1
                  AND agent_run.invocation_kind <> 'single_chat'),
               (SELECT COUNT(*)
                FROM approval
@@ -3192,17 +3195,14 @@ fn load_agent_runs(
                  (SELECT message_id FROM agent_run_input
                   WHERE agent_run_id = agent_run.id ORDER BY ordinal LIMIT 1),
                  agent_run.anchor_message_id,
-                 agent_run.trigger_camp_message_id,
-                 CASE WHEN camp_turn.trigger_type = 'camp_message'
-                      THEN camp_turn.trigger_id END
+                 agent_run.trigger_camp_message_id
                ),
                continued.source_agent_run_id IS NOT NULL,
                agent_run.current_public_tail_sequence,
                agent_run.runtime_adapter_kind,
                agent_run.last_error_code
         FROM agent_run
-        LEFT JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
-        JOIN camp ON camp.id = COALESCE(agent_run.camp_id, camp_turn.camp_id)
+        JOIN camp ON camp.id = agent_run.camp_id
         JOIN conversation ON conversation.id = agent_run.conversation_id
         LEFT JOIN (
             SELECT DISTINCT continuation.source_agent_run_id
@@ -3210,7 +3210,7 @@ fn load_agent_runs(
             JOIN camp_run_continuation AS continuation ON continuation.delivery_id = delivery.id
             WHERE delivery.camp_id = ?1
         ) AS continued ON continued.source_agent_run_id = agent_run.id
-        WHERE camp.id = ?1
+        WHERE agent_run.camp_id = ?1
           AND agent_run.invocation_kind <> 'single_chat'
         ORDER BY
           CASE

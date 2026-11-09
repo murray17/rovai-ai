@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AdapterInstallation } from '@contracts'
-import { messageRuntimeModelPresentation, modelSummary } from './runtime-model-presentation'
+import { memberRuntimeConfigurationPresentation, messageRuntimeModelPresentation, modelSummary } from './runtime-model-presentation'
 
 describe('message model identity', () => {
   const record = { adapterKind: 'codex-cli', modelId: 'old-model', reasoningEffort: 'high' }
@@ -17,6 +17,32 @@ describe('message model identity', () => {
     expect(messageRuntimeModelPresentation(record, null)).toEqual(fallback)
     expect(messageRuntimeModelPresentation(record, { ...installation, adapterKind: 'claude-code-cli' })).toEqual(fallback)
     expect(modelSummary(fallback)).toBe('old-model · high')
+  })
+
+  it('uses CodeBuddy thought_level in member summaries and the existing message effort field', () => {
+    const codebuddy: AdapterInstallation = {
+      ...installation,
+      adapterKind: 'codebuddy-cli',
+      snapshot: {
+        ...installation.snapshot!,
+        models: [{
+          ...installation.snapshot!.models[0],
+          options: [{ ...installation.snapshot!.models[0].options[0], key: 'thought_level' }]
+        }]
+      }
+    }
+    const configuration: Parameters<typeof memberRuntimeConfigurationPresentation>[0] = {
+      adapterKind: 'codebuddy-cli',
+      model: {
+        mode: 'explicit', modelId: 'old-model',
+        options: { thought_level: 'high', reasoning_effort: 'wrong' }
+      },
+      permissions: { adapterKind: 'codebuddy-cli', schemaVersion: 1, values: {} }
+    }
+    expect(memberRuntimeConfigurationPresentation(configuration, codebuddy).effort)
+      .toEqual({ label: '推理强度', value: 'High' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind: 'codebuddy-cli' }, codebuddy)?.effort)
+      .toEqual({ label: '推理强度', value: 'High' })
   })
 
   it('keeps an unknown record, Agent defaults and an unspecified effort distinct', () => {

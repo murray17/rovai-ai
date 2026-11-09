@@ -188,6 +188,8 @@ pub struct SingleChatRunView {
 pub struct SingleChatSnapshot {
     pub conversation: SingleChatConversationView,
     pub approvals: Vec<crate::read_model::ApprovalView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_interactions: Option<Vec<crate::native_interaction::NativeInteractionView>>,
     pub messages: Vec<SingleChatMessageView>,
     pub draft: SingleChatComposerDraftView,
     pub pending_inputs: SingleChatPendingInputsView,
@@ -1670,6 +1672,7 @@ impl SingleChatService {
         }
         crate::execution_text::overlay(database, &mut execution_evidence)?;
         Ok(Some(SingleChatSnapshot {
+            native_interactions: None,
             approvals: crate::read_model::load_conversation_approvals(
                 database.connection(),
                 &conversation.camp_id,
@@ -4426,7 +4429,7 @@ mod tests {
             )
             .unwrap();
         while take_run_wake(&database) {}
-        runtime
+        let completed = runtime
             .succeed_agent_run(
                 &mut database,
                 &CommandEnvelope {
@@ -4438,17 +4441,28 @@ mod tests {
                     expected_versions: Vec::new(),
                     execution_epoch: None,
                     payload: SucceedAgentRunCommand {
-                        agent_run_id: first_run_id,
+                        agent_run_id: first_run_id.clone(),
                         expected_version: 1,
                         execution_epoch: 1,
                         native_turn_id: "single-chat-pending-first-turn".to_string(),
-                        final_output: "第一轮完成".to_string(),
+                        final_output: String::new(),
                         missing_send_recovery_candidate: None,
                         ending_git_observation: None,
                     },
                 },
             )
             .unwrap();
+
+        assert_eq!(completed.result.code, "agent_run.succeeded");
+        assert!(completed.result.payload["finalConversationMessageId"].is_null());
+        let private_replies: i64 = database.connection().query_row(
+            "SELECT COUNT(*) FROM conversation_message WHERE source_agent_run_id=?1 AND author_type='agent'",
+            [&first_run_id], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(
+            private_replies, 0,
+            "empty native success must not create a blank reply"
+        );
 
         assert!(
             take_run_wake(&database),
@@ -4481,9 +4495,9 @@ mod tests {
             .snapshot(&database, &conversation_id)
             .unwrap()
             .unwrap();
-        assert_eq!(snapshot.messages.len(), 3);
-        assert_eq!(snapshot.messages[2].body, "读取排队附件");
-        assert_eq!(snapshot.messages[2].quotes, captured);
+        assert_eq!(snapshot.messages.len(), 2);
+        assert_eq!(snapshot.messages[1].body, "读取排队附件");
+        assert_eq!(snapshot.messages[1].quotes, captured);
         let candidate = runtime
             .list_dispatchable_agent_runs(&database, 8)
             .unwrap()
@@ -4557,7 +4571,7 @@ mod tests {
             input["quotes"],
             json!([{"kind":"message_excerpt","text":"这一处设计"}])
         );
-        assert_eq!(snapshot.messages[2].attachments.len(), 1);
+        assert_eq!(snapshot.messages[1].attachments.len(), 1);
         assert!(snapshot.pending_inputs.items.is_empty());
         let public_messages: i64 = database
             .connection()
