@@ -80,6 +80,8 @@ pub enum Operation {
     CampFastCheck,
     #[serde(rename = "threads.members.fast.set", alias = "camps.members.fast.set")]
     CampFastSet,
+    #[serde(rename = "members.presence.set")]
+    MemberPresenceSet,
     #[serde(rename = "members.removalPreview")]
     MemberRemovalPreview,
     #[serde(rename = "members.remove")]
@@ -488,6 +490,7 @@ impl Operation {
             Self::PendingDraftPresence => "camps.pendingDraft.setPresence",
             Self::CampFastCheck => "camps.members.fast.check",
             Self::CampFastSet => "camps.members.fast.set",
+            Self::MemberPresenceSet => "members.presence.set",
             Self::MemberRemovalPreview => "members.removalPreview",
             Self::MemberRemove => "members.remove",
             Self::MemberReorder => "members.reorder",

@@ -6,10 +6,54 @@ import { campMessageSendParams } from '../../desktop/src/renderer/src/BusinessAp
 import { PendingThreadDraftPersistence } from '../../desktop/src/renderer/src/pending-thread-draft'
 import { ConsoleClient } from './client'
 import { createThreadAdapter } from './camp-adapter'
+import { newCommandId } from '../../desktop/src/shared/command-id'
 
 // Owns the production Web adapter + execution window seam. A Host-only HTTP
 // test bypasses this adapter's allowlist; a populated page hides missing deltas.
 afterEach(() => vi.unstubAllGlobals())
+it('routes member leave and return through the Web adapter and recovers a lost return receipt without resending', async () => {
+  const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
+  vi.stubGlobal('sessionStorage', storage)
+  vi.stubGlobal('localStorage', storage)
+  vi.stubGlobal('navigator', { platform: 'MacIntel' })
+  vi.stubGlobal('window', { sessionStorage: storage, history: { state: null } })
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  const leave = { commandId: newCommandId(), command: { agentId: 'member', expectedVersion: 1, presence: 'away' } }
+  const rejoin = { commandId: newCommandId(), command: { agentId: 'member', expectedVersion: 2, presence: 'present' } }
+  const left = { status: 'applied', payload: { agentId: 'member', version: 2 } }
+  const rejoined = { status: 'applied', payload: { agentId: 'member', version: 3 } }
+  const writes: unknown[] = []
+  let recorded = false
+  const fetcher = vi.fn<typeof fetch>(async (url, options) => {
+    if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+    const request = JSON.parse(String(options?.body))
+    if (request.operation === 'commands.reconcile') {
+      expect(request.params).toEqual({ operation: 'members.presence.set', params: rejoin })
+      return Response.json({ result: recorded ? { state: 'recorded', result: rejoined } : { state: 'unknown' } })
+    }
+    if (request.operation === 'app.info') return Response.json({ result: {} })
+    writes.push(request)
+    if (request.params.command.presence === 'present') throw new TypeError('reply lost after commit')
+    return Response.json({ result: left })
+  })
+  const transport = new ConsoleClient('http://127.0.0.1:8766', fetcher)
+  await transport.login('b'.repeat(64))
+  const client = createThreadAdapter(transport, async () => null).environment.client
+  try {
+    await expect(client.request('members.presence.set', leave)).resolves.toEqual(left)
+    const pending = client.request('members.presence.set', rejoin).then(value => ({ value }), error => ({ error }))
+    await vi.waitFor(() => {
+      expect(transport.connectionState).toBe('offline')
+      expect(transport.pendingCommandCount).toBe(1)
+    })
+    recorded = true
+    await transport.retryPending()
+    expect(await pending).toEqual({ value: rejoined })
+    expect(writes).toEqual([leave, rejoin].map(params => ({ operation: 'members.presence.set', params })))
+    expect(transport.pendingCommandCount).toBe(0)
+  } finally { transport.clear() }
+})
+
 it('routes public reference directory and availability reads through the Web adapter', async () => {
   const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined }
   vi.stubGlobal('sessionStorage', storage)
