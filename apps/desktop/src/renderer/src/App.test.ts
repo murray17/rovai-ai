@@ -8290,6 +8290,36 @@ describe('task event projections', () => {
     }
   })
 
+  it('shows the current version-read failure in the existing row feedback while retaining the version line', () => {
+    const item = productAvailability('codex-cli', 'ready', {
+      runtimeKind: 'codex-cli', origin: 'environment', phase: 'spawn',
+      code: 'runtime_version_failed', summary: '智能体版本读取失败，请重试检查。',
+      detail: '本轮版本命令已超时。', retryable: true
+    })
+    item.discovery.versionProbeSucceeded = false
+    item.diagnosticCode = 'runtime_version_failed'
+    item.reportedVersion = 'codex-cli 1.0.0'
+    const markup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
+      health: {
+        hostPlatform: 'macos-arm64', runtimeCatalog: [],
+        runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
+        runtimeAvailability: [item],
+        searchEnvironment: {
+          generation: 1, createdAt: '2026-11-09T00:00:00Z', pathEntryCount: 0,
+          shell: { status: 'captured', interactive: true, shellName: 'zsh', entryCount: 0, elapsedMillis: 0 }
+        }
+      },
+      installations: [], onReload: async () => undefined
+    }))
+    expect(markup).toContain('<small title="codex-cli 1.0.0">codex-cli 1.0.0</small>')
+    expect(markup).toContain('class="runtime-guide-feedback is-error" role="alert"')
+    expect(markup).toContain('智能体版本读取失败，请重试检查。')
+    expect(markup).toContain('本轮版本命令已超时。')
+    expect(markup).not.toContain('runtime-failure-notice')
+    expect(markup).not.toContain('上次已知版本')
+    expect(markup).not.toContain('版本未知')
+  })
+
   it('renders Windows not-qualified rows without machine checks or rescan actions', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: 'C:\\Users\\test\\AppData\\Local\\Rovai AI' },

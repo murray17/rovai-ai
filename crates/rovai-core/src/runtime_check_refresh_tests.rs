@@ -2,6 +2,8 @@
 //! The capture seam never reads a developer's PATH, registry, shell or accounts.
 use super::*;
 use crate::application::{RuntimeCheckOutcome, RuntimeCheckTrigger, RuntimeLaunchPurpose};
+#[cfg(unix)]
+use rovai_core::agent_runtime_adapter::executable_fingerprint as fingerprint_executable;
 use rovai_core::runtime_startup::RuntimeStartupConfiguration;
 use serde_json::{Value, json};
 use std::{
@@ -686,11 +688,17 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                 .unwrap()
                 .unwrap();
             let snapshot = installation.snapshot.unwrap();
-            assert!(
-                snapshot.stale_at.is_some(),
-                "old Ready remains explicitly stale"
+            assert_eq!(
+                snapshot.probe_status, "installed_unverified",
+                "saving the new program's version cannot relabel old Ready evidence"
             );
-            assert_ne!(
+            assert!(snapshot.last_successful_probe_at.is_none());
+            assert!(
+                !snapshot
+                    .capabilities
+                    .contains(&"old-program-capability".to_string())
+            );
+            assert_eq!(
                 snapshot.executable_fingerprint,
                 fixture.core.runtime_discovery.read().await[&KIND].executable_fingerprint
             );
@@ -1110,14 +1118,112 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
         });
 }
 
+// The version must outlive cancellation of the production resolution future,
+// exactly as when the existing Check Manager's total timeout drops that future.
+// A pure version-reader test cannot prove the DB commit and public projection.
+#[cfg(unix)]
+#[tokio::test]
+async fn full_probe_saves_version_before_connection_and_cancellation() {
+    use rovai_core::agent_profile::AgentProfileService;
+    let fixture = Fixture::new();
+    let program = fixture.program("selected", "1.0.0", true);
+    let version_file = fixture.root.join("selected/reported-version");
+    let calls = fixture.root.join("selected/version-calls");
+    let body = std::fs::read_to_string(&program).unwrap().replace(
+        "printf 'codex-cli 1.0.0\\n'",
+        &format!(
+            "printf call >> '{}'; /bin/cat '{}'",
+            calls.display(),
+            version_file.display()
+        ),
+    );
+    std::fs::write(&program, body).unwrap();
+    fixture.save(0, &configuration(Some(&program))).await;
+    fixture.core.run_runtime_discovery().await;
+    fixture.seed_ready().await;
+    let before = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap()
+        .snapshot
+        .unwrap();
+    let fingerprint = fingerprint_executable(&program).unwrap();
+    std::fs::write(&version_file, b"codex-cli 2.0.0\n").unwrap();
+    let search = fixture.core.runtime_search_environment.read().await.clone();
+    {
+        let resolution = fixture.core.run_product_runtime_resolution_in_environment(
+            KIND,
+            RuntimeLaunchPurpose::AvailabilityCheck,
+            tokio::time::Instant::now() + Duration::from_secs(90),
+            search,
+            false,
+        );
+        tokio::pin!(resolution);
+        tokio::select! {
+            result = &mut resolution => panic!("connection must remain held: {result:?}"),
+            _ = async {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !fixture.root.join("probe-started").exists() {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                }).await.unwrap();
+            } => {}
+        }
+        let current = fixture.health().await;
+        assert_eq!(current["reportedVersion"], "codex-cli 2.0.0");
+        assert_eq!(current["discovery"]["versionProbeSucceeded"], true);
+        let saved = AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap()
+            .snapshot
+            .unwrap();
+        assert_eq!(saved.reported_version.as_deref(), Some("codex-cli 2.0.0"));
+        assert_eq!(saved.capabilities, before.capabilities);
+        assert_eq!(
+            saved.last_successful_probe_at,
+            before.last_successful_probe_at
+        );
+        assert!(
+            tokio::time::timeout(Duration::ZERO, &mut resolution)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 2.0.0");
+    assert_eq!(std::fs::read_to_string(&calls).unwrap(), "call");
+    std::fs::write(fixture.root.join("probe-release"), b"release").unwrap();
+    std::fs::write(&version_file, b"codex-cli 3.0.0\n").unwrap();
+    assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 3.0.0");
+    assert_eq!(
+        fixture.health().await["discovery"]["versionProbeSucceeded"],
+        true
+    );
+    assert_eq!(fingerprint_executable(&program).unwrap(), fingerprint);
+    assert_eq!(
+        std::fs::read_to_string(&calls).unwrap(),
+        "callcall",
+        "each full check reads once, including when later connection checks fail"
+    );
+    fixture.close().await;
+}
+
 // The manual rescan owns bounded version reads; passive discovery stays static.
 #[cfg(unix)]
 #[tokio::test]
-async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses() {
+async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() {
     use rovai_core::agent_profile::AgentProfileService;
     let fixture = Fixture::new();
     let program = fixture.program("versions", "1.0.0", false);
     let log = fixture.root.join("versions/commands");
+    let version_file = fixture.root.join("versions/reported-version");
+    std::fs::write(&version_file, b"codex-cli 1.0.0\n").unwrap();
+    let body = std::fs::read_to_string(&program).unwrap().replace(
+        "printf 'codex-cli 1.0.0\\n'",
+        &format!("/bin/cat '{}'", version_file.display()),
+    );
+    std::fs::write(&program, body).unwrap();
     let instrument = |program: &Path| {
         let body = std::fs::read_to_string(program).unwrap().replace(
             "#!/bin/sh\n",
@@ -1140,10 +1246,21 @@ async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses()
             .unwrap()
             .lines()
             .collect::<Vec<_>>(),
-        ["--version"]
+        ["--version", "--version", "--version"]
     );
     assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 1.0.0");
+    let fingerprint = fingerprint_executable(&program).unwrap();
+    std::fs::write(&version_file, b"codex-cli 1.1.0\n").unwrap();
+    fixture.core.rescan_runtime_discovery().await.unwrap();
+    assert_eq!(fingerprint_executable(&program).unwrap(), fingerprint);
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 1.1.0");
+    std::fs::write(&version_file, b"codex-cli 1.2.0\n").unwrap();
     assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 1.2.0");
+    assert_eq!(
+        fixture.health().await["discovery"]["versionProbeSucceeded"],
+        true
+    );
     let failure = fixture.health().await["diagnosticCode"].clone();
     fixture.core.rescan_runtime_discovery().await.unwrap();
     assert_eq!(
@@ -1157,7 +1274,62 @@ async fn manual_rescan_reuses_versions_and_discards_replaced_version_responses()
             .lines()
             .filter(|line| *line == "--version")
             .count(),
-        1
+        6
+    );
+    let retained_attempt = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap()
+        .last_probe_attempt;
+    std::fs::write(&version_file, b"").unwrap();
+    fixture.core.rescan_runtime_discovery().await.unwrap();
+    let failed = fixture.health().await;
+    assert_eq!(failed["reportedVersion"], "codex-cli 1.2.0");
+    assert_eq!(failed["discovery"]["versionProbeSucceeded"], false);
+    assert_eq!(failed["diagnosticCode"], "runtime_version_empty");
+    assert_eq!(failed["failure"]["code"], failed["diagnosticCode"]);
+    assert_eq!(
+        AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap()
+            .last_probe_attempt,
+        retained_attempt,
+        "light version failure must retain the full check's failure record"
+    );
+    assert_eq!(fixture.check().await, RuntimeCheckOutcome::StableFailure);
+    let failed = fixture.health().await;
+    assert_eq!(failed["reportedVersion"], "codex-cli 1.2.0");
+    assert_eq!(failed["discovery"]["versionProbeSucceeded"], false);
+    assert_eq!(failed["diagnosticCode"], "runtime_version_empty");
+    assert_eq!(failed["failure"]["code"], failed["diagnosticCode"]);
+    assert!(
+        failed["failure"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("runtime_version_empty")
+    );
+    let search = fixture.core.runtime_search_environment.read().await.clone();
+    let private = rovai_core::runtime_discovery::with_runtime_configuration(
+        KIND,
+        &search,
+        Box::pin(fixture.core.deep_probe_candidate(
+            KIND,
+            &program,
+            RuntimeLaunchPurpose::InstallationRefresh,
+            None,
+            None,
+            false,
+            None,
+        )),
+    )
+    .await
+    .unwrap();
+    assert!(!private.version_probe_succeeded);
+    assert_eq!(
+        private.snapshot.executable_fingerprint.as_deref(),
+        Some(fingerprint.as_str()),
+        "a failed direct check without a cached fingerprint still describes the selected program"
     );
     fixture.program("versions", "2.0.0-upgraded", false);
     instrument(&program);
@@ -1647,7 +1819,7 @@ for line in sys.stdin:
                 .lines()
                 .filter(|line| line.contains("--version"))
                 .count(),
-            usize::from(first_trigger == RuntimeCheckTrigger::CatalogOpen)
+            2 + usize::from(first_trigger == RuntimeCheckTrigger::CatalogOpen)
         );
         // Existing invalidation must not be undone by a partial health observation.
         fixture

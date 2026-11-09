@@ -1591,9 +1591,16 @@ export function RuntimeInstallationsPanel({
             // A stale server snapshot must not lock retry after this row's request
             // settles. The badge still presents server state; Core coalesces checks.
             const checking = checkingKinds.has(runtimeKind)
-            const feedback = checkFeedback[runtimeKind] ? (
+            const versionFailure = item?.failure && (
+              item.discovery.versionProbeSucceeded === false || item.failure.code.startsWith('runtime_version_')
+            ) ? item.failure : null
+            const feedbackMessage = versionFailure
+              ? [versionFailure.summary, versionFailure.detail?.trim()]
+                  .filter((part, index, parts) => part && parts.indexOf(part) === index).join('\n')
+              : checkFeedback[runtimeKind]
+            const feedback = feedbackMessage ? (
               <p className="runtime-guide-feedback is-error" role="alert">
-                {checkFeedback[runtimeKind]}
+                {feedbackMessage}
               </p>
             ) : null
             return (
@@ -1624,7 +1631,7 @@ export function RuntimeInstallationsPanel({
                 </button>}
                 <button type="button" className="quiet-button runtime-product-settings" aria-label={uiAttribute("{0} 启动设置", String(adapterLabel(runtimeKind)))}
                   title={uiAttribute("启动设置")} disabled={checking || !allowed} onClick={() => setSettingsRuntime(runtimeKind)}><DialogControlIcon name="settings" /></button>
-                {item?.failure && <RuntimeFailureNotice failure={item.failure} />}
+                {item?.failure && !versionFailure && <RuntimeFailureNotice failure={item.failure} />}
                 {isOpen && guide && expanded ? <RuntimeInstallationGuide
                   id={`${guideId}-${runtimeKind}`} label={adapterLabel(runtimeKind)} guide={guide}
                   mode={expanded.mode} busy={checking} checking={checking} feedback={feedback}

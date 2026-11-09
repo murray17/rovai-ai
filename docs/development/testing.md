@@ -207,6 +207,13 @@ owner，而不是继续增加平行 fixture 和断言。
 
 ### 单项 Runtime 检查减重
 
+主动版本刷新扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses` owner，保留入口替换、
+被动零查询和健康失败记录边界，改为每轮主动重扫读取版本，并覆盖脚本／指纹不变时升级与读取失败的公开投影。
+新增 `full_probe_saves_version_before_connection_and_cancellation`，复用私有 Core／DB 与合成程序夹具，验证版本
+先于连接提交、取消完整检查 future 后仍可读取、同一轮只查询一次且不推进健康成功时间。纯 reader 不能证明
+事务与公开投影，归入既有 `slow-tests` 路由；最小命令为
+`cargo test -p rovai-core --features slow-tests --lib runtime_check_environment::tests::`。无真实 Runtime 或模型调用。
+
 Issue #997 扩展既有 `windows_command_shim_content_changes_compatibility_fingerprint`，通过真实发现入口
 验证 npm/pnpm 包升级但包装脚本内容和文件属性不变、旧证据拒收、重复发现身份稳定及损坏 manifest/bin
 不回退弱身份。`identity_checked_probe_discards_updated_results_and_keeps_stable_errors` 扩展至 Windows，
