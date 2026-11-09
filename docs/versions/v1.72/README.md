@@ -16,6 +16,13 @@ last_updated: 2026-11-08
 Pi 原生待答来源接入现有审批提醒队列，共用开关、静默、定位和主题小点；不新增问卷持久化或改动
 答复协议。实现和验收范围见[实施记录](implementation-plan.md#pi-待回答提醒2026-11-08)。
 
+## Hermes 思考强度（2026-11-08）
+
+复用队员模型参数保存与官方 ACP 设置 `reasoning_effort`，保留不覆盖、`none`、`default` 原生值语义。
+已知旧 ACP 有覆盖在 prompt 前报错，无覆盖继续使用；回显沿用尽力处理，不增加生效确认或历史观测。
+规则见[Hermes 合同](../../contracts/hermes-managed-runtime-v1.md#模型权限skills-与-mcp)，官方版本、Provider 参数与
+覆盖见[验收记录](../../research/hermes-runtime/README.md#官方-acp-思考强度2026-11-08)。
+
 ## 执行台自动打开偏好（2026-11-08）
 
 按 User 确认，在“通用 → 会话”增加默认关闭的“自动打开执行台”，统一控制 Desktop／宽屏 Web

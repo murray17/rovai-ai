@@ -591,11 +591,15 @@ function ModelFields({
           loadingLabel={isDsh && pageActive && !disabled && readStatus === 'loading' && optionLoadingKey === targetKey
             ? uiAttribute('正在读取可选思考强度，当前选择仍可保存') : undefined}
           defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
-            : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
+            : adapterKind === 'hermes-cli' ? uiAttribute('不覆盖原生会话设置')
+              : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
           choices={[
             ...(optionInvalid ? [{ value: optionValue, label: uiAttribute('尚未核对 · {0}', optionValue) }] : []),
             ...(option?.values ?? []).filter(choice => adapterKind !== 'hermes-cli' || choice.value !== 'runtime_default')
-              .map(choice => ({ ...choice, disabled: isDsh && !optionsKnown }))
+              .map(choice => ({ ...choice,
+                label: adapterKind === 'hermes-cli' && choice.value === 'default'
+                  ? uiAttribute('恢复 Hermes 配置默认') : choice.label,
+                disabled: isDsh && !optionsKnown }))
           ]}
         />
       )}

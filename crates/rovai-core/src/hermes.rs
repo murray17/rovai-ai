@@ -9,6 +9,35 @@ pub fn supported_version(version: Option<&str>) -> bool {
         .is_some_and(|(version, _)| version >= [0, 22, 4])
 }
 
+/// Only this native Session option is supported. Missing catalog metadata is
+/// not a reason to discard a saved choice; older ACP entries silently ACK it.
+pub fn reasoning_effort<'a>(options: &'a Value, version: Option<&str>) -> Result<Option<&'a str>> {
+    let options = options
+        .as_object()
+        .context("Hermes model options must be an object")?;
+    anyhow::ensure!(
+        options.keys().all(|key| key == "reasoning_effort"),
+        "Hermes ACP only supports the reasoning_effort model option"
+    );
+    let Some(value) = options.get("reasoning_effort") else {
+        return Ok(None);
+    };
+    let value = value
+        .as_str()
+        .context("Hermes reasoning_effort must be a string")?;
+    anyhow::ensure!(
+        !value.is_empty() && value != "runtime_default",
+        "Hermes reasoning_effort requires a native value; use default to restore the Hermes configuration"
+    );
+    anyhow::ensure!(
+        !version
+            .and_then(crate::agent_runtime_adapter::parse_reported_runtime_version)
+            .is_some_and(|(version, _)| version < [0, 22, 6]),
+        "Hermes reasoning_effort requires ACP 0.22.6 or newer; the installed ACP entry does not apply this setting"
+    );
+    Ok(Some(value))
+}
+
 /// Compare the native choice without changing the ID sent to session/set_model.
 /// A generic custom:<model> report may omit the configured custom provider name.
 pub fn model_selection_matches(selected: &str, current: Option<&str>) -> bool {
@@ -143,6 +172,26 @@ mod tests {
             );
         }
         assert!(!model_selection_matches("A", None));
+        for version in [Some("0.22.4"), Some("0.22.5")] {
+            assert_eq!(reasoning_effort(&json!({}), version).unwrap(), None);
+            assert!(reasoning_effort(&json!({"reasoning_effort":"high"}), version).is_err());
+        }
+        for version in [None, Some("0.22.6"), Some("0.23.0")] {
+            for effort in ["high", "low", "none", "default", "future-native-value"] {
+                assert_eq!(
+                    reasoning_effort(&json!({"reasoning_effort":effort}), version).unwrap(),
+                    Some(effort)
+                );
+            }
+        }
+        for options in [
+            json!({"reasoning_effort":7}),
+            json!({"reasoning_effort":"runtime_default"}),
+            json!({"reasoning_effort":""}),
+            json!({"other":"value"}),
+        ] {
+            assert!(reasoning_effort(&options, Some("0.23.0")).is_err());
+        }
     }
 
     #[tokio::test]
