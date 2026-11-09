@@ -1,13 +1,14 @@
 ---
 document_type: research-record
 authority: non-normative-runtime-evidence
-status: investigated
+status: implemented-preview
 last_updated: 2026-11-09
 ---
 
 # Kilo 7.8.27 ACP Steer 可行性
 
-结论：有条件接入同 Session 的原生接续队列；当前 Core 尚未开放 Kilo active-input。
+结论：原生接续基础已用于 Core Steer，仍为 macOS arm64 Preview。
+本页保留原生调查范围；实际 Core/开发版结果见[后续实施记录](../../versions/v1.72/kilo-files-steer-verification.md)。
 没有专用 Steer method 或 capability 广告，不能直接把第二个普通 prompt 当成已经准入的 Core Steer。
 
 官方 7.8.27、macOS arm64、全新 HOME/XDG、loopback Provider 的实测：
@@ -28,7 +29,7 @@ last_updated: 2026-11-09
 - 验证首请求结束竞态、连续更正、取消时全部 pending 请求、迟到回复和后续普通 Run。
 - 保留公开发送去重、原生失败优先级及已发生副作用；不增加独立 Session、私有队列或 nonce。
 
-在这些 Core 场景未完成前，`supports_active_input("kilo-cli")` 保持 false。
+当前实现复用共享输入、版本准入与多请求收口；本页原生结果不替代后续 Core 验证。
 
 ## 官方源码
 

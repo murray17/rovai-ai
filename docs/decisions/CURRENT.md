@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-11-05
+last_updated: 2026-11-09
 ---
 
 # 当前规范与决定理由导航
@@ -55,7 +55,7 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contracts/runtime-launch-and-verification-v76.md)、
 [公开 Runtime failure](../architecture/runtime-catalog-boundaries.md#内部诊断与公开-runtime-failure)。
 
-- Kilo 官方 ACP：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#kilo-官方-acp)、[Launch v78](../contracts/runtime-launch-and-verification-v78.md)；单 Binding/instructions 见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，原生配置合并修正见 [D77](../versions/v1.72/decisions.md#v1-72-d77)。
+- Kilo 官方 ACP：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#kilo-官方-acp)、[Launch v79](../contracts/runtime-launch-and-verification-v79.md)；单 Binding/instructions 见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，原生配置合并修正见 [D77](../versions/v1.72/decisions.md#v1-72-d77)，前台策略、文件与 Steer 见 [D78](../versions/v1.72/decisions.md#v1-72-d78)。
 
 ## Public Thread 消息与多输入 AgentRun
 

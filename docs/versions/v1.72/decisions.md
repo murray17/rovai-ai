@@ -8,6 +8,21 @@ last_updated: 2026-11-09
 
 # v1.72 版本决定
 
+<a id="v1-72-d78"></a>
+## V1.72-D78：Kilo 使用原生禁后台与共享 Steer、文件投影
+
+- 状态：accepted
+- 日期：2026-11-09
+- 当前权威：[Launch v79](../../contracts/runtime-launch-and-verification-v79.md)。
+
+官方 7.8.27 提供与 Claude 当前范围一致的后台子代理 opt-out，直接注入原生环境，保留前台调用。
+同 Session 的并发 prompt 具备接续基础，但每个 RPC 独立结束，故复用 Hermes 的多请求 Run 收口，
+不新增队列、后台管理或接受轮询。等待终态回执的后续输入保留共享 scheduler 的既有串行语义。
+真实 sub2api GPT 暴露 apply_patch 而不是 edit；write/edit 的 filediff 与 patch 的 files 提供已应用结果，
+复用共享 native patch 解析与文件投影，不把替换片段伪装成完整前后态。
+保留原生配置保序和 Host/MCP 生命周期的必要接线；B/P 与证据版本不变，平台资格仍为 Preview。
+实际结果和未验收范围见[实施记录](kilo-files-steer-verification.md)。
+
 <a id="v1-72-d77"></a>
 ## V1.72-D77：Kilo 在原生合并后保持默认权限与具体规则顺序
 

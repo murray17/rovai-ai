@@ -290,14 +290,13 @@ struct AcpActivePrompt {
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
     zcode_input_id: Option<String>,
     codebuddy_request_id: Option<String>,
-    hermes_progress: HermesPromptProgress,
+    prompt_progress: AcpPromptProgress,
 }
 
-/// Hermes may turn a late slash steer into another native prompt. Keep the
-/// existing Run's route until every submitted request has returned; notifications
-/// and native-session CLI calls still belong to that Run in the meantime.
+/// Kilo concurrent prompts and Hermes slash-steer fallback each have their own
+/// terminal. Keep the Run and CLI lease until every submitted prompt settles.
 #[derive(Debug, Clone, Default)]
-struct HermesPromptProgress {
+struct AcpPromptProgress {
     pending_steers: usize,
     original_terminal: Option<(u64, Value)>,
     supplement_failure: Option<Value>,
@@ -2706,7 +2705,10 @@ impl AcpHost {
     }
 
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
-        if self.adapter_kind == AdapterKind::HermesCli {
+        if matches!(
+            self.adapter_kind,
+            AdapterKind::HermesCli | AdapterKind::KiloCli
+        ) {
             let target = match &pending {
                 PendingRpc::Prompt {
                     owner,
@@ -2735,7 +2737,7 @@ impl AcpHost {
                             AcpSessionPhase::PromptActive(prompt)
                                 if prompt.prompt_id == prompt_id =>
                             {
-                                Some(&mut prompt.hermes_progress)
+                                Some(&mut prompt.prompt_progress)
                             }
                             _ => None,
                         }
@@ -3636,6 +3638,7 @@ impl AcpHost {
                         | AdapterKind::TraeCnCli
                         | AdapterKind::MinimaxCodeCli
                         | AdapterKind::HermesCli
+                        | AdapterKind::KiloCli
                 ) && !active_prompt.acceptance_emitted
                     && (matches!(
                         message
@@ -4477,7 +4480,7 @@ impl AcpHost {
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
                 zcode_input_id: None,
                 codebuddy_request_id: None,
-                hermes_progress: HermesPromptProgress::default(),
+                prompt_progress: AcpPromptProgress::default(),
             });
         }
         self.pending.lock().await.insert(
@@ -5964,7 +5967,7 @@ impl AcpRuntime {
                     "clientUserMessageId":input_id,
                     "expectedRequestId":codebuddy_request.as_deref().unwrap_or(expected_prompt)}),
             ),
-            AdapterKind::CodebuddyCli => (
+            AdapterKind::CodebuddyCli | AdapterKind::KiloCli => (
                 "session/prompt",
                 json!({"sessionId":session,"prompt":[{"type":"text","text":text}]}),
             ),
@@ -5998,11 +6001,13 @@ impl AcpRuntime {
         };
         let id = self.host.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, response) = oneshot::channel();
-        if self.adapter_kind() == AdapterKind::HermesCli
-            && let Some(route) = routes.get_mut(&session)
+        if matches!(
+            self.adapter_kind(),
+            AdapterKind::HermesCli | AdapterKind::KiloCli
+        ) && let Some(route) = routes.get_mut(&session)
             && let AcpSessionPhase::PromptActive(prompt) = &mut route.phase
         {
-            prompt.hermes_progress.pending_steers += 1;
+            prompt.prompt_progress.pending_steers += 1;
         }
         // A supplement response is never the authoritative original Prompt
         // terminal. Legacy CodeBuddy returns end_turn before its tool ends.
@@ -6023,8 +6028,8 @@ impl AcpRuntime {
             },
         );
         // Some transports cannot atomically bind to a native turn. Do not reuse
-        // this ACP Host after steering. Hermes additionally drains submitted
-        // prompts above; closing its client does not stop the shared Gateway.
+        // this ACP Host after steering. Concurrent prompts additionally drain
+        // above; closing Hermes's client does not stop its shared Gateway.
         self.host.retire_after_steer.store(true, Ordering::Release);
         timeout(
             Duration::from_secs(10),
@@ -6035,12 +6040,14 @@ impl AcpRuntime {
         .context("ACP active input write timed out")??;
         drop(routes);
         drop(ingress);
-        // A slash steer normally returns immediately, but its native fallback
-        // is a full prompt. Use the Run's existing cancellation/lifetime budget.
-        let result = if self.adapter_kind() == AdapterKind::HermesCli {
+        // These are full prompts. Use the Run's cancellation/lifetime budget.
+        let result = if matches!(
+            self.adapter_kind(),
+            AdapterKind::HermesCli | AdapterKind::KiloCli
+        ) {
             response
                 .await
-                .context("Hermes supplemental prompt disconnected")?
+                .context("ACP supplemental prompt disconnected")?
         } else {
             timeout(
                 Duration::from_secs(if self.adapter_kind() == AdapterKind::ZcodeApp {
@@ -6055,6 +6062,14 @@ impl AcpRuntime {
             .context("ACP active input response disconnected")?
         };
         let result = match result {
+            Err(error)
+                if self.adapter_kind() == AdapterKind::KiloCli
+                    && error.downcast_ref::<AcpRpcError>().is_some_and(|native| {
+                        matches!(native.code, Some(-32600 | -32601 | -32602))
+                    }) =>
+            {
+                return Err(rovai_core::steer::ActiveInputNotAccepted.into());
+            }
             Err(error) if self.adapter_kind() == AdapterKind::HermesCli => {
                 if let Some(native) = error.downcast_ref::<AcpRpcError>() {
                     if native.hermes_input_admitted {
@@ -6105,8 +6120,12 @@ impl AcpRuntime {
             }
             result => result?,
         };
-        if self.adapter_kind() == AdapterKind::HermesCli && result["stopReason"] != "end_turn" {
-            bail!("Hermes did not confirm the supplemental prompt");
+        if matches!(
+            self.adapter_kind(),
+            AdapterKind::HermesCli | AdapterKind::KiloCli
+        ) && result["stopReason"] != "end_turn"
+        {
+            bail!("ACP did not confirm the supplemental prompt");
         }
         if self.adapter_kind() == AdapterKind::MinimaxCodeCli
             && (result["mode"] != "steered" || result["turnId"].as_str().is_none_or(str::is_empty))
@@ -6213,6 +6232,26 @@ impl AcpRuntime {
         self.host
             .release_client_terminals_for_session(&session_id, &self.owner)
             .await;
+        if self.adapter_kind() == AdapterKind::KiloCli && cancellation.is_ok() {
+            // Kilo releases its native turn/snapshot ownership while settling
+            // cancelled prompts. Let that finish before shared process teardown.
+            let _ = timeout(Duration::from_secs(2), async {
+                while self.host.is_alive()
+                    && self
+                        .host
+                        .routes
+                        .read()
+                        .await
+                        .get(&session_id)
+                        .is_some_and(|route| {
+                            matches!(route.phase, AcpSessionPhase::PromptActive(_))
+                        })
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await;
+        }
         cancellation
     }
 
@@ -7186,7 +7225,10 @@ pub(crate) fn runtime_compatibility_digest(
     if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
         compatibility["nativeQuestionnairePolicy"] = json!("no-ask-user-v1");
     }
-    if frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli {
+    if matches!(
+        frozen_runtime.adapter_kind,
+        AdapterKind::CodebuddyCli | AdapterKind::KiloCli
+    ) {
         compatibility["nativeBackgroundPolicy"] = json!("disabled-v1");
     }
     if frozen_runtime.adapter_kind == AdapterKind::QoderCli {
@@ -9223,7 +9265,7 @@ pub fn completed_action(
     let public_file_changes = (succeeded
         && !matches!(
             adapter_kind,
-            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli | AdapterKind::KiloCli
         ))
     .then(|| public_acp_file_changes(update.get("content")))
     .flatten();
@@ -9310,7 +9352,7 @@ fn reconcile_completed_action(
         && completion.public_file_changes.is_none()
         && !matches!(
             adapter_kind,
-            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli | AdapterKind::KiloCli
         )
     {
         completion.public_file_changes = observed.public_file_changes;
@@ -9367,7 +9409,7 @@ fn reconcile_completed_action(
         .as_ref()
         .map(|(operation_kind, _)| operation_kind.clone());
     completion.public_file_operation_path = file_operation.map(|(_, path)| path);
-    completion.public_file_operation_change_kind = opencode_write_change_kind(
+    completion.public_file_operation_change_kind = native_write_change_kind(
         adapter_kind,
         update,
         &completion.native_kind,
@@ -9395,7 +9437,7 @@ fn reconcile_completed_action(
         && completion.public_file_changes.is_none()
         && !matches!(
             adapter_kind,
-            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli
+            AdapterKind::MinimaxCodeCli | AdapterKind::HermesCli | AdapterKind::KiloCli
         )
         && completion.native_kind == "edit"
         && let Some(path) = completion.public_file_operation_path.as_deref()
@@ -9421,7 +9463,7 @@ fn reconcile_completed_action(
     Ok(completion)
 }
 
-fn opencode_write_change_kind<'a>(
+fn native_write_change_kind<'a>(
     adapter_kind: AdapterKind,
     update: &'a Value,
     native_kind: &str,
@@ -9429,12 +9471,14 @@ fn opencode_write_change_kind<'a>(
     corroborating_path: Option<&str>,
     operation_path: Option<&str>,
 ) -> Option<&'a str> {
-    // OpenCode records whether the target existed before its native write and
+    // OpenCode and Kilo record whether the target existed before native write and
     // carries that metadata through ACP rawOutput. Keep the signal adapter
     // scoped and require a second, same-ToolCall path source before publishing
     // it; an unrelated `exists` field must never upgrade a generic ACP write.
-    if adapter_kind != AdapterKind::OpencodeCli
-        || !matches!(outcome, ActionResultOutcome::Succeeded)
+    if !matches!(
+        adapter_kind,
+        AdapterKind::OpencodeCli | AdapterKind::KiloCli
+    ) || !matches!(outcome, ActionResultOutcome::Succeeded)
         || !matches!(native_kind, "edit" | "write")
     {
         return None;
@@ -10187,6 +10231,16 @@ mod compaction_detector_tests {
             command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:{'git *':'allow','* --force':'deny'}},agent:{custom:{permission:{bash:{'git *':'allow','* --force':'deny'}}}},instructions:['native.md'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
             command.env("KILO_PERMISSION", r#"{"*":"allow","edit":"ask"}"#);
             crate::kilo::configure_command(&mut command);
+            assert_eq!(
+                command
+                    .as_std()
+                    .get_envs()
+                    .find(|(key, _)| *key == "KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS")
+                    .unwrap()
+                    .1
+                    .unwrap(),
+                "false"
+            );
             let file = root.join("kilo bootstrap 中文.md");
             crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
             crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
@@ -13307,6 +13361,7 @@ while IFS= read -r ignored; do :; done
             (AdapterKind::TraeCnCli, false),
             (AdapterKind::MinimaxCodeCli, false),
             (AdapterKind::HermesCli, false),
+            (AdapterKind::KiloCli, false),
         ] {
             for (late, unsupported, bad_owner) in [
                 (false, false, false),
@@ -13317,8 +13372,10 @@ while IFS= read -r ignored; do :; done
             ] {
                 if late
                     && unsupported
-                    && (!matches!(kind, AdapterKind::CodebuddyCli | AdapterKind::HermesCli)
-                        || legacy)
+                    && (!matches!(
+                        kind,
+                        AdapterKind::CodebuddyCli | AdapterKind::HermesCli | AdapterKind::KiloCli
+                    ) || legacy)
                 {
                     continue;
                 }
@@ -13335,6 +13392,7 @@ while IFS= read -r ignored; do :; done
                             | AdapterKind::CodebuddyCli
                             | AdapterKind::MinimaxCodeCli
                             | AdapterKind::HermesCli
+                            | AdapterKind::KiloCli
                     ) || legacy)
                 {
                     continue;
@@ -13422,7 +13480,10 @@ IFS= read -r finish || exit 1
                         )
                     }
                 } else if late {
-                    let continuation = if kind == AdapterKind::HermesCli {
+                    let continuation = if matches!(
+                        kind,
+                        AdapterKind::HermesCli | AdapterKind::KiloCli
+                    ) {
                         r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-steer","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"continuation"}}}}'"#
                     } else {
                         ""
@@ -13457,8 +13518,11 @@ while IFS= read -r ignored; do :; done
                 if kind == AdapterKind::HermesCli {
                     frozen.reported_version = Some("0.22.4".into());
                 }
+                if kind == AdapterKind::KiloCli {
+                    frozen.reported_version = Some("7.8.27".into());
+                }
                 frozen.permissions = serde_json::from_value(json!({"adapterKind":kind.as_str(),"schemaVersion":1,
-                    "values": if kind == AdapterKind::QwenCode { json!({"approval_mode":"yolo"}) } else if kind == AdapterKind::KiroCli { json!({"trust_all_tools":"on"}) } else if kind == AdapterKind::HermesCli { json!({"permission_mode":"dont_ask"}) } else { json!({"permission_mode":"bypassPermissions"}) }})).unwrap();
+                    "values": if kind == AdapterKind::QwenCode { json!({"approval_mode":"yolo"}) } else if kind == AdapterKind::KiroCli { json!({"trust_all_tools":"on"}) } else if kind == AdapterKind::HermesCli { json!({"permission_mode":"dont_ask"}) } else if kind == AdapterKind::KiloCli { json!({"permission":"allow"}) } else { json!({"permission_mode":"bypassPermissions"}) }})).unwrap();
                 let workspace =
                     AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into());
                 let (incoming, mut receiver) = mpsc::unbounded_channel();
@@ -13516,7 +13580,8 @@ while IFS= read -r ignored; do :; done
                     }), 0).await;
                 }
                 assert!(
-                    matches!(receiver.try_recv(), Ok(AcpIncoming::InputAccepted { native_prompt_id, .. }) if native_prompt_id == prompt)
+                    matches!(receiver.try_recv(), Ok(AcpIncoming::InputAccepted { native_prompt_id, .. }) if native_prompt_id == prompt),
+                    "{kind:?} late={late} unsupported={unsupported} must retain original acceptance"
                 );
                 assert!(
                     receiver.try_recv().is_err(),
@@ -13600,14 +13665,21 @@ while IFS= read -r ignored; do :; done
                             .is::<rovai_core::steer::ActiveInputNotAccepted>()
                     );
                     host.notify("fixture/finish", json!({})).await.unwrap();
-                } else if late && kind == AdapterKind::HermesCli {
+                } else if late && matches!(kind, AdapterKind::HermesCli | AdapterKind::KiloCli) {
                     result.unwrap();
                     assert!(!host.protocol_violated.load(Ordering::Acquire));
                     let request: Value =
                         serde_json::from_str(std::fs::read_to_string(&requests).unwrap().trim())
                             .unwrap();
                     assert_eq!(request["method"], "session/prompt");
-                    assert_eq!(request["params"]["prompt"][0]["text"], "/steer STEER");
+                    assert_eq!(
+                        request["params"]["prompt"][0]["text"],
+                        if kind == AdapterKind::HermesCli {
+                            "/steer STEER"
+                        } else {
+                            "STEER"
+                        }
+                    );
                 } else if late {
                     let error = result.unwrap_err();
                     assert_eq!(
@@ -13704,7 +13776,10 @@ while IFS= read -r ignored; do :; done
                         }
                     }
                 }
-                if kind == AdapterKind::HermesCli && !late && !unsupported {
+                if matches!(kind, AdapterKind::HermesCli | AdapterKind::KiloCli)
+                    && !late
+                    && !unsupported
+                {
                     // Reuse this transport owner for the aggregate terminal:
                     // two already-submitted inputs must both settle, in either
                     // ordering relative to the original terminal.
@@ -13746,6 +13821,8 @@ while IFS= read -r ignored; do :; done
                             false,
                         ),
                     ] {
+                        let accepted = accepted
+                            && (kind == AdapterKind::HermesCli || reply.get("error").is_none());
                         host.bind_session("session-steer", &runtime.owner, AcpSessionPhase::Ready)
                             .await
                             .unwrap();
@@ -13765,7 +13842,7 @@ while IFS= read -r ignored; do :; done
                                     let routes = host.routes.read().await;
                                     if let AcpSessionPhase::PromptActive(p) =
                                         &routes["session-steer"].phase
-                                        && p.hermes_progress.pending_steers == waiters.len()
+                                        && p.prompt_progress.pending_steers == waiters.len()
                                     {
                                         break;
                                     }
@@ -13777,6 +13854,29 @@ while IFS= read -r ignored; do :; done
                             .unwrap();
                         }
                         let _ingress = host.ingress_fence.lock().await;
+                        let mut cancellation = (kind == AdapterKind::KiloCli
+                            && reply["result"]["stopReason"] == "cancelled")
+                            .then(|| {
+                                let runtime = runtime.clone();
+                                tokio::spawn(async move { runtime.cancel().await })
+                            });
+                        if let Some(cancellation) = cancellation.as_mut() {
+                            timeout(Duration::from_secs(1), async {
+                                while !host.routes.read().await["session-steer"]
+                                    .client_terminal_create_cancelled
+                                {
+                                    tokio::task::yield_now().await;
+                                }
+                            })
+                            .await
+                            .unwrap();
+                            assert!(
+                                timeout(Duration::from_millis(50), cancellation)
+                                    .await
+                                    .is_err(),
+                                "Kilo cancellation must let submitted native prompts settle"
+                            );
+                        }
                         let original = host
                             .pending
                             .lock()
@@ -13822,6 +13922,13 @@ while IFS= read -r ignored; do :; done
                             host.routes.read().await["session-steer"].phase,
                             AcpSessionPhase::PromptCompleted(_)
                         ));
+                        if let Some(cancellation) = cancellation {
+                            timeout(Duration::from_secs(1), cancellation)
+                                .await
+                                .unwrap()
+                                .unwrap()
+                                .unwrap();
+                        }
                         let result = waiters.pop().unwrap().await.unwrap();
                         assert_eq!(result.is_ok(), accepted);
                         if let Err(error) = result {
@@ -13830,7 +13937,19 @@ while IFS= read -r ignored; do :; done
                                 rejected
                             );
                         }
-                        waiters.pop().unwrap().await.unwrap().unwrap();
+                        let first = waiters.pop().unwrap().await.unwrap();
+                        if kind == AdapterKind::KiloCli
+                            && reply["result"]["stopReason"] == "cancelled"
+                        {
+                            assert!(
+                                !first
+                                    .unwrap_err()
+                                    .is::<rovai_core::steer::ActiveInputNotAccepted>(),
+                                "cancellation cannot prove that a submitted input was never accepted"
+                            );
+                        } else {
+                            first.unwrap();
+                        }
                         let final_message = loop {
                             if let AcpIncoming::Message { message, .. } =
                                 receiver.recv().await.unwrap()
@@ -18189,56 +18308,56 @@ while IFS= read -r ignored; do :; done
                 "preview or replacement input is not full file state"
             );
         }
-        for (exists, expected_change_kind) in [(false, "add"), (true, "update")] {
-            let terminal = json!({
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": format!("tool-opencode-write-{exists}"),
-                "status": "completed",
-                "kind": "edit",
-                "rawOutput": {
-                    "output": "must-not-be-published",
-                    "metadata": {
-                        "filepath": "/repo/src/app.ts",
-                        "exists": exists,
-                        "diagnostics": []
+        for adapter_kind in [AdapterKind::OpencodeCli, AdapterKind::KiloCli] {
+            for (exists, expected_change_kind) in [(false, "add"), (true, "update")] {
+                let terminal = json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": format!("tool-opencode-write-{exists}"),
+                    "status": "completed",
+                    "kind": "edit",
+                    "rawOutput": {
+                        "output": "must-not-be-published",
+                        "metadata": {
+                            "filepath": "/repo/src/app.ts",
+                            "exists": exists,
+                            "diagnostics": []
+                        }
                     }
-                }
-            });
-            let completion = completed_action(
-                AdapterKind::OpencodeCli,
-                &json!({"update": terminal.clone()}),
-            )
-            .unwrap()
-            .expect("terminal OpenCode write should complete");
-            let reconciled = reconcile_completed_action(
-                AdapterKind::OpencodeCli,
-                &terminal,
-                ObservedToolMetadata {
-                    native_kind: Some("edit".to_string()),
-                    observation_digest: None,
-                    raw_input: Some(json!({"filePath": "/repo/src/app.ts"})),
-                    stable_meta: None,
-                    locations: None,
-                    public_file_changes: None,
-                },
-                completion,
-            )
-            .unwrap();
+                });
+                let completion =
+                    completed_action(adapter_kind, &json!({"update": terminal.clone()}))
+                        .unwrap()
+                        .expect("terminal OpenCode write should complete");
+                let reconciled = reconcile_completed_action(
+                    adapter_kind,
+                    &terminal,
+                    ObservedToolMetadata {
+                        native_kind: Some("edit".to_string()),
+                        observation_digest: None,
+                        raw_input: Some(json!({"filePath": "/repo/src/app.ts"})),
+                        stable_meta: None,
+                        locations: None,
+                        public_file_changes: None,
+                    },
+                    completion,
+                )
+                .unwrap();
 
-            assert_eq!(
-                reconciled.public_file_operation_path.as_deref(),
-                Some("/repo/src/app.ts")
-            );
-            assert_eq!(
-                reconciled.public_file_operation_change_kind.as_deref(),
-                Some(expected_change_kind)
-            );
-            assert!(
-                !reconciled
-                    .result_data
-                    .to_string()
-                    .contains("must-not-be-published")
-            );
+                assert_eq!(
+                    reconciled.public_file_operation_path.as_deref(),
+                    Some("/repo/src/app.ts")
+                );
+                assert_eq!(
+                    reconciled.public_file_operation_change_kind.as_deref(),
+                    Some(expected_change_kind)
+                );
+                assert!(
+                    !reconciled
+                        .result_data
+                        .to_string()
+                        .contains("must-not-be-published")
+                );
+            }
         }
 
         for (adapter_kind, exists, metadata_path, observed_input, expected_path) in [

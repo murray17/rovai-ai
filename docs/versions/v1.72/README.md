@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-08
+last_updated: 2026-11-09
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
@@ -20,7 +20,8 @@ macOS arm64 开放主动使用的 Preview，其他平台 NotQualified；完整 F
 实现、Core/官方 CLI 验证及缺失范围见[实施记录](kilo-acp-implementation.md)，
 上游原生探测见[研究矩阵](../../research/kilo-runtime/README.md)，架构理由见 [D76](decisions.md#v1-72-d76)。
 
-2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正，以及 Steer 接续可行性见[复核记录](kilo-acp-review-fixes.md)。
+2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正见[复核记录](kilo-acp-review-fixes.md)；
+原生禁后台、文件结果投影、Core Steer 与 sub2api 开发版验收见[后续实施记录](kilo-files-steer-verification.md)。
 
 ## 执行台自动打开偏好（2026-11-08）
 

@@ -2,7 +2,7 @@
 document_type: research-record
 authority: non-normative-runtime-evidence
 status: implemented-preview
-last_updated: 2026-11-08
+last_updated: 2026-11-09
 ---
 
 # Kilo 原生 ACP 研究与实际探测
@@ -15,7 +15,9 @@ User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-ki
 七个真实 Core Run 的本地 Provider 结果见[Core evidence](core-smoke-7.8.27-macos-arm64.json)。
 下文保留实施前原生研究的范围和矩阵，不能将当时的 NotImplemented 当作当前实现状态。
 
-当前修正与 Steer 调查见[复核记录](../../versions/v1.72/kilo-acp-review-fixes.md)；
+当前修正见[复核记录](../../versions/v1.72/kilo-acp-review-fixes.md)；
+后续禁后台、文件与 Core Steer 见[实施记录](../../versions/v1.72/kilo-files-steer-verification.md)。
+该后续记录包含真实 sub2api 开发 App；下方基线表中的本地 Provider 范围仍只描述早期原生研究。
 早期“无插件”只描述初次实现。当前追加原生 config 回调用于保持配置合并语义，不参与压缩或 B/P 投递。
 
 ## 基线与证据

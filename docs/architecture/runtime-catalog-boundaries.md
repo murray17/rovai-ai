@@ -73,7 +73,8 @@ Kilo 是独立的官方 ACP 产品身份，复用共享 Host/Fleet/Binding 与�
 Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共享冻结正文；
 无需压缩插件或校验握手。监控复用逐消息 numeric reader，原生配置、认证和数据继续归 Kilo 自己拥有。
 原生最终 config 回调只保持默认权限与具体规则顺序，不参与审批或 Bootstrap。
-启动、权限、原生来源和数值口径见 [Runtime Launch v78](../contracts/runtime-launch-and-verification-v78.md)。
+原生环境关闭后台子代理，前台保留；Steer 复用共享多请求收口；文件结果进入既有 Diff 投影。
+启动、权限、原生来源和数值口径见 [Runtime Launch v79](../contracts/runtime-launch-and-verification-v79.md)。
 macOS arm64 当前为 Preview，其他平台 NotQualified；不由编译或原生握手宣称完整资格。
 理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
 

@@ -1,7 +1,7 @@
 // Real Core + official Kilo, using a local deterministic Provider and owned data.
 // ROVAI_KILO_BIN=/absolute/path/to/kilo node scripts/smoke-kilo-runtime.mjs
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { createInterface } from 'node:readline'
@@ -19,6 +19,7 @@ const repo = resolve(import.meta.dirname, '..')
 const root = await realpath(process.env.ROVAI_KILO_SMOKE_ROOT ?? await mkdtemp(join(tmpdir(), 'rovai-kilo-core-')))
 for (const part of ['home','project','core','config','data','member-data','cache','state','evidence','service']) await mkdir(join(root,part))
 const project = join(root,'project'), data = join(root,'core')
+execFileSync('git',['init','--quiet',project])
 const startedFile = join(project,'cancel-started'), lateFile = join(project,'cancel-late')
 const quote = s => "'"+s.replaceAll("'","'\\''")+"'"
 let approvalDecision = 'allow_once'
@@ -27,6 +28,12 @@ const busyEntered = new Promise(resolve=>{enterBusy=resolve})
 const busyGate = new Promise(resolve=>{releaseBusy=resolve})
 const bootstrapChecks=[]
 const calls = [], events = [], result = { root, platform:process.platform+'-'+process.arch, checks:{} }
+let steerControl
+function armSteer() {
+  let enter, release
+  const entered=new Promise(resolve=>{enter=resolve}), gate=new Promise(resolve=>{release=resolve})
+  return steerControl={entered,gate,enter,release,held:false}
+}
 const provider = createServer((req,res)=>{
   serve(req,res).catch(error=>{result.fixtureError=error.stack;res.writeHead(500);res.end('Fixture provider failed')})
 })
@@ -42,6 +49,15 @@ async function serve(req,res) {
   await writeFile(join(root,'evidence','model-requests.json'),JSON.stringify(calls,null,2))
   const message=[...body.messages].reverse().find(m=>m.role==='user')
   const content=typeof message?.content==='string'?message.content:JSON.stringify(message?.content)
+  if(content?.includes('CORE_STEER_')&&body.tools?.length&&steerControl&&!steerControl.held) {
+    const control=steerControl; control.held=true
+    const base={id:'kilo-steer-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
+    res.writeHead(200,{'content-type':'text/event-stream'})
+    res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',content:'KILO_STEER_READY'},finish_reason:null}]})+'\n\n')
+    control.enter(); await control.gate
+    if(!res.destroyed)res.end('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n')
+    return
+  }
   let delta={role:'assistant',content:'KILO_CORE_PUBLIC'},finish='stop'
   if(body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_MCP')) {
     const tool=body.tools?.find(tool=>tool.function.name.includes('kilo_review')&&tool.function.name.endsWith('echo'))
@@ -315,6 +331,39 @@ try{
   assert.equal(await readFile(lateFile,'utf8').catch(e=>e.code==='ENOENT'?null:Promise.reject(e)),null,'Cancelled tool must not leave a delayed file effect')
   const afterCancel=await settle(await send('CORE_AFTER_STOP'))
   result.checks.cancel={run:cancelledRun.run.id,status:cancelledRun.run.status,nextRun:afterCancel.run.id}
+  const ledger=new DatabaseSync(join(data,'rovai.sqlite'),{readOnly:true})
+  const native=new DatabaseSync(nativeDatabase,{readOnly:true})
+  const until=async check=>{const deadline=Date.now()+30000;while(Date.now()<deadline){if(check())return;await delay()}throw Error('Steer intake/receipt deadline')}
+  const activeSteerRun=async()=>{
+    const deadline=Date.now()+30000
+    while(Date.now()<deadline){const snapshot=await core.request('camps.snapshot',{threadId});const run=snapshot.agentRuns.find(r=>r.status==='running'&&!result.finishedRuns.includes(r.id));if(run&&ledger.prepare("SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=? AND input_kind='start' AND status='accepted'").get(run.id).n)return run;await delay()}
+    throw Error('Active accepted Run deadline')
+  }
+  const steer=async(run,body)=>core.request('thread.messages.send',{commandId:crypto.randomUUID(),threadId,content:composerDocumentForAddress({mode:'explicit',agentIds:['agent_2']},body),sourceAttachments:[],quotes:[],replyToThreadMessageId:null,deliveryMode:'steer',steerTargets:[{agentRunId:run.id,executionEpoch:run.executionEpoch}],execution:{taskId:null,purpose:'Kilo active input',completionRole:'required'}})
+  try {
+    const control=armSteer(), first=await send('CORE_STEER_FIRST')
+    await Promise.race([control.entered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Steer provider entry deadline')),30000))]);const run=await activeSteerRun()
+    const receipt=await steer(run,'CORE_STEER_CORRECTION_ONE');assert.equal(receipt.commandResult.status,'accepted')
+    await until(()=>native.prepare("SELECT count(*) AS n FROM part WHERE json_extract(data,'$.text') LIKE '%CORE_STEER_CORRECTION_%'").get().n>=1)
+    assert.equal((await core.request('camps.snapshot',{threadId})).agentRuns.find(r=>r.id===run.id).status,'running')
+    control.release();await settle(first)
+    await until(()=>ledger.prepare("SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=? AND input_kind='steer' AND status='accepted'").get(run.id).n===1)
+    assert(calls.some(call=>JSON.stringify(call.messages).includes('CORE_STEER_CORRECTION_ONE')))
+    result.checks.steer={run:run.id,accepted:1,sameRun:true,heldUntilAllRequests:true}
+    steerControl=null
+    await settle(await send('CORE_AFTER_STEER'))
+    const cancellation=armSteer(), cancelFirst=await send('CORE_STEER_CANCEL_FIRST')
+    await Promise.race([cancellation.entered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Steer cancel provider deadline')),30000))]);const target=await activeSteerRun()
+    assert.equal((await steer(target,'CORE_STEER_CANCEL_CORRECTION')).commandResult.status,'accepted')
+    await until(()=>native.prepare("SELECT count(*) AS n FROM part WHERE json_extract(data,'$.text') LIKE '%CORE_STEER_CANCEL_CORRECTION%'").get().n>0)
+    const snapshot=await core.request('camps.snapshot',{threadId}), current=snapshot.agentRuns.find(r=>r.id===target.id)
+    await core.request('agentRuns.cancel',{commandId:crypto.randomUUID(),command:{threadId,agentRunId:target.id,expectedVersion:current.version}})
+    cancellation.release();steerControl=null
+    const cancelled=await waitForRun(threadId,(cancelFirst.commandResult??cancelFirst).payload.threadMessageId)
+    assert.equal(cancelled.run.status,'cancelled');result.finishedRuns.push(cancelled.run.id)
+    await settle(await send('CORE_AFTER_STEER_CANCEL'))
+    result.checks.steer.cancelledWithPending=true
+  } finally {steerControl?.release();ledger.close();native.close()}
   assert(calls.every(call=>!call.tools?.some(tool=>tool.function.name==='question')),'Native question must remain disabled through warm/cold and permission changes')
   assert(!JSON.stringify(calls).includes('INHERITED_KILO_CONFIG_CANARY'),'Parent native config must not enter fixture model input')
   assert(bootstrapChecks.length>=result.finishedRuns.length-1&&bootstrapChecks.every(check=>check.verbatim),'Every ordinary model request must receive its current Host Bootstrap verbatim')
@@ -323,6 +372,7 @@ try{
   result.status='passed'
 }catch(error){result.status='failed';result.error=error.stack;throw error}
 finally{
+  steerControl?.release()
   releaseBusy()
   if(core)await core.close().catch(error=>{result.cleanupError=error.message;result.status='failed';process.exitCode=1})
   provider.closeAllConnections();await new Promise(r=>provider.close(r))

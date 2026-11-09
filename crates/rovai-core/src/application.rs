@@ -24283,6 +24283,22 @@ fn normalize_acp_event_with_completion(
                     "sourceEventKind":"session/update.tool_call_update.completed", "semanticKind":"minimax_file_patch",
                     "entries":[{"path":path,"changeKind":"update","diff":patch}]});
             }
+            if adapter_kind == AdapterKind::KiloCli
+                && public_status == "completed"
+                && completion.is_some_and(|value| value.native_kind == "edit")
+                && let Some(entries) = crate::kilo::file_diff_entries(
+                    &update,
+                    completion.and_then(|value| value.public_file_operation_path.as_deref()),
+                )
+            {
+                payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":"session/update.tool_call_update.completed", "semanticKind":"kilo_file_patch","entries":entries});
+                if entries.as_array().is_some_and(|entries| entries.len() == 1) {
+                    payload["runtimeFileOperation"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                        "sourceEventKind":"session/update.tool_call_update.completed","operationKind":"write",
+                        "path":entries[0]["path"],"changeKind":entries[0]["changeKind"]});
+                }
+            }
             if adapter_kind == AdapterKind::CommandCodeCli
                 && public_status == "completed"
                 && let Some(entries) = update.pointer("/_meta/rovaiCommandMutation/entries")
@@ -37748,6 +37764,52 @@ for line in sys.stdin:
                 assert_eq!(payload["runtimeDiff"]["semanticKind"], "minimax_file_patch");
             }
             assert!(!payload.to_string().contains("MINI_PRIVATE_DETAILS"));
+        }
+        for (shape, status, truncated, has_diff) in [
+            ("write", "completed", false, true),
+            ("patch", "completed", false, true),
+            ("write", "failed", false, false),
+            ("patch", "in_progress", false, false),
+            ("write", "completed", true, false),
+        ] {
+            let patch = "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -0,0 +1 @@\n+new\n";
+            let mut metadata = if shape == "write" {
+                json!({"filepath":"/repo/src/a.txt","exists":false,"filediff":{"file":"/repo/src/a.txt","patch":patch}})
+            } else {
+                json!({"files":[{"filePath":"/repo/src/a.txt","type":"add","patch":patch}]})
+            };
+            metadata["truncated"] = json!(truncated);
+            metadata["private"] = json!("KILO_PRIVATE_METADATA");
+            let params = json!({"update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-file","kind":"edit","status":status,
+                "locations":[{"path":"/repo/src/a.txt"}],"rawOutput":{"metadata":metadata}}});
+            let completion = acp::completed_action(AdapterKind::KiloCli, &params).unwrap();
+            let (_, payload) = normalize_acp_event_with_completion(
+                AdapterKind::KiloCli,
+                "session/update",
+                &params,
+                completion.as_ref(),
+            );
+            assert_eq!(
+                !payload["runtimeDiff"].is_null(),
+                has_diff,
+                "{shape} {status}"
+            );
+            if has_diff {
+                let admitted = rovai_core::runtime_diff::admit_runtime_diff(
+                    &payload,
+                    Path::new("/repo"),
+                    Some("kilo-cli"),
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(
+                    (admitted.entries[0].additions, admitted.entries[0].deletions),
+                    (1, 0)
+                );
+                assert_eq!(admitted.entries[0].change_kind, "add");
+                assert_eq!(payload["runtimeFileOperation"]["path"], "/repo/src/a.txt");
+            }
+            assert!(!payload.to_string().contains("KILO_PRIVATE_METADATA"));
         }
         let (_, payload) = normalize_acp_event(
             AdapterKind::OpencodeCli,

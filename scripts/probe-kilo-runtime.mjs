@@ -19,6 +19,7 @@ const root = process.env.ROVAI_KILO_PROBE_ROOT ?? await mkdtemp(join(tmpdir(), '
 const repo = resolve(import.meta.dirname, '..')
 for (const dir of ['home','workspace','config','data','cache','state','evidence','skills']) await mkdir(join(root,dir))
 const project = join(root, 'workspace')
+execFileSync('git',['init','--quiet',project])
 const bootstrap = join(root, 'bootstrap.txt')
 await writeFile(bootstrap, '[SESSION_CHARTER]\nBOOTSTRAP_A_92c1\n[/SESSION_CHARTER]\n')
 const calls = [], hosts = [], evidence = { platform:process.platform+'-'+process.arch, checks:{} }
@@ -36,7 +37,16 @@ const provider = createServer(async (req,res)=>{
   const user=[...body.messages].reverse().find(m=>m.role==='user')
   const content=typeof user?.content==='string'?user.content:JSON.stringify(user?.content)
   let delta={role:'assistant',content:'KILO_FIXTURE_OK'},finish='stop'
-  if(content?.includes('PROBE_BASH')&&last?.role!=='tool'&&body.tools?.some(t=>t.function.name==='bash')){
+  if(content?.includes('PROBE_FILES')&&body.tools?.length){
+    const history=body.messages.slice(body.messages.findLastIndex(m=>m.role==='user')+1)
+    const used=history.flatMap(m=>m.tool_calls?.map(t=>t.function.name)??[])
+    const file=join(project,'文件 空格.txt')
+    const name=!used.includes('write')?'write':!used.includes('read')?'read':!used.includes('edit')?'edit':null
+    const args=name==='write'?{filePath:file,content:'第一行\n保留行\n'}:name==='read'?{filePath:file}:{filePath:file,oldString:'第一行',newString:'第一行（已编辑）'}
+    if(name){delta={role:'assistant',tool_calls:[{index:0,id:'call_files_'+calls.length,type:'function',function:{name,arguments:JSON.stringify(args)}}]};finish='tool_calls'}
+  }else if(content?.includes('PROBE_TASK_')&&last?.role!=='tool'&&body.tools?.length){
+    delta={role:'assistant',tool_calls:[{index:0,id:'call_task_'+calls.length,type:'function',function:{name:'task',arguments:JSON.stringify({description:'Native foreground check',subagent_type:'general',prompt:'Return KILO_NATIVE_CHILD.',...(content.includes('PROBE_TASK_BACKGROUND')?{background:true}:{})})}}]};finish='tool_calls'
+  }else if(content?.includes('PROBE_BASH')&&last?.role!=='tool'&&body.tools?.some(t=>t.function.name==='bash')){
     delta={role:'assistant',tool_calls:[{index:0,id:'call_kilo_bash_'+calls.length,type:'function',function:{name:'bash',arguments:JSON.stringify({command:"printf 'KILO_STDOUT'; printf 'KILO_STDERR' >&2",description:'Check native command output'})}}]}
     finish='tool_calls'
   }else if(content?.includes('PROBE_MCP')&&last?.role!=='tool'){
@@ -64,6 +74,7 @@ const environment=isolatedKiloEnvironment(root)
 Object.assign(environment,{
   XDG_CONFIG_HOME:join(root,'config'),XDG_DATA_HOME:join(root,'data'),XDG_CACHE_HOME:join(root,'cache'),XDG_STATE_HOME:join(root,'state'),
   KILO_CONFIG_CONTENT:JSON.stringify(config),KILO_CLIENT:'acp',KILO_DISABLE_AUTOUPDATE:'1',
+  KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS:'false',
   KILO_DISABLE_MODELS_FETCH:'1',KILO_DISABLE_EXTERNAL_SKILLS:'1',KILO_DISABLE_CLAUDE_CODE:'1',
   KILO_DISABLE_DEFAULT_PLUGINS:'1',KILO_DISABLE_LSP_DOWNLOAD:'1',KILO_EXPERIMENTAL_DISABLE_FILEWATCHER:'1'
 })
@@ -201,6 +212,24 @@ try{
     frames:hosts.at(-1).frames.slice(offset).map(frame=>({id:frame.id,method:frame.method,stopReason:frame.result?.stopReason,sessionId:frame.params?.sessionId,update:frame.params?.update?.sessionUpdate}))}
   try{await host.rpc('session/resume',{sessionId:'ses_missing_0123456789',cwd:project,mcpServers:[]});evidence.checks.unknownSessionRejected=false}catch(e){assert(e.rpcError,'Missing Session must return a native RPC error');evidence.checks.unknownSessionRejected={message:e.message,error:e.rpcError}}
   assert(evidence.checks.unknownSessionRejected!==false,'Unknown Session must not silently become a new one')
+  const files=await host.rpc('session/new',{cwd:project,mcpServers:[]})
+  const fileResult=await host.prompt(files.sessionId,'PROBE_FILES')
+  assert.equal(await readFile(join(project,'文件 空格.txt'),'utf8'),'第一行（已编辑）\n保留行\n')
+  evidence.checks.files={stopReason:fileResult.result.stopReason,updates:fileResult.frames.filter(f=>f.params?.update?.toolCallId).map(f=>f.params.update)}
+  const tasks=await host.rpc('session/new',{cwd:project,mcpServers:[]})
+  const taskDb=new DatabaseSync(join(root,'data','kilo','kilo.db'),{readOnly:true})
+  const children=()=>taskDb.prepare('SELECT count(*) AS n FROM session WHERE parent_id=?').get(tasks.sessionId).n
+  try {
+    const blocked=await host.prompt(tasks.sessionId,'PROBE_TASK_BACKGROUND')
+    assert.equal(children(),0,'Background opt-out must not start a child Session')
+    assert(JSON.stringify(blocked.frames).includes('Background subagents require'),'Native tool must reject explicit background=true')
+    const foreground=await host.prompt(tasks.sessionId,'PROBE_TASK_FOREGROUND')
+    assert.equal(children(),1,'Foreground subagent remains available')
+    assert.equal(foreground.result.stopReason,'end_turn')
+    const schemas=calls.flatMap(call=>call.tools?.filter(t=>t.function.name==='task').map(t=>t.function.parameters)??[])
+    assert(schemas.length>0&&schemas.every(schema=>!Object.hasOwn(schema.properties??{},'background')))
+    evidence.checks.backgroundPolicy={taskVisible:true,backgroundParameterAbsent:true,explicitBackgroundRejected:true,foregroundChildSessions:children()}
+  } finally {taskDb.close()}
   await host.close()
   evidence.modelCalls=calls.length
   evidence.status='passed'

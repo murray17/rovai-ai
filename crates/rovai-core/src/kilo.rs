@@ -5,12 +5,37 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, ensure};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::process::Command;
 
 use crate::{agent_profile::AdapterKind, runtime_discovery::runtime_environment_variable};
 
 pub(crate) const BOOTSTRAP_FILE: &str = "bootstrap.md";
+
+/// Applied result patches from Kilo's native write/edit and apply_patch tools.
+/// Header/path validation and rendering remain in the shared Diff projection.
+pub(crate) fn file_diff_entries(update: &Value, operation_path: Option<&str>) -> Option<Value> {
+    let metadata = update.pointer("/rawOutput/metadata")?;
+    if metadata["truncated"] == true {
+        return None;
+    }
+    if let Some(files) = metadata["files"].as_array() {
+        let entries: Option<Vec<_>> = files.iter().map(|file| {
+            let change = file["type"].as_str()?;
+            matches!(change, "add" | "update" | "delete").then_some(())?;
+            Some(json!({"path":file["filePath"].as_str()?,"changeKind":change,"diff":file["patch"].as_str()?}))
+        }).collect();
+        return Some(json!(entries?));
+    }
+    let file = metadata.get("filediff")?;
+    let path = file["file"].as_str()?;
+    if operation_path != Some(path) {
+        return None;
+    }
+    Some(
+        json!([{"path":path,"changeKind":if metadata["exists"] == false {"add"} else {"update"},"diff":file["patch"].as_str()?}]),
+    )
+}
 
 // Keep native rule order local to Kilo; do not change workspace JSON semantics.
 #[derive(Serialize, Deserialize)]
@@ -91,6 +116,7 @@ pub(crate) fn configure_command(command: &mut Command) {
         .arg("acp")
         .env("KILO_CLIENT", "acp")
         .env("KILO_DISABLE_AUTOUPDATE", "1")
+        .env("KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "false")
         .env("KILO_ENABLE_QUESTION_TOOL", "false");
 }
 

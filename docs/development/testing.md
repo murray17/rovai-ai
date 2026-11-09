@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-04
+last_updated: 2026-11-09
 ---
 
 # 测试与 Smoke Test
@@ -177,6 +177,11 @@ Core smoke 使用系统临时根的独立 data/Skills/MCP、成员专属 XDG dat
 复核扩展同一配置 owner 验证全局/Agent 嵌套规则保序及 KILO_DB 的缺省/绝对/相对/:memory: 路径；
 共享 cwd、模型目录、目录来源及 Fleet owners 分别扩展 Kilo，不新增 Rust 测试函数。
 完整门禁和原生权限、MCP A → B → A、Steer 研究的实际边界见[复核记录](../versions/v1.72/kilo-acp-review-fixes.md)。
+
+后续文件/Steer smoke 仍扩展上述两个脚本，不新建并行入口。原生探针增加 write/read/edit 与后台拒绝/前台 task；
+Core smoke 增加同 Run 更正、待回执取消及普通后继。终态汇合和取消等待复用既有 active-input receipt owner，
+文件元数据、exists 与 patch 共用事件归一化和 native patch owners。真实 sub2api 开发 App 与受控 Provider 分开记账，
+结果和范围见[文件与 Steer 实施记录](../versions/v1.72/kilo-files-steer-verification.md)。
 
 ## Rust 测试准入与退役门槛
 

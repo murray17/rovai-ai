@@ -1,10 +1,32 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-04
+last_updated: 2026-11-09
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-09 Kilo 前台子代理、文件结果与 Steer
+
+macOS arm64、官方 Kilo **7.8.27** 的 `KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS=false`
+隐藏 task 的 background 参数并拒绝显式后台调用；前台子代理仍正常创建，范围与现有 Claude Code 策略一致。
+生产 Steer 使用同 Session 的普通 `session/prompt`，复用 Hermes 的多请求终态收口。
+共享 scheduler 仍按 Run 串行等回执；原生并发能力不等于多条用户 Steer 同时派发。
+
+隔离 Core 与本地 Provider 的 **19 个 Run** 完成：17 个 succeeded、2 个主动 cancelled。
+同 Run 更正、待回执时取消、unknown 不重发与取消后普通后继通过。
+初次取消后立即关闭 Host 曾使后继停在原生 snapshot 初始化；取消成功后沿现有 route 有界等待终态，
+再走共享进程清理，实际重跑后继成功。没有删除原生锁或创建替代 Session。
+
+`pnpm dev` 的独立数据/Skills/MCP/HOME/XDG 与 **sub2api/gpt-6.1-sol** 完成两轮真实 Run。
+首轮真实 UI 插话沿同一根 Run 被接受；第二轮 write 新建/覆盖和 apply_patch 修改完成，
+Files Changed 持久化为 **3 文件 +5/−3**，文件详情的红绿 hunk 在开发 App 中打开核对。
+该 GPT 原生选择 apply_patch，未提供 edit；原生 edit 由官方 CLI 与受控 Provider 独立实跑。
+文件投影消费原生成功结果，共用既有 patch normalizer；不把替换片段当作完整文件状态。
+
+范围仍是 macOS arm64 Preview，其他平台与版本未据此取得资格。实现、失败对照、简化取舍与
+[白名单机器证据](research/kilo-runtime/files-steer-7.8.27-macos-arm64.json)见
+[实施记录](versions/v1.72/kilo-files-steer-verification.md)。
 
 ## 2026-11-04 DSH 原生 MCP 生命周期接口兼容
 
