@@ -1958,7 +1958,7 @@ impl AcpHost {
         )?;
         let native_usage_data_dir = match frozen_runtime.adapter_kind {
             AdapterKind::MinimaxCodeCli => minimax_data_dir(&spec),
-            AdapterKind::KiloCli => crate::kilo::data_dir(&spec),
+            AdapterKind::KiloCli => crate::kilo::database_path(&spec),
             _ => None,
         };
         let codebuddy_config_dir = (frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli)
@@ -5247,6 +5247,12 @@ impl AcpRuntime {
                             definition,
                             &self.execution_root,
                         );
+                    } else if self.host.adapter_kind == AdapterKind::KiloCli {
+                        crate::runtime_mcp::adapt_acp_stdio_cwd(
+                            &mut server,
+                            definition,
+                            &self.execution_root,
+                        );
                     }
                     server
                 })
@@ -6915,9 +6921,12 @@ impl AcpCliRuntimeAdapter {
         let spawn_startup_bootstrap = startup_bootstrap.map(str::to_owned);
         let spawn_incoming = self.incoming.clone();
         let spawn_compaction_policy = self.compaction_detector_policy;
-        if self.kind == AdapterKind::DeepseekHarness {
-            // DSH persists exact Sessions but holds a native lock while the
-            // previous Host owns them. Reap obsolete idle Hosts before resume;
+        if matches!(
+            self.kind,
+            AdapterKind::DeepseekHarness | AdapterKind::KiloCli
+        ) {
+            // Retire obsolete Hosts in this Binding before exact resume.
+            // DSH also holds a native lock while its previous Host owns the Session.
             // an active Host retires at its normal Run boundary, and the
             // replacement waits for that reap before it starts.
             self.fleet
@@ -10169,12 +10178,16 @@ mod compaction_detector_tests {
             }
         }
         // Kilo uses its own config namespace and the native instructions reader.
-        // Its overlay has no OpenCode dialect, plugin or second approval policy.
+        // The final native config hook only restores native rule/default order.
+        let root =
+            std::env::temp_dir().join(format!("rovai-kilo-config-{} 空格", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
         for mode in ["allow", "ask", "deny"] {
             let mut command = Command::new("/selected/kilo");
-            command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:'ask'},instructions:['native.md'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
+            command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:{'git *':'allow','* --force':'deny'}},agent:{custom:{permission:{bash:{'git *':'allow','* --force':'deny'}}}},instructions:['native.md'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
+            command.env("KILO_PERMISSION", r#"{"*":"allow","edit":"ask"}"#);
             crate::kilo::configure_command(&mut command);
-            let file = std::env::temp_dir().join("kilo bootstrap 中文.md");
+            let file = root.join("kilo bootstrap 中文.md");
             crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
             crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
             let content = command
@@ -10183,24 +10196,71 @@ mod compaction_detector_tests {
                 .find(|(key, _)| *key == "KILO_CONFIG_CONTENT")
                 .unwrap()
                 .1
+                .unwrap()
+                .to_str()
                 .unwrap();
-            let config: Value = serde_json::from_str(content.to_str().unwrap()).unwrap();
+            let config: Value = serde_json::from_str(content).unwrap();
             assert_eq!(config["model"], "native/model");
             assert_eq!(
-                config["permission"],
-                json!({"*":mode,"bash":"ask","question":"deny"})
+                config["permission"]["bash"],
+                json!({"git *":"allow","* --force":"deny"})
+            );
+            assert_eq!(
+                content
+                    .matches(r#""git *":"allow","* --force":"deny""#)
+                    .count(),
+                2,
+                "both global and agent patterns retain native order"
             );
             assert_eq!(
                 config["instructions"],
                 json!(["native.md", file.to_str().unwrap()])
             );
+            assert_eq!(config["plugin"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                url::Url::parse(config["plugin"][0].as_str().unwrap())
+                    .unwrap()
+                    .to_file_path()
+                    .unwrap(),
+                root.join("config.mjs")
+            );
+            let hook = std::fs::read_to_string(root.join("config.mjs")).unwrap();
+            assert!(hook.contains(&format!("'*': \"{mode}\"")));
             assert!(config["mcp"]["native"].is_object());
-            assert!(config.get("plugin").is_none());
             assert!(!automatically_allows_permission_requests(
                 AdapterKind::KiloCli,
                 &json!({"permission":mode})
             ));
+            for (configured, expected) in [
+                (None, Some(root.join("data/kilo/kilo.db"))),
+                (Some("custom.db"), Some(root.join("data/kilo/custom.db"))),
+                (
+                    Some(root.join("absolute.db").to_str().unwrap()),
+                    Some(root.join("absolute.db")),
+                ),
+                (Some(":memory:"), None),
+            ] {
+                let mut command = Command::new(std::env::current_exe().unwrap());
+                command
+                    .current_dir(&root)
+                    .env("XDG_DATA_HOME", root.join("data"));
+                if let Some(value) = configured {
+                    command.env("KILO_DB", value);
+                } else {
+                    command.env_remove("KILO_DB");
+                }
+                let spec = ManagedProcessLaunchSpec::capture(
+                    &command,
+                    ManagedProcessPurpose::RuntimeHost,
+                    ManagedStdinPolicy::Piped,
+                    ManagedWindowsArgvDialect::MicrosoftCrt,
+                    "kilo-native-path",
+                )
+                .unwrap();
+                assert_eq!(crate::kilo::database_path(&spec), expected);
+            }
         }
+        std::fs::remove_dir_all(root).unwrap();
         let mut config = json!({
             "autoupdate": false,
             "permission": {"*": "ask"},

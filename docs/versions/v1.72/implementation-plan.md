@@ -18,6 +18,8 @@ last_updated: 2026-11-08
 具体门禁、Golden Flows 和未测范围集中在[实施记录](kilo-acp-implementation.md)。
 按 [D76](decisions.md#v1-72-d76)仅 macOS arm64 Preview；其他平台、付费模型与完整 First-Class 资格不由本机夹具推导。
 
+2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正，以及 Steer 接续可行性见[复核记录](kilo-acp-review-fixes.md)。
+
 ## 执行台自动打开偏好（2026-11-08）
 
 独立 worktree 从 `origin/main` 的 `cab7f7788eddaad3308a9d5574de649ecb1ae6e5` 建立，

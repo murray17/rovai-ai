@@ -2605,7 +2605,10 @@ fn acp_capability_snapshot(
             ]
         } else if matches!(
             adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+            AdapterKind::DeepseekHarness
+                | AdapterKind::CommandCodeCli
+                | AdapterKind::ClineCli
+                | AdapterKind::KiloCli
         ) {
             &[
                 "acp.initialize",
@@ -2896,6 +2899,20 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
+    if adapter_kind == AdapterKind::KiloCli {
+        let current = acp_runtime_model_id_from_session(session_result);
+        let effort = session_result["configOptions"]
+            .as_array()
+            .and_then(|options| options.iter().find(|option| option["id"] == "effort"))
+            .and_then(acp_model_option);
+        for model in &mut models {
+            model.options = if current.as_deref() == Some(model.id.as_str()) {
+                effort.clone().into_iter().collect()
+            } else {
+                Vec::new()
+            };
+        }
+    }
     if adapter_kind == AdapterKind::MinimaxCodeCli {
         let current = acp_runtime_model_id_from_session(session_result);
         let effort = session_result["configOptions"]
@@ -4290,6 +4307,16 @@ mod tests {
         assert!(
             models[1].options.is_empty(),
             "effort must not leak across models"
+        );
+        let kilo = json!({"configOptions":[
+            {"id":"model","type":"select","currentValue":"local/variant-model","options":[{"value":"local/variant-model","name":"Variant model"},{"value":"local/plain","name":"Plain"}]},
+            {"id":"effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
+        ]});
+        let models = acp_model_catalog_for_adapter(AdapterKind::KiloCli, &kilo).unwrap();
+        assert_eq!(models[0].options[0].key, "effort");
+        assert!(
+            models[1].options.is_empty(),
+            "Kilo effort is advertised only for its selected model"
         );
         let custom = json!({"models":{"currentModelId":"private-provider/custom-model","availableModels":[{"modelId":"builtin-model","name":"Builtin"}]}});
         let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();

@@ -150,6 +150,38 @@ pub(crate) fn external_acp_server(name: &str, definition: &McpServerDefinition) 
     }
 }
 
+/// ACP stdio has no cwd field. Keep the native argv literal and change only
+/// the server process directory when it differs from the Session directory.
+pub(crate) fn adapt_acp_stdio_cwd(
+    server: &mut Value,
+    definition: &McpServerDefinition,
+    session_cwd: &Path,
+) {
+    if let McpServerDefinition::Stdio {
+        command,
+        args,
+        cwd: Some(cwd),
+        ..
+    } = definition
+        && !crate::git::persisted_workspace_path_matches_canonical(Path::new(cwd), session_cwd)
+    {
+        server["command"] = json!("node");
+        server["args"] = json!(
+            [
+                vec![
+                    "--eval".to_owned(),
+                    include_str!("runtime_mcp/cwd.cjs").to_owned(),
+                    "--".to_owned(),
+                    cwd.clone(),
+                    command.clone()
+                ],
+                args.clone()
+            ]
+            .concat()
+        );
+    }
+}
+
 fn native_file_server(definition: &McpServerDefinition, dialect: NativeFileDialect) -> Value {
     match (dialect, definition) {
         (

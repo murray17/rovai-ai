@@ -3356,7 +3356,11 @@ mod tests {
 
     #[tokio::test]
     async fn warm_hosts_never_cross_camp_compatibility_keys() {
-        for adapter_kind in [AdapterKind::CodexCli, AdapterKind::DeepseekHarness] {
+        for adapter_kind in [
+            AdapterKind::CodexCli,
+            AdapterKind::DeepseekHarness,
+            AdapterKind::KiloCli,
+        ] {
             let request = |run: &str, camp: &str, agent: &str| {
                 let mut request = acquire_request(run, camp);
                 request.adapter_kind = adapter_kind;

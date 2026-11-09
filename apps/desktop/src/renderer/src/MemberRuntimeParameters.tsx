@@ -422,8 +422,9 @@ function modelFieldsFor(
       return <ModelFields {...props} optionKey="effort" optionLabel={uiAttribute("思考强度")} />
     case 'codebuddy-cli':
       return <ModelFields {...props} optionKey="thought_level" optionLabel={uiAttribute("推理强度")} />
-    case 'codex-cli':
     case 'kilo-cli':
+      return <ModelFields {...props} optionKey="effort" optionLabel={uiAttribute("推理强度")} />
+    case 'codex-cli':
     case 'opencode-cli':
     case 'copilot-cli':
     case 'qoder-cli':

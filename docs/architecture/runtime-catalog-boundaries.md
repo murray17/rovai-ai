@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-08
+last_updated: 2026-11-09
 ---
 
 # Runtime Catalog Boundaries
@@ -72,7 +72,8 @@ Kilo 是独立的官方 ACP 产品身份，复用共享 Host/Fleet/Binding 与�
 原生会话仍以保存的精确 ID 恢复；不增加 Kilo 私有池、配置镜像或原生历史管理。
 Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共享冻结正文；
 无需压缩插件或校验握手。监控复用逐消息 numeric reader，原生配置、认证和数据继续归 Kilo 自己拥有。
-启动、原生权限、数值口径和模型输入见 [Runtime Launch v77](../contracts/runtime-launch-and-verification-v77.md)。
+原生最终 config 回调只保持默认权限与具体规则顺序，不参与审批或 Bootstrap。
+启动、权限、原生来源和数值口径见 [Runtime Launch v78](../contracts/runtime-launch-and-verification-v78.md)。
 macOS arm64 当前为 Preview，其他平台 NotQualified；不由编译或原生握手宣称完整资格。
 理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
 

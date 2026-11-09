@@ -151,29 +151,7 @@ pub(crate) fn adapt_mcp_server(
             }
         }
     }
-    if let crate::mcp::McpServerDefinition::Stdio {
-        command,
-        args,
-        cwd: Some(cwd),
-        ..
-    } = definition
-        && !crate::git::persisted_workspace_path_matches_canonical(Path::new(cwd), session_cwd)
-    {
-        server["command"] = json!("node");
-        server["args"] = json!(
-            [
-                vec![
-                    "--eval".to_owned(),
-                    include_str!("command_code/mcp-cwd.cjs").to_owned(),
-                    "--".to_owned(),
-                    cwd.clone(),
-                    command.clone()
-                ],
-                args.clone(),
-            ]
-            .concat()
-        );
-    }
+    crate::runtime_mcp::adapt_acp_stdio_cwd(server, definition, session_cwd);
 }
 
 /// The registered Mod command consumes one JSON string without starting a
@@ -242,7 +220,7 @@ mod tests {
                 assert_eq!(server["command"], "node");
                 let argv = server["args"].as_array().unwrap();
                 assert_eq!(argv[0], "--eval");
-                assert_eq!(argv[1], include_str!("command_code/mcp-cwd.cjs"));
+                assert_eq!(argv[1], include_str!("runtime_mcp/cwd.cjs"));
                 assert_eq!(argv[2], "--");
                 assert_eq!(argv[3], "/other space");
                 assert_eq!(argv[4], command);

@@ -3,10 +3,25 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-05
+last_updated: 2026-11-09
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d77"></a>
+## V1.72-D77：Kilo 在原生合并后保持默认权限与具体规则顺序
+
+- 状态：accepted
+- 日期：2026-11-09
+- 当前权威：[Launch v78](../../contracts/runtime-launch-and-verification-v78.md)。
+
+源码及官方 CLI 复现证明，serde_json 排序会改变最后匹配的权限结果；即使 inline 保序，
+原生跨文件深合并也可能把新增 wildcard 排在已有具体规则之后。继承的 KILO_PERMISSION 还拥有更晚优先级。
+选择 Kilo 局部有序配置树，以及现有 Host 私有目录中的短原生 config 回调：在原生合并后将产品默认放在具体规则之前。
+不启用全局 JSON preserve-order，不复制原生配置 loader，不增加 Core 权限求值、审批层、压缩 hook 或装载握手。
+该回调不参与 Bootstrap/Dynamic Context，已确认 R1 输入与证据版本保持。
+其他修正只补齐共享退役/argv cwd、原生 effort/DB/Skills 来源及诚实的认证投影。
+macOS arm64 Preview 范围保持；Steer 只有原生接续研究证据，Core active-input 仍关闭。
 
 <a id="v1-72-d76"></a>
 ## V1.72-D76：Kilo 使用原生 ACP、单 Binding Host 与 instructions

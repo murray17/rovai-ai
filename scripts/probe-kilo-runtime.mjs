@@ -9,18 +9,22 @@ import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { isAbsolute, join, resolve } from 'node:path'
+import { isolatedKiloEnvironment } from './lib/isolated-kilo-environment.mjs'
 
 // Native Kilo with a local deterministic model; this does not grant platform qualification.
 const configuredExecutable = process.env.ROVAI_KILO_BIN || process.argv[2]
 assert(configuredExecutable && isAbsolute(configuredExecutable), 'Pass an absolute official Kilo executable through ROVAI_KILO_BIN or argv')
 const executable = resolve(configuredExecutable)
-const root = await mkdtemp(join(tmpdir(), 'rovai-kilo-native-'))
+const root = process.env.ROVAI_KILO_PROBE_ROOT ?? await mkdtemp(join(tmpdir(), 'rovai-kilo-native-'))
 const repo = resolve(import.meta.dirname, '..')
-for (const dir of ['workspace','config','data','cache','state','evidence','skills']) await mkdir(join(root,dir))
+for (const dir of ['home','workspace','config','data','cache','state','evidence','skills']) await mkdir(join(root,dir))
 const project = join(root, 'workspace')
 const bootstrap = join(root, 'bootstrap.txt')
 await writeFile(bootstrap, '[SESSION_CHARTER]\nBOOTSTRAP_A_92c1\n[/SESSION_CHARTER]\n')
 const calls = [], hosts = [], evidence = { platform:process.platform+'-'+process.arch, checks:{} }
+let enterSteer, releaseSteer
+const steerEntered = new Promise(resolve => { enterSteer = resolve })
+const steerGate = new Promise(resolve => { releaseSteer = resolve })
 const provider = createServer(async (req,res)=>{
   let text=''
   for await (const chunk of req) text+=chunk
@@ -39,6 +43,8 @@ const provider = createServer(async (req,res)=>{
     const tool=body.tools?.find(t=>t.function.name.includes('parity')&&t.function.name.endsWith('echo'))
     if(tool){delta={role:'assistant',tool_calls:[{index:0,id:'call_kilo_mcp_'+calls.length,type:'function',function:{name:tool.function.name,arguments:'{"text":"NATIVE_MCP_MARKER"}'}}]};finish='tool_calls'}
   }
+  if (content?.includes('STEER_ACTIVE') && body.tools?.length) { enterSteer(); await steerGate }
+  if (res.destroyed) return
   const base={id:'chatcmpl-fixture-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
   res.writeHead(200,{'content-type':'text/event-stream'})
   res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta,finish_reason:null}]})+'\n\n')
@@ -54,7 +60,7 @@ const config={
     models:{'local-model':{name:'Local model',tool_call:true,limit:{context:32768,output:2048}}}}},
   permission:{'*':'allow',question:'deny'},instructions:[bootstrap]
 }
-const environment=Object.fromEntries(['PATH','SHELL','TMPDIR','LANG','LC_ALL','SystemRoot','COMSPEC','PATHEXT'].filter(k=>process.env[k]).map(k=>[k,process.env[k]]))
+const environment=isolatedKiloEnvironment(root)
 Object.assign(environment,{
   XDG_CONFIG_HOME:join(root,'config'),XDG_DATA_HOME:join(root,'data'),XDG_CACHE_HOME:join(root,'cache'),XDG_STATE_HOME:join(root,'state'),
   KILO_CONFIG_CONTENT:JSON.stringify(config),KILO_CLIENT:'acp',KILO_DISABLE_AUTOUPDATE:'1',
@@ -169,6 +175,30 @@ try{
   evidence.checks.coldResume={sessionId:a.sessionId,historyMessages:calls[before].messages.length,mcpToolsPresent:calls[before].tools.some(t=>t.function.name.includes('parity'))}
   assert(JSON.stringify(calls[before].messages).includes('AFTER_COMPACTION'),'Cold resume must preserve prior native history')
   assert(!evidence.checks.coldResume.mcpToolsPresent,'Process-local MCP must disappear on a fresh Host')
+  const steering=await host.rpc('session/new',{cwd:project,mcpServers:[]})
+  const offset=hosts.at(-1).frames.length, callOffset=calls.length
+  const firstSteer=host.prompt(steering.sessionId,'STEER_ACTIVE original request')
+  firstSteer.catch(()=>{})
+  await Promise.race([steerEntered,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Steer provider entry timeout')),10000))])
+  const correction=host.prompt(steering.sessionId,'STEER_CORRECTION corrected request')
+  correction.catch(()=>{})
+  const intakeDeadline=Date.now()+5000
+  let intake=false
+  const steeringDb=new DatabaseSync(join(root,'data','kilo','kilo.db'),{readOnly:true})
+  try {
+    while(Date.now()<intakeDeadline) {
+      intake=steeringDb.prepare("SELECT EXISTS(SELECT 1 FROM part WHERE session_id=? AND json_extract(data,'$.text') LIKE '%STEER_CORRECTION%') AS found").get(steering.sessionId).found===1
+      if(intake)break
+      await new Promise(resolve=>setTimeout(resolve,50))
+    }
+  } finally { steeringDb.close() }
+  releaseSteer()
+  const outcomes=await Promise.allSettled([firstSteer,correction])
+  const requests=calls.slice(callOffset)
+  evidence.checks.concurrentPrompt={sessionId:steering.sessionId,acceptedWhileFirstModelPending:intake,
+    outcomes:outcomes.map(outcome=>outcome.status==='fulfilled'?{status:'fulfilled',result:outcome.value.result}:{status:'rejected',error:outcome.reason.message,rpcError:outcome.reason.rpcError}),
+    modelCalls:requests.length,correctionReachedModel:requests.some(request=>JSON.stringify(request.messages).includes('STEER_CORRECTION')),
+    frames:hosts.at(-1).frames.slice(offset).map(frame=>({id:frame.id,method:frame.method,stopReason:frame.result?.stopReason,sessionId:frame.params?.sessionId,update:frame.params?.update?.sessionUpdate}))}
   try{await host.rpc('session/resume',{sessionId:'ses_missing_0123456789',cwd:project,mcpServers:[]});evidence.checks.unknownSessionRejected=false}catch(e){assert(e.rpcError,'Missing Session must return a native RPC error');evidence.checks.unknownSessionRejected={message:e.message,error:e.rpcError}}
   assert(evidence.checks.unknownSessionRejected!==false,'Unknown Session must not silently become a new one')
   await host.close()
@@ -178,6 +208,7 @@ try{
   evidence.status='failed';evidence.error=error.stack
   throw error
 }finally{
+  releaseSteer()
   evidence.hostPids=hosts.map(h=>h.pid)
   evidence.cleanup=await Promise.allSettled(hosts.map(h=>h.close()))
   provider.closeAllConnections();await new Promise(r=>provider.close(r))

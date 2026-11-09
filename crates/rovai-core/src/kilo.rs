@@ -3,14 +3,57 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, ensure};
-use serde_json::{Value, json};
+use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::process::Command;
 
 use crate::{agent_profile::AdapterKind, runtime_discovery::runtime_environment_variable};
 
 pub(crate) const BOOTSTRAP_FILE: &str = "bootstrap.md";
 
-pub(crate) fn data_dir(spec: &crate::managed_process::ManagedProcessLaunchSpec) -> Option<PathBuf> {
+// Keep native rule order local to Kilo; do not change workspace JSON semantics.
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum ConfigValue {
+    Object(IndexMap<String, ConfigValue>),
+    Array(Vec<ConfigValue>),
+    Scalar(Value),
+}
+
+impl ConfigValue {
+    fn append_path(&mut self, key: &str, path: &Path) -> Result<()> {
+        let Self::Object(config) = self else {
+            anyhow::bail!("Kilo config must be an object")
+        };
+        let Self::Array(paths) = config
+            .entry(key.into())
+            .or_insert_with(|| Self::Array(Vec::new()))
+        else {
+            anyhow::bail!("Kilo {key} must be an array")
+        };
+        let path = if key == "plugin" {
+            url::Url::from_file_path(path)
+                .map_err(|_| anyhow::anyhow!("Kilo plugin path must be absolute"))?
+                .to_string()
+        } else {
+            path.to_str()
+                .context("Kilo config path is not UTF-8")?
+                .to_owned()
+        };
+        if !paths
+            .iter()
+            .any(|item| matches!(item, Self::Scalar(Value::String(value)) if value == &path))
+        {
+            paths.push(Self::Scalar(Value::String(path)));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn database_path(
+    spec: &crate::managed_process::ManagedProcessLaunchSpec,
+) -> Option<PathBuf> {
     let root = spec
         .environment_value("XDG_DATA_HOME")
         .filter(|value| !value.is_empty())
@@ -20,14 +63,27 @@ pub(crate) fn data_dir(spec: &crate::managed_process::ManagedProcessLaunchSpec) 
                 .map(|home| PathBuf::from(home).join(".local/share"))
         })
         .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))?;
-    Some(
-        if root.is_absolute() {
-            root
-        } else {
-            spec.working_directory().join(root)
+    let data = if root.is_absolute() {
+        root
+    } else {
+        spec.working_directory().join(root)
+    }
+    .join("kilo");
+    match spec
+        .environment_value("KILO_DB")
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) if value == ":memory:" => None,
+        Some(value) => {
+            let path = PathBuf::from(value);
+            Some(if path.is_absolute() {
+                path
+            } else {
+                data.join(path)
+            })
         }
-        .join("kilo"),
-    )
+        None => Some(data.join("kilo.db")),
+    }
 }
 
 pub(crate) fn configure_command(command: &mut Command) {
@@ -57,38 +113,23 @@ pub(crate) fn configure_execution(
         });
     let mut config = match inherited {
         Some(value) => {
-            json5::from_str::<Value>(value.to_str().context("Kilo config is not UTF-8")?)
+            json5::from_str::<ConfigValue>(value.to_str().context("Kilo config is not UTF-8")?)
                 .context("Kilo KILO_CONFIG_CONTENT is invalid")?
         }
-        None => json!({}),
+        None => ConfigValue::Object(IndexMap::new()),
     };
-    let object = config
-        .as_object_mut()
-        .context("Kilo config must be an object")?;
-    let permissions = object.entry("permission").or_insert_with(|| json!({}));
-    // A native string is the shorthand for its wildcard permission.
-    if permissions.is_string() {
-        *permissions = json!({"*": permissions.as_str().unwrap()});
-    }
-    let permissions = permissions
-        .as_object_mut()
-        .context("Kilo permission must be a string or object")?;
-    permissions.insert("*".into(), json!(permission));
-    // ACP has no questionnaire UI; execution permissions keep their native rules.
-    permissions.insert("question".into(), json!("deny"));
-    let instructions = object
-        .entry("instructions")
-        .or_insert_with(|| json!([]))
-        .as_array_mut()
-        .context("Kilo instructions must be an array")?;
-    let file = json!(
-        bootstrap_file
-            .to_str()
-            .context("Kilo instructions path is not UTF-8")?
-    );
-    if !instructions.contains(&file) {
-        instructions.push(file);
-    }
+    let plugin = bootstrap_file
+        .parent()
+        .context("Kilo Host directory missing")?
+        .join("config.mjs");
+    std::fs::write(
+        &plugin,
+        include_str!("kilo/config.mjs")
+            .replace("__ROVAI_PERMISSION__", &serde_json::to_string(permission)?),
+    )
+    .context("failed to write Kilo native config hook")?;
+    config.append_path("instructions", bootstrap_file)?;
+    config.append_path("plugin", &plugin)?;
     command.env("KILO_CONFIG_CONTENT", serde_json::to_string(&config)?);
     Ok(())
 }

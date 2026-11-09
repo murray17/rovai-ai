@@ -104,9 +104,20 @@ impl NativeUsageReader {
         .map(Self::Jsonl)
     }
 
-    pub(crate) fn for_kilo_prompt(root: &Path, workspace: &Path, session_id: &str) -> Option<Self> {
-        OpenCodeUsageReader::from_root(AdapterKind::KiloCli, root, workspace, session_id)
-            .map(Self::OpenCode)
+    pub(crate) fn for_kilo_prompt(path: &Path, workspace: &Path, session_id: &str) -> Option<Self> {
+        if !safe_identity(session_id) {
+            return None;
+        }
+        OpenCodeUsageReader::baseline(
+            path.to_path_buf(),
+            workspace.to_str()?.to_string(),
+            session_id.to_string(),
+        )
+        .ok()
+        .map(|mut reader| {
+            reader.kind = AdapterKind::KiloCli;
+            Self::OpenCode(reader)
+        })
     }
 
     pub(crate) fn poll(&mut self) -> Vec<NativeUsageObservation> {
@@ -838,35 +849,21 @@ impl OpenCodeUsageReader {
         if !data.is_absolute() {
             return None;
         }
-        Self::from_root(kind, &data.join("opencode"), workspace, session_id)
+        Self::from_root(&data.join("opencode"), workspace, session_id)
     }
 
-    fn from_root(
-        kind: AdapterKind,
-        root: &Path,
-        workspace: &Path,
-        session_id: &str,
-    ) -> Option<Self> {
+    fn from_root(root: &Path, workspace: &Path, session_id: &str) -> Option<Self> {
         if !safe_identity(session_id) {
             return None;
         }
-        let app = if kind == AdapterKind::KiloCli {
-            "kilo"
-        } else {
-            "opencode"
-        };
         let root = fs::canonicalize(root).ok()?;
-        let path = root.join(format!("{app}.db"));
+        let path = root.join("opencode.db");
         Self::baseline(
             path,
             workspace.to_str()?.to_string(),
             session_id.to_string(),
         )
         .ok()
-        .map(|mut reader| {
-            reader.kind = kind;
-            reader
-        })
     }
 
     fn baseline(path: PathBuf, workspace: String, session_id: String) -> Result<Self> {

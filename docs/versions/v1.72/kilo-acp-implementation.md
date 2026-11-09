@@ -12,6 +12,8 @@ worktree 为 `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
 编码基线为 `958784f6e17fc32d8b2753d7f14fd6122dceea9d`。
 当前按 [D76](decisions.md#v1-72-d76)开放 macOS arm64 Preview；不声明 First-Class，其他平台保持 NotQualified。
 
+本页保留 `1eef483cb` 的初轮实现与验收范围；后续原生语义修正、逐 Run Bootstrap 与 Steer 调查见[复核记录](kilo-acp-review-fixes.md)。
+
 ## 实现边界
 
 - 独立 `kilo-cli` identity、`kilo` 发现与 `ROVAI_KILO_BIN`；使用官方 `kilo acp`，原生配置、认证和模型来源独立。

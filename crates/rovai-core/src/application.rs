@@ -10665,9 +10665,11 @@ impl Core {
                 } = &result
                     && !affected_agent_ids.is_empty()
                 {
-                    self.runtime_fleet
-                        .invalidate_adapter_members(AdapterKind::CommandCodeCli, affected_agent_ids)
-                        .await;
+                    for kind in [AdapterKind::CommandCodeCli, AdapterKind::KiloCli] {
+                        self.runtime_fleet
+                            .invalidate_adapter_members(kind, affected_agent_ids)
+                            .await;
+                    }
                 }
                 Ok(serde_json::to_value(result)?)
             }
@@ -13104,7 +13106,11 @@ impl Core {
                         adapter_kind: kind,
                         reported_version: probe.result.reported_version,
                         executable_fingerprint: probe.result.executable_fingerprint,
-                        authentication_status: if kind == AdapterKind::ClineCli {
+                        authentication_status: if kind == AdapterKind::ClineCli
+                            || (kind == AdapterKind::KiloCli
+                                && probe.result.status
+                                    != health::AgentRuntimeProbeStatus::AuthenticationRequired)
+                        {
                             "unknown".to_string()
                         } else {
                             probe_authentication_status(probe.result.status).to_string()
