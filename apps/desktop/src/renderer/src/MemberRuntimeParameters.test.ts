@@ -17,7 +17,6 @@ import {
   displayableInstallationModels,
   explicitSelection,
   liveCatalogIsAtLeastAsRecent,
-  modelCatalogStatusCopy,
   runtimeDraftForMember,
   runtimeModelSelectionAvailable,
   runtimeEditorInstallation
@@ -96,7 +95,7 @@ describe('runtime model catalog source', () => {
     expect(displayableInstallationModels(installation)).toEqual([])
     installation.modelCatalog.status = 'expired'
     installation.snapshot!.probeStatus = 'light_ready'
-    expect(displayableInstallationModels(installation)).toEqual([])
+    expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
     installation.adapterKind = 'pi'
     installation.snapshot!.staleAt = 'old-health-invalidation'
     expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
@@ -199,22 +198,6 @@ describe('explicit model changes', () => {
 })
 
 describe('member runtime parameters', () => {
-  it('presents a superseded refresh as a temporary Runtime update, not a failure', () => {
-    const cache = runtimeInstallation('copilot-cli').modelCatalog
-
-    expect(modelCatalogStatusCopy(cache, {
-      loading: false,
-      refreshFailed: false,
-      servingCachedModels: true,
-      refreshStatus: 'deferred'
-    })).toBe('运行环境正在更新，继续显示上次成功结果')
-    expect(modelCatalogStatusCopy(cache, {
-      loading: false,
-      refreshFailed: false,
-      servingCachedModels: false,
-      refreshStatus: 'deferred'
-    })).toBe('运行环境正在更新，稍后重新获取')
-  })
 
   it('keeps onboarding limited to model fields while permissions come from adapter defaults', () => {
     const installation = runtimeInstallation('codex-cli')
@@ -370,9 +353,6 @@ describe('member runtime parameters', () => {
     }))
 
     expect(markup).toContain('Runtime Model')
-    expect(modelCatalogStatusCopy(installation.modelCatalog, {
-      loading: false, refreshFailed: true, servingCachedModels: true, refreshStatus: 'failed'
-    })).toBe('模型与参数尚未核对，已保留上次结果。')
   })
 
   it.each([
@@ -411,7 +391,7 @@ describe('member runtime parameters', () => {
     }))
     expect(render()).toContain('aria-label="推理强度，High"')
     installation.snapshot!.models[0].options = []
-    expect(render()).toContain('尚未核对 · high')
+    expect(render()).toContain('high')
     expect(draft.model.options).toEqual({ thought_level: 'high' })
   })
 
@@ -432,7 +412,7 @@ describe('member runtime parameters', () => {
       adapterKind: 'hermes-cli', installation, disabled: false, onChange: () => undefined,
       model: {mode: 'explicit', modelId: 'runtime/model', options: {reasoning_effort: 'future'}}
     }))
-    expect(markup).toContain('尚未核对 · future')
+    expect(markup).toContain('future')
   })
 
   it('keeps one common Hermes default with or without a model catalog', () => {
@@ -457,7 +437,7 @@ describe('member runtime parameters', () => {
         expect(field.defaultChoice).toEqual({ value: '', label: '跟随模型默认值' })
         expect(markup).toContain(value === 'default'
           ? 'aria-label="推理强度，跟随模型默认值"'
-          : catalog === 'native-reset' ? 'aria-label="推理强度，high"' : '尚未核对 · high')
+          : catalog === 'native-reset' ? 'aria-label="推理强度，high"' : 'high')
         expect(onChange).not.toHaveBeenCalled()
         field.onChange(field.defaultChoice!.value)
         expect(onChange).toHaveBeenLastCalledWith({ ...model, options: {} })
@@ -485,8 +465,8 @@ describe('member runtime parameters', () => {
       ['known', ['off'], '', null],
       ['known', [], '', null],
       ['unknown', [], '', null],
-      ['unknown', [], 'max', '尚未核对 · max'],
-      ['known', ['off'], 'high', '尚未核对 · high'],
+      ['unknown', [], 'max', 'max'],
+      ['known', ['off'], 'high', 'high'],
     ] as const) {
       const model = installation.snapshot!.models[0]
       model.runtimeMetadata = { piThinkingSchemaVersion: 1, piThinkingState: state }

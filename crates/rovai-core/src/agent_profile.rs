@@ -617,7 +617,8 @@ fn model_catalog_has_native_evidence(
             || claude_code_catalog_has_native_evidence(models))
 }
 
-pub fn runtime_model_catalog_cache_view(
+#[cfg(test)]
+fn runtime_model_catalog_cache_view(
     adapter_kind: AdapterKind,
     snapshot: Option<&AdapterCapabilitySnapshot>,
     now: chrono::DateTime<chrono::Utc>,
@@ -646,7 +647,9 @@ fn runtime_model_catalog_cache_view_at(
             expires_at: None,
         };
     };
-    if snapshot.stale_at.is_some() {
+    // Health may remain stale after a successful directory read. Only a later
+    // identity/configuration invalidation invalidates that observation.
+    if !catalog_survives_invalidation(catalog_succeeded_at, snapshot.stale_at.as_deref()) {
         return RuntimeModelCatalogCacheView {
             status: RuntimeModelCatalogCacheStatus::Invalidated,
             observed_at: (snapshot.probe_status == "ready")
@@ -656,12 +659,7 @@ fn runtime_model_catalog_cache_view_at(
             expires_at: None,
         };
     }
-    let retained_lkg = snapshot.probe_status != "ready"
-        && catalog_succeeded_at.is_some()
-        && !snapshot.models.is_empty();
-    if (snapshot.probe_status != "ready" && !retained_lkg)
-        || !model_catalog_has_native_evidence(adapter_kind, &snapshot.models)
-    {
+    if !model_catalog_has_native_evidence(adapter_kind, &snapshot.models) {
         return RuntimeModelCatalogCacheView {
             status: RuntimeModelCatalogCacheStatus::Unavailable,
             observed_at: None,
@@ -669,7 +667,16 @@ fn runtime_model_catalog_cache_view_at(
             expires_at: None,
         };
     }
-    catalog_observation_cache_view(catalog_succeeded_at, retained_lkg, now)
+    catalog_observation_cache_view(catalog_succeeded_at, false, now)
+}
+
+fn catalog_survives_invalidation(observed_at: Option<&str>, stale_at: Option<&str>) -> bool {
+    let Some(stale_at) = stale_at else {
+        return true;
+    };
+    let observed = observed_at.and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok());
+    let stale = chrono::DateTime::parse_from_rfc3339(stale_at).ok();
+    matches!((observed, stale), (Some(observed), Some(stale)) if observed > stale)
 }
 
 fn catalog_observation_cache_view(
@@ -784,12 +791,7 @@ impl AdapterInstallationView {
             || (self.model_catalog.status == RuntimeModelCatalogCacheStatus::Expired
                 && self.snapshot.as_ref().is_some_and(|snapshot| {
                     self.adapter_kind == AdapterKind::Pi
-                        || (snapshot.probe_status == "ready"
-                            && snapshot.stale_at.is_none()
-                            && model_catalog_has_native_evidence(
-                                self.adapter_kind,
-                                &snapshot.models,
-                            ))
+                        || model_catalog_has_native_evidence(self.adapter_kind, &snapshot.models)
                 }))
     }
 }
@@ -1477,9 +1479,9 @@ impl AgentProfileService {
                        attempt.diagnostic_code, attempt.candidate_path,
                        attempt.executable_fingerprint, attempt.attempted_at,
                        attempt.retry_after, attempt.public_runtime_failure_json,
-                       CASE WHEN installation.adapter_kind = 'minimax-code-cli'
-                            THEN snapshot.model_catalog_succeeded_at
-                            ELSE COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at) END,
+                       CASE WHEN installation.adapter_kind = 'pi'
+                            THEN COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at)
+                            ELSE snapshot.model_catalog_succeeded_at END,
                        identity.executable_fingerprint,
                        (SELECT generation FROM runtime_search_environment_state WHERE singleton = 1)
                 FROM adapter_installation AS installation
@@ -2164,33 +2166,48 @@ impl AgentProfileService {
         &self,
         database: &mut Database,
         expected: &AdapterInstallationView,
+        fingerprint: &str,
         models: &[ModelDescriptor],
         succeeded_at: &str,
     ) -> Result<bool> {
-        let Some(snapshot) = expected.snapshot.as_ref() else {
-            return Ok(false);
-        };
         let transaction = database.connection_mut().transaction()?;
         let models = normalize_model_catalog(models.to_vec());
         if models.is_empty() {
             return Ok(false);
         }
+        let current: Option<Option<String>> = transaction.query_row(
+            "SELECT snapshot.executable_fingerprint FROM adapter_installation installation
+             LEFT JOIN adapter_capability_snapshot snapshot ON snapshot.installation_id = installation.id
+             LEFT JOIN runtime_executable_identity identity ON identity.installation_id = installation.id
+               AND identity.executable_path = installation.executable_path
+             WHERE installation.id = ?1 AND installation.generation = ?2
+               AND installation.executable_path = ?3 AND installation.enabled = 1
+               AND installation.path_state = 'valid' AND installation.auth_scope = ?4
+               AND installation.adapter_kind = ?5
+               AND COALESCE(identity.executable_fingerprint, snapshot.executable_fingerprint) = ?6",
+            params![expected.id, expected.generation, expected.executable_path, expected.auth_scope,
+                expected.adapter_kind.as_str(), fingerprint], |row| row.get(0),
+        ).optional()?;
+        let Some(previous_fingerprint) = current else {
+            return Ok(false);
+        };
+        if previous_fingerprint.as_deref() != Some(fingerprint) {
+            // Retire old-program health evidence without claiming new health.
+            // The directory then belongs to the existing current identity fields.
+            let mut snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
+                expected.adapter_kind,
+                None,
+                fingerprint.to_owned(),
+                succeeded_at.to_owned(),
+            )?;
+            snapshot.probe_status = "installed_unverified".into();
+            upsert_static_capability_snapshot(&transaction, &expected.id, &snapshot)?;
+        }
         let models = merge_persisted_dsh_options(&transaction, &expected.id, &models)?;
         let updated = transaction.execute(
             "UPDATE adapter_capability_snapshot SET model_catalog_json = ?2, model_catalog_succeeded_at = ?3
-             WHERE installation_id = ?1 AND probe_status = 'ready'
-               AND authentication_status = 'authenticated' AND stale_at IS NULL
-               AND executable_fingerprint = ?4 AND permission_schema_digest = ?5
-               AND last_successful_probe_at IS ?6
-               AND EXISTS(SELECT 1 FROM adapter_installation installation
-                 WHERE installation.id = ?1 AND installation.generation = ?7
-                   AND installation.executable_path = ?8 AND installation.enabled = 1
-                   AND installation.path_state = 'valid' AND installation.auth_scope = ?9
-                   AND installation.adapter_kind = ?10)",
-            params![expected.id, serde_json::to_string(&models)?, succeeded_at,
-                snapshot.executable_fingerprint, snapshot.permission_schema_digest,
-                snapshot.last_successful_probe_at, expected.generation, expected.executable_path,
-                expected.auth_scope, expected.adapter_kind.as_str()],
+             WHERE installation_id = ?1 AND executable_fingerprint = ?4",
+            params![expected.id, serde_json::to_string(&models)?, succeeded_at, fingerprint],
         )? != 0;
         transaction.commit()?;
         Ok(updated)
@@ -2384,9 +2401,9 @@ impl AgentProfileService {
                        snapshot.model_catalog_json,
                        snapshot.last_successful_probe_at,
                        locator.compatibility_fingerprint,
-                       CASE WHEN installation.adapter_kind = 'minimax-code-cli'
-                            THEN snapshot.model_catalog_succeeded_at
-                            ELSE COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at) END,
+                       CASE WHEN installation.adapter_kind = 'pi'
+                            THEN COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at)
+                            ELSE snapshot.model_catalog_succeeded_at END,
                        snapshot.executable_fingerprint
                 FROM adapter_installation AS installation
                 LEFT JOIN runtime_executable_identity AS identity
@@ -4328,20 +4345,11 @@ fn upsert_successful_capability_snapshot(
     let retained_catalog = if catalog_complete {
         None
     } else {
-        transaction
-            .query_row(
-                "SELECT model_catalog_json, model_catalog_succeeded_at
-             FROM adapter_capability_snapshot WHERE installation_id = ?1
-               AND stale_at IS NULL AND executable_fingerprint = ?2
-               AND permission_schema_digest = ?3 AND model_catalog_succeeded_at IS NOT NULL",
-                params![
-                    installation_id,
-                    snapshot.executable_fingerprint,
-                    snapshot.permission_schema_digest
-                ],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .optional()?
+        retained_model_catalog(
+            transaction,
+            installation_id,
+            snapshot.executable_fingerprint.as_deref(),
+        )?
     };
     let models = match &retained_catalog {
         Some((models, _)) => serde_json::from_str(models)?,
@@ -4471,6 +4479,22 @@ fn merge_persisted_dsh_options(
     Ok(models)
 }
 
+// Read the existing directory in the same transaction; preserve RFC3339 precision
+// so a health marker one nanosecond before success cannot discard that success.
+fn retained_model_catalog(
+    transaction: &Transaction<'_>,
+    installation_id: &str,
+    fingerprint: Option<&str>,
+) -> Result<Option<(String, String)>> {
+    Ok(transaction.query_row(
+        "SELECT model_catalog_json, model_catalog_succeeded_at, stale_at FROM adapter_capability_snapshot
+         WHERE installation_id=?1 AND executable_fingerprint=?2 AND model_catalog_succeeded_at IS NOT NULL",
+        params![installation_id, fingerprint],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)),
+    ).optional()?.filter(|(_, at, stale)| catalog_survives_invalidation(Some(at), stale.as_deref()))
+        .map(|(models, at, _)| (models, at)))
+}
+
 fn upsert_static_capability_snapshot(
     transaction: &Transaction<'_>,
     installation_id: &str,
@@ -4479,6 +4503,11 @@ fn upsert_static_capability_snapshot(
     if !is_static_snapshot_status(&snapshot.probe_status) {
         anyhow::bail!("only bounded discovery evidence can replace a static snapshot");
     }
+    let retained_catalog = retained_model_catalog(
+        transaction,
+        installation_id,
+        snapshot.executable_fingerprint.as_deref(),
+    )?;
     transaction.execute(
         r#"
         INSERT INTO adapter_capability_snapshot(
@@ -4531,6 +4560,12 @@ fn upsert_static_capability_snapshot(
             snapshot.last_error,
         ],
     )?;
+    if let Some((models, observed_at)) = retained_catalog {
+        transaction.execute(
+            "UPDATE adapter_capability_snapshot SET model_catalog_json = ?2, model_catalog_succeeded_at = ?3 WHERE installation_id = ?1",
+            params![installation_id, models, observed_at],
+        )?;
+    }
     Ok(())
 }
 
@@ -6544,6 +6579,13 @@ mod slow_tests {
                 .commit_runtime_model_catalog(
                     &mut database,
                     &original,
+                    original
+                        .snapshot
+                        .as_ref()
+                        .unwrap()
+                        .executable_fingerprint
+                        .as_deref()
+                        .unwrap(),
                     &[unobserved_a.clone(), b.clone()],
                     "2026-10-09T10:00:10Z"
                 )
@@ -6567,6 +6609,13 @@ mod slow_tests {
                 .commit_runtime_model_catalog(
                     &mut database,
                     &original,
+                    original
+                        .snapshot
+                        .as_ref()
+                        .unwrap()
+                        .executable_fingerprint
+                        .as_deref()
+                        .unwrap(),
                     &[older_a, snapshot.models[1].clone()],
                     "2026-10-09T10:00:11Z"
                 )
@@ -6590,6 +6639,13 @@ mod slow_tests {
                 .commit_runtime_model_catalog(
                     &mut database,
                     &expected,
+                    expected
+                        .snapshot
+                        .as_ref()
+                        .unwrap()
+                        .executable_fingerprint
+                        .as_deref()
+                        .unwrap(),
                     &[changed_route.clone()],
                     "2026-10-09T10:00:12Z"
                 )
@@ -6608,6 +6664,13 @@ mod slow_tests {
                 .commit_runtime_model_catalog(
                     &mut database,
                     &expected,
+                    expected
+                        .snapshot
+                        .as_ref()
+                        .unwrap()
+                        .executable_fingerprint
+                        .as_deref()
+                        .unwrap(),
                     &[changed_config.clone()],
                     "2026-10-09T10:00:13Z"
                 )
@@ -6668,7 +6731,7 @@ mod slow_tests {
         snapshot.probe_status = "light_ready".to_string();
         let light_cache =
             runtime_model_catalog_cache_view(AdapterKind::CodexCli, Some(&snapshot), observed_at);
-        assert_eq!(light_cache.status, RuntimeModelCatalogCacheStatus::Stale);
+        assert_eq!(light_cache.status, RuntimeModelCatalogCacheStatus::Fresh);
         assert_eq!(light_cache.observed_at, snapshot.last_successful_probe_at);
         assert_eq!(
             runtime_model_catalog_cache_view(
@@ -6702,7 +6765,7 @@ mod slow_tests {
                 observed_at
             )
             .status,
-            RuntimeModelCatalogCacheStatus::Stale
+            RuntimeModelCatalogCacheStatus::Fresh
         );
         assert_eq!(
             runtime_model_catalog_cache_view(
@@ -8258,6 +8321,13 @@ mod slow_tests {
                 upsert_successful_capability_snapshot(&transaction, &installation_id, &ready, true)
                     .unwrap();
                 transaction.commit().unwrap();
+                if writer == "static" {
+                    let stale = chrono::DateTime::parse_from_rfc3339(&ready.last_attempted_at)
+                        .unwrap()
+                        - chrono::Duration::nanoseconds(1);
+                    database.connection().execute("UPDATE adapter_capability_snapshot SET stale_at=?1 WHERE installation_id=?2",
+                        params![stale.to_rfc3339(), installation_id]).unwrap();
+                }
                 for changed_program in [false, true] {
                     let mut next = ready.clone();
                     next.reported_version = None;
@@ -8291,6 +8361,7 @@ mod slow_tests {
                             .unwrap();
                         } else {
                             next.probe_status = "light_ready".into();
+                            next.models.clear();
                             upsert_static_capability_snapshot(
                                 &transaction,
                                 &installation_id,
@@ -8313,6 +8384,29 @@ mod slow_tests {
                         },
                         "{writer}, changed program: {changed_program}"
                     );
+                    if writer == "static" {
+                        let (models, succeeded_at): (String, Option<String>) = database.connection().query_row(
+                            "SELECT model_catalog_json, model_catalog_succeeded_at FROM adapter_capability_snapshot WHERE installation_id=?1",
+                            [&installation_id], |row| Ok((row.get(0)?, row.get(1)?)),
+                        ).unwrap();
+                        let models: Vec<ModelDescriptor> = serde_json::from_str(&models).unwrap();
+                        assert_eq!(
+                            models,
+                            if changed_program {
+                                vec![]
+                            } else {
+                                ready.models.clone()
+                            }
+                        );
+                        assert_eq!(
+                            succeeded_at.as_deref(),
+                            if changed_program {
+                                None
+                            } else {
+                                Some(ready.last_attempted_at.as_str())
+                            }
+                        );
+                    }
                 }
             }
             drop(database);
@@ -8761,6 +8855,61 @@ mod slow_tests {
             );
 
             if kind == AdapterKind::CodexCli {
+                // This existing SQL owner also owns directory/version write order:
+                // metadata before/after a read cannot fence it or fabricate health.
+                let catalog_expected = service
+                    .managed_installation(&database, kind, "default")
+                    .unwrap()
+                    .unwrap();
+                let models = ready_codex_snapshot().models;
+                let observed_at = chrono::Utc::now().to_rfc3339();
+                service
+                    .record_runtime_version(
+                        &mut database,
+                        &frozen.installation_id,
+                        &frozen.executable_path,
+                        &fingerprint,
+                        "1.2.4",
+                    )
+                    .unwrap();
+                assert!(
+                    service
+                        .commit_runtime_model_catalog(
+                            &mut database,
+                            &catalog_expected,
+                            &fingerprint,
+                            &models,
+                            &observed_at
+                        )
+                        .unwrap()
+                );
+                service
+                    .record_runtime_version(
+                        &mut database,
+                        &frozen.installation_id,
+                        &frozen.executable_path,
+                        &fingerprint,
+                        "1.2.5",
+                    )
+                    .unwrap();
+                let observed = service
+                    .managed_installation(&database, kind, "default")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    observed.model_catalog.observed_at.as_deref(),
+                    Some(observed_at.as_str())
+                );
+                assert_eq!(
+                    observed.model_catalog.status,
+                    RuntimeModelCatalogCacheStatus::Fresh
+                );
+                let snapshot = observed.snapshot.unwrap();
+                assert_eq!(snapshot.models, models);
+                assert_eq!(snapshot.probe_status, "installed_unverified");
+                assert_eq!(snapshot.authentication_status, "unknown");
+                assert!(snapshot.last_successful_probe_at.is_none());
+                assert_eq!(snapshot.reported_version.as_deref(), Some("1.2.5"));
                 // An upgrade leaves the old diagnostic intact; its fingerprint
                 // cannot turn every later Run into another full-file read.
                 let mut old_snapshot = ready_codex_snapshot();
@@ -8810,6 +8959,18 @@ mod slow_tests {
                 assert_eq!(
                     installation.snapshot.unwrap().executable_fingerprint,
                     Some(fingerprint.clone())
+                );
+                assert!(
+                    !service
+                        .commit_runtime_model_catalog(
+                            &mut database,
+                            &catalog_expected,
+                            &fingerprint,
+                            &models,
+                            &chrono::Utc::now().to_rfc3339()
+                        )
+                        .unwrap(),
+                    "the old directory response must not write into the replacement program"
                 );
                 let identity = service
                     .verified_executable_identity(

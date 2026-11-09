@@ -1396,7 +1396,7 @@ export const MemberRuntimeForm = forwardRef<
             installation={installation}
             draft={draft}
             disabled={(busy !== null || submitting) || !runtimeMutationAllowed}
-            onOpenModelCatalog={(target) => openRuntimeModelCatalog(selectedKind, client.request, false, target)}
+            onOpenModelCatalog={(target) => openRuntimeModelCatalog(selectedKind, client.request, true, target)}
             onChange={(nextDraft) => {
               setDraft(nextDraft)
               setSubmitError(null)

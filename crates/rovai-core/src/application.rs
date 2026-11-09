@@ -2360,7 +2360,6 @@ struct RuntimeCheckWorkerResult {
     attempt_id: String,
     runtime_kind: AdapterKind,
     installation_target: Option<RuntimeCheckInstallationTarget>,
-    catalog_only: bool,
     result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 }
@@ -2409,11 +2408,8 @@ impl RuntimeCheckAttempt {
             && other.startup_preview.is_none()
             && self.model_target == other.model_target
             && self.runtime_kind == other.runtime_kind
-            && (!matches!(
-                self.runtime_kind,
-                AdapterKind::Pi | AdapterKind::MinimaxCodeCli
-            ) || (self.trigger == RuntimeCheckTrigger::CatalogOpen)
-                == (other.trigger == RuntimeCheckTrigger::CatalogOpen))
+            && (self.trigger == RuntimeCheckTrigger::CatalogOpen)
+                == (other.trigger == RuntimeCheckTrigger::CatalogOpen)
             && self.search.generation() == other.search.generation()
             && runtime_check_can_satisfy(self.catalog_only, other.trigger)
     }
@@ -2428,11 +2424,8 @@ impl RuntimeCheckAttempt {
             && self.startup_preview.is_none()
             && self.model_target == request.model_target
             && self.runtime_kind == request.runtime_kind
-            && (!matches!(
-                self.runtime_kind,
-                AdapterKind::Pi | AdapterKind::MinimaxCodeCli
-            ) || (self.trigger == RuntimeCheckTrigger::CatalogOpen)
-                == (request.trigger == RuntimeCheckTrigger::CatalogOpen))
+            && (self.trigger == RuntimeCheckTrigger::CatalogOpen)
+                == (request.trigger == RuntimeCheckTrigger::CatalogOpen)
             && self.search.generation() == request.search.generation()
     }
 }
@@ -4227,12 +4220,6 @@ impl Core {
             let database = self.database.lock().await;
             AgentProfileService::default().managed_installation(&database, kind, "default")?
         };
-        let diagnostic = self
-            .runtime_product_diagnostics
-            .read()
-            .await
-            .get(&kind)
-            .cloned();
         let Some(installation) = installation else {
             return Ok(json!({
                 "runtimeKind": kind,
@@ -4244,9 +4231,7 @@ impl Core {
                 },
                 "models": [],
                 "refreshStatus": refresh_status,
-                "diagnosticCode": if kind == AdapterKind::Pi {
-                    (refresh_status == "failed").then(|| "runtime_model_catalog_refresh_failed".to_string())
-                } else { diagnostic.map(|value| value.diagnostic_code) },
+                "diagnosticCode": (refresh_status == "failed").then_some("runtime_model_catalog_refresh_failed"),
             }));
         };
         let models = if installation.model_catalog_can_display() {
@@ -4263,14 +4248,7 @@ impl Core {
             "cache": installation.model_catalog,
             "models": models,
             "refreshStatus": refresh_status,
-            "diagnosticCode": if kind == AdapterKind::Pi {
-                (refresh_status == "failed").then(|| "runtime_model_catalog_refresh_failed".to_string())
-            } else { installation
-                .last_probe_attempt
-                .as_ref()
-                .filter(|attempt| attempt.status == "failed")
-                .and_then(|attempt| attempt.diagnostic_code.clone())
-                .or_else(|| diagnostic.map(|value| value.diagnostic_code)) },
+            "diagnosticCode": (refresh_status == "failed").then_some("runtime_model_catalog_refresh_failed"),
         }))
     }
 
@@ -4391,23 +4369,7 @@ impl Core {
         {
             return Ok(outcome);
         }
-        // Reuse the existing readiness fallback only when no verified installation exists.
-        let outcome = self
-            .run_product_runtime_resolution_in_environment(
-                kind,
-                RuntimeLaunchPurpose::AvailabilityCheck,
-                tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE,
-                search.clone(),
-                true,
-                None,
-            )
-            .await?;
-        if outcome != RuntimeCheckOutcome::Ready {
-            return Ok(outcome);
-        }
-        self.refresh_verified_runtime_catalog_for_selection(kind, search, selection)
-            .await
-            .map(|outcome| outcome.unwrap_or(RuntimeCheckOutcome::Superseded))
+        Ok(RuntimeCheckOutcome::StableFailure)
     }
 
     async fn runtime_check_installation_target(
@@ -5153,7 +5115,7 @@ impl Core {
             .startup_configuration(kind)
             .ensure_environment_available()?;
         let service = AgentProfileService::default();
-        let (installation, verified_identity) = {
+        let (installation, fingerprint, verified_identity) = {
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
                 return Ok(Some(RuntimeCheckOutcome::Superseded));
             };
@@ -5162,32 +5124,40 @@ impl Core {
             else {
                 return Ok(None);
             };
-            let Some(snapshot) = installation.snapshot.as_ref().filter(|snapshot| {
-                installation.enabled
-                    && installation.path_state == "valid"
-                    && health::catalog_refresh_evidence_current(kind, snapshot)
-            }) else {
-                return Ok(None);
-            };
-            let Some(fingerprint) = snapshot.executable_fingerprint.as_deref() else {
-                return Ok(None);
-            };
-            let verified = service.verified_executable_identity(
+            if !installation.enabled || installation.path_state != "valid" {
+                return Ok(Some(RuntimeCheckOutcome::StableFailure));
+            }
+            // A queued full check may already have supplied the directory.
+            if target.is_none()
+                && installation.model_catalog.status == RuntimeModelCatalogCacheStatus::Fresh
+            {
+                return Ok(Some(RuntimeCheckOutcome::Ready));
+            }
+            let recorded = service.recorded_executable_identity(
                 &database,
                 &installation.id,
                 &installation.executable_path,
-                fingerprint,
             )?;
-            (installation, verified)
+            let fingerprint = recorded
+                .as_ref()
+                .map(|(fingerprint, _)| fingerprint.clone())
+                .or_else(|| {
+                    installation
+                        .snapshot
+                        .as_ref()
+                        .and_then(|snapshot| snapshot.executable_fingerprint.clone())
+                });
+            let Some(fingerprint) = fingerprint else {
+                return Ok(None);
+            };
+            (
+                installation,
+                fingerprint,
+                recorded.map(|(_, identity)| identity),
+            )
         };
         let search_generation = search.generation();
-        let fingerprint = installation
-            .snapshot
-            .as_ref()
-            .unwrap()
-            .executable_fingerprint
-            .as_ref()
-            .unwrap();
+        let fingerprint = &fingerprint;
         let path = Path::new(&installation.executable_path);
         let check_path = path.to_path_buf();
         let check_fingerprint = fingerprint.clone();
@@ -5205,17 +5175,59 @@ impl Core {
         .await
         .context("Catalog identity worker failed")?;
         let Ok(Some(identity)) = identity else {
+            // Resolve only this changed program, using the existing static entry
+            // path. Do not scan other runtimes or escalate to a health check.
+            let locator = service.runtime_entrypoint_locator_identity(
+                &*self.database.lock().await,
+                &installation.id,
+            )?;
+            let saved_path = locator
+                .map(|value| PathBuf::from(value.canonical_shim_path))
+                .unwrap_or_else(|| PathBuf::from(&installation.executable_path));
+            let mut entry_search = search.as_ref().clone();
+            if !search.has_startup_configuration(kind)
+                && matches!(
+                    installation.source,
+                    InstallationSource::Manual | InstallationSource::Custom
+                )
+            {
+                let mut configuration = entry_search.startup_configuration(kind);
+                configuration.program_path = Some(saved_path.to_string_lossy().into_owned());
+                entry_search = entry_search.with_startup_configuration(kind, configuration);
+            }
+            let observation = tokio::task::spawn_blocking(move || {
+                rovai_core::runtime_discovery::discover_runtime_path_with_manual_candidates(
+                    kind,
+                    &entry_search,
+                    [saved_path],
+                )
+            })
+            .await
+            .context("Catalog entry resolution worker failed")?;
+            if observation.discovery_status != RuntimeDiscoveryStatus::Found {
+                return Ok(Some(RuntimeCheckOutcome::StableFailure));
+            }
+            let verified = self.verify_runtime_entry(&observation, None).await?;
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
                 return Ok(Some(RuntimeCheckOutcome::Superseded));
             };
             let mut database = self.database.lock().await;
-            service.mark_runtime_integrity_changed(
-                &mut database,
-                &installation.id,
-                &installation.executable_path,
-                fingerprint,
-            )?;
-            return Ok(None);
+            if service
+                .managed_installation(&database, kind, "default")?
+                .as_ref()
+                .is_some_and(|current| {
+                    current.id == installation.id && current.generation == installation.generation
+                })
+            {
+                service.commit_discovered_runtime_entry(
+                    &mut database,
+                    verified,
+                    Some(&installation.id),
+                )?;
+                drop(database);
+                self.publish_verified_runtime_discovery(observation).await;
+            }
+            return Ok(Some(RuntimeCheckOutcome::Superseded));
         };
         if !self
             .runtime_probe_identity_is_current(kind, search_generation, path, fingerprint)
@@ -5249,6 +5261,10 @@ impl Core {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         };
         if !executable_identity_is_current(path, &identity, fingerprint) {
+            eprintln!(
+                "[model-catalog] write runtime={} rejected=program_changed",
+                kind.as_str()
+            );
             let mut database = self.database.lock().await;
             service.mark_runtime_integrity_changed(
                 &mut database,
@@ -5269,23 +5285,16 @@ impl Core {
         if !current.as_ref().is_some_and(|current| {
             current.id == installation.id
                 && current.generation == installation.generation
-                && if kind == AdapterKind::DeepseekHarness {
-                    current
-                        .snapshot
-                        .as_ref()
-                        .zip(installation.snapshot.as_ref())
-                        .is_some_and(|(current, expected)| {
-                            // Another model's capability write is not an identity change.
-                            // The transaction merges against the latest persisted catalog.
-                            let mut current = current.clone();
-                            current.models.clone_from(&expected.models);
-                            current == *expected
-                        })
-                } else {
-                    current.snapshot == installation.snapshot
-                }
+                && current.executable_path == installation.executable_path
+                && current.auth_scope == installation.auth_scope
+                && current.enabled
+                && current.path_state == "valid"
         }) || self.runtime_search_environment.read().await.generation() != search_generation
         {
+            eprintln!(
+                "[model-catalog] write runtime={} rejected=installation_or_environment_changed",
+                kind.as_str()
+            );
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         }
         match catalog {
@@ -5310,9 +5319,20 @@ impl Core {
                 let committed = service.commit_runtime_model_catalog(
                     &mut database,
                     &installation,
+                    fingerprint,
                     &catalog.models,
                     &chrono::Utc::now().to_rfc3339(),
                 )?;
+                eprintln!(
+                    "[model-catalog] write runtime={} models={} committed={committed} reason={}",
+                    kind.as_str(),
+                    catalog.models.len(),
+                    if committed {
+                        "accepted"
+                    } else {
+                        "installation_or_program_changed"
+                    }
+                );
                 Ok(Some(if committed {
                     RuntimeCheckOutcome::Ready
                 } else {
@@ -5320,25 +5340,11 @@ impl Core {
                 }))
             }
             Err(error) => {
-                // A failed optional model read is not a failed Runtime check.
-                // Keep the usable catalog and all saved member selections.
-                if target.is_some() {
-                    return Ok(Some(RuntimeCheckOutcome::StableFailure));
-                }
-                let failure = health::model_catalog_failure(kind, &error, path);
-                service.record_managed_probe_failure(
-                    &mut database,
-                    ManagedProbeFailure {
-                        adapter_kind: kind,
-                        auth_scope: "default",
-                        candidate_path: &installation.executable_path,
-                        fingerprint: Some(fingerprint),
-                        source: Some(installation.source),
-                        failure_class: "transient",
-                        diagnostic_code: "runtime_model_catalog_refresh_failed",
-                        failure: Some(&failure),
-                    },
-                )?;
+                eprintln!(
+                    "[model-catalog] read runtime={} failed={}",
+                    kind.as_str(),
+                    health::model_catalog_failure(kind, &error, path).code
+                );
                 Ok(Some(RuntimeCheckOutcome::StableFailure))
             }
         }
@@ -6031,21 +6037,21 @@ impl Core {
                 latest_observation.diagnostic_code =
                     failure.as_ref().map(|failure| failure.code.clone());
             }
-            if snapshot.probe_status == "ready" {
-                if kind == AdapterKind::DeepseekHarness {
-                    let context = with_runtime_configuration(kind, &search, async {
-                        crate::dsh::model_options_context(&canonical)
-                    })
-                    .await?;
-                    if snapshot.models.iter().any(|model| {
-                        model
-                            .runtime_metadata
-                            .as_ref()
-                            .is_none_or(|meta| meta["dshOptionsContext"] != context)
-                    }) {
-                        return Ok(RuntimeCheckOutcome::Superseded);
-                    }
+            if kind == AdapterKind::DeepseekHarness {
+                let context = with_runtime_configuration(kind, &search, async {
+                    crate::dsh::model_options_context(&canonical)
+                })
+                .await?;
+                if snapshot.models.iter().any(|model| {
+                    model
+                        .runtime_metadata
+                        .as_ref()
+                        .is_none_or(|meta| meta["dshOptionsContext"] != context)
+                }) {
+                    return Ok(RuntimeCheckOutcome::Superseded);
                 }
+            }
+            if snapshot.probe_status == "ready" {
                 let executable_path = canonical.to_string_lossy().to_string();
                 let mut database = self.database.lock().await;
                 if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
@@ -6156,6 +6162,25 @@ impl Core {
                     failure: failure.as_ref(),
                 },
             )?;
+            // Record the health failure first: its stale marker must not erase
+            // a genuine directory observed earlier in this same diagnostic.
+            if kind != AdapterKind::Pi
+                && (kind != AdapterKind::MinimaxCodeCli || catalog_requested)
+                && rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
+                    &snapshot.models,
+                )
+            {
+                let service = AgentProfileService::default();
+                if let Some(current) = service.managed_installation(&database, kind, "default")? {
+                    service.commit_runtime_model_catalog(
+                        &mut database,
+                        &current,
+                        &candidate_fingerprint,
+                        &snapshot.models,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )?;
+                }
+            }
             commit_target = runtime_installation_revision(&database, kind)?;
             note_product_runtime_diagnostic(
                 &mut unresolved_diagnostic,
@@ -28171,9 +28196,6 @@ async fn process_runtime_check_manager(
                     .iter_mut()
                     .find(|attempt| attempt.accepts(&request, &installation_target))
                 {
-                    if request.trigger != RuntimeCheckTrigger::CatalogOpen {
-                        existing.catalog_only = false;
-                    }
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
                         existing.purpose = request.purpose;
@@ -28224,7 +28246,7 @@ async fn process_runtime_check_manager(
                     deadline,
                     waiters,
                 };
-                if !is_private_check && !(attempt.runtime_kind == AdapterKind::Pi && attempt.catalog_only) {
+                if !is_private_check && !attempt.catalog_only {
                 core.runtime_check_activity.write().await.insert(
                     request.runtime_kind,
                     RuntimeCheckActivity {
@@ -28266,10 +28288,6 @@ async fn process_runtime_check_manager(
                                 if target_advanced {
                                     merge_runtime_check_pending(&core, &mut attempt, &mut pending).await;
                                 }
-                                // A catalog request can fall back to a real full check.
-                                // Preserve its Ready-delivery behavior without letting a
-                                // catalog-only success manufacture verification evidence.
-                                attempt.catalog_only = worker.catalog_only;
                                 execution_deferrals.record(attempt.runtime_kind, attempt.trigger, &worker.result);
                                 finalize_runtime_check(
                                     &core,
@@ -28326,7 +28344,7 @@ async fn process_runtime_check_manager(
             let attempt = pending.swap_remove(next);
             if attempt.startup_preview.is_none()
                 && attempt.model_target.is_none()
-                && !(attempt.runtime_kind == AdapterKind::Pi && attempt.catalog_only)
+                && !attempt.catalog_only
             {
                 core.runtime_check_activity.write().await.insert(
                     attempt.runtime_kind,
@@ -28355,7 +28373,6 @@ async fn process_runtime_check_manager(
             let worker_model_target = attempt.model_target.clone();
             let mut worker_installation_target = attempt.installation_target.clone();
             let abort_handle = checks.spawn(async move {
-                let mut catalog_only = worker_catalog_only;
                 let (result, finalization) = match tokio::time::timeout_at(worker_deadline, async {
                     if let Some(target) = worker_model_target {
                         check_core
@@ -28379,17 +28396,15 @@ async fn process_runtime_check_manager(
                         {
                             return Ok(RuntimeCheckOutcome::Superseded);
                         }
-                        if worker_catalog_only
-                            && let Some(outcome) = check_core
+                        if worker_catalog_only {
+                            return Ok(check_core
                                 .refresh_verified_runtime_catalog(
                                     worker_kind,
                                     worker_search.clone(),
                                 )
                                 .await?
-                        {
-                            return Ok(outcome);
+                                .unwrap_or(RuntimeCheckOutcome::StableFailure));
                         }
-                        catalog_only = false;
                         check_core
                             .run_product_runtime_resolution_in_environment(
                                 worker_kind,
@@ -28421,7 +28436,6 @@ async fn process_runtime_check_manager(
                     attempt_id: worker_attempt_id,
                     runtime_kind: worker_kind,
                     installation_target: worker_installation_target,
-                    catalog_only,
                     result,
                     finalization,
                 }
@@ -28464,6 +28478,18 @@ async fn finalize_runtime_check(
     finalization: RuntimeCheckFinalization,
 ) {
     if attempt.startup_preview.is_some() || attempt.model_target.is_some() {
+        if attempt.model_target.is_some()
+            && result
+                .as_ref()
+                .is_ok_and(|outcome| *outcome == RuntimeCheckOutcome::Ready)
+        {
+            emit(
+                &core.output,
+                "runtime.availability.updated",
+                json!({ "runtimeKind": attempt.runtime_kind,
+                "status": core.current_runtime_availability_status(attempt.runtime_kind).await }),
+            );
+        }
         for waiter in attempt.waiters {
             let _ = waiter.send(result.clone());
         }
@@ -28476,11 +28502,26 @@ async fn finalize_runtime_check(
         result = Ok(RuntimeCheckOutcome::Superseded);
     }
     eprintln!(
-        "[model-catalog] refresh runtime={} total_ms={} outcome={:?}",
+        "[model-catalog] refresh runtime={} trigger={:?} total_ms={} outcome={:?}",
         attempt.runtime_kind.as_str(),
+        attempt.trigger,
         attempt.started_at.elapsed().as_millis(),
         result
     );
+    if attempt.catalog_only {
+        // Publish the existing shared installation projection, not health Ready
+        // or a machine failure. No execution/Ready-delivery side effects.
+        emit(
+            &core.output,
+            "runtime.availability.updated",
+            json!({ "runtimeKind": attempt.runtime_kind,
+            "status": core.current_runtime_availability_status(attempt.runtime_kind).await }),
+        );
+        for waiter in attempt.waiters {
+            let _ = waiter.send(result.clone());
+        }
+        return;
+    }
     let owns_terminal = {
         let mut activity = core.runtime_check_activity.write().await;
         take_runtime_check_activity(&mut activity, attempt.runtime_kind, &attempt.attempt_id)
@@ -31462,9 +31503,8 @@ while IFS= read -r _ignored; do :; done
     #[cfg(all(target_os = "macos", feature = "slow-tests"))]
     #[tokio::test]
     async fn pi_catalog_observations_are_independent_of_health_and_fenced_by_identity() {
-        // Unique owner for Pi's no-health bootstrap, manager coalescing and SQL
-        // readback. The Codex owner intentionally requires a Ready snapshot and
-        // permits full-check fallback, so it cannot own this opposite contract.
+        // Owns Pi's native observation identity, provider errors and no-Session
+        // protocol, which the Codex catalog/health isolation fixture cannot cover.
         let root = std::env::temp_dir().join(format!("rovai-pi-catalog-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let root = root.canonicalize().unwrap();
@@ -31482,6 +31522,10 @@ while IFS= read -r line; do
       while [ ! -f "$root/release" ]; do /bin/sleep 0.01; done
       if [ -f "$root/provider-error" ]; then
         printf '%s\n' '{"type":"extension_error","extensionPath":"fixture.ts","event":"register_provider","error":"invalid provider configuration"}'
+      fi
+      if [ -f "$root/catalog-error" ]; then
+        printf '{"type":"response","id":"%s","command":"get_available_models","success":false,"error":"fixture catalog unavailable"}\n' "$id"
+        continue
       fi
       printf '{"type":"response","id":"%s","command":"get_available_models","success":true,"data":{"models":' "$id"
       /bin/cat "$root/models"
@@ -31680,6 +31724,7 @@ done
         )
         .unwrap();
         std::fs::write(root.join("provider-error"), "").unwrap();
+        std::fs::write(root.join("catalog-error"), "").unwrap();
         assert_eq!(
             core.await_runtime_check(
                 AdapterKind::Pi,
@@ -31696,9 +31741,9 @@ done
             .unwrap();
         assert_eq!(after_failure["models"], before_failure["models"]);
         assert_eq!(after_failure["cache"], before_failure["cache"]);
-        std::fs::remove_file(root.join("provider-error")).unwrap();
-        // Same successful RPC without an exposed error is only an observation:
-        // no invented completeness property, no permanent merge of absent models.
+        std::fs::remove_file(root.join("catalog-error")).unwrap();
+        // An extension/provider error does not invalidate other providers' valid
+        // RPC models. Match the native Pi catalog owner's observation contract.
         assert_eq!(
             core.await_runtime_check(
                 AdapterKind::Pi,
@@ -31718,6 +31763,7 @@ done
             partial["models"][1]["id"],
             "pi://model?provider=fixture&id=partial"
         );
+        std::fs::remove_file(root.join("provider-error")).unwrap();
         for changed_identity in ["installation", "environment", "executable"] {
             std::fs::remove_file(root.join("started")).unwrap();
             std::fs::remove_file(root.join("release")).unwrap();
@@ -31826,11 +31872,15 @@ if [ "$1" = 'login' ]; then exit 0; fi
 if [ "$2" = 'generate-json-schema' ]; then
   /usr/bin/touch "$root/full-started"
   while [ ! -f "$root/full-release" ]; do /bin/sleep 0.01; done
+  if [ -f "$root/schema-error" ] && [ "$(/bin/cat "$root/schema-error")" = exit ]; then exit 1; fi
   while [ "$1" != '--out' ]; do shift; done
   shift; out="$1"; /bin/mkdir -p "$out/v2"
   for name in ClientRequest ServerNotification ServerRequest; do
     printf '%s\n' '["model/list","thread/start","thread/resume","runtimeWorkspaceRoots","turn/start","turn/interrupt","item/agentMessage/delta","turn/completed","item/commandExecution/requestApproval","item/fileChange/requestApproval"]' > "$out/$name.json"
   done
+  if [ -f "$root/schema-error" ]; then
+    for name in ClientRequest ServerNotification ServerRequest; do echo '[]' > "$out/$name.json"; done
+  fi
   for name in ThreadStartResponse TurnStartResponse ItemStartedNotification; do echo '{}' > "$out/v2/$name.json"; done
   echo '{"properties":{"serviceTierForTurn":{}}}' > "$out/v2/TurnStartParams.json"
   exit 0
@@ -31934,6 +31984,10 @@ done
         assert_eq!(displayed["models"][0]["id"], "old-model");
         assert_eq!(displayed["cache"]["status"], "expired");
         file_ready(root.join("catalog-started")).await;
+        assert!(
+            core.runtime_check_activity.read().await.is_empty(),
+            "optional pending directory reads must not project a machine health check"
+        );
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, waiter) = oneshot::channel();
         core.runtime_check_requests
@@ -31993,6 +32047,31 @@ done
                 .count(),
             1
         );
+        {
+            let mut database = core.database.lock().await;
+            let service = AgentProfileService::default();
+            let installation = service
+                .managed_installation(&database, AdapterKind::CodexCli, "default")
+                .unwrap()
+                .unwrap();
+            assert!(
+                service
+                    .record_runtime_version(
+                        &mut database,
+                        &installation.id,
+                        &installation.executable_path,
+                        installation
+                            .snapshot
+                            .as_ref()
+                            .unwrap()
+                            .executable_fingerprint
+                            .as_deref()
+                            .unwrap(),
+                        "metadata-during-catalog"
+                    )
+                    .unwrap()
+            );
+        }
         std::fs::write(root.join("catalog-release"), "").unwrap();
         assert_eq!(waiter.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
         // Catalog completion includes committed writeback, independently of the
@@ -32037,7 +32116,7 @@ done
             "not_required"
         );
         let calls = std::fs::read_to_string(root.join("calls")).unwrap();
-        assert_eq!(calls.lines().filter(|line| *line == "--version").count(), 0);
+        assert_eq!(calls.lines().filter(|line| *line == "--version").count(), 1);
         assert_eq!(
             calls
                 .lines()
@@ -32066,6 +32145,10 @@ done
             .unwrap()
             .lines()
             .count();
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at = ?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')",
+            [&old_time],
+        ).unwrap();
         let light_started = Instant::now();
         assert_eq!(
             core.refresh_verified_runtime_catalog(
@@ -32094,9 +32177,118 @@ done
                 .all(|line| line == "catalog-snapshot")
         );
 
+        // The reverse order also stays isolated. A catalog queued behind a full
+        // check reuses that check's committed directory without a second process.
+        std::fs::remove_file(root.join("full-started")).unwrap();
+        std::fs::remove_file(root.join("full-release")).unwrap();
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET capabilities_json='[]', model_catalog_succeeded_at=?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')", [&old_time],
+        ).unwrap();
+        let full_first = tokio::spawn({
+            let core = core.clone();
+            async move {
+                core.await_runtime_check(
+                    AdapterKind::CodexCli,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap()
+            }
+        });
+        file_ready(root.join("full-started")).await;
+        let processes_before_queued = std::fs::read_to_string(root.join("calls"))
+            .unwrap()
+            .lines()
+            .filter(|line| *line == "app-server --listen stdio://")
+            .count();
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        let (completed, queued_catalog) = oneshot::channel();
+        core.runtime_check_requests
+            .send(
+                RuntimeCheckRequest {
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::CodexCli,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::CatalogOpen,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
+            .unwrap();
+        assert!(
+            acknowledgement.await.unwrap(),
+            "catalog must queue instead of joining the full diagnostic"
+        );
+        std::fs::write(root.join("full-release"), "").unwrap();
+        assert_eq!(full_first.await.unwrap(), RuntimeCheckOutcome::Ready);
+        assert_eq!(
+            queued_catalog.await.unwrap().unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("calls"))
+                .unwrap()
+                .lines()
+                .filter(|line| *line == "app-server --listen stdio://")
+                .count(),
+            processes_before_queued
+        );
+
+        // Force the existing schema owner to inspect again instead of reusing
+        // known capabilities. Both transport failure and missing schema features
+        // retain the catalog without satisfying the failed diagnostic.
+        for schema_failure in ["exit", "missing"] {
+            core.database.lock().await.connection().execute(
+                "UPDATE adapter_capability_snapshot SET capabilities_json='[]' WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')", [],
+            ).unwrap();
+            std::fs::write(root.join("schema-error"), schema_failure).unwrap();
+            std::fs::write(
+                root.join("catalog-result"),
+                r#"{"id":3,"result":{"data":[{"id":"schema-retained"}],"nextCursor":null}}"#,
+            )
+            .unwrap();
+            assert_eq!(
+                core.await_runtime_check(
+                    AdapterKind::CodexCli,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck
+                )
+                .await
+                .unwrap(),
+                RuntimeCheckOutcome::StableFailure
+            );
+            let retained = core
+                .runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+                .await
+                .unwrap();
+            assert_eq!(retained["models"][0]["id"], "schema-retained");
+            assert_eq!(retained["cache"]["status"], "fresh");
+            let health = AgentProfileService::default()
+                .managed_installation(
+                    &*core.database.lock().await,
+                    AdapterKind::CodexCli,
+                    "default",
+                )
+                .unwrap()
+                .unwrap();
+            assert!(health.last_probe_attempt.unwrap().status == "failed");
+            assert_eq!(
+                health.snapshot.unwrap().stale_at.is_some(),
+                schema_failure == "missing"
+            );
+            std::fs::remove_file(root.join("schema-error")).unwrap();
+        }
+
         // Installation identity and search/startup identity are independent
         // fences; late responses cannot overwrite either newer environment.
         for change_search in [false, true] {
+            core.database.lock().await.connection().execute(
+                "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at = ?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')", [&old_time],
+            ).unwrap();
             std::fs::remove_file(root.join("catalog-started")).unwrap();
             std::fs::remove_file(root.join("catalog-release")).unwrap();
             std::fs::write(
@@ -32135,9 +32327,45 @@ done
                     .managed_installation(&database, AdapterKind::CodexCli, "default")
                     .unwrap()
                     .unwrap();
-                assert_eq!(installation.snapshot.unwrap().models[0].id, "new-model");
+                assert_eq!(
+                    installation.snapshot.unwrap().models[0].id,
+                    "schema-retained"
+                );
             }
         }
+        // A program upgrade gets only this installation's static identity first;
+        // the next request can read its directory without a full verification.
+        std::fs::write(&executable, format!("{script}\n# upgraded-program\n")).unwrap();
+        let before_upgrade = std::fs::read_to_string(root.join("calls")).unwrap();
+        assert_eq!(
+            core.refresh_verified_runtime_catalog(
+                AdapterKind::CodexCli,
+                core.runtime_search_environment.read().await.clone()
+            )
+            .await
+            .unwrap(),
+            Some(RuntimeCheckOutcome::Superseded)
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("calls")).unwrap(),
+            before_upgrade
+        );
+        std::fs::write(
+            root.join("catalog-result"),
+            r#"{"id":3,"result":{"data":[{"id":"upgraded-catalog"}],"nextCursor":null}}"#,
+        )
+        .unwrap();
+        let upgraded = core
+            .open_runtime_model_catalog(AdapterKind::CodexCli, true)
+            .await
+            .unwrap();
+        assert_eq!(upgraded["refreshStatus"], "completed");
+        assert_eq!(upgraded["models"][0]["id"], "upgraded-catalog");
+        let upgrade_calls = std::fs::read_to_string(root.join("calls")).unwrap();
+        assert_eq!(
+            upgrade_calls.lines().count() - before_upgrade.lines().count(),
+            1
+        );
         manager.abort();
         let _ = manager.await;
         drop(core);

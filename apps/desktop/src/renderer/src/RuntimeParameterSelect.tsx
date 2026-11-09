@@ -18,7 +18,7 @@ export function RuntimePickerChevron(): React.JSX.Element {
 }
 
 /** Short Runtime enums share the model picker surface; only model catalogs need search. */
-export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loadingLabel }: {
+export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loadingLabel, notice, onRetry, onOpen }: {
   label: string
   value: string
   choices: RuntimeParameterChoice[]
@@ -27,6 +27,9 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
   recommendedValue?: string
   menuGuidance?: string
   loadingLabel?: string
+  notice?: string | null
+  onRetry?(): void
+  onOpen?(): void
   onChange(value: string): void
 }): React.JSX.Element {
   const id = useId()
@@ -37,7 +40,7 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
     hasRecommendation && choice.value === recommendedValue ? t('推荐') : undefined
   return <div className="field-label">
     <label htmlFor={id}>{label}</label>
-    <Menu.Root>
+    <Menu.Root onOpenChange={open => { if (open) onOpen?.() }}>
       <Menu.Trigger asChild>
         <button id={id} type="button" className="runtime-model-picker-trigger" disabled={disabled}
           aria-label={[label, selected?.label ?? value, selected?.description, selected && recommendation(selected)].filter(Boolean).join('，')}
@@ -49,6 +52,10 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
       </Menu.Trigger>
       <Menu.Portal><Menu.Content className="runtime-model-picker-menu runtime-parameter-picker-menu"
         align="start" sideOffset={5} collisionPadding={10} loop>
+        {loadingLabel && <div className="runtime-model-picker-notice" role="status">{loadingLabel}</div>}
+        {notice && <div className="runtime-model-picker-notice" role="status"><span>{notice}</span>
+          {onRetry && <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}>{t('重试')}</button>}
+        </div>}
         <Menu.RadioGroup className="runtime-picker-options" value={value} onValueChange={next => { if (!disabled) onChange(next) }}>
           <div className="runtime-picker-scroll">{choices.map(choice => <Choice key={choice.value} choice={choice} disabled={disabled} recommendation={recommendation(choice)} />)}</div>
           {defaultChoice && <div className="runtime-picker-default"><Choice choice={defaultChoice} disabled={disabled} /></div>}

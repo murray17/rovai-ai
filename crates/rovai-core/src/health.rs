@@ -420,32 +420,6 @@ pub async fn antigravity_capability_probe_at(
     antigravity_probe_at(path, true, fingerprint, known_version, known_capabilities).await
 }
 
-/// Only the existing verified snapshot authorizes omitting full checks. Session
-/// authentication/handshakes required to read a native catalog still run.
-pub fn catalog_refresh_evidence_current(
-    kind: AdapterKind,
-    snapshot: &rovai_core::agent_profile::AdapterCapabilitySnapshot,
-) -> bool {
-    let required = match kind {
-        AdapterKind::CodexCli => vec!["model.list".into(), "app_server.initialize".into()],
-        AdapterKind::ClaudeCodeCli => vec![CLAUDE_MODEL_CATALOG_CAPABILITY.into()],
-        AdapterKind::AntigravityApp => vec!["model.list".into()],
-        AdapterKind::Pi => pi_machine_ready_requirements(),
-        _ => acp_required_capabilities(kind),
-    };
-    snapshot.probe_status == "ready"
-        && snapshot.authentication_status == "authenticated"
-        && snapshot.stale_at.is_none()
-        && snapshot.last_successful_probe_at.is_some()
-        && rovai_core::agent_runtime_adapter::validate_machine_ready_snapshot(kind, snapshot)
-            .is_ok()
-        && (kind != AdapterKind::ZcodeApp
-            || rovai_core::zcode::supported_version(snapshot.reported_version.as_deref()))
-        && required
-            .iter()
-            .all(|capability| snapshot.capabilities.contains(capability))
-}
-
 /// Catalog-only branch of the same check task. Returns models, never Ready evidence.
 #[derive(Debug)]
 pub struct RefreshedModelCatalog {
@@ -2371,29 +2345,42 @@ async fn run_acp_probe_with_scope(
                     // Native catalogs may include an unconfigured Provider or a
                     // variant that this release cannot select. Its unavailable
                     // options must not hide the working native default/catalog.
-                    let Ok(selected) = read_rpc_result(lines, id).await else {
-                        continue;
+                    let selected = match read_rpc_result(lines, id).await {
+                        Ok(selected) => selected,
+                        Err(error)
+                            if error
+                                .to_string()
+                                .starts_with(&format!("RPC request {id} was rejected:")) =>
+                        {
+                            continue;
+                        }
+                        Err(error) => return Err(error),
                     };
-                    if crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
-                        .as_deref()
-                        != Some(model.id.as_str())
-                    {
-                        continue;
-                    }
-                    let Some(chosen) = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                    anyhow::ensure!(
+                        crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
+                            .as_deref()
+                            == Some(model.id.as_str()),
+                        "MiniMax model selection response did not match the requested model"
+                    );
+                    let chosen = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
                         kind, &selected,
-                    )
-                    .ok()
-                    .and_then(|models| models.into_iter().find(|entry| entry.id == model.id)) else {
-                        continue;
-                    };
+                    )?
+                    .into_iter()
+                    .find(|entry| entry.id == model.id)
+                    .context("MiniMax selected model was missing from its response")?;
                     options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
                 }
                 if let Some(original) = original {
                     let id = 1000 + models.len() as u64;
                     write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
                         "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
-                    let _ = read_rpc_result(lines, id).await;
+                    if let Err(error) = read_rpc_result(lines, id).await
+                        && !error
+                            .to_string()
+                            .starts_with(&format!("RPC request {id} was rejected:"))
+                    {
+                        return Err(error);
+                    }
                 }
                 session["_meta"]["rovaiMinimaxModelOptions"] = Value::Object(options);
             }
@@ -3423,7 +3410,7 @@ async fn codex_runtime_probe_uncached(
             Ok(result) => result,
             Err(error) => {
                 return CodexCapabilityProbe {
-                    raw_model_catalog: None,
+                    raw_model_catalog: Some(raw_model_catalog),
                     result: probe_result(
                         Some(path_text),
                         reported_version,
@@ -4058,66 +4045,6 @@ for line in sys.stdin:
                     assert_eq!(launches.lines().count(), 1);
                     assert!(!launches.contains("--experimental"));
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn catalog_refresh_requires_current_full_acp_evidence() {
-        for kind in [
-            AdapterKind::HermesCli,
-            AdapterKind::OpencodeCli,
-            AdapterKind::CopilotCli,
-            AdapterKind::KiroCli,
-            AdapterKind::QoderCli,
-            AdapterKind::CodebuddyCli,
-            AdapterKind::QwenCode,
-            AdapterKind::TraeCnCli,
-            AdapterKind::CursorAgent,
-            AdapterKind::KimiCodeCli,
-            AdapterKind::GrokBuild,
-            AdapterKind::ZcodeApp,
-        ] {
-            let snapshot = AgentRuntimeAdapterRegistry::default().acp_capability_snapshot(AcpProbeObservation {
-                adapter_kind: kind,
-                reported_version: Some(if kind == AdapterKind::ZcodeApp { "0.17.0" } else { "1.0.0" }.into()),
-                executable_fingerprint: Some("sha256:fixture".into()),
-                authentication_status: "authenticated".into(), probe_status: "ready".into(),
-                capabilities: acp_required_capabilities(kind),
-                initialize_result: Some(json!({"protocolVersion":1})),
-                session_result: Some(json!({"sessionId":"fixture-session", "models":{
-                    "currentModelId":"fixture", "availableModels":[{"modelId":"fixture", "name":"Fixture"}]},
-                    "modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]}})),
-                attempted_at: "2000-01-01T00:00:00Z".into(), last_error: None,
-            }).unwrap();
-            assert!(
-                catalog_refresh_evidence_current(kind, &snapshot),
-                "{kind:?}: expired directory alone must not require full verification"
-            );
-            for invalidation in ["status", "auth", "capability", "stale", "success"] {
-                let mut invalid = snapshot.clone();
-                match invalidation {
-                    "status" => invalid.probe_status = "installed_unverified".into(),
-                    "auth" => invalid.authentication_status = "unknown".into(),
-                    "capability" => invalid.capabilities.clear(),
-                    "stale" => invalid.stale_at = Some("2000-01-02T00:00:00Z".into()),
-                    "success" => invalid.last_successful_probe_at = None,
-                    _ => unreachable!(),
-                }
-                assert!(
-                    !catalog_refresh_evidence_current(kind, &invalid),
-                    "{kind:?}: {invalidation}"
-                );
-            }
-            if kind == AdapterKind::HermesCli {
-                let mut legacy = snapshot;
-                legacy
-                    .capabilities
-                    .push("context.charter.managed_system_prompt".into());
-                assert!(
-                    catalog_refresh_evidence_current(kind, &legacy),
-                    "extra legacy metadata cannot invalidate usable catalog protocol evidence"
-                );
             }
         }
     }

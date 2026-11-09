@@ -4357,7 +4357,7 @@ export function BusinessApp({
           )}
           onRefreshRuntime={() => void refreshOnboardingRuntime()}
           onOpenModelCatalog={async (runtimeKind, target) => {
-            const catalog = await openRuntimeModelCatalog(runtimeKind, client.request, false, target)
+            const catalog = await openRuntimeModelCatalog(runtimeKind, client.request, true, target)
             await loadInstallations()
             return catalog
           }}

@@ -39,6 +39,7 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
 function Fixture(): React.JSX.Element {
   const [kind, setKind] = useState<AdapterKind>('codex-cli')
   const [page, setPage] = useState('member')
+  const [visible, setVisible] = useState(true)
   const [mode, setMode] = useState('normal')
   const [generation, setGeneration] = useState(1)
   const [catalogExpired, setCatalogExpired] = useState(false)
@@ -46,7 +47,7 @@ function Fixture(): React.JSX.Element {
   const [dshReadMode, setDshReadMode] = useState('normal')
   const [observation, setObservation] = useState(0)
   const installation = fixture(kind, mode === 'empty' || mode === 'pending', generation,
-    mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
+    mode === 'failed' || mode === 'failed-empty' || mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
   if (kind === 'pi' && state.piInvalidated) installation.modelCatalog.status = 'invalidated'
@@ -57,18 +58,18 @@ function Fixture(): React.JSX.Element {
   }
   if (kind === 'deepseek-harness' && observation) installation.modelCatalog.observedAt = `2026-09-${15 + observation}T00:00:00Z`
   Object.assign(window, { runtimeTest: Object.assign(state, {
-    draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled,
+    draft, kind, generation, setVisible, catalogStatus: installation.modelCatalog.status, setDisabled,
     expireCatalog: () => setCatalogExpired(true),
     invalidatePiCatalog: () => { state.piInvalidated = true; setObservation(value => value + 1) },
     setDshReadMode,
     setDshCacheShape: (shape: string | null) => { state.dshCacheShape = shape; state.dshCache = {}; setObservation(value => value + 1) },
-    refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setObservation(value => value + 1) },
+    refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setGeneration(value => value + 1) },
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
     switchKind: (next: AdapterKind) => { setKind(next); setDraft(draftFromDefaults(fixture(next, false, generation).memberRuntimeDefaults!)) },
-    reset: (nextPage = 'member', nextMode = 'normal') => {
+    reset: (nextPage = 'member', nextMode = 'normal', nextVisible = true) => {
       state.changes = 0
       state.piInvalidated = false; state.piCatalogModels = null; setObservation(0)
-      setPage(nextPage); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false)
+      setPage(nextPage); setVisible(nextVisible); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false)
       const item = fixture('codex-cli', false, 1); setKind('codex-cli')
       setDraft({ model: onboardingRuntimeSelectionFor('codex-cli', [item]).model!, permissions: item.memberRuntimeDefaults!.permissions })
     },
@@ -161,8 +162,8 @@ function Fixture(): React.JSX.Element {
       <button id="before" type="button">前一项</button>
       {page === 'member' && <MemberRuntimePicker id="runtime" value={kind} disabled={disabled} isDisabled={next => !['codex-cli', 'claude-code-cli', 'command-code-cli'].includes(next)} onChange={next => { if (next) state.switchKind(next) }} />}
       {page === 'member'
-        ? <div className="member-editor-runtime-fields"><MemberRuntimeParameters adapterKind={kind} installation={installation} draft={draft} disabled={disabled} onOpenModelCatalog={catalog} onChange={next => { state.changes++; setDraft(next) }} /></div>
-        : <MemberModelParameters adapterKind={kind} installation={installation} model={draft.model} disabled={disabled} onOpenModelCatalog={catalog} onChange={model => { state.changes++; setDraft({ ...draft, model }) }} />}
+        ? <div className="member-editor-runtime-fields"><MemberRuntimeParameters active={visible} adapterKind={kind} installation={installation} draft={draft} disabled={disabled} onOpenModelCatalog={catalog} onChange={next => { state.changes++; setDraft(next) }} /></div>
+        : <MemberModelParameters active={visible} adapterKind={kind} installation={installation} model={draft.model} disabled={disabled} onOpenModelCatalog={catalog} onChange={model => { state.changes++; setDraft({ ...draft, model }) }} />}
       <button id="after" type="button">下一项</button>
       <p style={{ marginTop: 360 }}>原生输入集成夹具；不启动 Core 或 Runtime。</p>
     </section>

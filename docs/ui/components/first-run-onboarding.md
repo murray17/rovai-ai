@@ -2,7 +2,7 @@
 document_type: ui-component-spec
 authority: first-run-onboarding-presentation
 status: accepted
-last_updated: 2026-10-30
+last_updated: 2026-11-09
 ---
 
 # 首次训练与“初次集结”
@@ -55,8 +55,9 @@ Desktop 用已完成 onboarding 快照中的 `quickChatThreadId` 识别首次会
 也不常驻解释验证机制。检查与执行边界见 [Runtime Launch](../../contracts/runtime-launch-and-verification-v74.md)。
 
 模型字段复用队员运行配置的 schema 驱动组件，遵循 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md)。
-目录只用于发现和选择，不作为保存或执行准入；读取失败保留当前值与有效缓存并显示“尚未核对”。
-打开 Picker 使用 Core-owned 60 秒 stale-while-revalidate，切换 Runtime 不触发 discovery。
+目录只用于发现和选择，不作为保存或执行准入；保存值直接显示原值，读取失败在候选区域提示并提供重试。
+可见参数页按需尝试一次，模型与强度共享读取；沿用 Core-owned 60 秒/24 小时缓存，有效目录直接复用。
+目录时间、metadata 与保存状态更新不自行重试；切换 Runtime 不触发 discovery。
 菜单的搜索、默认项置底及推理强度样式与[队员配置](member-identity.md#队员配置页)同步。初始模型保持 Runtime Default；
 用户从 Runtime Default 首次选择固定模型后，推理强度保持跟随模型默认值，不预填 schema 的推荐值。
 此后在同一 Runtime 内切换固定模型时，按队员配置的显式覆盖值兼容规则处理；过期历史目录和异步刷新均

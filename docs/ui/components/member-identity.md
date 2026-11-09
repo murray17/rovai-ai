@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-member-identity
 status: accepted
-last_updated: 2026-11-04
+last_updated: 2026-11-09
 ---
 
 # 队员身份与图像
@@ -95,8 +95,10 @@ CodeBuddy 的“推理强度”使用原生 `thought_level`，候选值来自 Co
 原生响应归属与兼容规则见 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#codebuddy-原生档位)。
 
 目录缓存状态沿用 Core 投影，Renderer 不自行计算 TTL。同一环境和身份的过期目录仍可用于选择。
-读取失败显示“模型与参数尚未核对”，保留当前模型、参数与有效缓存；未枚举的已存值显示“尚未核对 · 值”，
-允许更改或清除，不显示“不支持”或“当前目录未提供”。异步目录刷新只更新候选项，不改写草稿。
+可见参数页进入时按需尝试一次目录读取，模型与强度共享结果、pending 和错误；隐藏页不读取。
+已有有效目录直接复用，目录时间、metadata 或保存状态更新只更新展示，不再次自动读取。
+加载和失败提示放在候选区域，失败可手动重试；保存值直接显示原值，即使目录未列出也允许更改或清除。
+异步目录刷新只更新候选项，不改写草稿。
 保存不以目录为门槛，执行交给原生 Runtime 判定，见 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md)。
 
 DeepSeek Harness 的两个权限字段以原生名称作为主标签：`sandbox_mode` 与 `approval_policy`。选项也逐字显示

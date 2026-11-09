@@ -3,10 +3,58 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-08
+last_updated: 2026-11-09
 ---
 
 # v1.72 实施与验收
+
+## 模型目录与强度共享加载修复（2026-11-09）
+
+在独立 worktree / `rovai/model-catalog-loading` 实施，保留原工作区的 PR #986 集成分支。
+以该分支 `70a2ab30a` 为来源合入 `origin/main` 的 `38c075162`，合并点为 `131e26a50`。
+保留 main 的检查前版本补写、检查目标同步与 Hermes 单一默认项；版本补写与目录并发写回共同验证，
+不以整张健康快照相等作为目录提交条件。
+
+复用 `runtime.modelCatalog.open`、Check Manager、安装身份及原有目录 JSON/成功时间。
+目录请求只合并同用途请求，不回退完整检查；排在完整检查后复查成功目录。
+目录 pending 不进入机器健康检查投影，成功和失败均不建立 Ready 或增加保存、执行门槛。
+目录只按安装、程序与有效环境归属写回，同身份版本和静态快照更新保留成功目录；真实身份变化拒绝旧响应。
+完整诊断在目录后失败时，先保留真实失败，再按当前身份保存已取得的目录，避免健康失效标记盖掉新目录。
+
+Renderer 在可见参数页共用一个目录、pending、错误与自动尝试；隐藏页不读，结果与 metadata 更新不自动重试。
+两个下拉共享候选与重试，保存值直接显示原值，目录不调用草稿 `onChange`。
+DSH 保留原目标缓存和目标补读，删除独立的重复 effect；MiniMax 保留一次刷新内的临时 Session 遍历，
+单模型明确拒绝可跳过，进程/连接/协议失败使整轮失败并保留旧目录。
+没有新增 API、字段、表、缓存、轮询、事件或任务系统，也没有普通 Run 目录读取。
+当前规则同步至 [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实)、
+[Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#用户界面)、
+[队员配置](../../ui/components/member-identity.md)与[引导页](../../ui/components/first-run-onboarding.md)。
+
+验证扩展既有 owner，不增加 Rust 测试函数：
+
+- `discovered_entry_configures_and_freezes_without_health_evidence`：保存/冻结不依赖健康或目录，
+  同身份版本补写穿插目录提交，以及程序替换拒绝旧响应。
+- `failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale`：既有三种快照写入路径，
+  额外覆盖静态元数据写入保留同指纹目录成功时间、不同指纹不继承时间，以及成功与失效时间仅差一纳秒的顺序。
+- `codex_catalog_waiters_share_refresh_without_satisfying_full_validation`：请求合并、用途隔离、pending 不投影健康检查、
+  版本补写不丢结果、排队后缓存复用、schema 失败保留目录及安装/环境旧响应 fencing；
+  升级仅更新目标程序的静态身份，随后只启动一次目录查询，不扫描其他 Runtime 或启动完整检查。
+- `minimax_check_and_catalog_keep_their_intent_and_complete_options`：完整遍历仅一次、后续健康结果不覆盖目录，
+  单模型原生拒绝与断连/坏协议分别处理。Pi 原 observation owner 保留 known/unknown 与独立身份语义；
+  同步其过时 Provider 错误断言，目录 RPC 失败仍保留旧观察。
+
+退役 `health::tests::catalog_refresh_requires_current_full_acp_evidence`：它拥有的 Ready/完整健康前置条件
+随生产函数一起删除，由上述目录和事务 owner 覆盖新边界；主动诊断的能力验证没有退出。
+Renderer 删除旧文案 helper 的断言，其加载、失败和原值展示由既有参数测试与隔离 Electron picker owner 覆盖。
+最小 Rust 命令使用 `cargo test -p rovai-core --features slow-tests --lib <上述 owner 名称>`。
+
+已通过上述五个定向 Rust owner、类型检查、Vitest 3,265 项（2 既有跳过）、隔离 Electron picker 回归、
+Desktop/Web/只读执行页构建与 macOS arm64 Core debug 三个 sidecar 构建。
+`cargo test --workspace`：495 通过、1 既有 ignored；定向 slow owner 均为实际非零用例。
+`TZ=UTC pnpm test` 的 Node 主套件为 376 通过、1 失败、2 平台跳过：继承基线的
+`scripts/benchmark/protocol/product-contract.test.mjs` 仍断言 schema 172，而合并基线 `131e26a50` 的
+Core 已为 177；两处均不在本次目录修复中修改。文档治理使用真实合并基线检查。
+本轮不启动日常 App、真实模型或本机 CLI 目录查询，叮叮的现场缓存未刷新；不把夹具结果声明为真实账号或跨平台验收。
 
 ## 执行台自动打开偏好（2026-11-08）
 
