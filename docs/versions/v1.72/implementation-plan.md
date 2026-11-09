@@ -8,6 +8,16 @@ last_updated: 2026-11-08
 
 # v1.72 实施与验收
 
+## Kilo 官方 ACP 原生研究（2026-11-08）
+
+分支 `rovai/kilo-acp`，worktree `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
+基线 `origin/main @ 958784f6e17fc32d8b2753d7f14fd6122dceea9d`。不迁移主 checkout 的其他工作。
+[R1 提案](kilo-acp-proposal.md)记录输入层次、最小模块、实施顺序、验证 owner 和 pending 确认；
+[研究矩阵](../../research/kilo-runtime/README.md)区分源码、实际 Kilo+本地夹具及未实现的 Core 链路。
+当前新增独立原生探针，不修改生产实现或 Rust 测试。
+官方 7.8.27 加本地 Provider 的独立探针、两个 Host 进程组退出检查、Node 语法检查及
+通用文档单测/普通/指定 base 门禁均通过；这不代表 Core 集成、真实付费模型或其他平台已通过。
+
 ## 执行台自动打开偏好（2026-11-08）
 
 独立 worktree 从 `origin/main` 的 `cab7f7788eddaad3308a9d5574de649ecb1ae6e5` 建立，

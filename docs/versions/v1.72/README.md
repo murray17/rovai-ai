@@ -11,6 +11,14 @@ last_updated: 2026-11-08
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Kilo 官方 ACP（2026-11-08，研究）
+
+独立 worktree 已完成官方 7.8.27 macOS arm64 与本地 Provider 的原生探测；
+工具输出、MCP、warm instructions、真实手动压缩和精确冷恢复证据见
+[研究记录](../../research/kilo-runtime/README.md)。接入建议复用共享 ACP/Fleet，
+一个 Binding 一个 Host，原生 instructions 承载现有 Bootstrap，不增加 SHA256 校验或压缩插件。
+[完整 R1 输入与实施提案](kilo-acp-proposal.md)待 User 二次确认；产品 Adapter、Schema、当前合同和平台准入尚未修改。
+
 ## 执行台自动打开偏好（2026-11-08）
 
 按 User 确认，在“通用 → 会话”增加默认关闭的“自动打开执行台”，统一控制 Desktop／宽屏 Web

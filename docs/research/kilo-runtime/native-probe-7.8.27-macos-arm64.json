@@ -1,0 +1,178 @@
+{
+  "platform": "darwin-arm64",
+  "checks": {
+    "first": {
+      "calls": 3,
+      "result": {
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 75,
+          "outputTokens": 20,
+          "totalTokens": 120,
+          "cachedReadTokens": 25
+        },
+        "_meta": {}
+      },
+      "nativeUsage": [
+        {
+          "id": "msg_1bf258397001BTUDks9BCw3221",
+          "input": 75,
+          "output": 20,
+          "cacheRead": 25
+        },
+        {
+          "id": "msg_1bf25841e001Ud8IMTHqQz06ts",
+          "input": 75,
+          "output": 20,
+          "cacheRead": 25
+        }
+      ],
+      "commandOutput": "KILO_STDOUTKILO_STDERR"
+    },
+    "questionDisabled": true,
+    "warmInstructionsAndMcp": true,
+    "manualCompact": {
+      "result": {
+        "stopReason": "end_turn",
+        "_meta": {}
+      },
+      "calls": 1,
+      "nativeSummaries": 1
+    },
+    "instructionsAfterCompact": true,
+    "sameHostEmptyMcpRetainsA": true,
+    "coldResume": {
+      "sessionId": "ses_e40da7d26ffe9Ry6v234yGJ9HC",
+      "historyMessages": 6,
+      "mcpToolsPresent": false
+    },
+    "unknownSessionRejected": {
+      "message": "Internal error: OpenCode service failure",
+      "error": {
+        "code": -32603,
+        "message": "Internal error: OpenCode service failure",
+        "data": {
+          "service": "session"
+        }
+      }
+    }
+  },
+  "version": "7.8.27",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "mcpCapabilities": {
+        "http": true,
+        "sse": true
+      },
+      "promptCapabilities": {
+        "embeddedContext": true,
+        "image": true
+      },
+      "sessionCapabilities": {
+        "close": {},
+        "fork": {},
+        "list": {},
+        "resume": {}
+      }
+    },
+    "authMethods": [
+      {
+        "description": "Run `kilo auth login` in the terminal",
+        "name": "Login with Kilo",
+        "id": "kilo-login"
+      }
+    ],
+    "agentInfo": {
+      "name": "Kilo",
+      "version": "7.8.27"
+    }
+  },
+  "session": {
+    "sessionId": "ses_e40da7d26ffe9Ry6v234yGJ9HC",
+    "configOptions": [
+      {
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "type": "select",
+        "currentValue": "local/local-model",
+        "options": [
+          {
+            "value": "local/local-model",
+            "name": "Local probe/Local model"
+          }
+        ]
+      },
+      {
+        "id": "mode",
+        "name": "Session Mode",
+        "category": "mode",
+        "type": "select",
+        "currentValue": "code",
+        "options": [
+          {
+            "value": "code",
+            "name": "code",
+            "description": "The default agent. Executes tools based on configured permissions."
+          },
+          {
+            "value": "ask",
+            "name": "ask",
+            "description": "Get answers and explanations without making changes to the codebase."
+          },
+          {
+            "value": "debug",
+            "name": "debug",
+            "description": "Diagnose and fix software issues with systematic debugging methodology."
+          },
+          {
+            "value": "orchestrator",
+            "name": "orchestrator",
+            "description": "Coordinate complex tasks by delegating to specialized agents in parallel."
+          },
+          {
+            "value": "plan",
+            "name": "plan",
+            "description": "Plan mode. Can only edit plan files; all other filesystem mutations are denied."
+          }
+        ]
+      }
+    ]
+  },
+  "modelCalls": 9,
+  "status": "passed",
+  "hostPids": [
+    13738,
+    13886
+  ],
+  "cleanup": [
+    {
+      "status": "fulfilled",
+      "value": {
+        "closed": true
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "closed": true
+      }
+    }
+  ],
+  "scope": "official-kilo-with-local-provider-fixture",
+  "qualificationGranted": false,
+  "recordedAt": "2026-11-09T07:12:20.140497+00:00",
+  "upstreamCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "processGroupsAfterProbe": [
+    {
+      "pid": 13738,
+      "groupAbsent": true
+    },
+    {
+      "pid": 13886,
+      "groupAbsent": true
+    }
+  ]
+}
