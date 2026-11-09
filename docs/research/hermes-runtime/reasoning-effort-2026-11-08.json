@@ -1,0 +1,2363 @@
+{
+  "date": "2026-11-08",
+  "rovaiBase": "958784f6e17fc32d8b2753d7f14fd6122dceea9d",
+  "testedCoreSha256": "fd0c1989974c5b53d4c304e374515f8a9e0fb1ae048ca284f80b9553f67ead11",
+  "reproductionScriptSha256": "fa1fce9af15705c2d70d8933a8bba8e8d703a9696316f39a4aae898b60d8b248",
+  "productionScope": "Existing option read/save; frozen reasoning_effort via official ACP after model; existing error/response handling; no echo equality gate or observation persistence",
+  "channel": "Isolated automatic acceptance with production Core/CLI, separate Home/Profile/Gateway, data-dir, Skill Library and MCP",
+  "records": [
+    {
+      "kind": "controlled_0230",
+      "fixture": "rovai-hermes-effort-cdmUPE",
+      "rawResultSha256": "de2a1d55133b78694153c36acca1710fcccbdbbad54bda848509d68a83904cb7",
+      "nativeVersion": "v0.23.0",
+      "nativeCommit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "gatewayVersion": "v0.23.0",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "cases": [
+        {
+          "label": "B0",
+          "runId": "21c24b65-88b3-41db-aa21-3838f11e4bd5",
+          "status": "succeeded",
+          "session": "local-44564a1fa1e7a9b52bbe977517a531a9500cd030070686590c282270cda5c343",
+          "connection": [
+            {
+              "pid": 12427,
+              "method": "initialize"
+            },
+            {
+              "pid": 12427,
+              "method": "session/new"
+            },
+            {
+              "pid": 12427,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 12427,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12427,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "B0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "B0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A0",
+          "runId": "c3dd377c-95e4-490e-9e12-bff3b7d73774",
+          "status": "succeeded",
+          "session": "local-5ea1c25d128f037161f46c45c05ef3d893beca5eac061d7d1eedd748d973c0f8",
+          "connection": [
+            {
+              "pid": 12428,
+              "method": "initialize"
+            },
+            {
+              "pid": 12428,
+              "method": "session/new"
+            },
+            {
+              "pid": 12428,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "pid": 12428,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12428,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "high",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A1",
+          "runId": "a4754061-e210-462f-a9b0-f7592016ab94",
+          "status": "succeeded",
+          "session": "local-5ea1c25d128f037161f46c45c05ef3d893beca5eac061d7d1eedd748d973c0f8",
+          "connection": [
+            {
+              "pid": 12856,
+              "method": "initialize"
+            },
+            {
+              "pid": 12856,
+              "method": "session/resume"
+            },
+            {
+              "pid": 12856,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 12856,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A1",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A1",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A2",
+          "runId": "0873034b-fa8b-41d1-9fc7-5480588815d7",
+          "status": "succeeded",
+          "session": "local-5ea1c25d128f037161f46c45c05ef3d893beca5eac061d7d1eedd748d973c0f8",
+          "connection": [
+            {
+              "pid": 12929,
+              "method": "initialize"
+            },
+            {
+              "pid": 12929,
+              "method": "session/resume"
+            },
+            {
+              "pid": 12929,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "pid": 12929,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A2",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A2",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A3",
+          "runId": "172fb9b6-439d-49ec-94ff-d6a08c759553",
+          "status": "succeeded",
+          "session": "local-5ea1c25d128f037161f46c45c05ef3d893beca5eac061d7d1eedd748d973c0f8",
+          "connection": [
+            {
+              "pid": 13013,
+              "method": "initialize"
+            },
+            {
+              "pid": 13013,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13013,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "none"
+            },
+            {
+              "pid": 13013,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A3",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            },
+            {
+              "label": "A3",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "none"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "none",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A4",
+          "runId": "ef8533e5-6bdd-448e-8bd9-bab4945c674e",
+          "status": "succeeded",
+          "session": "local-5ea1c25d128f037161f46c45c05ef3d893beca5eac061d7d1eedd748d973c0f8",
+          "connection": [
+            {
+              "pid": 13133,
+              "method": "initialize"
+            },
+            {
+              "pid": 13133,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13133,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A4",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            },
+            {
+              "label": "A4",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "nativeReplies": []
+        },
+        {
+          "label": "A5",
+          "runId": "9e495f91-3275-4dcf-8cfc-4c288a58eb2e",
+          "status": "succeeded",
+          "session": "local-5ea1c25d128f037161f46c45c05ef3d893beca5eac061d7d1eedd748d973c0f8",
+          "connection": [
+            {
+              "pid": 13203,
+              "method": "initialize"
+            },
+            {
+              "pid": 13203,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13203,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "pid": 13203,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A5",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A5",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A6",
+          "runId": "d4555e4c-1059-465b-ab5b-0d27f6e1bef6",
+          "status": "succeeded",
+          "session": "local-5ea1c25d128f037161f46c45c05ef3d893beca5eac061d7d1eedd748d973c0f8",
+          "connection": [
+            {
+              "pid": 13397,
+              "method": "initialize"
+            },
+            {
+              "pid": 13397,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13397,
+              "method": "session/set_model"
+            },
+            {
+              "pid": 13397,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "pid": 13397,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A6",
+              "main": true,
+              "model": "other-probe",
+              "effort": "high"
+            },
+            {
+              "label": "A6",
+              "main": true,
+              "model": "other-probe",
+              "effort": "high"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:other-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "high",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "BAD",
+          "runId": "49e0f64a-8e9e-47a9-bfb0-e6223ac3025e",
+          "status": "failed",
+          "session": "local-44564a1fa1e7a9b52bbe977517a531a9500cd030070686590c282270cda5c343",
+          "connection": [
+            {
+              "pid": 12427,
+              "method": "initialize"
+            },
+            {
+              "pid": 12427,
+              "method": "session/new"
+            },
+            {
+              "pid": 12427,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 12427,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12427,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [],
+          "errorCode": "runtime_launch_failed",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "not-a-native-effort"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        }
+      ],
+      "providerRequestCount": 37,
+      "mainProviderRequestCount": 16
+    },
+    {
+      "kind": "controlled_0226",
+      "fixture": "rovai-hermes-effort-H42aB0",
+      "rawResultSha256": "9eef466ccf872579fbe1ec4189a86c6e59ede71606ac33267661e0c0fedb7f48",
+      "nativeVersion": "v0.22.6",
+      "nativeCommit": "f0d94882e89ab8d4098b5bb2f166adfb9ee0a0ab",
+      "gatewayVersion": "v0.22.6",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "cases": [
+        {
+          "label": "A0",
+          "runId": "b60e8c73-c0b6-4800-b17d-9a9f483b0e38",
+          "status": "succeeded",
+          "session": "local-7b16ccffe836c779df8287830e6d2a646c2a833a23d254537a6a0b593d67b48a",
+          "connection": [
+            {
+              "pid": 12426,
+              "method": "initialize"
+            },
+            {
+              "pid": 12426,
+              "method": "session/new"
+            },
+            {
+              "pid": 12426,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "pid": 12426,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12426,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "high",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "B0",
+          "runId": "a3d476da-6f80-4b00-84c6-61233c4a12cf",
+          "status": "succeeded",
+          "session": "local-7fa8511ac64e9432a0cd2bb49c2d622b3c535cf844770da90a809a4ecf322477",
+          "connection": [
+            {
+              "pid": 12425,
+              "method": "initialize"
+            },
+            {
+              "pid": 12425,
+              "method": "session/new"
+            },
+            {
+              "pid": 12425,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 12425,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12425,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "B0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "B0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A1",
+          "runId": "92cb3218-aab5-4783-bea8-051babc0c1f2",
+          "status": "succeeded",
+          "session": "local-7b16ccffe836c779df8287830e6d2a646c2a833a23d254537a6a0b593d67b48a",
+          "connection": [
+            {
+              "pid": 12855,
+              "method": "initialize"
+            },
+            {
+              "pid": 12855,
+              "method": "session/resume"
+            },
+            {
+              "pid": 12855,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 12855,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A1",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A1",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A2",
+          "runId": "c3610cd0-cb0b-4c8c-a052-c08f363b85d2",
+          "status": "succeeded",
+          "session": "local-7b16ccffe836c779df8287830e6d2a646c2a833a23d254537a6a0b593d67b48a",
+          "connection": [
+            {
+              "pid": 12928,
+              "method": "initialize"
+            },
+            {
+              "pid": 12928,
+              "method": "session/resume"
+            },
+            {
+              "pid": 12928,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "pid": 12928,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A2",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A2",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A3",
+          "runId": "44adbd9c-156b-40ba-9dfa-ee6f651a27a2",
+          "status": "succeeded",
+          "session": "local-7b16ccffe836c779df8287830e6d2a646c2a833a23d254537a6a0b593d67b48a",
+          "connection": [
+            {
+              "pid": 13014,
+              "method": "initialize"
+            },
+            {
+              "pid": 13014,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13014,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "none"
+            },
+            {
+              "pid": 13014,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A3",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            },
+            {
+              "label": "A3",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "none"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "none",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A4",
+          "runId": "812fa5b7-9d9a-42bb-962e-3fe2309c1b38",
+          "status": "succeeded",
+          "session": "local-7b16ccffe836c779df8287830e6d2a646c2a833a23d254537a6a0b593d67b48a",
+          "connection": [
+            {
+              "pid": 13131,
+              "method": "initialize"
+            },
+            {
+              "pid": 13131,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13131,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A4",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            },
+            {
+              "label": "A4",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "nativeReplies": []
+        },
+        {
+          "label": "A5",
+          "runId": "9e837b55-5e38-4bf0-bf0a-a8e07694853f",
+          "status": "succeeded",
+          "session": "local-7b16ccffe836c779df8287830e6d2a646c2a833a23d254537a6a0b593d67b48a",
+          "connection": [
+            {
+              "pid": 13201,
+              "method": "initialize"
+            },
+            {
+              "pid": 13201,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13201,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "pid": 13201,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A5",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A5",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A6",
+          "runId": "06177715-4c91-438e-aeb1-3d30254ea1a2",
+          "status": "succeeded",
+          "session": "local-7b16ccffe836c779df8287830e6d2a646c2a833a23d254537a6a0b593d67b48a",
+          "connection": [
+            {
+              "pid": 13395,
+              "method": "initialize"
+            },
+            {
+              "pid": 13395,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13395,
+              "method": "session/set_model"
+            },
+            {
+              "pid": 13395,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "pid": 13395,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A6",
+              "main": true,
+              "model": "other-probe",
+              "effort": "high"
+            },
+            {
+              "label": "A6",
+              "main": true,
+              "model": "other-probe",
+              "effort": "high"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:other-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "high",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "BAD",
+          "runId": "a9412b48-1812-4da9-93a5-562762963ee8",
+          "status": "failed",
+          "session": "local-7fa8511ac64e9432a0cd2bb49c2d622b3c535cf844770da90a809a4ecf322477",
+          "connection": [
+            {
+              "pid": 12425,
+              "method": "initialize"
+            },
+            {
+              "pid": 12425,
+              "method": "session/new"
+            },
+            {
+              "pid": 12425,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 12425,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12425,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [],
+          "errorCode": "runtime_launch_failed",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "not-a-native-effort"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        }
+      ],
+      "providerRequestCount": 36,
+      "mainProviderRequestCount": 16
+    },
+    {
+      "kind": "legacy_0224",
+      "fixture": "rovai-hermes-effort-oIt90J",
+      "rawResultSha256": "6899529c15f021eea344735ed50b66f8cf3c3a8a2e14300b8a4eb4f978b7272f",
+      "nativeVersion": "v0.22.4",
+      "nativeCommit": "4d04303818b61bf3aa09278af48356315515965b",
+      "gatewayVersion": "v0.22.4",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "cases": [
+        {
+          "label": "LEGACY_BASE",
+          "runId": "75722ce4-5e38-474f-9c61-1ff848f3f9c0",
+          "status": "succeeded",
+          "session": "local-b82995b8560080ab6832bcc5fe538e91d396213738dd24326b6efcf751ba3ba4",
+          "connection": [
+            {
+              "pid": 12846,
+              "method": "initialize"
+            },
+            {
+              "pid": 12846,
+              "method": "session/new"
+            },
+            {
+              "pid": 12846,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12846,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "LEGACY_BASE",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "LEGACY_BASE",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "nativeReplies": []
+        },
+        {
+          "label": "LEGACY_OVERRIDE",
+          "runId": "41151d6a-aee0-4eb1-9688-f732e3328283",
+          "status": "failed",
+          "session": "local-b82995b8560080ab6832bcc5fe538e91d396213738dd24326b6efcf751ba3ba4",
+          "connection": [
+            {
+              "pid": 12846,
+              "method": "initialize"
+            },
+            {
+              "pid": 12846,
+              "method": "session/new"
+            },
+            {
+              "pid": 12846,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 12846,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [],
+          "errorCode": "runtime_launch_failed",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": []
+        }
+      ],
+      "providerRequestCount": 8,
+      "mainProviderRequestCount": 2
+    },
+    {
+      "kind": "real_0230",
+      "fixture": "rovai-hermes-effort-hk2nFD",
+      "rawResultSha256": "2373a27f81655d321690a7de56bf5ff8daf593e80b32fa8ac895093841d12cdf",
+      "nativeVersion": "v0.23.0",
+      "nativeCommit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "gatewayVersion": "v0.23.0",
+      "realModel": true,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "cases": [
+        {
+          "label": "B0",
+          "runId": "9fe3f36b-19b0-4727-aded-442fd3a1d6f1",
+          "status": "succeeded",
+          "session": "local-32b0972d66b9a4aba46de1ead3515cfebd718dc745423fbb0b8d233c73c6a295",
+          "connection": [
+            {
+              "pid": 13108,
+              "method": "initialize"
+            },
+            {
+              "pid": 13108,
+              "method": "session/new"
+            },
+            {
+              "pid": 13108,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 13108,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 13108,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "B0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            },
+            {
+              "label": "B0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A0",
+          "runId": "42edd5d1-5639-428d-a240-f865480621cf",
+          "status": "succeeded",
+          "session": "local-a0145ecc7e14eccb0b562c07376322de8949b6fe350900d33de6725422877c61",
+          "connection": [
+            {
+              "pid": 13107,
+              "method": "initialize"
+            },
+            {
+              "pid": 13107,
+              "method": "session/new"
+            },
+            {
+              "pid": 13107,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "pid": 13107,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 13107,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "high",
+              "httpStatus": 200
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "high",
+              "httpStatus": 200
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "high",
+              "httpStatus": 200
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "high",
+              "httpStatus": 200
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "high",
+              "httpStatus": 200
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "high",
+              "httpStatus": 200
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "high",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A1",
+          "runId": "ec6de6fe-b2d3-45fb-98e6-f6e90c180559",
+          "status": "succeeded",
+          "session": "local-a0145ecc7e14eccb0b562c07376322de8949b6fe350900d33de6725422877c61",
+          "connection": [
+            {
+              "pid": 13931,
+              "method": "initialize"
+            },
+            {
+              "pid": 13931,
+              "method": "session/resume"
+            },
+            {
+              "pid": 13931,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 13931,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A1",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            },
+            {
+              "label": "A1",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            },
+            {
+              "label": "A1",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A2",
+          "runId": "6b88b8a6-9cc1-46eb-9529-6d162ec3c47b",
+          "status": "succeeded",
+          "session": "local-a0145ecc7e14eccb0b562c07376322de8949b6fe350900d33de6725422877c61",
+          "connection": [
+            {
+              "pid": 14121,
+              "method": "initialize"
+            },
+            {
+              "pid": 14121,
+              "method": "session/resume"
+            },
+            {
+              "pid": 14121,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "pid": 14121,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A2",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            },
+            {
+              "label": "A2",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            },
+            {
+              "label": "A2",
+              "main": true,
+              "model": "gpt-6.1-sol",
+              "effort": "low",
+              "httpStatus": 200
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:sub2api:gpt-6.1-sol",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        }
+      ],
+      "providerRequestCount": 16,
+      "mainProviderRequestCount": 14
+    },
+    {
+      "kind": "client_0230_gateway_0224",
+      "fixture": "rovai-hermes-effort-5qfCBu",
+      "rawResultSha256": "d4e218d9d1aff9cdbf68f239d49b1a886cebcc817b6da52818a9fa1ece20fed8",
+      "nativeVersion": "v0.23.0",
+      "nativeCommit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "gatewayVersion": "v0.22.4",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [],
+      "cases": [
+        {
+          "label": "A0",
+          "runId": "a0f59206-5a72-42c1-b254-9ffe18302ac1",
+          "status": "succeeded",
+          "session": "local-ccf7a6f87390e7bb55330b44d948dc0a54feef17edce5f36de19bcb723b25758",
+          "connection": [
+            {
+              "pid": 13980,
+              "method": "initialize"
+            },
+            {
+              "pid": 13980,
+              "method": "session/new"
+            },
+            {
+              "pid": 13980,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "pid": 13980,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 13980,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            },
+            {
+              "label": "A0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "high",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "B0",
+          "runId": "cb84240f-248d-413b-96b7-e7e454771ba2",
+          "status": "succeeded",
+          "session": "local-28c382de77e091dad8b47b956fad98302501411727cbd763bee195ea69a1352e",
+          "connection": [
+            {
+              "pid": 13981,
+              "method": "initialize"
+            },
+            {
+              "pid": 13981,
+              "method": "session/new"
+            },
+            {
+              "pid": 13981,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 13981,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 13981,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "B0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "B0",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A1",
+          "runId": "f669437d-1ac2-4b50-a713-cb3d599cf6f8",
+          "status": "succeeded",
+          "session": "local-ccf7a6f87390e7bb55330b44d948dc0a54feef17edce5f36de19bcb723b25758",
+          "connection": [
+            {
+              "pid": 14088,
+              "method": "initialize"
+            },
+            {
+              "pid": 14088,
+              "method": "session/resume"
+            },
+            {
+              "pid": 14088,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 14088,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A1",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A1",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "low"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A2",
+          "runId": "fd3a7762-2928-4c52-a1d9-9a1ec44f5e6f",
+          "status": "succeeded",
+          "session": "local-ccf7a6f87390e7bb55330b44d948dc0a54feef17edce5f36de19bcb723b25758",
+          "connection": [
+            {
+              "pid": 14155,
+              "method": "initialize"
+            },
+            {
+              "pid": 14155,
+              "method": "session/resume"
+            },
+            {
+              "pid": 14155,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "pid": 14155,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A2",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A2",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A3",
+          "runId": "195fd0f0-6aed-463f-ab37-f953d71a7bc8",
+          "status": "succeeded",
+          "session": "local-ccf7a6f87390e7bb55330b44d948dc0a54feef17edce5f36de19bcb723b25758",
+          "connection": [
+            {
+              "pid": 14398,
+              "method": "initialize"
+            },
+            {
+              "pid": 14398,
+              "method": "session/resume"
+            },
+            {
+              "pid": 14398,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "none"
+            },
+            {
+              "pid": 14398,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A3",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            },
+            {
+              "label": "A3",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "none"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "none",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A4",
+          "runId": "76ec3d1b-2937-4604-ae34-a88994bd0114",
+          "status": "succeeded",
+          "session": "local-ccf7a6f87390e7bb55330b44d948dc0a54feef17edce5f36de19bcb723b25758",
+          "connection": [
+            {
+              "pid": 14478,
+              "method": "initialize"
+            },
+            {
+              "pid": 14478,
+              "method": "session/resume"
+            },
+            {
+              "pid": 14478,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A4",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            },
+            {
+              "label": "A4",
+              "main": true,
+              "model": "native-probe",
+              "effort": "none"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "nativeReplies": []
+        },
+        {
+          "label": "A5",
+          "runId": "1ec512f0-90b2-4eb0-9f69-e0b2e529a252",
+          "status": "succeeded",
+          "session": "local-ccf7a6f87390e7bb55330b44d948dc0a54feef17edce5f36de19bcb723b25758",
+          "connection": [
+            {
+              "pid": 14540,
+              "method": "initialize"
+            },
+            {
+              "pid": 14540,
+              "method": "session/resume"
+            },
+            {
+              "pid": 14540,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "default"
+            },
+            {
+              "pid": 14540,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A5",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "A5",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "default"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "A6",
+          "runId": "e064bf2c-959e-48da-b8ec-20424267bd1c",
+          "status": "succeeded",
+          "session": "local-ccf7a6f87390e7bb55330b44d948dc0a54feef17edce5f36de19bcb723b25758",
+          "connection": [
+            {
+              "pid": 14617,
+              "method": "initialize"
+            },
+            {
+              "pid": 14617,
+              "method": "session/resume"
+            },
+            {
+              "pid": 14617,
+              "method": "session/set_model"
+            },
+            {
+              "pid": 14617,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "high"
+            },
+            {
+              "pid": 14617,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "A6",
+              "main": true,
+              "model": "other-probe",
+              "effort": "high"
+            },
+            {
+              "label": "A6",
+              "main": true,
+              "model": "other-probe",
+              "effort": "high"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:other-probe",
+            "options": {
+              "reasoning_effort": "high"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "high",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "label": "BAD",
+          "runId": "0aeaca35-acdf-4764-afad-6db9598e4a5d",
+          "status": "failed",
+          "session": "local-28c382de77e091dad8b47b956fad98302501411727cbd763bee195ea69a1352e",
+          "connection": [
+            {
+              "pid": 13981,
+              "method": "initialize"
+            },
+            {
+              "pid": 13981,
+              "method": "session/new"
+            },
+            {
+              "pid": 13981,
+              "method": "session/set_config_option",
+              "configId": "reasoning_effort",
+              "configValue": "low"
+            },
+            {
+              "pid": 13981,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 13981,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [],
+          "errorCode": "runtime_launch_failed",
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {
+              "reasoning_effort": "not-a-native-effort"
+            }
+          },
+          "nativeReplies": [
+            [
+              {
+                "currentValue": "low",
+                "category": "thought_level",
+                "values": [
+                  "none",
+                  "minimal",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max",
+                  "ultra"
+                ]
+              }
+            ]
+          ]
+        }
+      ],
+      "providerRequestCount": 36,
+      "mainProviderRequestCount": 16
+    },
+    {
+      "kind": "native_deferred_0230",
+      "fixture": "rovai-hermes-effort-Q8o1fH",
+      "rawResultSha256": "bc59ecbc06c6e0f161d3304ecf8265fbb35602e5be21dc68230da4720cba698f",
+      "nativeVersion": "v0.23.0",
+      "nativeCommit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "gatewayVersion": "v0.23.0",
+      "realModel": false,
+      "configUnchanged": true,
+      "nativeChecks": [
+        {
+          "name": "busy_native_setter",
+          "requested": "high",
+          "reportedBeforeBoundary": "low"
+        },
+        {
+          "name": "native_deferred_choice_applies_at_boundary",
+          "providerEffort": "high"
+        }
+      ],
+      "cases": [
+        {
+          "label": "DEFER",
+          "runId": "b0557407-11e3-4f0f-9e5b-ab02758b956b",
+          "status": "succeeded",
+          "session": "local-af6f0dc73d35f71d7d94bb40fb4355ec24857b830d8bd469e18aeb1542a8dbdc",
+          "connection": [
+            {
+              "pid": 17186,
+              "method": "initialize"
+            },
+            {
+              "pid": 17186,
+              "method": "session/new"
+            },
+            {
+              "pid": 17186,
+              "method": "session/set_mode"
+            },
+            {
+              "pid": 17186,
+              "method": "session/prompt"
+            },
+            {
+              "pid": 17186,
+              "method": "session/request_permission"
+            }
+          ],
+          "provider": [
+            {
+              "label": "DEFER",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "DEFER",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            },
+            {
+              "label": "DEFER",
+              "main": true,
+              "model": "native-probe",
+              "effort": "low"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "nativeReplies": []
+        },
+        {
+          "label": "AFTER_DEFER",
+          "runId": "4a3a4b45-77e0-4685-be82-74e968801822",
+          "status": "succeeded",
+          "session": "local-af6f0dc73d35f71d7d94bb40fb4355ec24857b830d8bd469e18aeb1542a8dbdc",
+          "connection": [
+            {
+              "pid": 17590,
+              "method": "initialize"
+            },
+            {
+              "pid": 17590,
+              "method": "session/resume"
+            },
+            {
+              "pid": 17590,
+              "method": "session/prompt"
+            }
+          ],
+          "provider": [
+            {
+              "label": "AFTER_DEFER",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            },
+            {
+              "label": "AFTER_DEFER",
+              "main": true,
+              "model": "native-probe",
+              "effort": "high"
+            }
+          ],
+          "errorCode": null,
+          "frozenRunSelection": {
+            "source": "explicit",
+            "modelId": "custom:fixture:native-probe",
+            "options": {}
+          },
+          "nativeReplies": []
+        }
+      ],
+      "providerRequestCount": 15,
+      "mainProviderRequestCount": 5
+    }
+  ],
+  "protocolTests": {
+    "owner": "real_acp_session_model_selection_respects_native_adapter_boundaries",
+    "result": "passed",
+    "cases": [
+      "new and cold resume",
+      "same model still sets effort",
+      "model before effort",
+      "none and default preserved",
+      "native rejection stops prompt",
+      "missing echo accepted",
+      "old-value/deferred echo accepted"
+    ]
+  },
+  "limits": [
+    "macOS arm64 only; no new cross-platform qualification",
+    "Real Provider model gpt-6.1-sol via existing authorized Responses route; not all model/Provider combinations",
+    "Provider parameter capture and native observers are acceptance-only",
+    "Native Gateway may defer a busy choice; ACP normal reply does not assert immediate application"
+  ],
+  "fixtureDevelopmentCorrections": [
+    "Official install stamp generator needs update mechanism and explicit base version",
+    "Core command envelopes use payload.threadId and accepted commandResult for message submission",
+    "Native Python gate requires existing approval resolution; first deferred attempt stopped its owned Gateway and is not counted as passing"
+  ],
+  "validation": {
+    "targetedRust": "passed: existing Hermes/parser/catalog/ACP owners",
+    "renderer": "41 tests passed; typecheck and desktop build passed",
+    "docs": "passed: 10 governance tests, version/decision checks and base-aware CI checks",
+    "workspace": {
+      "final": "passed: pnpm test:rust:pr (cargo test --workspace)",
+      "firstAttempt": "437 passed, 1 ignored, 1 failure: runtime_probe_process::tests::successful_leader_with_stdio_holding_descendant_finishes_bounded",
+      "standaloneRecheck": "same runtime_probe_stdout_cleanup_timed_out",
+      "fullRecheck": "all workspace tests passed",
+      "unchangedSources": [
+        "crates/rovai-core/src/runtime_probe_process.rs",
+        "crates/rovai-core/src/managed_process.rs",
+        "crates/rovai-core/src/managed_process/macos.rs"
+      ]
+    }
+  }
+}
