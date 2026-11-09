@@ -8,15 +8,15 @@ last_updated: 2026-11-08
 
 # v1.72 实施与验收
 
-## Kilo 官方 ACP 原生研究（2026-11-08）
+## Kilo 官方 ACP（2026-11-08，Preview 实施）
 
 分支 `rovai/kilo-acp`，worktree `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
 基线 `origin/main @ 958784f6e17fc32d8b2753d7f14fd6122dceea9d`。不迁移主 checkout 的其他工作。
-[R1 提案](kilo-acp-proposal.md)记录输入层次、最小模块、实施顺序、验证 owner 和 pending 确认；
-[研究矩阵](../../research/kilo-runtime/README.md)区分源码、实际 Kilo+本地夹具及未实现的 Core 链路。
-当前新增独立原生探针，不修改生产实现或 Rust 测试。
-官方 7.8.27 加本地 Provider 的独立探针、两个 Host 进程组退出检查、Node 语法检查及
-通用文档单测/普通/指定 base 门禁均通过；这不代表 Core 集成、真实付费模型或其他平台已通过。
+[R1](model-context-change-kilo-acp.md)已获 User sequence 4 确认，生产实现采用共享 ACP/Fleet、
+单 Binding Host、原生 instructions、权限/Session/CLI 与逐调用数值 owner；新增目录和 schema 173。
+官方 7.8.27 与本地 Provider 的原生探针及真实 Core 路径分别记账；
+具体门禁、Golden Flows 和未测范围集中在[实施记录](kilo-acp-implementation.md)。
+按 [D76](decisions.md#v1-72-d76)仅 macOS arm64 Preview；其他平台、付费模型与完整 First-Class 资格不由本机夹具推导。
 
 ## 执行台自动打开偏好（2026-11-08）
 

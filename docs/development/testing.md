@@ -152,6 +152,28 @@ cargo test -p rovai-core --lib --features extended-tests native_
 cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts
 ```
 
+## Kilo 官方 ACP 验证归属
+
+Kilo 扩展现有 Adapter 默认值/闭集、Context 投递、平台准入、原生配置及数值 owners，不新增 Rust 测试函数。
+`runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 同时覆盖 migration 223/schema 172→173
+七个闭集表、触发器、行保留与事务失败回滚；旧 fixture 的 downgrade/upgrade 链延伸到当前 marker。
+`opencode_detector_plugin_is_additive_to_runtime_config` 增加 Kilo 原生 JSON5 合并、权限保留、instructions 去重与无 plugin 断言；
+`opencode_metadata_excludes_old_pending_child_and_repeated_calls` 增加 Kilo 消息计费与重复 poll 去重。
+最小定向入口为：
+
+```sh
+cargo test -p rovai-core --features extended-tests --lib runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts
+cargo test -p rovai-core --features extended-tests --lib opencode_detector_plugin_is_additive_to_runtime_config
+cargo test -p rovai-core --features extended-tests --lib opencode_metadata_excludes_old_pending_child_and_repeated_calls
+```
+
+默认 workspace、TypeScript/Renderer/Node 和跨边界 Desktop build 仍须通过。
+真实官方 CLI 的独立原生探针为 `node scripts/probe-kilo-runtime.mjs`，生产 Core 入口为
+`node scripts/smoke-kilo-runtime.mjs`；均须显式 `ROVAI_KILO_BIN`，不注册到默认测试。
+Core smoke 使用系统临时根的独立 data/Skills/MCP、成员专属 XDG data 与 loopback Provider，
+分别验证首次/warm/cold、原生审批、取消后继与共享部分采样；不使用日常配置或账户。
+当前矩阵与真实证据见[实施记录](../versions/v1.72/kilo-acp-implementation.md)。
+
 ## Rust 测试准入与退役门槛
 
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess

@@ -668,6 +668,14 @@ fn user_roots(
             );
             paths.push(agents);
         }
+        AdapterKind::KiloCli => {
+            let xdg = configured_root("XDG_CONFIG_HOME", home.join(".config"), configuration);
+            paths.push(
+                configured_root("KILO_CONFIG_DIR", xdg.join("kilo"), configuration).join("skills"),
+            );
+            paths.push(agents);
+            paths.push(claude);
+        }
         AdapterKind::OpencodeCli => {
             let xdg = configured_root("XDG_CONFIG_HOME", home.join(".config"), configuration);
             paths.push(xdg.join("opencode/skills"));
@@ -779,6 +787,7 @@ fn project_roots(adapter: AdapterKind, project: &Path) -> Vec<(&'static str, Pat
             | AdapterKind::ClaudeCodeCli
             | AdapterKind::Pi
             | AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | AdapterKind::MinimaxCodeCli
     );
     let mut directories = vec![project.to_path_buf()];
@@ -800,6 +809,12 @@ fn project_roots(adapter: AdapterKind, project: &Path) -> Vec<(&'static str, Pat
         AdapterKind::ClaudeCodeCli => &[".claude/skills"],
         AdapterKind::Pi => &[".pi/skills", ".agents/skills"],
         AdapterKind::OpencodeCli => &[".opencode/skills", ".agents/skills", ".claude/skills"],
+        AdapterKind::KiloCli => &[
+            ".kilo/skills",
+            ".kilocode/skills",
+            ".agents/skills",
+            ".claude/skills",
+        ],
         AdapterKind::CopilotCli => &[".github/skills", ".agents/skills", ".claude/skills"],
         AdapterKind::HermesCli => &[".hermes/skills", ".agents/skills"],
         AdapterKind::KiroCli => &[".kiro/skills"],

@@ -70,6 +70,7 @@ const ADAPTER_KINDS: readonly AdapterKind[] = [
   'codex-cli',
   'pi',
   'opencode-cli',
+  'kilo-cli',
   'copilot-cli',
   'claude-code-cli',
   'kiro-cli',

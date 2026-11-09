@@ -55,6 +55,8 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contracts/runtime-launch-and-verification-v76.md)、
 [公开 Runtime failure](../architecture/runtime-catalog-boundaries.md#内部诊断与公开-runtime-failure)。
 
+- Kilo 官方 ACP：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#kilo-官方-acp)、[Launch v77](../contracts/runtime-launch-and-verification-v77.md)；单 Binding Host 与原生 instructions 的取舍见 [D76](../versions/v1.72/decisions.md#v1-72-d76)。
+
 ## Public Thread 消息与多输入 AgentRun
 
 - 原生成功与文字发布分离：[Runtime Launch v75](../contracts/runtime-launch-and-verification-v75.md)、

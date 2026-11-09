@@ -2100,7 +2100,9 @@ fn eligible_mask(runtime: AdapterKind, _runtime_version: Option<&str>) -> i64 {
         | AdapterKind::Pi
         | AdapterKind::GrokBuild
         | AdapterKind::AntigravityApp => full_tokens,
-        AdapterKind::ClaudeCodeCli | AdapterKind::CopilotCli => full_tokens | ELIGIBLE_COST,
+        AdapterKind::ClaudeCodeCli | AdapterKind::CopilotCli | AdapterKind::KiloCli => {
+            full_tokens | ELIGIBLE_COST
+        }
         AdapterKind::CodebuddyCli => (full_tokens & !ELIGIBLE_CACHE_WRITE) | ELIGIBLE_COST,
         AdapterKind::QwenCode => {
             (full_tokens & !(ELIGIBLE_UNCACHED_INPUT | ELIGIBLE_CACHE_WRITE)) | ELIGIBLE_COST
@@ -3591,7 +3593,7 @@ pub fn parse_acp_usage_message(
 
         let cost = if matches!(
             adapter_kind,
-            AdapterKind::OpencodeCli | AdapterKind::CommandCodeCli
+            AdapterKind::OpencodeCli | AdapterKind::KiloCli | AdapterKind::CommandCodeCli
         ) {
             // These adapters report total Session cost here, not the current
             // Turn/Run cost. A Run projection requires a Native Session-scoped

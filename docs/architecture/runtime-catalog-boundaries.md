@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-04
+last_updated: 2026-11-08
 ---
 
 # Runtime Catalog Boundaries
@@ -48,7 +48,7 @@ Antigravity 适配器通过 `--print-timeout 0` 等待原生整轮结束，保�
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含二十种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前包含二十一种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 当前不展示 Settings Preview row。DeepSeek Harness 通过官方 ACP profile 接入；macOS arm64、macOS x64、
 Windows x64 与 Linux x64 分别绑定平台专属证据并取得 qualified。
 产品目录的机器可判数量、全量检查、诊断分母和
@@ -64,6 +64,17 @@ Command Code 在 macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。�
 `not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，`unsupported` 显示平台不支持。
 后两者不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
 可以原样读取并在修改无关队员字段时原样保留，但不能修改 Runtime 子对象、重新保存默认值或执行。
+
+## Kilo 官方 ACP
+
+Kilo 是独立的官方 ACP 产品身份，复用共享 Host/Fleet/Binding 与现有原生审批。
+每个成员的 Native Binding 使用自己的 resident Host，MCP 实际更新在既有生命周期边界退役进程，
+原生会话仍以保存的精确 ID 恢复；不增加 Kilo 私有池、配置镜像或原生历史管理。
+Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共享冻结正文；
+无需压缩插件或校验握手。监控复用逐消息 numeric reader，原生配置、认证和数据继续归 Kilo 自己拥有。
+启动、原生权限、数值口径和模型输入见 [Runtime Launch v77](../contracts/runtime-launch-and-verification-v77.md)。
+macOS arm64 当前为 Preview，其他平台 NotQualified；不由编译或原生握手宣称完整资格。
+理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
 
 <a id="command-code-研究接入边界"></a>
 ## Command Code ACP 实施边界

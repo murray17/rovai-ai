@@ -39,6 +39,7 @@ pub enum AdapterKind {
     CodexCli,
     Pi,
     OpencodeCli,
+    KiloCli,
     CopilotCli,
     ClaudeCodeCli,
     ClineCli,
@@ -102,10 +103,11 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::CodexCli,
         Self::Pi,
         Self::OpencodeCli,
+        Self::KiloCli,
         Self::CopilotCli,
         Self::ClaudeCodeCli,
         Self::ClineCli,
@@ -130,6 +132,7 @@ impl AdapterKind {
             Self::CodexCli => "codex-cli",
             Self::Pi => "pi",
             Self::OpencodeCli => "opencode-cli",
+            Self::KiloCli => "kilo-cli",
             Self::CopilotCli => "copilot-cli",
             Self::ClaudeCodeCli => "claude-code-cli",
             Self::ClineCli => "cline-cli",
@@ -155,6 +158,7 @@ impl AdapterKind {
             Self::CodexCli => "codex",
             Self::Pi => "pi",
             Self::OpencodeCli => "opencode",
+            Self::KiloCli => "kilo",
             Self::CopilotCli => "copilot",
             Self::ClaudeCodeCli => "claude",
             Self::ClineCli => "cline",
@@ -192,6 +196,7 @@ impl AdapterKind {
             Self::ZcodeApp => &["ZCode"],
             Self::CodexCli => &["codex"],
             Self::OpencodeCli => &["opencode"],
+            Self::KiloCli => &["kilo"],
             Self::CopilotCli => &["copilot"],
             Self::ClaudeCodeCli => &["claude"],
             Self::ClineCli => &["cline"],
@@ -210,6 +215,7 @@ impl AdapterKind {
             Self::CodexCli => "Codex CLI",
             Self::Pi => "Pi Coding Agent",
             Self::OpencodeCli => "OpenCode",
+            Self::KiloCli => "Kilo",
             Self::CopilotCli => "GitHub Copilot",
             Self::ClaudeCodeCli => "Claude Code",
             Self::ClineCli => "Cline",
@@ -241,6 +247,7 @@ impl AdapterKind {
         matches!(
             self,
             Self::OpencodeCli
+                | Self::KiloCli
                 | Self::CopilotCli
                 | Self::CommandCodeCli
                 | Self::ClineCli
@@ -264,6 +271,7 @@ impl AdapterKind {
             Self::CodexCli => "ROVAI_CODEX_BIN",
             Self::Pi => "ROVAI_PI_BIN",
             Self::OpencodeCli => "ROVAI_OPENCODE_BIN",
+            Self::KiloCli => "ROVAI_KILO_BIN",
             Self::CopilotCli => "ROVAI_COPILOT_BIN",
             Self::ClaudeCodeCli => "ROVAI_CLAUDE_CODE_BIN",
             Self::ClineCli => "ROVAI_CLINE_BIN",
@@ -294,6 +302,7 @@ impl AdapterKind {
             Self::CodexCli
             | Self::Pi
             | Self::OpencodeCli
+            | Self::KiloCli
             | Self::CopilotCli
             | Self::CommandCodeCli
             | Self::ClineCli
@@ -322,6 +331,7 @@ impl AdapterKind {
             Self::CodexCli
             | Self::Pi
             | Self::OpencodeCli
+            | Self::KiloCli
             | Self::CopilotCli
             | Self::CommandCodeCli
             | Self::ClineCli
@@ -351,6 +361,7 @@ impl FromStr for AdapterKind {
             "codex-cli" => Ok(Self::CodexCli),
             "pi" => Ok(Self::Pi),
             "opencode-cli" => Ok(Self::OpencodeCli),
+            "kilo-cli" => Ok(Self::KiloCli),
             "copilot-cli" => Ok(Self::CopilotCli),
             "claude-code-cli" => Ok(Self::ClaudeCodeCli),
             "cline-cli" => Ok(Self::ClineCli),
@@ -4439,6 +4450,7 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         AdapterKind::ClaudeCodeCli => "claude-code-print-v1",
         AdapterKind::AntigravityApp => "antigravity-app-cli-v1",
         AdapterKind::OpencodeCli
+        | AdapterKind::KiloCli
         | AdapterKind::CopilotCli
         | AdapterKind::KiroCli
         | AdapterKind::QoderCli

@@ -15,6 +15,7 @@ import zcodeLogo from './assets/runtime-logos/zcode.png'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
 import kimiLogo from './assets/runtime-logos/kimi.svg'
 import openCodeLogo from './assets/runtime-logos/opencode.svg'
+import kiloLogo from './assets/runtime-logos/kilo.svg'
 import piLogo from './assets/runtime-logos/pi.svg'
 import qoderLogo from './assets/runtime-logos/qoder-color.svg'
 import qwenLogo from './assets/runtime-logos/qwen-color.svg'
@@ -25,6 +26,7 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'codex-cli',
   'copilot-cli',
   'opencode-cli',
+  'kilo-cli',
   'kiro-cli',
   'qoder-cli',
   'codebuddy-cli',
@@ -64,6 +66,7 @@ export const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'codex-cli': codexLogo,
   'copilot-cli': copilotLogo,
   'opencode-cli': openCodeLogo,
+  'kilo-cli': kiloLogo,
   'kiro-cli': kiroLogo,
   'qoder-cli': qoderLogo,
   'codebuddy-cli': codeBuddyLogo,
@@ -86,6 +89,7 @@ export function adapterLabel(kind: AdapterKind): string {
     'codex-cli': 'Codex CLI',
     pi: 'PI',
     'opencode-cli': 'OpenCode',
+    'kilo-cli': 'Kilo',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
     'kiro-cli': 'Kiro',

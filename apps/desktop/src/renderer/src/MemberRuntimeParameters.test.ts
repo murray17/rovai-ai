@@ -575,6 +575,7 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'pi':
       return {}
     case 'opencode-cli':
+    case 'kilo-cli':
       return { permission: 'allow' }
     case 'copilot-cli':
       return { allow_all: 'on' }

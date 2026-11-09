@@ -1,16 +1,19 @@
 ---
 document_type: research-record
 authority: non-normative-runtime-evidence
-status: research
+status: implemented-preview
 last_updated: 2026-11-08
 ---
 
 # Kilo 原生 ACP 研究与实际探测
 
-结论：采用官方 `kilo acp`，复用共享 ACP/Fleet 可行；建议单 Binding Host 和原生 instructions，
+结论：采用官方 `kilo acp`，复用共享 ACP/Fleet；单 Binding Host 和原生 instructions 已用于产品实现，
 不增加压缩插件、独立进程池、配置镜像、二次审批或 SHA256 校验。
-当前没有 Kilo 产品 Adapter，不宣称完成接入或 First-Class。
-待确认的完整实施与模型输入说明见 [Kilo R1](../../versions/v1.72/kilo-acp-proposal.md)。
+当前 macOS arm64 为 Preview，其他平台 NotQualified，不宣称 First-Class。
+User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-kilo-acp.md)；
+后续 Core 实施、验证和当前缺失范围见[实施记录](../../versions/v1.72/kilo-acp-implementation.md)，
+七个真实 Core Run 的本地 Provider 结果见[Core evidence](core-smoke-7.8.27-macos-arm64.json)。
+下文保留实施前原生研究的范围和矩阵，不能将当时的 NotImplemented 当作当前实现状态。
 
 ## 基线与证据
 
@@ -25,11 +28,11 @@ last_updated: 2026-11-08
 | 实测平台 | macOS arm64 |
 | 协议 | ACP protocolVersion 1，NDJSON JSON-RPC |
 | Provider | loopback OpenAI-compatible fixture、假 token；没有真实账户/付费模型 |
-| 隔离 | fresh XDG config/data/cache/state、owned workspace/skills；未启动 App/Core |
-| 当前准入 | research；未增加产品 identity/Schema/平台资格 |
+| 原生研究隔离 | fresh XDG config/data/cache/state、owned workspace/skills；该原生探针未启动 App/Core |
+| 当前准入 | macOS arm64 Preview；identity 为 kilo-cli、schema 173，见后续实施记录 |
 
 原始网页报告只提供研究线索。此处区分官方源码、真实 Kilo 对本地 Provider 的行为，
-以及尚不存在的 Rovai 实现；不直接继承报告中的资格判断或建议的复杂防御机制。
+以及后续的 Rovai 实现；不直接继承报告中的资格判断或建议的复杂防御机制。
 
 ## 关键判断与实测
 
@@ -91,7 +94,8 @@ spawn 前显式设置 `KILO_CLIENT=acp`，普通请求 tools 未含 question。
 
 ## 14 轴实施前 Parity Matrix
 
-所有 Rovai implementation 状态仍为 `NotImplemented`，共享底座存在不能冒充 Kilo 已接入。
+此表记录实施前的原生研究，彼时 Rovai implementation 均为 `NotImplemented`。
+当前各轴的生产实现与真实 Core 证据见[实施矩阵](../../versions/v1.72/kilo-acp-implementation.md#当前实施矩阵)；共享底座存在不能替代 Kilo 真实验收。
 Runtime evidence 的 Verified 只指“已实测”列的具体子能力；轴内其余部分仍为 NotObserved。
 
 | 核心轴 | 标准行为及接入策略 | Runtime evidence 与当前边界 |
@@ -133,7 +137,7 @@ Agent 请求；每个 RPC 有界，finally 结束自有进程组和 Provider。
 
 本轮验证通过：独立原生探针、Node 语法检查、`pnpm docs:test`（10 项）、
 `pnpm docs:check`、指定真实 base 的 `pnpm docs:check:ci`、`git diff --check`。
-没有修改生产代码，不运行与本次研究无关的 Rust/Renderer 全量回归；完整产品验收仍待实施。
+以上为原生研究阶段门禁；后续生产修改与 Rust/Renderer/Core 门禁单独记录在实施记录，不回写为原生阶段已完成。
 
 ## 官方来源
 

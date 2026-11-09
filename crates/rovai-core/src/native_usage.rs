@@ -15,7 +15,8 @@ use sha2::{Digest, Sha256};
 use crate::{
     agent_profile::AdapterKind,
     monitoring::{
-        ParsedRuntimeUsage, RuntimeInputSemantics, RuntimeUsageCounterMode, RuntimeUsageFields,
+        ParsedRuntimeUsage, RuntimeInputSemantics, RuntimeUsageCost, RuntimeUsageCounterMode,
+        RuntimeUsageFields,
     },
 };
 
@@ -101,6 +102,11 @@ impl NativeUsageReader {
         )
         .ok()
         .map(Self::Jsonl)
+    }
+
+    pub(crate) fn for_kilo_prompt(root: &Path, workspace: &Path, session_id: &str) -> Option<Self> {
+        OpenCodeUsageReader::from_root(AdapterKind::KiloCli, root, workspace, session_id)
+            .map(Self::OpenCode)
     }
 
     pub(crate) fn poll(&mut self) -> Vec<NativeUsageObservation> {
@@ -810,6 +816,7 @@ fn open_native_file(root: &Path, file_path: &Path) -> Result<Option<File>> {
 }
 
 pub(crate) struct OpenCodeUsageReader {
+    kind: AdapterKind,
     path: PathBuf,
     workspace: String,
     session_id: String,
@@ -820,30 +827,46 @@ pub(crate) struct OpenCodeUsageReader {
 
 impl OpenCodeUsageReader {
     fn for_prompt(workspace: &Path, session_id: &str) -> Option<Self> {
-        if !safe_identity(session_id) {
-            return None;
-        }
-        let data = crate::runtime_discovery::runtime_environment_variable(
-            AdapterKind::OpencodeCli,
-            "XDG_DATA_HOME",
-        )
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            crate::runtime_discovery::runtime_home_directory(AdapterKind::OpencodeCli)
-                .map(|home| home.join(".local/share"))
-        })?;
+        let kind = AdapterKind::OpencodeCli;
+        let data = crate::runtime_discovery::runtime_environment_variable(kind, "XDG_DATA_HOME")
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                crate::runtime_discovery::runtime_home_directory(kind)
+                    .map(|home| home.join(".local/share"))
+            })?;
         if !data.is_absolute() {
             return None;
         }
-        let root = fs::canonicalize(data.join("opencode")).ok()?;
-        let path = root.join("opencode.db");
+        Self::from_root(kind, &data.join("opencode"), workspace, session_id)
+    }
+
+    fn from_root(
+        kind: AdapterKind,
+        root: &Path,
+        workspace: &Path,
+        session_id: &str,
+    ) -> Option<Self> {
+        if !safe_identity(session_id) {
+            return None;
+        }
+        let app = if kind == AdapterKind::KiloCli {
+            "kilo"
+        } else {
+            "opencode"
+        };
+        let root = fs::canonicalize(root).ok()?;
+        let path = root.join(format!("{app}.db"));
         Self::baseline(
             path,
             workspace.to_str()?.to_string(),
             session_id.to_string(),
         )
         .ok()
+        .map(|mut reader| {
+            reader.kind = kind;
+            reader
+        })
     }
 
     fn baseline(path: PathBuf, workspace: String, session_id: String) -> Result<Self> {
@@ -852,6 +875,7 @@ impl OpenCodeUsageReader {
             bail!("native Usage database is not a regular file");
         }
         let mut reader = Self {
+            kind: AdapterKind::OpencodeCli,
             path,
             workspace,
             session_id,
@@ -927,7 +951,8 @@ impl OpenCodeUsageReader {
             "SELECT id,
             CASE WHEN json_type(data,'$.tokens.input')='integer' THEN json_extract(data,'$.tokens.input') END, CASE WHEN json_type(data,'$.tokens.output')='integer' THEN json_extract(data,'$.tokens.output') END,
             CASE WHEN json_type(data,'$.tokens.reasoning')='integer' THEN json_extract(data,'$.tokens.reasoning') END, CASE WHEN json_type(data,'$.tokens.cache.read')='integer' THEN json_extract(data,'$.tokens.cache.read') END,
-            CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, json_extract(data,'$.time.completed'), CASE WHEN json_type(data,'$.providerID')='text' THEN json_extract(data,'$.providerID') END, CASE WHEN json_type(data,'$.modelID')='text' THEN json_extract(data,'$.modelID') END
+            CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, json_extract(data,'$.time.completed'), CASE WHEN json_type(data,'$.providerID')='text' THEN json_extract(data,'$.providerID') END, CASE WHEN json_type(data,'$.modelID')='text' THEN json_extract(data,'$.modelID') END,
+            CASE WHEN json_type(data,'$.cost') IN ('integer','real') THEN json_extract(data,'$.cost') END
             FROM message WHERE session_id=?1 AND json_valid(data)
                 AND json_extract(data,'$.role')='assistant'
                 AND json_type(data,'$.time.completed')='integer'
@@ -950,12 +975,13 @@ impl OpenCodeUsageReader {
                     row.get::<_, Option<i64>>(6)?,
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<f64>>(9)?,
                 ))
             },
         )?;
         let mut result = Vec::new();
         for row in rows {
-            let (id, mut fields, time, provider, model) = row?;
+            let (id, mut fields, time, provider, model, cost) = row?;
             if self.seen.contains(&id) {
                 continue;
             }
@@ -970,15 +996,34 @@ impl OpenCodeUsageReader {
                 }
                 _ => None,
             };
-            result.push(observation(
+            let mut consumption = observation(
                 &self.session_id,
-                format!("opencode-native:{}:{id}", self.session_id),
-                "opencode-native-message-usage-v1",
+                format!(
+                    "{}-native:{}:{id}",
+                    self.kind.command_name(),
+                    self.session_id
+                ),
+                if self.kind == AdapterKind::KiloCli {
+                    "kilo-native-message-usage-v1"
+                } else {
+                    "opencode-native-message-usage-v1"
+                },
                 None,
                 RuntimeInputSemantics::ExclusiveBuckets,
                 fields.clone(),
                 time,
-            ));
+            );
+            if self.kind == AdapterKind::KiloCli {
+                consumption.usage.cost = cost
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .map(|amount| RuntimeUsageCost {
+                        amount: amount.to_string(),
+                        currency: "USD".into(),
+                        quality: "runtime_reported".into(),
+                        grain: "model_call".into(),
+                    });
+            }
+            result.push(consumption);
             // The installed ACPUsage.contextTokens() defines occupancy as the
             // latest call's input + both cache buckets, excluding output. ACP
             // supplies size from its effective Provider/Model catalog when
@@ -992,8 +1037,16 @@ impl OpenCodeUsageReader {
             if let Some(used) = used {
                 let mut gauge = observation(
                     &self.session_id,
-                    format!("opencode-context:{}:{id}", self.session_id),
-                    "opencode-native-call-context-v1",
+                    format!(
+                        "{}-context:{}:{id}",
+                        self.kind.command_name(),
+                        self.session_id
+                    ),
+                    if self.kind == AdapterKind::KiloCli {
+                        "kilo-native-call-context-v1"
+                    } else {
+                        "opencode-native-call-context-v1"
+                    },
                     None,
                     RuntimeInputSemantics::Unknown,
                     RuntimeUsageFields {
@@ -2828,6 +2881,26 @@ mod tests {
                 run["expectedSessionProjection"][0]["usedTokens"].as_i64()
             );
         }
+        let mut kilo =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        kilo.kind = AdapterKind::KiloCli;
+        insert("kilo-call", "session-1", Some(7));
+        database
+            .execute(
+                "UPDATE message SET data=json_set(data,'$.cost',0.0042) WHERE id='kilo-call'",
+                [],
+            )
+            .unwrap();
+        let observed = kilo.poll();
+        assert_eq!(observed.len(), 2);
+        assert!(observed[0].source_identity.starts_with("kilo-native:"));
+        assert_eq!(observed[0].usage.cost.as_ref().unwrap().amount, "0.0042");
+        assert_eq!(observed[0].usage.cost.as_ref().unwrap().currency, "USD");
+        assert!(
+            kilo.poll().is_empty(),
+            "Kilo native message IDs must deduplicate cost as well as tokens"
+        );
         database
             .execute(
                 "UPDATE session SET directory='/changed' WHERE id='session-1'",

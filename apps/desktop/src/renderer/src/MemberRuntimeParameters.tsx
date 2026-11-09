@@ -203,6 +203,8 @@ function runtimeParametersFor(
       return <CodexRuntimeParameters {...props} />
     case 'pi':
       return <PiRuntimeParameters {...props} />
+    case 'kilo-cli':
+      return <div className="runtime-parameter-form">{modelFieldsFor('kilo-cli', props)}<PermissionSelect {...props} fieldKey="permission" label={uiAttribute("权限模式")} /></div>
     case 'opencode-cli':
       return <OpenCodeRuntimeParameters {...props} />
     case 'copilot-cli':
@@ -421,6 +423,7 @@ function modelFieldsFor(
     case 'codebuddy-cli':
       return <ModelFields {...props} optionKey="thought_level" optionLabel={uiAttribute("推理强度")} />
     case 'codex-cli':
+    case 'kilo-cli':
     case 'opencode-cli':
     case 'copilot-cli':
     case 'qoder-cli':

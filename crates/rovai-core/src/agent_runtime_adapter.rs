@@ -420,6 +420,7 @@ pub enum SkillDeliveryGroupKey {
     Codex,
     Pi,
     Opencode,
+    Kilo,
     Copilot,
     ClaudeCompatible,
     Antigravity,
@@ -440,10 +441,11 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
+        Self::Kilo,
         Self::Copilot,
         Self::ClaudeCompatible,
         Self::Antigravity,
@@ -468,6 +470,7 @@ impl SkillDeliveryGroupKey {
             Self::Codex => "codex",
             Self::Pi => "pi",
             Self::Opencode => "opencode",
+            Self::Kilo => "kilo",
             Self::Copilot => "copilot",
             Self::ClaudeCompatible => "claude_compatible",
             Self::Antigravity => "antigravity",
@@ -493,6 +496,7 @@ impl SkillDeliveryGroupKey {
             Self::Codex => Path::new(".codex/skills"),
             Self::Pi => Path::new(".pi/skills"),
             Self::Opencode => Path::new(".opencode/skills"),
+            Self::Kilo => Path::new(".kilo/skills"),
             Self::Copilot => Path::new(".github/skills"),
             Self::ClaudeCompatible => Path::new(".claude/skills"),
             Self::Antigravity => Path::new(".agent/skills"),
@@ -522,6 +526,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "codex" => Ok(Self::Codex),
             "pi" => Ok(Self::Pi),
             "opencode" => Ok(Self::Opencode),
+            "kilo" => Ok(Self::Kilo),
             "copilot" => Ok(Self::Copilot),
             "claude_compatible" => Ok(Self::ClaudeCompatible),
             "antigravity" => Ok(Self::Antigravity),
@@ -818,6 +823,17 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             )
         };
+        if kind == AdapterKind::KiloCli {
+            return if platform == HostPlatformKey::MacosArm64 {
+                RuntimePlatformAdmission::preview(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                )
+            } else {
+                unqualified()
+            };
+        }
         if kind == AdapterKind::HermesCli {
             return RuntimePlatformAdmission::enabled(kind, platform);
         }
@@ -993,7 +1009,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::DeepseekHarness => {
                 json!({"sandbox_mode":"danger-full-access", "approval_policy":"never"})
             }
-            AdapterKind::OpencodeCli => json!({
+            AdapterKind::OpencodeCli | AdapterKind::KiloCli => json!({
                 "permission": "allow",
             }),
             AdapterKind::CopilotCli => json!({
@@ -1064,7 +1080,7 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli => resolve_acp_runtime(kind, input),
-            AdapterKind::ClineCli => resolve_acp_runtime(kind, input),
+            AdapterKind::ClineCli | AdapterKind::KiloCli => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -1090,6 +1106,13 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::Pi => native_skill_discovery(
                 [SkillDeliveryGroupKey::Pi],
                 SkillDiscoveryVerification::Verified,
+            ),
+            AdapterKind::KiloCli => native_skill_discovery(
+                [
+                    SkillDeliveryGroupKey::Kilo,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
             ),
             AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
@@ -1142,6 +1165,7 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
             AdapterKind::Pi => unsupported_external_mcp_projection(),
+            AdapterKind::KiloCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -1193,6 +1217,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
             }
+            AdapterKind::KiloCli => acp_capability_snapshot(observation, kilo_permission_options()),
             AdapterKind::OpencodeCli => self.opencode_cli.capability_snapshot(observation),
             AdapterKind::CopilotCli => self.copilot_cli.capability_snapshot(observation),
             AdapterKind::QoderCli => {
@@ -1242,6 +1267,7 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => codex_permission_options(),
             AdapterKind::Pi => pi_permission_options(),
+            AdapterKind::KiloCli => kilo_permission_options(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
@@ -3199,6 +3225,28 @@ fn opencode_permission_options() -> Vec<PermissionOptionDescriptor> {
     }]
 }
 
+fn kilo_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission".into(),
+        label: "permission".into(),
+        description:
+            "Kilo native default permission; native agent and tool-specific rules remain in effect."
+                .into(),
+        value_type: "enum".into(),
+        choices: vec![
+            choice("allow", "allow"),
+            choice("ask", "ask"),
+            choice("deny", "deny"),
+        ],
+        recommended_value: json!("ask"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".into(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
 fn copilot_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "allow_all".to_string(),
@@ -3983,6 +4031,7 @@ mod tests {
             ),
             (AdapterKind::Pi, json!({})),
             (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
+            (AdapterKind::KiloCli, json!({"permission": "allow"})),
             (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
             (
                 AdapterKind::ClaudeCodeCli,
@@ -5646,6 +5695,14 @@ mod tests {
             &[SkillDeliveryGroupKey],
             SkillDiscoveryVerification,
         )] = &[
+            (
+                AdapterKind::KiloCli,
+                &[
+                    SkillDeliveryGroupKey::Kilo,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             (
                 AdapterKind::HermesCli,
                 &[SkillDeliveryGroupKey::Hermes],

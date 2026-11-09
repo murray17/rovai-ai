@@ -384,7 +384,7 @@ mod tests {
                             assert_eq!(admission.reason_code(), None);
                             assert!(admission.evidence_revision().is_none());
                         }
-                        AdapterKind::CursorAgent | AdapterKind::ClineCli => {
+                        AdapterKind::CursorAgent | AdapterKind::ClineCli | AdapterKind::KiloCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -492,6 +492,7 @@ mod tests {
                 runtime_kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
+                    | AdapterKind::KiloCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
                     | AdapterKind::HermesCli
@@ -532,6 +533,22 @@ mod tests {
     #[test]
     fn macos_catalog_qualifies_each_runtime_only_with_its_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
+        for platform in HostPlatformKey::ALL {
+            let kilo = registry.platform_admission(AdapterKind::KiloCli, platform);
+            assert_eq!(
+                kilo.status(),
+                if platform == HostPlatformKey::MacosArm64 {
+                    RuntimePlatformAdmissionStatus::Preview
+                } else {
+                    RuntimePlatformAdmissionStatus::NotQualified
+                }
+            );
+            assert!(kilo.evidence_revision().is_none());
+            assert_eq!(
+                kilo.allows_runtime_use(),
+                platform == HostPlatformKey::MacosArm64
+            );
+        }
         for platform in HostPlatformKey::ALL {
             let hermes = registry.platform_admission(AdapterKind::HermesCli, platform);
             assert_eq!(hermes.status(), RuntimePlatformAdmissionStatus::Enabled);
@@ -608,6 +625,7 @@ mod tests {
                 kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
+                    | AdapterKind::KiloCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
                     | AdapterKind::HermesCli

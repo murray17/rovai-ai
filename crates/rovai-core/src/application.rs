@@ -2502,6 +2502,7 @@ struct Core {
     codex_cli: CodexCliRuntimeAdapter,
     pi: PiRpcRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
+    kilo_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
     kiro_cli: AcpCliRuntimeAdapter,
     qoder_cli: AcpCliRuntimeAdapter,
@@ -2860,6 +2861,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::CodexCli => "Codex CLI",
         AdapterKind::Pi => "Pi",
         AdapterKind::OpencodeCli => "OpenCode",
+        AdapterKind::KiloCli => "Kilo",
         AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",
         AdapterKind::KiroCli => "Kiro CLI",
@@ -6052,6 +6054,13 @@ impl Core {
             return Some(AgentRunRuntime::Pi(runtime));
         }
         if let Some(runtime) = self
+            .kilo_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
             .opencode_cli
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -6264,6 +6273,7 @@ impl Core {
             self.pi.shutdown_all(),
             self.cline_cli.shutdown_all(),
             self.opencode_cli.shutdown_all(),
+            self.kilo_cli.shutdown_all(),
             self.copilot_cli.shutdown_all(),
             self.kiro_cli.shutdown_all(),
             self.qoder_cli.shutdown_all(),
@@ -6291,6 +6301,7 @@ impl Core {
                 self.pi.shutdown_all(),
                 self.cline_cli.shutdown_all(),
                 self.opencode_cli.shutdown_all(),
+                self.kilo_cli.shutdown_all(),
                 self.copilot_cli.shutdown_all(),
                 self.kiro_cli.shutdown_all(),
                 self.qoder_cli.shutdown_all(),
@@ -6321,6 +6332,7 @@ impl Core {
     ) -> Option<&AcpCliRuntimeAdapter> {
         match kind {
             rovai_core::agent_profile::AdapterKind::OpencodeCli => Some(&self.opencode_cli),
+            AdapterKind::KiloCli => Some(&self.kilo_cli),
             rovai_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
             rovai_core::agent_profile::AdapterKind::KiroCli => Some(&self.kiro_cli),
             rovai_core::agent_profile::AdapterKind::QoderCli => Some(&self.qoder_cli),
@@ -13062,6 +13074,7 @@ impl Core {
                 )
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -19526,7 +19539,10 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         if matches!(
             execution.runtime.adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+            AdapterKind::DeepseekHarness
+                | AdapterKind::CommandCodeCli
+                | AdapterKind::ClineCli
+                | AdapterKind::KiloCli
         ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
@@ -19940,6 +19956,7 @@ impl Core {
                     .await;
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -20854,6 +20871,13 @@ async fn run_core(
         mcp_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
         pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
+        kilo_cli: AcpCliRuntimeAdapter::deferred(
+            AdapterKind::KiloCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/kilo"),
+            runtime_fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        ),
         opencode_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
@@ -25845,6 +25869,7 @@ async fn flush_runtime_usage(
         AdapterKind::KimiCodeCli,
         AdapterKind::MinimaxCodeCli,
         AdapterKind::OpencodeCli,
+        AdapterKind::KiloCli,
         AdapterKind::QoderCli,
         AdapterKind::TraeCnCli,
     ] {
@@ -29307,6 +29332,13 @@ mod tests {
             mcp_projection,
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
             pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
+            kilo_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::KiloCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/kilo"),
+                runtime_fleet.clone(),
+                CompactionDetectorPolicy::Disabled,
+            )?,
             opencode_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::OpencodeCli,
                 acp_tx.clone(),

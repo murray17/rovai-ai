@@ -6,6 +6,7 @@ export function runtimeAdapterLabel(kind: string): string {
     'codex-cli': 'Codex CLI',
     pi: 'Pi Coding Agent',
     'opencode-cli': 'OpenCode',
+    'kilo-cli': 'Kilo',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
     'kiro-cli': 'Kiro',

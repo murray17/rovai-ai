@@ -2,17 +2,16 @@
 document_type: implementation-proposal
 version: v1.72
 authority: proposed-runtime-integration
-status: proposed
+status: accepted
 revision: 1
-confirmation_status: pending
+confirmation_status: confirmed
 last_updated: 2026-11-08
 ---
 
 # Kilo 官方 ACP 接入提案 R1
 
-本页是待 User 审阅的实施提案，不是已生效合同。研究、原生探测已获授权；产品 Adapter、Schema、
-平台准入和模型输入实现尚未修改。确认本 revision 后，将下文输入说明保存为本版本独立的
-`model-context-change-kilo-acp.md` 并记录真实确认，再实施。不得由 Agent 自行填写 confirmed。
+User 在本 Thread sequence 4（`0112e4da-7599-49ba-9a3b-0371e9d62d5d`）确认本 R1。
+[独立输入说明](model-context-change-kilo-acp.md)保存相同的 B/P 投递合同和真实确认；产品接入已按本 R1 实施，当前状态见[实施记录](kilo-acp-implementation.md)。
 
 研究基线、14 轴矩阵及实测范围见 [Kilo 原生证据](../../research/kilo-runtime/README.md)。
 
@@ -113,13 +112,7 @@ P 完整沿用当前 [ContextManifest v43/v44](../../contracts/context-manifest-
 
 ### 二次确认
 
-状态：`pending`，revision：`1`。初次“考虑接入 / 开启 wt”没有展示本文件完整输入位置方案，
-不伪记为二次确认。User 明确同意“按 Kilo R1 实施”后记录消息 ID、时间和确认版本；
-语义调整必须另增 revision。
-
-依据是 [模型上下文变更治理](../../development/model-context-change-governance.md#二次确认门槛)：
-“未取得确认时可以继续调查和编辑提案文档，但不得修改实现、Schema、当前合同或执行 clean break。”
-因此当前只提交提案、研究和独立探针，尚未改产品接入实现。
+User sequence 4 已确认 revision 1；消息与时间见[独立输入说明](model-context-change-kilo-acp.md#二次确认)。
 
 ### 验证
 
@@ -153,4 +146,4 @@ Worktree: `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`。
 Branch: `rovai/kilo-acp`。
 Base: `origin/main @ 958784f6e17fc32d8b2753d7f14fd6122dceea9d`。
 Governance: none；当前规范未要求本任务治理文件先进入 main。
-Status: active，原生研究完成，产品实现等待 R1 输入确认。
+Status: active，R1 已实现，macOS arm64 Preview；worktree 保留用于 review。

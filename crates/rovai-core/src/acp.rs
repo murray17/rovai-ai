@@ -1499,7 +1499,7 @@ pub(crate) struct AcpHost {
     builtin_tools: Option<BuiltinToolProcessConfig>,
     grok_context_windows: BTreeMap<String, i64>,
     codebuddy_config_dir: Option<PathBuf>,
-    minimax_data_dir: Option<PathBuf>,
+    native_usage_data_dir: Option<PathBuf>,
 }
 
 fn enrich_paired_tool_message(
@@ -1956,9 +1956,11 @@ impl AcpHost {
             ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("runtime-host:{}", frozen_runtime.adapter_kind.as_str()),
         )?;
-        let minimax_data_dir = (frozen_runtime.adapter_kind == AdapterKind::MinimaxCodeCli)
-            .then(|| minimax_data_dir(&spec))
-            .flatten();
+        let native_usage_data_dir = match frozen_runtime.adapter_kind {
+            AdapterKind::MinimaxCodeCli => minimax_data_dir(&spec),
+            AdapterKind::KiloCli => crate::kilo::data_dir(&spec),
+            _ => None,
+        };
         let codebuddy_config_dir = (frozen_runtime.adapter_kind == AdapterKind::CodebuddyCli)
             .then(|| codebuddy_config_dir(&spec))
             .transpose()?;
@@ -2051,7 +2053,7 @@ impl AcpHost {
             },
             client_terminal_mode,
             codebuddy_config_dir,
-            minimax_data_dir,
+            native_usage_data_dir,
             client_terminal_bridge,
             host_instance_id,
             child: Mutex::new(startup.child.take().expect("Host takes startup child")),
@@ -4939,6 +4941,7 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
     matches!(
         adapter_kind,
         AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -5105,6 +5108,15 @@ impl AcpRuntime {
         session_id: &str,
         bootstrap: &str,
     ) -> Result<()> {
+        if self.host.adapter_kind == AdapterKind::KiloCli {
+            let file = self
+                .host
+                .private_config_root
+                .as_deref()
+                .context("Kilo private Host directory missing")?
+                .join(crate::kilo::BOOTSTRAP_FILE);
+            return std::fs::write(file, bootstrap).context("failed to write Kilo Bootstrap");
+        }
         if self.host.adapter_kind == AdapterKind::ClineCli {
             return crate::cline::bind_bootstrap(
                 self.host
@@ -5764,7 +5776,7 @@ impl AcpRuntime {
             let model_id = self.observed_model_id().await;
             let executable_path = self.host.executable_path.clone();
             let native_usage = self.native_usage.clone();
-            let minimax_root = self.host.minimax_data_dir.clone();
+            let native_root = self.host.native_usage_data_dir.clone();
             // Optional journal baseline I/O cannot delay dispatch or a successor.
             // An initialization that finishes late may omit early usage.
             tokio::spawn(async move {
@@ -5785,8 +5797,12 @@ impl AcpRuntime {
                 };
                 let reader = tokio::task::spawn_blocking(move || {
                     (if kind == AdapterKind::MinimaxCodeCli {
-                        minimax_root.as_deref().and_then(|root| {
+                        native_root.as_deref().and_then(|root| {
                             NativeUsageReader::for_minimax_prompt(root, &workspace, &native_session)
+                        })
+                    } else if kind == AdapterKind::KiloCli {
+                        native_root.as_deref().and_then(|root| {
+                            NativeUsageReader::for_kilo_prompt(root, &workspace, &native_session)
                         })
                     } else {
                         NativeUsageReader::for_prompt(
@@ -6575,7 +6591,8 @@ impl AcpRuntime {
             | AdapterKind::KimiCodeCli
             | AdapterKind::MinimaxCodeCli
             | AdapterKind::QoderCli
-            | AdapterKind::TraeCnCli => true,
+            | AdapterKind::TraeCnCli
+            | AdapterKind::KiloCli => true,
             AdapterKind::OpencodeCli => {
                 crate::opencode_compat::Generation::from_version(
                     self.host.launch_runtime.reported_version.as_deref(),
@@ -6999,6 +7016,7 @@ impl AcpCliRuntimeAdapter {
                 | AdapterKind::KimiCodeCli
                 | AdapterKind::MinimaxCodeCli
                 | AdapterKind::OpencodeCli
+                | AdapterKind::KiloCli
                 | AdapterKind::QoderCli
                 | AdapterKind::TraeCnCli
         ) {
@@ -7372,7 +7390,8 @@ fn prepare_private_host_config(
         | AdapterKind::DeepseekHarness
         | AdapterKind::ClineCli
         | AdapterKind::CommandCodeCli
-        | AdapterKind::MinimaxCodeCli => private_runtime_dir
+        | AdapterKind::MinimaxCodeCli
+        | AdapterKind::KiloCli => private_runtime_dir
             .join("acp-host")
             .join(uuid::Uuid::new_v4().to_string()),
         AdapterKind::ZcodeApp => {
@@ -7463,6 +7482,19 @@ fn configure_runtime_command(
                 .env("TMPDIR", root)
                 .env("ROVAI_ZCODE_OWNER_REPORT", root.join("owner-cleanup.json"))
                 .env("ROVAI_ZCODE_CLI_CONTEXT_DIR", root.join("cli-contexts"));
+        }
+        AdapterKind::KiloCli => {
+            crate::kilo::configure_command(command);
+            crate::kilo::configure_execution(
+                command,
+                values
+                    .get("permission")
+                    .and_then(Value::as_str)
+                    .context("Kilo permission is missing")?,
+                &private_config_root
+                    .context("Kilo private Host directory missing")?
+                    .join(crate::kilo::BOOTSTRAP_FILE),
+            )?;
         }
         AdapterKind::OpencodeCli => {
             let configured = values
@@ -8744,7 +8776,7 @@ pub fn automatically_allows_permission_requests(
         AdapterKind::CursorAgent => permissions["approval_policy"] == "force",
         AdapterKind::KimiCodeCli => permissions["permission_mode"] == "yolo",
         AdapterKind::MinimaxCodeCli => permissions["permission_mode"] == "bypassPermissions",
-        AdapterKind::HermesCli => false,
+        AdapterKind::HermesCli | AdapterKind::KiloCli => false,
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
@@ -10135,6 +10167,39 @@ mod compaction_detector_tests {
                     );
                 }
             }
+        }
+        // Kilo uses its own config namespace and the native instructions reader.
+        // Its overlay has no OpenCode dialect, plugin or second approval policy.
+        for mode in ["allow", "ask", "deny"] {
+            let mut command = Command::new("/selected/kilo");
+            command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:'ask'},instructions:['native.md'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
+            crate::kilo::configure_command(&mut command);
+            let file = std::env::temp_dir().join("kilo bootstrap 中文.md");
+            crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
+            crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
+            let content = command
+                .as_std()
+                .get_envs()
+                .find(|(key, _)| *key == "KILO_CONFIG_CONTENT")
+                .unwrap()
+                .1
+                .unwrap();
+            let config: Value = serde_json::from_str(content.to_str().unwrap()).unwrap();
+            assert_eq!(config["model"], "native/model");
+            assert_eq!(
+                config["permission"],
+                json!({"*":mode,"bash":"ask","question":"deny"})
+            );
+            assert_eq!(
+                config["instructions"],
+                json!(["native.md", file.to_str().unwrap()])
+            );
+            assert!(config["mcp"]["native"].is_object());
+            assert!(config.get("plugin").is_none());
+            assert!(!automatically_allows_permission_requests(
+                AdapterKind::KiloCli,
+                &json!({"permission":mode})
+            ));
         }
         let mut config = json!({
             "autoupdate": false,

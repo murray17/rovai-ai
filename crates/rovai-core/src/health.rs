@@ -1712,6 +1712,7 @@ async fn acp_probe_at(
     if !matches!(
         kind,
         AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -2801,6 +2802,7 @@ pub fn configure_acp_command(
     version: Option<&str>,
 ) -> Result<()> {
     match kind {
+        AdapterKind::KiloCli => crate::kilo::configure_command(command),
         AdapterKind::OpencodeCli => {
             crate::opencode_compat::Generation::require(version)?.configure_command(command);
         }
@@ -3095,6 +3097,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
     matches!(
         kind,
         AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -3712,6 +3715,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         return find_codex();
     }
     let (environment_keys, executable_name) = match kind {
+        AdapterKind::KiloCli => (&["ROVAI_KILO_BIN"][..], "kilo"),
         AdapterKind::OpencodeCli => (
             &[
                 "ROVAI_OPENCODE_BIN",

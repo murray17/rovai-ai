@@ -14,7 +14,7 @@ export function RuntimeGlyph({
   kind: AdapterKind | '' | null
 }): React.JSX.Element {
   const monochrome =
-    kind && ['opencode-cli', 'cursor-agent', 'grok-build', 'cline-cli', 'pi'].includes(kind)
+    kind && ['kilo-cli', 'opencode-cli', 'cursor-agent', 'grok-build', 'cline-cli', 'pi'].includes(kind)
   const surface =
     kind && ['qwen-code', 'qoder-cli', 'kimi-code-cli'].includes(kind)
   return (

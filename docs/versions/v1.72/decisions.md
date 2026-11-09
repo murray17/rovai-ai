@@ -8,6 +8,27 @@ last_updated: 2026-11-05
 
 # v1.72 版本决定
 
+<a id="v1-72-d76"></a>
+## V1.72-D76：Kilo 使用原生 ACP、单 Binding Host 与 instructions
+
+- 状态：accepted
+- 日期：2026-11-08
+- 授权：User 初次要求 ACP 接入、架构简洁且不增加 SHA256，sequence 4 确认已展示的 R1 后开始实施。
+- 当前权威：[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#kilo-官方-acp)、[Runtime Launch v77](../../contracts/runtime-launch-and-verification-v77.md)。
+
+Kilo 与 OpenCode 同属 ACP，但版本、认证和原生目录独立；将两者当作一个 Adapter 会形成不可接受的持久身份与配置耦合。
+原生 backend 的 MCP 按 directory 共享，空 Session 配置不能撤销旧工具；已实测的 instructions reader
+则能在 warm、手动压缩和 cold 后继续提供原始 System 字节。
+
+选择复用共享 ACP/Fleet，一个成员的 Native Binding 一个 Host；真实 MCP 更新走现有 invalidation，
+保留原 Session exact resume。Bootstrap 使用现行 managed-system 通道和原生 instructions 文件，
+不注册压缩插件、校验 hash、nonce、私有进程池或第二层审批。用量扩展现有 numeric reader，避免最后一步少算及 Session 费用重算。
+
+拒绝跨 Binding 的同 cwd Host 多 Session 复用，也拒绝 first-payload 加新压缩桥接：前者不能可靠撤销 MCP，
+后者在已有原生 System 入口时增加不必要的生命周期机制。
+macOS arm64 先以现有 Preview 主动开放，其他平台保持 NotQualified；本轮本地 Provider 与 Core 验证
+不冒充真实付费模型、全部 Golden Flow 或跨平台资格。Preview 的空 evidence revision 保持诚实。
+
 <a id="v1-72-d75"></a>
 ## V1.72-D75：公开执行列表只按 Run 的直接会话归属读取
 
