@@ -254,6 +254,28 @@ test('Desktop and Web share one Core while listener failure, revocation and stop
     }
     // Writes use real Core services and independent, proof-bound editing scopes.
     const profiles = await call(first, 'members.list')
+    let presenceMember = profiles[0]
+    for (const presence of ['away', 'present']) {
+      const operation = 'members.presence.set'
+      const params = { commandId: crypto.randomUUID(), command: { agentId: presenceMember.agentId, expectedVersion: presenceMember.version, presence } }
+      assert.deepEqual(await call(first, 'commands.reconcile', { operation, params }), { state: 'unknown' })
+      const changed = await call(first, operation, params)
+      assert.equal(changed.status, 'applied', JSON.stringify(changed))
+      const updated = await call(second, 'members.get', { agentId: presenceMember.agentId })
+      assert.equal(updated.presence, presence)
+      assert.equal(updated.version, presenceMember.version + 1)
+      assert.deepEqual(updated.runtimeConfiguration, presenceMember.runtimeConfiguration)
+      assert.equal(updated.avatarRef, presenceMember.avatarRef)
+      assert.deepEqual(await host.request('members.get', { agentId: presenceMember.agentId }), updated, 'Web presence changes are visible to Desktop')
+      assert.deepEqual(await call(second, operation, params), changed, 'retrying the original command replays its result')
+      assert.deepEqual((await call(second, 'commands.reconcile', { operation, params })).result, changed)
+      const staleParams = { ...params, commandId: crypto.randomUUID(), command: { ...params.command, presence: presence === 'away' ? 'present' : 'away' } }
+      const rejected = await call(first, operation, staleParams)
+      assert.equal(rejected.status, 'rejected', JSON.stringify(rejected))
+      assert.deepEqual((await call(first, 'commands.reconcile', { operation, params: staleParams })).result, rejected)
+      assert.deepEqual(await call(first, 'members.get', { agentId: presenceMember.agentId }), updated, 'replay and stale versions cannot mutate the profile again')
+      presenceMember = updated
+    }
     const defaultsMethod = 'preferences.newConversation.'
     const legacyDefaults = { newConversationDefaults: { memberAgentIds: [profiles[0].agentId], defaultLeadAgentId: profiles[0].agentId }, newConversationDefaultsRequireConfirmation: false, oneClickNewConversationEnabled: true }
     assert.equal((await call(first, defaultsMethod + 'get')).newConversationDefaults, null)
