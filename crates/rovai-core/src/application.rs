@@ -2083,6 +2083,7 @@ struct ProductRuntimeDiagnostic {
 struct RuntimeDeepProbeResult {
     snapshot: rovai_core::agent_profile::AdapterCapabilitySnapshot,
     failure: Option<RuntimeFailureView>,
+    version_probe_succeeded: bool,
 }
 
 const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
@@ -2251,6 +2252,23 @@ struct RuntimeCheckRequest {
     completion: Option<oneshot::Sender<std::result::Result<RuntimeCheckOutcome, String>>>,
 }
 
+enum RuntimeCheckManagerMessage {
+    Request(RuntimeCheckRequest),
+    TargetAdvanced {
+        attempt_id: String,
+        runtime_kind: AdapterKind,
+        previous: Option<RuntimeCheckInstallationTarget>,
+        target: RuntimeCheckInstallationTarget,
+        acknowledged: oneshot::Sender<bool>,
+    },
+}
+
+impl From<RuntimeCheckRequest> for RuntimeCheckManagerMessage {
+    fn from(request: RuntimeCheckRequest) -> Self {
+        Self::Request(request)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RuntimeCheckInstallationTarget {
     id: String,
@@ -2261,6 +2279,66 @@ struct RuntimeCheckInstallationTarget {
         rovai_core::agent_runtime_adapter::ExecutableFileIdentity,
     )>,
     locator: Option<rovai_core::agent_profile::RuntimeEntrypointLocatorIdentity>,
+}
+
+impl RuntimeCheckInstallationTarget {
+    fn from_verified_commit(
+        revision: &(String, i64),
+        verified: &rovai_core::agent_profile::VerifiedDiscoveredRuntimeEntry,
+    ) -> Self {
+        let entry = verified.entry();
+        Self {
+            id: revision.0.clone(),
+            version: revision.1,
+            executable_path: entry.executable_path.clone(),
+            file_identity: Some((
+                entry.executable_fingerprint.clone(),
+                verified.executable_file_identity().clone(),
+            )),
+            locator: entry.entrypoint_locator_identity.clone(),
+        }
+    }
+}
+
+struct RuntimeCheckWorkerContext<'a> {
+    attempt_id: &'a str,
+    installation_target: &'a mut Option<RuntimeCheckInstallationTarget>,
+}
+
+impl RuntimeCheckWorkerContext<'_> {
+    fn publish_target(
+        &mut self,
+        core: &Core,
+        kind: AdapterKind,
+        target: RuntimeCheckInstallationTarget,
+    ) -> Result<Option<oneshot::Receiver<bool>>> {
+        if self.installation_target.as_ref() == Some(&target) {
+            return Ok(None);
+        }
+        let previous = self.installation_target.replace(target.clone());
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        core.runtime_check_requests
+            .send(RuntimeCheckManagerMessage::TargetAdvanced {
+                attempt_id: self.attempt_id.to_string(),
+                runtime_kind: kind,
+                previous,
+                target,
+                acknowledged,
+            })
+            .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
+        Ok(Some(acknowledgement))
+    }
+
+    async fn await_target(acknowledgement: Option<oneshot::Receiver<bool>>) -> Result<()> {
+        // Never wait on the Manager while holding the installation commit guard.
+        if let Some(acknowledgement) = acknowledgement {
+            anyhow::ensure!(
+                acknowledgement.await.unwrap_or(false),
+                "runtime_check_target_advance_superseded"
+            );
+        }
+        Ok(())
+    }
 }
 
 struct RuntimeCheckAttempt {
@@ -2281,6 +2359,7 @@ struct RuntimeCheckAttempt {
 struct RuntimeCheckWorkerResult {
     attempt_id: String,
     runtime_kind: AdapterKind,
+    installation_target: Option<RuntimeCheckInstallationTarget>,
     catalog_only: bool,
     result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
@@ -2310,6 +2389,35 @@ fn runtime_installation_revision_matches(
 }
 
 impl RuntimeCheckAttempt {
+    fn advance_target(
+        &mut self,
+        previous: &Option<RuntimeCheckInstallationTarget>,
+        target: RuntimeCheckInstallationTarget,
+    ) -> bool {
+        if self.installation_target != *previous
+            && self.installation_target.as_ref() != Some(&target)
+        {
+            return false;
+        }
+        self.installation_target = Some(target);
+        true
+    }
+
+    fn can_join(&self, other: &Self) -> bool {
+        self.installation_target == other.installation_target
+            && self.startup_preview.is_none()
+            && other.startup_preview.is_none()
+            && self.model_target == other.model_target
+            && self.runtime_kind == other.runtime_kind
+            && (!matches!(
+                self.runtime_kind,
+                AdapterKind::Pi | AdapterKind::MinimaxCodeCli
+            ) || (self.trigger == RuntimeCheckTrigger::CatalogOpen)
+                == (other.trigger == RuntimeCheckTrigger::CatalogOpen))
+            && self.search.generation() == other.search.generation()
+            && runtime_check_can_satisfy(self.catalog_only, other.trigger)
+    }
+
     fn accepts(
         &self,
         request: &RuntimeCheckRequest,
@@ -2483,7 +2591,7 @@ struct Core {
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, ProductRuntimeDiagnostic>>,
     runtime_check_activity:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeCheckActivity>>,
-    runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckRequest>,
+    runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckManagerMessage>,
     attachment_projection_requests: mpsc::UnboundedSender<String>,
     automation_scheduler_control: RwLock<Option<AutomationSchedulerControl>>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
@@ -3650,7 +3758,9 @@ impl Core {
                             kind, &search, candidates, previous,
                         );
                         }
-                        if let (Some((installation, _, _)), Some(entry)) = (&saved, &verified) {
+                        if !read_versions
+                            && let (Some((installation, _, _)), Some(entry)) = (&saved, &verified)
+                        {
                             observation.reported_version = installation
                                 .snapshot
                                 .as_ref()
@@ -3684,7 +3794,7 @@ impl Core {
                 if verified.is_some() {
                     // Version commands are part of this Runtime's worker, never the
                     // result collection loop. Bind the response to the same file.
-                    if read_versions && observation.reported_version.is_none() {
+                    if read_versions {
                         rovai_core::runtime_discovery::discover_runtime_version(
                             &mut observation,
                             &search,
@@ -3928,6 +4038,7 @@ impl Core {
         candidate: &RuntimeExecutableCandidate,
         search_generation: u64,
         expected: &Option<(String, i64)>,
+        check_context: Option<&mut RuntimeCheckWorkerContext<'_>>,
     ) -> Result<Option<(String, i64)>> {
         if !verified.is_current() {
             return Ok(None);
@@ -3975,6 +4086,16 @@ impl Core {
             )?;
             (id, version)
         };
+        let target_ack = check_context
+            .map(|context| {
+                context.publish_target(
+                    self,
+                    kind,
+                    RuntimeCheckInstallationTarget::from_verified_commit(&target, verified),
+                )
+            })
+            .transpose()?
+            .flatten();
         self.runtime_product_diagnostics.write().await.remove(&kind);
         self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
             runtime_kind: kind,
@@ -3994,6 +4115,8 @@ impl Core {
             entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
         })
         .await;
+        drop(_update);
+        RuntimeCheckWorkerContext::await_target(target_ack).await?;
         Ok(Some(target))
     }
 
@@ -4276,6 +4399,7 @@ impl Core {
                 tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE,
                 search.clone(),
                 true,
+                None,
             )
             .await?;
         if outcome != RuntimeCheckOutcome::Ready {
@@ -4429,16 +4553,19 @@ impl Core {
         }
         let (acknowledged, acknowledgement) = oneshot::channel();
         self.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: self.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: kind,
-                purpose,
-                trigger,
-                acknowledged,
-                completion: None,
-            })
+            .send(
+                RuntimeCheckRequest {
+                    search: self.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: kind,
+                    purpose,
+                    trigger,
+                    acknowledged,
+                    completion: None,
+                }
+                .into(),
+            )
             .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
         tokio::time::timeout(Duration::from_secs(2), acknowledgement)
             .await
@@ -4474,16 +4601,19 @@ impl Core {
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, completion) = oneshot::channel();
         self.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search,
-                startup_preview: None,
-                model_target,
-                runtime_kind: kind,
-                purpose,
-                trigger,
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    search,
+                    startup_preview: None,
+                    model_target,
+                    runtime_kind: kind,
+                    purpose,
+                    trigger,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
         tokio::time::timeout(Duration::from_secs(2), acknowledgement)
             .await
@@ -4554,9 +4684,12 @@ impl Core {
                                 == rovai_core::agent_profile::InstallationClass::ManagedDefault
                             && installation.auth_scope == "default"
                     });
-                    let product_diagnostic = product_diagnostics.get(&kind);
+                    let product_diagnostic = product_diagnostics.get(&kind).filter(|diagnostic| {
+                        !version_read_failure_superseded(&discovery, Some(&diagnostic.diagnostic_code))
+                    });
                     let relevant_probe_attempt = installation
-                        .and_then(relevant_failed_runtime_probe_attempt);
+                        .and_then(relevant_failed_runtime_probe_attempt)
+                        .filter(|attempt| !version_read_failure_superseded(&discovery, attempt.diagnostic_code.as_deref()));
                     let is_checking = checking.get(&kind).is_some_and(|activity| {
                         activity.runtime_kind == kind && activity.deadline > chrono::Utc::now()
                     });
@@ -4568,6 +4701,16 @@ impl Core {
                     );
                     let reported_version =
                         product_runtime_reported_version(&discovery, installation);
+                    let version_failure = rovai_core::runtime_discovery::version_probe_failure(&discovery);
+                    // Code and details must describe the same current failure. A
+                    // light rescan does not delete the retained health attempt.
+                    let current_version_failure = version_failure.as_ref().map(|fallback| {
+                        relevant_probe_attempt
+                            .filter(|attempt| !runtime_attempt_precedes(attempt, &discovery.observed_at))
+                            .and_then(|attempt| attempt.failure.as_ref())
+                            .filter(|failure| failure.code == fallback.code)
+                            .unwrap_or(fallback)
+                    });
                     json!({
                         "runtimeKind": kind,
                         "status": status,
@@ -4575,13 +4718,13 @@ impl Core {
                         "discovery": discovery,
                         "installationId": installation.map(|installation| &installation.id),
                         "reportedVersion": reported_version,
-                        "diagnosticCode": relevant_probe_attempt
+                        "diagnosticCode": current_version_failure.map(|failure| failure.code.as_str()).or_else(|| relevant_probe_attempt
                             .and_then(|attempt| attempt.diagnostic_code.as_deref())
                             .or_else(|| product_diagnostic.map(|diagnostic| diagnostic.diagnostic_code.as_str()))
-                            .or(discovery.diagnostic_code.as_deref()),
-                        "failure": relevant_probe_attempt
+                            .or(discovery.diagnostic_code.as_deref())),
+                        "failure": current_version_failure.or_else(|| relevant_probe_attempt
                             .and_then(|attempt| attempt.failure.as_ref())
-                            .or_else(|| product_diagnostic.and_then(|diagnostic| diagnostic.failure.as_ref())),
+                            .or_else(|| product_diagnostic.and_then(|diagnostic| diagnostic.failure.as_ref()))),
                         "lastAttemptedAt": installation
                             .and_then(|installation| installation.snapshot.as_ref())
                             .map(|snapshot| snapshot.last_attempted_at.as_str())
@@ -5209,8 +5352,10 @@ impl Core {
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
         let search = self.runtime_search_environment.read().await.clone();
-        self.run_product_runtime_resolution_in_environment(kind, purpose, deadline, search, false)
-            .await
+        self.run_product_runtime_resolution_in_environment(
+            kind, purpose, deadline, search, false, None,
+        )
+        .await
     }
 
     async fn run_product_runtime_resolution_in_environment(
@@ -5220,6 +5365,7 @@ impl Core {
         deadline: tokio::time::Instant,
         search: Arc<RuntimeSearchEnvironment>,
         catalog_requested: bool,
+        mut check_context: Option<RuntimeCheckWorkerContext<'_>>,
     ) -> Result<RuntimeCheckOutcome> {
         let (existing, existing_entrypoint_locator, existing_identity) = {
             let Some(_update) = self.runtime_check_update_guard(&search).await else {
@@ -5498,6 +5644,7 @@ impl Core {
                         &candidate,
                         search.generation(),
                         &commit_target,
+                        check_context.as_mut(),
                     )
                     .await?
                 else {
@@ -5512,28 +5659,113 @@ impl Core {
                 probe_execution_count += 1;
                 let checked = run_identity_checked_probe(
                     &canonical,
-                    with_runtime_configuration(
-                        kind,
-                        &search,
-                        self.deep_probe_candidate(
+                    with_runtime_configuration(kind, &search, async {
+                        rovai_core::runtime_discovery::ensure_runtime_environment_available(kind)?;
+                        if let Some(blocker) = current_runtime_platform_blocker(kind) {
+                            anyhow::bail!("{}: {}", blocker.code, blocker.payload);
+                        }
+                        anyhow::ensure!(
+                            runtime_launch_allowed(kind, purpose),
+                            "runtime_launch_disallowed_for_{purpose:?}"
+                        );
+                        let version_read =
+                            health::read_runtime_version_for_probe(&canonical, kind).await;
+                        let mut observation = runtime_check_environment::candidate_observation(
                             kind,
+                            &search,
+                            &candidate,
                             &canonical,
-                            purpose,
-                            Some(&candidate_fingerprint),
-                            existing
-                                .as_ref()
-                                .filter(|installation| {
-                                    Path::new(&installation.executable_path) == canonical
-                                })
-                                .and_then(|installation| installation.snapshot.as_ref())
-                                .filter(|snapshot| {
-                                    snapshot.executable_fingerprint.as_deref()
-                                        == Some(&candidate_fingerprint)
-                                })
-                                .filter(|_| !locator_identity_changed),
-                            catalog_requested,
-                        ),
-                    ),
+                            &candidate_fingerprint,
+                        );
+                        observation.reported_version = version_read.as_ref().ok().cloned();
+                        observation.version_probe_succeeded = Some(version_read.is_ok());
+                        observation.diagnostic_code = version_read
+                            .as_ref()
+                            .err()
+                            .map(|failure| failure.code.clone());
+                        let entry = self
+                            .verify_runtime_entry(
+                                &observation,
+                                Some(verified_candidate.executable_file_identity()),
+                            )
+                            .await?;
+                        anyhow::ensure!(
+                            candidate.entrypoint_locator_identity_is_current(),
+                            "runtime_entry_changed_during_version_read"
+                        );
+                        let mut target_ack = None;
+                        {
+                            let _update = self
+                                .runtime_check_update_guard(&search)
+                                .await
+                                .context("runtime_configuration_changed_during_version_read")?;
+                            let mut database = self.database.lock().await;
+                            anyhow::ensure!(
+                                runtime_installation_revision_matches(
+                                    &database,
+                                    kind,
+                                    &commit_target
+                                )?,
+                                "runtime_installation_changed_during_version_read"
+                            );
+                            if let Ok(version) = &version_read {
+                                let service = AgentProfileService::default();
+                                let id = service.commit_discovered_runtime_entry(
+                                    &mut database,
+                                    entry,
+                                    commit_target.as_ref().map(|(id, _)| id.as_str()),
+                                )?;
+                                commit_target = runtime_installation_revision(&database, kind)?;
+                                if let Some(context) = check_context.as_mut() {
+                                    target_ack = context.publish_target(
+                                        self,
+                                        kind,
+                                        RuntimeCheckInstallationTarget::from_verified_commit(
+                                            commit_target.as_ref().unwrap(),
+                                            &verified_candidate,
+                                        ),
+                                    )?;
+                                }
+                                anyhow::ensure!(
+                                    service.record_runtime_version(
+                                        &mut database,
+                                        &id,
+                                        &canonical.to_string_lossy(),
+                                        &candidate_fingerprint,
+                                        version,
+                                    )?,
+                                    "runtime_version_target_changed"
+                                );
+                            }
+                            drop(database);
+                            self.publish_verified_runtime_discovery(observation.clone())
+                                .await;
+                        }
+                        latest_observation = observation;
+                        RuntimeCheckWorkerContext::await_target(target_ack).await?;
+                        Box::pin(
+                            self.deep_probe_candidate(
+                                kind,
+                                &canonical,
+                                purpose,
+                                Some(&candidate_fingerprint),
+                                existing
+                                    .as_ref()
+                                    .filter(|installation| {
+                                        Path::new(&installation.executable_path) == canonical
+                                    })
+                                    .and_then(|installation| installation.snapshot.as_ref())
+                                    .filter(|snapshot| {
+                                        snapshot.executable_fingerprint.as_deref()
+                                            == Some(&candidate_fingerprint)
+                                    })
+                                    .filter(|_| !locator_identity_changed),
+                                catalog_requested,
+                                Some(version_read),
+                            ),
+                        )
+                        .await
+                    }),
                 )
                 .await;
                 let checked = match checked {
@@ -5739,6 +5971,7 @@ impl Core {
                                     &candidate,
                                     search.generation(),
                                     &commit_target,
+                                    check_context.as_mut(),
                                 )
                                 .await?
                             else {
@@ -5753,6 +5986,7 @@ impl Core {
             let RuntimeDeepProbeResult {
                 mut snapshot,
                 failure,
+                version_probe_succeeded,
             } = deep_probe;
             let probe_ms = probe_started.elapsed().as_secs_f64() * 1000.0;
             let verification_started = std::time::Instant::now();
@@ -5792,7 +6026,11 @@ impl Core {
                 &candidate_fingerprint,
             );
             latest_observation.reported_version = snapshot.reported_version.clone();
-            latest_observation.version_probe_succeeded = Some(snapshot.reported_version.is_some());
+            latest_observation.version_probe_succeeded = Some(version_probe_succeeded);
+            if !version_probe_succeeded {
+                latest_observation.diagnostic_code =
+                    failure.as_ref().map(|failure| failure.code.clone());
+            }
             if snapshot.probe_status == "ready" {
                 if kind == AdapterKind::DeepseekHarness {
                     let context = with_runtime_configuration(kind, &search, async {
@@ -5813,6 +6051,14 @@ impl Core {
                 if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
                     return Ok(RuntimeCheckOutcome::Superseded);
                 }
+                // This path saved its version before connecting. A concurrent
+                // rescan may now own a newer observation for the same program.
+                snapshot.reported_version = saved_runtime_probe_version(
+                    &database,
+                    &commit_target,
+                    &executable_path,
+                    &candidate_fingerprint,
+                )?;
                 let catalog_unverified = catalog_requested
                     && !rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
                         &snapshot.models,
@@ -5849,24 +6095,15 @@ impl Core {
                     )?;
                 }
                 drop(database);
-                self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
-                    runtime_kind: kind,
-                    discovery_status: RuntimeDiscoveryStatus::Found,
-                    executable_path: Some(executable_path),
-                    source: Some(source),
-                    reported_version: snapshot.reported_version,
-                    executable_fingerprint: snapshot.executable_fingerprint,
-                    search_path_source: candidate.search_path_source,
-                    entrypoint_kind: Some(candidate.entrypoint_kind),
-                    candidate_extension: Some(candidate.candidate_extension),
-                    resolved_native_target: candidate.resolved_native_target,
-                    version_probe_succeeded: Some(true),
-                    search_generation: search.generation(),
-                    observed_at: chrono::Utc::now().to_rfc3339(),
-                    diagnostic_code: None,
-                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
-                })
-                .await;
+                // Publish health completion without replacing the early version
+                // observation (or a later rescan). Readers load the current value.
+                emit(
+                    &self.output,
+                    "runtime.availability.updated",
+                    json!({
+                        "runtimeKind": kind, "status": self.current_runtime_availability_status(kind).await,
+                    }),
+                );
                 self.runtime_product_diagnostics.write().await.remove(&kind);
                 eprintln!(
                     "[runtime-check-timing] runtime={} commit_publish_ms={:.3}",
@@ -5891,20 +6128,17 @@ impl Core {
                 _ if identity_changed => ("identity_changed", "runtime_identity_changed"),
                 _ => ("transient", "runtime_probe_transient_failure"),
             };
+            let diagnostic_code = if !version_probe_succeeded {
+                failure
+                    .as_ref()
+                    .map_or("runtime_version_failed", |failure| failure.code.as_str())
+                    .to_string()
+            } else {
+                diagnostic_code.to_string()
+            };
             let mut database = self.database.lock().await;
             if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
                 return Ok(RuntimeCheckOutcome::Superseded);
-            }
-            if let (Some(installation), Some(version)) =
-                (existing.as_ref(), snapshot.reported_version.as_deref())
-            {
-                AgentProfileService::default().record_runtime_version(
-                    &mut database,
-                    &installation.id,
-                    &canonical.to_string_lossy(),
-                    &candidate_fingerprint,
-                    version,
-                )?;
             }
             AgentProfileService::default().record_managed_probe_failure(
                 &mut database,
@@ -5918,7 +6152,7 @@ impl Core {
                         .or(Some(candidate_fingerprint.as_str())),
                     source: Some(source),
                     failure_class,
-                    diagnostic_code,
+                    diagnostic_code: &diagnostic_code,
                     failure: failure.as_ref(),
                 },
             )?;
@@ -5926,7 +6160,7 @@ impl Core {
             note_product_runtime_diagnostic(
                 &mut unresolved_diagnostic,
                 failure_class,
-                diagnostic_code,
+                &diagnostic_code,
                 failure,
             );
         }
@@ -5941,14 +6175,26 @@ impl Core {
             return Ok(RuntimeCheckOutcome::Superseded);
         }
         if let Some(diagnostic) = unresolved_diagnostic {
-            latest_observation.diagnostic_code = Some(diagnostic.diagnostic_code.clone());
+            if latest_observation.version_probe_succeeded != Some(false) {
+                latest_observation.diagnostic_code = Some(diagnostic.diagnostic_code.clone());
+            }
             self.runtime_product_diagnostics
                 .write()
                 .await
                 .insert(kind, diagnostic);
         }
-        self.publish_verified_runtime_discovery(latest_observation)
-            .await;
+        if latest_observation.version_probe_succeeded.is_none() {
+            self.publish_verified_runtime_discovery(latest_observation)
+                .await;
+        } else {
+            emit(
+                &self.output,
+                "runtime.availability.updated",
+                json!({
+                    "runtimeKind": kind, "status": self.current_runtime_availability_status(kind).await,
+                }),
+            );
+        }
         Ok(RuntimeCheckOutcome::StableFailure)
     }
 
@@ -13003,6 +13249,7 @@ impl Core {
         fingerprint: Option<&str>,
         known_snapshot: Option<&AdapterCapabilitySnapshot>,
         catalog_requested: bool,
+        version_read: Option<std::result::Result<String, RuntimeFailureView>>,
     ) -> Result<RuntimeDeepProbeResult> {
         rovai_core::runtime_discovery::ensure_runtime_environment_available(adapter_kind)?;
         eprintln!(
@@ -13018,10 +13265,6 @@ impl Core {
         let known_snapshot = known_snapshot.filter(|snapshot| {
             fingerprint.is_some() && snapshot.executable_fingerprint.as_deref() == fingerprint
         });
-        let known_version = known_snapshot
-            .and_then(|snapshot| snapshot.reported_version.as_deref())
-            .map(str::trim)
-            .filter(|version| !version.is_empty());
         let static_capabilities = known_snapshot
             .filter(|snapshot| {
                 snapshot.probe_status == "ready"
@@ -13032,12 +13275,44 @@ impl Core {
             .unwrap_or_default();
         let attempted_at = chrono::Utc::now().to_rfc3339();
         let registry = AgentRuntimeAdapterRegistry::default();
+        let version_read = match version_read {
+            Some(version_read) => version_read,
+            None => health::read_runtime_version_for_probe(executable_path, adapter_kind).await,
+        };
+        let version = match version_read {
+            Ok(version) => version,
+            Err(failure) => {
+                let failed_fingerprint = fingerprint
+                    .map(str::to_owned)
+                    .or_else(|| fingerprint_executable(executable_path).ok());
+                let mut snapshot = registry.light_ready_snapshot(
+                    adapter_kind,
+                    None,
+                    failed_fingerprint.clone().unwrap_or_default(),
+                    attempted_at,
+                )?;
+                snapshot.executable_fingerprint = failed_fingerprint;
+                snapshot.probe_status = if executable_path.is_file() {
+                    "probe_failed"
+                } else {
+                    "not_installed"
+                }
+                .into();
+                snapshot.last_error = Some(failure.summary.clone());
+                return Ok(RuntimeDeepProbeResult {
+                    snapshot,
+                    failure: Some(failure),
+                    version_probe_succeeded: false,
+                });
+            }
+        };
+        let current_version = Some(version.as_str());
         let (snapshot, failure) = match adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
                 let checked = health::codex_capability_probe_at(
                     executable_path,
                     fingerprint,
-                    known_version,
+                    current_version,
                     static_capabilities,
                 )
                 .await;
@@ -13062,7 +13337,7 @@ impl Core {
             }
             rovai_core::agent_profile::AdapterKind::Pi => {
                 let probe =
-                    health::pi_capability_probe_at(executable_path, fingerprint, known_version)
+                    health::pi_capability_probe_at(executable_path, fingerprint, current_version)
                         .await;
                 let last_error = (probe.result.status != health::AgentRuntimeProbeStatus::Ready)
                     .then(|| probe.result.detail.clone())
@@ -13103,7 +13378,7 @@ impl Core {
                     kind,
                     purpose,
                     fingerprint,
-                    known_version,
+                    current_version,
                     catalog_requested,
                 )
                 .await;
@@ -13142,7 +13417,7 @@ impl Core {
                 let probe = health::claude_code_capability_probe_at(
                     executable_path,
                     fingerprint,
-                    known_version,
+                    current_version,
                     static_capabilities,
                 )
                 .await;
@@ -13165,7 +13440,7 @@ impl Core {
                 let probe = health::antigravity_capability_probe_at(
                     executable_path,
                     fingerprint,
-                    known_version,
+                    current_version,
                     static_capabilities,
                 )
                 .await;
@@ -13187,7 +13462,11 @@ impl Core {
                 (snapshot, failure)
             }
         };
-        Ok(RuntimeDeepProbeResult { snapshot, failure })
+        Ok(RuntimeDeepProbeResult {
+            snapshot,
+            failure,
+            version_probe_succeeded: true,
+        })
     }
 
     async fn refresh_adapter_installation(
@@ -13231,14 +13510,15 @@ impl Core {
         let deep_probe = with_runtime_configuration(
             installation.adapter_kind,
             &search,
-            self.deep_probe_candidate(
+            Box::pin(self.deep_probe_candidate(
                 installation.adapter_kind,
                 Path::new(&installation.executable_path),
                 RuntimeLaunchPurpose::InstallationRefresh,
                 None,
                 None,
                 false,
-            ),
+                None,
+            )),
         )
         .await?;
         let mut database = self.database.lock().await;
@@ -20255,6 +20535,47 @@ fn note_product_runtime_diagnostic(
         priority,
         failure,
     });
+}
+
+fn saved_runtime_probe_version(
+    database: &Database,
+    target: &Option<(String, i64)>,
+    path: &str,
+    fingerprint: &str,
+) -> Result<Option<String>> {
+    let Some((id, _)) = target else {
+        return Ok(None);
+    };
+    Ok(database
+        .connection()
+        .query_row(
+            "SELECT snapshot.reported_version FROM adapter_installation installation
+         JOIN runtime_executable_identity identity ON identity.installation_id = installation.id
+         JOIN adapter_capability_snapshot snapshot ON snapshot.installation_id = installation.id
+         WHERE installation.id = ?1 AND installation.executable_path = ?2
+           AND installation.enabled = 1 AND installation.path_state = 'valid'
+           AND identity.executable_path = ?2 AND identity.executable_fingerprint = ?3
+           AND snapshot.executable_fingerprint = ?3",
+            rusqlite::params![id, path, fingerprint],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+fn version_read_failure_superseded(
+    discovery: &RuntimeDiscoveryObservation,
+    code: Option<&str>,
+) -> bool {
+    discovery.version_probe_succeeded == Some(true)
+        && matches!(
+            code,
+            Some(
+                "runtime_version_failed"
+                    | "runtime_version_empty"
+                    | "runtime_version_output_truncated"
+            )
+        )
 }
 
 fn product_runtime_reported_version<'a>(
@@ -27470,7 +27791,7 @@ async fn process_network_recovery(
 
 async fn process_runtime_check_manager(
     core: Arc<Core>,
-    mut requests: mpsc::UnboundedReceiver<RuntimeCheckRequest>,
+    mut requests: mpsc::UnboundedReceiver<RuntimeCheckManagerMessage>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
     let mut checks: tokio::task::JoinSet<RuntimeCheckWorkerResult> = tokio::task::JoinSet::new();
@@ -27480,7 +27801,20 @@ async fn process_runtime_check_manager(
     loop {
         tokio::select! {
             request = requests.recv() => {
-                let Some(request) = request else { break };
+                let Some(message) = request else { break };
+                let request = match message {
+                    RuntimeCheckManagerMessage::Request(request) => request,
+                    RuntimeCheckManagerMessage::TargetAdvanced { attempt_id, runtime_kind, previous, target, acknowledged } => {
+                        let accepted = if let Some(attempt) = active.values_mut().find(|attempt| attempt.attempt_id == attempt_id && attempt.runtime_kind == runtime_kind) {
+                            if attempt.advance_target(&previous, target) {
+                                merge_runtime_check_pending(&core, attempt, &mut pending).await;
+                                true
+                            } else { false }
+                        } else { false };
+                        let _ = acknowledged.send(accepted);
+                        continue;
+                    }
+                };
                 if request.model_target.is_none() && execution_deferrals.should_defer(request.runtime_kind, request.trigger) {
                     if let Some(completion) = request.completion {
                         let _ = completion.send(Ok(RuntimeCheckOutcome::Superseded));
@@ -27589,6 +27923,14 @@ async fn process_runtime_check_manager(
                                 )
                                 .await;
                             } else {
+                                // A deadline may expire while its progress message
+                                // is waiting. This target comes only from the same
+                                // worker's guarded commits, never a late DB lookup.
+                                let target_advanced = attempt.installation_target != worker.installation_target;
+                                attempt.installation_target = worker.installation_target;
+                                if target_advanced {
+                                    merge_runtime_check_pending(&core, &mut attempt, &mut pending).await;
+                                }
                                 // A catalog request can fall back to a real full check.
                                 // Preserve its Ready-delivery behavior without letting a
                                 // catalog-only success manufacture verification evidence.
@@ -27676,7 +28018,7 @@ async fn process_runtime_check_manager(
             let worker_search = attempt.search.clone();
             let worker_catalog_only = attempt.catalog_only;
             let worker_model_target = attempt.model_target.clone();
-            let worker_installation_target = attempt.installation_target.clone();
+            let mut worker_installation_target = attempt.installation_target.clone();
             let abort_handle = checks.spawn(async move {
                 let mut catalog_only = worker_catalog_only;
                 let (result, finalization) = match tokio::time::timeout_at(worker_deadline, async {
@@ -27720,6 +28062,10 @@ async fn process_runtime_check_manager(
                                 worker_deadline,
                                 worker_search,
                                 worker_catalog_only,
+                                Some(RuntimeCheckWorkerContext {
+                                    attempt_id: &worker_attempt_id,
+                                    installation_target: &mut worker_installation_target,
+                                }),
                             )
                             .await
                     }
@@ -27739,6 +28085,7 @@ async fn process_runtime_check_manager(
                 RuntimeCheckWorkerResult {
                     attempt_id: worker_attempt_id,
                     runtime_kind: worker_kind,
+                    installation_target: worker_installation_target,
                     catalog_only,
                     result,
                     finalization,
@@ -27888,6 +28235,41 @@ async fn finalize_runtime_check(
     }
     for waiter in attempt.waiters {
         let _ = waiter.send(result.clone());
+    }
+}
+
+async fn merge_runtime_check_pending(
+    core: &Core,
+    active: &mut RuntimeCheckAttempt,
+    pending: &mut Vec<RuntimeCheckAttempt>,
+) {
+    let mut activity = core.runtime_check_activity.write().await;
+    for index in (0..pending.len()).rev() {
+        if !active.can_join(&pending[index]) {
+            continue;
+        }
+        let mut duplicate = pending.swap_remove(index);
+        active.trigger = active.trigger.max(duplicate.trigger);
+        active.waiters.append(&mut duplicate.waiters);
+        // A request can be admitted between the DB commit and its progress
+        // message. Fold it into this same round with the existing merge rules.
+        if take_runtime_check_activity(&mut activity, active.runtime_kind, &duplicate.attempt_id) {
+            activity.insert(
+                active.runtime_kind,
+                RuntimeCheckActivity {
+                    attempt_id: active.attempt_id.clone(),
+                    runtime_kind: active.runtime_kind,
+                    deadline: chrono::Utc::now()
+                        + chrono::Duration::from_std(
+                            active
+                                .deadline
+                                .saturating_duration_since(tokio::time::Instant::now()),
+                        )
+                        .unwrap_or_default(),
+                    running: true,
+                },
+            );
+        }
     }
 }
 
@@ -30839,16 +31221,19 @@ done
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completion, waiter) = oneshot::channel();
         core.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: AdapterKind::Pi,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: RuntimeCheckTrigger::CatalogOpen,
-                acknowledged,
-                completion: Some(completion),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::Pi,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::CatalogOpen,
+                    acknowledged,
+                    completion: Some(completion),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(
             acknowledgement.await.unwrap(),
@@ -31213,16 +31598,19 @@ done
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, waiter) = oneshot::channel();
         core.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: AdapterKind::CodexCli,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: RuntimeCheckTrigger::CatalogOpen,
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::CodexCli,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::CatalogOpen,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(
             !acknowledgement.await.unwrap(),
@@ -31243,16 +31631,19 @@ done
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, full) = oneshot::channel();
         core.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                search: core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: AdapterKind::CodexCli,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: RuntimeCheckTrigger::UserCheck,
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::CodexCli,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::UserCheck,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(!acknowledgement.await.unwrap());
         assert!(!root.join("full-started").exists());
