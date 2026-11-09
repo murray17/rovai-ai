@@ -3417,6 +3417,10 @@ impl AgentProfileService {
                 settled_run_ids.extend(outcome.affected_run_ids);
             }
             transaction.execute(
+                "DELETE FROM member_toolbox_skill WHERE agent_id = ?1",
+                [&envelope.payload.agent_id],
+            )?;
+            transaction.execute(
                 r#"
                 UPDATE agent_profile
                 SET profile_status = 'removed', removed_at = ?2,
@@ -9441,6 +9445,24 @@ mod slow_tests {
                 |row| row.get::<_, String>(0),
             )
             .expect("legacy handle should remain internally readable");
+        for skill_name in crate::managed_skills::TOOLBOX_SKILLS {
+            database.connection().execute(
+                "INSERT OR IGNORE INTO member_toolbox_skill(agent_id, skill_name, updated_at) VALUES (?1, ?2, 'configured-at')",
+                params![profile.agent_id, skill_name],
+            ).unwrap();
+        }
+        let configured_skills = crate::managed_skills::configured_toolbox_names(
+            database.connection(),
+            &profile.agent_id,
+        )
+        .unwrap();
+        assert_eq!(
+            configured_skills.len(),
+            crate::managed_skills::TOOLBOX_SKILLS.len()
+        );
+        let other_member_skills =
+            crate::managed_skills::configured_toolbox_names(database.connection(), "agent_1")
+                .unwrap();
         let preview = service
             .removal_preview(&database, &profile.agent_id)
             .expect("preview should load")
@@ -9465,6 +9487,51 @@ mod slow_tests {
             mismatch.result.code,
             "agent_profile.confirmation_name_mismatch"
         );
+        assert_eq!(
+            crate::managed_skills::configured_toolbox_names(
+                database.connection(),
+                &profile.agent_id
+            )
+            .unwrap(),
+            configured_skills,
+        );
+
+        database.connection().execute_batch(
+            "CREATE TEMP TRIGGER fail_member_removal BEFORE UPDATE OF profile_status ON agent_profile
+             WHEN NEW.id = 'agent_4' AND NEW.profile_status = 'removed'
+             BEGIN SELECT RAISE(ABORT, 'injected member removal failure'); END;",
+        ).unwrap();
+        let failed = service.remove_member(
+            &mut database,
+            &user_command(
+                "remove-qilu-failed",
+                RemoveMemberCommand {
+                    agent_id: profile.agent_id.clone(),
+                    expected_version: profile.version,
+                    confirmation_name: profile.display_name.clone(),
+                },
+            ),
+        );
+        assert!(format!("{:#}", failed.unwrap_err()).contains("injected member removal failure"));
+        assert_eq!(
+            crate::managed_skills::configured_toolbox_names(
+                database.connection(),
+                &profile.agent_id
+            )
+            .unwrap(),
+            configured_skills,
+            "a failed removal must roll back Skill cleanup",
+        );
+        let unchanged = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(unchanged.version, profile.version);
+        assert_eq!(unchanged.presence, profile.presence);
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER fail_member_removal;")
+            .unwrap();
 
         let removed = service
             .remove_member(
@@ -9480,6 +9547,20 @@ mod slow_tests {
             )
             .expect("member should be removed");
         assert_eq!(removed.result.code, "agent_profile.removed");
+        assert!(
+            crate::managed_skills::configured_toolbox_names(
+                database.connection(),
+                &profile.agent_id
+            )
+            .unwrap()
+            .is_empty(),
+            "permanent removal must clear every current toolbox assignment",
+        );
+        assert_eq!(
+            crate::managed_skills::configured_toolbox_names(database.connection(), "agent_1")
+                .unwrap(),
+            other_member_skills,
+        );
         assert!(
             service
                 .get_profile(&database, &profile.agent_id)
