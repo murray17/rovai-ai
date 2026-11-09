@@ -386,16 +386,19 @@ impl Core {
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, completion) = oneshot::channel();
         self.runtime_check_requests
-            .send(RuntimeCheckRequest {
-                model_target: None,
-                search: self.runtime_search_environment.read().await.clone(),
-                startup_preview: Some(preview.clone()),
-                runtime_kind: kind,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: RuntimeCheckTrigger::UserCheck,
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                RuntimeCheckRequest {
+                    model_target: None,
+                    search: self.runtime_search_environment.read().await.clone(),
+                    startup_preview: Some(preview.clone()),
+                    runtime_kind: kind,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::UserCheck,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
         tokio::time::timeout(Duration::from_secs(2), acknowledgement).await??;
         let outcome = tokio::time::timeout(

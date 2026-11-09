@@ -615,9 +615,27 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
     use rovai_core::agent_profile::AgentProfileService;
     // No health evidence and stale pre-upgrade Ready evidence must both leave
     // the already discovered target stable when a diagnostic begins.
-    for upgraded in [false, true] {
+    for scenario in [
+        "unverified",
+        "upgraded",
+        "first_install",
+        "first_install_unpublished",
+    ] {
+        if scenario == "first_install_unpublished" && !cfg!(unix) {
+            continue;
+        }
+        let first_install = scenario.starts_with("first_install");
+        let upgraded = scenario == "upgraded";
         let fixture = Fixture::new();
         let first_program = fixture.program("first", "1.0.0", true);
+        if scenario == "first_install_unpublished" {
+            let body = std::fs::read_to_string(&first_program).unwrap().replace(
+                "if [ \"$1\" = '--version' ]; then",
+                &format!("if [ \"$1\" = '--version' ]; then printf started > '{}'; while [ ! -f '{}' ]; do /bin/sleep 0.01; done; printf call >> '{}';",
+                    fixture.root.join("version-started").display(), fixture.root.join("version-release").display(), fixture.root.join("version-calls").display()),
+            );
+            std::fs::write(&first_program, body).unwrap();
+        }
         let second_program = fixture.program("second", "2.0.0", false);
         fixture.save(0, &configuration(Some(&first_program))).await;
         fixture
@@ -631,7 +649,9 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
             )
             .await
             .unwrap();
-        fixture.core.run_runtime_discovery().await;
+        if !first_install {
+            fixture.core.run_runtime_discovery().await;
+        }
         if upgraded {
             fixture.seed_ready().await;
             let before = AgentProfileService::default()
@@ -659,6 +679,7 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
             .runtime_check_installation_target(KIND)
             .await
             .unwrap();
+        assert_eq!(initial_target.is_none(), first_install);
         let generation = fixture
             .core
             .runtime_search_environment
@@ -666,6 +687,56 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
             .await
             .generation();
         let first = tokio::spawn(check(fixture.core.clone()));
+        let early_duplicate = if scenario == "first_install_unpublished" {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !fixture.root.join("version-started").exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            // Hold publication after the commit. Another client must already
+            // be able to share the worker that owns the new installation.
+            let publication = fixture.core.runtime_discovery.write().await;
+            std::fs::write(fixture.root.join("version-release"), "").unwrap();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while fixture
+                    .core
+                    .runtime_check_installation_target(KIND)
+                    .await
+                    .unwrap()
+                    .is_none()
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let (acknowledged, acknowledgement) = oneshot::channel();
+            let (completed, completion) = oneshot::channel();
+            fixture
+                .core
+                .runtime_check_requests
+                .send(
+                    crate::application::RuntimeCheckRequest {
+                        search: fixture.core.runtime_search_environment.read().await.clone(),
+                        startup_preview: None,
+                        model_target: None,
+                        runtime_kind: KIND,
+                        purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                        trigger: RuntimeCheckTrigger::UserCheck,
+                        acknowledged,
+                        completion: Some(completed),
+                    }
+                    .into(),
+                )
+                .unwrap();
+            acknowledgement.await.unwrap();
+            drop(publication);
+            Some(completion)
+        } else {
+            None
+        };
         tokio::time::timeout(Duration::from_secs(10), async {
             while !fixture.root.join("probe-started").exists() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -679,7 +750,17 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                 .runtime_check_installation_target(KIND)
                 .await
                 .unwrap(),
-            initial_target,
+            if first_install {
+                let created = fixture
+                    .core
+                    .runtime_check_installation_target(KIND)
+                    .await
+                    .unwrap();
+                assert!(created.is_some());
+                created
+            } else {
+                initial_target
+            },
             "a diagnostic must reuse the current static identity, even with an old health snapshot"
         );
         if upgraded {
@@ -708,20 +789,23 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
         fixture
             .core
             .runtime_check_requests
-            .send(crate::application::RuntimeCheckRequest {
-                search: fixture.core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: KIND,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: if upgraded {
-                    RuntimeCheckTrigger::CatalogOpen
-                } else {
-                    RuntimeCheckTrigger::UserCheck
-                },
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                crate::application::RuntimeCheckRequest {
+                    search: fixture.core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: KIND,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: if upgraded {
+                        RuntimeCheckTrigger::CatalogOpen
+                    } else {
+                        RuntimeCheckTrigger::UserCheck
+                    },
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(
             !acknowledgement.await.unwrap(),
@@ -765,6 +849,17 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
         );
         std::fs::write(fixture.root.join("probe-release"), b"release").unwrap();
         assert_eq!(first.await.unwrap(), RuntimeCheckOutcome::StableFailure);
+        if let Some(duplicate) = early_duplicate {
+            assert_eq!(
+                duplicate.await.unwrap().unwrap(),
+                RuntimeCheckOutcome::StableFailure
+            );
+            assert_eq!(
+                std::fs::read_to_string(fixture.root.join("version-calls")).unwrap(),
+                "call",
+                "a request admitted before target synchronization must share this full check"
+            );
+        }
         assert_eq!(
             duplicate.await.unwrap().unwrap(),
             RuntimeCheckOutcome::StableFailure
@@ -778,6 +873,7 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                 .find(|row| row["runtimeKind"] == kind)
                 .unwrap();
             assert_ne!(row["status"], "checking");
+            assert_eq!(row["checking"], false);
             assert_eq!(row["discovery"]["discoveryStatus"], "found");
             assert!(row["diagnosticCode"].is_string());
         }
@@ -835,20 +931,23 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
         fixture
             .core
             .runtime_check_requests
-            .send(crate::application::RuntimeCheckRequest {
-                search: fixture.core.runtime_search_environment.read().await.clone(),
-                startup_preview: None,
-                model_target: None,
-                runtime_kind: KIND,
-                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                trigger: if change == "installation" {
-                    RuntimeCheckTrigger::CatalogOpen
-                } else {
-                    RuntimeCheckTrigger::UserCheck
-                },
-                acknowledged,
-                completion: Some(completed),
-            })
+            .send(
+                crate::application::RuntimeCheckRequest {
+                    search: fixture.core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: KIND,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: if change == "installation" {
+                        RuntimeCheckTrigger::CatalogOpen
+                    } else {
+                        RuntimeCheckTrigger::UserCheck
+                    },
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
             .unwrap();
         assert!(
             acknowledgement.await.unwrap(),
@@ -905,6 +1004,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                 "unobserved_replacement",
                 "rescanned_replacement",
                 "unknown",
+                "created",
                 "version_during_io",
                 "identity_during_io",
             ]
@@ -927,7 +1027,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                         "an old F1 failure must not be selected for F2");
                 }
                 let search = fixture.core.runtime_search_environment.read().await.clone();
-                let installation_target = if change == "unknown" {
+                let installation_target = if matches!(change, "unknown" | "created") {
                     None
                 } else {
                     fixture
@@ -962,6 +1062,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     assert!(fixture.core.commit_rebound_runtime_candidate(
                         KIND, &verified, &candidate, search.generation(),
                         &Some((installation.id.clone(), installation.version)),
+                        None,
                     ).await.unwrap().is_some());
                     assert_eq!(
                         fixture
@@ -974,7 +1075,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                 }
                 let attempt_id = format!("timeout-{index}");
                 let (completed, completion) = oneshot::channel();
-                let attempt = RuntimeCheckAttempt {
+                let mut attempt = RuntimeCheckAttempt {
                     installation_target,
                     search: search.clone(),
                     startup_preview: None,
@@ -988,6 +1089,17 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     deadline: tokio::time::Instant::now(),
                     waiters: vec![completed],
                 };
+                if change == "created" {
+                    let mut committed_target = None;
+                    let current = fixture.core.runtime_check_installation_target(KIND).await.unwrap().unwrap();
+                    let _ack = crate::application::RuntimeCheckWorkerContext {
+                        attempt_id: &attempt_id, installation_target: &mut committed_target,
+                    }.publish_target(&fixture.core, KIND, current.clone()).unwrap();
+                    assert_eq!(committed_target, Some(current));
+                    // The worker result carries this guarded-commit proof even
+                    // if its total deadline expires before the Manager's ack.
+                    attempt.installation_target = committed_target;
+                }
                 fixture.core.runtime_check_activity.write().await.insert(
                     KIND,
                     RuntimeCheckActivity {
@@ -1081,7 +1193,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
                     .unwrap()
                     .unwrap();
-                if matches!(change, "unchanged" | "upgraded" | "upgraded_static" | "upgraded_verified") {
+                if matches!(change, "unchanged" | "upgraded" | "upgraded_static" | "upgraded_verified" | "created") {
                     assert_eq!(failure_count().await, attempts_before + 1);
                     fixture.core.runtime_product_diagnostics.write().await.clear();
                     assert_eq!(
@@ -1157,6 +1269,7 @@ async fn full_probe_saves_version_before_connection_and_cancellation() {
             tokio::time::Instant::now() + Duration::from_secs(90),
             search,
             false,
+            None,
         );
         tokio::pin!(resolution);
         tokio::select! {
@@ -1207,6 +1320,128 @@ async fn full_probe_saves_version_before_connection_and_cancellation() {
         "each full check reads once, including when later connection checks fail"
     );
     fixture.close().await;
+}
+
+// The full-check/rescan race must cross the production manager and snapshot
+// writer. Both health success and failure must retain the rescan's newer version.
+#[cfg(unix)]
+#[tokio::test]
+async fn full_check_finishes_without_overwriting_a_later_rescan_version() {
+    use rovai_core::agent_profile::AgentProfileService;
+    use std::os::unix::fs::PermissionsExt;
+    let python = std::process::Command::new("python3")
+        .args(["-c", "import sys; print(sys.executable)"])
+        .output()
+        .unwrap();
+    assert!(python.status.success());
+    let python = String::from_utf8(python.stdout).unwrap();
+    let kind = AdapterKind::MinimaxCodeCli;
+    for fails in [false, true] {
+        let fixture = Fixture::new();
+        let program = fixture.root.join("mcode");
+        std::fs::write(&program, format!("#!{}\n{}", python.trim(), r#"
+import json, pathlib, sys, time
+root = pathlib.Path(__file__).parent
+if '--version' in sys.argv:
+    with (root / 'version-calls').open('a') as f: f.write('call\n')
+    print((root / 'reported-version').read_text().strip()); sys.exit(0)
+for line in sys.stdin:
+    request=json.loads(line); method=request['method']
+    if method == 'initialize':
+        (root / 'started').touch()
+        while (root / 'gate').exists(): time.sleep(.01)
+        if (root / 'fail').exists():
+            print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32603,'message':'fixture connection failed'}}),flush=True)
+            continue
+        result={'protocolVersion':1,'agentCapabilities':{'loadSession':True}}
+    elif method == 'session/new':
+        result={'sessionId':'fixture-session','configOptions':[
+            {'id':'model','name':'Model','category':'model','type':'select','currentValue':'model-0','options':[{'value':'model-0','name':'Model 0'}]},
+            {'id':'thinkingEffort','name':'Thinking','type':'select','currentValue':'high','options':[{'value':'high','name':'High'}]}]}
+    else: raise AssertionError(method)
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
+"#)).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(fixture.root.join("reported-version"), "0.6.12").unwrap();
+        std::fs::write(fixture.root.join("gate"), "").unwrap();
+        if fails {
+            std::fs::write(fixture.root.join("fail"), "").unwrap();
+        }
+        fixture.core.handle_runtime_startup("runtime.startup.save", json!({
+            "runtimeKind": kind, "expectedRevision": 0, "configuration": configuration(Some(&program)),
+        })).await.unwrap();
+        fixture.core.run_runtime_discovery().await;
+        let fingerprint = fingerprint_executable(&program).unwrap();
+        let check = tokio::spawn({
+            let core = fixture.core.clone();
+            async move {
+                core.await_runtime_check(
+                    kind,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !fixture.root.join("started").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let row = |payload: Value| {
+            payload["runtimeAvailability"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["runtimeKind"] == "minimax-code-cli")
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(
+            row(fixture.public_state().await)["reportedVersion"],
+            "0.6.12"
+        );
+        std::fs::write(fixture.root.join("reported-version"), "0.6.13").unwrap();
+        fixture.core.rescan_runtime_discovery().await.unwrap();
+        let scanned = row(fixture.public_state().await);
+        assert_eq!(scanned["reportedVersion"], "0.6.13");
+        assert_eq!(fingerprint_executable(&program).unwrap(), fingerprint);
+        std::fs::remove_file(fixture.root.join("gate")).unwrap();
+        assert_eq!(
+            check.await.unwrap(),
+            if fails {
+                RuntimeCheckOutcome::StableFailure
+            } else {
+                RuntimeCheckOutcome::Ready
+            }
+        );
+        let completed = row(fixture.public_state().await);
+        assert_eq!(completed["reportedVersion"], "0.6.13");
+        assert_eq!(completed["discovery"]["versionProbeSucceeded"], true);
+        assert_eq!(
+            completed["discovery"]["observedAt"],
+            scanned["discovery"]["observedAt"]
+        );
+        let installation = AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            installation.snapshot.unwrap().reported_version.as_deref(),
+            Some("0.6.13")
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("version-calls"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+        fixture.close().await;
+    }
 }
 
 // The manual rescan owns bounded version reads; passive discovery stays static.
@@ -1331,6 +1566,54 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         Some(fingerprint.as_str()),
         "a failed direct check without a cached fingerprint still describes the selected program"
     );
+    let retained_read_failure = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap()
+        .last_probe_attempt;
+    std::fs::write(&version_file, b"codex-cli 1.3.0\n").unwrap();
+    fixture.core.rescan_runtime_discovery().await.unwrap();
+    let recovered = fixture.health().await;
+    assert_eq!(recovered["reportedVersion"], "codex-cli 1.3.0");
+    assert_eq!(recovered["discovery"]["versionProbeSucceeded"], true);
+    assert!(recovered["diagnosticCode"].is_null());
+    assert!(
+        recovered["failure"].is_null(),
+        "a newer successful read supersedes both historical read-error sources"
+    );
+    assert_eq!(
+        AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap()
+            .last_probe_attempt,
+        retained_read_failure
+    );
+    for code in [
+        "runtime_version_below_minimum",
+        "runtime_authentication_required",
+        "runtime_capability_incompatible",
+    ] {
+        fixture
+            .core
+            .runtime_product_diagnostics
+            .write()
+            .await
+            .insert(
+                KIND,
+                crate::application::ProductRuntimeDiagnostic {
+                    status: "needs_attention",
+                    diagnostic_code: code.into(),
+                    priority: 2,
+                    failure: None,
+                },
+            );
+        assert_eq!(
+            fixture.health().await["diagnosticCode"],
+            code,
+            "successful version reads cannot clear other diagnostics"
+        );
+    }
     fixture.program("versions", "2.0.0-upgraded", false);
     instrument(&program);
     fixture.core.rescan_runtime_discovery().await.unwrap();
@@ -1704,16 +1987,19 @@ for line in sys.stdin:
             fixture
                 .core
                 .runtime_check_requests
-                .send(crate::application::RuntimeCheckRequest {
-                    search: fixture.core.runtime_search_environment.read().await.clone(),
-                    startup_preview: None,
-                    model_target: None,
-                    runtime_kind: kind,
-                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                    trigger,
-                    acknowledged,
-                    completion: Some(completion),
-                })
+                .send(
+                    crate::application::RuntimeCheckRequest {
+                        search: fixture.core.runtime_search_environment.read().await.clone(),
+                        startup_preview: None,
+                        model_target: None,
+                        runtime_kind: kind,
+                        purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                        trigger,
+                        acknowledged,
+                        completion: Some(completion),
+                    }
+                    .into(),
+                )
                 .unwrap();
             assert_eq!(
                 ack.await.unwrap(),

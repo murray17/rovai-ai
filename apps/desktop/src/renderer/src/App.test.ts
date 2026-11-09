@@ -8318,6 +8318,21 @@ describe('task event projections', () => {
     expect(markup).not.toContain('runtime-failure-notice')
     expect(markup).not.toContain('上次已知版本')
     expect(markup).not.toContain('版本未知')
+    item.discovery.versionProbeSucceeded = true
+    const recovered = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
+      health: {
+        hostPlatform: 'macos-arm64', runtimeCatalog: [],
+        runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
+        runtimeAvailability: [item],
+        searchEnvironment: {
+          generation: 1, createdAt: '2026-11-09T00:00:00Z', pathEntryCount: 0,
+          shell: { status: 'captured', interactive: true, shellName: 'zsh', entryCount: 0, elapsedMillis: 0 }
+        }
+      }, installations: [], onReload: async () => undefined
+    }))
+    expect(recovered).not.toContain('智能体版本读取失败，请重试检查。')
+    expect(recovered).not.toContain('本轮版本命令已超时。')
+    expect(recovered).not.toContain('runtime-failure-notice')
   })
 
   it('renders Windows not-qualified rows without machine checks or rescan actions', () => {
