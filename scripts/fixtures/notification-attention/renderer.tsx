@@ -19,6 +19,7 @@ const acknowledgements: unknown[] = []
 const navigations: NotificationActionView[] = []
 let preference = { headsUpEnabled: true, approvalHeadsUpEnabled: true, userMentionHeadsUpEnabled: true,
   turnCompletedHeadsUpEnabled: true, turnIncompleteHeadsUpEnabled: true, singleChatHeadsUpEnabled: true, missionNeedsYouHeadsUpEnabled: true, missionStatusHeadsUpEnabled: true, taskStatusHeadsUpEnabled: false, missionStatuses: ['completed'], taskStatuses: ['completed','blocked','cancelled'], version: 1, updatedAt: '2026-09-07' }
+let refreshNotifications: () => void
 let showSettings: (visible: boolean) => void
 let failPreferenceSave = false
 let failedInboxReads = 0
@@ -31,6 +32,7 @@ let holdChanges = false
 const pendingChanges: Array<() => void> = []
 let changeReads = 0
 let setSources: (source: VisibleNotificationSources | null) => void
+let native: import('@contracts').NativeInteractionNotification[] = []
 let sequence = 0
 const taskSnapshot = () => ({ enabled: tasksEnabled, headsUpAfterSequence, observedThroughChangeSequence: sequence })
 const read = () => ({ threadId: 'camp-other', surfaceVisible: true, snapshotSequence: 0,
@@ -43,6 +45,7 @@ Object.assign(window, { rovai: {
       if (failedTaskReads > 0) { failedTaskReads--; throw new Error('Temporary capability failure') }
       return snapshot
     }
+    if (method === 'nativeInteractions.notifications') return [...native]
     if (method === 'notifications.preference.get') return preference
     if (method === 'notifications.preference.update') {
       if (failPreferenceSave) { failPreferenceSave = false; throw new Error('测试保存失败') }
@@ -92,6 +95,8 @@ function admit(semantic: NotificationSemantic, privateId: string | null = null, 
   return `occurrence-${n}`
 }
 function Fixture() {
+  const [generation, setGeneration] = useState(0)
+  refreshNotifications = () => setGeneration(value => value + 1)
   notificationCapability = useTaskCapability()
   const [sources, updateSources] = useState<VisibleNotificationSources | null>(read())
   setSources = updateSources
@@ -99,7 +104,7 @@ function Fixture() {
   showSettings = setSettings
   if (settings) return <main className="settings-panel settings-panel-notifications" style={{ padding: 28, height: '100vh', overflow: 'auto' }}><NotificationSettings /></main>
   return <main style={{ padding: 40 }}><h1>通知交互验证</h1><input id="draft" aria-label="消息草稿" defaultValue="继续阅读" />
-    <NotificationAttentionController enabled activeThreadId={sources?.threadId ?? 'camp-other'} activeThreadVisible navigationActive={false}
+    <NotificationAttentionController key={generation} enabled activeThreadId={sources?.threadId ?? 'camp-other'} activeThreadVisible navigationActive={false}
       visibleSources={sources?.conversationId ? null : sources} singleChatSources={sources?.conversationId ? sources : null}
       onNavigate={async (_episode, action) => { navigations.push(action); return { status: 'navigated' } }}
       onPresentNavigation={async () => true} onCancelNavigation={() => undefined}
@@ -109,6 +114,16 @@ function Fixture() {
 let notificationCapability: ReturnType<typeof useTaskCapability>
 Object.assign(window, { notificationTest: {
   admit,
+  refresh: () => refreshNotifications(),
+  native: (id: string, privateId: string | null = null, expiresAt: number | null = null) => {
+    native.push({ id, thread: { id: 'camp-target', title: '原生问答会话' }, agentRunId: `run-${id}`,
+      executionEpoch: 1, agentDisplayName: '爱丽丝', singleChat: privateId ? { conversationId: privateId,
+        agentId: 'agent-native', agentDisplayName: '爱丽丝', agentRunId: `run-${id}` } : null,
+      createdAt: Date.now(), expiresAt })
+    listeners.forEach(callback => callback({ method: 'agent_run.interaction_changed' }))
+  },
+  resolveNative: (id: string) => { native = native.filter(source => source.id !== id)
+    listeners.forEach(callback => callback({ method: 'agent_run.interaction_changed' })) },
   tasks: (enabled: boolean) => {
     if (!tasksEnabled && enabled) headsUpAfterSequence = sequence
     if (tasksEnabled !== enabled) sequence++

@@ -8487,3 +8487,20 @@ function runtimeAdmissionRows(
 const taskCapability = vi.hoisted(() => ({ enabled: true }))
 vi.mock('./TaskCapabilityProvider', () => ({ useTaskCapability: () => taskCapability }))
 afterEach(() => { taskCapability.enabled = true })
+
+
+it('locates native questions by their exact public or private interaction ID', () => {
+  const action: import('@contracts').NotificationActionView = { actionId: 'native', kind: 'open_native_interaction',
+    available: true, threadId: 'thread', agentRunId: 'run', threadTurnId: null, messageId: null,
+    approvalId: null, acknowledgementId: null, observedEpisodeVersion: 0, interactionId: 'question' }
+  expect(notificationFocusMatchesAction({ requestId: 1, kind: 'native_interaction',
+    threadTurnId: null, interactionId: 'question' }, action)).toBe(true)
+  expect(notificationFocusMatchesAction({ requestId: 1, kind: 'native_interaction',
+    threadTurnId: null, interactionId: 'other' }, action)).toBe(false)
+  const privateAction = { ...action, singleChat: { conversationId: 'original-private', agentId: 'agent',
+    agentDisplayName: 'Alice', agentRunId: 'run' } }
+  expect(notificationFocusMatchesAction({ requestId: 2, kind: 'single_chat', threadTurnId: null,
+    conversationId: 'original-private', agentRunId: 'run', interactionId: 'question' }, privateAction)).toBe(true)
+  expect(notificationFocusMatchesAction({ requestId: 2, kind: 'single_chat', threadTurnId: null,
+    conversationId: 'successor-private', agentRunId: 'run', interactionId: 'question' }, privateAction)).toBe(false)
+})

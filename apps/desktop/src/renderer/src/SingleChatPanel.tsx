@@ -1209,7 +1209,7 @@ export function SingleChatPanel({
   }, [threadId, currentSnapshot, onVisibleNotificationSources, visible])
 
   useEffect(() => {
-    if (!visible || !notificationFocus?.active || notificationFocus.approvalId
+    if (!visible || !notificationFocus?.active || notificationFocus.approvalId || notificationFocus.interactionId
       || currentSnapshot?.conversation.id !== notificationFocus.conversationId) return
     const node = viewportRef.current?.querySelector<HTMLElement>(
       `[data-single-chat-run-id="${CSS.escape(notificationFocus.agentRunId ?? '')}"]`)
@@ -1815,8 +1815,8 @@ export function SingleChatPanel({
           return result
         }}
         onResolve={onResolveApproval} containerRef={approvalRef}
-        focusRequest={notificationFocus?.active && notificationFocus.approvalId ? notificationFocus.requestId : null}
-        focusApprovalId={notificationFocus?.approvalId ?? null}
+        focusRequest={notificationFocus?.active && (notificationFocus.approvalId || notificationFocus.interactionId) ? notificationFocus.requestId : null}
+        focusApprovalId={notificationFocus?.interactionId ?? notificationFocus?.approvalId ?? null}
         onFocusPresented={onNotificationFocusPresented}
       />}
 

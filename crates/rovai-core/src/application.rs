@@ -12388,6 +12388,27 @@ impl Core {
                 }
                 Ok(serde_json::to_value(view)?)
             }
+            "nativeInteractions.notifications" => {
+                let questions = self.pi.channel_interactions().await;
+                let database = self.database.lock().await;
+                let mut sources = Vec::new();
+                for (thread_id, question) in questions {
+                    if let Some(source) = crate::native_interaction::notification_source(
+                        database.connection(),
+                        &thread_id,
+                        &question,
+                    )? {
+                        sources.push(source);
+                    }
+                }
+                sources.sort_by_key(|source| {
+                    (
+                        source["createdAt"].as_i64().unwrap_or(0),
+                        source["id"].as_str().unwrap_or_default().to_owned(),
+                    )
+                });
+                Ok(json!(sources))
+            }
             "nativeInteractions.respond" => {
                 let params: crate::native_interaction::RespondNativeInteraction =
                     serde_json::from_value(request.params.clone())?;

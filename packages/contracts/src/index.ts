@@ -2767,6 +2767,7 @@ export interface ThreadMessageChange {
 export interface ThreadReadInvalidation {
   referencesChanged?: boolean
   notificationsChanged?: boolean
+  nativeInteractionsChanged?: boolean
   tasksChanged?: boolean
   teamsChanged?: boolean
   resync?: boolean
@@ -2898,7 +2899,20 @@ export interface EventBatch {
 
 export type NotificationEpisodeKind = 'collaboration' | 'message' | 'approval' | 'round' | 'mission' | 'task' | 'single_chat'
 
+// native_interaction_pending is transient Runtime attention, never a persisted Episode.
+export interface NativeInteractionNotification {
+  id: string
+  thread: NotificationEpisodeView['thread']
+  agentRunId: string
+  executionEpoch: number
+  agentDisplayName: string
+  singleChat: NotificationSingleChatSource | null
+  createdAt: number
+  expiresAt: number | null
+}
+
 export type NotificationSemantic =
+  | 'native_interaction_pending'
   | 'approval_pending'
   | 'user_mention'
   | 'turn_completed'
@@ -2922,6 +2936,7 @@ export type NotificationReasonState =
   | 'satisfied'
 
 export type NotificationActionKind =
+  | 'open_native_interaction'
   | 'open_approval'
   | 'open_camp_message'
   | 'open_camp_turn'
@@ -2965,6 +2980,7 @@ export interface NotificationSubject {
 }
 
 export interface NotificationActionView {
+  interactionId?: string
   actionId: string
   kind: NotificationActionKind
   available: boolean
@@ -3040,6 +3056,8 @@ export interface NotificationThreadInterruptions {
 }
 
 export interface NotificationHeadsUpSignal {
+  // Present only for transient Runtime-owned questions, outside the durable Journal.
+  nativeInteraction?: NativeInteractionNotification
   semantic: NotificationSemantic
   admittedAttentionRevision: number
   action: NotificationActionView
@@ -4646,6 +4664,7 @@ export type CoreMethod =
   | 'userAutomation.thread.send'
   | 'action.approvals.resolve'
   | 'nativeInteractions.respond'
+  | 'nativeInteractions.notifications'
   | 'notifications.inbox'
   | 'notifications.threadInterruptions'
   | 'notifications.changesSince'

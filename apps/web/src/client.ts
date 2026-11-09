@@ -72,6 +72,7 @@ export const WEB_OPERATIONS = [
   'members.remove',
   'members.reorder',
   'runtime.subsystems.retry',
+  'nativeInteractions.notifications',
   'notifications.inbox',
   'notifications.threadInterruptions',
   'notifications.changesSince',
@@ -322,7 +323,7 @@ export class InvalidationDecoder {
           const messages = Array.isArray(payload.messages) ? payload.messages.filter(change =>
             typeof change.threadId === 'string' && typeof change.indexChanged === 'boolean'
             && Number.isSafeInteger(change.throughGlobalSequence)) : []
-          this.#changes.push({ messages, ...(payload.referencesChanged === true ? { referencesChanged: true } : {}), ...(payload.tasksChanged === true ? { tasksChanged: true } : {}), ...(payload.teamsChanged === true ? { teamsChanged: true } : {}), ...(payload.notificationsChanged === true ? { notificationsChanged: true } : {}) })
+          this.#changes.push({ messages, ...(payload.referencesChanged === true ? { referencesChanged: true } : {}), ...(payload.tasksChanged === true ? { tasksChanged: true } : {}), ...(payload.teamsChanged === true ? { teamsChanged: true } : {}), ...(payload.notificationsChanged === true ? { notificationsChanged: true } : {}), ...(payload.nativeInteractionsChanged === true ? { nativeInteractionsChanged: true } : {}) })
         }
       }
     }
@@ -1162,7 +1163,7 @@ export class ConsoleClient {
             if (done) break
             if (frames.push(decoder.decode(value, { stream: true }))) {
               const changes = frames.takeChanges()
-              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.referencesChanged) ? { referencesChanged: true } : {}), ...(changes.some(change => change.notificationsChanged) ? { notificationsChanged: true } : {}), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), ...(changes.some(change => change.teamsChanged) ? { teamsChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
+              invalidate({ resync: changes.some(change => change.resync), ...(changes.some(change => change.referencesChanged) ? { referencesChanged: true } : {}), ...(changes.some(change => change.notificationsChanged) ? { notificationsChanged: true } : {}), ...(changes.some(change => change.nativeInteractionsChanged) ? { nativeInteractionsChanged: true } : {}), ...(changes.some(change => change.tasksChanged) ? { tasksChanged: true } : {}), ...(changes.some(change => change.teamsChanged) ? { teamsChanged: true } : {}), messages: changes.flatMap(change => change.messages ?? []) })
               void this.reconcilePending()
             }
           }

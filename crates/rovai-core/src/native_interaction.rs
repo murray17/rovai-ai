@@ -121,3 +121,54 @@ pub struct NativeInteractionResult {
     pub status: NativeInteractionStatus,
     pub already_handled: bool,
 }
+
+/// Current Runtime attention only: no question/answer text, notification rows or restored waits.
+pub fn notification_source(
+    connection: &rusqlite::Connection,
+    thread_id: &str,
+    question: &NativeInteractionView,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    use rusqlite::{OptionalExtension, params};
+    use serde_json::json;
+    if question.status != NativeInteractionStatus::Pending
+        || question
+            .expires_at
+            .is_some_and(|end| end <= chrono::Utc::now().timestamp_millis())
+    {
+        return Ok(None);
+    }
+    Ok(connection.query_row(
+        "SELECT camp.title, profile.display_name, owner.agent_id,
+                run.destination_conversation_id, channel.provider, channel.conversation_kind
+         FROM agent_run AS run JOIN conversation AS owner ON owner.id=run.conversation_id
+         LEFT JOIN camp_turn AS turn ON turn.id=run.camp_turn_id
+         JOIN camp ON camp.id=COALESCE(run.camp_id,turn.camp_id)
+         JOIN agent_profile AS profile ON profile.id=owner.agent_id AND profile.profile_status='present'
+         JOIN camp_member AS member ON member.camp_id=camp.id AND member.agent_id=owner.agent_id
+           AND member.status='active' AND member.leave_requested_at IS NULL
+         LEFT JOIN conversation AS private ON private.id=run.destination_conversation_id
+           AND private.kind='single_chat' AND private.camp_id=camp.id AND private.agent_id=owner.agent_id
+         LEFT JOIN channel_conversation_binding AS binding ON binding.camp_id=camp.id
+         LEFT JOIN channel_conversation AS channel ON channel.id=binding.channel_conversation_id
+         WHERE run.id=?1 AND run.execution_epoch=?2 AND camp.id=?3
+           AND run.status IN ('running','waiting') AND run.cancel_requested_at IS NULL
+           AND ((run.invocation_kind<>'single_chat' AND run.destination_conversation_id IS NULL)
+             OR (run.invocation_kind='single_chat' AND private.id IS NOT NULL AND private.ended_at IS NULL))",
+        params![question.agent_run_id, question.execution_epoch, thread_id],
+        |row| {
+            let name: String = row.get(1)?;
+            let conversation_id: Option<String> = row.get(3)?;
+            let agent_id: String = row.get(2)?;
+            Ok(json!({
+                "id":question.id, "agentRunId":question.agent_run_id,
+                "executionEpoch":question.execution_epoch, "agentDisplayName":name,
+                "thread":{"id":thread_id,"title":row.get::<_,String>(0)?,
+                    "channelSource":crate::read_model::camp_channel_source_from_row(row,4)?},
+                "singleChat":conversation_id.map(|id| json!({"conversationId":id,
+                    "agentId":agent_id,
+                    "agentDisplayName":name,"agentRunId":question.agent_run_id})),
+                "createdAt":question.created_at,"expiresAt":question.expires_at
+            }))
+        },
+    ).optional()?)
+}

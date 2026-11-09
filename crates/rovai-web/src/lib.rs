@@ -681,6 +681,9 @@ async fn events(
                         if matches!(change["method"].as_str(), Some("notification_episode.changed" | "notification_episode.preference_changed")) {
                             payload["notificationsChanged"] = json!(true);
                         }
+                        if matches!(change["method"].as_str(), Some("agent_run.interaction_changed" | "agent_run.terminal" | "agent_run.cancelled" | "single_chat.ended")) {
+                            payload["nativeInteractionsChanged"] = json!(true);
+                        }
                         if change["method"] == "thread.messages.changed" {
                             let params = &change["params"];
                             if let (Some(thread_id), Some(index_changed), Some(through)) = (
