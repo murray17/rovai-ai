@@ -54,9 +54,7 @@ use crate::{
 
 #[cfg(unix)]
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
-const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
-const CODEBUDDY_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-const PI_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+pub const RUNTIME_VERSION_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
@@ -1347,18 +1345,6 @@ fn version_arguments(kind: AdapterKind) -> &'static [&'static str] {
     }
 }
 
-fn version_timeout(kind: AdapterKind) -> Duration {
-    match kind {
-        AdapterKind::CodebuddyCli => CODEBUDDY_VERSION_TIMEOUT,
-        AdapterKind::HermesCli => Duration::from_secs(20),
-        // Pi's packaged JavaScript entrypoint may need a cold Node startup before it can
-        // answer `--version`. Keep the bounded probe, but do not apply the native-binary
-        // deadline to this runtime.
-        AdapterKind::Pi | AdapterKind::ZcodeApp => PI_VERSION_TIMEOUT,
-        _ => VERSION_TIMEOUT,
-    }
-}
-
 /// Reads only the selected program's version during an already-authorized launch.
 /// This does not run a model or refresh installation capabilities.
 pub async fn read_runtime_version_for_launch(
@@ -1400,7 +1386,7 @@ async fn bounded_version_command(
     let output = run_bounded_command(
         &mut command,
         ProbeCommandLimits {
-            deadline: version_timeout(kind),
+            deadline: RUNTIME_VERSION_TIMEOUT,
             stdout_bytes: MAX_VERSION_OUTPUT_BYTES,
             stderr_bytes: MAX_VERSION_OUTPUT_BYTES,
             cleanup_timeout: Duration::from_secs(1),
@@ -2013,20 +1999,6 @@ pub fn catalog_entries() -> Vec<BTreeMap<&'static str, &'static str>> {
             ])
         })
         .collect()
-}
-
-#[cfg(test)]
-mod version_timeout_tests {
-    use super::*;
-
-    #[test]
-    fn pi_version_probe_allows_js_cold_start() {
-        assert_eq!(version_timeout(AdapterKind::Pi), Duration::from_secs(5));
-        assert_eq!(
-            version_timeout(AdapterKind::CodexCli),
-            Duration::from_secs(2)
-        );
-    }
 }
 
 #[cfg(all(test, unix))]
@@ -3450,19 +3422,6 @@ mod windows_tests {
         .await;
         assert_eq!(inherited_path, search.path_value());
         fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn script_runtime_version_probes_allow_cold_start() {
-        assert_eq!(
-            version_timeout(AdapterKind::CodebuddyCli),
-            Duration::from_secs(5)
-        );
-        assert_eq!(version_timeout(AdapterKind::Pi), Duration::from_secs(5));
-        assert_eq!(
-            version_timeout(AdapterKind::CodexCli),
-            Duration::from_secs(2)
-        );
     }
 }
 
