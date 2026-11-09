@@ -48,7 +48,7 @@ describe('notification settings', () => {
     expect(markup).toContain('使命需要你')
     expect(markup).toContain('任务状态变更')
     expect(markup).toContain('已完成、受阻、已取消')
-    expect(markup).toContain('aria-label="待审批"')
+    expect(markup).toContain('aria-label="待审批与回答"')
     expect(markup).toContain('aria-label="提到你"')
     expect(markup).toContain('aria-label="本轮完成"')
     expect(markup).toContain('aria-label="执行未完成"')

@@ -125,6 +125,8 @@ describe('console transport', () => {
     expect(scoped.takeChanges()).toEqual([])
     scoped.push('event: invalidate\ndata: {"notificationsChanged":true,"private":"ignored"}\n\n')
     expect(scoped.takeChanges()).toEqual([{ messages: [], notificationsChanged: true }])
+    scoped.push('event: invalidate\ndata: {"nativeInteractionsChanged":true,"answer":"ignored"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [], nativeInteractionsChanged: true }])
     scoped.push('event: invalidate\ndata: {"notificationsChanged":"true"}\n\n')
     expect(scoped.takeChanges()).toEqual([{ messages: [] }])
     scoped.push('event: invalidate\ndata: {"teamsChanged":true,"private":"ignored"}\n\n')

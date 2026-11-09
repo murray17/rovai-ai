@@ -354,6 +354,7 @@ const allowedMethods = new Set<CoreMethod>([
   'userAutomation.thread.send',
   'action.approvals.resolve',
   'nativeInteractions.respond',
+  'nativeInteractions.notifications',
   'notifications.inbox',
   'notifications.threadInterruptions',
   'notifications.changesSince',

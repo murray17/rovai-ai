@@ -4341,5 +4341,12 @@
   "自动打开执行台说明": "About opening the execution desk automatically",
   "发送消息后，或进入有队员正在执行的会话时，自动展开执行台。": "Automatically open the execution desk after sending a message or entering a conversation with a teammate running.",
   "会话任务说明": "About conversation tasks",
-  "执行、任务与阅读偏好": "Execution, tasks and reading preferences"
+  "执行、任务与阅读偏好": "Execution, tasks and reading preferences",
+  "{0}在等你回答": "{0} is waiting for your answer",
+  "待审批与回答": "Approvals and questions",
+  "公共会话或单聊中，队员等待授权或回答时提醒": "Notify when a teammate is waiting for permission or an answer in a conversation or private chat.",
+  "跳过": "Skip",
+  "否": "No",
+  "是": "Yes",
+  "提交": "Submit"
 }

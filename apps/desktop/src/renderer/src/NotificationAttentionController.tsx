@@ -4,6 +4,7 @@ import { newCommandId } from '../../shared/command-id'
 import { readErrorMessage } from './error-message'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
+  NativeInteractionNotification,
   NotificationActionView,
   NotificationEpisodeChange,
   NotificationEpisodeChangeBatch,
@@ -120,9 +121,9 @@ export function applyNotificationHeadsUpChanges(
     if ([...nextEntries, ...overflowEntries].some(entry => dominatedBy(entry, next))) continue
     nextEntries = nextEntries.filter(entry => !dominatedBy(next, entry))
     overflowEntries = overflowEntries.filter(entry => !dominatedBy(next, entry))
-    const identity = next.signal.action.acknowledgementId
-    const existingIndex = nextEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
-    const existingOverflowIndex = overflowEntries.findIndex((entry) => entry.signal.action.acknowledgementId === identity)
+    const identity = next.signal.action.acknowledgementId ?? next.signal.action.actionId
+    const existingIndex = nextEntries.findIndex((entry) => (entry.signal.action.acknowledgementId ?? entry.signal.action.actionId) === identity)
+    const existingOverflowIndex = overflowEntries.findIndex((entry) => (entry.signal.action.acknowledgementId ?? entry.signal.action.actionId) === identity)
     if (existingIndex >= 0) nextEntries[existingIndex] = next
     else if (existingOverflowIndex >= 0) overflowEntries[existingOverflowIndex] = next
     else {
@@ -139,7 +140,46 @@ export function applyNotificationHeadsUpChanges(
 }
 
 function headsUpPriority(semantic: NotificationSemantic): number {
-  return { approval_pending: 5, mission_needs_you: 5, turn_failed: 4, turn_incomplete: 3, run_stopped: 3, user_mention: 2, turn_completed: 1, round_completed: 1, single_chat_reply: 1, mission_status_changed: 2, task_status_changed: 1 }[semantic]
+  return { native_interaction_pending: 5, approval_pending: 5, mission_needs_you: 5, turn_failed: 4, turn_incomplete: 3, run_stopped: 3, user_mention: 2, turn_completed: 1, round_completed: 1, single_chat_reply: 1, mission_status_changed: 2, task_status_changed: 1 }[semantic]
+}
+
+// Project the current Runtime source into the existing presentation queue only.
+// These entries never enter the durable Episode journal or acknowledgement commands.
+export function reconcileNativeInteractionHeadsUp(
+  current: NotificationHeadsUpState,
+  previousIds: ReadonlySet<string> | null,
+  pending: readonly NativeInteractionNotification[],
+  preference: NotificationPreference | null,
+  quietThreadId: string | null,
+  now = Date.now()
+): NotificationHeadsUpState {
+  const active = pending.filter(source => source.expiresAt === null || source.expiresAt > now)
+  const ids = new Set(active.map(source => source.id))
+  const retain = (entry: NotificationHeadsUpEntry): boolean => !entry.signal.nativeInteraction
+    || ids.has(entry.signal.nativeInteraction.id)
+  const retained = { entries: current.entries.filter(retain), overflowEntries: current.overflowEntries.filter(retain) }
+  if (previousIds === null || !preference?.headsUpEnabled || !preference.approvalHeadsUpEnabled) return retained
+  const changes = active.filter(source => !previousIds.has(source.id) && source.thread.id !== quietThreadId)
+    .map((source): NotificationEpisodeChange => {
+      const id = `native-interaction:${source.id}`
+      const action: NotificationActionView = { actionId: id, kind: 'open_native_interaction', available: true,
+        threadId: source.thread.id, agentRunId: source.agentRunId, interactionId: source.id,
+        threadTurnId: null, messageId: null, approvalId: null, acknowledgementId: null,
+        observedEpisodeVersion: 0, singleChat: source.singleChat }
+      const signal: NotificationHeadsUpSignal = { semantic: 'native_interaction_pending',
+        nativeInteraction: source, action, mention: null, admittedAttentionRevision: 0 }
+      const time = new Date(source.createdAt).toISOString()
+      const episode: NotificationEpisodeView = { id, kind: 'collaboration', episodeVersion: 0,
+        attentionRevision: 0, changeSequence: 0, thread: source.thread, threadTurnId: null,
+        agentRunId: source.agentRunId, primarySemantic: signal.semantic, unread: false,
+        resolved: false, satisfied: false, pendingApprovalCount: 0, mentionCount: 0,
+        unacknowledgedMentionCount: 0, mention: null, reasons: [], primaryAction: action,
+        secondaryActions: [], createdAt: time, updatedAt: time }
+      return { episodeId: id, episodeVersion: 0, attentionRevision: 0, changeSequence: 0,
+        operation: 'upsert', changeCause: 'occurrence_admitted', headsUpSignal: signal,
+        headsUpInvalidation: null, changedAt: time, episode }
+    })
+  return applyNotificationHeadsUpChanges(retained, changes)
 }
 
 export function filterVisibleNotificationHeadsUp(
@@ -269,6 +309,8 @@ export function notificationHeadsUpPresentation(
   signal: NotificationHeadsUpSignal
 ): { label: string; message: string } {
   switch (signal.semantic) {
+    case 'native_interaction_pending':
+      return { label: uiAttribute('等待回答'), message: uiAttribute('{0}在等你回答', signal.nativeInteraction?.agentDisplayName ?? uiAttribute('队员')) }
     case 'approval_pending':
       return { label:uiAttribute("待审批"), message:uiAttribute("有操作等待你审批") }
     case 'turn_failed':
@@ -383,6 +425,10 @@ export function NotificationAttentionController({
   const windowAttentive = useWindowAttentive()
   const [foregroundReady, setForegroundReady] = useState(false)
   const changeCursor = useRef(0)
+  const nativeIds = useRef<Set<string> | null>(null)
+  const nativeReadSequence = useRef(0)
+  const nativeContext = useRef({ enabled, activeThreadId, activeThreadVisible, windowAttentive, preference })
+  nativeContext.current = { enabled, activeThreadId, activeThreadVisible, windowAttentive, preference }
   const baselineReady = useRef(false)
   const baselineGeneration = useRef(0)
   const pollRunning = useRef(false)
@@ -416,9 +462,26 @@ export function NotificationAttentionController({
     )
     if (!validPreference(next)) throw new Error(uiAttribute('提醒设置合同不兼容。'))
     setPreference(next)
+    nativeContext.current.preference = next
     setHeadsUpState((current) => filterHeadsUpByPreference(current, next))
     return next
   }, [])
+
+  const syncNative = useCallback(async (): Promise<void> => {
+    if (!mounted.current || !baselineReady.current || !nativeContext.current.enabled) return
+    const generation = baselineGeneration.current
+    const sequence = ++nativeReadSequence.current
+    // Runtime attention failure must not prevent durable Journal convergence.
+    const pending = await client.request<NativeInteractionNotification[]>('nativeInteractions.notifications').catch(() => null)
+    if (pending === null) return
+    const effectivePreference = nativeContext.current.preference ?? await loadPreference().catch(() => null)
+    if (!mounted.current || generation !== baselineGeneration.current || sequence !== nativeReadSequence.current) return
+    const previousIds = nativeIds.current
+    nativeIds.current = new Set(pending.map(source => source.id))
+    const context = nativeContext.current
+    setHeadsUpState(current => reconcileNativeInteractionHeadsUp(current, previousIds, pending,
+      context.preference ?? effectivePreference, context.activeThreadVisible && context.windowAttentive ? context.activeThreadId : null))
+  }, [client, loadPreference])
 
   const readUnreadStatus = useCallback(async (): Promise<NotificationEpisodeInbox> => {
     const inbox = await client.request<NotificationEpisodeInbox>(
@@ -432,8 +495,12 @@ export function NotificationAttentionController({
 
   const establishBaseline = useCallback(async (): Promise<void> => {
     const generation = ++baselineGeneration.current
-    const inbox = await readUnreadStatus()
+    const [inbox, native] = await Promise.all([
+      readUnreadStatus(),
+      client.request<NativeInteractionNotification[]>('nativeInteractions.notifications').catch(() => null)
+    ])
     if (generation !== baselineGeneration.current) return
+    nativeIds.current = native === null ? null : new Set(native.map(source => source.id))
     resetInterruptions?.()
     setHeadsUpState(emptyNotificationHeadsUpState())
     changeCursor.current = inbox.throughChangeSequence
@@ -444,11 +511,12 @@ export function NotificationAttentionController({
     baselineReady.current = true
     pollFailureCount.current = 0
     pollRetryAt.current = 0
-  }, [readUnreadStatus, resetInterruptions])
+  }, [client, readUnreadStatus, resetInterruptions])
 
   useEffect(() => {
     if (!enabled) {
       baselineReady.current = false
+      nativeIds.current = null
       baselineGeneration.current += 1
       pendingPoll.current = null
       setHeadsUpState(emptyNotificationHeadsUpState())
@@ -604,6 +672,7 @@ export function NotificationAttentionController({
       pollFailureCount.current = 0
       pollRetryAt.current = 0
       if (document.visibilityState === 'visible' && document.hasFocus()) setForegroundReady(true)
+      await syncNative()
     } catch (nextError) {
       pollFailureCount.current += 1
       pollRetryAt.current = Date.now() + Math.min(
@@ -634,6 +703,7 @@ export function NotificationAttentionController({
     onRefreshVisibleThread,
     preference,
     readingSources,
+    syncNative,
     windowAttentive
   ])
 
@@ -645,11 +715,15 @@ export function NotificationAttentionController({
       void poll(true).catch(() => undefined)
     }, NOTIFICATION_RECOVERY_INTERVAL_MS)
     let eventTimer: number | null = null
-    const schedulePoll = (): void => {
+    let journalPending = false
+    const schedulePoll = (nativeOnly = false): void => {
+      journalPending ||= !nativeOnly
       if (eventTimer !== null) window.clearTimeout(eventTimer)
       eventTimer = window.setTimeout(() => {
         eventTimer = null
-        void poll().catch(() => undefined)
+        const read = journalPending ? poll : syncNative
+        journalPending = false
+        void read().catch(() => undefined)
       }, 80)
     }
     const unsubscribe = client.onEvent?.((event) => {
@@ -658,6 +732,8 @@ export function NotificationAttentionController({
         return
       }
       if (shouldPollForNotificationEvent(event.method)) schedulePoll()
+      else if (event.method === 'agent_run.interaction_changed'
+        || (nativeIds.current?.size && ['agent_run.terminal', 'agent_run.cancelled', 'single_chat.ended'].includes(event.method))) schedulePoll(true)
     })
     const unlisten = client.onInvalidated?.(change => {
       if (!change || change.resync) {
@@ -666,7 +742,7 @@ export function NotificationAttentionController({
       } else if (change.notificationsChanged) {
         void loadPreference().catch(() => undefined)
         schedulePoll()
-      }
+      } else if (change.nativeInteractionsChanged) schedulePoll(true)
     })
     return () => {
       window.clearInterval(timer)
@@ -674,7 +750,7 @@ export function NotificationAttentionController({
       unsubscribe?.()
       unlisten?.()
     }
-  }, [client, enabled, loadPreference, poll])
+  }, [client, enabled, loadPreference, poll, syncNative])
 
   useEffect(() => {
     if (!windowAttentive || !enabled) {
@@ -790,6 +866,12 @@ export function NotificationAttentionController({
         onCancelNavigation()
         return
       }
+      if (presented && action.kind === 'open_native_interaction') {
+        setHeadsUpState(current => ({
+          entries: current.entries.filter(entry => entry.signal.action.actionId !== action.actionId),
+          overflowEntries: current.overflowEntries.filter(entry => entry.signal.action.actionId !== action.actionId)
+        }))
+      }
       if (!presented) {
         onCancelNavigation()
         onError(acknowledgementPersisted
@@ -806,6 +888,18 @@ export function NotificationAttentionController({
       setBusyAcknowledgementId(null)
     }
   }
+
+  useEffect(() => {
+    const deadlines = [...headsUpState.entries, ...headsUpState.overflowEntries]
+      .flatMap(entry => entry.signal.nativeInteraction?.expiresAt == null ? [] : [entry.signal.nativeInteraction.expiresAt])
+    if (deadlines.length === 0) return
+    const timer = window.setTimeout(() => {
+      const retain = (entry: NotificationHeadsUpEntry): boolean => entry.signal.nativeInteraction?.expiresAt == null
+        || entry.signal.nativeInteraction.expiresAt > Date.now()
+      setHeadsUpState(current => ({ entries: current.entries.filter(retain), overflowEntries: current.overflowEntries.filter(retain) }))
+    }, Math.min(2_147_483_647, Math.max(0, Math.min(...deadlines) - Date.now())))
+    return () => window.clearTimeout(timer)
+  }, [headsUpState])
 
   const presentableState = filterVisibleNotificationHeadsUp(
     filterTaskHeadsUp(headsUpState, tasksEnabled, headsUpAfterSequence),
@@ -998,6 +1092,7 @@ export function shouldShowHeadsUp(
   if (!preference.headsUpEnabled) return false
   switch (signal.semantic) {
     case 'run_stopped': return false
+    case 'native_interaction_pending':
     case 'approval_pending': return preference.approvalHeadsUpEnabled
     case 'user_mention': return preference.userMentionHeadsUpEnabled
     case 'turn_completed':

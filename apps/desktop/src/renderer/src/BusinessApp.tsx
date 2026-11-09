@@ -3168,6 +3168,13 @@ export function BusinessApp({
           }
           return
         }
+        if (action.kind === 'open_native_interaction') {
+          const sources = await client.request<import('@contracts').NativeInteractionNotification[]>('nativeInteractions.notifications')
+          const source = sources.find(source => source.id === action.interactionId
+            && source.thread.id === action.threadId && source.agentRunId === action.agentRunId
+            && (source.singleChat?.conversationId ?? null) === (action.singleChat?.conversationId ?? null))
+          if (!source) throw new Error(uiAttribute('请求已处理'))
+        }
         if (action.kind === 'open_single_chat') {
           const source = action.singleChat
           if (!source) throw new Error(uiAttribute('单聊通知缺少原始对话标识。'))
@@ -3254,10 +3261,10 @@ export function BusinessApp({
         }
         const target: NotificationFocusTarget | null = (action.kind === 'open_mission' || (action.kind === 'open_task' && taskCapabilityRef.current)) && action.subject
           ? { requestId: ++notificationFocusSequence.current, kind: action.subject.kind === 'mission' ? 'mission' : 'task', subjectId: action.subject.id, threadTurnId: null }
-          : action.kind === 'open_single_chat' && action.singleChat
+          : (action.kind === 'open_single_chat' || action.kind === 'open_native_interaction') && action.singleChat
           ? { requestId: ++notificationFocusSequence.current, kind: 'single_chat',
             conversationId: action.singleChat.conversationId, agentRunId: action.singleChat.agentRunId,
-            threadTurnId: action.threadTurnId, approvalId: action.approvalId ?? undefined }
+            threadTurnId: action.threadTurnId, approvalId: action.approvalId ?? undefined, interactionId: action.interactionId }
           : action.kind === 'open_camp_message'
           ? action.messageId
             ? {
@@ -3267,6 +3274,9 @@ export function BusinessApp({
               messageId: action.messageId
             }
             : null
+          : action.kind === 'open_native_interaction'
+            ? { requestId: ++notificationFocusSequence.current, kind: 'native_interaction',
+                threadTurnId: null, interactionId: action.interactionId }
           : action.kind === 'open_approval'
             ? {
               requestId: ++notificationFocusSequence.current,
@@ -3319,7 +3329,7 @@ export function BusinessApp({
           }
           return
         }
-        if (action.kind === 'open_single_chat' && action.singleChat && target) {
+        if ((action.kind === 'open_single_chat' || action.kind === 'open_native_interaction') && action.singleChat && target) {
           setSingleChatNotificationTarget({ ...action.singleChat, requestId: target.requestId })
           setSingleChatThreadId(action.threadId)
         } else setSingleChatThreadId(null)
@@ -5113,7 +5123,8 @@ export function notificationFocusMatchesAction(
       && focus.subjectId === action.subject?.id && focus.kind === action.subject?.kind
   }
   if (focus.kind === 'single_chat') {
-    return action.kind === 'open_single_chat'
+    return (action.kind === 'open_single_chat' || action.kind === 'open_native_interaction')
+      && (focus.interactionId ?? null) === (action.interactionId ?? null)
       && focus.conversationId === action.singleChat?.conversationId
       && focus.agentRunId === action.singleChat?.agentRunId
       && (focus.approvalId ?? null) === action.approvalId
@@ -5133,6 +5144,8 @@ export function notificationFocusMatchesAction(
       && Boolean(focus.agentRunId)
       && focus.agentRunId === action.agentRunId
   }
+  if (focus.kind === 'native_interaction') return action.kind === 'open_native_interaction'
+    && Boolean(focus.interactionId) && focus.interactionId === action.interactionId
   return action.kind === 'open_approval'
     && (focus.approvalId ?? null) === (action.approvalId ?? null)
 }

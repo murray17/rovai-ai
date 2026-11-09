@@ -52,7 +52,7 @@ interface NotificationScenario {
 
 const NOTIFICATION_SCENARIOS: readonly NotificationScenario[] = [
   { id: 'conversation', title:"会话", categories: [
-    { key: 'approvalHeadsUpEnabled', label:"待审批", description:"公共会话或单聊有权限请求时提醒" },
+    { key: 'approvalHeadsUpEnabled', label:"待审批与回答", description:"公共会话或单聊中，队员等待授权或回答时提醒" },
     { key: 'userMentionHeadsUpEnabled', label:"提到你", description:"队员在公共会话中明确提到你" },
     { key: 'turnCompletedHeadsUpEnabled', label:"本轮完成", description:"本次消息引发的全部协作结束后，只提醒一次" },
     { key: 'singleChatHeadsUpEnabled', label:"单聊回复", description:"队员在单聊中完成回复时提醒" },
