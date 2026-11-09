@@ -1,7 +1,8 @@
 import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { RuntimeParameterSelect } from './RuntimeParameterSelect'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -22,6 +23,8 @@ import {
 } from './MemberRuntimeParameters'
 
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+
+vi.mock('./RuntimeParameterSelect', { spy: true })
 
 describe('runtime model catalog source', () => {
   it('keeps expired same-environment history displayable without accepting invalidated history', () => {
@@ -369,6 +372,41 @@ describe('member runtime parameters', () => {
       model: {mode: 'explicit', modelId: 'runtime/model', options: {reasoning_effort: 'future'}}
     }))
     expect(markup).toContain('尚未核对 · future')
+  })
+
+  it('keeps one Hermes reset choice without a matching model catalog and saves its explicit intent', () => {
+    for (const catalog of ['missing-model', 'empty', 'native-reset'] as const) {
+      const installation = runtimeInstallation('hermes-cli')
+      installation.snapshot!.models[0].options[0].values = ['high', 'default', 'default']
+        .map(value => ({ value, label: value }))
+      if (catalog === 'empty') installation.snapshot!.models = []
+      for (const value of ['high', 'default']) {
+        vi.mocked(RuntimeParameterSelect).mockClear()
+        const model = {
+          mode: 'explicit' as const,
+          modelId: catalog === 'native-reset' ? 'runtime/model' : 'custom:manual:unlisted',
+          options: { reasoning_effort: value }
+        }
+        const onChange = vi.fn()
+        const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+          adapterKind: 'hermes-cli', installation, model, disabled: false, onChange
+        }))
+        const [field] = vi.mocked(RuntimeParameterSelect).mock.calls.at(-1)!
+        const resets = field.choices.filter(choice => choice.value === 'default')
+        expect(resets).toHaveLength(1)
+        expect(resets[0].label).toBe('恢复 Hermes 配置默认')
+        expect(field.defaultChoice).toEqual({ value: '', label: '不覆盖原生会话设置' })
+        expect(markup).toContain(value === 'default'
+          ? 'aria-label="推理强度，恢复 Hermes 配置默认"'
+          : catalog === 'native-reset' ? 'aria-label="推理强度，high"' : '尚未核对 · high')
+        expect(onChange).not.toHaveBeenCalled()
+        field.onChange(resets[0].value)
+        expect(onChange).toHaveBeenLastCalledWith({ ...model, options: { reasoning_effort: 'default' } })
+        field.onChange('')
+        expect(onChange).toHaveBeenLastCalledWith({ ...model, options: {} })
+        expect(model.options).toEqual({ reasoning_effort: value })
+      }
+    }
   })
 
   it('does not present an approval mode for native Pi tool execution', () => {

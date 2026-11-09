@@ -562,8 +562,14 @@ function ModelFields({
     : ''
   const optionValue = adapterKind === 'hermes-cli' && storedOptionValue === 'runtime_default'
     ? '' : storedOptionValue
+  const optionChoices = adapterKind === 'hermes-cli'
+    ? [
+        { value: 'default', label: uiAttribute('恢复 Hermes 配置默认') },
+        ...(option?.values ?? []).filter(choice => choice.value !== 'default' && choice.value !== 'runtime_default')
+      ]
+    : option?.values ?? []
   const optionInvalid = optionValue
-    ? !option?.values.some((candidate) => candidate.value === optionValue)
+    ? !optionChoices.some((candidate) => candidate.value === optionValue)
     : false
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
@@ -595,11 +601,10 @@ function ModelFields({
               : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
           choices={[
             ...(optionInvalid ? [{ value: optionValue, label: uiAttribute('尚未核对 · {0}', optionValue) }] : []),
-            ...(option?.values ?? []).filter(choice => adapterKind !== 'hermes-cli' || choice.value !== 'runtime_default')
-              .map(choice => ({ ...choice,
-                label: adapterKind === 'hermes-cli' && choice.value === 'default'
-                  ? uiAttribute('恢复 Hermes 配置默认') : choice.label,
-                disabled: isDsh && !optionsKnown }))
+            ...optionChoices.map(choice => ({
+              ...choice,
+              disabled: isDsh && !optionsKnown
+            }))
           ]}
         />
       )}
