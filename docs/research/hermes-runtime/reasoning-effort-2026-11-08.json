@@ -2347,7 +2347,17 @@
   "validation": {
     "targetedRust": "passed: existing Hermes/parser/catalog/ACP owners",
     "renderer": "41 tests passed; typecheck and desktop build passed",
-    "docs": "10 tests and version/decision/base checks passed before final evidence update",
-    "workspace": "437 passed, 1 ignored, 1 failure: unchanged runtime_probe_process successful_leader_with_stdio_holding_descendant_finishes_bounded; standalone reproduces runtime_probe_stdout_cleanup_timed_out"
+    "docs": "passed: 10 governance tests, version/decision checks and base-aware CI checks",
+    "workspace": {
+      "final": "passed: pnpm test:rust:pr (cargo test --workspace)",
+      "firstAttempt": "437 passed, 1 ignored, 1 failure: runtime_probe_process::tests::successful_leader_with_stdio_holding_descendant_finishes_bounded",
+      "standaloneRecheck": "same runtime_probe_stdout_cleanup_timed_out",
+      "fullRecheck": "all workspace tests passed",
+      "unchangedSources": [
+        "crates/rovai-core/src/runtime_probe_process.rs",
+        "crates/rovai-core/src/managed_process.rs",
+        "crates/rovai-core/src/managed_process/macos.rs"
+      ]
+    }
   }
 }
