@@ -217,6 +217,11 @@ owner，而不是继续增加平行 fixture 和断言。
 连接阶段阻塞，脚本与指纹不变时重扫读取新版，再分别以健康成功／失败收尾；需要现有私有 Core、DB 与 Manager
 证明事务和公开投影，纯 reader 不能覆盖。既有重扫 owner 同时验证读取恢复后的双来源诊断投影及其他失败保留；
 既有并发合并／Supervisor owners 扩展首次安装目标同步与超时记录，不删除原未知目标、身份漂移或配置变化反例。
+候选入口回归继续扩展 `full_probe_saves_version_before_connection_and_cancellation`，不增加 Rust owner：
+Codex／Claude 合成入口分别覆盖已有选中安装、已有回退安装和首次安装；连接／能力阶段阻塞替代候选，
+确认其版本不会提前改写安装、公开版本或产生成功迁移审计，失败后仍保留选中入口及对应诊断。
+另以合成 ACP 验证候选真正准入后仍提交并展示自己的版本，同一轮每个候选的版本只查询一次。
+私有 Core／DB／Manager 和进程屏障拥有实际写回，纯选择谓词无法覆盖；最小命令沿用上面的 `slow-tests` 路由。
 
 Issue #997 扩展既有 `windows_command_shim_content_changes_compatibility_fingerprint`，通过真实发现入口
 验证 npm/pnpm 包升级但包装脚本内容和文件属性不变、旧证据拒收、重复发现身份稳定及损坏 manifest/bin

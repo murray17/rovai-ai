@@ -136,6 +136,37 @@ impl Fixture {
         path
     }
 
+    #[cfg(unix)]
+    fn claude_program(&self, directory: &str, version: &str, complete_help: bool) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = self.root.join(directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("claude");
+        let help = "--print --output-format --input-format --resume --session-id --append-system-prompt --mcp-config --allowedTools --add-dir --permission-mode --model";
+        let body = format!(
+            "#!/bin/sh\ncase \"$1\" in\n--version) printf '{} (Claude Code)\\n'; exit 0;;\n--help) {}printf '%s\\n' '{} {}'; exit 0;;\nauth) printf '{{\"loggedIn\":false}}\\n'; exit 1;;\nesac\nexit 1\n",
+            version,
+            if complete_help {
+                String::new()
+            } else {
+                format!(
+                    "printf started > '{}'; while [ ! -f '{}' ]; do /bin/sleep 0.01; done; ",
+                    self.root.join("probe-started").display(),
+                    self.root.join("probe-release").display()
+                )
+            },
+            help,
+            if complete_help {
+                "--no-session-persistence"
+            } else {
+                ""
+            },
+        );
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+
     async fn check(&self) -> RuntimeCheckOutcome {
         check(self.core.clone()).await
     }
@@ -232,12 +263,16 @@ impl Fixture {
     }
 
     async fn health(&self) -> Value {
+        self.health_for(KIND).await
+    }
+
+    async fn health_for(&self, kind: AdapterKind) -> Value {
         let payload = self.core.runtime_health_payload().await.unwrap();
         payload["runtimeAvailability"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|item| item["runtimeKind"] == "codex-cli")
+            .find(|item| item["runtimeKind"] == kind.as_str())
             .unwrap()
             .clone()
     }
@@ -1320,6 +1355,243 @@ async fn full_probe_saves_version_before_connection_and_cancellation() {
         "each full check reads once, including when later connection checks fail"
     );
     fixture.close().await;
+
+    // A version observation belongs to the selected entry. Merely trying a
+    // second installation must not replace it before that candidate is ready.
+    // Cover both an existing installation and the first check without one.
+    for (kind, existing_entry) in [
+        (KIND, "selected"),
+        (KIND, "alternate"),
+        (KIND, "none"),
+        (AdapterKind::ClaudeCodeCli, "selected"),
+        (AdapterKind::ClaudeCodeCli, "alternate"),
+        (AdapterKind::ClaudeCodeCli, "none"),
+    ] {
+        let fixture = Fixture::new();
+        let (selected, alternate, expected_version) = if kind == AdapterKind::ClaudeCodeCli {
+            (
+                fixture.claude_program("selected", "2.1.311", true),
+                fixture.claude_program("alternate", "2.0.47", false),
+                "2.1.311 (Claude Code)",
+            )
+        } else {
+            (
+                fixture.program("selected", "2.0.0", false),
+                fixture.program("alternate", "1.0.0", true),
+                "codex-cli 2.0.0",
+            )
+        };
+        let existing_program = if existing_entry == "alternate" {
+            &alternate
+        } else {
+            &selected
+        };
+        *fixture.paths.lock().unwrap() = vec![existing_program.parent().unwrap().into()];
+        if existing_entry != "none" {
+            fixture
+                .core
+                .refresh_runtime_check_environment()
+                .await
+                .unwrap();
+            fixture.core.run_runtime_discovery().await;
+            if kind == KIND {
+                fixture.seed_ready().await;
+            }
+        } else {
+            assert!(
+                AgentProfileService::default()
+                    .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        *fixture.paths.lock().unwrap() = vec![
+            selected.parent().unwrap().into(),
+            alternate.parent().unwrap().into(),
+        ];
+        let checking = tokio::spawn({
+            let core = fixture.core.clone();
+            async move {
+                core.await_runtime_check(
+                    kind,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap()
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !fixture.root.join("probe-started").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let during = AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        let during_public = fixture.health_for(kind).await;
+        std::fs::write(fixture.root.join("probe-release"), "release").unwrap();
+        let outcome = checking.await.unwrap();
+        let after = AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+            .unwrap()
+            .unwrap();
+        let after_public = fixture.health_for(kind).await;
+        let relocations: i64 = fixture
+            .core
+            .database
+            .lock()
+            .await
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM adapter_relocation_audit WHERE installation_id = ?1 AND next_path = ?2 AND result = 'succeeded'",
+                rusqlite::params![after.id, alternate.to_string_lossy().as_ref()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        fixture.close().await;
+
+        assert_eq!(outcome, RuntimeCheckOutcome::StableFailure);
+        assert_eq!(
+            during.executable_path,
+            selected.to_string_lossy(),
+            "an unverified alternate must not replace the selected entry while connecting"
+        );
+        assert_eq!(
+            after.executable_path,
+            selected.to_string_lossy(),
+            "a failed alternate must not become the installed entry"
+        );
+        assert_eq!(during_public["reportedVersion"], expected_version);
+        assert_eq!(after_public["reportedVersion"], expected_version);
+        assert_eq!(
+            after.snapshot.unwrap().reported_version.as_deref(),
+            Some(expected_version)
+        );
+        assert_eq!(
+            relocations, 0,
+            "failed alternatives cannot create successful relocation records"
+        );
+        if kind == AdapterKind::ClaudeCodeCli {
+            assert_eq!(
+                after_public["diagnosticCode"],
+                "runtime_authentication_required"
+            );
+            assert_eq!(
+                after_public["failure"]["code"],
+                "runtime_authentication_required"
+            );
+        }
+    }
+
+    // An alternate that actually passes the ACP probe must still be admitted,
+    // with its own version published exactly once after the held connection.
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    let python = std::process::Command::new("python3")
+        .args(["-c", "import sys; print(sys.executable)"])
+        .output()
+        .unwrap();
+    assert!(python.status.success());
+    let python = String::from_utf8(python.stdout).unwrap();
+    let protocol = r#"
+import json, pathlib, sys, time
+root = pathlib.Path(__file__).parent
+if '--version' in sys.argv:
+    with (root / 'version-calls').open('a') as f: f.write('call\n')
+    print((root / 'reported-version').read_text().strip()); sys.exit(0)
+for line in sys.stdin:
+    request=json.loads(line); method=request['method']
+    if method == 'initialize':
+        (root / 'started').touch()
+        while (root / 'gate').exists(): time.sleep(.01)
+        if (root / 'fail').exists():
+            print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32603,'message':'fixture connection failed'}}),flush=True)
+            continue
+        result={'protocolVersion':1,'agentCapabilities':{'loadSession':True}}
+    elif method == 'session/new':
+        result={'sessionId':'fixture-session','configOptions':[
+            {'id':'model','name':'Model','category':'model','type':'select','currentValue':'model-0','options':[{'value':'model-0','name':'Model 0'}]},
+            {'id':'thinkingEffort','name':'Thinking','type':'select','currentValue':'high','options':[{'value':'high','name':'High'}]}]}
+    else: raise AssertionError(method)
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
+"#;
+    let selected_dir = fixture.root.join("selected");
+    let alternate_dir = fixture.root.join("alternate");
+    for (directory, version) in [(&selected_dir, "0.6.12"), (&alternate_dir, "0.6.13")] {
+        std::fs::create_dir_all(directory).unwrap();
+        let program = directory.join("mcode");
+        std::fs::write(&program, format!("#!{}\n{}", python.trim(), protocol)).unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::write(directory.join("reported-version"), version).unwrap();
+    }
+    std::fs::write(selected_dir.join("fail"), "").unwrap();
+    std::fs::write(alternate_dir.join("gate"), "").unwrap();
+    *fixture.paths.lock().unwrap() = vec![selected_dir.clone(), alternate_dir.clone()];
+    let kind = AdapterKind::MinimaxCodeCli;
+    let checking = tokio::spawn({
+        let core = fixture.core.clone();
+        async move {
+            core.await_runtime_check(
+                kind,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                RuntimeCheckTrigger::UserCheck,
+            )
+            .await
+            .unwrap()
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !alternate_dir.join("started").exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let during = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+        .unwrap()
+        .unwrap();
+    let during_public = fixture.health_for(kind).await;
+    std::fs::remove_file(alternate_dir.join("gate")).unwrap();
+    let outcome = checking.await.unwrap();
+    let after = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, kind, "default")
+        .unwrap()
+        .unwrap();
+    let after_public = fixture.health_for(kind).await;
+    for directory in [&selected_dir, &alternate_dir] {
+        assert_eq!(
+            std::fs::read_to_string(directory.join("version-calls"))
+                .unwrap()
+                .lines()
+                .count(),
+            1
+        );
+    }
+    fixture.close().await;
+    assert_eq!(
+        during.executable_path,
+        selected_dir.join("mcode").to_string_lossy()
+    );
+    assert_eq!(during_public["reportedVersion"], "0.6.12");
+    assert_eq!(outcome, RuntimeCheckOutcome::Ready);
+    assert_eq!(
+        after.executable_path,
+        alternate_dir.join("mcode").to_string_lossy()
+    );
+    assert_eq!(
+        after.snapshot.unwrap().reported_version.as_deref(),
+        Some("0.6.13")
+    );
+    assert_eq!(after_public["reportedVersion"], "0.6.13");
+    assert_eq!(
+        after_public["discovery"]["executablePath"],
+        alternate_dir.join("mcode").to_string_lossy().as_ref()
+    );
 }
 
 // The full-check/rescan race must cross the production manager and snapshot

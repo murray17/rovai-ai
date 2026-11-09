@@ -5431,6 +5431,8 @@ impl Core {
         let mut latest_observation =
             RuntimeDiscoveryObservation::detecting(kind, search.generation());
         latest_observation.discovery_status = RuntimeDiscoveryStatus::Missing;
+        let mut selected_entry_pending = true;
+        let mut selected_entry_published = false;
         let candidates = if let Some(installation) = existing.as_ref().filter(|installation| {
             matches!(
                 installation.source,
@@ -5607,6 +5609,10 @@ impl Core {
                         continue;
                     }
                 };
+            // Only the first usable discovery entry is this round's selection.
+            // Other installations remain candidates until the existing full
+            // probe admits them; reading their versions cannot select them.
+            let selected_candidate = std::mem::take(&mut selected_entry_pending);
             let mut candidate_fingerprint =
                 verified_candidate.entry().executable_fingerprint.clone();
             latest_observation = runtime_check_environment::candidate_observation(
@@ -5636,7 +5642,7 @@ impl Core {
                     .map(|identity| identity.compatibility_fingerprint.as_str());
             let mut identity_changed = targets_current_installation
                 && (executable_identity_changed || locator_identity_changed);
-            if identity_changed {
+            if identity_changed && selected_candidate {
                 let Some(target) = self
                     .commit_rebound_runtime_candidate(
                         kind,
@@ -5708,7 +5714,7 @@ impl Core {
                                 )?,
                                 "runtime_installation_changed_during_version_read"
                             );
-                            if let Ok(version) = &version_read {
+                            if selected_candidate && let Ok(version) = &version_read {
                                 let service = AgentProfileService::default();
                                 let id = service.commit_discovered_runtime_entry(
                                     &mut database,
@@ -5738,8 +5744,11 @@ impl Core {
                                 );
                             }
                             drop(database);
-                            self.publish_verified_runtime_discovery(observation.clone())
-                                .await;
+                            if selected_candidate {
+                                self.publish_verified_runtime_discovery(observation.clone())
+                                    .await;
+                                selected_entry_published = true;
+                            }
                         }
                         latest_observation = observation;
                         RuntimeCheckWorkerContext::await_target(target_ack).await?;
@@ -5788,18 +5797,6 @@ impl Core {
                             kind.as_str(),
                             canonical.display()
                         );
-                        let failure_class = if identity_changed {
-                            "identity_changed"
-                        } else {
-                            "transient"
-                        };
-                        let diagnostic_code = if !targets_current_installation {
-                            "runtime_alternate_candidate_probe_failed"
-                        } else if identity_changed {
-                            "runtime_identity_changed"
-                        } else {
-                            "runtime_probe_transient_failure"
-                        };
                         if !candidate.entrypoint_locator_identity_is_current()
                             || fingerprint_executable(&canonical).ok().as_deref()
                                 != Some(candidate_fingerprint.as_str())
@@ -5814,6 +5811,23 @@ impl Core {
                         {
                             return Ok(RuntimeCheckOutcome::Superseded);
                         }
+                        let targets_current_installation = runtime_probe_targets_current_entry(
+                            &database,
+                            &commit_target,
+                            &canonical,
+                        )?;
+                        let failure_class = if targets_current_installation && identity_changed {
+                            "identity_changed"
+                        } else {
+                            "transient"
+                        };
+                        let diagnostic_code = if !targets_current_installation {
+                            "runtime_alternate_candidate_probe_failed"
+                        } else if identity_changed {
+                            "runtime_identity_changed"
+                        } else {
+                            "runtime_probe_transient_failure"
+                        };
                         AgentProfileService::default().record_managed_probe_failure(
                             &mut database,
                             ManagedProbeFailure {
@@ -5963,7 +5977,7 @@ impl Core {
                                 .and_then(|installation| installation.snapshot.as_ref())
                                 .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
                                 != Some(candidate_fingerprint.as_str());
-                        if targets_current_installation {
+                        if targets_current_installation && selected_candidate {
                             let Some(target) = self
                                 .commit_rebound_runtime_candidate(
                                     kind,
@@ -6051,14 +6065,16 @@ impl Core {
                 if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
                     return Ok(RuntimeCheckOutcome::Superseded);
                 }
-                // This path saved its version before connecting. A concurrent
-                // rescan may now own a newer observation for the same program.
-                snapshot.reported_version = saved_runtime_probe_version(
-                    &database,
-                    &commit_target,
-                    &executable_path,
-                    &candidate_fingerprint,
-                )?;
+                if selected_candidate {
+                    // This entry saved its version before connecting. A
+                    // concurrent rescan may now own a newer observation.
+                    snapshot.reported_version = saved_runtime_probe_version(
+                        &database,
+                        &commit_target,
+                        &executable_path,
+                        &candidate_fingerprint,
+                    )?;
+                }
                 let catalog_unverified = catalog_requested
                     && !rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
                         &snapshot.models,
@@ -6079,6 +6095,22 @@ impl Core {
                         entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                     },
                 )?;
+                if !selected_candidate {
+                    commit_target = runtime_installation_revision(&database, kind)?;
+                    if let Some(context) = check_context.as_mut() {
+                        // The alternate becomes bound only after admission.
+                        // Carry that committed proof into completion/timeout;
+                        // there is no further probe work requiring an ack.
+                        drop(context.publish_target(
+                            self,
+                            kind,
+                            RuntimeCheckInstallationTarget::from_verified_commit(
+                                commit_target.as_ref().unwrap(),
+                                &final_entry,
+                            ),
+                        )?);
+                    }
+                }
                 if catalog_unverified {
                     AgentProfileService::default().record_managed_probe_failure(
                         &mut database,
@@ -6095,16 +6127,22 @@ impl Core {
                     )?;
                 }
                 drop(database);
-                // Publish health completion without replacing the early version
-                // observation (or a later rescan). Readers load the current value.
-                emit(
-                    &self.output,
-                    "runtime.availability.updated",
-                    json!({
-                        "runtimeKind": kind, "status": self.current_runtime_availability_status(kind).await,
-                    }),
-                );
                 self.runtime_product_diagnostics.write().await.remove(&kind);
+                if selected_candidate {
+                    // Preserve this entry's early observation or a later rescan.
+                    emit(
+                        &self.output,
+                        "runtime.availability.updated",
+                        json!({
+                            "runtimeKind": kind, "status": self.current_runtime_availability_status(kind).await,
+                        }),
+                    );
+                } else {
+                    // A successful alternate is admitted only now. Its own
+                    // version was reused within the probe, never pre-published.
+                    self.publish_verified_runtime_discovery(latest_observation)
+                        .await;
+                }
                 eprintln!(
                     "[runtime-check-timing] runtime={} commit_publish_ms={:.3}",
                     kind.as_str(),
@@ -6116,6 +6154,12 @@ impl Core {
                     RuntimeCheckOutcome::Ready
                 });
             }
+            let mut database = self.database.lock().await;
+            if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            let targets_current_installation =
+                runtime_probe_targets_current_entry(&database, &commit_target, &canonical)?;
             let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
                 _ if !targets_current_installation => {
                     ("transient", "runtime_alternate_candidate_probe_failed")
@@ -6128,7 +6172,7 @@ impl Core {
                 _ if identity_changed => ("identity_changed", "runtime_identity_changed"),
                 _ => ("transient", "runtime_probe_transient_failure"),
             };
-            let diagnostic_code = if !version_probe_succeeded {
+            let diagnostic_code = if !version_probe_succeeded && targets_current_installation {
                 failure
                     .as_ref()
                     .map_or("runtime_version_failed", |failure| failure.code.as_str())
@@ -6136,10 +6180,6 @@ impl Core {
             } else {
                 diagnostic_code.to_string()
             };
-            let mut database = self.database.lock().await;
-            if !runtime_installation_revision_matches(&database, kind, &commit_target)? {
-                return Ok(RuntimeCheckOutcome::Superseded);
-            }
             AgentProfileService::default().record_managed_probe_failure(
                 &mut database,
                 ManagedProbeFailure {
@@ -6183,7 +6223,7 @@ impl Core {
                 .await
                 .insert(kind, diagnostic);
         }
-        if latest_observation.version_probe_succeeded.is_none() {
+        if !selected_entry_published {
             self.publish_verified_runtime_discovery(latest_observation)
                 .await;
         } else {
@@ -20535,6 +20575,25 @@ fn note_product_runtime_diagnostic(
         priority,
         failure,
     });
+}
+
+fn runtime_probe_targets_current_entry(
+    database: &Database,
+    target: &Option<(String, i64)>,
+    candidate: &Path,
+) -> Result<bool> {
+    let Some((id, _)) = target else {
+        return Ok(false);
+    };
+    let path = database
+        .connection()
+        .query_row(
+            "SELECT executable_path FROM adapter_installation WHERE id = ?1",
+            [id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(path.is_some_and(|path| canonical_runtime_path(Path::new(&path)) == candidate))
 }
 
 fn saved_runtime_probe_version(
