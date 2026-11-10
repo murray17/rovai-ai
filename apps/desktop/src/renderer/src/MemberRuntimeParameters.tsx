@@ -668,7 +668,8 @@ function RuntimeModelPicker({
 
   const loadCatalog = (force = false): void => {
     if (!onOpenModelCatalog || loading || !pageActive || disabled) return
-    if (!force && (cache.status === 'fresh' || refreshFailed)) return
+    const revalidateAfter = cache.revalidateAfter ? Date.parse(cache.revalidateAfter) : Number.NaN
+    if (!force && ((cache.status === 'fresh' && Date.now() < revalidateAfter) || refreshFailed)) return
     const startedAt = performance.now()
     const generation = ++requestGeneration.current
     const recordFirstDisplay = (cached: boolean): void => {

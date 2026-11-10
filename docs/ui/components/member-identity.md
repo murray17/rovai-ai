@@ -99,6 +99,8 @@ CodeBuddy 的“推理强度”使用原生 `thought_level`，候选值来自 Co
 原生响应归属与兼容规则见 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#codebuddy-原生档位)。
 
 目录缓存状态沿用 Core 投影，Renderer 不自行计算 TTL。同一环境和身份的过期目录仍可用于选择。
+进入可见配置区域或展开模型菜单时，按 Core 已有 `revalidateAfter` 与当前时间判断是否仍可直接复用；
+到期则调用原目录请求，由 Core 判断刷新并合并在途请求，不增加定时器或后台预拉。
 读取失败显示“模型与参数尚未核对”，保留当前模型、参数与有效缓存；未枚举的已存值显示“尚未核对 · 值”，
 允许更改或清除，不显示“不支持”或“当前目录未提供”。异步目录刷新只更新候选项，不改写草稿。
 保存不以目录为门槛，执行交给原生 Runtime 判定，见 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md)。

@@ -244,7 +244,7 @@ export function RuntimeStartupSettings({ runtimeKind, health, onBack, backLabel,
           <span role="status" className={`runtime-startup-result${status === 'authentication_required' || status === 'version_unverified' ? ' is-warning' : status === 'missing' || status === 'check_failed' ? ' is-error' : ''}`}>
             {statusLabel}{statusLabel && inspection?.reportedVersion && <span className="runtime-startup-version">{inspection.reportedVersion}</span>}
           </span>
-          <button className="quiet-button" type="button" disabled={locked || Boolean(draft.configurationError)} onClick={() => void inspect(draft, true)}><UiText zh={"检查状态"} /><DialogControlIcon name="refresh" /></button>
+          <button className="quiet-button" type="button" disabled={locked || Boolean(draft.configurationError)} onClick={() => void inspect(draft)}><UiText zh={"检查状态"} /><DialogControlIcon name="refresh" /></button>
         </div>
         {environmentIncomplete && <p className="runtime-startup-result is-warning" role="status"><UiText zh={"部分查找来源不可用，本次结果使用已读取的可用环境。"} /></p>}
       </section>
