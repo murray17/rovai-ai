@@ -215,9 +215,11 @@ function pageFrame(kind: string, feedback: boolean) {
     'Loading canvas must cover the complete Renderer viewport')
     const mark = canvas.querySelector<SVGElement>('.startup-loading-mark')
     check(mark, 'Loading canvas must include the Rovai horizon mark')
-    check(mark.dataset.brandMark === 'horizon' && mark.querySelectorAll('path').length === 2
-      && Boolean(mark.querySelector('[data-brand-point="rendezvous"]')),
-    'Loading canvas must use the complete Rovai horizon mark')
+    const artwork = mark.querySelector('svg[viewBox="0 0 1024 1024"]')
+    check(mark.dataset.brandMark === 'horizon' && artwork?.querySelectorAll('path').length === 2
+      && artwork.querySelector('path[fill="#7897AE"]')
+      && artwork.querySelector('path[fill="none"][stroke="#7897AE"]'),
+    'Loading canvas must use the blue star and arc of the Rovai horizon mark')
     const markRect = mark.getBoundingClientRect()
     check(Math.abs(markRect.width - 48) < 1 && Math.abs(markRect.height - 48) < 1,
       'Loading mark must keep its approved 48px geometry')
