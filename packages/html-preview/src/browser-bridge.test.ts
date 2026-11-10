@@ -51,11 +51,12 @@ function fixture(fetcher: typeof fetch) {
     document.dispatchEvent(event)
   }
   const error = (message: string, patch: Record<string, unknown> = {}) => {
-    const event = new FixtureErrorEvent('error')
+    const event = new FixtureErrorEvent('error', { cancelable: true })
     const { isTrusted = true, ...fields } = patch
     Object.assign(event, { message, error: null, filename: preview.documentUrl, lineno: 0, colno: 0, ...fields })
     Object.defineProperty(event, 'isTrusted', { value: isTrusted })
     frame.dispatchEvent(event)
+    return event
   }
   return { channel, messages, close, preview, frame, host, policy, error }
 }
@@ -73,14 +74,16 @@ it.each([
   '  ResizeObserver loop completed with undelivered notifications.  ',
   'ResizeObserver loop limit exceeded',
   '\nResizeObserver loop limit exceeded.\t',
-])('retains the original layout message through the existing validated channel: %s', async message => {
-  const { messages, error } = fixture(vi.fn<typeof fetch>().mockRejectedValue(new Error('offline')))
+])('omits only the preview report for a strictly matched layout notification: %s', async message => {
+  const { messages, frame, error } = fixture(vi.fn<typeof fetch>().mockRejectedValue(new Error('offline')))
+  const authorListener = vi.fn()
+  frame.addEventListener('error', authorListener)
   await vi.advanceTimersByTimeAsync(0)
-  error(message); error(message)
+  const event = error(message); error(message)
   await vi.advanceTimersByTimeAsync(0)
-  expect(messages.filter(message => message.type === 'diagnostic')).toEqual([
-    expect.objectContaining({ diagnostic: expect.objectContaining({ kind: 'layout', message }) })
-  ])
+  expect(messages.filter(message => message.type === 'diagnostic')).toEqual([])
+  expect(authorListener).toHaveBeenCalledTimes(2)
+  expect(event.defaultPrevented).toBe(false)
 })
 
 it.each([

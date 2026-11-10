@@ -15,6 +15,7 @@ addEventListener('error', event => {
     message: event.message, trusted: event.isTrusted, filename: event.filename,
     line: event.lineno, column: event.colno, errorType: typeof event.error,
     errorIsNull: event.error === null, errorValue: String(event.error),
+    defaultPrevented: event.defaultPrevented,
     stack: event.error?.stack ?? null
   });
 });

@@ -52,16 +52,13 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
     for (const stream of streams) stream.end()
     await wait(`${stage}?.dataset.serverDiagnosticsState==='unavailable'`)
     const interrupted = await snapshot()
-    await run(`${panel}.querySelector('.file-preview-html-info').click()`)
-    await wait(`${panel}.querySelector('.file-preview-html-info')?.getAttribute('aria-expanded')==='true'`)
     await new Promise(resolve => setTimeout(resolve, 100))
     await writeFile(join(userData, 'diagnostic-interrupted-day.png'), (await window.webContents.capturePage()).toPNG())
     const retained = await frame.executeJavaScript('({value:window.retainedValue,input:document.querySelector("#retained-input").value,top:scrollY,timeOrigin:performance.timeOrigin})')
-    cases.push({ name: 'HTTP diagnostic loss leaves the loaded page interactive and uses collapsed neutral details',
+    cases.push({ name: 'HTTP diagnostic loss leaves the loaded page interactive without a standalone entry',
       ok: interrupted.document === 'loaded' && interrupted.channel === 'connected' && interrupted.sameFrame
-        && !interrupted.summary && interrupted.info && interrupted.inToolbar && interrupted.infoLabel === '查看诊断详情'
-        && interrupted.expanded === 'false' && !interrupted.warning && !interrupted.alert
-        && interrupted.text.includes('资源诊断连接中断，部分资源错误信息可能不完整')
+        && !interrupted.summary && !interrupted.info && !interrupted.warning && !interrupted.alert
+        && !interrupted.text.includes('资源诊断连接中断，部分资源错误信息可能不完整')
         && retained.value === 42 && retained.input === '诊断断流后保留的输入' && retained.top === 150 && retained.timeOrigin === timeOrigin,
       evidence: { interrupted, scrollBefore, retained } })
   }
@@ -85,10 +82,20 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
     const candidate = await snapshot()
     cases.push({ name: 'candidate refresh commits with loaded root and valid page channel despite diagnostic failure',
       ok: !candidate.sameFrame && candidate.document === 'loaded' && candidate.channel === 'connected'
-        && !candidate.warning && !candidate.alert && !await run('Boolean(window.previewAcceptance.activeTab.refreshError)'), evidence: candidate })
+        && !candidate.info && !candidate.summary && !candidate.warning && !candidate.alert
+        && !await run('Boolean(window.previewAcceptance.activeTab.refreshError)'), evidence: candidate })
     await run(`document.documentElement.dataset.theme='night'`)
     await new Promise(resolve => setTimeout(resolve, 100))
     await writeFile(join(userData, 'diagnostic-candidate-night.png'), (await window.webContents.capturePage()).toPNG())
+    const candidateOrigin = await run('window.previewAcceptance.activeTab.content.preview.origin')
+    const candidateFrame = window.webContents.mainFrame.framesInSubtree.find(frame => frame.url.startsWith(candidateOrigin + '/'))!
+    await candidateFrame.executeJavaScript(`setTimeout(()=>{throw new Error('author error during diagnostic loss')},0)`)
+    await wait(`${stage}?.textContent.includes('author error during diagnostic loss')`)
+    const problem = await snapshot()
+    cases.push({ name: 'HTTP diagnostic loss does not weaken a real page problem or hide its diagnostic status',
+      ok: problem.warning && !problem.info && problem.summary === '1 项问题'
+        && problem.document === 'loaded' && problem.channel === 'connected'
+        && problem.text.includes('资源诊断连接中断，部分资源错误信息可能不完整'), evidence: problem })
     await run('window.previewAcceptance.close(window.previewAcceptance.activeTabId)')
     await wait(`!document.querySelector('iframe.file-preview-html')`)
     const requestsAtClose = diagnosticRequests
