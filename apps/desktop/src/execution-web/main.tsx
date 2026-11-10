@@ -1,3 +1,4 @@
+import { RovaiBrandMark } from '../renderer/src/RovaiBrandMark'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThreadClientProvider, type ThreadClient } from '../renderer/src/camp-client'
@@ -39,15 +40,6 @@ function Chevron({ open = false }: { open?: boolean }): React.JSX.Element {
   return <svg viewBox="0 0 16 16" aria-hidden="true"><path d={open
     ? 'm4.5 9.5 3.5-3.5 3.5 3.5'
     : 'm4.5 6.5 3.5 3.5 3.5-3.5'} /></svg>
-}
-
-function Mark(): React.JSX.Element {
-  return <svg data-brand-mark="horizon" className="brand-mark" viewBox="0 0 24 24"
-    aria-label="Rovai AI" role="img">
-    <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor" />
-    <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round" />
-    <circle cx="12" cy="18.46" r="1.05" fill="var(--ember)" stroke="var(--surface)" strokeWidth=".65" />
-  </svg>
 }
 
 function Avatar({ id, name, user = false }: { id: string; name: string; user?: boolean }): React.JSX.Element {
@@ -405,7 +397,7 @@ function App(): React.JSX.Element {
         })
       }}>
         <a className="skip-link" href="#execution-records">跳到执行记录</a>
-        <header className="web-app-bar"><div><Mark /><h1>{snapshot?.thread.title || '执行台'}</h1>
+        <header className="web-app-bar"><div><RovaiBrandMark className="brand-mark" label="Rovai AI" /><h1>{snapshot?.thread.title || '执行台'}</h1>
           <span className="web-readonly">只读</span></div></header>
         {!snapshot && <main className="web-state" id="execution-records"
           role={error ? 'alert' : 'status'}><div>

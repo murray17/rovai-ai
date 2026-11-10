@@ -1,3 +1,4 @@
+import { RovaiBrandMark } from './RovaiBrandMark'
 import { InlineProjectFileReference } from './InlineProjectFileReference'
 import { projectFileLink } from './project-file-reference'
 import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
@@ -1599,17 +1600,13 @@ export function QuickChatWorkspace({
       <div className="new-conversation-main">
         <div className="new-conversation-stage">
           {recentThreads.length === 0 && <>
-          <svg className="quick-chat-mark" data-brand-mark="horizon" data-brand-layout="separated" width="96" height="66" viewBox="0 0 72 56" aria-hidden="true">
-            <path d="M36 4 L39.6 16.7 L53.9 20.4 L39.6 24.1 L36 36.8 L32.4 24.1 L18.1 20.4 L32.4 16.7 Z" fill="currentColor" />
-            <path d="M8 49.5 Q36 37.5 64 49.5" stroke="currentColor" strokeWidth="5" fill="none" strokeLinecap="round" />
-            <circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="36" cy="43.5" r="2.6" />
-          </svg>
+          <RovaiBrandMark className="quick-chat-mark" width={96} height={66} wide />
           <h2>{hasAvailableMember ? uiAttribute("开始一段协作") : uiAttribute("还没有可用的队员")}</h2>
           <p className="quick-chat-subline">{hasAvailableMember ? uiAttribute("选好队员，写下你想完成的事。") : uiAttribute("先添加队员或完成运行配置。")}</p>
-          <div className="quick-chat-empty">
+          <div className={`quick-chat-empty${hasAvailableMember ? '' : ' quick-chat-empty-unavailable'}`}>
             {hasAvailableMember
               ? <button className="quick-chat-create" type="button" onClick={onNewConversation}><span aria-hidden="true">＋</span><UiText zh={"新对话"} /></button>
-              : <><button className="quick-chat-create" type="button" onClick={onOpenMembers}><UiText zh={"前往队员"} /></button><button className="quiet-button" type="button" onClick={onOpenRuntimeSettings}><UiText zh={"查看智能体"} /></button></>}
+              : <><button className="quick-chat-create" type="button" onClick={onOpenMembers}><UiText zh={"前往队员"} /></button><button className="quick-chat-secondary" type="button" onClick={onOpenRuntimeSettings}><UiText zh={"查看智能体"} /></button></>}
           </div>
           </>}
           {recentThreads.length > 0 && (

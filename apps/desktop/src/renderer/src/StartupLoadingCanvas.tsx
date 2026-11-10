@@ -1,3 +1,4 @@
+import { RovaiBrandMark } from './RovaiBrandMark'
 import { useEffect, useRef, useState } from 'react'
 
 export const STARTUP_LOADING_EXIT_MS = 180
@@ -68,18 +69,7 @@ export function StartupLoadingCanvas({
         surfaceRef.current?.focus({ preventScroll: true })
       }}
     >
-      <svg
-        className="startup-loading-mark"
-        data-brand-mark="horizon"
-        data-brand-layout="separated"
-        viewBox="0 0 24 24"
-        aria-hidden="true"
-        focusable="false"
-      >
-        <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor" />
-        <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round" />
-        <circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="12" cy="18.46" r="1.05" />
-      </svg>
+      <RovaiBrandMark className="startup-loading-mark" />
       <span className="sr-only">{label}</span>
     </section>
   )

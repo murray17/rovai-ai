@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-10
 ---
 
 # App Shell 与统一侧栏
@@ -225,6 +225,13 @@ Core-owned Pending Thread 并进入同一 Composer，第一条消息成功后再
 
 - 新对话的队员选择、全选、队长候选及一键新建共用[新对话 Dialog](../surfaces/new-conversation-dialog.md#field-order)的可用性规则。
 - 一键新建说明收进选项右侧的「?」提示，支持悬停、焦点、点击与 Escape 关闭；不再显示行内说明或「本次新建成功后生效」。
+
+### 快速对话空状态
+
+没有已配置且可用的队员时，保持“还没有可用的队员”与现有说明，提供“前往队员”和“查看智能体”。
+前者使用灰底主入口，打开队员工作区；后者使用无描边的次要文字入口，打开“设置 → 智能体”。
+两者同字号、字重、行高、圆角与高度，文字基线对齐，间距 8px；Desktop 为 38px，Mobile 为 44px。
+Hover 与键盘可见焦点使用现有表面和文字反馈。有可用队员时的“新对话”及最近对话列表保持各自样式。
 
 ## 冷启动反馈
 
