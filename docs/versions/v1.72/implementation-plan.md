@@ -8,6 +8,24 @@ last_updated: 2026-11-10
 
 # v1.72 实施与验收
 
+## User Automation 成员代发与回执兼容（2026-11-10）
+
+- 工作分支 `rovai/pr-1020-fix` 从原 PR head `52c3b668` 建立并合入 `origin/main` 基线 `c9522f15`，
+  保留原贡献者提交；本轮只补发送兼容、相关诊断的写入前拒绝、回归与版本记录。
+- 普通发送和成员代发共用预算输入：对象原样交给 Core，undefined/null 同为缺省；标量、字符串、数组仍拒绝。
+  Core 的预算准入、执行和超时逻辑保持，不增加默认值或新的预算系统。
+- 成功回执只返回消息 ID、sequence、Delivery IDs 和 replayed，CLI 接受后退出 0；领域拒绝和未知协议仍非零。
+  不以消息受理推断 Run 已启动，不伪造旧 Turn/Run/deadline；同命令重放仍只保留第一条消息。
+- status 声明 Delivery 回执；现有 Trial 在 journal、导出目录与任何 Core mutation 前拒绝这类回执，
+  缺失或未知能力同样拒绝，防止先派出真实任务再因缺少 Run 身份失败。未新增观察接口或恢复 Trial，已知 Run 的诊断命令不变。
+- 新增当前 [User Automation v7](../../contracts/user-automation-v7.md)，原 v6 保留为继承历史；
+  现有 Main transport owner 覆盖普通／成员 × 对象／null 四组合、字段省略对照、非法预算、重放和坏回执。
+  Rust 扩展现有 Trial admission owner，不新增测试函数。
+- 验证：Main 11 项、Rust 默认 workspace 483 passed / 1 ignored、User Automation 事务定向 3 项、
+  CLI 31 项通过。CLI owner 包含 wait/no-wait × Delivery/缺失能力的四次私有假 IPC 入口验证，只请求 status。
+  `pnpm typecheck`、`pnpm build:desktop`、格式、差异检查和通用文档门禁通过；未新增 Rust owner。
+  前次隔离 Desktop/Hermes 演示已证实成员署名及接收者运行；普通终端通过不等于 Hermes cron 已验收。
+
 ## 手动目录刷新并发与 DSH 语义收尾（2026-11-10）
 
 - Work item：后加入强刷不能由缓存任务完成；DSH 模型按钮刷新完整目录并去掉强刷前的缓存预读。
