@@ -177,7 +177,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v76（当前）](runtime-launch-and-verification-v76.md) | CodeBuddy refusal 原生错误详情解析，复用共享脱敏、公开 failure 与 RunCard 展示 |
+| [Runtime Launch and Verification v77（当前）](runtime-launch-and-verification-v77.md) | MiniMax 目录零选模、目标参数读取与逐模型观测；复用现有缓存和界面请求 |
+| [Runtime Launch and Verification v76（历史）](runtime-launch-and-verification-v76.md) | CodeBuddy refusal 原生错误详情解析，复用共享脱敏、公开 failure 与 RunCard 展示 |
 | [Runtime Launch and Verification v75（历史）](runtime-launch-and-verification-v75.md) | 全 Runtime 按有效原生成功完成，允许空最终文字；局部问卷取消不覆盖后续成功 |
 | [Runtime Launch and Verification v74（历史）](runtime-launch-and-verification-v74.md) | 共享模型目录归一化、失败保留配置与缓存、原生 Runtime 接受显式配置；继承 PATH 与环境规则 |
 | [Runtime Launch and Verification v72（历史）](runtime-launch-and-verification-v72.md) | Command Code 1.88 原生 HOME、官方 Mod、ACP MCP、按 Binding 身份复用与启动失败材料所有权 |

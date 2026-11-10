@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # Runtime Catalog Boundaries
@@ -335,6 +335,15 @@ Core 原子保存显式模型和选项的精确意图及静态权限配置；过
 Thread/Session 的 Runtime-native 结构化字段记录首个实际模型，并按 AgentRun execution epoch、default-only、
 write-once 持久化；catalog default、请求模型、冻结 sentinel、Usage 或自由文本都不能补推。无观测时 Read
 Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime failure；该事实也不反向改写配置或 catalog。
+
+### MiniMax 按目标参数发现
+
+MiniMax 基础目录只读取初始 Session，选模与业务 Prompt 均为零；用户选择具体模型时复用 DSH 的目标缓存、
+共享 Check Manager、请求去重与界面代次隔离，不引入 DSH 来源或参数语义。原生 `thinkingEffort` 按精确模型 ID
+观测，区分未读取、有选项与确认无选项。临时选模最多一次，初始已是目标则为零；目录默认始终保留初始观测。
+参数成功观测在既有目录 metadata 逐模型合并，绑定 MiniMax 原生配置、安装与实际环境身份；
+原生初始化状态保留，失败不更新成功时间或影响安装健康。正式执行与保存不增加发现门槛。
+字段、完整响应判据及身份输入由 [Runtime Launch v77](../contracts/runtime-launch-and-verification-v77.md)拥有。
 
 ### Claude Code 原生模型目录
 
