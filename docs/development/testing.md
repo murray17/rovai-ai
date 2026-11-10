@@ -207,6 +207,17 @@ owner，而不是继续增加平行 fixture 和断言。
 
 ### 单项 Runtime 检查减重
 
+2026-11-09 安装／版本与目录职责分离扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses`、
+`codex_catalog_waiters_share_refresh_without_satisfying_full_validation`、Pi 观察及目录缓存 owners，覆盖单项仅执行版本、
+首次无健康快照的目录读写、历史失败保留与反馈隔离、同用途合并及身份失效。原
+`catalog_refresh_requires_current_full_acp_evidence` 随健康前置条件、
+`later_success_supersedes_an_older_failed_attempt_for_every_runtime` 随检测页历史错误回填一同退役；
+上述进程／SQL owners 承接实际反例，不为已删除的回填谓词保留平行断言；
+完整 Probe 的认证、能力、早期版本保存和并发写回 owners 保留。Renderer 复用 `MemberRuntimeParameters` 与
+`runtime-model-picker`，覆盖可见目标加载、隐藏区域零查询、缓存复用和迟到响应，不新增 Rust 测试函数或测试文件。
+最低命令为 `cargo test -p rovai-core --features slow-tests --lib` 的上述 owners、默认 workspace，及
+`pnpm test:runtime-model-picker`、相关 Vitest、typecheck 和文档门禁。
+
 主动版本刷新扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses` owner，保留入口替换、
 被动零查询和健康失败记录边界，改为每轮主动重扫读取版本，并覆盖脚本／指纹不变时升级与读取失败的公开投影。
 新增 `full_probe_saves_version_before_connection_and_cancellation`，复用私有 Core／DB 与合成程序夹具，验证版本
