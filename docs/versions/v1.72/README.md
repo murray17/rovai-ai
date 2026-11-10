@@ -11,6 +11,14 @@ last_updated: 2026-11-09
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## 队员智能体名称搜索（2026-11-09）
+
+按 User 确认，在队员 `@` 候选中增加智能体产品名、简称和前缀搜索，沿用具体队员选择与邀请流程。
+当前会话优先，同范围依次为姓名完整、姓名前缀、智能体完整、智能体前缀、姓名模糊、角色；
+例如 `@com` 找到 Command Code 队员，`@pi` 先列皮皮再列其他 PI 队员。
+当前规则见[Member Typeahead](../../ui/components/structured-mentions.md#member-typeahead)，
+分支实施与验证见[实施记录](implementation-plan.md#队员智能体名称搜索2026-11-09)。
+
 ## Shell PATH 探测边界（2026-11-09）
 
 Issue #1050 的局部修复由采集器在随机标记前主动输出换行，与探测块共用一个 `printf`。

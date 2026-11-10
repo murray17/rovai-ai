@@ -106,6 +106,36 @@ main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_cu
 本轮验收使用临时数据库、受控原生协议夹具及独立 Electron userData，不修改日常 App 或叮叮目录；
 不将这些结果表述为真实账号、真实 Run 并发或 Windows/Linux 实机验收。
 
+## 队员智能体名称搜索（2026-11-09）
+
+- Work item：队员 `@` 搜索的智能体产品名、别名、前缀与匹配优先级。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-mention-agent-search`；
+  Branch：`rovai/mention-agent-search`；Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；
+  Governance：none（局部可逆搜索交互，无主线治理先行要求）；Status：ready（任务分支交付，尚未合入）。
+- `member-mention-search.ts` 从现有产品目录生成搜索键，补齐已确认简称，依据当前 `runtimeKind` 匹配。
+  产品名和查询使用 NFKC、小写并去除空格、连字符与下划线；只作完整／前缀匹配，模型和展示标签不参与归属。
+- `member-search.ts` 保留姓名／角色原有模糊和拼音资格，额外区分完整、前缀与其他模糊匹配。
+  Composer 先按当前会话／可邀请资格排序，再按确认的六级相关度稳定排序，按 `agentId` 去重后应用原候选配额。
+  空查询、广播、邀请与具体 Member Atom 的插入、草稿和投递沿用原路径。
+- 公屏、Pending 和使命描述复用同一搜索入口；没有 Core、Schema、模型输入或 Runtime 启动改动。
+  当前交互规范同步至 [Member Typeahead](../../ui/components/structured-mentions.md#member-typeahead)，
+  局部可逆选择不满足 Version Decision 的准入门槛。
+- 定向 Vitest 两个文件 97 项、`pnpm typecheck` 与 `pnpm build:desktop` 通过。
+  `TZ=UTC pnpm test`：274 个 Vitest 文件、3,243 passed / 2 skipped；Node 主套件 377 passed / 2 skipped，
+  文档、Skills 和 Electron sandbox capability 门禁一并通过。
+  `CARGO_BUILD_JOBS=4 pnpm test:rust:pr`：默认 workspace 483 passed / 1 ignored，无 Rust 输入改动。
+- `pnpm test:composer-input` 三个 owner 全部通过：原生 Composer 49 个场景、Web 链接及公屏／Pending 邀请。
+  原生场景验证 `@com`、皮皮与 PI 的排序、方向键／Enter 的实际选择和准确的 Member Atom；
+  生产 ThreadWorkspace 验证公屏／Pending 的 `@cod`、`@CODEX`、在队优先和待邀请身份，使命描述验证同一智能体前缀。
+  邀请夹具的 member-search report 共 18 项，包含 5 个智能体搜索场景，截图与 JSON 交付至本次 Thread 附件目录。
+- 组合夹具首次停在已过时的默认分组／无选中 Tab 断言。使用上述基线 SHA 的 Composer 和姓名搜索源码进行
+  Vite load 替换，在独立临时 userData／Skill Library 下复现同一断言；当前组件已为单类别 Tab 面板。
+  本次仅将该夹具更新为现有规范的默认队员 Tab、三类别循环和自动标题类别，并等待真实标题候选返回；
+  同时补齐本次智能体搜索场景，没有更改生产 Tab、分类或引用逻辑。
+- 通用文档门禁使用上述真实 base SHA；`git diff --check` 通过。验收范围为本机 macOS 的生产组件夹具，
+  使用独立临时 userData／Skill Library，不启动日常 App、Core 或真实模型；不宣称跨平台整机验收。
+  交付按用户偏好提交并推送任务分支，保留 worktree，后续复用同一目录。
+
 ## Shell PATH 探测边界（2026-11-09）
 
 - Work item：Issue #1050 的 Shell 无换行启动输出解析缺陷。

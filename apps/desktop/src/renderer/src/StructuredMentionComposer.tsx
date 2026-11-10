@@ -12,7 +12,7 @@ import { composerReferenceIdentities, useReferenceAvailability } from './useRefe
 import { ThreadReferenceMenu } from './ThreadReferenceMenu'
 import { useReferencePreview } from './ThreadReferencePreview'
 import { isReferenceAtom, referenceAtom, referenceIdentity } from './thread-reference'
-import { memberSearchMatches } from './member-search'
+import { memberMentionSearchRank } from './member-mention-search'
 import { useShortcuts } from './ShortcutProvider'
 import { shouldSendComposerKey } from '../../shared/shortcuts'
 import { useEditingRecovery } from './camp-client'
@@ -192,11 +192,21 @@ export function structuredMentionOptions(
 ): StructuredMentionOption[] {
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const options: StructuredMentionOption[] = []
-  const matches = (member: StructuredMentionMember): boolean =>
-    member.mentionable !== false
-      && (memberSearchMatches(member.displayName, query) || memberSearchMatches(member.teamRole, query))
-  const current = members.filter((member) => member.inThread !== false && matches(member))
-  const outside = members.filter((member) => member.inThread === false && matches(member))
+  const ranked = members.flatMap(member => {
+    if (member.mentionable === false) return []
+    const rank = normalizedQuery ? memberMentionSearchRank(member, query) : 0
+    return rank === null ? [] : [{ member, rank }]
+  }).sort((left, right) => Number(left.member.inThread === false) - Number(right.member.inThread === false)
+    || left.rank - right.rank)
+  const seen = new Set<string>()
+  const current: StructuredMentionMember[] = []
+  const outside: StructuredMentionMember[] = []
+  for (const { member } of ranked) {
+    if (seen.has(member.agentId)) continue
+    seen.add(member.agentId)
+    const group = member.inThread === false ? outside : current
+    group.push(member)
+  }
   if (inviteLayer) {
     options.push({ kind: 'back_to_camp' })
     options.push(...outside.slice(0, 49).map((member) => ({ kind: 'member' as const, member })))
