@@ -33,7 +33,7 @@ Use [UI routing](docs/ui/README.md) for component contracts, surface briefs and 
 
 - Preserve the separated four-point star and curved horizon; reuse the production assets.
 - The App icon uses its fixed charcoal carrier, Steel horizon and Porcelain star, without a rendezvous point.
-- In-app marks omit the carrier and use `--rail-logo` with the `--ember` rendezvous point.
+- In-app marks reuse the App icon's star and horizon on a transparent background, both in fixed Steel blue (`#7897AE`), without the carrier or rendezvous point. Use the shared [RovaiBrandMark](apps/desktop/src/renderer/src/RovaiBrandMark.tsx) and [asset](apps/desktop/src/renderer/src/assets/rovai-mark.svg); theme thumbnails retain the same artwork and color.
 - Brand geometry and colors do not express status, selection, identity or approval.
 
 ## Colors

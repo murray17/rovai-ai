@@ -1,3 +1,4 @@
+import { RovaiBrandMark } from './RovaiBrandMark'
 import { TeamGlyph } from './MissionDefinitionEditor'
 import { useShortcutAction, useShortcutLabel, useShortcuts } from './ShortcutProvider'
 import { useThreadClient } from './camp-client'
@@ -417,19 +418,7 @@ export function ThreadNavigation({
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
-            <svg
-              className="rail-logo-mark"
-              data-brand-mark="horizon"
-              data-brand-layout="separated"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor" />
-              <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round" />
-              <circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="12" cy="18.46" r="1.05" />
-            </svg>
+            <RovaiBrandMark className="rail-logo-mark" width={20} height={20} />
             <span><strong>Rovai AI</strong></span>
           </span>
         </div>

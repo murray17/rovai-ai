@@ -3,10 +3,24 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # v1.72 实施与验收
+
+## 应用标识与快速对话空状态（2026-11-10）
+
+- 从 `origin/main` / `96198639004d1531d0f7756024fe7ea02a64e0f6` 建立独立 worktree，
+  分支 `rovai/brand-symbol-empty-actions`；无前置主线治理要求，不修改模型上下文、Core、协议或安装图标。
+- `RovaiBrandMark` 统一八个组件的标识呈现，复用透明 SVG；星形和弧线均为 `#7897AE`，
+  保持 App 图标几何、原组件尺寸及可访问名称。六张外观缩略图中的十二个内嵌图形同步更新。
+- 无可用队员的两个操作共用规格，保留“前往队员”的灰底和“查看智能体”的次要文字样式。
+  文案、去向、队员可用性判定、新对话与最近对话行为保持。
+- 验证：`pnpm typecheck`、`TZ=UTC pnpm exec vitest run --maxWorkers=4`（3,251 通过、2 项既有跳过）、
+  `pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check` 与指定真实基线的 `pnpm docs:check:ci` 通过。
+  直接构建生产组件且不叠加原型图形或样式的浏览器验收通过 183 项，覆盖五套主题、四种窗口尺寸、九个界面、
+  缩略图十二处图形、登录／公开执行页状态和手机隐藏规则；不以原型样式替代生产实现。
+  公开执行页使用打包 SVG 的可信静态内联内容，保持禁止图像加载的原 CSP；未启动 App、Core 或 Runtime。
 
 ## 模型选择器 v3 交互稿落地（2026-11-09）
 

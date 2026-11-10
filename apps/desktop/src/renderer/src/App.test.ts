@@ -2685,7 +2685,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('aria-label="快速对话"')
     expect(markup).toContain('class="quick-chat-mark" data-brand-mark="horizon" data-brand-layout="separated"')
-    expect(markup).toContain('data-brand-point="rendezvous"')
+    expect(markup).not.toContain('data-brand-point="rendezvous"')
     expect(markup).toContain('还没有可用的队员')
     expect(markup).not.toContain('Arctic Dawn')
     expect(markup).not.toContain('在晨光里')
@@ -3063,7 +3063,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('data-brand-mark="horizon"')
     expect(markup).toContain('data-brand-layout="separated"')
-    expect(markup).toContain('data-brand-point="rendezvous"')
+    expect(markup).not.toContain('data-brand-point="rendezvous"')
     expect(markup).toContain('<strong>Rovai AI</strong>')
     expect(markup).toContain('队员')
     expect(markup).toContain('记忆，2 条普通提案待确认')

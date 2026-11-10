@@ -4,7 +4,6 @@
 .web-login { width: min(100%, 340px); margin-top: -32px; font-size: 13px; }
 .web-login-identity { text-align: center; margin-bottom: 32px; }
 .web-login-mark { width: 48px; height: 48px; color: var(--rail-logo); display: block; margin: 0 auto 20px; }
-.web-login-mark .brand-rendezvous-point { stroke: var(--surface); stroke-width: .65; }
 .web-login h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.035em; line-height: 1.4; }
 .web-login-description { margin: 8px 0 0; color: var(--muted); }
 .web-login-label { display: block; margin-bottom: 8px; font-weight: 500; }

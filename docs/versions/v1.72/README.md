@@ -6,10 +6,18 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 应用标识与快速对话空状态（2026-11-10）
+
+按 User 确认的交互稿，应用内标识统一采用 App 图标的星形和弧线，两者使用固定蓝色、透明背景，
+移除黑色底座和黄点；导航、启动、引导、关于、外观预览与缩略图、Web 登录及公开执行页统一覆盖。
+“无可用队员”的“前往队员 / 查看智能体”统一规格并保留灰底主入口与次要文字入口。
+规则归 [DESIGN](../../../DESIGN.md#brand-mark) 与 [App Shell](../../ui/components/app-shell-navigation.md#快速对话空状态)，
+实现和验证见[实施记录](implementation-plan.md#应用标识与快速对话空状态2026-11-10)。
 
 ## 队员智能体名称搜索（2026-11-09）
 
