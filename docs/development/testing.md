@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # 测试与 Smoke Test
@@ -192,6 +192,11 @@ Core smoke 增加同 Run 更正、待回执取消及普通后继。终态汇合�
 成功 Steer 复用继续扩展原 active-input owner，核对正常汇合解除退役、错误/取消不解除及两种 RPC 终态顺序；
 Core smoke 使用三个连续 Steer/普通后继转换验证同 Host/Session 与后继 CLI lease，每轮实际发送无重复 final。
 原待回执取消仍须退役 Host 并运行普通后继；不新增 Rust 测试函数或并行验收入口。见[复用记录](../versions/v1.72/kilo-steer-reuse.md)。
+
+前台 task 展示扩展原 Prompt-local provenance 与 ACP 公开归一化 owners，包含固定函数标签、运行改名、
+稀疏终态、参数保留、稳定调用 ID 和未知反例；不新增 Rust 测试函数或 classifier。
+原 Core smoke 增加短/超预算 task 报告、超预算命令与重开后永久截断，并确认模型仍收到完整报告。
+共享 Renderer 继续运行 `node --test scripts/lib/command-view.test.mjs`，实际范围见[补全记录](../versions/v1.72/kilo-subagent-display.md)。
 
 ## Rust 测试准入与退役门槛
 

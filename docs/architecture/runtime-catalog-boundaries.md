@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # Runtime Catalog Boundaries
@@ -74,6 +74,8 @@ Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共
 无需压缩插件或校验握手。监控复用逐消息 numeric reader，原生配置、认证和数据继续归 Kilo 自己拥有。
 原生最终 config 回调只保持默认权限与具体规则顺序，不参与审批或 Bootstrap。
 原生环境关闭后台子代理，前台保留；Steer 复用共享多请求收口；文件结果进入既有 Diff 投影。
+前台 task 通过共享 normalizer 进入既有子代理工具展示，参数与真实报告沿普通详情和输出预算；
+不补采独立子会话工具，遵循 [Surface v58](../contracts/run-process-detail-surface-v58.md)。
 不同 cwd 的 MCP 复用 bundled CLI 的私有 cwd 启动模式，不引入 PATH Node 依赖；取消使用共享绝对阶段期限。
 成功 Steer 在原请求与补充请求全部收口后沿普通 Fleet 复用 Host；失败/取消保持原清理。
 启动、权限、原生来源和数值口径见 [Runtime Launch v81](../contracts/runtime-launch-and-verification-v81.md)。

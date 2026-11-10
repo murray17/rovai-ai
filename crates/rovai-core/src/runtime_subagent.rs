@@ -28,6 +28,7 @@ pub fn is_agent_tool(adapter: AdapterKind, name: &str) -> bool {
         | AdapterKind::QoderCli => matches!(name, "Agent" | "Task" | "TaskOutput" | "TaskStop"),
         AdapterKind::QwenCode => matches!(name, "agent" | "task_output" | "task_stop"),
         AdapterKind::OpencodeCli => matches!(name, "task" | "subagent" | "task_output"),
+        AdapterKind::KiloCli => name == "task",
         AdapterKind::MinimaxCodeCli => matches!(name, "task" | "task_output" | "task_stop"),
         AdapterKind::CommandCodeCli => name == "agent",
         AdapterKind::GrokBuild => name == "spawn_subagent",
@@ -119,6 +120,17 @@ pub fn acp_tool_name(adapter: AdapterKind, update: &Value) -> Option<String> {
                 && update["rawInput"]["agent_id"].is_string() =>
         {
             Some("read_agent".into())
+        }
+        // Kilo's fixed pending label is task/think. Running updates replace
+        // that label with description; the native task input proves identity.
+        AdapterKind::KiloCli
+            if update["kind"] == "think"
+                && (title == "task"
+                    || (update["rawInput"]["description"].is_string()
+                        && update["rawInput"]["subagent_type"].is_string()
+                        && update["rawInput"]["prompt"].is_string())) =>
+        {
+            Some("task".into())
         }
         _ => None,
     }
@@ -353,6 +365,36 @@ mod tests {
     // reproduce collisions/anonymous text without a database or model process.
     #[test]
     fn display_calls_keep_scoped_identity_and_exclude_unattributed_child_prose() {
+        // Official Kilo starts with an empty input and a fixed function label,
+        // then changes that label to the task description. Its terminal omits
+        // kind/input; the child Session in the result is the target, not author.
+        let mut kilo = AcpExecutionDisplay::default();
+        let pending = kilo.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call","toolCallId":"kilo-task",
+                "title":"task","kind":"think","status":"pending","rawInput":{}}
+        })).unwrap();
+        assert_eq!(pending["update"]["toolName"], "task");
+        assert_eq!(pending["update"]["runtimeToolType"], "agent");
+        let input = json!({"description":"Read fixture","subagent_type":"general","prompt":"Read the fixture"});
+        let running = kilo.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-task",
+                "title":"Read fixture","kind":"think","status":"in_progress","rawInput":input}
+        })).unwrap();
+        let completed = kilo.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-task",
+                "status":"completed","rawOutput":{"output":"child report","metadata":{
+                    "parentSessionId":"kilo-session","sessionId":"child-session"}}}
+        })).unwrap();
+        for update in [&running, &completed] {
+            assert_eq!(
+                update["update"]["operationId"],
+                pending["update"]["operationId"]
+            );
+            assert_eq!(update["update"]["toolName"], "task");
+            assert_eq!(update["update"]["runtimeToolType"], "agent");
+            assert_eq!(update["update"]["rawInput"], input);
+            assert_eq!(update["runtimeRootOutput"], true);
+        }
         let mut state = AcpExecutionDisplay::default();
         let launch = json!({"sessionId":"session", "update":{
             "sessionUpdate":"tool_call", "toolCallId":"parent", "status":"pending", "kind":"other",
@@ -534,6 +576,27 @@ mod tests {
                 Some("spawn_subagent"),
             ),
             (AdapterKind::CopilotCli, json!({"title":"Agent"}), None),
+            (
+                AdapterKind::KiloCli,
+                json!({"title":"User task description","kind":"think","rawInput":{
+                    "description":"Read fixture","subagent_type":"general","prompt":"Read the fixture"}}),
+                Some("task"),
+            ),
+            (
+                AdapterKind::KiloCli,
+                json!({"title":"task","kind":"other"}),
+                None,
+            ),
+            (
+                AdapterKind::KiloCli,
+                json!({"title":"Task review","kind":"think"}),
+                None,
+            ),
+            (
+                AdapterKind::KiloCli,
+                json!({"title":"Task review","kind":"think","rawInput":{"subagent_type":"general","prompt":"Read"}}),
+                None,
+            ),
             (
                 AdapterKind::KiroCli,
                 json!({"title":"Spawning agent crew"}),

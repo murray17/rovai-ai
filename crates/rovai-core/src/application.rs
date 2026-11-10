@@ -37776,6 +37776,7 @@ for line in sys.stdin:
             (AdapterKind::KimiCodeCli, "TaskOutput"),
             (AdapterKind::HermesCli, "delegate_task"),
             (AdapterKind::KiroCli, "subagent"),
+            (AdapterKind::KiloCli, "task"),
         ] {
             let input =
                 json!({"prompt":"Read the fixture","mode":"background","agent_id":"native-child"});
@@ -37831,6 +37832,30 @@ for line in sys.stdin:
             serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
             report
         );
+        // Kilo changes its task title and drops input/kind at completion. The
+        // shared display cache supplies task parameters; native content owns
+        // the report, without exposing private result metadata.
+        let input = json!({"description":"Read fixture","subagent_type":"general","prompt":"Read the fixture"});
+        let started = display.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-call",
+                "title":"Read fixture","kind":"think","status":"in_progress","rawInput":input}
+        })).unwrap();
+        let completed = display.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-call",
+                "status":"completed","content":[{"type":"content","content":{"type":"text","text":"KILO_CHILD_REPORT"}}],
+                "rawOutput":{"output":"KILO_CHILD_REPORT","metadata":{"sessionId":"child-session","private":"KILO_PRIVATE"}}}
+        })).unwrap();
+        let (_, payload) = normalize_acp_event(AdapterKind::KiloCli, "session/update", &completed);
+        assert_eq!(payload["operationId"], started["update"]["operationId"]);
+        assert_eq!(payload["toolName"], "task");
+        assert_eq!(payload["runtimeToolType"], "agent");
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+            input
+        );
+        assert_eq!(payload["output"], "KILO_CHILD_REPORT");
+        assert_eq!(payload["runtimeRootOutput"], true);
+        assert!(!payload.to_string().contains("KILO_PRIVATE"));
         for (status, name, omitted, has_patch) in [
             ("completed", "edit", false, true),
             ("completed", "write", false, true),

@@ -23,6 +23,10 @@ const binaries=join(root,'bundled tools')
 for(const name of ['rovai-core','rovai'])await copyFile(join(repo,'target/debug',name),join(binaries,name))
 execFileSync('git',['init','--quiet',project])
 const startedFile = join(project,'cancel-started'), lateFile = join(project,'cancel-late')
+const childReports={SHORT:'KILO_CHILD_REPORT',LONG:'KILO_CHILD_REPORT_START\n'+'界'.repeat(3000)+'\nKILO_CHILD_REPORT_DISCARDED'}
+const longCommandOutput='KILO_COMMAND_REPORT_START\n'+'界'.repeat(3000)+'\nKILO_COMMAND_REPORT_DISCARDED'
+const longCommandFile=join(project,'long-command.txt')
+await writeFile(longCommandFile,longCommandOutput)
 const quote = s => "'"+s.replaceAll("'","'\\''")+"'"
 let approvalDecision = 'allow_once'
 let enterBusy, releaseBusy
@@ -43,14 +47,16 @@ async function serve(req,res) {
   let text='';for await(const chunk of req)text+=chunk
   const body=JSON.parse(text);calls.push(body)
   const nativeSystem=body.messages.filter(message=>message.role==='system').map(message=>message.content).join('\n')
+  const message=[...body.messages].reverse().find(m=>m.role==='user')
+  const content=typeof message?.content==='string'?message.content:JSON.stringify(message?.content)
+  const childPrompt=Array.isArray(message?.content)?message.content.find(part=>part.type==='text')?.text:content
+  const child=/^KILO_CHILD_(SHORT|LONG)$/.exec(childPrompt??'')
   const source=nativeSystem.match(/Instructions from: (.+\/bootstrap\.md)\n/)?.[1]
-  if(body.tools?.length) {
+  if(body.tools?.length&&!child) {
     const frozen=source?await readFile(source,'utf8'):''
     bootstrapChecks.push({index:calls.length-1,bytes:Buffer.byteLength(frozen),verbatim:!!source&&nativeSystem.includes('Instructions from: '+source+'\n'+frozen)})
   }
   await writeFile(join(root,'evidence','model-requests.json'),JSON.stringify(calls,null,2))
-  const message=[...body.messages].reverse().find(m=>m.role==='user')
-  const content=typeof message?.content==='string'?message.content:JSON.stringify(message?.content)
   if(content?.includes('CORE_STEER_')&&body.tools?.length&&steerControl&&!steerControl.held) {
     const control=steerControl; control.held=true
     const base={id:'kilo-steer-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
@@ -60,8 +66,12 @@ async function serve(req,res) {
     if(!res.destroyed)res.end('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n')
     return
   }
-  let delta={role:'assistant',content:'KILO_CORE_PUBLIC'},finish='stop'
-  if(body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_MCP')) {
+  let delta={role:'assistant',content:child?childReports[child[1]]:'KILO_CORE_PUBLIC'},finish='stop'
+  if(body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_TASK_')) {
+    assert(body.tools?.some(tool=>tool.function.name==='task'),'Native foreground task must remain available')
+    const size=content.includes('CORE_TASK_LONG')?'LONG':'SHORT'
+    delta={role:'assistant',tool_calls:[{index:0,id:'call_task_'+calls.length,type:'function',function:{name:'task',arguments:JSON.stringify({description:'Read native child report',subagent_type:'general',prompt:'KILO_CHILD_'+size})}}]};finish='tool_calls'
+  } else if(body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_MCP')) {
     const tool=body.tools?.find(tool=>tool.function.name.includes('kilo_review')&&tool.function.name.endsWith('echo'))
     assert(tool,'Assigned MCP tool must be visible')
     delta={role:'assistant',tool_calls:[{index:0,id:'call_mcp_'+calls.length,type:'function',function:{name:tool.function.name,arguments:'{"text":"CORE_MCP_MARKER"}'}}]};finish='tool_calls'
@@ -71,6 +81,7 @@ async function serve(req,res) {
   } else if(body.messages.at(-1)?.role!=='tool' && body.tools?.some(t=>t.function.name==='bash')) {
     let command
     if(content?.includes('CORE_FIRST_CLI')) command="printf KILO_CORE_STDOUT; rovai send --public-only --body KILO_CORE_CLI"
+    else if(content?.includes('CORE_LONG_COMMAND')) command='cat '+quote(longCommandFile)
     else if(content?.includes('CORE_AFTER_STEER_CLI_')) command='rovai send --public-only --body KILO_WARM_CLI_'+content.match(/CORE_AFTER_STEER_CLI_(\d+)/)[1]
     else if(content?.includes('CORE_PERMISSION_')) {
       const label=content.match(/CORE_PERMISSION_(FILE|INLINE|AGENT)/)[1]
@@ -244,6 +255,37 @@ try{
     assert(variants.some(message=>message.variant==='high'),'Native Session must use the requested effort variant')
     result.checks.effort='high'
   } finally { metadata.close() }
+  const foreground=[]
+  for(const size of ['SHORT','LONG']) {
+    const offset=calls.length, done=await settle(await send('CORE_TASK_'+size))
+    const rows=done.snapshot.executionEvidence.filter(e=>e.agentRunId===done.run.id&&e.canonical?.semanticKind==='tool.agent')
+    assert.equal(rows.length,1,'One native task must occupy one shared tool row')
+    const row=rows[0],detail=await core.request('agentRunEvidence.getContent',{threadId,evidenceId:row.id})
+    assert.equal(row.canonical.toolName,'task')
+    assert.equal(detail.payload.runtimeToolType,'agent')
+    assert.equal(JSON.parse(detail.payload.input).prompt,'KILO_CHILD_'+size,'Native task parameters must survive sparse terminal updates')
+    assert(detail.payload.output.includes('KILO_CHILD_REPORT'))
+    assert.equal(detail.outputTruncated,size==='LONG')
+    assert(Buffer.byteLength(detail.payload.output)<=7680,'Task report must use the shared 7.5 KiB output budget')
+    assert(!detail.payload.output.includes('KILO_CHILD_REPORT_DISCARDED'))
+    const updates=events.filter(e=>e.method==='runtime.action'&&e.params?.agentRunId===done.run.id&&e.params?.payload?.toolName==='task')
+    assert(updates.length>=3&&new Set(updates.map(e=>e.params.payload.operationId)).size===1,'Pending/running/terminal must update one stable operation')
+    const messages=done.snapshot.messages.filter(m=>m.sourceAgentRunId===done.run.id)
+    assert.equal(messages.length,1);assert.equal(messages[0].body,'KILO_CORE_PUBLIC','Child report must stay in its tool return')
+    const returned=calls.slice(offset).flatMap(c=>c.messages).filter(m=>m.role==='tool').map(m=>JSON.stringify(m.content)).join('\n')
+    assert(returned.includes(size==='LONG'?'KILO_CHILD_REPORT_DISCARDED':'KILO_CHILD_REPORT'),'Rovai display truncation must not alter native model input')
+    foreground.push({run:done.run.id,evidence:row.id,operation:row.operationId,bytes:Buffer.byteLength(detail.payload.output),outputTruncated:detail.outputTruncated})
+  }
+  result.checks.foregroundSubagents={rows:foreground,stableOperation:true,parametersRetained:true,childReportInToolOnly:true,nativeModelReceivesFullReport:true}
+  const longCommand=await settle(await send('CORE_LONG_COMMAND'))
+  const longRow=longCommand.snapshot.executionEvidence.find(e=>e.agentRunId===longCommand.run.id&&e.canonical?.semanticKind==='shell.execute')
+  assert(longRow,'Long command must remain a shell operation')
+  const longDetail=await core.request('agentRunEvidence.getContent',{threadId,evidenceId:longRow.id})
+  assert.equal(longDetail.outputTruncated,true)
+  assert(Buffer.byteLength(longDetail.payload.output)<=7680)
+  assert(longDetail.payload.output.startsWith('KILO_COMMAND_REPORT_START'))
+  assert(!longDetail.payload.output.includes('KILO_COMMAND_REPORT_DISCARDED'))
+  result.checks.commandOutputBudget={run:longCommand.run.id,evidence:longRow.id,bytes:Buffer.byteLength(longDetail.payload.output),outputTruncated:true}
   for(const label of ['FILE','INLINE','AGENT']) {
     const tested=await settle(await send('CORE_PERMISSION_'+label))
     assert.equal(await readFile(join(project,label.toLowerCase()+'-blocked.txt'),'utf8').catch(error=>error.code==='ENOENT'?null:Promise.reject(error)),null,'Native '+label+' deny must win over its earlier allow pattern')
@@ -252,6 +294,13 @@ try{
   }
   await core.close()
   core=await openCore();await core.request('health.check')
+  for(const row of [...foreground,{evidence:longRow.id,outputTruncated:true}]) {
+    const detail=await core.request('agentRunEvidence.getContent',{threadId,evidenceId:row.evidence})
+    assert.equal(detail.outputTruncated,row.outputTruncated)
+    assert(Buffer.byteLength(detail.payload.output)<=7680)
+    assert(!detail.payload.output.includes('_REPORT_DISCARDED'),'Reopen must preserve permanent output truncation')
+  }
+  result.checks.outputBudgetSurvivesReopen=true
   const before=calls.length
   const c=await settle(await send('CORE_COLD'))
   assert.equal(c.started.nativeThreadId,a.started.nativeThreadId,'Core restart must preserve exact native ID')

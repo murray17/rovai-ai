@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:96a67ecbcbbcf0169a1fe211321477b101d77d0821a032195bbeb1d07d63f46b";
+    "sha256:439d4298f000cf5948f0e9e79ef066f633682526f550de12490ae47c7b3e2cdc";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared

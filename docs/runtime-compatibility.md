@@ -1,10 +1,23 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-10 Kilo 前台 task 展示与输出预算
+
+官方 **7.8.27**、macOS arm64、生产 Core/CLI 与本地受控 Provider 完成 **26 个 Run（24 成功、2 主动取消）**。
+前台 task 复用共享子代理工具行、任务参数与真实报告；同调用更新不增加步骤，未补采独立 child Session。
+短报告 115 字节未截断，长报告 7,680 字节及长命令 7,679 字节均截断并保持 UTF-8 完整；
+重开后预算仍生效，原生模型仍收到完整子代理报告。既有 Steer、权限/MCP/cwd 与文件矩阵继续通过。
+共享 command-view 的机器人图标和详情回归通过；本轮没有新的开发 App 人工点击或付费模型验收。
+[实施与解释](versions/v1.72/kilo-subagent-display.md)、[白名单证据](research/kilo-runtime/subagent-display-7.8.27-macos-arm64.json)。
+
+Skills 的 DocumentationOnly 是 Rovai 验收状态，不代表 Kilo 缺少原生 Skill。
+普通 Kilo 执行不按 7.8.27 精确锁版；Steer 仅接受稳定 7.x 且不低于 7.8.27，仍须满足协议与当前 Run 条件。
+这不是对所有 7.x 的实测声明；平台继续仅 macOS arm64 Preview，其他平台 NotQualified。
 
 ## 2026-11-09 Kilo 成功 Steer 后常规复用
 
