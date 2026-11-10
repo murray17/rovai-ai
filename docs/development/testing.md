@@ -213,6 +213,14 @@ Main dispatcher 传递沿用既有 User Automation 测试；模型投影和持�
 最小命令为 `cargo test -p rovai-core --features slow-tests --lib user_automation_` 和
 `pnpm exec vitest run apps/desktop/src/main/user-automation.test.ts`，再运行默认 workspace 回归。
 
+缺省预算／Delivery 回执兼容继续扩展同一 Main owner，覆盖普通和成员发送各自的对象、null 与字段省略，
+并保留非法输入零 Core 调用、重放字段和未知回执失败。旧 Run mock 由真实 Core 的消息／sequence／Delivery
+shape 替代，不能仅用已过时的即时 Run 回执证明发送成功。CLI 现有 Trial admission owner
+`automation_trial_keeps_peer_creation_and_requires_the_run_receipt` 同时保留 peer 创建准入与回执兼容拒绝，
+Unix 子进程连接私有假 IPC，只允许 status，覆盖 wait/no-wait 与 Delivery/缺失能力，并核对空导出目录。
+夹具保留受管标记，既有导出目录保证回归失败也不会进入真实 journal 写入；不启动 Core 或模型。
+不新增 Rust 测试函数；最小命令为 `cargo test -p rovai-core --bin rovai automation_trial_`。
+
 ### 单项 Runtime 检查减重
 
 2026-11-09 安装／版本与目录职责分离扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses`、

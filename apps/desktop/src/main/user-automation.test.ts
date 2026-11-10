@@ -83,20 +83,20 @@ describe('User Automation transport', () => {
     }, dependencies)).rejects.toMatchObject({ code: 'automation_invalid_input' })
   })
 
-  it('sends through one atomic Core operation and maps only the closed V1 launch shape', async () => {
+  it('sends through one atomic Core operation and returns the persisted Delivery receipt', async () => {
     const calls: Array<{ method: CoreMethod; params: unknown }> = []
     const core = {
       async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
         calls.push({ method, params })
+        if (method === 'app.info') return { version: 'test' } as T
         if (method === 'userAutomation.thread.send') {
           return {
             commandResult: {
               status: 'accepted',
               payload: {
                 threadMessageId: 'rvmsg_1',
-                threadTurnId: 'rvturn_1',
-                agentRunIds: ['rvrun_1'],
-                executionBudget: { deadlineAt: '2026-08-21T10:30:00Z' }
+                sequence: 7,
+                deliveryIds: ['rvdelivery_1']
               }
             },
             replayed: false,
@@ -126,9 +126,8 @@ describe('User Automation transport', () => {
     expect(result).toEqual({
       status: 'dispatched',
       threadMessageId: 'rvmsg_1',
-      threadTurnId: 'rvturn_1',
-      agentRunIds: ['rvrun_1'],
-      executionBudget: { deadlineAt: '2026-08-21T10:30:00Z' },
+      sequence: 7,
+      deliveryIds: ['rvdelivery_1'],
       replayed: false
     })
     expect(calls.map(({ method }) => method)).toEqual(['userAutomation.thread.send'])
@@ -165,6 +164,50 @@ describe('User Automation transport', () => {
         .rejects.toMatchObject({ code: 'automation_invalid_input' })
     }
     expect(calls).toHaveLength(2)
+    await expect(dispatchUserAutomation('status', {}, {
+      core, openThread: async threadId => ({ threadId, opened: true }), appVersion: 'test'
+    })).resolves.toMatchObject({ threadSendReceipt: 'delivery' })
+  })
+
+  it('accepts CLI object and null budgets for both user and member sends without changing Core defaults', async () => {
+    const budget = { elapsedSeconds: 180, maxAgentRunResponsibilities: 1, maxAcceptedA2a: 0 }
+    for (const operation of ['thread.send', 'thread.sendAsMember']) {
+      for (const budgetKind of ['explicit', 'null', 'omitted']) {
+        const calls: Array<{ method: CoreMethod; params: unknown }> = []
+        const core = { async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
+          calls.push({ method, params })
+          return {
+            commandResult: { status: 'accepted', payload: {
+              threadMessageId: 'rvmsg_budget', sequence: 1, deliveryIds: ['rvdelivery_budget']
+            } },
+            replayed: budgetKind === 'null', preflight: null, pendingExecution: null
+          } as T
+        } }
+        const input = {
+          commandId: `budget-${operation}-${budgetKind}`, threadId: 'rvcamp_test',
+          agentId: 'agent_1', body: 'task',
+          ...(operation === 'thread.sendAsMember' ? { senderAgentId: 'agent_2' } : {}),
+          ...(budgetKind === 'omitted' ? {} : { executionBudget: budgetKind === 'null' ? null : budget })
+        }
+        const dependencies = { core, openThread: async (threadId: string) => ({ threadId, opened: true as const }), appVersion: 'test' }
+        const result = await dispatchUserAutomation(operation, input, dependencies)
+        expect(result).toEqual({
+          status: 'dispatched', threadMessageId: 'rvmsg_budget', sequence: 1,
+          deliveryIds: ['rvdelivery_budget'], replayed: budgetKind === 'null'
+        })
+        expect(calls).toEqual([{ method: 'userAutomation.thread.send', params: {
+          commandId: input.commandId, threadId: 'rvcamp_test', agentId: 'agent_1', body: 'task',
+          ...(operation === 'thread.sendAsMember' ? { senderAgentId: 'agent_2' } : {}),
+          execution: { taskId: null, purpose: 'task', completionRole: 'required',
+            budget: budgetKind === 'explicit' ? budget : null }
+        } }])
+        for (const invalidBudget of [false, 0, '', [], '180']) {
+          await expect(dispatchUserAutomation(operation, { ...input, executionBudget: invalidBudget }, dependencies))
+            .rejects.toMatchObject({ code: 'automation_invalid_input' })
+        }
+        expect(calls).toHaveLength(1)
+      }
+    }
   })
 
   it('fails closed when Core ever returns Pending Execution', async () => {
@@ -185,6 +228,24 @@ describe('User Automation transport', () => {
       { commandId: 'c', threadId: 'rvcamp_test', agentId: 'agent_1', body: 'task' },
       { core, openThread: async (threadId) => ({ threadId, opened: true }), appVersion: 'test' }
     )).rejects.toMatchObject({ code: 'automation_contract_upgrade_required' })
+
+    for (const payload of [
+      { threadMessageId: 'rvmsg_1', threadTurnId: 'rvturn_1', agentRunIds: [] },
+      { threadMessageId: 'rvmsg_1', sequence: 0, deliveryIds: ['delivery'] },
+      { threadMessageId: 'rvmsg_1', sequence: 1.5, deliveryIds: ['delivery'] },
+      { threadMessageId: 'rvmsg_1', sequence: 1, deliveryIds: [] },
+      { threadMessageId: 'rvmsg_1', sequence: 1, deliveryIds: [null] },
+      { threadMessageId: '', sequence: 1, deliveryIds: ['delivery'] }
+    ]) {
+      const malformed = { async request<T>(): Promise<T> {
+        return { commandResult: { status: 'accepted', payload }, replayed: false,
+          preflight: null, pendingExecution: null } as T
+      } }
+      await expect(dispatchUserAutomation('thread.send', {
+        commandId: 'malformed-receipt', threadId: 'rvcamp_test', agentId: 'agent_1', body: 'task'
+      }, { core: malformed, openThread: async threadId => ({ threadId, opened: true }), appVersion: 'test' }))
+        .rejects.toMatchObject({ code: 'automation_contract_upgrade_required' })
+    }
   })
 
   it('does not expose a generic Core invoke operation', async () => {

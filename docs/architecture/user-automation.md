@@ -3,13 +3,13 @@ document_type: architecture
 architecture: user-automation
 authority: desktop-user-automation-component-boundaries
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-10
 ---
 
 # User Automation Architecture
 
 本文说明普通用户终端自动化与 Runtime Diagnostic Trial 的长期组件边界。字段、命令、错误和 bundle 以
-[User Automation v6](../contracts/user-automation-v6.md)为准；决定理由见
+[User Automation v7](../contracts/user-automation-v7.md)为准；决定理由见
 [v1.21 决策](../versions/v1.21/decisions.md)。
 
 ## 进程结构
@@ -57,6 +57,8 @@ Delivery 创建，不提前创建 AgentRun，也不以 Composer 作为中间存�
 可选的成员代发只改变公共消息作者：Core 验证指定发送者的当前成员资格，保留 User 审计 actor，
 以 `automation` 来源发布且不绑定 source Run。它不转移受管执行权，不借用原生 Session 或 lease；
 后续由既有 Delivery 批处理投递，精确字段与拒绝语义见当前合同。
+Main 返回 Core 的消息 ID、sequence 与 Delivery IDs 作为持久受理回执，不把尚未创建的 Run 或预算
+deadline 补成即时 launch 结果。预算缺失和 null 共用 Core 缺省路径，其他输入仍按对象校验。
 当前合同无法解释的新状态必须失败并要求升级，不能以
 convenience path 绕过。
 
@@ -72,6 +74,8 @@ Main 不启动 Runtime、不读取原生数据库；Core 保留失败任务、�
 
 Diagnostic Trial 只回答“这个已配置成员 Runtime 能否在当前产品路径上接受并完成这一个隔离任务，以及 Core
 记录了什么”。它不拥有 case catalog、replica、judge、score、comparison、qualification 或 publication。
+现有 Trial 尚未迁移到 Delivery-first：Main 在 status 声明回执种类，CLI 在任何 Trial 写入前明确拒绝，
+不先发布任务再猜测 Run；已知 Run ID 的诊断、观察与导出保持原路径。
 现有 Benchmark/Qualification 架构不能消费 Trial bundle 后将其自动提升为正式结果；需要正式评测时仍使用其
 独立 admission、protocol 与 evidence chain。
 

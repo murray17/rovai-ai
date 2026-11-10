@@ -968,6 +968,19 @@ async fn agent_run_cancel(flags: &Flags) -> Result<u8> {
     Ok(command_result_exit_code(&result))
 }
 
+fn require_trial_run_receipt(status: &Value) -> Result<()> {
+    // Missing capability metadata does not prove that a Desktop still creates
+    // immediate Runs. Refuse before publishing unless that receipt is explicit.
+    if status.get("threadSendReceipt").and_then(Value::as_str) != Some("agent_run") {
+        return Err(CliError::new(
+            "automation_contract_upgrade_required",
+            "Diagnostic Trial requires an explicit immediate AgentRun receipt. No task was dispatched; use thread send and inspect the Thread instead.",
+        )
+        .into());
+    }
+    Ok(())
+}
+
 async fn trial_run(flags: &Flags) -> Result<u8> {
     flags
         .validate(
@@ -1008,6 +1021,7 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
             .map_err(anyhow::Error::new)?
             .unwrap_or("30m"),
     )?;
+    require_trial_run_receipt(&invoke("status", json!({})).await?)?;
     let trial_id = format!("rvtrial_{}", Uuid::now_v7().simple());
     let create_command_id = command_id();
     let send_command_id = command_id();
@@ -1936,9 +1950,10 @@ mod tests {
     #[cfg(windows)]
     use super::atomic_write_private_json;
     use super::{
-        Flags, camp_create_params, command_result_exit_code, event_belongs_to_run,
+        CliError, Flags, camp_create_params, command_result_exit_code, event_belongs_to_run,
         launch_result_exit_code, member_create_params, member_runtime_set_params,
-        parse_duration_seconds, terminal_exit_code, terminal_status, trace_export_params,
+        parse_duration_seconds, require_trial_run_receipt, terminal_exit_code, terminal_status,
+        trace_export_params,
     };
     use rovai_core::agent_profile::AdapterKind;
     use serde_json::json;
@@ -2001,8 +2016,8 @@ mod tests {
         assert!(trace_export_params(&Flags::parse(&unknown).unwrap()).is_err());
     }
 
-    #[test]
-    fn automation_camp_creation_uses_the_supported_peer_mode() {
+    #[tokio::test]
+    async fn automation_trial_keeps_peer_creation_and_requires_the_run_receipt() {
         let params = camp_create_params(
             "command-1".to_string(),
             Some("TRAE Command View".to_string()),
@@ -2012,6 +2027,129 @@ mod tests {
         );
 
         assert_eq!(params["collaborationMode"], "peer");
+        assert!(require_trial_run_receipt(&json!({ "threadSendReceipt": "agent_run" })).is_ok());
+        assert!(require_trial_run_receipt(&json!({ "appRunning": true })).is_err());
+        for receipt in [json!("delivery"), json!("unknown"), json!(null)] {
+            let error = require_trial_run_receipt(&json!({ "threadSendReceipt": receipt }))
+                .unwrap_err()
+                .downcast::<CliError>()
+                .unwrap();
+            assert_eq!(error.code, "automation_contract_upgrade_required");
+            assert_eq!(error.exit_code, 2);
+        }
+
+        #[cfg(unix)]
+        {
+            use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+            // Exercise the real Trial entry point in a child test process that
+            // connects only to its synthetic Automation context. Managed-Runtime
+            // markers remain inherited and unchanged.
+            if let Some(root) = std::env::var_os("ROVAI_TRIAL_ADMISSION_FIXTURE") {
+                let root = std::path::PathBuf::from(root);
+                let mut args = vec![
+                    "--agent-id".to_string(),
+                    "agent-test".to_string(),
+                    "--workspace".to_string(),
+                    root.to_string_lossy().into_owned(),
+                    "--task-file".to_string(),
+                    root.join("task.md").to_string_lossy().into_owned(),
+                    "--export".to_string(),
+                    root.join("bundle").to_string_lossy().into_owned(),
+                ];
+                if std::env::var("ROVAI_TRIAL_ADMISSION_NO_WAIT").as_deref() == Ok("1") {
+                    args.push("--no-wait".to_string());
+                }
+                let flags = Flags::parse(&args).unwrap();
+                let error = super::trial_run(&flags)
+                    .await
+                    .unwrap_err()
+                    .downcast::<CliError>()
+                    .unwrap();
+                assert_eq!(error.code, "automation_contract_upgrade_required");
+                assert_eq!(error.exit_code, 2);
+                assert!(error.message.starts_with("Diagnostic Trial requires"));
+                return;
+            }
+
+            // Keep the socket below macOS's sockaddr_un path limit. The export
+            // directory already exists so a regressed guard cannot reach the
+            // legacy journal path or any Core mutation during this negative test.
+            let root = std::path::Path::new("/tmp")
+                .join(format!("rvtrial-{}", uuid::Uuid::new_v4().simple()));
+            super::reserve_private_directory(&root).unwrap();
+            super::reserve_private_directory(&root.join("bundle")).unwrap();
+            super::write_private(&root.join("task.md"), b"isolated admission probe").unwrap();
+            let socket = root.join("ipc.sock");
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let context_path = root.join("context.json");
+            super::write_private_json(
+                &context_path,
+                &json!({
+                    "contractVersion": 1, "instanceId": "trial-test", "pid": std::process::id(),
+                    "endpoint": { "transport": "unix_socket", "path": socket },
+                    "credential": "isolated-test-credential-long-enough-for-context"
+                }),
+            )
+            .unwrap();
+            let server = tokio::spawn(async move {
+                for result in [
+                    json!({ "threadSendReceipt": "delivery" }),
+                    json!({ "threadSendReceipt": "delivery" }),
+                    json!({ "appRunning": true }),
+                    json!({ "appRunning": true }),
+                ] {
+                    let (stream, _) =
+                        tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept())
+                            .await
+                            .expect("Trial must query its receipt capability")
+                            .unwrap();
+                    let mut peer = BufReader::new(stream);
+                    let mut line = String::new();
+                    peer.read_line(&mut line).await.unwrap();
+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    assert_eq!(request["operation"], "status", "Trial must not mutate Core");
+                    let response =
+                        json!({ "requestId": request["requestId"], "ok": true, "result": result });
+                    peer.get_mut()
+                        .write_all(format!("{response}\n").as_bytes())
+                        .await
+                        .unwrap();
+                }
+            });
+            for no_wait in [false, true, false, true] {
+                let output = tokio::time::timeout(
+                    std::time::Duration::from_secs(10),
+                    tokio::process::Command::new(std::env::current_exe().unwrap())
+                        .args([
+                            "--exact",
+                            "app_cli::tests::automation_trial_keeps_peer_creation_and_requires_the_run_receipt",
+                        ])
+                        .env("ROVAI_TRIAL_ADMISSION_FIXTURE", &root)
+                        .env("ROVAI_TRIAL_ADMISSION_NO_WAIT", if no_wait { "1" } else { "0" })
+                        .env(super::CONTEXT_ENV, &context_path)
+                        .kill_on_drop(true)
+                        .output(),
+                )
+                .await
+                .expect("Trial admission must finish without waiting for mutation")
+                .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            server.await.unwrap();
+            assert!(
+                std::fs::read_dir(root.join("bundle"))
+                    .unwrap()
+                    .next()
+                    .is_none()
+            );
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[test]
