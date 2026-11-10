@@ -505,18 +505,35 @@ function ModelFields({
     }
     attempted.current = { key: current.key, startedAt: now }
     const request = generation.current
+    const publishCatalog = (result: RuntimeModelCatalogView) => {
+      setLive(previous => previous?.identity === identity
+        && !liveCatalogIsAtLeastAsRecent(result, previous.catalog.cache) ? previous : { identity, catalog: result })
+    }
     setLoading(true)
     setRetryNeeded(false)
     if (pending.current?.key !== current.key || pending.current.generation !== request) {
       const read = current.onOpenModelCatalog
+      const ownsRequest = () => request === generation.current && current.key === latest.current.key && latest.current.pageActive
       const promise = Promise.resolve().then(async () => {
-        if (!current.target) return read(retry ? { forceRefresh: true } : undefined)
+        if (retry) {
+          // The model-menu button always refreshes the directory. DSH may
+          // then need its existing selected-model read; Core owns that cache.
+          const catalog = await read({ forceRefresh: true })
+          if (!current.target || !ownsRequest()) return catalog
+          if (catalog.runtimeKind !== adapterKind) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
+          if (catalog.refreshStatus === 'failed' || catalog.refreshStatus === 'deferred') {
+            throw new Error(uiAttribute('暂时无法读取该模型的可选项，请重试。'))
+          }
+          publishCatalog(catalog)
+          return read(current.target)
+        }
+        if (!current.target) return read()
         const cached = await read({ ...current.target, cacheOnly: true })
-        if (request !== generation.current || current.key !== latest.current.key || !latest.current.pageActive) return cached
+        if (!ownsRequest()) return cached
         if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
         const model = cached.models.find(model => model.id === current.target!.modelId) ?? null
-        if (!retry && cached.refreshStatus === 'not_required' && dshModelOptionsResolved(model, current.target.dshSource)) return cached
-        return read({ ...current.target, forceRefresh: retry })
+        if (cached.refreshStatus === 'not_required' && dshModelOptionsResolved(model, current.target.dshSource)) return cached
+        return read(current.target)
       })
       const owner = { key: current.key, generation: request, promise }
       pending.current = owner
@@ -533,8 +550,7 @@ function ModelFields({
       }
       const incomplete = result.refreshStatus === 'failed' || result.refreshStatus === 'deferred'
       if (!incomplete || result.models.length > 0) {
-        setLive(previous => previous?.identity === identity
-          && !liveCatalogIsAtLeastAsRecent(result, previous.catalog.cache) ? previous : { identity, catalog: result })
+        publishCatalog(result)
       }
       setRetryNeeded(incomplete)
     }).catch(() => {

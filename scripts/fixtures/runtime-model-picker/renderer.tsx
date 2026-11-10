@@ -104,6 +104,12 @@ function Fixture(): React.JSX.Element {
     if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
       cache: { status: 'fresh', ...cacheTimes(new Date(clockStartedAt + 2000).toISOString()) }, models: state.piCatalogModels,
       refreshStatus: 'completed', diagnosticCode: null })
+    if (kind === 'deepseek-harness' && target?.forceRefresh && !target.modelId) {
+      // A directory result is independent of an earlier target's outcome.
+      return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog },
+        models: state.dshDirectoryModels ?? state.dshPublished?.models ?? nativeDshModels,
+        refreshStatus: 'completed', diagnosticCode: null })
+    }
     if (kind === 'deepseek-harness' && target?.modelId) {
       state.dshReads ??= []
       state.dshCache ??= {}

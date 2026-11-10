@@ -2430,6 +2430,9 @@ impl RuntimeCheckAttempt {
 
     fn can_join(&self, other: &Self) -> bool {
         self.installation_target == other.installation_target
+            // The running worker already captured its refresh intent. Keep a
+            // queued force behind a worker that may return cached data.
+            && (self.force_refresh || !other.force_refresh)
             && self.startup_preview.is_none()
             && other.startup_preview.is_none()
             && self.model_target == other.model_target
@@ -27841,9 +27844,9 @@ async fn process_runtime_check_manager(
                 }
                 if let Some(existing) = active
                     .values_mut()
-                    .find(|attempt| attempt.accepts(&request, &installation_target))
+                    .find(|attempt| attempt.accepts(&request, &installation_target)
+                        && (attempt.force_refresh || !request.force_refresh))
                 {
-                    existing.force_refresh |= request.force_refresh;
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
                     }
@@ -28276,7 +28279,6 @@ async fn merge_runtime_check_pending(
         }
         let mut duplicate = pending.swap_remove(index);
         active.trigger = active.trigger.max(duplicate.trigger);
-        active.force_refresh |= duplicate.force_refresh;
         active.waiters.append(&mut duplicate.waiters);
         // A request can be admitted between the DB commit and its progress
         // message. Fold it into this same round with the existing merge rules.
@@ -29501,8 +29503,8 @@ mod tests {
                         file_identity: None,
                         locator: None,
                     });
-                    let attempt = RuntimeCheckAttempt {
-                        force_refresh: false,
+                    let attempt_for = |force_refresh| RuntimeCheckAttempt {
+                        force_refresh,
                         installation_target: target.clone(),
                         search: search.clone(),
                         startup_preview: None,
@@ -29520,10 +29522,11 @@ mod tests {
                         deadline: tokio::time::Instant::now(),
                         waiters: vec![],
                     };
+                    let attempt = attempt_for(false);
                     let (acknowledged, _) = oneshot::channel();
                     let mut request = RuntimeCheckRequest {
                         force_refresh: false,
-                        search,
+                        search: search.clone(),
                         startup_preview: None,
                         model_target: None,
                         runtime_kind: kind,
@@ -29536,6 +29539,26 @@ mod tests {
                         attempt.accepts(&request, &target),
                         catalog_only == (trigger == RuntimeCheckTrigger::CatalogOpen)
                     );
+                    if catalog_only && trigger == RuntimeCheckTrigger::CatalogOpen {
+                        let forced = attempt_for(true);
+                        assert!(
+                            !attempt.can_join(&forced),
+                            "target advancement cannot fold queued force into cache-only-capable work"
+                        );
+                        assert!(
+                            forced.can_join(&attempt),
+                            "native forced work can satisfy an ordinary reader"
+                        );
+                        assert!(
+                            forced.can_join(&attempt_for(true)),
+                            "forced requests still coalesce"
+                        );
+                        request.force_refresh = true;
+                        assert!(
+                            attempt.accepts(&request, &target),
+                            "an unstarted pending task may still adopt force intent"
+                        );
+                    }
                     let mut changed = target.clone();
                     changed.as_mut().unwrap().version += 1;
                     assert!(!attempt.accepts(&request, &changed));
@@ -32000,6 +32023,88 @@ done
             .unwrap();
         assert_eq!(refreshed["refreshStatus"], "completed");
         assert_eq!(refreshed["models"][0]["id"], "manual-refresh");
+        // The ack is sent before the manager spawns a worker, and its next
+        // request is handled only after that spawn. Holding the existing commit
+        // guard keeps this ordinary worker before its Fresh-cache decision.
+        // A later force request must not inherit that worker's copied `false`.
+        std::fs::write(root.join("requests"), "").unwrap();
+        std::fs::write(
+            root.join("catalog-result"),
+            r#"{"id":3,"result":{"data":[{"id":"late-manual-refresh"}],"nextCursor":null}}"#,
+        )
+        .unwrap();
+        let update = core.runtime_search_update.lock().await;
+        let search = core.runtime_search_environment.read().await.clone();
+        let send = |force_refresh| {
+            let (acknowledged, acknowledgement) = oneshot::channel();
+            let (completed, completion) = oneshot::channel();
+            core.runtime_check_requests
+                .send(
+                    RuntimeCheckRequest {
+                        force_refresh,
+                        search: search.clone(),
+                        startup_preview: None,
+                        model_target: None,
+                        runtime_kind: AdapterKind::CodexCli,
+                        purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                        trigger: RuntimeCheckTrigger::CatalogOpen,
+                        acknowledged,
+                        completion: Some(completed),
+                    }
+                    .into(),
+                )
+                .unwrap();
+            (acknowledgement, completion)
+        };
+        let (ordinary_ack, ordinary_done) = send(false);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), ordinary_ack)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        let (forced_ack, forced_done) = send(true);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), forced_ack)
+                .await
+                .unwrap()
+                .unwrap(),
+            "late force must queue behind a worker that may serve Fresh cache"
+        );
+        let (duplicate_ack, duplicate_done) = send(true);
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(5), duplicate_ack)
+                .await
+                .unwrap()
+                .unwrap(),
+            "same-target queued force requests still coalesce"
+        );
+        drop(update);
+        for done in [ordinary_done, forced_done, duplicate_done] {
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(10), done)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap(),
+                RuntimeCheckOutcome::Ready
+            );
+        }
+        assert_eq!(
+            std::fs::read_to_string(root.join("requests"))
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("model/list"))
+                .count(),
+            1,
+            "late force completes through one native catalog read despite Fresh cache"
+        );
+        assert_eq!(
+            core.runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+                .await
+                .unwrap()["models"][0]["id"],
+            "late-manual-refresh"
+        );
         let requests = std::fs::read_to_string(root.join("requests")).unwrap();
         assert!(requests.contains("model/list"));
         assert!(

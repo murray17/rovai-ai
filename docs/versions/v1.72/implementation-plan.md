@@ -8,6 +8,27 @@ last_updated: 2026-11-10
 
 # v1.72 实施与验收
 
+## 手动目录刷新并发与 DSH 语义收尾（2026-11-10）
+
+- Work item：后加入强刷不能由缓存任务完成；DSH 模型按钮刷新完整目录并去掉强刷前的缓存预读。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai`（复用干净主目录）；
+  Branch：`rovai/model-refresh-followup`；Base：`origin/main` / `1efd3f7194236550e0d4e9c762120e7307990a74`；
+  Governance：none；Status：ready（验收完成，交付结果以 PR／安装记录为准）。保留 #1058 的控件、文案、缓存身份及 Run 边界。
+- 先扩展原 Codex owner：以原提交锁及 Manager acknowledgement 确定普通 worker 已启动但尚未决定是否复用 Fresh，
+  再发强刷及重复强刷。修复前第二个请求被合入普通任务、断言失败；修复后强刷排队且重复请求合并，最终仅一次原生 `model/list`。
+  原 `runtime_check_activity_has_two_slots_and_one_terminal_owner` 同时覆盖目标进度归并时不能折入强刷，未增加 Rust 测试函数。
+- 只收窄运行中任务的合并条件，保留未启动任务升级强刷的能力；删除运行后无效的布尔赋值。
+  不增加共享原子状态、阶段事件、调度器或持久字段，普通 Run 不参与该流程。
+- 原 Electron picker 回归先确认 DSH 手动刷新仍有一次 `cacheOnly`，且没有读取完整目录。
+  修复后先发送无 `modelId` 的目录强刷，再走原目标入口，前端预读为零；Core 自行复用有效目标缓存。
+  已成功目录立即供候选使用，后续参数补读失败也保留目录与用户选择；页面／目标和最终结果校验继续沿用原归属检查。
+- 两条定向回归已完成失败到通过的验证；Codex 目录 owner 1 passed，原 Electron picker owner 1 passed，
+  其中新增断言覆盖 DSH 先读目录、无缓存预读、目录成功但后续参数失败仍保留候选。
+  类型检查、50 项相关单元、前端全量 3,251 passed / 2 skipped（275 文件）、Node 末组 377 passed / 2 平台 skipped、
+  默认 Rust workspace 483 passed / 1 ignored 及 Desktop/Web 构建通过。
+  主目录既有 ignored 原型含失效 Markdown 链接，因此同一通用文档门禁与 10 项文档单测在只含已提交文件的验证副本中通过，
+  没有移动这些原型、放宽 checker 或增加例外。完整日志与交付结果保存在本轮验收资料中。
+
 ## 应用标识与快速对话空状态（2026-11-10）
 
 - 从 `origin/main` / `96198639004d1531d0f7756024fe7ea02a64e0f6` 建立独立 worktree，
@@ -27,7 +48,7 @@ last_updated: 2026-11-10
 - Work item：固定模型刷新入口、首次加载与已有列表刷新、自定义 ID 操作及中英文交互稿还原。
   Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；
   Branch：`rovai/model-catalog-clean`；Base：`origin/main` / `33979e07f76b2beea61cafdc13e3f155f38a62e6`；
-  Governance：none；Status：ready（待 PR / 安装）。复用本节下方目录修复的干净分支，同步 #1056、#1057，
+  Governance：none；Status：merged（PR #1058，`961986390`；本机安装已完成）。复用本节下方目录修复的干净分支，同步 #1056、#1057，
   保留此前健康解耦、身份隔离及重启代次修复，不引入旧集成分支的其他功能或迁移。
 - 模型菜单搜索框右侧固定清除与刷新位置，刷新原位转动、阻止重复点击并保持键盘焦点；删除状态条和独占重试行。
   首次无真实目录才显示中性加载占位，历史列表刷新保持搜索、选项和滚动；失败继续保留保存值、默认项和手工输入。
