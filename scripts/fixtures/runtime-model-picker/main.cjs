@@ -235,6 +235,13 @@ app.whenReady().then(async () => {
     await run('window.runtimeTest.setModel({mode:"explicit",modelId:"vendor/model-0",options:{reasoning_effort:"max"}}); window.runtimeTest.setVisible(true)'); await settle()
     assert.equal(await run('window.runtimeTest.calls'), beforeHidden + 1)
     const beforeReadDraft = await draft()
+    for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
+      await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`); await settle()
+      assert.equal(await run('document.querySelector(\'button[aria-label="推理强度，max"]\').getAttribute("aria-busy")'), null, 'A shared catalog read must not mark ordinary effort as busy')
+      assert.equal(await run('getComputedStyle(document.querySelector(\'button[aria-label="推理强度，max"]\'),"::after").content'), 'none', 'Ordinary effort has no catalog spinner')
+      await capture(`catalog-pending-effort-${theme}`)
+    }
+    await run('document.documentElement.dataset.theme="day"'); await settle()
     await click('button[aria-label="推理强度，max"]'); await key('Escape')
     await click(modelTrigger)
     assert.equal(await run('document.querySelector(".catalog-refresh-button").getAttribute("aria-busy")'), 'true')
@@ -430,8 +437,12 @@ app.whenReady().then(async () => {
     await waitForBusy()
     assert.equal(await run(`document.querySelector(${JSON.stringify(busyTrigger)}).disabled`), false, 'Loading does not disable the parameter')
     assert.equal(await run(`document.querySelector(${JSON.stringify(busyTrigger)}).getAttribute('aria-description')`), null)
-    await capture('dsh-options-loading-night')
-    await run('document.documentElement.dataset.theme="day"'); await settle(); await capture('dsh-options-loading-day')
+    for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
+      await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`); await settle()
+      assert.equal(await isBusy(), true, 'DSH retains its target-options indicator in every theme')
+      assert.equal(await run(`getComputedStyle(document.querySelector(${JSON.stringify(busyTrigger)}),'::after').animationName`), 'runtime-parameter-spin')
+      await capture(`dsh-options-loading-${theme}`)
+    }
     await click(busyTrigger)
     await quietCandidates('[role=menu]')
     assert.equal(await run('document.querySelector(".runtime-picker-default [role=menuitemradio]").hasAttribute("data-disabled")'), false, 'Model default stays selectable during loading')
