@@ -2011,6 +2011,12 @@ button.file-preview-html-feedback { cursor: pointer; }
 .file-preview-html-feedback.is-problem { color: var(--danger); }
 .file-preview-html-feedback svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
 button.file-preview-html-feedback:hover { background: var(--surface-hover); }
+.file-preview-html-toolbar-actions { display: inline-flex; align-items: center; }
+.file-preview-html-toolbar-actions:empty, .file-preview-html-toolbar-actions[hidden] { display: none; }
+.file-preview-html-info-control { position: relative; display: inline-flex; }
+.file-preview-html-info-tooltip { left: auto; right: 0; max-width: 240px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; white-space: nowrap; }
+.file-preview-html-info-control:hover .file-preview-html-info-tooltip,
+.file-preview-html-info:focus + .file-preview-html-info-tooltip { visibility: visible; opacity: 1; transform: translateY(0); }
 .file-preview-html-diagnostics { flex: 0 1 auto; min-height: 0; max-height: min(32vh, 260px); padding: 0 12px 10px; overflow: auto; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); color: var(--ink); background: var(--conversation-surface); font-size: 12px; line-height: 1.6; }
 .file-preview-html-diagnostics[hidden] { display: none; }
 .file-preview-html-diagnostics p { margin: 10px 0; }

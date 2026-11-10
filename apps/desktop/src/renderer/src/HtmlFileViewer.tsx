@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { HtmlPreviewHostChannel } from '../../../../../packages/html-preview/src/host-channel'
 import { htmlPreviewDiagnosticKey, parseHtmlPreviewDiagnostic, validPreviewOrigin, type HtmlPreviewDiagnostic } from '../../../../../packages/html-preview/src/protocol'
 import { useFilePreview, type FilePreviewTabModel } from './FilePreviewContext'
@@ -10,8 +11,9 @@ import { UiText, uiAttribute } from './interface-language'
 
 const labels = { script: '脚本错误', promise: '异步脚本错误', resource: '资源加载失败', policy: '浏览器策略阻止', document: '页面加载失败', channel: '诊断通道不可用', layout: '浏览器布局提示' }
 
-export function HtmlViewer({ tab, pathControl, updateAction, downloadAction, hideToolbar = false }: {
+export function HtmlViewer({ tab, pathControl, updateAction, downloadAction, hideToolbar = false, toolbarTarget }: {
   hideToolbar?: boolean
+  toolbarTarget?: HTMLElement | null
   tab: FilePreviewTabModel; pathControl: ReactNode; updateAction: ReactNode; downloadAction: ReactNode
 }): React.JSX.Element {
   const versions = [{ file: tab.file, content: tab.content, candidate: false },
@@ -19,12 +21,14 @@ export function HtmlViewer({ tab, pathControl, updateAction, downloadAction, hid
   return <>{versions.map(version => <div key={version.file?.handleId ?? tab.id}
     className="file-preview-html-version" hidden={version.candidate} inert={version.candidate}>
     <HtmlPageViewer tab={{ ...tab, file: version.file, content: version.content }}
-      candidate={version.candidate} hideToolbar={hideToolbar} downloadAction={version.candidate ? null : downloadAction} pathControl={pathControl} updateAction={updateAction} />
+      candidate={version.candidate} hideToolbar={hideToolbar} toolbarTarget={version.candidate ? null : toolbarTarget}
+      downloadAction={version.candidate ? null : downloadAction} pathControl={pathControl} updateAction={updateAction} />
   </div>)}</>
 }
 
-function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candidate, hideToolbar }: {
+function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candidate, hideToolbar, toolbarTarget }: {
   hideToolbar: boolean
+  toolbarTarget?: HTMLElement | null
   candidate: boolean
   downloadAction: ReactNode
   tab: FilePreviewTabModel
@@ -121,7 +125,14 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
       : documentState === 'unresponsive' ? uiAttribute('加载未完成') : documentState === 'loading' ? uiAttribute('加载中…') : ''
   const summary = [status, problemCount ? uiAttribute("{0} 项问题", String(problemCount)) : ''].filter(Boolean).join(' · ')
   const expanded = hasDetails && detailsOpen
-  const feedback = hasDetails ? <button type="button" className={`file-preview-html-feedback${hasProblem ? ' is-problem' : ''}`}
+  const auxiliaryOnly = hasDetails && !hasProblem && !status
+  const feedback = auxiliaryOnly ? <span className="file-preview-html-info-control">
+    <button type="button" className="file-action-button file-preview-html-info" aria-label={uiAttribute('查看诊断详情')}
+      aria-describedby={`${detailsId}-hint`} aria-expanded={expanded} aria-controls={detailsId} onClick={() => setDetailsOpen(!detailsOpen)}>
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" /><path d="M10 9v5M10 6.5h.01" /></svg>
+    </button>
+    <span id={`${detailsId}-hint`} role="tooltip" className="file-preview-path-tooltip file-preview-html-info-tooltip"><UiText zh={"查看诊断详情"} /></span>
+  </span> : hasDetails ? <button type="button" className={`file-preview-html-feedback${hasProblem ? ' is-problem' : ''}`}
     aria-expanded={expanded} aria-controls={detailsId} onClick={() => setDetailsOpen(!detailsOpen)}>
     {hasProblem && <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 15 14H1L8 1.5Z M8 5.5v4 M8 11.5v.5" /></svg>}
     {summary ||uiAttribute("诊断详情")}
@@ -139,7 +150,7 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
         {downloadAction}
       </div>
     </div>}
-    {hideToolbar && hasDetails && feedback}
+    {hideToolbar && hasDetails && (auxiliaryOnly && toolbarTarget ? createPortal(feedback, toolbarTarget) : feedback)}
     {hasDetails && <div id={detailsId} className="file-preview-html-diagnostics" hidden={!expanded}>
       {tab.refreshError && <p role="alert"><UiText zh={"重新加载失败："} />{tab.refreshError}<UiText zh={"。已显示的内容会保留。"} /></p>}
       {loadState.notice && <p className="file-preview-html-notice">{loadState.notice}</p>}
