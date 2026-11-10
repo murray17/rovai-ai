@@ -7,11 +7,19 @@ import { MemberRuntimePicker } from '../../../apps/desktop/src/renderer/src/Memb
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'
 
-const observedAt = '2026-09-13T00:00:00Z'
+const clockStartedAt = Date.now()
+let clockNow = clockStartedAt
+Date.now = () => clockNow
+const observedAt = new Date(clockStartedAt).toISOString()
+const cacheTimes = (at = observedAt) => ({
+  observedAt: at,
+  revalidateAfter: new Date(Date.parse(at) + 60000).toISOString(),
+  expiresAt: new Date(Date.parse(at) + 86400000).toISOString()
+})
 function fixture(kind: AdapterKind, empty: boolean, generation: number, expired = false): AdapterInstallation {
   const installation = {
     id: `fixture-${kind}`, adapterKind: kind, generation, installationClass: 'managed_default', authScope: 'default',
-    modelCatalog: { status: empty ? 'unavailable' : expired ? 'expired' : 'fresh', observedAt, revalidateAfter: observedAt, expiresAt: observedAt },
+    modelCatalog: { status: empty ? 'unavailable' : expired ? 'expired' : 'fresh', ...cacheTimes() },
     snapshot: { probeStatus: 'ready', staleAt: null, models: empty ? [] : Array.from({ length: 24 }, (_, i) => ({ id: `vendor/model-${i}`, displayName: `${kind} 模型 ${i}`, description: i === 0 ? '模型说明' : undefined, hidden: false, deprecated: false, isDefault: i === 0,
       options: i === 2 ? [] : [{ key: kind === 'claude-code-cli' ? 'effort' : 'reasoning_effort', label: 'Effort', valueType: 'enum', values: [
         { value: 'low', label: 'Low' }, { value: 'high', label: 'High' }, ...(i === 0 ? [{ value: 'xhigh', label: 'Xhigh' }] : [])
@@ -31,7 +39,7 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
   }
   if (kind === 'pi') installation.lastProbeAttempt = { id: 'old-health-failure', installationId: installation.id,
     status: 'failed', failureClass: 'transient', diagnosticCode: 'runtime_check_timed_out',
-    candidatePath: '/fixture/pi', executableFingerprint: 'fixture', attemptedAt: '2026-09-14T00:00:00Z',
+    candidatePath: '/fixture/pi', executableFingerprint: 'fixture', attemptedAt: new Date(clockStartedAt + 1000).toISOString(),
     retryAfter: null, failure: null }
   return installation
 }
@@ -58,9 +66,10 @@ function Fixture(): React.JSX.Element {
     installation.snapshot!.models = state.dshCacheShape === 'empty' ? []
       : nativeDshModels.filter(model => model.id !== 'vendor/model-1')
   }
-  if (kind === 'deepseek-harness' && observation) installation.modelCatalog.observedAt = `2026-09-${15 + observation}T00:00:00Z`
+  if (kind === 'deepseek-harness' && observation) installation.modelCatalog.observedAt = new Date(clockStartedAt + (observation + 2) * 1000).toISOString()
   Object.assign(window, { runtimeTest: Object.assign(state, {
     draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled, setVisible,
+    advanceClock: (milliseconds: number) => { clockNow += milliseconds },
     expireCatalog: () => setCatalogExpired(true),
     expirePublishedCatalog: () => { state.expiredPublishedCatalog = state.lastCatalog?.cache; setObservation(value => value + 1) },
     invalidatePiCatalog: () => { state.piInvalidated = true; setObservation(value => value + 1) },
@@ -70,6 +79,7 @@ function Fixture(): React.JSX.Element {
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
     switchKind: (next: AdapterKind) => { setKind(next); setDraft(draftFromDefaults(fixture(next, false, generation).memberRuntimeDefaults!)) },
     reset: (nextPage = 'member', nextMode = 'normal') => {
+      clockNow = clockStartedAt
       state.changes = 0
       state.expiredPublishedCatalog = null
       state.piInvalidated = false; state.piCatalogModels = null; setObservation(0)
@@ -82,7 +92,7 @@ function Fixture(): React.JSX.Element {
   const catalog = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
     state.calls++
     if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
-      cache: { ...installation.modelCatalog, status: 'fresh', observedAt: '2026-10-01T00:00:00Z' }, models: state.piCatalogModels,
+      cache: { status: 'fresh', ...cacheTimes(new Date(clockStartedAt + 2000).toISOString()) }, models: state.piCatalogModels,
       refreshStatus: state.piCatalogModels.length ? 'completed' : 'failed', diagnosticCode: null })
     if (kind === 'deepseek-harness' && target) {
       state.dshReads ??= []
@@ -117,7 +127,7 @@ function Fixture(): React.JSX.Element {
         const done = () => {
           if (context !== (state.dshContext ?? 0)) { resolve(view('deferred')); return }
           state.dshCache[target.modelId] = { ...model,
-            runtimeMetadata: { dshSource: 'native', dshOptionsResolved: true, dshOptionsContext: String(context), dshOptionsObservedAt: new Date().toISOString() },
+            runtimeMetadata: { dshSource: 'native', dshOptionsResolved: true, dshOptionsContext: String(context), dshOptionsObservedAt: new Date(Date.now()).toISOString() },
             options: values.length ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
               values: values.map((value: string) => ({ value, label: value })) }] : [] }
           state.dshPublished = view('completed')
@@ -140,14 +150,19 @@ function Fixture(): React.JSX.Element {
     }
     if (kind === 'deepseek-harness' && state.dshPublished) return Promise.resolve(state.dshPublished)
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))
-    if (mode === 'failed-empty') return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog, observedAt: '2026-10-29T00:00:00Z' }, models: [], refreshStatus: 'failed', diagnosticCode: 'runtime_model_catalog_refresh_failed' })
+    if (mode === 'failed-empty') return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog, ...cacheTimes(new Date(clockStartedAt + 3000).toISOString()) }, models: [], refreshStatus: 'failed', diagnosticCode: 'runtime_model_catalog_refresh_failed' })
+    if (mode === 'clock-expiry') {
+      const result: RuntimeModelCatalogView = { runtimeKind: kind, cache: { status: 'fresh', ...cacheTimes(new Date(Date.now()).toISOString()) },
+        models: installation.snapshot!.models, refreshStatus: 'completed', diagnosticCode: null }
+      return new Promise(resolve => state.pending.push(() => resolve(result)))
+    }
     const modelsWithLowOnlyTarget = installation.snapshot!.models.map(model => model.id === 'vendor/model-1'
       ? { ...model, options: [{ ...model.options[0], values: [{ value: 'low', label: 'Low' }] }] }
       : model)
     const result = mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired)
       ? {
           runtimeKind: kind,
-          cache: { ...installation.modelCatalog, status: 'fresh' as const, observedAt: '2026-09-14T00:00:00Z' },
+          cache: { status: 'fresh' as const, ...cacheTimes(new Date(clockStartedAt + 1000).toISOString()) },
           models: modelsWithLowOnlyTarget,
           refreshStatus: 'completed' as const,
           diagnosticCode: null
@@ -168,7 +183,7 @@ function Fixture(): React.JSX.Element {
       {page === 'member' && <MemberRuntimePicker id="runtime" value={kind} disabled={disabled} isDisabled={next => !['codex-cli', 'claude-code-cli', 'command-code-cli'].includes(next)} onChange={next => { if (next) state.switchKind(next) }} />}
       {page === 'member'
         ? <div className="member-editor-runtime-fields"><MemberRuntimeParameters active={visible} adapterKind={kind} installation={installation} draft={draft} disabled={disabled} onOpenModelCatalog={catalog} onChange={next => { state.changes++; setDraft(next) }} /></div>
-        : <MemberModelParameters active={visible} adapterKind={kind} installation={installation} model={draft.model} disabled={disabled} onOpenModelCatalog={catalog} onChange={model => { state.changes++; setDraft({ ...draft, model }) }} />}
+        : visible ? <MemberModelParameters adapterKind={kind} installation={installation} model={draft.model} disabled={disabled} onOpenModelCatalog={catalog} onChange={model => { state.changes++; setDraft({ ...draft, model }) }} /> : null}
       <button id="after" type="button">下一项</button>
       <p style={{ marginTop: 360 }}>原生输入集成夹具；不启动 Core 或 Runtime。</p>
     </section>
