@@ -8367,8 +8367,9 @@ mod slow_tests {
                     )
                     .unwrap()
             );
-            // Environment publication also owns its clock invalidation transaction;
-            // republishing the same generation preserves the successful read.
+            database
+                .record_runtime_search_environment_generation(1, &chrono::Utc::now().to_rfc3339())
+                .unwrap();
             assert!(
                 service
                     .commit_runtime_model_catalog(
@@ -8380,27 +8381,96 @@ mod slow_tests {
                     )
                     .unwrap()
             );
-            database
-                .record_runtime_search_environment_generation(7, &chrono::Utc::now().to_rfc3339())
-                .unwrap();
-            assert!(read(&database).model_catalog.observed_at.is_none());
-            let current = read(&database);
-            assert!(
-                service
-                    .commit_runtime_model_catalog(
-                        &mut database,
-                        &current,
-                        fingerprint,
-                        &ready.models,
-                        &chrono::Utc::now().to_rfc3339()
-                    )
-                    .unwrap()
-            );
             let observed = read(&database).model_catalog.observed_at;
-            database
-                .record_runtime_search_environment_generation(7, &chrono::Utc::now().to_rfc3339())
+            if kind == AdapterKind::CodexCli {
+                // Startup configuration is scoped to managed defaults. Populate
+                // both real cache projections without starting either program.
+                database.connection().execute("UPDATE adapter_installation SET installation_class='managed_default', source='manual' WHERE id=?1", [&installation_id]).unwrap();
+                let claude_path = test_executable_path(&directory, "restart-claude");
+                let claude_id = service
+                    .commit_verified_managed_installation(
+                        &mut database,
+                        VerifiedManagedInstallation {
+                            model_catalog_complete: true,
+                            executable_file_identity: None,
+                            adapter_kind: AdapterKind::ClaudeCodeCli,
+                            executable_path: claude_path.to_string_lossy().into_owned(),
+                            command_name: "claude".into(),
+                            source: InstallationSource::Manual,
+                            auth_scope: "default".into(),
+                            snapshot: ready_claude_snapshot(),
+                            entrypoint_locator_identity: None,
+                        },
+                    )
+                    .unwrap();
+                crate::runtime_startup::save(
+                    &mut database,
+                    AdapterKind::ClaudeCodeCli,
+                    0,
+                    crate::runtime_startup::RuntimeStartupConfiguration {
+                        program_path: Some(claude_path.to_string_lossy().into_owned()),
+                        ..Default::default()
+                    },
+                    2,
+                )
                 .unwrap();
-            assert_eq!(read(&database).model_catalog.observed_at, observed);
+                assert_eq!(read(&database).model_catalog.observed_at, observed);
+                assert!(
+                    service
+                        .list_installations(&database)
+                        .unwrap()
+                        .iter()
+                        .find(|entry| entry.id == claude_id)
+                        .unwrap()
+                        .model_catalog
+                        .observed_at
+                        .is_none()
+                );
+                drop(database);
+                database = Database::open(&directory).unwrap();
+                // A new process starts its counter at 1; no input changed.
+                database
+                    .record_runtime_search_environment_generation(
+                        1,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    read(&database).model_catalog.observed_at,
+                    observed,
+                    "a Claude edit followed by restart must preserve Codex's directory"
+                );
+                assert!(read(&database).model_catalog_can_display());
+                crate::runtime_startup::save(
+                    &mut database,
+                    AdapterKind::CodexCli,
+                    0,
+                    crate::runtime_startup::RuntimeStartupConfiguration {
+                        program_path: Some(executable_path.to_string_lossy().into_owned()),
+                        ..Default::default()
+                    },
+                    2,
+                )
+                .unwrap();
+                assert!(
+                    read(&database).model_catalog.observed_at.is_none(),
+                    "an actual Codex setting edit must still invalidate its directory"
+                );
+            } else {
+                database
+                    .record_runtime_search_environment_generation(
+                        7,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )
+                    .unwrap();
+                database
+                    .record_runtime_search_environment_generation(
+                        1,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )
+                    .unwrap();
+                assert_eq!(read(&database).model_catalog.observed_at, observed);
+            }
             drop(database);
             std::fs::remove_dir_all(directory).expect("temporary database should be removable");
         }

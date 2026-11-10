@@ -406,6 +406,46 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     std::fs::write(fixture.root.join("probe-release"), b"release").unwrap();
     assert!(changing_preview.await.unwrap().is_err());
     assert_eq!(fixture.public_state().await, public_before);
+    // Republishing identical inputs preserves the directory; a real PATH
+    // change invalidates it even when the selected executable stays pinned.
+    fixture.seed_ready().await;
+    let service = rovai_core::agent_profile::AgentProfileService::default();
+    let before = service
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert!(before.model_catalog.observed_at.is_some());
+    let unchanged = fixture
+        .core
+        .refresh_runtime_check_environment()
+        .await
+        .unwrap();
+    let same = service
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        same.model_catalog.observed_at,
+        before.model_catalog.observed_at
+    );
+    fixture
+        .paths
+        .lock()
+        .unwrap()
+        .push(fixture.root.join("new-search-input"));
+    let changed = fixture
+        .core
+        .refresh_runtime_check_environment()
+        .await
+        .unwrap();
+    assert_eq!(changed.generation(), unchanged.generation() + 1);
+    let invalidated = service
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert_eq!(invalidated.id, before.id);
+    assert_eq!(invalidated.executable_path, before.executable_path);
+    assert!(invalidated.model_catalog.observed_at.is_none());
     std::fs::rename(&old, old.with_extension("moved")).unwrap();
     fixture.check().await;
     let missing = fixture.health().await;

@@ -31784,13 +31784,9 @@ impl Database {
     ) -> Result<()> {
         let generation =
             i64::try_from(generation).context("Runtime Search Environment generation overflow")?;
-        let transaction = self.connection.transaction()?;
-        transaction.execute(
-            "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=NULL
-             WHERE NOT EXISTS(SELECT 1 FROM runtime_search_environment_state WHERE singleton=1 AND generation=?1)",
-            [generation],
-        )?;
-        transaction.execute(
+        // This process-local counter is recorded at startup as well. A numeric
+        // difference alone does not establish any change to catalog inputs.
+        self.connection.execute(
             r#"
             INSERT INTO runtime_search_environment_state(
                 singleton, generation, captured_at
@@ -31801,7 +31797,6 @@ impl Database {
             "#,
             params![generation, captured_at],
         )?;
-        transaction.commit()?;
         Ok(())
     }
 

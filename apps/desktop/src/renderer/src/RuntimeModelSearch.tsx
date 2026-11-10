@@ -7,7 +7,7 @@ import { UiText, uiAttribute } from './interface-language'
 const DEFAULT_MODEL = 'runtime_default'
 const normalize = (text: string): string => text.normalize('NFKC').trim().toLocaleLowerCase()
 
-export function RuntimeModelSearch({ open, onOpenChange, models, value, label, disabled, loading, failed, notice, onRetry, onSelect }: {
+export function RuntimeModelSearch({ open, onOpenChange, models, value, label, disabled, loading, onRetry, onSelect }: {
   open: boolean
   onOpenChange(open: boolean): void
   models: ModelDescriptor[]
@@ -15,9 +15,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
   label: string
   disabled: boolean
   loading: boolean
-  failed: boolean
-  notice: string | null
-  onRetry(): void
+  onRetry?(): void
   onSelect(value: string): void
 }): React.JSX.Element {
   const id = useId()
@@ -128,8 +126,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
         </button>}
       </div>
       {loading && models.length > 0 && <div className="runtime-model-picker-notice" role="status"><UiText zh="正在读取可选项…" /></div>}
-      {notice && <div className="runtime-model-picker-notice" role="status">
-        <span>{notice}</span>
+      {onRetry && <div className="runtime-model-picker-notice">
         <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}><UiText zh={"重试"} /></button>
       </div>}
       <div id={`${id}-list`} role="listbox" aria-label={uiAttribute("模型")} className="runtime-picker-options">
@@ -159,8 +156,8 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
             onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(candidate)} onClick={() => choose(candidate)}>
             <span className="runtime-model-specify-copy"><span><UiText zh="使用" /></span><code>{candidate}</code></span>
           </button>}
-          {!notice && !filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
-            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在读取可选项…") : failed ? uiAttribute("可选项读取失败，已保留当前选择。") : uiAttribute("当前没有可选的固定模型。")}
+          {(query || loading) && !filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
+            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : uiAttribute("正在读取可选项…")}
           </p>}
         </div>
         <div className="runtime-picker-default">

@@ -18,7 +18,7 @@ export function RuntimePickerChevron(): React.JSX.Element {
 }
 
 /** Short Runtime enums share the model picker surface; only model catalogs need search. */
-export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loadingLabel, notice, onRetry, onOpen }: {
+export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loadingLabel, onRetry, onOpen }: {
   label: string
   value: string
   choices: RuntimeParameterChoice[]
@@ -27,7 +27,6 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
   recommendedValue?: string
   menuGuidance?: string
   loadingLabel?: string
-  notice?: string | null
   onRetry?(): void
   onOpen?(): void
   onChange(value: string): void
@@ -53,8 +52,8 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
       <Menu.Portal><Menu.Content className="runtime-model-picker-menu runtime-parameter-picker-menu"
         align="start" sideOffset={5} collisionPadding={10} loop>
         {loadingLabel && <div className="runtime-model-picker-notice" role="status">{loadingLabel}</div>}
-        {notice && <div className="runtime-model-picker-notice" role="status"><span>{notice}</span>
-          {onRetry && <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}>{t('重试')}</button>}
+        {onRetry && <div className="runtime-model-picker-notice">
+          <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}>{t('重试')}</button>
         </div>}
         <Menu.RadioGroup className="runtime-picker-options" value={value} onValueChange={next => { if (!disabled) onChange(next) }}>
           <div className="runtime-picker-scroll">{choices.map(choice => <Choice key={choice.value} choice={choice} disabled={disabled} recommendation={recommendation(choice)} />)}</div>

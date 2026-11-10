@@ -15,7 +15,6 @@ import type {
   RuntimeModelCatalogView
 } from '@contracts'
 import { UiText, uiAttribute, useInterfaceLanguage } from './interface-language'
-import { readErrorMessage } from './error-message'
 
 export type MemberRuntimeDraft = {
   model: ModelSelection
@@ -471,8 +470,7 @@ function ModelFields({
   const [live, setLive] = useState<{ identity: string; catalog: RuntimeModelCatalogView } | null>(null)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [feedback, setFeedback] = useState<{ status: 'failed' | 'deferred'; message?: string } | null>(null)
-  const failed = feedback?.status === 'failed'
+  const [retryNeeded, setRetryNeeded] = useState(false)
   const generation = useRef(0)
   const attempted = useRef<{ key: string; startedAt: number } | null>(null)
   const pending = useRef<{ key: string; generation: number; promise: Promise<RuntimeModelCatalogView> } | null>(null)
@@ -488,8 +486,8 @@ function ModelFields({
   // A shared projection may age the same observation after this local response.
   const cache = catalog && catalog.cache.observedAt !== installation.modelCatalog.observedAt
     ? catalog.cache : installation.modelCatalog
-  const latest = useRef({ onOpenModelCatalog, cache, target, pageActive, key, failed })
-  latest.current = { onOpenModelCatalog, cache, target, pageActive, key, failed }
+  const latest = useRef({ onOpenModelCatalog, cache, target, pageActive, key, retryNeeded })
+  latest.current = { onOpenModelCatalog, cache, target, pageActive, key, retryNeeded }
 
   // Both controls subscribe to one in-flight read. Shared installation updates
   // update presentation only; they are deliberately absent from the visit effect.
@@ -499,16 +497,16 @@ function ModelFields({
     const now = Date.now()
     const due = Date.parse(current.cache.revalidateAfter ?? '')
     if (!retry && attempted.current?.key === current.key
-      && (!opened || current.failed || !(due > attempted.current.startedAt && now >= due))) return
+      && (!opened || current.retryNeeded || !(due > attempted.current.startedAt && now >= due))) return
     if (!current.target && !retry && runtimeModelCatalogIsFresh(current.cache, now)) {
       setLoading(false)
-      setFeedback(null)
+      setRetryNeeded(false)
       return
     }
     attempted.current = { key: current.key, startedAt: now }
     const request = generation.current
     setLoading(true)
-    setFeedback(null)
+    setRetryNeeded(false)
     if (pending.current?.key !== current.key || pending.current.generation !== request) {
       const read = current.onOpenModelCatalog
       const promise = Promise.resolve().then(async () => {
@@ -533,15 +531,15 @@ function ModelFields({
         && !dshModelOptionsResolved(result.models.find(model => model.id === current.target!.modelId) ?? null, current.target.dshSource)) {
         throw new Error(uiAttribute('暂时无法读取该模型的可选项，请重试。'))
       }
-      if (result.refreshStatus !== 'failed' || result.models.length > 0) {
+      const incomplete = result.refreshStatus === 'failed' || result.refreshStatus === 'deferred'
+      if (!incomplete || result.models.length > 0) {
         setLive(previous => previous?.identity === identity
           && !liveCatalogIsAtLeastAsRecent(result, previous.catalog.cache) ? previous : { identity, catalog: result })
       }
-      setFeedback(result.refreshStatus === 'failed' || result.refreshStatus === 'deferred'
-        ? { status: result.refreshStatus } : null)
-    }).catch((reason: unknown) => {
+      setRetryNeeded(incomplete)
+    }).catch(() => {
       if (request === generation.current && current.key === latest.current.key && latest.current.pageActive) {
-        setFeedback({ status: 'failed', message: readErrorMessage(reason, typeof reason === 'string' ? reason : '') })
+        setRetryNeeded(true)
       }
     }).finally(() => {
       if (request === generation.current && current.key === latest.current.key) setLoading(false)
@@ -554,7 +552,7 @@ function ModelFields({
     attempted.current = null
     setOpen(false)
     setLoading(false)
-    setFeedback(null)
+    setRetryNeeded(false)
     if (pageActive) ensure.current()
     return () => { generation.current += 1 }
   }, [pageActive, key])
@@ -584,12 +582,8 @@ function ModelFields({
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
     : isDsh ? !optionsKnown || option || optionValue : option || storedOptionValue
-  const notice = failed
-    ? [uiAttribute('可选项读取失败，已保留当前选择。'), feedback.message].filter(Boolean).join('\n')
-    : feedback?.status === 'deferred' ? models.length > 0
-      ? uiAttribute('运行环境正在更新，继续显示上次成功结果')
-      : uiAttribute('运行环境正在更新，稍后重新获取') : null
   const loadingLabel = loading ? uiAttribute('正在读取可选项…') : undefined
+  const retry = retryNeeded && !loading ? () => ensureCatalog(true) : undefined
 
   return <>
     <div className="field-label runtime-model-field">
@@ -598,14 +592,14 @@ function ModelFields({
         onOpenChange={next => { setOpen(next); if (next) ensureCatalog(false, true) }}
         models={models} value={explicit?.modelId ?? 'runtime_default'}
         label={explicit ? selectedModel?.displayName ?? explicit.modelId : uiAttribute('默认')}
-        disabled={disabled} loading={loading} failed={failed} notice={notice}
-        onRetry={() => ensureCatalog(true)} onSelect={selectModel} />
+        disabled={disabled} loading={loading}
+        onRetry={retry} onSelect={selectModel} />
     </div>
     {explicit && optionKey && showOption && <RuntimeParameterSelect
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
-      onOpen={() => ensureCatalog(false, true)} loadingLabel={loadingLabel} notice={notice}
-      onRetry={() => ensureCatalog(true)}
+      onOpen={() => ensureCatalog(false, true)} loadingLabel={loadingLabel}
+      onRetry={retry}
       defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
         : isDsh ? uiAttribute('模型默认') : uiAttribute('跟随模型默认值') }}
       choices={[

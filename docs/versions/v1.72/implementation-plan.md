@@ -15,7 +15,7 @@ Work item：目录轻量读取、共享加载与审查修订。Worktree：
 Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；Governance：none；Status：ready（待审阅，未合入）。
 该工作目录从干净 main 建立新分支，只移植目录修复；旧 `rovai/model-catalog-loading` 保留供对照，
 不继承其 PR #986 集成提交、Windows/聊天功能或迁移。Data Contract 保持 v1.72 / schema 172。
-`db.rs` 只改已有环境代次发布方法的事务，不增加字段、表或 Migration；接口和共享安装投影保持。
+环境代次记录只记录数字，目录清理移回已确认实际输入变化的分支；不增加字段、表或 Migration，接口和共享安装投影保持。
 整理期间 main 合入 #1054，保留其普通 UI 轻量版本检查、独立目录读取、目标安装发现、身份复核和原生错误反馈。
 本分支只补齐未覆盖的失效路径、共享 Renderer 生命周期与诊断目录提交，不恢复旧分支的重复解析或调度分支。
 随后同步 #1055：启动设置页对未保存草稿使用 `runtime.startup.inspect` 的改动完整保留；
@@ -30,7 +30,7 @@ Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；Governance�
 - 目录读取和提交不要求历史健康 Ready，也不回退完整检查；目录 pending 不投影机器检查。
   同用途请求合并，排在完整检查后先复用它已经提交的有效目录。保存值原样保留，目录不改草稿和运行门槛。
 - 删除健康 `stale_at` 与目录时间的比较；同身份的认证/健康失败保留目录。
-  真正的程序/安装配置/有效环境变化，在原有事务里清空 `model_catalog_succeeded_at`，并继续拒绝旧身份写回。
+  真正的程序/安装配置/有效环境变化，在既有失效路径里清空 `model_catalog_succeeded_at`，并继续拒绝旧身份写回。
   同身份版本、静态快照和健康补写保留自己的成功目录，完整诊断后续失败不丢弃已经取得的目录。
 - Renderer 保持一个共享加载所有者；进入与打开列表时核对 `revalidateAfter`，同一观察的共享缓存状态优先，
   过期重入可重新读取。普通健康元数据不重启读取，真实成功时间清空时结束旧请求作用域。
@@ -45,7 +45,7 @@ Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；Governance�
 验证扩展既有 Rust owner，不增加测试函数：
 
 - `health_failures_preserve_catalog_and_identity_changes_invalidate_it`（原 `failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale`）：
-  同身份认证失败仍可见，旧健康 stale 之后的新目录遇到配置变化仍失效，环境代次变化清空目录时间、同代次重发保留。
+  同身份认证失败仍可见，旧健康 stale 之后的新目录遇到配置变化仍失效；修改 Claude 后重开测试库并重记代次 1，Codex 目录仍保留，Codex 自身设置变化仍失效。
 - `discovered_entry_configures_and_freezes_without_health_evidence`、`fingerprint_change_revokes_ready_but_retains_lkg_and_hides_old_attempt`：
   元数据穿插提交、当前程序替换与旧请求拒绝；保留历史 JSON 不等于有当前成功目录。
 - `codex_catalog_waiters_share_refresh_without_satisfying_full_validation`：用途隔离、排队后复用、schema 失败保留目录及身份 fencing。
@@ -77,18 +77,24 @@ main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_cu
 携带未保存路径和环境草稿，不发送 `runtime.startup.check` 或保存全局状态。
 通用文档门禁以当前真实 main base 执行；Core 源码相对原交付无变化，不重复声称执行了新一轮 Rust 全量测试。
 
-候选错误展示复核：Main/Preload 的 `request` 明确拒绝可克隆的 failure 对象，Renderer 应读取其 `message`。
-原 main 的目录与 DSH 两个旧入口均使用 `instanceof Error / String(reason)`；共享加载收口后仍漏用已有
-`readErrorMessage`，普通 failure 对象因此成为 `[object Object]`。本轮直接复用该函数，未知对象无可读原因时
-只保留候选区域的通用失败文案，不修改全局错误读取函数或传输格式。空目录失败摘要去重；`deferred` 恢复为
-临时更新反馈，不作为失败；目录/目标身份不匹配及选项缺失的内部英文提示改为界面文案。
-扩展既有 Picker owner：普通 Error、可克隆 failure、无 message 对象、空目录、两个入口的 deferred，
-以及 DSH 的失败详情、未解析目标 deferred 和内部错误；所有更新继续保留保存值，不触发额外自动读取。
-修复前隔离用例在“可克隆 failure 保留 message”断言失败；修复后相关单元测试 3 文件 / 58 passed，
-类型检查与隔离 Picker 回归通过。没有重新打开日常参数页、点击重试、执行原生检查或修改日常目录。
+按用户最新要求，候选区静默降级：失败或 deferred 保留同身份已有列表，首次没有目录时只显示原生默认项、
+已保存模型/强度和手工模型 ID 输入，不显示目录错误、失败摘要或环境更新文字；保留原“重试”按钮，不新增入口。
+删除已被替代的错误详情状态和 props，不修改全局错误函数、协议或原生诊断日志，也不隐藏保存/运行自身的失败。
+扩展既有 Picker owner：普通 Error、可克隆 failure、无 message 对象、空目录、两个入口的 deferred 及 DSH 内部拒绝，
+均验证静默列表、保存值不变、手填可用、原生默认可选、无额外自动读取。相关单元测试 3 文件 / 58 passed、类型检查及隔离 Picker 通过。
 
-相对当前 main 保留原目录修复、展示修订与一次 main 同步合并，完整差异为 20 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
-`application.rs`、`db.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
+重启缓存回归修正：原 SQL 在 `generation 2 → 1` 时误清其他 Runtime 的目录，改动前已在既有
+`health_failures_preserve_catalog_and_identity_changes_invalidate_it` 中复现“Claude 编辑后重启仍保留 Codex”断言失败。
+`record_runtime_search_environment_generation` 恢复单纯记录；目录清理在 `refresh_runtime_check_environment` 的
+`changed = !current.same_inputs(&search)` 分支执行。程序身份与按 Runtime 保存配置的原有失效规则继续保留。
+同一 profile owner 覆盖重开数据库、代次回到 1、其他 Runtime 缓存保留及 Codex 自身配置变更失效；
+既有 `fresh_formal_and_draft_checks_preserve_program_selection_and_private_state` 覆盖相同输入保留、真实 PATH 输入变更失效且选中程序不变。
+新增回归均扩展既有 owner，Rust 测试函数净增 0。修复后的 profile 模块 32 passed，Renderer 58 项相关单元、
+隔离 Picker、真实 Electron bridge、类型检查及 UTC 前端全量通过；Runtime 环境模块、workspace 与最终打包安装结果记录在本轮任务验收附件中。
+本轮按用户要求安装到日常位置，采用非终止安装交接；当前会话进程保留，备份不删除，独立 userData/Skill 文件目录用于打包启动验收。
+
+相对当前 main 保留原目录修复、展示修订与一次 main 同步合并，完整差异为 21 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
+`application.rs`、`db.rs`、`runtime_check_environment.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
 `MemberRuntimeParameters.tsx`、`RuntimeModelSearch.tsx`、`RuntimeParameterSelect.tsx`、`BusinessApp.tsx`、
 英文文案及两个现有单元测试；两个 picker fixture 文件；本文及四份既有架构／合同／界面文档。
 
