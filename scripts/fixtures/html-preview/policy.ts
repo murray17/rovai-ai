@@ -53,21 +53,19 @@ export async function policyAcceptance(window: BrowserWindow, userData: string, 
   await new Promise(resolve => setTimeout(resolve, 100))
   await writeFile(join(userData, 'diagnostic-policy-night.png'), (await window.webContents.capturePage()).toPNG())
 
-  await frame().executeJavaScript(`(() => {
+  const native = await frame().executeJavaScript(`new Promise(resolve => {
+    addEventListener('error',event=>requestAnimationFrame(()=>resolve({message:event.message,trusted:event.isTrusted,errorIsNull:event.error===null,defaultPrevented:event.defaultPrevented})),{once:true});
     const target=document.createElement('div');target.style.width='100px';document.body.append(target);
     let changed=false;const observer=new ResizeObserver(([entry])=>{
       if(changed){observer.disconnect();return}changed=true;entry.target.style.width=(entry.contentRect.width+1)+'px';
     });observer.observe(target);
-  })()`)
-  await wait(`${stage}?.querySelectorAll('ol>li').length===1`)
+  })`)
   const layout = await snapshot()
-  cases.push({ name: 'layout records remain reachable when resource diagnostics are policy-limited',
-    ok: layout.info && layout.inToolbar && layout.infoLabel === '查看诊断详情' && layout.expanded === 'false'
-      && !layout.summary && !layout.warning && !layout.retry
-      && layout.issues[0].includes('浏览器布局提示') && layout.text.includes('资源诊断：受页面策略限制'),
-    evidence: layout })
-  await run(`${panel}.querySelector('.file-preview-html-info').click()`)
-  await wait(`!${stage}.querySelector('.file-preview-html-diagnostics').hidden`)
+  cases.push({ name: 'native layout notification plus a policy limitation produces no preview record or entry',
+    ok: native.trusted && native.errorIsNull && !native.defaultPrevented
+      && native.message === 'ResizeObserver loop completed with undelivered notifications.'
+      && !layout.info && !layout.summary && !layout.warning && !layout.retry && !layout.details && layout.issues.length === 0,
+    evidence: { native, layout } })
 
   await frame().executeJavaScript(`location.search='?errors=1'`)
   await wait(`${stage}?.querySelectorAll('ol>li').length===4 && ${stage}?.dataset.documentState==='loaded'`)

@@ -118,7 +118,6 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
     || channelState === 'unavailable' || documentState === 'unresponsive' || documentState === 'unconfirmed'
   const diagnosticsUnavailable = loadState.serverDiagnostics === 'unavailable'
   const hasDetails = hasProblem || currentDiagnostics.length > 0
-    || (diagnosticsUnavailable && loadState.serverDiagnosticsReason !== 'policy')
   useEffect(() => { if (!hasDetails) setDetailsOpen(false) }, [hasDetails])
   if (!preview || !tab.file) return null
   const status = tab.isRefreshing ? uiAttribute('重新加载中…') : documentFailed ? uiAttribute('加载失败') : tab.refreshError ? uiAttribute('重新加载失败')

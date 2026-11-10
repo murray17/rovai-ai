@@ -4,7 +4,7 @@ contract: file-preview-v28
 status: accepted
 version: 28
 source_version: v1.72
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # File Preview v28
@@ -22,13 +22,14 @@ list 与 search 的返回条目统一按名称升序混排，不对目录赋予�
 
 ## HTML 诊断分类
 
-既有诊断的 `kind` 增加 `layout`，仅用于已识别的浏览器 ResizeObserver 布局通知。桥接器在原始 `ErrorEvent` 上要求
+桥接器仅在原始 `ErrorEvent` 上严格识别浏览器 ResizeObserver 布局通知，要求
 `isTrusted === true` 且 `error === null`，并将消息去除首尾空白和一个末尾句号后，精确匹配以下两条之一：
 
 - `ResizeObserver loop completed with undelivered notifications`
 - `ResizeObserver loop limit exceeded`
 
 该事件特征已由现有 Electron 浏览器夹具验证；不符合条件的事件继续按原有脚本错误处理，不对异步异常做消息过滤。
-传输和展示保留原始消息，不新增字段或来源追踪；继续使用既有身份校验、去重键、100 条上限和文档清理机制。
-`layout` 不计入页面问题数、不触发脚本错误状态，仍在同一诊断列表的中性详情中可见；分类不保证布局没有问题。
-其他诊断类型沿用原有问题口径。资源诊断的独立状态及 CSP 精确归因、停止重试行为保持，状态文案按 `reason: policy` 显示为“受页面策略限制”。
+符合全部条件时直接跳过向 Rovai 预览诊断列表上报，保持原始事件、其他监听器和原生控制台行为，不调用 `preventDefault()`；这不保证布局没有问题。
+既有 `layout` 合法值和问题计数兼容逻辑保留，当前桥接器不再为这些通知生成该记录。
+其他错误继续使用既有身份校验、去重键、100 条上限、文档清理机制及问题口径，不新增字段或来源追踪。
+资源诊断的独立状态及 CSP 精确归因、停止重试行为保持，状态文案按 `reason: policy` 显示为“受页面策略限制”。
