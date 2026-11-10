@@ -78,7 +78,7 @@ export async function layoutAcceptance(window: BrowserWindow, userData: string, 
   if (await access(samplePath).then(() => true, () => false)) {
     const original = await readFile(samplePath, 'utf8')
     await run(`window.previewAcceptance.open({kind:'camp_workspace',threadId:'preview-test',rawReference:'${sampleName}'})`)
-    await wait(`${stage}?.dataset.documentState==='loaded' && ${stage}?.textContent.includes('资源诊断：受页面策略限制')`)
+    await wait(`${stage}?.dataset.documentState==='loaded' && ${stage}?.dataset.serverDiagnosticsState==='unavailable'`)
     const sampleOrigin = await run('window.previewAcceptance.activeTab.content.preview.origin')
     const sampleFrame = window.webContents.mainFrame.framesInSubtree.find(frame => frame.url.startsWith(sampleOrigin + '/'))!
     const before = await sampleFrame.executeJavaScript(`(() => {
@@ -90,13 +90,16 @@ export async function layoutAcceptance(window: BrowserWindow, userData: string, 
     // Give the real attachment a rendering turn after its initial layout.
     await new Promise(resolve => setTimeout(resolve, 250))
     const sample = await snapshot()
-    await run(`${panel}.querySelector('.file-preview-html-info').click()`)
-    await wait(`${panel}.querySelector('.file-preview-html-info')?.getAttribute('aria-expanded')==='true'`)
+    if (sample.info) {
+      await run(`${panel}.querySelector('.file-preview-html-info').click()`)
+      await wait(`${panel}.querySelector('.file-preview-html-info')?.getAttribute('aria-expanded')==='true'`)
+    }
     await new Promise(resolve => setTimeout(resolve, 100))
     await writeFile(join(userData, 'model-selector-v3-diagnostics.png'), (await window.webContents.capturePage()).toPNG())
     const after = await sampleFrame.executeJavaScript(`({timeOrigin:performance.timeOrigin,input:window.retainedSampleInput?.value,csp:document.querySelector('meta[http-equiv="Content-Security-Policy"]').content})`)
-    cases.push({ name: 'original model-selector-v3 attachment retains its policy and interaction with neutral diagnostics',
-      ok: sample.summary === '' && sample.info && sample.inToolbar && sample.infoLabel === '查看诊断详情'
+    cases.push({ name: 'original model-selector-v3 attachment retains policy and interaction without a policy-only entry',
+      ok: sample.summary === '' && sample.info === (sample.issues.length > 0)
+        && (!sample.info || (sample.inToolbar && sample.infoLabel === '查看诊断详情'))
         && !sample.warning && !sample.retry && sample.script === 'no-error-observed'
         && before.csp.includes("connect-src 'none'") && before.csp === after.csp && before.timeOrigin === after.timeOrigin
         && before.hasInput && after.input === 'sample input retained' && Boolean(before.rootText)
