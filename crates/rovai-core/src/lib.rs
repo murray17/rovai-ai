@@ -18,6 +18,7 @@ mod pi;
 mod reference_markdown;
 mod runtime_fleet;
 mod runtime_mcp;
+pub(crate) mod runtime_model_options;
 
 pub mod action;
 pub mod agent_identity;

@@ -2238,7 +2238,7 @@ struct RuntimeCheckActivity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct DshOptionsTarget {
+struct ModelOptionsTarget {
     model_id: String,
     source: Option<crate::agent_profile::DshModelSource>,
     context: String,
@@ -2248,7 +2248,7 @@ struct RuntimeCheckRequest {
     force_refresh: bool,
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
-    model_target: Option<DshOptionsTarget>,
+    model_target: Option<ModelOptionsTarget>,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
     trigger: RuntimeCheckTrigger,
@@ -2372,7 +2372,7 @@ struct RuntimeCheckAttempt {
     installation_target: Option<RuntimeCheckInstallationTarget>,
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
-    model_target: Option<DshOptionsTarget>,
+    model_target: Option<ModelOptionsTarget>,
     attempt_id: String,
     runtime_kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
@@ -4332,12 +4332,14 @@ impl Core {
         }))
     }
 
-    async fn dsh_model_options_payload(
+    async fn target_model_options_payload(
         &self,
+        kind: AdapterKind,
         model_id: &str,
         source: Option<crate::agent_profile::DshModelSource>,
     ) -> Result<(Value, String, bool)> {
-        let kind = AdapterKind::DeepseekHarness;
+        let keys = crate::runtime_model_options::metadata_keys(kind)
+            .context("Runtime does not support target options")?;
         let search = self.runtime_search_environment.read().await.clone();
         let path = {
             let database = self.database.lock().await;
@@ -4352,19 +4354,19 @@ impl Core {
                     .await;
                 AgentProfileService::default()
                     .managed_installation(&*self.database.lock().await, kind, "default")?
-                    .context("DSH installation is unavailable")?
+                    .context("Runtime installation is unavailable")?
                     .executable_path
             }
         };
         // Configuration and executable identity are local observations, never a probe.
         let context = with_runtime_configuration(kind, &search, async {
-            crate::dsh::model_options_context(Path::new(&path))
+            crate::runtime_model_options::context(kind, Path::new(&path))
         })
         .await?;
         let _update = self
             .runtime_check_update_guard(&search)
             .await
-            .context("DSH configuration changed during cache validation")?;
+            .context("Runtime configuration changed during cache validation")?;
         let mut payload = self
             .runtime_model_catalog_payload(kind, "not_required")
             .await?;
@@ -4373,17 +4375,20 @@ impl Core {
         if let Some(models) = payload["models"].as_array_mut() {
             for model in models {
                 let identity_matches =
-                    catalog_valid && model["runtimeMetadata"]["dshOptionsContext"] == context;
+                    catalog_valid && model["runtimeMetadata"][keys.context] == context;
                 if !identity_matches {
                     // Retain history, but never describe a previous context as confirmed.
-                    model["runtimeMetadata"]["dshOptionsResolved"] = json!(false);
+                    model["runtimeMetadata"][keys.resolved] = json!(false);
                 }
                 if model["id"] == model_id
-                    && model["runtimeMetadata"]["dshSource"]
-                        == json!(source.unwrap_or(crate::agent_profile::DshModelSource::Native))
-                    && model["runtimeMetadata"]["dshOptionsResolved"] == true
+                    && (kind != AdapterKind::DeepseekHarness
+                        || model["runtimeMetadata"]["dshSource"]
+                            == json!(
+                                source.unwrap_or(crate::agent_profile::DshModelSource::Native)
+                            ))
+                    && model["runtimeMetadata"][keys.resolved] == true
                 {
-                    fresh = model["runtimeMetadata"]["dshOptionsObservedAt"]
+                    fresh = model["runtimeMetadata"][keys.observed_at]
                         .as_str()
                         .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
                         .is_some_and(|at| {
@@ -4398,22 +4403,24 @@ impl Core {
         Ok((payload, context, fresh))
     }
 
-    async fn open_dsh_model_options(
+    async fn open_target_model_options(
         &self,
+        kind: AdapterKind,
         model_id: &str,
         source: Option<crate::agent_profile::DshModelSource>,
         cache_only: bool,
         force_refresh: bool,
     ) -> Result<Value> {
-        let kind = AdapterKind::DeepseekHarness;
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
         }
         anyhow::ensure!(
             !model_id.trim().is_empty(),
-            "DSH target model must not be empty"
+            "Target model must not be empty"
         );
-        let (cached, context, fresh) = self.dsh_model_options_payload(model_id, source).await?;
+        let (cached, context, fresh) = self
+            .target_model_options_payload(kind, model_id, source)
+            .await?;
         if cache_only || (fresh && !force_refresh) {
             return Ok(cached);
         }
@@ -4422,7 +4429,7 @@ impl Core {
                 kind,
                 RuntimeLaunchPurpose::AvailabilityCheck,
                 RuntimeCheckTrigger::CatalogOpen,
-                Some(DshOptionsTarget {
+                Some(ModelOptionsTarget {
                     model_id: model_id.to_owned(),
                     source,
                     context,
@@ -4430,7 +4437,9 @@ impl Core {
                 force_refresh,
             )
             .await?;
-        let (mut payload, _, _) = self.dsh_model_options_payload(model_id, source).await?;
+        let (mut payload, _, _) = self
+            .target_model_options_payload(kind, model_id, source)
+            .await?;
         payload["refreshStatus"] = json!(match result {
             RuntimeCheckOutcome::Ready => "completed",
             RuntimeCheckOutcome::Superseded => "deferred",
@@ -4439,21 +4448,22 @@ impl Core {
         Ok(payload)
     }
 
-    async fn refresh_dsh_model_options(
+    async fn refresh_target_model_options(
         &self,
         search: Arc<RuntimeSearchEnvironment>,
-        target: DshOptionsTarget,
+        kind: AdapterKind,
+        target: ModelOptionsTarget,
+        force_refresh: bool,
     ) -> Result<RuntimeCheckOutcome> {
         let (_, context, fresh) = self
-            .dsh_model_options_payload(&target.model_id, target.source)
+            .target_model_options_payload(kind, &target.model_id, target.source)
             .await?;
         if context != target.context {
             return Ok(RuntimeCheckOutcome::Superseded);
         }
-        if fresh {
+        if fresh && !force_refresh {
             return Ok(RuntimeCheckOutcome::Ready);
         }
-        let kind = AdapterKind::DeepseekHarness;
         let selection = Some((target.model_id.as_str(), target.source));
         self.refresh_verified_runtime_catalog_for_selection(kind, search, selection, None)
             .await
@@ -4625,7 +4635,7 @@ impl Core {
         kind: AdapterKind,
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
-        model_target: Option<DshOptionsTarget>,
+        model_target: Option<ModelOptionsTarget>,
         force_refresh: bool,
     ) -> Result<RuntimeCheckOutcome> {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
@@ -5236,16 +5246,16 @@ impl Core {
         {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         }
-        if kind == AdapterKind::DeepseekHarness {
+        if let Some(keys) = crate::runtime_model_options::metadata_keys(kind) {
             let context = with_runtime_configuration(kind, &search, async {
-                crate::dsh::model_options_context(&path)
+                crate::runtime_model_options::context(kind, &path)
             })
             .await?;
             if catalog.models.iter().any(|model| {
                 model
                     .runtime_metadata
                     .as_ref()
-                    .is_none_or(|meta| meta["dshOptionsContext"] != context)
+                    .is_none_or(|meta| meta[keys.context] != context)
             }) {
                 return Ok(Some(RuntimeCheckOutcome::Superseded));
             }
@@ -6001,7 +6011,7 @@ impl Core {
             if snapshot.probe_status == "ready" {
                 if kind == AdapterKind::DeepseekHarness {
                     let context = with_runtime_configuration(kind, &search, async {
-                        crate::dsh::model_options_context(&canonical)
+                        crate::runtime_model_options::context(kind, &canonical)
                     })
                     .await?;
                     if snapshot.models.iter().any(|model| {
@@ -12984,10 +12994,19 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 if let Some(model_id) = params.model_id {
                     anyhow::ensure!(
-                        params.runtime_kind == AdapterKind::DeepseekHarness,
-                        "Target-model option discovery is only supported for DSH"
+                        matches!(
+                            params.runtime_kind,
+                            AdapterKind::DeepseekHarness | AdapterKind::MinimaxCodeCli
+                        ),
+                        "Runtime does not support target-model option discovery"
                     );
-                    self.open_dsh_model_options(
+                    anyhow::ensure!(
+                        params.runtime_kind == AdapterKind::DeepseekHarness
+                            || params.dsh_source.is_none(),
+                        "MiniMax does not have a DSH source"
+                    );
+                    self.open_target_model_options(
+                        params.runtime_kind,
                         &model_id,
                         params.dsh_source,
                         params.cache_only,
@@ -28017,7 +28036,12 @@ async fn process_runtime_check_manager(
                 let (result, finalization) = match tokio::time::timeout_at(worker_deadline, async {
                     if let Some(target) = worker_model_target {
                         check_core
-                            .refresh_dsh_model_options(worker_search, target)
+                            .refresh_target_model_options(
+                                worker_search,
+                                worker_kind,
+                                target,
+                                worker_force_refresh,
+                            )
                             .await
                     } else if let Some(preview) = worker_startup_preview {
                         let result = check_core
@@ -32214,7 +32238,7 @@ done
                 installation_target: None,
                 search,
                 startup_preview: None,
-                model_target: Some(DshOptionsTarget {
+                model_target: Some(ModelOptionsTarget {
                     model_id: "fixture-model".into(),
                     source: None,
                     context: "fixture-context".into(),
