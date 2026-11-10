@@ -473,7 +473,7 @@ function ModelFields({
     ? selectedModel.options.find((candidate) => candidate.key === optionKey) ?? null
     : null
   const targetKey = dshOptionReadKey(identity, draft.model)
-  const [optionRead, setOptionRead] = useState<{ key: string; status: 'loading' | 'ready' | 'failed' } | null>(null)
+  const [optionRead, setOptionRead] = useState<{ key: string; status: 'loading' | 'ready' | 'failed'; error?: string } | null>(null)
   const [optionLoadingKey, setOptionLoadingKey] = useState<string | null>(null)
   const [optionRetry, setOptionRetry] = useState(0)
   const latest = useRef({ onOpenModelCatalog })
@@ -529,8 +529,8 @@ function ModelFields({
       if (!model || !['completed', 'not_required'].includes(catalog.refreshStatus)
         || !dshModelOptionsResolved(model, target.dshSource)) throw new Error('Model options unavailable')
       accept()
-    }).catch(() => {
-      if (active) setOptionRead({ key: targetKey, status: 'failed' })
+    }).catch((reason: unknown) => {
+      if (active) setOptionRead({ key: targetKey, status: 'failed', error: reason instanceof Error ? reason.message : String(reason) })
     }).finally(() => {
       clearTimeout(loadingTimer)
       if (active) setOptionLoadingKey(null)
@@ -575,6 +575,7 @@ function ModelFields({
     <>
       <RuntimeModelPicker
         key={identity}
+        active={pageActive}
         adapterKind={adapterKind}
         installation={installation}
         draft={draft}
@@ -606,6 +607,7 @@ function ModelFields({
       {isDsh && explicit && !disabled && readStatus === 'failed' && (
         <div className="runtime-parameter-unavailable" role="status">
           <UiText zh="思考强度尚未核对，已保留当前选择。" />
+          {optionRead?.key === targetKey && optionRead.error && <span>{optionRead.error}</span>}
           <button type="button" className="quiet-button" onClick={() => setOptionRetry((value) => value + 1)}><UiText zh="重试" /></button>
         </div>
       )}
@@ -614,6 +616,7 @@ function ModelFields({
 }
 
 function RuntimeModelPicker({
+  active: pageActive,
   adapterKind,
   installation,
   draft,
@@ -622,6 +625,7 @@ function RuntimeModelPicker({
   onChange,
   onCatalogChange
 }: {
+  active: boolean
   adapterKind: AdapterKind
   installation: AdapterInstallation
   draft: MemberRuntimeDraft
@@ -632,7 +636,7 @@ function RuntimeModelPicker({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [refreshFailed, setRefreshFailed] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
   const [liveCatalog, setLiveCatalog] = useState<RuntimeModelCatalogView | null>(null)
   const requestGeneration = useRef(0)
   const initialCache = installation.modelCatalog
@@ -640,7 +644,8 @@ function RuntimeModelPicker({
   const activeLiveCatalog = liveCatalogIsAtLeastAsRecent(liveCatalog, initialCache)
     ? liveCatalog
     : null
-  const cache = activeLiveCatalog?.cache ?? initialCache
+  const cache = activeLiveCatalog && activeLiveCatalog.cache.observedAt !== initialCache.observedAt
+    ? activeLiveCatalog.cache : initialCache
   const models = activeLiveCatalog
     ? selectableModels(activeLiveCatalog.models)
     : initialModels
@@ -649,18 +654,21 @@ function RuntimeModelPicker({
     ? models.find((model) => model.id === explicit.modelId) ?? null
     : null
   const selectedValue = explicit?.modelId ?? 'runtime_default'
-  const persistedRefreshFailed = latestCatalogRefreshFailed(installation, cache)
+  const identity = catalogInstallationIdentity(installation)
+  const refreshFailed = refreshError !== null
 
   useEffect(() => {
     requestGeneration.current += 1
     setOpen(false)
     setLoading(false)
-    setRefreshFailed(false)
+    setRefreshError(null)
     setLiveCatalog(null)
-  }, [adapterKind, installation.id])
+    return () => { requestGeneration.current += 1 }
+  }, [adapterKind, identity])
 
-  const loadCatalog = (): void => {
-    if (!onOpenModelCatalog) return
+  const loadCatalog = (force = false): void => {
+    if (!onOpenModelCatalog || loading || !pageActive || disabled) return
+    if (!force && (cache.status === 'fresh' || refreshFailed)) return
     const startedAt = performance.now()
     const generation = ++requestGeneration.current
     const recordFirstDisplay = (cached: boolean): void => {
@@ -672,23 +680,27 @@ function RuntimeModelPicker({
     }
     if (models.length > 0) recordFirstDisplay(true)
     setLoading(true)
-    setRefreshFailed(false)
+    setRefreshError(null)
     void onOpenModelCatalog()
       .then((catalog) => {
         if (generation !== requestGeneration.current || catalog.runtimeKind !== adapterKind) return
         if (catalog.refreshStatus !== 'failed' || catalog.models.length > 0) setLiveCatalog(catalog)
         onCatalogChange(catalog)
         if (models.length === 0 && catalog.models.length > 0) recordFirstDisplay(false)
-        setRefreshFailed(catalog.refreshStatus === 'failed')
+        setRefreshError(catalog.refreshStatus === 'failed' ? uiAttribute('暂时无法获取模型目录') : null)
       })
-      .catch(() => {
+      .catch((reason: unknown) => {
         if (generation !== requestGeneration.current) return
-        setRefreshFailed(true)
+        setRefreshError(reason instanceof Error ? reason.message : String(reason))
       })
       .finally(() => {
         if (generation === requestGeneration.current) setLoading(false)
       })
   }
+
+  useEffect(() => {
+    if (pageActive && !disabled) loadCatalog()
+  }, [pageActive, disabled, identity])
 
   const selectModel = (value: string): void => {
     if (value === selectedValue) return
@@ -703,7 +715,7 @@ function RuntimeModelPicker({
 
   const statusCopy = modelCatalogStatusCopy(cache, {
     loading: loading && models.length === 0,
-    refreshFailed: !loading && (refreshFailed || persistedRefreshFailed),
+    refreshFailed: !loading && refreshFailed,
     servingCachedModels: models.length > 0,
     refreshStatus: loading ? 'joined' : activeLiveCatalog?.refreshStatus ?? null
   })
@@ -725,10 +737,10 @@ function RuntimeModelPicker({
         label={triggerLabel}
         disabled={disabled}
         loading={loading}
-        failed={refreshFailed || persistedRefreshFailed}
+        failed={refreshFailed}
         onSelect={selectModel}
-        notice={!loading && (refreshFailed || persistedRefreshFailed) ? statusCopy : null}
-        onRetry={loadCatalog}
+        notice={!loading && refreshFailed ? [statusCopy, refreshError].filter(Boolean).join('\n') : null}
+        onRetry={() => loadCatalog(true)}
       />
 
     </div>
@@ -749,7 +761,7 @@ function modelCatalogIsServiceable(cache: RuntimeModelCatalogCache): boolean {
 
 function catalogInstallationIdentity(installation: AdapterInstallation): string {
   const healthIdentity = [installation.id, installation.generation, installation.snapshot?.executableFingerprint,
-    installation.snapshot?.staleAt].join(':')
+    installation.pathState, installation.modelCatalog.status === 'invalidated' || installation.modelCatalog.status === 'unavailable'].join(':')
   if (installation.adapterKind !== 'pi') return healthIdentity
   // Pi's catalog can be invalidated independently of the shared health fields.
   // A prior local response must not outlive Core's new ownership projection.
@@ -763,7 +775,6 @@ export function displayableInstallationModels(installation: AdapterInstallation)
   const cache = installation.modelCatalog
   const snapshot = installation.snapshot
   const sameEnvironmentHistory = cache.status === 'expired'
-    && (installation.adapterKind === 'pi' || (snapshot?.probeStatus === 'ready' && !snapshot.staleAt))
   return modelCatalogIsServiceable(cache) || sameEnvironmentHistory
     ? selectableModels(snapshot?.models ?? []) : []
 }
@@ -779,19 +790,6 @@ export function liveCatalogIsAtLeastAsRecent(
   if (liveObservedAt === null) return false
   if (initialObservedAt === null) return true
   return Date.parse(liveObservedAt) >= Date.parse(initialObservedAt)
-}
-
-function latestCatalogRefreshFailed(installation: AdapterInstallation, cache: RuntimeModelCatalogCache): boolean {
-  if (installation.adapterKind === 'pi') return false
-  const attempt = installation.lastProbeAttempt
-  if (attempt?.status !== 'failed') return false
-  const observedAt = cache.observedAt
-  if (!observedAt) return true
-  const attemptedTime = Date.parse(attempt.attemptedAt)
-  const observedTime = Date.parse(observedAt)
-  return Number.isNaN(attemptedTime)
-    || Number.isNaN(observedTime)
-    || attemptedTime >= observedTime
 }
 
 export function modelCatalogStatusCopy(

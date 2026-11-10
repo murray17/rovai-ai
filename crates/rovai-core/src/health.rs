@@ -414,32 +414,6 @@ pub async fn antigravity_capability_probe_at(
     antigravity_probe_at(path, true, fingerprint, known_version, known_capabilities).await
 }
 
-/// Only the existing verified snapshot authorizes omitting full checks. Session
-/// authentication/handshakes required to read a native catalog still run.
-pub fn catalog_refresh_evidence_current(
-    kind: AdapterKind,
-    snapshot: &rovai_core::agent_profile::AdapterCapabilitySnapshot,
-) -> bool {
-    let required = match kind {
-        AdapterKind::CodexCli => vec!["model.list".into(), "app_server.initialize".into()],
-        AdapterKind::ClaudeCodeCli => vec![CLAUDE_MODEL_CATALOG_CAPABILITY.into()],
-        AdapterKind::AntigravityApp => vec!["model.list".into()],
-        AdapterKind::Pi => pi_machine_ready_requirements(),
-        _ => acp_required_capabilities(kind),
-    };
-    snapshot.probe_status == "ready"
-        && snapshot.authentication_status == "authenticated"
-        && snapshot.stale_at.is_none()
-        && snapshot.last_successful_probe_at.is_some()
-        && rovai_core::agent_runtime_adapter::validate_machine_ready_snapshot(kind, snapshot)
-            .is_ok()
-        && (kind != AdapterKind::ZcodeApp
-            || rovai_core::zcode::supported_version(snapshot.reported_version.as_deref()))
-        && required
-            .iter()
-            .all(|capability| snapshot.capabilities.contains(capability))
-}
-
 /// Catalog-only branch of the same check task. Returns models, never Ready evidence.
 #[derive(Debug)]
 pub struct RefreshedModelCatalog {
@@ -447,6 +421,7 @@ pub struct RefreshedModelCatalog {
     pub dsh_preparation: Option<Value>,
 }
 
+#[cfg(test)]
 pub async fn refresh_model_catalog(
     path: &Path,
     kind: AdapterKind,
@@ -1423,7 +1398,7 @@ pub(crate) fn model_catalog_failure(
     } else {
         RuntimeFailureOrigin::Unknown
     };
-    public_probe_failure(
+    let mut failure = public_probe_failure(
         kind,
         origin,
         RuntimeFailurePhase::ModelCatalog,
@@ -1436,7 +1411,15 @@ pub(crate) fn model_catalog_failure(
         &detail,
         path,
         true,
-    )
+    );
+    if let Some(redactor) = probe_redactor(kind) {
+        failure.summary = redactor.text(&failure.summary);
+        failure.detail = failure
+            .detail
+            .as_deref()
+            .map(|detail| redactor.text(detail));
+    }
+    failure
 }
 
 #[expect(
@@ -3193,6 +3176,10 @@ fn classify_acp_probe_failure(detail: &str) -> AgentRuntimeProbeStatus {
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
+    codex_model_catalog_at(path, false).await
+}
+
+async fn codex_model_catalog_at(path: &Path, require_account: bool) -> Result<Value> {
     let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command.args(["app-server", "--listen", "stdio://"]);
     let mut process =
@@ -3227,19 +3214,21 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
             );
             write_json_line(stdin, &json!({"method": "initialized", "params": {}})).await?;
 
-            write_json_line(
-                stdin,
-                &json!({
-                    "method": "account/read", "id": 2,
-                    "params": { "refreshToken": false }
-                }),
-            )
-            .await?;
-            let account = read_rpc_result(lines, 2).await?;
-            anyhow::ensure!(
-                crate::codex::authentication_available_from_account(&account),
-                "Codex authentication is required"
-            );
+            if require_account {
+                write_json_line(
+                    stdin,
+                    &json!({
+                        "method": "account/read", "id": 2,
+                        "params": { "refreshToken": false }
+                    }),
+                )
+                .await?;
+                let account = read_rpc_result(lines, 2).await?;
+                anyhow::ensure!(
+                    crate::codex::authentication_available_from_account(&account),
+                    "Codex authentication is required"
+                );
+            }
 
             let mut models = Vec::new();
             let mut cursor: Option<String> = None;
@@ -3387,7 +3376,7 @@ async fn codex_runtime_probe_uncached(
         )
     };
 
-    let raw_model_catalog = match codex_model_catalog(&path).await {
+    let raw_model_catalog = match codex_model_catalog_at(&path, true).await {
         Ok(catalog) => catalog,
         Err(error) => {
             let detail = format!("Codex app-server check failed: {error:#}");
@@ -4052,66 +4041,6 @@ for line in sys.stdin:
                     assert_eq!(launches.lines().count(), 1);
                     assert!(!launches.contains("--experimental"));
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn catalog_refresh_requires_current_full_acp_evidence() {
-        for kind in [
-            AdapterKind::HermesCli,
-            AdapterKind::OpencodeCli,
-            AdapterKind::CopilotCli,
-            AdapterKind::KiroCli,
-            AdapterKind::QoderCli,
-            AdapterKind::CodebuddyCli,
-            AdapterKind::QwenCode,
-            AdapterKind::TraeCnCli,
-            AdapterKind::CursorAgent,
-            AdapterKind::KimiCodeCli,
-            AdapterKind::GrokBuild,
-            AdapterKind::ZcodeApp,
-        ] {
-            let snapshot = AgentRuntimeAdapterRegistry::default().acp_capability_snapshot(AcpProbeObservation {
-                adapter_kind: kind,
-                reported_version: Some(if kind == AdapterKind::ZcodeApp { "0.17.0" } else { "1.0.0" }.into()),
-                executable_fingerprint: Some("sha256:fixture".into()),
-                authentication_status: "authenticated".into(), probe_status: "ready".into(),
-                capabilities: acp_required_capabilities(kind),
-                initialize_result: Some(json!({"protocolVersion":1})),
-                session_result: Some(json!({"sessionId":"fixture-session", "models":{
-                    "currentModelId":"fixture", "availableModels":[{"modelId":"fixture", "name":"Fixture"}]},
-                    "modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]}})),
-                attempted_at: "2000-01-01T00:00:00Z".into(), last_error: None,
-            }).unwrap();
-            assert!(
-                catalog_refresh_evidence_current(kind, &snapshot),
-                "{kind:?}: expired directory alone must not require full verification"
-            );
-            for invalidation in ["status", "auth", "capability", "stale", "success"] {
-                let mut invalid = snapshot.clone();
-                match invalidation {
-                    "status" => invalid.probe_status = "installed_unverified".into(),
-                    "auth" => invalid.authentication_status = "unknown".into(),
-                    "capability" => invalid.capabilities.clear(),
-                    "stale" => invalid.stale_at = Some("2000-01-02T00:00:00Z".into()),
-                    "success" => invalid.last_successful_probe_at = None,
-                    _ => unreachable!(),
-                }
-                assert!(
-                    !catalog_refresh_evidence_current(kind, &invalid),
-                    "{kind:?}: {invalidation}"
-                );
-            }
-            if kind == AdapterKind::HermesCli {
-                let mut legacy = snapshot;
-                legacy
-                    .capabilities
-                    .push("context.charter.managed_system_prompt".into());
-                assert!(
-                    catalog_refresh_evidence_current(kind, &legacy),
-                    "extra legacy metadata cannot invalidate usable catalog protocol evidence"
-                );
             }
         }
     }

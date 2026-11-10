@@ -831,11 +831,7 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                     model_target: None,
                     runtime_kind: KIND,
                     purpose: RuntimeLaunchPurpose::AvailabilityCheck,
-                    trigger: if upgraded {
-                        RuntimeCheckTrigger::CatalogOpen
-                    } else {
-                        RuntimeCheckTrigger::UserCheck
-                    },
+                    trigger: RuntimeCheckTrigger::UserCheck,
                     acknowledged,
                     completion: Some(completed),
                 }
@@ -910,7 +906,22 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
             assert_ne!(row["status"], "checking");
             assert_eq!(row["checking"], false);
             assert_eq!(row["discovery"]["discoveryStatus"], "found");
-            assert!(row["diagnosticCode"].is_string());
+            assert!(
+                row["diagnosticCode"].is_null(),
+                "the detection row cannot inherit a full check failure"
+            );
+            assert!(
+                AgentProfileService::default()
+                    .managed_installation(
+                        &*fixture.core.database.lock().await,
+                        kind.parse::<AdapterKind>().unwrap(),
+                        "default"
+                    )
+                    .unwrap()
+                    .unwrap()
+                    .last_probe_attempt
+                    .is_some()
+            );
         }
         fixture.close().await;
     }
@@ -1000,10 +1011,28 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
         // Existing bounded file-update retry may revalidate the replacement.
         // The acknowledgement above proves the new request did not join that old worker.
         assert_eq!(first.await.unwrap(), RuntimeCheckOutcome::Superseded);
-        assert_eq!(
-            second.await.unwrap().unwrap(),
-            RuntimeCheckOutcome::StableFailure
-        );
+        let second = second.await.unwrap();
+        if change == "installation" {
+            assert!(second.unwrap_err().contains("模型目录"));
+            assert!(
+                fixture.health().await["reportedVersion"].is_null(),
+                "directory reads cannot manufacture a version for a replaced entry"
+            );
+            assert_eq!(
+                fixture
+                    .core
+                    .await_runtime_check(
+                        KIND,
+                        RuntimeLaunchPurpose::DiscoveryVersion,
+                        RuntimeCheckTrigger::UserCheck,
+                    )
+                    .await
+                    .unwrap(),
+                RuntimeCheckOutcome::Ready
+            );
+        } else {
+            assert_eq!(second.unwrap(), RuntimeCheckOutcome::StableFailure);
+        }
         assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 2.0.0");
         assert_eq!(
             fixture.settings().await["revision"],
@@ -1233,8 +1262,9 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     fixture.core.runtime_product_diagnostics.write().await.clear();
                     assert_eq!(
                         fixture.health().await["diagnosticCode"],
-                        "runtime_check_timed_out"
+                        Value::Null
                     );
+                    assert_eq!(after.last_probe_attempt.as_ref().unwrap().diagnostic_code.as_deref(), Some("runtime_check_timed_out"));
                 } else {
                     assert_eq!(failure_count().await, attempts_before);
                     let mut expected = before.clone();
@@ -1476,13 +1506,16 @@ async fn full_probe_saves_version_before_connection_and_cancellation() {
             "failed alternatives cannot create successful relocation records"
         );
         if kind == AdapterKind::ClaudeCodeCli {
+            assert_eq!(after_public["diagnosticCode"], Value::Null);
+            assert_eq!(after_public["failure"]["code"], Value::Null);
             assert_eq!(
-                after_public["diagnosticCode"],
-                "runtime_authentication_required"
-            );
-            assert_eq!(
-                after_public["failure"]["code"],
-                "runtime_authentication_required"
+                after
+                    .last_probe_attempt
+                    .as_ref()
+                    .unwrap()
+                    .diagnostic_code
+                    .as_deref(),
+                Some("runtime_authentication_required")
             );
         }
     }
@@ -1723,6 +1756,41 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     use rovai_core::agent_profile::AgentProfileService;
     let fixture = Fixture::new();
     let program = fixture.program("versions", "1.0.0", false);
+    // The public single check is installation/version only, even on a program
+    // whose connection/capability branch fails. It must not discover other kinds.
+    fixture.save(0, &configuration(Some(&program))).await;
+    let passive_before = fixture.core.runtime_discovery.read().await.clone();
+    assert_eq!(
+        fixture
+            .core
+            .await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck,
+            )
+            .await
+            .unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    {
+        let observations = fixture.core.runtime_discovery.read().await;
+        for (kind, observation) in observations.iter().filter(|(kind, _)| **kind != KIND) {
+            assert_eq!(
+                serde_json::to_value(Some(observation)).unwrap(),
+                serde_json::to_value(passive_before.get(kind)).unwrap()
+            );
+        }
+        let database = fixture.core.database.lock().await;
+        let installation = AgentProfileService::default()
+            .managed_installation(&database, KIND, "default")
+            .unwrap()
+            .unwrap();
+        let snapshot = installation.snapshot.unwrap();
+        assert_eq!(snapshot.authentication_status, "unknown");
+        assert_eq!(snapshot.last_successful_probe_at, None);
+        assert!(installation.last_probe_attempt.is_none());
+        assert!(!fixture.root.join("probe-started").exists());
+    }
     let log = fixture.root.join("versions/commands");
     let version_file = fixture.root.join("versions/reported-version");
     std::fs::write(&version_file, b"codex-cli 1.0.0\n").unwrap();
@@ -1739,7 +1807,8 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         std::fs::write(program, body).unwrap();
     };
     instrument(&program);
-    fixture.save(0, &configuration(Some(&program))).await;
+    let revision = fixture.settings().await["revision"].as_u64().unwrap();
+    fixture.save(revision, &configuration(Some(&program))).await;
     fixture.core.run_runtime_discovery().await;
     assert!(
         !log.exists(),
@@ -1880,10 +1949,18 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
                     failure: None,
                 },
             );
+        assert!(fixture.health().await["diagnosticCode"].is_null());
         assert_eq!(
-            fixture.health().await["diagnosticCode"],
+            fixture
+                .core
+                .runtime_product_diagnostics
+                .read()
+                .await
+                .get(&KIND)
+                .unwrap()
+                .diagnostic_code,
             code,
-            "successful version reads cannot clear other diagnostics"
+            "light feedback ignores, but never deletes, historical diagnostics"
         );
     }
     fixture.program("versions", "2.0.0-upgraded", false);
@@ -1923,6 +2000,116 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     );
     fixture.core.rescan_runtime_discovery().await.unwrap();
     assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 4.0.0");
+    // A light check and a directory read never satisfy each other, while
+    // duplicate light requests still share one bounded version command.
+    let version_started = fixture.root.join("light-version-started");
+    let version_release = fixture.root.join("light-version-release");
+    let version_calls = fixture.root.join("light-version-calls");
+    let body = std::fs::read_to_string(&program).unwrap().replace(
+        "if [ \"$1\" = '--version' ]; then",
+        &format!("if [ \"$1\" = '--version' ]; then printf v >> '{}'; printf started > '{}'; while [ ! -f '{}' ]; do /bin/sleep 0.01; done;",
+            version_calls.display(), version_started.display(), version_release.display()),
+    );
+    std::fs::write(&program, body).unwrap();
+    let search = fixture.core.runtime_search_environment.read().await.clone();
+    fixture
+        .core
+        .discover_runtime_installations_for(false, Some(KIND), search.clone())
+        .await;
+    let prior_attempt = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap()
+        .last_probe_attempt;
+    let light = tokio::spawn({
+        let core = fixture.core.clone();
+        async move {
+            core.await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck,
+            )
+            .await
+            .unwrap()
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !version_started.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let (acknowledged, acknowledgement) = oneshot::channel();
+    let (completion, duplicate) = oneshot::channel();
+    fixture
+        .core
+        .runtime_check_requests
+        .send(
+            crate::application::RuntimeCheckRequest {
+                search,
+                startup_preview: None,
+                model_target: None,
+                runtime_kind: KIND,
+                purpose: RuntimeLaunchPurpose::DiscoveryVersion,
+                trigger: RuntimeCheckTrigger::UserCheck,
+                acknowledged,
+                completion: Some(completion),
+            }
+            .into(),
+        )
+        .unwrap();
+    assert!(
+        !acknowledgement.await.unwrap(),
+        "same-purpose light requests must merge"
+    );
+    let (acknowledged, acknowledgement) = oneshot::channel();
+    let (completion, mut catalog) = oneshot::channel();
+    fixture
+        .core
+        .runtime_check_requests
+        .send(
+            crate::application::RuntimeCheckRequest {
+                search: fixture.core.runtime_search_environment.read().await.clone(),
+                startup_preview: None,
+                model_target: None,
+                runtime_kind: KIND,
+                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                trigger: RuntimeCheckTrigger::CatalogOpen,
+                acknowledged,
+                completion: Some(completion),
+            }
+            .into(),
+        )
+        .unwrap();
+    assert!(
+        acknowledgement.await.unwrap(),
+        "a directory request must queue its own work instead of joining a light check"
+    );
+    assert!(matches!(
+        catalog.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    assert!(
+        !light.is_finished(),
+        "queuing a directory request cannot complete a held version check"
+    );
+    assert_eq!(
+        AgentProfileService::default()
+            .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+            .unwrap()
+            .unwrap()
+            .last_probe_attempt,
+        prior_attempt
+    );
+    std::fs::write(&version_release, "").unwrap();
+    assert_eq!(light.await.unwrap(), RuntimeCheckOutcome::Ready);
+    assert_eq!(
+        duplicate.await.unwrap().unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    assert!(catalog.await.unwrap().unwrap_err().contains("模型目录"));
+    assert_eq!(std::fs::read_to_string(version_calls).unwrap(), "v");
     fixture.close().await;
 }
 
@@ -2377,7 +2564,7 @@ for line in sys.stdin:
                 .lines()
                 .filter(|line| line.contains("--version"))
                 .count(),
-            2 + usize::from(first_trigger == RuntimeCheckTrigger::CatalogOpen)
+            2
         );
         // Existing invalidation must not be undone by a partial health observation.
         fixture
@@ -2387,7 +2574,7 @@ for line in sys.stdin:
             .await
             .connection()
             .execute(
-                "UPDATE adapter_capability_snapshot SET stale_at = ?2 WHERE installation_id = ?1",
+                "UPDATE adapter_capability_snapshot SET stale_at = ?2, model_catalog_succeeded_at = NULL WHERE installation_id = ?1",
                 rusqlite::params![latest.id, chrono::Utc::now().to_rfc3339()],
             )
             .unwrap();

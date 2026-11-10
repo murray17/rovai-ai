@@ -35,7 +35,9 @@ describe('runtime model catalog source', () => {
     expect(displayableInstallationModels(installation)).toEqual([])
     installation.modelCatalog.status = 'expired'
     installation.snapshot!.probeStatus = 'light_ready'
-    expect(displayableInstallationModels(installation)).toEqual([])
+    expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
+    installation.snapshot!.staleAt = 'historical-health-failure'
+    expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
     installation.adapterKind = 'pi'
     installation.snapshot!.staleAt = 'old-health-invalidation'
     expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
