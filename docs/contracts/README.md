@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-04
+last_updated: 2026-11-05
 ---
 
 # 长期接口合同
@@ -30,13 +30,14 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [ContextManifest Evidence v43 / v44](context-manifest-evidence-v44.md)
 - [Context Delivery Profile v15 / v16](context-delivery-profile-v15.md)
 - [Run Facts v10](run-facts-v10.md)
-- [Camp Message Send v29](camp-message-send-v29.md)
-- [Thread Reference v1](thread-reference-v1.md)：对话/使命身份、用户目录、首次发布标题与弱引用正文投影。
+- [Camp Message Send v31](camp-message-send-v31.md)
+- [Project File Reference v2](project-file-reference-v2.md)
+- [Thread Reference v3](thread-reference-v3.md)：对话/使命身份、用户目录、首次发布标题与弱引用正文投影。
 - [AgentRun Continuation v4](agent-run-continuation-v4.md)
-- [Camp Open Projection v30](camp-open-projection-v30.md)
+- [Camp Open Projection v33](camp-open-projection-v33.md)
 - [Notification Episode v12](notification-episode-v12.md)
 - [Desktop Shortcuts v2](desktop-shortcuts-v2.md)
-- [Host Web v9](host-web-v9.md)
+- [Host Web v11](host-web-v11.md)
 
 上述版本取代同族旧合同的当前入口；旧版本继续解释冻结对象及恢复。
 
@@ -62,8 +63,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Thread Replies v1（当前）](thread-replies-v1.md)：单回复锚点形成平铺链，完整链分页与只读缓存。
 
 - [Navigation Read v1（当前）](navigation-read-v1.md)：单会话、单分组、完整摘要快照，观察水位内已读确认与局部失效。
-- [Input History v1（当前）](input-history-v1.md)：公共/单聊从现有消息生成本轮固定内容、同步导航与草稿预览。
-- [Message Reedit v1（当前）](message-reedit-v1.md)：客户端两分钟撤回文字副本、原命令回放、容量与清理、确认回填。
+- [Input History v2（当前）](input-history-v3.md)：公共/单聊从现有消息生成本轮固定内容、同步导航与草稿预览。
+- [Message Reedit v2（当前）](message-reedit-v3.md)：客户端两分钟撤回文字副本、原命令回放、容量与清理、确认回填。
 
 ## Mission
 
@@ -120,7 +121,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Windows Window Close v1（当前）](windows-window-close-v1.md) | Windows 主窗口关闭选择、记忆、本机设置与托盘生命周期；明确退出复用 Planned Shutdown |
 | [Host Lifecycle v2（当前）](host-lifecycle-v2.md) | 统一 Host 的原生 Server 单一数据根与用户入口；Desktop 旧布局兼容、唯一 owner、配套 WebUI 与受控停止 |
 | [Host Lifecycle v1（兼容入口）](host-lifecycle-v1.md) | 旧预览 Host CLI 的显式内部路径和初始化；由 v2 保留兼容，不自动迁移数据 |
-| [Host Web v9（当前）](host-web-v9.md) | Web 长粘贴直写 Thread 输出目录、上传恢复与单向保护下的异步删除 |
+| [Host Web v10（当前）](host-web-v11.md) | Web 长粘贴直写 Thread 输出目录、上传恢复与单向保护下的异步删除 |
 | [Host Web v8（历史）](host-web-v8.md) | 候选内分页/定位复用 Analysis，以原始大小和修改时间校验；其他读取和传输规则保持 |
 | [Host Web v7（历史）](host-web-v7.md) | 30 MiB 上传、独立下载票据与原生有界流式传输、取消及原结果核对 |
 | [Host Web v5（历史）](host-web-v5.md) | User 继续入口与既有命令回执核对，传输协议仍为 4 |
@@ -152,6 +153,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Images v3（历史）](runtime-images-v3.md) | v2 来源/保存/读取不变；同 Run 的已发送同摘要图片优先展示；统一图片几何与附件原序规则由 v4 替代 |
 | [Runtime Images v2（历史）](runtime-images-v2.md) | 本地结构化图片、ACP 增量累积、混合存储与 Camp-scoped 读取；允许显式附件重复展示的规则由 v3 替代 |
 | [Member Creation Flow v1（当前）](member-creation-flow-v1.md) | AI 优先入口、可用协助者、原子静态入队回执与配置链接 |
+| [Camp Open Projection v30（历史）](camp-open-projection-v30.md) | Task 能力决定字段省略和查询准入；公开 Run 的 Turn 回退由 v31 退役 |
 | [Camp Open Projection v29（历史）](camp-open-projection-v29.md) | 惰性锚点预览补充实际回复队员的姓名与头像，保留索引、正文窗口及旧 Host 兼容 |
 | [Camp Open Projection v28（历史）](camp-open-projection-v28.md) | Run 与公开消息共用冻结模型 / 强度投影，补齐执行行模型信息；兼容旧 Host |
 | [Camp Open Projection v27（历史）](camp-open-projection-v27.md) | Run 投影冻结的启动公开消息边界，初始执行行不回插到已领取输入；读取与分页边界不变 |
@@ -174,6 +176,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（历史）](camp-open-projection-v10.md) | main Snapshot 34/Open 6；Open 不读取 event_log，移除 timeline/coverage.timeline，保留 high-water 与业务卡片 |
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
+| [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
 | [Runtime Launch and Verification v76（当前）](runtime-launch-and-verification-v76.md) | CodeBuddy refusal 原生错误详情解析，复用共享脱敏、公开 failure 与 RunCard 展示 |
 | [Runtime Launch and Verification v75（历史）](runtime-launch-and-verification-v75.md) | 全 Runtime 按有效原生成功完成，允许空最终文字；局部问卷取消不覆盖后续成功 |
 | [Runtime Launch and Verification v74（历史）](runtime-launch-and-verification-v74.md) | 共享模型目录归一化、失败保留配置与缓存、原生 Runtime 接受显式配置；继承 PATH 与环境规则 |
@@ -312,7 +315,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [File Preview v24](file-preview-v24.md) | 当前项目 UTF-8 文本编辑、共享 Host 手动保存、摘要冲突及窗口草稿保留 |
 | [File Preview v25（历史）](file-preview-v25.md) | 项目浏览首版；offset 分页与逐文件登记由 v26 替代 |
-| [File Preview v26（当前）](file-preview-v26.md) | 按需项目目录、文件搜索、变化失效与绑定工作目录的预览来源 |
+| [File Preview v27（当前）](file-preview-v28.md) | 按需项目目录、文件搜索、变化失效与绑定工作目录的预览来源 |
 | [File Preview v23（历史）](file-preview-v23.md) | Desktop 最近定位复用、同版本自动刷新跳过内容与 HTML 准备；候选与更新水位保持 |
 | [File Preview v22（历史）](file-preview-v22.md) | 当前可见文件自动刷新、后台按需更新、失败阻断与分页行号恢复；复用候选刷新和既有通知 |
 | [File Preview v21（历史）](file-preview-v21.md) | 精确归因内部诊断 CSP 拒绝，中性降级并停止当前文档无效重试；保留作者策略与真实错误 |
@@ -440,7 +443,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Collaboration State v4（当前）](collaboration-state-v4.md) | peers 恰好 ID、名称、团队角色，职责不参与协作摘要 |
 | [Collaboration State v3（历史）](collaboration-state-v3.md) | 模型正文删除 schemaVersion，peer、Lead 与 digest 业务语义不变 |
 | [Collaboration State v2（历史）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Thread Runs v1（当前）](thread-runs-v1.md) | 公开执行和排队查询；统一 items、可空 Run ID、实时预览和动态分页 |
+| [Thread Runs v2（当前）](thread-runs-v2.md) | 公开 Run 只按直接会话归属读取，取消 Turn-only 回退；排队聚合、预览和动态分页保持 |
+| [Thread Runs v1（历史）](thread-runs-v1.md) | 公开执行和排队查询；其旧 Turn 归属回退由 v2 退役 |
 | [Camp History v11（历史）](camp-history-v11.md) | 正常 timeline/reply-chain/item 统一 addressing，撤回项保持独立形状 |
 | [Camp History v10（历史）](camp-history-v10.md) | 显式 read/search 可见 claim 前消息，撤回后 read 返回英文状态项；保留按需实时读取与 1–100 诚实分页 |
 | [Camp History v9（历史）](camp-history-v9.md) | 按需实时读取；`camp.read` 默认 20、显式整数 1–100、诚实分页 |
@@ -566,7 +570,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
-| [Camp Composer Draft v20（当前）](camp-composer-draft-v20.md) | Web 公屏长粘贴、浏览器草稿接纳、Host 生成文件存储与清理 |
+| [Camp Composer Draft v21（当前）](camp-composer-draft-v22.md) | Web 公屏长粘贴、浏览器草稿接纳、Host 生成文件存储与清理 |
 | [Camp Composer Draft v18（历史）](camp-composer-draft-v18.md) | 内部复制的纯正文也按单次长粘贴阈值附件化；仅恢复后仍含 Atom 的内容优先按结构化粘贴 |
 | [Camp Composer Draft v17（历史）](camp-composer-draft-v17.md) | Desktop 长粘贴生成文件、Thread 归属、单向发送保护与先保存后清理；不改变本机草稿权威 |
 | [Camp Composer Draft v16（历史）](camp-composer-draft-v16.md) | Active 与普通一键 Pending 的本机独立草稿、保存失败保护和首发送清空；同项目可多份 |

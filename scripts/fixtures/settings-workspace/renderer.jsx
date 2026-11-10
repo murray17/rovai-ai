@@ -4,6 +4,7 @@ import { ThreadNavigation } from '@renderer/ThreadNavigation'
 import { WindowDragStrip } from '@renderer/BusinessApp'
 import { HostWebSettings } from '@renderer/HostWebSettings'
 import { GeneralSettings } from '@renderer/GeneralSettings'
+import { MobileLayoutProvider } from '@renderer/MobileLayout'
 import { AppearanceSettings } from '@renderer/AppearanceSettings'
 import { NotificationSettings } from '@renderer/NotificationSettings'
 import { editableSnapshot, configurationFromSnapshot, withSnapshotValue } from '@renderer/runtime-startup-editor'
@@ -95,7 +96,8 @@ Object.assign(window, { rovai: {
     setStartupLocationMode: savePreference('startupLocationMode'),
     setNewConversationDefaults: savePreference('newConversationDefaults'),
     setOneClickNewConversationEnabled: savePreference('oneClickNewConversationEnabled'),
-    setWorldMapEnabled: savePreference('worldMapEnabled')
+    setWorldMapEnabled: savePreference('worldMapEnabled'),
+    setExecutionConsoleAutoOpen: savePreference('executionConsoleAutoOpen')
   },
   windowControls: { getResetCapability: async () => ({ canReset: true, reason: null }), resetBounds: async () => ({ performed: true }) },
   channels: {
@@ -168,6 +170,7 @@ Object.assign(window, { rovai: {
 } })
 
 function Fixture() {
+  const [mobile, setMobile] = useState(false)
   const [page, setPage] = useState('general')
   const [remotePort, setRemotePort] = useState(null)
   const [generation, setGeneration] = useState(0)
@@ -176,6 +179,7 @@ function Fixture() {
   const [updateError, setUpdateError] = useState(null)
   const [runtimeHealth, setRuntimeHealth] = useState(fixture.healthSnapshot)
   Object.assign(window.settingsTest, {
+    setMobile,
     setRuntimeChecking: (runtimeKind, checking) => setRuntimeHealth(health => ({
       ...health, runtimeAvailability: health.runtimeAvailability.map(item => item.runtimeKind === runtimeKind ? { ...item, checking, status: checking ? 'checking' : 'ready' } : item)
     })),
@@ -197,7 +201,7 @@ function Fixture() {
       onRemoveProject={async () => {}} onRename={async () => {}} onDelete={async () => {}} onError={error => { throw error }} />
     <main className="content settings-content">
       <div className="settings-workbench"><div className={`settings-panel settings-panel-${page}`} key={`${page}-${generation}`}>
-        {page === 'general' && <GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} agents={roster} initialPreferences={state.preferences} onPreferencesChange={ignore} />}
+        {page === 'general' && <MobileLayoutProvider value={mobile}><GeneralSettings api={window.rovai.generalPreferences} windowControls={window.rovai.windowControls} agents={roster} initialPreferences={state.preferences} onPreferencesChange={ignore} /></MobileLayoutProvider>}
         {page === 'remote' && <HostWebSettings portDraft={remotePort} onPortDraftChange={setRemotePort} api={window.rovai.hostWeb} />}
         {page === 'appearance' && <AppearanceSettings appearance={appearance} disabled={false} onChange={async value => { setAppearance(value); return value }} />}
         {page === 'notifications' && <NotificationSettings />}

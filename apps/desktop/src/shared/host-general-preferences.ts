@@ -45,6 +45,7 @@ export function withHostConversationPreferences(local: Omit<GeneralPreferencesAp
     setStartupLocationMode: value => localChange(local.setStartupLocationMode(value)),
     setLastSettingsSection: value => localChange(local.setLastSettingsSection(value)),
     setExecutionConsolePlacement: value => localChange(local.setExecutionConsolePlacement(value)),
+    setExecutionConsoleAutoOpen: value => localChange(local.setExecutionConsoleAutoOpen(value)),
     setWorldMapEnabled: value => localChange(local.setWorldMapEnabled(value)),
     setNewConversationTeam: async (teamId, enableOneClick = false) => merge(await request('preferences.newConversation.setTeam', { teamId, enableOneClick })),
     setNewConversationDefaults: async (defaults, enableOneClick = false) => merge(await request('preferences.newConversation.setDefaults', { defaults, enableOneClick })),

@@ -56,7 +56,6 @@
 .message-export-document .markdown-table-scroll,.message-export-document .markdown-code-frame { overflow:visible; }
 .message-export-document table { min-width:0; width:100%; table-layout:fixed; }
 .message-export-document th,.message-export-document td { overflow-wrap:anywhere; }
-.message-export-excerpt { white-space:pre-wrap; }
 .message-export-recipients { margin-top:6px; color:var(--muted); font-size:11px; }
 .message-export-attachment { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin-top:10px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; width:fit-content; max-width:100%; box-sizing:border-box; }
 .message-export-attachment > svg { width:24px; height:24px; flex:none; }
@@ -69,7 +68,12 @@
 .message-export-zoom { position:fixed; inset:16px; display:grid; place-items:center; z-index:1001; pointer-events:none; }
 .message-export-zoom button { pointer-events:auto; padding:12px; border:0; background:transparent; cursor:zoom-out; max-width:100%; max-height:100%; }
 .message-export-zoom img { max-width:100%; max-height:70dvh; object-fit:contain; }
-.message-quote-selection-toolbar:has(.message-selection-export) { display:flex; gap:0; border:1px solid var(--line-strong); border-radius:8px; background:var(--surface-raised); box-shadow:var(--shadow-float); }
-.message-quote-selection-toolbar:has(.message-selection-export) > button { border:0; box-shadow:none; background:transparent; }
+.message-export-read-state { min-height:260px; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; color:var(--muted); font-size:13px; }
+.message-export-read-state p { margin:0; }
+.message-export-read-spinner { width:18px; height:18px; border:2px solid var(--line); border-top-color:var(--muted); border-radius:50%; animation:message-export-spin .8s linear infinite; }
+@keyframes message-export-spin { to { transform:rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .message-export-read-spinner { animation:none; } }
+html[data-mobile-web="true"] .message-export-document[data-export-format="html"] { width:100%; min-width:0; max-width:100%; padding:20px 14px; box-sizing:border-box; }
+html[data-mobile-web="true"] .dialog-content.app-dialog.message-export-dialog .app-dialog-footer button { min-height:44px; }
 @media(max-width:760px) { .message-export-selecting .conversation-bubble[data-message-id]::before { left:-28px; }.message-export-check { left:-27px; }.message-export-options { gap:12px; }.message-export-preview { max-height:calc(100dvh - 360px); }.message-selection-dock { padding-inline:12px; } }
 @media(pointer:coarse) { .message-select-button { width:40px; height:40px; }.message-export-check { width:40px; left:-35px; } }

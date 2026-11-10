@@ -1,3 +1,4 @@
+import { RovaiBrandMark } from './RovaiBrandMark'
 import { TeamGlyph } from './MissionDefinitionEditor'
 import { useShortcutAction, useShortcutLabel, useShortcuts } from './ShortcutProvider'
 import { useThreadClient } from './camp-client'
@@ -84,7 +85,7 @@ type NavigationAction = {
 export function campNavigationMenuLabels(pinned: boolean, unread = false): string[] {
   return [pinned ? uiAttribute('取消置顶') : uiAttribute('置顶'),
     unread ? uiAttribute('标记已读') : uiAttribute('标记未读'),
-    uiAttribute('重命名'), uiAttribute('复制会话 ID'), uiAttribute('删除')]
+    uiAttribute('重命名'), uiAttribute('复制会话 ID'), uiAttribute('导出会话'), uiAttribute('删除')]
 }
 
 export async function copyThreadIdToClipboard(
@@ -188,6 +189,7 @@ export function ThreadNavigation({
   onRemoveProject,
   onRenameProject,
   onThreadIdCopied = () => undefined,
+  onExportThread,
   onRename,
   onDelete,
   onDeleteError,
@@ -237,6 +239,7 @@ export function ThreadNavigation({
   onRenameProject?(project: ProjectNavigationGroup, name: string | null): Promise<void>
   onRemoveProject(project: ProjectNavigationGroup): Promise<void>
   onThreadIdCopied?(): void
+  onExportThread?(thread: NavigationThreadItem): void
   onRename(thread: NavigationThreadItem, title: string): Promise<void>
   onDelete(thread: NavigationThreadItem): Promise<void>
   onDeleteError?(error: unknown): void
@@ -320,6 +323,11 @@ export function ThreadNavigation({
 
   const toggleProjectGroup = (groupKey: string): void => {
     setCollapsedProjectGroups((current) => toggleNavigationGroup(current, groupKey))
+    if (collapsedProjectGroups.has(groupKey)
+      || loadingGroupsRef.current.has(groupKey)
+      || (groupLimits[groupKey] ?? NAVIGATION_INITIAL_VISIBLE_CAMPS) > NAVIGATION_INITIAL_VISIBLE_CAMPS) {
+      collapseGroupThreads(groupKey)
+    }
   }
 
   const togglePin = async (
@@ -410,19 +418,7 @@ export function ThreadNavigation({
         <div className="unified-sidebar-drag" aria-hidden="true" />
         <div className="unified-brand">
           <span className="rail-logo" role="img" aria-label="Rovai AI">
-            <svg
-              className="rail-logo-mark"
-              data-brand-mark="horizon"
-              data-brand-layout="separated"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path d="M12 2 L13.16 7.3 L17.76 8.84 L13.16 10.38 L12 15.68 L10.84 10.38 L6.24 8.84 L10.84 7.3 Z" fill="currentColor" />
-              <path d="M3 20.96 Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round" />
-              <circle className="brand-rendezvous-point" data-brand-point="rendezvous" cx="12" cy="18.46" r="1.05" />
-            </svg>
+            <RovaiBrandMark className="rail-logo-mark" width={20} height={20} />
             <span><strong>Rovai AI</strong></span>
           </span>
         </div>
@@ -490,6 +486,7 @@ export function ThreadNavigation({
                 pinned
                 onTogglePin={() => void togglePin('camp', thread.id, thread)}
                 onCopyThreadId={() => void copyThreadId(thread)}
+                onExport={onExportThread ? () => onExportThread(thread) : undefined}
                 onThread={onThread}
                 onAction={openAction}
               />
@@ -525,6 +522,7 @@ export function ThreadNavigation({
                 onRemoveProject={() => openProjectRemoval(project)}
                 onToggleThreadPin={(thread) => void togglePin('camp', thread.id, thread)}
                 onCopyThreadId={(thread) => void copyThreadId(thread)}
+                onExportThread={onExportThread}
                 threadReadStates={threadReadStates}
                 onSetThreadUnread={onSetThreadUnread ? setThreadUnread : undefined}
                 platform={platform}
@@ -571,6 +569,7 @@ export function ThreadNavigation({
                 onRemoveProject={() => openProjectRemoval(project)}
                 onToggleThreadPin={(thread) => void togglePin('camp', thread.id, thread)}
                 onCopyThreadId={(thread) => void copyThreadId(thread)}
+                onExportThread={onExportThread}
                 threadReadStates={threadReadStates}
                 onSetThreadUnread={onSetThreadUnread ? setThreadUnread : undefined}
                 platform={platform}
@@ -602,6 +601,7 @@ export function ThreadNavigation({
             onCreate={() => onCreateInProject(null)}
             onToggleThreadPin={(thread) => void togglePin('camp', thread.id, thread)}
             onCopyThreadId={(thread) => void copyThreadId(thread)}
+            onExportThread={onExportThread}
             threadReadStates={threadReadStates}
             onSetThreadUnread={onSetThreadUnread ? setThreadUnread : undefined}
             platform={platform}
@@ -861,6 +861,7 @@ function CommandPalette({
   firstRunThreadId: string | null
   onThread(thread: NavigationThreadTarget): void
 }): JSX.Element {
+  const client = useThreadClient()
   const [query, setQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const projectNameByPath = useMemo(
@@ -881,8 +882,8 @@ function CommandPalette({
   useEffect(() => {
     setLookup(null)
     if (!open || threadId === null) return
-    return startNavigationThreadLookup(threadId, setLookup)
-  }, [open, threadId])
+    return startNavigationThreadLookup(threadId, setLookup, id => client.request('navigation.findThread', { threadId: id }))
+  }, [client, open, threadId])
 
   const selectedIndex = Math.min(activeIndex, Math.max(visible.length - 1, 0))
 
@@ -975,6 +976,7 @@ function ThreadGroup({
   onRenameProject,
   onToggleThreadPin,
   onCopyThreadId,
+  onExportThread,
   threadReadStates,
   onSetThreadUnread,
   platform,
@@ -1012,6 +1014,7 @@ function ThreadGroup({
   onCopyProjectPath?(): void
   onToggleThreadPin(thread: NavigationThreadItem): void
   onCopyThreadId(thread: NavigationThreadItem): void
+  onExportThread?(thread: NavigationThreadItem): void
   onThread(thread: NavigationThreadItem): void
   onAction(kind: 'rename' | 'delete', thread: NavigationThreadItem): void
 }): JSX.Element {
@@ -1100,6 +1103,7 @@ function ThreadGroup({
             pinned={false}
             onTogglePin={() => onToggleThreadPin(thread)}
             onCopyThreadId={() => onCopyThreadId(thread)}
+            onExport={onExportThread ? () => onExportThread(thread) : undefined}
             onThread={onThread}
             onAction={onAction}
           />
@@ -1126,6 +1130,7 @@ function ThreadRow({
   pinned,
   onTogglePin,
   onCopyThreadId,
+  onExport,
   onThread,
   onAction
 }: {
@@ -1138,6 +1143,7 @@ function ThreadRow({
   pinned: boolean
   onTogglePin(): void
   onCopyThreadId(): void
+  onExport?(): void
   onThread(thread: NavigationThreadItem): void
   onAction(kind: 'rename' | 'delete', thread: NavigationThreadItem): void
 }): JSX.Element {
@@ -1181,9 +1187,12 @@ function ThreadRow({
     icon: 'copy',
     onSelect: onCopyThreadId
   })
+  if (onExport && thread.activationState !== 'pending') menuItems.push({
+    key: 'export', label: menuLabels[4], icon: 'export', onSelect: onExport
+  })
   menuItems.push({
     key: 'delete',
-    label: menuLabels[4],
+    label: menuLabels[5],
     icon: 'trash',
     danger: true,
     separatorBefore: true,
@@ -1225,7 +1234,7 @@ function ThreadRow({
 type SidebarActionMenuItem = {
   key: string
   label: string
-  icon: 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread'
+  icon: 'pin' | 'edit' | 'copy' | 'trash' | 'remove' | 'square-pen' | 'reveal' | 'read' | 'unread' | 'export'
   disabled?: boolean
   filled?: boolean
   danger?: boolean
@@ -1317,6 +1326,7 @@ function SidebarMenuIcon({ kind, filled = false }: {
   filled?: boolean
 }): JSX.Element {
   if (kind === 'square-pen') return <NavigationIcon name="square-pen" />
+  if (kind === 'export') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 15v5h14v-5" /></svg>
   if (kind === 'reveal') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9V6a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v3M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9" /><path d="M12 14h9m-3-3 3 3-3 3" /></svg>
   if (kind === 'read') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-6 9 6v10H3ZM3 9l9 6 9-6" /></svg>
   if (kind === 'unread') return <svg className="sidebar-action-menu-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /><circle cx="20" cy="5" r="3" fill="currentColor" stroke="var(--surface-raised)" strokeWidth="1.8" /></svg>

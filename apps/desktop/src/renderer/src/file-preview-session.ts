@@ -193,7 +193,7 @@ function referenceFileName(value: string): string {
 export function filePreviewSourceKey(request: OpenFilePreviewRequest): string {
   switch (request.kind) {
     case 'project_file':
-      return `project:${request.threadId}:${request.rawReference}`
+      return `project:${JSON.stringify([request.threadId, request.rawReference, request.expectedPathAtSend ?? null])}`
     case 'skill_reference':
       return `skill:${request.threadId}:${request.skillId}`
     case 'message_reference': {

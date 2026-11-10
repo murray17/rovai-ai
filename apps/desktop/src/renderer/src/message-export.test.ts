@@ -11,6 +11,8 @@ describe('message export boundaries', () => {
     const title = defaultMessageExportTitle(source)
     expect(title).toBe('a'.repeat(39) + '👩‍💻… · 会话片段')
     expect(defaultMessageExportTitle('短标题')).toBe('短标题 · 会话片段')
+    expect(defaultMessageExportTitle(source, 'conversation')).toBe('a'.repeat(39) + '👩‍💻…')
+    expect(defaultMessageExportTitle('短标题', 'conversation')).toBe('短标题')
     const entry = { message: message('a', 1, { createdAt: '2026-11-03T01:00:00Z', attachments: [] }), author: 'Alice', avatarRef: null, recipients: [], markdown: source, reply: null }
     const text = messageExportMarkdown(title, [entry], defaultMessageExportOptions('markdown'))
     expect(text).toContain(source)
@@ -28,14 +30,17 @@ describe('message export boundaries', () => {
   it('preserves code/link Markdown, projects internal references and treats names as literal text', () => {
     const code = '\n```diff\n-old\n+new\n```\n[site](https://example.com)'
     const result = exportMessageMarkdown('', [{ kind: 'member_mention', agentId: 'a' }, { kind: 'text', text: code }, { kind: 'thread_reference', threadId: 'secret-id', titleAtSend: '[thread]' }], new Map([['a', '<img src=x>']]), '你')
-    expect(result).toContain(code); expect(result).toContain('\\[thread\\]'); expect(result).not.toContain('secret-id'); expect(result).toContain('\\<img src=x\\>')
+    expect(result).toContain(code); expect(result).toContain('[\\[thread\\]](rovai://thread/secret-id)'); expect(result).toContain('\\<img src=x\\>')
   })
-  it('excerpt exports never acquire the source message attachments, reply or recipients', () => {
-    const entry = { message: message('a', 1, { createdAt: '2026-11-03T01:00:00Z', attachments: [{ displayName: 'secret-file', mediaType: 'text/plain', kind: 'file', byteSize: 32 }] }), author: 'Alice', avatarRef: null, recipients: ['Bob'], markdown: 'full body', reply: 'reply body', excerpt: 'selected <script>' }
-    const text = messageExportMarkdown('title', [entry], defaultMessageExportOptions('markdown'))
-    expect(text).toMatch(/^# title\n\n### Alice/)
-    expect(text).toContain('Alice'); expect(text).toContain('2026\\-11\\-03'); expect(text).toContain('selected \\<script\\>')
-    for (const absent of ['secret-file', 'full body', 'reply body', 'Bob']) expect(text).not.toContain(absent)
+  it('exports published file, directory and mission links through their shared projectors', () => {
+    const result = exportMessageMarkdown('', [
+      { kind: 'project_file_reference', threadId: 't', rawReference: 'file', pathAtSend: '/workspace/src/中文 (draft)#1.ts', labelAtSend: 'src/中文 (draft)#1.ts' },
+      { kind: 'text', text: '\n' },
+      { kind: 'project_file_reference', threadId: 't', rawReference: 'directory', pathAtSend: '/workspace/src/auth', labelAtSend: 'src/auth', targetKind: 'directory' },
+      { kind: 'text', text: '\n[untrusted](file:///private/other.ts) ' },
+      { kind: 'mission_reference', missionId: 'mission-id', titleAtSend: '登录-重构 v1.2' }
+    ], new Map(), '你')
+    expect(result).toBe('[中文 (draft)#1.ts](file:///workspace/src/%E4%B8%AD%E6%96%87%20%28draft%29%231.ts)\n[auth](file:///workspace/src/auth/)\nuntrusted [登录-重构 v1.2](rovai://mission/mission-id)')
   })
   it('exports file/internal links as labels while leaving literal code and web links intact', () => {
     const code = '`[source](file:///private/source.ts)`\n\n```md\n[thread](rovai://thread/example)\n```'
@@ -50,6 +55,5 @@ describe('message export boundaries', () => {
     expect(entries.map((entry, i) => exportEntryShowsTime(entry, entries[i + 1]))).toEqual([false, false, true])
     expect(exportEntryShowsTime(entries[0], entries[2])).toBe(true)
     expect(exportEntryShowsTime({ ...entries[0], nextGroupedMessageId: null }, entries[1])).toBe(true)
-    expect(exportEntryShowsTime({ ...entries[0], excerpt: '选文' }, entries[1])).toBe(true)
   })
 })

@@ -247,13 +247,15 @@ function localSend(body: string, recipients = [aid(0)], draft?: any) {
   }, 4600)
 }
 const executionReadMode = new URLSearchParams(location.search).get('executionRead')
-const invalidationListeners = new Set<() => void>()
+const invalidationListeners = new Set<(change?: import('@contracts').ThreadReadInvalidation) => void>()
 const controls = { holdExportImage: false, steerReview: false, holdContinue: false, holdStop: false, holdDispatch: false, holdContinuationProjection: false, holdEntrySnapshot: false,
   failNextExecutionPage: executionReadMode === 'fail', holdExecutionPage: executionReadMode === 'hold',
   holdExecutionChanges: false, liveEvidence: false,
   holdSourceRead: false, failNextSourceRead: false, wrongSourceOwner: false,
   persistServer: false, continuationMode: 'normal', stopError: false,
   executionReads: [] as any[], hiddenMessages: [] as any[],
+  exportHistory: null as any[] | null, exportReadDelay: 0, failNextExportPage: false, exportReads: [] as any[],
+  exportImageGroups: [] as any[],
   continueAttempts: [] as any[], stopAttempts: [] as any[], receipts: new Map<string, any>() }
 export const model = {
   controls,
@@ -294,6 +296,31 @@ export const model = {
     const messages = [1, 2, 3].map(sequence => ({ ...makeMessage(`export-group-${sequence}`, sequence, `连续消息 ${sequence}。`, 0), threadTurnId: 'export-same-turn' }))
     update({ snapshot: { ...state.snapshot, messages } })
   },
+  showFullExportCase(count = 500, layout = 'gapped') {
+    this.showExportCase()
+    controls.exportReads = []; controls.exportReadDelay = 0; controls.failNextExportPage = false
+    const first = state.snapshot.messages.slice(0, 3).map((message: any) => structuredClone(message))
+    first[1].sourceAgentRunId = 'old-image-run'
+    const history = [...first, ...Array.from({ length: Math.max(0, count - 3) }, (_, i) => makeMessage(`history-${i + 4}`, i + 4, `历史正文 ${i + 4}`, i % 2 ? 0 : -1))].slice(0, count)
+    if (history[3]) { history[3].authorType = 'system'; history[3].body = '系统记录不导出' }
+    if (history[4]) { history[4].withdrawn = true; history[4].body = '已撤回正文不导出' }
+    controls.exportHistory = history
+    controls.exportImageGroups = [{ agentRunId: 'old-image-run', executionEpoch: 1, createdAt: first[1].createdAt,
+      images: [{ id: 'legacy-image', displayName: '旧关联输出.png', mediaType: 'image/png', byteSize: 32 }] }]
+    const window = layout === 'all' ? history : layout === 'tail' ? history.slice(-20) : [...history.slice(0, 1), ...history.slice(-20)]
+    update({ snapshot: { ...state.snapshot, messages: window, agentRunImages: [] } })
+  },
+  revealExportHistory() { update({ snapshot: { ...state.snapshot, messages: [...controls.exportHistory!] } }) },
+  appendExportMessage(showInTimeline = false) {
+    const history = controls.exportHistory!
+    history.push(makeMessage(`history-${history.at(-1).sequence + 1}`, history.at(-1).sequence + 1, '读取开始后新增的消息'))
+    if (showInTimeline) this.revealExportHistory()
+  },
+  removeExportMessage(id: string) {
+    controls.exportHistory = controls.exportHistory!.filter(message => message.id !== id)
+    invalidationListeners.forEach(listener => listener({ messages: [{ threadId: state.snapshot.thread.id, indexChanged: true,
+      unavailableMessageIds: [id], throughGlobalSequence: ++state.version }] }))
+  },
   showReplyCase(long = false, allLoaded = false, wrapped = false, grouped = false) {
     this.setScenario('stream'); halt()
     const messages = [
@@ -312,7 +339,7 @@ export const model = {
     for (const message of messages) message.replyToThreadMessageId = parents[message.id] ?? null
     if (long) for (let i = 10; i <= 120; i++) {
       // Cross the public-message grouping height when the detail pane closes.
-      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(16) : ''}`
+      const body = `长链回复 ${i}${wrapped ? '\n\n' + '消息正文会随会话宽度重新换行，关闭右侧详情后仍应显示选中的原文。'.repeat(grouped ? 15 : 16) : ''}`
       messages.push({ ...makeMessage(`long-${i}`,i,body,0,grouped ? 'run-alice' : null), replyToThreadMessageId:'reply-g' })
     }
     const run = { ...makeRun('run-alice',0,'running',['reply-c','reply-d']),anchorMessageId:'reply-d',publicTailSequenceAtStart:4 }
@@ -511,7 +538,8 @@ export const model = {
     halt()
     const runId = `retry-run-${++serial}`, deliveryId = `retry-delivery-${serial}`
     extraDeliveries.push({ ...delivery(deliveryId, source.inputMessageIds[0], source.agentId, null),
-      continuationRequest: true, sourceAgentRunId: id, inputMessageIds: [...source.inputMessageIds] })
+      continuationRequest: true, sourceAgentRunId: id, inputMessageIds: [...source.inputMessageIds],
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
     retries.set(id, { status: 'pending', runId, deliveryId }); refresh()
     scheduleRetry(source, runId, deliveryId)
     return deliveryId
@@ -565,8 +593,32 @@ export const model = {
       }
       return backing.client.composerAttachments.preview(locator)
     } },
-    onInvalidated: (listener: () => void) => { invalidationListeners.add(listener); return () => invalidationListeners.delete(listener) },
+    onInvalidated: (listener: (change?: import('@contracts').ThreadReadInvalidation) => void) => { invalidationListeners.add(listener); return () => invalidationListeners.delete(listener) },
     request: async (method: string, input: any = {}): Promise<any> => {
+      if (method === 'agentRunImages.read' && input.imageId === 'legacy-image') {
+        const canvas = document.createElement('canvas'); canvas.width = 80; canvas.height = 40
+        const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#23794b'; ctx.fillRect(0, 0, 80, 40)
+        return { mediaType: 'image/png', data: canvas.toDataURL('image/png').split(',')[1] }
+      }
+      if (method === 'threads.open' || method === 'thread.messages.page') {
+        controls.exportReads.push({ method, ...input })
+        const all = controls.exportHistory ?? state.snapshot.messages
+        const rows = method === 'threads.open' ? all.slice(-20) : all.filter((message: any) => message.sequence < input.beforeSequence).slice(-input.limit)
+        const hasMore = all.some((message: any) => message.sequence < rows[0]?.sequence)
+        const messages = structuredClone(rows)
+        const result = method === 'threads.open' ? { ...state.snapshot, schemaVersion: 9, throughGlobalSequence: state.version,
+          thread: { ...state.snapshot.thread, id: input.threadId, title: input.threadId === state.snapshot.thread.id ? state.snapshot.thread.title : '其他会话' }, messages,
+          agentRunImages: controls.exportImageGroups,
+          coverage: { messages: { hasEarlier: hasMore, complete: !hasMore, loadedCount: rows.length, totalCount: all.length,
+            oldestLoadedSequence: rows[0]?.sequence ?? null, newestLoadedSequence: rows.at(-1)?.sequence ?? null } } }
+          : { schemaVersion: 1, threadId: input.threadId, throughGlobalSequence: input.throughGlobalSequence,
+            requestedBeforeSequence: input.beforeSequence, messages, hasMore, nextBeforeSequence: hasMore ? rows[0].sequence : null }
+        const fail = method === 'thread.messages.page' && controls.failNextExportPage
+        if (fail) controls.failNextExportPage = false
+        if (controls.exportReadDelay) await new Promise(resolve => setTimeout(resolve, controls.exportReadDelay))
+        if (fail) throw new Error('Simulated export read failure')
+        return result
+      }
       if (['agentRunExecution.page', 'agentRunExecution.changes', 'agentRunEvidence.getContent', 'thread.messages.around', 'thread.messages.replies'].includes(method))
         controls.executionReads.push({ method, ...input })
       if (method === 'members.list') return profiles

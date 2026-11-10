@@ -136,7 +136,9 @@ test('production Web retains its mounted Composer and authentication across a re
 
     // Use the production ConsoleClient against this same real Host to inspect
     // the original Promise as well as the durable receipt (no synthetic Core replies).
-    const probe = await build({ configFile: false, logLevel: 'error', resolve: { alias: {
+    const probe = await build({ configFile: false, logLevel: 'error', define: {
+      'process.env.NODE_ENV': JSON.stringify('production')
+    }, resolve: { alias: {
       '@contracts': join(root, 'packages/contracts/src/index.ts')
     } }, build: { write: false, lib: {
       entry: join(root, 'apps/web/src/client.ts'), name: 'RecoveryClientProbe', formats: ['iife'] } } })

@@ -568,6 +568,53 @@ app.whenReady().then(async () => {
       assert.deepEqual(current.atomTypes, ['member'])
     })
 
+    await run('Runtime prefixes select a concrete member and keep invitation order', async () => {
+      await reset('请 ')
+      await evaluate(`window.composerTest.setMembers([
+        { agentId: 'outside-command', displayName: '队员乙', teamRole: '', runtimeKind: 'command-code-cli', inThread: false },
+        { agentId: 'command', displayName: '队员甲', teamRole: '', runtimeKind: 'command-code-cli' },
+        { agentId: 'unavailable', displayName: '队员丙', teamRole: '', runtimeKind: 'command-code-cli', mentionable: false }
+      ])`)
+      await frames()
+      await insert('@com')
+      const open = await state(false)
+      assert.equal(open.options.length, 2, JSON.stringify(open))
+      assert.ok(open.options[0].includes('队员甲'), JSON.stringify(open))
+      assert.ok(open.options[1].includes('队员乙') && open.options[1].includes('邀请'), JSON.stringify(open))
+      assert.equal(open.activeDescendantMatches, true)
+      await key('Enter', 13)
+      const selected = await expectSegments([
+        { kind: 'text', text: '请 ' },
+        { kind: 'atom', atom: { type: 'member', agentId: 'command', labelFallback: '队员甲' } },
+        { kind: 'text', text: ' ' }
+      ])
+      assert.equal(selected.submitCount, 0)
+    })
+
+    await run('pinyin name prefixes precede PI members and keyboard selection follows that order', async () => {
+      for (const next of [false, true]) {
+        await reset('')
+        await evaluate(`window.composerTest.setMembers([
+          { agentId: 'pi-member', displayName: '队员甲', teamRole: '', runtimeKind: 'pi' },
+          { agentId: 'pipi', displayName: '皮皮', teamRole: '', runtimeKind: 'pi' }
+        ])`)
+        await frames()
+        await insert('@pi')
+        const open = await state(false)
+        assert.equal(open.options.length, 2, JSON.stringify(open))
+        assert.ok(open.options[0].includes('皮皮') && open.options[1].includes('队员甲'), JSON.stringify(open))
+        assert.equal(open.activeOption, open.options[0])
+        if (next) await key('ArrowDown', 40)
+        assert.equal((await state(false)).activeDescendantMatches, true)
+        await key('Enter', 13)
+        const selected = await expectSegments([
+          { kind: 'atom', atom: { type: 'member', agentId: next ? 'pi-member' : 'pipi', labelFallback: next ? '队员甲' : '皮皮' } },
+          { kind: 'text', text: ' ' }
+        ])
+        assert.equal(selected.submitCount, 0)
+      }
+    })
+
     await run('invite layer inserts an outsider Atom without changing the draft until selection', async () => {
       await reset('')
       await evaluate('window.composerTest.includeOutsideMember()')

@@ -5436,12 +5436,14 @@ impl AcpRuntime {
             }
         }
         if model_source == "explicit" && self.host.adapter_kind == AdapterKind::HermesCli {
-            anyhow::ensure!(
-                model_options
-                    .as_object()
-                    .is_some_and(|options| options.is_empty()),
-                "Hermes ACP does not support generic per-Session model options"
-            );
+            let initialize = self.host.initialize_result.read().await.clone();
+            let effort = crate::hermes::reasoning_effort(
+                model_options,
+                initialize
+                    .as_ref()
+                    .and_then(|value| value.pointer("/agentInfo/version"))
+                    .and_then(Value::as_str),
+            )?;
             // Compare native provider forms locally; pass a changed choice intact.
             let current = session_result
                 .as_ref()
@@ -5449,6 +5451,13 @@ impl AcpRuntime {
                 .and_then(Value::as_str);
             if !crate::hermes::model_selection_matches(model, current) {
                 self.set_model(&session_id, model).await?;
+            }
+            // Apply frozen intent after the model even when the model matched.
+            // Native errors use the existing preparation failure path. Replies
+            // are best-effort metadata, not an equality/activation gate.
+            if let Some(effort) = effort {
+                self.set_config_option(&session_id, "reasoning_effort", effort)
+                    .await?;
             }
         } else if model_source == "explicit" {
             if self.host.adapter_kind == AdapterKind::DeepseekHarness {
@@ -14309,7 +14318,89 @@ for line in sys.stdin:
                     Some("session/set_mode"),
                     vec!["session/set_mode"],
                 ),
+                (
+                    "effort-high",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-none",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-default",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-model-default",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-no-echo",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-deferred",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-switch",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/other",
+                    None,
+                    vec!["session/set_model", "session/set_config_option"],
+                ),
+                (
+                    "effort-refused",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    Some("session/set_config_option"),
+                    vec!["session/set_config_option"],
+                ),
             ] {
+                let effort = match case {
+                    "effort-none" => Some("none"),
+                    "effort-default" => Some("default"),
+                    "effort-model-default" => None,
+                    value if value.starts_with("effort-") => Some("high"),
+                    _ => None,
+                };
+                let model_options = effort
+                    .map(|value| json!({"reasoning_effort":value}))
+                    .unwrap_or(json!({}));
                 let root = std::env::temp_dir()
                     .join(format!("rovai-hermes-model-{}", uuid::Uuid::new_v4()));
                 std::fs::create_dir_all(&root).unwrap();
@@ -14329,7 +14420,7 @@ for line in sys.stdin:
                 std::fs::write(
                     executable.with_extension("json"),
                     serde_json::to_vec(&json!({
-                        "session": session, "failure":failure,
+                        "session": session, "failure":failure, "case":case, "version":if case.starts_with("effort-") { "0.23.0" } else { "0.22.4" },
                     }))
                     .unwrap(),
                 )
@@ -14355,9 +14446,11 @@ for line in sys.stdin:
     if method == config['failure']:
         response['error'] = {'code':-32602, 'message':'native configuration refused'}
     elif method == 'initialize':
-        response['result'] = {'protocolVersion':1,'agentInfo':{'version':'0.22.4'},'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
+        response['result'] = {'protocolVersion':1,'agentInfo':{'version':config['version']},'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
     elif method in ('session/new', 'session/resume'):
         response['result'] = config['session']
+    elif method == 'session/set_config_option':
+        response['result'] = {} if config['case'] == 'effort-no-echo' else {'configOptions':[{'id':'reasoning_effort','currentValue':'low' if config['case'] == 'effort-deferred' else 'medium' if params['value'] == 'default' else params['value']}]}
     elif method == 'session/prompt':
         response['result'] = {'stopReason':'end_turn'}
     elif method in ('session/set_model', 'session/set_mode', 'audit/terminal-barrier'):
@@ -14417,7 +14510,7 @@ for line in sys.stdin:
                         },
                         source,
                         target,
-                        &json!({}),
+                        &model_options,
                         &BTreeMap::new(),
                     )
                     .await;
@@ -14463,6 +14556,13 @@ for line in sys.stdin:
                 for request in &requests {
                     if request["method"] == "session/set_model" {
                         assert_eq!(request["params"]["modelId"], target);
+                    }
+                    if request["method"] == "session/set_config_option" {
+                        assert_eq!(request["params"]["configId"], "reasoning_effort");
+                        assert_eq!(
+                            request["params"]["value"].as_str(),
+                            Some(effort.unwrap_or("default"))
+                        );
                     }
                     if request["method"] == "session/set_mode" {
                         assert_eq!(request["params"]["modeId"], "dont_ask");

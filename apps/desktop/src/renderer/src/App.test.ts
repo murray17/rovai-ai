@@ -624,6 +624,7 @@ describe('active Thread event invalidation', () => {
     let snapshot = campOpenProjectionAsSnapshot(projection('running'), null)
     const renderThread = (): string => renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
+      executionAutoOpen: true,
       projectName: null,
       agents: [agentProfile()],
       busy: false,
@@ -2614,8 +2615,8 @@ describe('task event projections', () => {
     }))
     expect(campMarkup).toContain('Quick Chat')
     expect(campMarkup).not.toContain('运行中 1')
-    expect(campMarkup).toContain('待审批 1')
-    expect(campMarkup).toContain('aria-label="待审批 1，定位输入框上方审批"')
+    expect(campMarkup).toContain('待处理 1')
+    expect(campMarkup).toContain('aria-label="待处理 1，定位输入框上方待处理区域"')
     expect(campMarkup).toContain('camp-detail-entry-host')
     expect(campMarkup).not.toContain('topbar-inspector-toggle')
 
@@ -2684,7 +2685,7 @@ describe('task event projections', () => {
 
     expect(markup).toContain('aria-label="快速对话"')
     expect(markup).toContain('class="quick-chat-mark" data-brand-mark="horizon" data-brand-layout="separated"')
-    expect(markup).toContain('data-brand-point="rendezvous"')
+    expect(markup).not.toContain('data-brand-point="rendezvous"')
     expect(markup).toContain('还没有可用的队员')
     expect(markup).not.toContain('Arctic Dawn')
     expect(markup).not.toContain('在晨光里')
@@ -2984,8 +2985,8 @@ describe('task event projections', () => {
   })
 
   it('defines the final unified Thread and Project menu labels', () => {
-    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '删除'])
-    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '删除'])
+    expect(campNavigationMenuLabels(false)).toEqual(['置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
+    expect(campNavigationMenuLabels(true)).toEqual(['取消置顶', '标记未读', '重命名', '复制会话 ID', '导出会话', '删除'])
     expect(projectNavigationMenuLabels(false)).toEqual(['新建对话', '置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
     expect(projectNavigationMenuLabels(true)).toEqual(['新建对话', '取消置顶项目', '重命名', '在 Finder 中显示', '复制项目路径', '移除项目'])
   })
@@ -3062,7 +3063,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('data-brand-mark="horizon"')
     expect(markup).toContain('data-brand-layout="separated"')
-    expect(markup).toContain('data-brand-point="rendezvous"')
+    expect(markup).not.toContain('data-brand-point="rendezvous"')
     expect(markup).toContain('<strong>Rovai AI</strong>')
     expect(markup).toContain('队员')
     expect(markup).toContain('记忆，2 条普通提案待确认')
@@ -4198,6 +4199,7 @@ describe('task event projections', () => {
 
     const workspaceProps: Parameters<typeof ThreadWorkspace>[0] = {
       snapshot: groupedSnapshot,
+      executionAutoOpen: true,
       executionPlacement: 'bottom',
       projectName: 'Rovai',
       agents: [profile],
@@ -4215,6 +4217,11 @@ describe('task event projections', () => {
       onStop: () => undefined
     }
     const markup = renderToStaticMarkup(createElement(ThreadWorkspace, workspaceProps))
+    const manualExecutionMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
+      ...workspaceProps, executionAutoOpen: false
+    }))
+    expect(manualExecutionMarkup).not.toContain('class="execution-drawer execution-drawer-bottom')
+    expect(manualExecutionMarkup).toContain('data-presence-run="run-muwa"')
     const suppressedMissionDrawerMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       ...workspaceProps,
       missionBoard: createElement('section', null, 'Mission board'),
@@ -4421,6 +4428,7 @@ describe('task event projections', () => {
 
     const inspectorMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot: groupedSnapshot,
+      executionAutoOpen: true,
       projectName: 'Rovai',
       agents: [profile],
       busy: false,
@@ -4571,6 +4579,7 @@ describe('task event projections', () => {
 
     const cancellingMarkup = renderToStaticMarkup(createElement(ThreadWorkspace, {
       snapshot,
+      executionAutoOpen: true,
       projectName: 'Rovai',
       agents: [profile],
       liveRuntimeEvents: [],
@@ -5005,13 +5014,13 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
 
-    expect(markup).toContain('aria-label="2 项待审批"')
+    expect(markup).toContain('aria-label="2 项待处理"')
     expect(markup).toContain('洛可 · Codex CLI')
     expect(markup).not.toContain('洛可、沐瓦')
     expect(markup).not.toContain('只允许当前请求。')
     expect(markup).toContain('data-approval-summary')
     expect(markup).toContain('运行 pnpm test')
-    expect(markup).toContain('aria-label="收起审批详情"')
+    expect(markup).toContain('aria-label="收起待处理"')
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('class="approval-card')
     expect((markup.match(/class="camp-detail-entry(?: [^"]*)?"/g) ?? []).length).toBe(4)
@@ -8281,6 +8290,51 @@ describe('task event projections', () => {
     }
   })
 
+  it('shows the current version-read failure in the existing row feedback while retaining the version line', () => {
+    const item = productAvailability('codex-cli', 'ready', {
+      runtimeKind: 'codex-cli', origin: 'environment', phase: 'spawn',
+      code: 'runtime_version_failed', summary: '智能体版本读取失败，请重试检查。',
+      detail: '本轮版本命令已超时。', retryable: true
+    })
+    item.discovery.versionProbeSucceeded = false
+    item.diagnosticCode = 'runtime_version_failed'
+    item.reportedVersion = 'codex-cli 1.0.0'
+    const markup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
+      health: {
+        hostPlatform: 'macos-arm64', runtimeCatalog: [],
+        runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
+        runtimeAvailability: [item],
+        searchEnvironment: {
+          generation: 1, createdAt: '2026-11-09T00:00:00Z', pathEntryCount: 0,
+          shell: { status: 'captured', interactive: true, shellName: 'zsh', entryCount: 0, elapsedMillis: 0 }
+        }
+      },
+      installations: [], onReload: async () => undefined
+    }))
+    expect(markup).toContain('<small title="codex-cli 1.0.0">codex-cli 1.0.0</small>')
+    expect(markup).toContain('class="runtime-guide-feedback is-error" role="alert"')
+    expect(markup).toContain('智能体版本读取失败，请重试检查。')
+    expect(markup).toContain('本轮版本命令已超时。')
+    expect(markup).not.toContain('runtime-failure-notice')
+    expect(markup).not.toContain('上次已知版本')
+    expect(markup).not.toContain('版本未知')
+    item.discovery.versionProbeSucceeded = true
+    const recovered = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
+      health: {
+        hostPlatform: 'macos-arm64', runtimeCatalog: [],
+        runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
+        runtimeAvailability: [item],
+        searchEnvironment: {
+          generation: 1, createdAt: '2026-11-09T00:00:00Z', pathEntryCount: 0,
+          shell: { status: 'captured', interactive: true, shellName: 'zsh', entryCount: 0, elapsedMillis: 0 }
+        }
+      }, installations: [], onReload: async () => undefined
+    }))
+    expect(recovered).not.toContain('智能体版本读取失败，请重试检查。')
+    expect(recovered).not.toContain('本轮版本命令已超时。')
+    expect(recovered).not.toContain('runtime-failure-notice')
+  })
+
   it('renders Windows not-qualified rows without machine checks or rescan actions', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: 'C:\\Users\\test\\AppData\\Local\\Rovai AI' },
@@ -8478,3 +8532,20 @@ function runtimeAdmissionRows(
 const taskCapability = vi.hoisted(() => ({ enabled: true }))
 vi.mock('./TaskCapabilityProvider', () => ({ useTaskCapability: () => taskCapability }))
 afterEach(() => { taskCapability.enabled = true })
+
+
+it('locates native questions by their exact public or private interaction ID', () => {
+  const action: import('@contracts').NotificationActionView = { actionId: 'native', kind: 'open_native_interaction',
+    available: true, threadId: 'thread', agentRunId: 'run', threadTurnId: null, messageId: null,
+    approvalId: null, acknowledgementId: null, observedEpisodeVersion: 0, interactionId: 'question' }
+  expect(notificationFocusMatchesAction({ requestId: 1, kind: 'native_interaction',
+    threadTurnId: null, interactionId: 'question' }, action)).toBe(true)
+  expect(notificationFocusMatchesAction({ requestId: 1, kind: 'native_interaction',
+    threadTurnId: null, interactionId: 'other' }, action)).toBe(false)
+  const privateAction = { ...action, singleChat: { conversationId: 'original-private', agentId: 'agent',
+    agentDisplayName: 'Alice', agentRunId: 'run' } }
+  expect(notificationFocusMatchesAction({ requestId: 2, kind: 'single_chat', threadTurnId: null,
+    conversationId: 'original-private', agentRunId: 'run', interactionId: 'question' }, privateAction)).toBe(true)
+  expect(notificationFocusMatchesAction({ requestId: 2, kind: 'single_chat', threadTurnId: null,
+    conversationId: 'successor-private', agentRunId: 'run', interactionId: 'question' }, privateAction)).toBe(false)
+})

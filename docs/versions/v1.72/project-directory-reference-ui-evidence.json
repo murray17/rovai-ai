@@ -1,0 +1,52 @@
+{
+  "checks": [
+    "Desktop directory selection has no slash, keeps targetKind, uses 480px aligned single-category candidates, publishes and reopens in the file tree",
+    "Desktop chooses a real file, inserts the shared icon and short name, and keeps editing focus",
+    "Desktop quick chat hides Files and Tab/Shift+Tab cycle only Members, Conversations and Missions",
+    "same-name files receive the shortest distinguishing directories",
+    "click opens existing preview with actual file bytes",
+    "native same-root cross-thread paste reissues target identity and persists it",
+    "different-root native paste preserves the atom and marks it for reselection",
+    "Web directory selection has no slash, keeps targetKind, uses 480px aligned single-category candidates, publishes and reopens in the file tree",
+    "authenticated Web uses the same candidate and file atom components",
+    "authenticated Web quick chat hides Files while project conversations retain all four categories",
+    "a valid file alone enables the actual public Composer send action",
+    "delayed candidate confirmation blocks mouse and direct form submission until the correct atom is inserted",
+    "keyboard file-tree action inserts the same atom beside existing content and returns editing focus",
+    "file-tree open and reference resolution share the submission barrier from their first asynchronous operation",
+    "Tab filtering, Enter selection, atomic deletion and native Undo preserve file identity",
+    "Enter on a keyboard-selected file opens its preview",
+    "preview reference action preserves existing input and restores editing focus",
+    "native Chinese composition pauses candidates and commits the complete spaced/hash filename identity",
+    "native input history restores the published file atom and its position",
+    "published file renders and previews; whole-message copy restores a structured file atom",
+    "controlled request-level business and protocol errors have distinct UI states and block sending without claiming a connection failure",
+    "actual send rejects a deleted file, marks its atom, preserves the draft and creates no message or execution",
+    "deferred old success cannot clear a send rejection; a new post-rejection check can confirm the restored file",
+    "narrow touch long-press exposes the full path and 44px actions without opening a preview",
+    "mobile virtualized file candidates keep 44px rows without overlap and scroll the keyboard selection into view"
+  ],
+  "screenshots": [
+    "day-1040.png",
+    "day-1440.png",
+    "day-2560.png",
+    "day-390.png",
+    "night-1040.png",
+    "night-1440.png",
+    "night-2560.png",
+    "night-390.png",
+    "night-touch-details.png",
+    "night-mobile-candidates.png"
+  ],
+  "packaged": true,
+  "realRuntime": false,
+  "sourceRevision": "3ef52b19c6c6d5bb722621440619b695abb33c9b",
+  "scope": "production packaged Desktop and authenticated Web, isolated fixture",
+  "signature": "ad-hoc arm64 verified",
+  "dataContract": {
+    "version": "v1.72",
+    "schema": 172
+  },
+  "command": "node scripts/accept-project-file-references.mjs --packaged",
+  "fixture": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-file-reference-ui-ghVZfc"
+}

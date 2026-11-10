@@ -1,28 +1,57 @@
-import type { ThreadMessageView, StructuredThreadMessageContent, AgentRunImageView } from '@contracts'
+import type { ThreadMessageView, ThreadMemberView, StructuredThreadMessageContent, AgentRunImageView } from '@contracts'
 import DOMPurify from 'dompurify'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
 import type { Root, RootContent } from 'mdast'
 import { uiAttribute } from './interface-language'
+import { projectFileLink } from './project-file-reference'
+import { projectReference } from './thread-reference'
 
 export type MessageExportFormat = 'html' | 'png' | 'markdown'
 export type MessageExportOptions = { avatars: boolean; authors: boolean; times: boolean; recipients: boolean }
 export const defaultMessageExportOptions = (format: MessageExportFormat): MessageExportOptions => ({
   avatars: format !== 'markdown', authors: true, times: true, recipients: true
 })
-export function defaultMessageExportTitle(sourceTitle: string): string {
+export function defaultMessageExportTitle(sourceTitle: string, scope: 'selected' | 'conversation' = 'selected'): string {
   const characters = Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(sourceTitle.trim()), part => part.segment)
   const source = characters.length > 40 ? characters.slice(0, 40).join('').trimEnd() + '…' : characters.join('')
+  if (scope === 'conversation') return source || uiAttribute('未命名会话')
   return source ? source + ' · ' + uiAttribute('会话片段') : uiAttribute('会话片段')
 }
 export type MessageExportEntry = {
   message: ThreadMessageView; author: string; avatarRef: string | null; recipients: string[]
-  markdown: string; reply: string | null; excerpt?: string; runtimeImages?: AgentRunImageView[]; avatarDataUrl?: string | null
+  markdown: string; reply: string | null; runtimeImages?: AgentRunImageView[]; avatarDataUrl?: string | null
   /** Frozen adjacency from the source timeline; never inferred from selected entries. */
   nextGroupedMessageId?: string | null
 }
 export function exportEntryShowsTime(entry: MessageExportEntry, next?: MessageExportEntry): boolean {
-  return entry.excerpt !== undefined || !next || next.excerpt !== undefined || entry.nextGroupedMessageId !== next.message.id
+  return !next || entry.nextGroupedMessageId !== next.message.id
+}
+export function campMessageAuthorLabel(message: ThreadMessageView, memberById: ReadonlyMap<string, ThreadMemberView>, currentUserName: string): string {
+  // Channel admission is Owner-only; this label does not change the stored author.
+  if (message.authorType === 'user' || message.authorType === 'external_principal') return currentUserName
+  if (message.authorType === 'system') return uiAttribute('系统')
+  return memberById.get(message.authorId)?.displayName ?? message.authorId
+}
+export function createMessageExportEntry(message: ThreadMessageView, context: {
+  memberById: ReadonlyMap<string, ThreadMemberView>; names: ReadonlyMap<string, string>
+  currentUserName: string; avatarDataUrl: string | null; parent?: ThreadMessageView | null
+  nextGroupedMessageId: string | null; runtimeImages: AgentRunImageView[]
+}): MessageExportEntry {
+  const { memberById, names, currentUserName, parent } = context
+  const quoted = (message.quotes ?? []).map(q => `${q.authorAtCapture?.displayName ?? ''}：${q.text}`)
+  const reply = message.replyToThreadMessageId
+    ? parent && !parent.withdrawn
+      ? `${uiAttribute('回复')} ${campMessageAuthorLabel(parent, memberById, currentUserName)} · ${staticReferenceMarkdown(exportMessageMarkdown(parent.body, parent.content, names, currentUserName)).replace(/\\([\\`*_{}\[\]()<>#+.!|~-])/g, '$1').slice(0, 240)}`
+      : uiAttribute('引用的消息当前不可用')
+    : ''
+  return { message: structuredClone(message), author: campMessageAuthorLabel(message, memberById, currentUserName),
+    avatarRef: memberById.get(message.authorId)?.avatarRef ?? null,
+    avatarDataUrl: message.authorType === 'user' ? context.avatarDataUrl : null,
+    recipients: message.addressedAgentIds.map(id => names.get(id) ?? uiAttribute('不可用队员')),
+    markdown: exportMessageMarkdown(message.body, message.content, names, currentUserName),
+    reply: [reply, ...quoted].filter(Boolean).join('\n') || null,
+    nextGroupedMessageId: context.nextGroupedMessageId, runtimeImages: context.runtimeImages }
 }
 export function exportableMessages(messages: readonly ThreadMessageView[]): ThreadMessageView[] {
   return messages.filter(m => !m.withdrawn && !m.id.startsWith('optimistic:') && !m.missionStart
@@ -38,13 +67,15 @@ export function toggleExportSelection(ids: ReadonlySet<string>, messages: readon
 }
 export const literalMarkdown = (text: string): string => text.replace(/([\\`*_{}\[\]()<>#+.!|~-])/g, '\\$1')
 const markdownParser = unified().use(remarkParse)
-/** Project internal/file links as text without rewriting fences or ordinary web links. */
-function staticReferenceMarkdown(source: string): string {
+/** Preserve published reference projections; flatten other internal/file links without rewriting code or web links. */
+function staticReferenceMarkdown(source: string, publishedReferences?: ReadonlySet<string>): string {
   const tree = markdownParser.parse(source) as Root
   const definitions = new Map(tree.children.flatMap(n => n.type === 'definition' ? [[n.identifier, n.url]] as const : []))
   const edits: { from: number; to: number; text: string }[] = []
   const label = (node: RootContent): string => 'children' in node ? node.children.map(child => label(child as RootContent)).join('') : 'value' in node ? node.value : 'alt' in node ? node.alt ?? '' : ''
   const visit = (node: RootContent): void => {
+    if (node.type === 'link' && node.position?.start.offset !== undefined && node.position.end.offset !== undefined
+      && publishedReferences?.has(source.slice(node.position.start.offset, node.position.end.offset))) return
     const url = node.type === 'link' || node.type === 'definition' ? node.url : node.type === 'linkReference' || node.type === 'imageReference' ? definitions.get(node.identifier) : undefined
     if (url !== undefined && !/^https?:\/\//i.test(url) && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
       edits.push({ from: node.position.start.offset, to: node.position.end.offset, text: node.type === 'definition' ? '' : literalMarkdown(node.type === 'imageReference' ? `图片：${node.alt ?? ''}（${url}）` : label(node)) })
@@ -56,25 +87,30 @@ function staticReferenceMarkdown(source: string): string {
 }
 export function exportMessageMarkdown(body: string, content: StructuredThreadMessageContent | null, names: ReadonlyMap<string, string>, currentUser: string): string {
   if (!content?.length) return staticReferenceMarkdown(body)
+  const publishedReferences = new Set<string>()
   return staticReferenceMarkdown(content.map(s => {
     if (s.kind === 'text') return s.text
     if (s.kind === 'member_mention') return literalMarkdown('@' + (names.get(s.agentId) ?? '不可用队员'))
     if (s.kind === 'current_user_mention') return literalMarkdown('@' + currentUser)
     if (s.kind === 'all_members_mention') return '@所有队员'
+    if (s.kind === 'project_file_reference' || s.kind === 'thread_reference' || s.kind === 'mission_reference') {
+      const link = s.kind === 'project_file_reference' ? projectFileLink(s) : projectReference(s)
+      publishedReferences.add(link)
+      return link
+    }
     if (s.kind === 'skill_mention') return literalMarkdown('/' + s.nameAtSend)
-    if (s.kind === 'thread_reference' || s.kind === 'mission_reference') return literalMarkdown(s.titleAtSend)
     return '> ' + literalMarkdown(s.senderDisplayName + '：' + s.body).replaceAll('\n', '\n> ')
       + s.attachmentSummaries.map(a => '\n> ' + literalMarkdown(a.name)).join('')
-  }).join(''))
+  }).join(''), publishedReferences)
 }
 export function messageExportMarkdown(title: string, entries: readonly MessageExportEntry[], options: MessageExportOptions): string {
   return '# ' + literalMarkdown(title) + '\n\n' + entries.map(e => {
     const heading = [options.authors ? e.author : '', options.times ? e.message.createdAt : ''].filter(Boolean).join(' · ')
-    const attachments = e.excerpt !== undefined ? [] : e.message.attachments.map(a => literalMarkdown(
+    const attachments = e.message.attachments.map(a => literalMarkdown(
       `${a.previewKind === 'image' ? '图片' : '附件'}：${a.displayName}（${a.mediaType ?? a.kind}${a.byteSize !== null ? `，${a.byteSize} bytes` : ''}）`))
-    return [heading ? '### ' + literalMarkdown(heading) : '', e.excerpt !== undefined ? literalMarkdown(e.excerpt) : e.reply ? '> ' + literalMarkdown(e.reply).replaceAll('\n', '\n> ') : '',
-      e.excerpt === undefined ? e.markdown : '', ...attachments, ...(e.excerpt === undefined ? (e.runtimeImages ?? []).map(a => literalMarkdown(`图片：${a.displayName}（${a.mediaType}，${a.byteSize} bytes）`)) : []),
-      e.excerpt === undefined && options.recipients && e.recipients.length ? '发送给 ' + e.recipients.map(n => literalMarkdown('@' + n)).join('、') : ''
+    return [heading ? '### ' + literalMarkdown(heading) : '', e.reply ? '> ' + literalMarkdown(e.reply).replaceAll('\n', '\n> ') : '',
+      e.markdown, ...attachments, ...(e.runtimeImages ?? []).map(a => literalMarkdown(`图片：${a.displayName}（${a.mediaType}，${a.byteSize} bytes）`)),
+      options.recipients && e.recipients.length ? '发送给 ' + e.recipients.map(n => literalMarkdown('@' + n)).join('、') : ''
     ].filter(Boolean).join('\n\n')
   }).join('\n\n---\n\n') + '\n'
 }

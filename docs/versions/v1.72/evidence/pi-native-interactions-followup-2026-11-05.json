@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "d04690d751947df42a6c4406356c5b1193bc4f8e",
+  "branch": "rovai/pi-native-interactions",
+  "platform": {
+    "system": "Darwin",
+    "machine": "arm64"
+  },
+  "fixes": [
+    "Web admits different interaction IDs concurrently; duplicate IDs remain blocked. Explicit pre-dispatch/admission failures keep drafts and restore actions; uncertain submissions remain fenced.",
+    "Draft storage and cleanup share the same public or private-conversation scope, including the outer public cleanup and ApprovalDock. Reload and remount preserve unrelated drafts.",
+    "Pi confirm/select/input timeout: 0 has no deadline. Positive deadlines retain the existing expiry and late-answer handling."
+  ],
+  "native": {
+    "ok": true,
+    "version": "1.1.0",
+    "plugin": {
+      "name": "@juicesharp/rpiv-ask-user-question",
+      "version": "2.15.0"
+    },
+    "fixture": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-pi-native-interactions-LQzH49",
+    "externalModelCalls": 0,
+    "reports": [
+      {
+        "name": "installed ask_user_question: single/custom and multi text via actual native RPC",
+        "passed": true
+      },
+      {
+        "name": "four methods, zero timeout, native continuation, exact text, blank, skip, duplicate and epoch fencing",
+        "passed": true
+      },
+      {
+        "name": "same member concurrent native requests",
+        "passed": true
+      },
+      {
+        "name": "private questions isolated from the public queue",
+        "passed": true
+      },
+      {
+        "name": "native timeout and late answer",
+        "passed": true
+      },
+      {
+        "name": "two members, stop releases native waits, late answers fenced",
+        "passed": true,
+        "runs": [
+          "be0bd5da-ec0e-4e71-92d2-c64911468722",
+          "d57c438e-ddb5-483f-8479-e24620d592e1"
+        ]
+      }
+    ]
+  },
+  "validation": [
+    {
+      "command": "cargo test --workspace",
+      "status": "passed",
+      "passed": 484,
+      "ignored": 1
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib pi::",
+      "status": "passed",
+      "passed": 25,
+      "ignored": 1
+    },
+    {
+      "command": "TZ=UTC pnpm test",
+      "status": "passed",
+      "vitestFiles": 270,
+      "vitestPassed": 3132,
+      "vitestSkipped": 2,
+      "nodePassed": 377,
+      "nodeSkipped": 2
+    },
+    {
+      "command": "ROVAI_KEEP_APPROVAL_FIXTURE=1 pnpm test:approval-dock",
+      "status": "passed",
+      "fixture": "/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-approval-dock-test-TErnwu",
+      "cases": [
+        "known pre-dispatch rejection remains retryable",
+        "unknown response and thrown transport errors remain fenced",
+        "public/private cleanup and remount preserve drafts",
+        "two members submit independently while the first response is deferred",
+        "existing shared approval/question, text, deadline and layout regressions"
+      ]
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "status": "passed"
+    },
+    {
+      "command": "cargo build -p rovai-core --bins",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test:desktop-bridge",
+      "status": "passed"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "status": "passed"
+    }
+  ],
+  "boundaries": [
+    "Real Core/Pi RPC and installed rpiv 2.15.0 plugin; controlled local provider with zero external model calls. Native acceptance is separate from production UI acceptance with a controlled transport.",
+    "No queue, scheduler, recovery service, new storage layer, Core answer protocol change or default timeout was added.",
+    "This follow-up preserves the original implementation evidence and does not claim its first test pass covered these three regressions."
+  ],
+  "sourceSha256": {
+    "apps/web/src/client.ts": "1223fe686938bca3c3ee30ff27ef8a0a95ed3b711dbfa76d7139f537212ac999",
+    "apps/web/src/client-recovery.test.ts": "0fab2b08bfc3d921145455064fd956196c244399b1186c669247f8b85b67009b",
+    "apps/desktop/src/renderer/src/native-interaction-drafts.ts": "48b133a900d9387bd061482bbac58f9272fc7514e6456f5461d6d71dba49b28a",
+    "apps/desktop/src/renderer/src/native-interaction-drafts.test.ts": "0421fb040f569461f538e56fab9d4fff1912e4646bb2b4bedaf1e768b56dab18",
+    "apps/desktop/src/renderer/src/ThreadWorkspace.tsx": "be3b25fea64fd7618d20900b7af9eafc2ab890d44ca63659ab5b67dac06e8ba0",
+    "apps/desktop/src/renderer/src/SingleChatPanel.tsx": "30a61d576640d0fb325248dbecd367ce29ef75f9a9905035dd7fe79ccb5fcee0",
+    "crates/rovai-core/src/pi/interactions.rs": "58f2659aa171443d940416dcc40d2ac8cc3b6f1bd65430b871129f449c6a722a",
+    "crates/rovai-core/src/pi.rs": "0887b462507e28fd8ad95285c64e75844c097c8ab83ba7a5d5b75b1750475a74",
+    "scripts/fixtures/approval-dock/renderer.tsx": "0cbaff7bd1d0fdc1280be8bafd241a0426f058668ab324bf98d914e391bcedde",
+    "scripts/fixtures/approval-dock/main.cjs": "1be4911a716588e5f70405a1cea7dfeb50938ca469f692d3a982814479f77663",
+    "scripts/fixtures/pi-native-interactions/probe.ts": "9b3c0d14e84d84629c04c799f3ff20f72926185e89d22f4d2dfe12019aefe48a",
+    "scripts/smoke-pi-native-interactions.mjs": "0c0bddd77e92d1862a55e9c4774b3d0935a29c1750f9b1c212484cc5335f3cf9"
+  }
+}

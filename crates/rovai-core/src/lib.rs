@@ -12,8 +12,10 @@ mod codex;
 pub mod command_code_acp;
 mod health;
 pub mod hermes;
+pub mod native_interaction;
 mod opencode_compat;
 mod pi;
+mod reference_markdown;
 mod runtime_fleet;
 mod runtime_mcp;
 
@@ -106,6 +108,7 @@ pub mod notification;
 pub mod pending_thread_draft;
 pub mod planned_shutdown;
 pub mod platform;
+pub mod project_file_reference;
 pub mod project_files;
 pub mod read_model;
 pub mod run_continuation;

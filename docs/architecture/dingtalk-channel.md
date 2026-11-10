@@ -3,10 +3,15 @@ document_type: architecture
 architecture: dingtalk-channel
 authority: dingtalk-channel-component-and-authority-boundaries
 status: accepted
-last_updated: 2026-10-13
+last_updated: 2026-11-08
 ---
 
 # 钉钉渠道架构
+
+Pi 原生问答完成后，既有 Outbox 更新原卡，消费 Core 保存的问题与首次成功答案的有限预览。
+公共正文与操作者私有提示使用相同结果文本，避免清理错误时退回仅有“已发送”。继续使用现有官方 Form 模板，
+其描述最多两行，不能视为与飞书/Lark 相同的多行展示。精确行为见
+[Native Interactions v1](../contracts/native-interactions-v1.md#钉钉只读结果卡)。
 
 字段、状态、Renderer 管理入口和恢复合同见 [DingTalk Channel v14](../contracts/dingtalk-channel-v14.md)，当前异步入站/外发语义见
 [Channel Message Bridge v1](../contracts/channel-message-bridge-v1.md)，credential 与 Developer Session 持久化见
@@ -26,6 +31,12 @@ last_updated: 2026-10-13
 [V1.38-D02](../versions/v1.38/decisions.md#v1-38-d02)。
 
 ## 组件与权威
+
+Pi 问答接入既有 App/Stream 与 ChannelDelivery，不引入 DWS、个人 OAuth 或专属问卷服务。
+Core 复用 [Native Interactions v1](../contracts/native-interactions-v1.md#渠道投影与答复)的 Owner、卡片、Run/epoch
+与答案校验；Main 只转换平台卡片/回调。每条原生请求独立创建 outTrackId，不将后续 input 关联到旧选项或
+刷新旧卡展示新题。单选使用官方 Form 的平铺 `CHECKBOX_GROUP`。模板适用企业范围和真实客户端表单仍需独立验收，
+当前候选及限制见[渠道实施记录](../versions/v1.72/pi-native-channel-interactions.md)。
 
 ```text
 Renderer 渠道设置

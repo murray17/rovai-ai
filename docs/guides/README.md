@@ -1,7 +1,7 @@
 ---
 document_type: user-guide
 authority: user-guide-routing
-last_updated: 2026-09-29
+last_updated: 2026-11-07
 ---
 
 # 用户指南
@@ -15,6 +15,7 @@ last_updated: 2026-09-29
 | 完成第一次任务 | [快速开始](https://rovai.dev/zh/docs/quickstart.html) |
 | 配置队员、智能体和模型 | [队员管理](https://rovai.dev/zh/docs/members.html) · [智能体与模型配置](https://rovai.dev/zh/docs/agents.html) |
 | 组织协作、查看执行与文件 | [多队员协作与交接](https://rovai.dev/zh/docs/collaboration.html) · [执行台](https://rovai.dev/zh/docs/execution.html) · [文件预览与变更](https://rovai.dev/zh/docs/files.html) |
+| 在问题中引用项目文件或文件夹 | [输入、复制与恢复引用](operations.md#引用项目文件与文件夹) |
 | 持续推进和积累工作 | [使命板](https://rovai.dev/zh/docs/missions.html) · [定时任务](https://rovai.dev/zh/docs/automations.html) · [记忆](https://rovai.dev/zh/docs/memory.html) |
 | 扩展工具与连接渠道 | [Skills](https://rovai.dev/zh/docs/skills.html) · [MCP](https://rovai.dev/zh/docs/mcp.html) · [渠道](https://rovai.dev/zh/docs/channels.html) |
 | 用浏览器连接桌面端或部署独立 Server | [部署与远程访问](https://rovai.dev/zh/docs/remote.html) |

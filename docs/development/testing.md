@@ -154,6 +154,19 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 
 ## Rust 测试准入与退役门槛
 
+Hermes 思考强度扩展已有 `model_selection_matches_native_provider_forms_without_suffix_matching`、
+`grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs` 与
+`real_acp_session_model_selection_respects_native_adapter_boundaries` owners，不新增 Rust 测试函数。
+纯函数覆盖已知旧 ACP、字段形状及无目录值；原有协议进程 fixture 覆盖 new/cold resume、同模型
+设置、模型后设置、通用默认在适配器内转换为 default、none、拒绝、缺回显和延后回显不阻断。最小命令：
+`cargo test -p rovai-core --lib hermes::`、
+`cargo test -p rovai-core --features extended-tests --lib grouped_acp_models`、
+`cargo test -p rovai-core --features extended-tests --lib real_acp_session_model_selection`。
+官方端到端入口 `node scripts/smoke-hermes-reasoning-effort.mjs <official-source> <prepared-python>`
+使用隔离用户 Home/Profile/Gateway 与生产 Core/CLI；追加 `--legacy` 验旧 ACP 无覆盖可用且有覆盖
+不提交任务，追加 `--real-model` 使用已授权 Responses Provider。Provider 参数断言与 ACP observer
+均仅存在于验收脚本，不进入生产执行。实际版本及覆盖见[Hermes 研究记录](../research/hermes-runtime/README.md)。
+
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess
 根进程清理均扩展原 owner；迁移/历史读取仍保留。原私有 Home controller、维护 CLI 与其专属测试
 随生产路径删除，不保留失效的 smoke 入口。完整退役与 successor 见 [测试归属](../research/hermes-runtime/README.md#rust-测试归属)。
@@ -201,6 +214,33 @@ Main dispatcher 传递沿用既有 User Automation 测试；模型投影和持�
 `pnpm exec vitest run apps/desktop/src/main/user-automation.test.ts`，再运行默认 workspace 回归。
 
 ### 单项 Runtime 检查减重
+
+2026-11-09 安装／版本与目录职责分离扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses`、
+`codex_catalog_waiters_share_refresh_without_satisfying_full_validation`、Pi 观察及目录缓存 owners，覆盖单项仅执行版本、
+首次无健康快照的目录读写、历史失败保留与反馈隔离、同用途合并及身份失效。原
+`catalog_refresh_requires_current_full_acp_evidence` 随健康前置条件、
+`later_success_supersedes_an_older_failed_attempt_for_every_runtime` 随检测页历史错误回填一同退役；
+上述进程／SQL owners 承接实际反例，不为已删除的回填谓词保留平行断言；
+完整 Probe 的认证、能力、早期版本保存和并发写回 owners 保留。Renderer 复用 `MemberRuntimeParameters` 与
+`runtime-model-picker`，覆盖可见目标加载、隐藏区域零查询、缓存复用和迟到响应，不新增 Rust 测试函数或测试文件。
+最低命令为 `cargo test -p rovai-core --features slow-tests --lib` 的上述 owners、默认 workspace，及
+`pnpm test:runtime-model-picker`、相关 Vitest、typecheck 和文档门禁。
+
+主动版本刷新扩展既有 `manual_rescan_reads_versions_and_discards_replaced_version_responses` owner，保留入口替换、
+被动零查询和健康失败记录边界，改为每轮主动重扫读取版本，并覆盖脚本／指纹不变时升级与读取失败的公开投影。
+新增 `full_probe_saves_version_before_connection_and_cancellation`，复用私有 Core／DB 与合成程序夹具，验证版本
+先于连接提交、取消完整检查 future 后仍可读取、同一轮只查询一次且不推进健康成功时间。纯 reader 不能证明
+事务与公开投影，归入既有 `slow-tests` 路由；最小命令为
+`cargo test -p rovai-core --features slow-tests --lib runtime_check_environment::tests::`。无真实 Runtime 或模型调用。
+并行重扫的版本保留由 `full_check_finishes_without_overwriting_a_later_rescan_version` 拥有：合成 ACP 在
+连接阶段阻塞，脚本与指纹不变时重扫读取新版，再分别以健康成功／失败收尾；需要现有私有 Core、DB 与 Manager
+证明事务和公开投影，纯 reader 不能覆盖。既有重扫 owner 同时验证读取恢复后的双来源诊断投影及其他失败保留；
+既有并发合并／Supervisor owners 扩展首次安装目标同步与超时记录，不删除原未知目标、身份漂移或配置变化反例。
+候选入口回归继续扩展 `full_probe_saves_version_before_connection_and_cancellation`，不增加 Rust owner：
+Codex／Claude 合成入口分别覆盖已有选中安装、已有回退安装和首次安装；连接／能力阶段阻塞替代候选，
+确认其版本不会提前改写安装、公开版本或产生成功迁移审计，失败后仍保留选中入口及对应诊断。
+另以合成 ACP 验证候选真正准入后仍提交并展示自己的版本，同一轮每个候选的版本只查询一次。
+私有 Core／DB／Manager 和进程屏障拥有实际写回，纯选择谓词无法覆盖；最小命令沿用上面的 `slow-tests` 路由。
 
 Issue #997 扩展既有 `windows_command_shim_content_changes_compatibility_fingerprint`，通过真实发现入口
 验证 npm/pnpm 包升级但包装脚本内容和文件属性不变、旧证据拒收、重复发现身份稳定及损坏 manifest/bin
@@ -1762,10 +1802,10 @@ version/auth 零调用及一次正文/零重放。Codex 既有真实 Host owner 
 `cargo test -p rovai-core --features slow-tests --lib dsh_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`。
 
 现有 Core 检查队列 owner `codex_catalog_waiters_share_refresh_without_satisfying_full_validation` 验证其他
-Runtime 的合并与检查强度不变；DSH 原生计数和配置变更屏障进入既有
+Runtime 的同用途合并与目录／完整检查隔离；DSH 原生计数和配置变更屏障进入既有
 `scripts/smoke-dsh-model-availability.mjs`，使用合成凭据和本地接收服务。60 秒过期场景仅在隔离数据库
 将对应成功时间调旧，不通过睡眠拖慢验收，不修改日常数据库。生产参数控件继续由
-`node --test scripts/lib/runtime-model-picker.test.mjs` 验证默认模型零查询、历史显示及迟到结果保护。
+`node --test scripts/lib/runtime-model-picker.test.mjs` 验证可见区域按需读取目录、默认模型不额外查询逐模型参数、历史显示及迟到结果保护。
 
 ## 原生会话恢复 owner（2026-10-12）
 

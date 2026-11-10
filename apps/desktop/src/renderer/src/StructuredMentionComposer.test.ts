@@ -10,12 +10,13 @@ import {
   shouldSubmitStructuredComposerOnEnter,
   structuredMentionMemberDescription,
   structuredMentionOptions,
-  structuredSkillOptions
+  structuredSkillOptions,
+  type StructuredMentionMember
 } from './StructuredMentionComposer'
 import { composerTypeaheadEnterAction } from './ComposerTypeaheadPlugin'
 import { RovaiComposerExtension } from './RovaiComposerExtension'
 import type { ComposerSkillOption } from './composer-skill-picker'
-import type { GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
+import type { AdapterKind, GeneralPreferencesApi, InterfaceLanguage } from '@contracts'
 import { changeInterfaceLanguage } from './interface-language'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
 
@@ -43,6 +44,116 @@ const skills: ComposerSkillOption[] = [{
   description: '管理并行工作树',
   origin: 'official'
 }]
+
+const memberIds = (catalog: StructuredMentionMember[], query: string, inviteLayer = false): string[] =>
+  structuredMentionOptions(catalog, query, inviteLayer)
+    .flatMap(option => option.kind === 'member' ? [option.member.agentId] : [])
+
+describe('member lookup by intelligent agent and relevance', () => {
+  it.each<[AdapterKind, string[]]>([
+    ['codex-cli', ['codex', 'codexcli']],
+    ['claude-code-cli', ['claude', 'claudecode']],
+    ['copilot-cli', ['copilot', 'githubcopilot']],
+    ['opencode-cli', ['opencode']], ['kiro-cli', ['kiro']],
+    ['qoder-cli', ['qoder']], ['codebuddy-cli', ['codebuddy']],
+    ['qwen-code', ['qwen', 'qwencode']], ['trae-cn-cli', ['trae', 'traecli']],
+    ['kimi-code-cli', ['kimi', 'kimicode']], ['minimax-code-cli', ['minimax', 'minimaxcode']],
+    ['hermes-cli', ['hermes', 'hermesagent']], ['grok-build', ['grok', 'grokbuild']],
+    ['deepseek-harness', ['deepseek', 'deepseekharness', 'dsh']],
+    ['command-code-cli', ['command', 'commandcode']],
+    ['zcode-app', ['zcode']], ['antigravity-app', ['antigravity']], ['pi', ['pi']]
+  ])('finds %s members by the approved product names and aliases', (runtimeKind, queries) => {
+    const catalog = [{ ...members[0], runtimeKind }, members[1]]
+    for (const query of queries) expect(memberIds(catalog, query)).toEqual(['agent_1'])
+  })
+
+  it('normalizes product names and aliases without searching arbitrary substrings or models', () => {
+    const catalog: StructuredMentionMember[] = [
+      { ...members[0], runtimeKind: 'command-code-cli' },
+      { ...members[1], runtimeKind: 'claude-code-cli' },
+      { agentId: 'open', displayName: '队员甲', teamRole: '', runtimeKind: 'opencode-cli',
+        runtimeLabel: 'Claude Code', modelLabel: 'Claude Sonnet' }
+    ]
+    expect(memberIds(catalog, 'com')).toEqual(['agent_1'])
+    expect(memberIds(catalog, 'COMMAND-CODE')).toEqual(['agent_1'])
+    expect(memberIds(catalog, 'command_code')).toEqual(['agent_1'])
+    expect(memberIds(catalog, 'ｃｌａｕｄｅ')).toEqual(['agent_2'])
+    expect(memberIds(catalog, 'Claude-Code')).toEqual(['agent_2'])
+    expect(memberIds(catalog, 'claude_code')).toEqual(['agent_2'])
+    expect(memberIds(catalog, 'cmd')).toEqual([])
+    expect(memberIds(catalog, 'code')).toEqual([])
+    expect(memberIds(catalog, 'sonnet')).toEqual([])
+    expect(memberIds(catalog, '---')).toEqual([])
+    expect(memberIds(catalog, 'opencode')).toEqual(['open'])
+  })
+
+  it('puts exact and leading pinyin names before PI, then fuzzy names and roles', () => {
+    const catalog: StructuredMentionMember[] = [
+      { agentId: 'role', displayName: '队员甲', teamRole: 'PI 专家' },
+      { agentId: 'fuzzy', displayName: 'Capri', teamRole: '' },
+      { agentId: 'runtime-a', displayName: '队员乙', teamRole: '', runtimeKind: 'pi' },
+      { agentId: 'runtime-b', displayName: '队员丙', teamRole: '', runtimeKind: 'pi' },
+      { agentId: 'pinyin-prefix', displayName: '皮皮', teamRole: '', runtimeKind: 'pi' },
+      { agentId: 'name-exact', displayName: 'PI', teamRole: '' }
+    ]
+    expect(memberIds(catalog, 'pi')).toEqual([
+      'name-exact', 'pinyin-prefix', 'runtime-a', 'runtime-b', 'fuzzy', 'role'
+    ])
+    expect(memberIds(catalog, 'pipi')).toEqual(['pinyin-prefix'])
+    expect(memberIds(catalog, 'pp')).toEqual(['pinyin-prefix'])
+  })
+
+  it('ranks all Runtime prefixes before fuzzy names while keeping catalog order for ties', () => {
+    const catalog: StructuredMentionMember[] = [
+      { agentId: 'role', displayName: '队员甲', teamRole: 'co' },
+      { agentId: 'fuzzy', displayName: 'Draco', teamRole: '' },
+      ...(['codex-cli', 'copilot-cli', 'codebuddy-cli', 'command-code-cli'] as const)
+        .map((runtimeKind, index) => ({ ...members[0], agentId: `runtime-${index}`, runtimeKind }))
+    ]
+    expect(memberIds(catalog, 'co')).toEqual(['runtime-0', 'runtime-1', 'runtime-2', 'runtime-3', 'fuzzy', 'role'])
+  })
+
+  it('keeps Thread membership ahead of relevance and filters unavailable members in both layers', () => {
+    const catalog: StructuredMentionMember[] = [
+      { agentId: 'outside-exact', displayName: 'PI', teamRole: '', inThread: false },
+      { agentId: 'outside-prefix', displayName: '皮皮', teamRole: '', inThread: false },
+      { agentId: 'hidden', displayName: 'PI', teamRole: '', runtimeKind: 'pi', mentionable: false },
+      { agentId: 'inside', displayName: '队员甲', teamRole: '', runtimeKind: 'pi' },
+      { agentId: 'outside-runtime', displayName: '队员乙', teamRole: '', runtimeKind: 'pi', inThread: false }
+    ]
+    expect(memberIds(catalog, 'pi')).toEqual(['inside', 'outside-exact', 'outside-prefix', 'outside-runtime'])
+    expect(memberIds(catalog, 'pi', true)).toEqual(['outside-exact', 'outside-prefix', 'outside-runtime'])
+    expect(structuredMentionOptions(catalog, 'pi', false, false))
+      .toEqual(structuredMentionOptions(catalog, 'pi'))
+  })
+
+  it('deduplicates by identity after membership and relevance, retaining distinct same-name members', () => {
+    const inside = { ...members[0], displayName: '皮皮', runtimeKind: 'pi' as const }
+    const catalog = [
+      { ...inside, inThread: false }, inside, inside,
+      { ...inside, agentId: 'same-name' }
+    ]
+    expect(memberIds(catalog, 'pi')).toEqual(['agent_1', 'same-name'])
+    expect(structuredMentionOptions(catalog, 'pi')[0]).toEqual({ kind: 'member', member: inside })
+  })
+
+  it('sorts before truncation and preserves the invitation quota for Runtime searches', () => {
+    const catalog: StructuredMentionMember[] = [
+      ...Array.from({ length: 55 }, (_, i) => ({
+        agentId: `in-${i}`, displayName: '队员甲', teamRole: '', runtimeKind: 'pi' as const
+      })),
+      { agentId: 'name', displayName: '皮皮', teamRole: '' },
+      ...Array.from({ length: 55 }, (_, i) => ({
+        agentId: `out-${i}`, displayName: '队员乙', teamRole: '', runtimeKind: 'pi' as const, inThread: false
+      }))
+    ]
+    const result = memberIds(catalog, 'pi')
+    expect(result).toHaveLength(50)
+    expect(result.slice(0, 40)).toEqual(['name', ...catalog.slice(0, 39).map(member => member.agentId)])
+    expect(result.slice(40)).toEqual(Array.from({ length: 10 }, (_, i) => `out-${i}`))
+    expect(memberIds(catalog, 'pi', true)).toHaveLength(49)
+  })
+})
 
 describe('StructuredMentionComposer V2', () => {
   const preferences = languageTestApi

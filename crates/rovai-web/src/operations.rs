@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 /// and the legacy shared draft remain outside the network capability.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub enum Operation {
+    #[serde(rename = "projectFileReferences.resolve")]
+    ProjectFileReferencesResolve,
     #[serde(rename = "projectFiles.request")]
     ProjectFiles,
     #[serde(rename = "missions.workspace.cleanup")]
@@ -78,6 +80,8 @@ pub enum Operation {
     CampFastCheck,
     #[serde(rename = "threads.members.fast.set", alias = "camps.members.fast.set")]
     CampFastSet,
+    #[serde(rename = "members.presence.set")]
+    MemberPresenceSet,
     #[serde(rename = "members.removalPreview")]
     MemberRemovalPreview,
     #[serde(rename = "members.remove")]
@@ -86,6 +90,8 @@ pub enum Operation {
     MemberReorder,
     #[serde(rename = "runtime.subsystems.retry")]
     SubsystemRetry,
+    #[serde(rename = "nativeInteractions.notifications")]
+    NativeInteractionNotifications,
     #[serde(rename = "notifications.inbox")]
     NotificationInbox,
     #[serde(rename = "notifications.changesSince")]
@@ -319,6 +325,8 @@ pub enum Operation {
     WithdrawMessage,
     #[serde(rename = "action.approvals.resolve")]
     Approval,
+    #[serde(rename = "nativeInteractions.respond")]
+    NativeInteraction,
     #[serde(rename = "agentRuns.cancel")]
     CancelRun,
     #[serde(rename = "agentRuns.continue")]
@@ -379,7 +387,7 @@ pub enum Operation {
 impl Operation {
     pub fn timeout(self) -> std::time::Duration {
         std::time::Duration::from_secs(match self {
-            Self::ProjectFiles => 30,
+            Self::ProjectFileReferencesResolve | Self::ProjectFiles => 30,
             Self::MissionCleanupRetry
             | Self::MissionChanges
             | Self::MissionFileDiff
@@ -395,7 +403,9 @@ impl Operation {
     pub fn project(self, mut value: serde_json::Value) -> serde_json::Value {
         use serde_json::json;
         match self {
-            Self::AppInfo => json!({"name":value["name"],"version":value["version"]}),
+            Self::AppInfo => {
+                json!({"name":value["name"],"version":value["version"],"composerProjectFileReferenceVersion":value["composerProjectFileReferenceVersion"]})
+            }
             // Core owns credential redaction and digest-CAS. These projections
             // admit the fields used by the shared editor, never future fields.
             Self::Mcp | Self::McpRepair => project_mcp_config(value),
@@ -447,6 +457,7 @@ impl Operation {
 
     pub fn method(self) -> &'static str {
         match self {
+            Self::ProjectFileReferencesResolve => "projectFileReferences.resolve",
             Self::ProjectFiles => "projectFiles.request",
             Self::TasksGet => "preferences.tasks.get",
             Self::TasksSet => "preferences.tasks.set",
@@ -481,10 +492,12 @@ impl Operation {
             Self::PendingDraftPresence => "camps.pendingDraft.setPresence",
             Self::CampFastCheck => "camps.members.fast.check",
             Self::CampFastSet => "camps.members.fast.set",
+            Self::MemberPresenceSet => "members.presence.set",
             Self::MemberRemovalPreview => "members.removalPreview",
             Self::MemberRemove => "members.remove",
             Self::MemberReorder => "members.reorder",
             Self::SubsystemRetry => "runtime.subsystems.retry",
+            Self::NativeInteractionNotifications => "nativeInteractions.notifications",
             Self::NotificationInbox => "notifications.inbox",
             Self::NotificationChanges => "notifications.changesSince",
             Self::NotificationThreadInterruptions => "notifications.threadInterruptions",
@@ -566,6 +579,7 @@ impl Operation {
             Self::Send => "camp.messages.send",
             Self::WithdrawMessage => "camp.messages.withdraw",
             Self::Approval => "action.approvals.resolve",
+            Self::NativeInteraction => "nativeInteractions.respond",
             Self::CancelRun => "agentRuns.cancel",
             Self::ContinueRun => "agentRuns.continue",
             Self::Reconcile => "commands.reconcile",

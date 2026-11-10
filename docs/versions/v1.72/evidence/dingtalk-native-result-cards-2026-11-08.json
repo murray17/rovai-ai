@@ -1,0 +1,139 @@
+{
+  "observedAt": "2026-11-08T10:05:27.136823+00:00",
+  "status": "bounded-dingtalk-result-display-implemented",
+  "baseCommit": "e12d3eaf2d65182402e147405422acab11262306",
+  "branch": "rovai/dingtalk-native-result-cards",
+  "sourceSha256": {
+    "apps/desktop/src/main/native-interaction-cards.ts": "c2c14a65ad6501f5792e72a4956471f2fbcda11a95f6a76b0937cb89599f106e",
+    "apps/desktop/src/main/dingtalk-channel-settings.ts": "eef265be00ae72b3ec8d8bde1ae76b2bea98b5f051d265d6a589e0a0bab8ed8e",
+    "apps/desktop/src/main/channel-settings.ts": "488642a7da70b409915ed4b429011141874f929042041e3b2aca79052e8eb85b",
+    "apps/desktop/src/main/channel-provider-profile.ts": "1cb222150df9c5eb799af1ffc1c60674a5d314a3e4beaeb63933f2589f0c1843",
+    "crates/rovai-core/src/channel/native_interactions.rs": "abb364bc314828cdb9b25392b9a6823e73a2b282e522af49fe7ee0229690f831"
+  },
+  "change": {
+    "existingBoundedPreviewFieldsReused": true,
+    "firstSuccessfulNativeAnswerStillAuthoritative": true,
+    "questionMovedToTitleForTemplateCapacity": true,
+    "answerInDescription": true,
+    "ownerPrivateDescriptionMatchesPublicDescription": true,
+    "noNewTable": true,
+    "noNewState": true,
+    "noNewTemplate": true,
+    "noNativeProtocolChange": true,
+    "legacyRecordsNotBackfilled": true
+  },
+  "officialTemplate": {
+    "id": "c2a6355b-9724-4f7e-9653-d33fcb3311bb.schema",
+    "source": "https://github.com/DingTalk-Real-AI/dingtalk-openclaw-connector/blob/main/docs/assets/dingtalk-ask-user-card-template.json",
+    "sourceBlobSha": "a6f50c9183ce090d8459b3b934a84ad267fb978b",
+    "descriptionComponent": "BaseText",
+    "fixedMaxLine": 2,
+    "realDesktopClientClipsLongText": true,
+    "clickDidNotExpand": true,
+    "longQuestionCanCrowdStatusBadge": true,
+    "sameMultilineVisualsAsFeishuLark": false
+  },
+  "presentation": {
+    "scope": "Current production renderer and OpenAPI client on real native DingTalk desktop. No Core, Runtime, Main Host or LLM launched. Credentials read only into memory from the published Alice Bot; no credential files created.",
+    "syntheticPresentationOnly": true,
+    "realPiOrLLMThisRun": false,
+    "newCoreProcessForPresentation": false,
+    "records": [
+      {
+        "kind": "select",
+        "outTrackId": "rovai_native_layout_2899605f-7bce-4449-b799-2eecfc1370f8",
+        "status": "sent",
+        "updatedSameOriginalCard": true,
+        "controls": 0,
+        "questionInTitle": true,
+        "answerInBody": true
+      },
+      {
+        "kind": "confirm",
+        "outTrackId": "rovai_native_layout_9074b390-a242-40a9-a094-8e41336cfafb",
+        "status": "sent",
+        "updatedSameOriginalCard": false,
+        "controls": 0,
+        "questionInTitle": true,
+        "answerInBody": true
+      },
+      {
+        "kind": "input",
+        "outTrackId": "rovai_native_layout_b9bfd099-622b-4d58-b593-5bf355b31057",
+        "status": "sent",
+        "updatedSameOriginalCard": false,
+        "controls": 0,
+        "questionInTitle": true,
+        "answerInBody": true
+      },
+      {
+        "kind": "editor",
+        "outTrackId": "rovai_native_layout_a24149e6-078c-402e-8f7a-465c28f3889b",
+        "status": "sent",
+        "updatedSameOriginalCard": false,
+        "controls": 0,
+        "questionInTitle": true,
+        "answerInBody": true
+      },
+      {
+        "kind": "skip",
+        "outTrackId": "rovai_native_layout_16bd4bdc-e5d6-4bf9-86f0-9d5bc7140b8e",
+        "status": "skipped",
+        "updatedSameOriginalCard": false,
+        "controls": 0,
+        "questionInTitle": true,
+        "answerInBody": true
+      }
+    ],
+    "credentialFilesCreated": false,
+    "dailyDatabaseReadOnly": true
+  },
+  "larkComparison": {
+    "sharedHostClass": "ChannelSettingsService",
+    "sharedRenderer": "feishuNativeQuestionCard / feishuNativeResultCard",
+    "bothProviderProfileTestsPassed": true,
+    "larkNativeClientThisRun": "logged_out",
+    "newLarkClientCallbackAcceptance": false,
+    "feishuNativeClientThisRun": "logged_in; existing completed question and answer cards inspected",
+    "newFeishuRunCreated": false,
+    "previousRealPiLarkAcceptance": "pi-native-result-cards-2026-11-07.json"
+  },
+  "checks": [
+    {
+      "command": "pnpm exec vitest run apps/desktop/src/main/native-interaction-cards.test.ts apps/desktop/src/main/dingtalk-channel-settings.test.ts apps/desktop/src/main/channel-settings.test.ts",
+      "files": 3,
+      "passed": 166
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "status": "passed"
+    },
+    {
+      "command": "cargo test --workspace",
+      "passed": 484,
+      "failed": 0,
+      "ignored": 1,
+      "ignoredPreExisting": true
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery",
+      "passed": 1,
+      "failed": 0
+    }
+  ],
+  "screenshots": [
+    "dingtalk-official-result-two-line-limit-20261107.png",
+    "dingtalk-native-results-choice-and-empty-20261107.png",
+    "dingtalk-native-results-text-and-skip-20261107.png",
+    "feishu-result-card-comparison-20261108.png"
+  ],
+  "acceptanceLimits": [
+    "DingTalk GUI presentation uses current production renderer/OpenAPI and synthetic completed sources. It does not claim a new production Main/Core/Pi/LLM round trip.",
+    "The official shared template still clips the answer description to two lines; a long question can crowd its status tag. No custom template or expansion behavior was added.",
+    "Lark source and both Provider tests were verified. The native Lark client is logged out, so this run did not repeat its real client callback acceptance."
+  ]
+}

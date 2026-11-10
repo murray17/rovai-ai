@@ -12,7 +12,7 @@ export function trackedExecutionCoreEventWake(
   event: CoreEvent,
   hasLiveExecutionCard: (agentRunId: string) => boolean
 ): ChannelHostCoreEventWake {
-  if (event.method === 'agent_run.started') return 'immediate'
+  if (event.method === 'agent_run.started' || event.method === 'agent_run.interaction_changed') return 'immediate'
   if (event.method === 'agent_run.terminal') return 'terminal'
   if (event.method === 'runtime.compaction.display') return 'ignore'
   const liveEvent = liveRuntimeEventFromCore(event, 'channel-host-wake')
@@ -101,6 +101,7 @@ export class AdaptiveChannelHostPump {
     // has settled. Keep lifecycle events able to discover that durable work.
     if (!this.#active
       && event.method !== 'agent_run.started'
+      && event.method !== 'agent_run.interaction_changed'
       && event.method !== 'agent_run.terminal') return
     const wake = this.#dependencies.classifyCoreEvent?.(event) ?? defaultCoreEventWake(event)
     if (wake === 'terminal') {

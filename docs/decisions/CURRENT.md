@@ -1,10 +1,14 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-11-04
+last_updated: 2026-11-05
 ---
 
 # 当前规范与决定理由导航
+
+公开执行列表的直接会话归属：[Camp Open Projection v32](../contracts/camp-open-projection-v33.md)、[Thread Runs v2](../contracts/thread-runs-v2.md)、
+[Thread Open Read Path](../architecture/camp-open-read-path.md#enter-and-refresh-flow)；取消旧公开卡片兼容、
+保留原始数据与当前单聊的取舍见 [V1.72-D75](../versions/v1.72/decisions.md#v1-72-d75)。
 
 原生子代理平铺 command：[Surface v59](../contracts/run-process-detail-surface-v59.md)、[会话组件](../ui/components/conversation-workspace.md)；
 状态归本次调用与匿名文本过滤的取舍见 [V1.72-D72](../versions/v1.72/decisions.md#v1-72-d72)。
@@ -59,7 +63,7 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 - Thread read 正向增量分页：[History v17](../contracts/camp-history-v17.md)；已确认输入与提示词前后对照见 [实施方案](../versions/v1.72/model-context-change-thread-read-after.md)。
 
-- 对话与使命引用：[Thread Reference v1](../contracts/thread-reference-v1.md)、[Composer 架构](../architecture/camp-composer-draft.md)；理由见 [V1.72-D58](../versions/v1.72/decisions.md#v1-72-d58)。
+- 对话与使命引用：[Thread Reference v2](../contracts/thread-reference-v3.md)、[Composer 架构](../architecture/camp-composer-draft.md)；理由见 [V1.72-D58](../versions/v1.72/decisions.md#v1-72-d58)。
 
 - Claude 受管执行回执与启动期待插话：[Delivery v18](../contracts/message-delivery-v18.md)；取舍见 [V1.72-D49](../versions/v1.72/decisions.md#v1-72-d49)。
 - 模型发送者统一：[Message Senders v1](../contracts/message-senders-v1.md)、[History v17](../contracts/camp-history-v17.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md)；确认与验证见 [R2](../versions/v1.72/model-context-change-message-senders.md)。
@@ -73,11 +77,11 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
   [V1.60-D07](../versions/v1.60/decisions.md#v1-60-d07)；首次目标路由与存量 waiting 自愈理由：
   [V1.60-D11](../versions/v1.60/decisions.md#v1-60-d11)。默认路由在 Agent 自动上下文中显式呈现冻结接收者、
   同时保持用户原文与路由权威分离的理由：[V1.61-D03](../versions/v1.61/decisions.md#v1-61-d03)。
-- 撤回与 Desktop-local Composer：[Camp Composer Draft v20](../contracts/camp-composer-draft-v20.md)、
+- 撤回与 Desktop-local Composer：[Camp Composer Draft v21](../contracts/camp-composer-draft-v22.md)、
   [Camp History v10](../contracts/camp-history-v10.md)；理由：[V1.69-D01](../versions/v1.69/decisions.md#v1-69-d01)、[V1.60-D03](../versions/v1.60/decisions.md#v1-60-d03)、
   [V1.60-D08](../versions/v1.60/decisions.md#v1-60-d08)、
   [V1.60-D10](../versions/v1.60/decisions.md#v1-60-d10)。
-- User 公共/单聊输入历史：[Input History v1](../contracts/input-history-v1.md)；
+- User 公共/单聊输入历史：[Input History v2](../contracts/input-history-v3.md)；
   从现有消息提取本轮固定内容、预览保留原稿与同步导航的实现边界见[本版实施记录](../versions/v1.72/input-history-implementation.md)。
 - 多输入 Context 与完整运输：[ContextManifest v32](../contracts/context-manifest-evidence-v32.md)、
   [Profile 11](../contracts/context-delivery-profile-v11.md)、[Run Facts v7](../contracts/run-facts-v7.md)、
@@ -105,7 +109,7 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 - 工具分类与图片迁移汇合：[原位升级](../architecture/availability-first-runtime.md#migration-switch)、[Runtime File Change Observation v3](../contracts/runtime-file-change-observation-v3.md#canonical-与读取兼容)；理由：[V1.53-D03](../versions/v1.53/decisions.md#v1-53-d03)。
 
-- Execution Evidence 生命周期、独立变更水位、私有思考边界与普通输出预算当前规范：[Run Process Detail Surface v59](../contracts/run-process-detail-surface-v59.md)、[Camp Open Projection v30](../contracts/camp-open-projection-v30.md)、[Single Chat v9](../contracts/single-chat-v9.md)与[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；统一记录与变更游标理由：[V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)，分离内容引用和定向回收理由：[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)，永久有界输出理由：[V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。主线块与组内游标理由见 [V1.72-D10](../versions/v1.72/decisions.md#v1-72-d10)，读取职责见 [Thread Open Read Path](../architecture/camp-open-read-path.md#run-主线与展开组读取)。历史正文块选择见 [V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)，既有维护降频见 [V1.62-D05](../versions/v1.62/decisions.md#v1-62-d05)。
+- Execution Evidence 生命周期、独立变更水位、私有思考边界与普通输出预算当前规范：[Run Process Detail Surface v59](../contracts/run-process-detail-surface-v59.md)、[Camp Open Projection v32](../contracts/camp-open-projection-v33.md)、[Single Chat v9](../contracts/single-chat-v9.md)与[Evidence 不变量](../architecture/foundational-invariants.md#evidence-usage)；统一记录与变更游标理由：[V1.64-D01](../versions/v1.64/decisions.md#v1-64-d01)，分离内容引用和定向回收理由：[V1.64-D02](../versions/v1.64/decisions.md#v1-64-d02)，永久有界输出理由：[V1.66-D01](../versions/v1.66/decisions.md#v1-66-d01)。主线块与组内游标理由见 [V1.72-D10](../versions/v1.72/decisions.md#v1-72-d10)，读取职责见 [Thread Open Read Path](../architecture/camp-open-read-path.md#run-主线与展开组读取)。历史正文块选择见 [V1.53-D02](../versions/v1.53/decisions.md#v1-53-d02)，既有维护降频见 [V1.62-D05](../versions/v1.62/decisions.md#v1-62-d05)。
 
 - Thread 队员 Fast 当前规范：[Camp Member Fast v3](../contracts/camp-member-fast-v3.md)、[Runtime 边界](../architecture/runtime-catalog-boundaries.md#thread-队员-fast-边界)、[Usage v11](../contracts/runtime-usage-monitoring-v11.md)；理由：[V1.72-D13](../versions/v1.72/decisions.md#v1-72-d13)。
 
@@ -118,16 +122,16 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 ## Thread、Workspace 与 Attachments
 
-- 普通一键草稿恢复当前规范：[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Composer Draft v20](../contracts/camp-composer-draft-v20.md)、[Thread Activation](../architecture/camp-activation-lifecycle.md)；本机内容与 Core presence 的取舍见 [V1.72-D11](../versions/v1.72/decisions.md#v1-72-d11)。
+- 普通一键草稿恢复当前规范：[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Composer Draft v20](../contracts/camp-composer-draft-v22.md)、[Thread Activation](../architecture/camp-activation-lifecycle.md)；本机内容与 Core presence 的取舍见 [V1.72-D11](../versions/v1.72/decisions.md#v1-72-d11)。
 
-- Runtime 图片当前规范：[Runtime 图片架构](../architecture/runtime-images.md)、[Runtime Images v5](../contracts/runtime-images-v5.md)、[Camp Open Projection v30](../contracts/camp-open-projection-v30.md)、[统一图片展示](../ui/components/conversation-workspace.md#runtime-图片与消息图片)；原生生图闭合集与历史 fail-closed 理由：[V1.53-D01](../versions/v1.53/decisions.md#v1-53-d01)，混合生命周期与不自动发布的理由：[V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。
+- Runtime 图片当前规范：[Runtime 图片架构](../architecture/runtime-images.md)、[Runtime Images v5](../contracts/runtime-images-v5.md)、[Camp Open Projection v32](../contracts/camp-open-projection-v33.md)、[统一图片展示](../ui/components/conversation-workspace.md#runtime-图片与消息图片)；原生生图闭合集与历史 fail-closed 理由：[V1.53-D01](../versions/v1.53/decisions.md#v1-53-d01)，混合生命周期与不自动发布的理由：[V1.37-D01](../versions/v1.37/decisions.md#v1-37-d01)。
 
-- 当前规范：[Thread/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Thread Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[动态 Thread 队员关系](../architecture/dynamic-camp-membership.md)、[Camp Membership v3](../contracts/camp-membership-v3.md)、[Thread Activation](../architecture/camp-activation-lifecycle.md)、[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Public Thread Composer](../architecture/camp-composer-draft.md)、[Camp Composer Draft v20](../contracts/camp-composer-draft-v20.md)、[结构化 Mention 与 Atom](../ui/components/structured-mentions.md)、[Thread Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v30](../contracts/camp-open-projection-v30.md)、[Thread Attachments](../architecture/camp-published-attachment-view.md)、[Camp Attachment v12](../contracts/camp-attachment-v12.md)、[Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)、[Thread 永久删除](../architecture/camp-deletion.md)、[Camp Permanent Deletion v4](../contracts/camp-permanent-deletion-v4.md)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v6](../contracts/first-run-onboarding-v6.md)。Files Changed 来源水位与重算理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
+- 当前规范：[Thread/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Thread Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[动态 Thread 队员关系](../architecture/dynamic-camp-membership.md)、[Camp Membership v3](../contracts/camp-membership-v3.md)、[Thread Activation](../architecture/camp-activation-lifecycle.md)、[Pending Camp Activation v5](../contracts/pending-camp-activation-v5.md)、[Public Thread Composer](../architecture/camp-composer-draft.md)、[Camp Composer Draft v21](../contracts/camp-composer-draft-v22.md)、[结构化 Mention 与 Atom](../ui/components/structured-mentions.md)、[Thread Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v32](../contracts/camp-open-projection-v33.md)、[Thread Attachments](../architecture/camp-published-attachment-view.md)、[Camp Attachment v12](../contracts/camp-attachment-v12.md)、[Camp Published Attachment View v4（legacy v1）](../contracts/camp-published-attachment-view-v4.md)、[Thread 永久删除](../architecture/camp-deletion.md)、[Camp Permanent Deletion v4](../contracts/camp-permanent-deletion-v4.md)、[Runtime File Change Observation](../architecture/runtime-file-change-observation.md)、[Runtime File Change Observation v6](../contracts/runtime-file-change-observation-v6.md)、[First-run](../architecture/first-run-onboarding.md)及[First-run Onboarding v6](../contracts/first-run-onboarding-v6.md)。Files Changed 来源水位与重算理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
 - 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.16-D01](../versions/v1.16/decisions.md#v1-16-d01)、[V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)、[V1.27-D08](../versions/v1.27/decisions.md#v1-27-d08)、[V1.28-D10](../versions/v1.28/decisions.md#v1-28-d10)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D04](../versions/v1.29/decisions.md#v1-29-d04)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)、[V1.29-D08](../versions/v1.29/decisions.md#v1-29-d08)、[V1.29-D09](../versions/v1.29/decisions.md#v1-29-d09)、[V1.31-D04](../versions/v1.31/decisions.md#v1-31-d04)、[V1.40-D01](../versions/v1.40/decisions.md#v1-40-d01)、[V1.43-D01](../versions/v1.43/decisions.md#v1-43-d01)、[V1.43-D02](../versions/v1.43/decisions.md#v1-43-d02)、[V1.58-D06](../versions/v1.58/decisions.md#v1-58-d06)、[V1.65-D01](../versions/v1.65/decisions.md#v1-65-d01)及[V1.65-D02](../versions/v1.65/decisions.md#v1-65-d02)。
 
 ## Thread 文件预览
 
-- 项目目录与独立入口：[File Preview v26](../contracts/file-preview-v26.md)、[项目目录浏览](../architecture/file-preview.md#项目目录浏览)；取舍见 [V1.72-D73](../versions/v1.72/decisions.md#v1-72-d73)、[V1.72-D74](../versions/v1.72/decisions.md#v1-72-d74)。v26 继承下列阅读与编辑契约。
+- 项目目录与独立入口：[File Preview v27](../contracts/file-preview-v28.md)、[项目目录浏览](../architecture/file-preview.md#项目目录浏览)；取舍见 [V1.72-D73](../versions/v1.72/decisions.md#v1-72-d73)、[V1.72-D74](../versions/v1.72/decisions.md#v1-72-d74)。v26 继承下列阅读与编辑契约。
 
 - 当前规范：[File Preview Architecture](../architecture/file-preview.md)、[File Preview v24](../contracts/file-preview-v24.md)、[Thread 文件预览区](../ui/components/file-preview.md)及[Thread 会话工作区](../ui/components/conversation-workspace.md)；版本化 projection 原位刷新与旧响应 fence 理由见 [V1.64-D03](../versions/v1.64/decisions.md#v1-64-d03)。
 - 窗口保留与刷新取舍：[V1.59-D07](../versions/v1.59/decisions.md#v1-59-d07)。
@@ -153,7 +157,7 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 - 文件引用、临时正文与三渠道提示：[Send v27](../contracts/camp-message-send-v27.md#agent-文件引用与发送教学)与[已确认 R3](../versions/v1.72/model-context-change-send-file-guidance.md)；沿用旧 Binding 的冻结 Bootstrap，无新增 Version Decision。
 
-- User Steer：[公开投递架构](../architecture/public-a2a-message-delivery.md#用户运行中插话)、[Send v28](../contracts/camp-message-send-v29.md)、[Delivery v18](../contracts/message-delivery-v18.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md) 和 [Profile 15/16](../contracts/context-delivery-profile-v15.md)；复用取舍见 [V1.72-D48](../versions/v1.72/decisions.md#v1-72-d48)。
+- User Steer：[公开投递架构](../architecture/public-a2a-message-delivery.md#用户运行中插话)、[Send v28](../contracts/camp-message-send-v31.md)、[Delivery v18](../contracts/message-delivery-v18.md)、[Manifest v43/v44](../contracts/context-manifest-evidence-v44.md) 和 [Profile 15/16](../contracts/context-delivery-profile-v15.md)；复用取舍见 [V1.72-D48](../versions/v1.72/decisions.md#v1-72-d48)。
 
 - 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[动态 Thread 队员关系](../architecture/dynamic-camp-membership.md)、[Public Thread Message/Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Task v6](../contracts/durable-task-v6.md)、[Camp Message Send v23](../contracts/camp-message-send-v23.md)、[Message Delivery v15](../contracts/message-delivery-v15.md)和[Camp History v10](../contracts/camp-history-v10.md)。主动查询与撤回边界理由见 [V1.69-D01](../versions/v1.69/decisions.md#v1-69-d01)；Task 去版本化与模型投影清理理由见 [V1.67-D01](../versions/v1.67/decisions.md#v1-67-d01)；正文收敛理由见 [V1.63-D01](../versions/v1.63/decisions.md#v1-63-d01)，协议 clean break 见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。Gather 只保留[历史解释](../architecture/durable-gather-barrier.md)。
 - 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.29-D01](../versions/v1.29/decisions.md#v1-29-d01)、[V1.29-D02](../versions/v1.29/decisions.md#v1-29-d02)、[V1.29-D05](../versions/v1.29/decisions.md#v1-29-d05)、[V1.29-D06](../versions/v1.29/decisions.md#v1-29-d06)及[V1.37-D03](../versions/v1.37/decisions.md#v1-37-d03)。
@@ -266,12 +270,12 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 ## Thread 连续消息
 
-- 当前规范：[Camp Composer Draft v20](../contracts/camp-composer-draft-v20.md)与[Public Thread Composer 架构](../architecture/camp-composer-draft.md)。旧 Core Pending/Draft/恢复合同仅解释历史；clean break 理由见 [V1.60-D03](../versions/v1.60/decisions.md#v1-60-d03)，本机恢复理由见 [V1.60-D08](../versions/v1.60/decisions.md#v1-60-d08)。
+- 当前规范：[Camp Composer Draft v21](../contracts/camp-composer-draft-v22.md)与[Public Thread Composer 架构](../architecture/camp-composer-draft.md)。旧 Core Pending/Draft/恢复合同仅解释历史；clean break 理由见 [V1.60-D03](../versions/v1.60/decisions.md#v1-60-d03)，本机恢复理由见 [V1.60-D08](../versions/v1.60/decisions.md#v1-60-d08)。
 - 队外 Mention 的发送前邀请、逐人结果与非原子恢复：[Public Thread Composer](../architecture/camp-composer-draft.md#发送)、[结构化 Mention](../ui/components/structured-mentions.md#member-typeahead)；理由见 [V1.72-D05](../versions/v1.72/decisions.md#v1-72-d05)。 Pending 首条原子邀请由 [Pending v5](../contracts/pending-camp-activation-v5.md)与[Send v26](../contracts/camp-message-send-v26.md)拥有，理由见 [V1.72-D17](../versions/v1.72/decisions.md#v1-72-d17)。
 
 - [V1.56-D01](../versions/v1.56/decisions.md#v1-56-d01)：选文快照独立于 Reply 与派发。
 
-- 长粘贴生成文件的 Thread 归属与单向发送保护：[Composer Draft v20](../contracts/camp-composer-draft-v20.md)、[Public Composer](../architecture/camp-composer-draft.md#长粘贴生成文件)；取舍见 [V1.72-D53](../versions/v1.72/decisions.md#v1-72-d53)。
+- 长粘贴生成文件的 Thread 归属与单向发送保护：[Composer Draft v20](../contracts/camp-composer-draft-v22.md)、[Public Composer](../architecture/camp-composer-draft.md#长粘贴生成文件)；取舍见 [V1.72-D53](../versions/v1.72/decisions.md#v1-72-d53)。
 
 ## 取消事务与 Runtime 清理
 
@@ -291,8 +295,8 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 ## 统一 Host 与 Web
 
-- 当前规范：[统一 Rust Host](../architecture/unified-rust-host.md)、[原生 Server 数据与分发](../architecture/unified-rust-host.md#原生-server-数据与分发)、[Host Lifecycle v2](../contracts/host-lifecycle-v2.md)、[Host Web v9](../contracts/host-web-v9.md)与[Server 开发预览](../development/server-preview.md)。Task 旧 payload reconciliation clean break 理由见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。
-- 浏览器文件传输：[Host Web v9](../contracts/host-web-v9.md)、[统一 Host 用户文件](../architecture/unified-rust-host.md#草稿与用户文件)；采用独立短期能力、准入后直接流式发送与浏览器下载管理器的取舍见 [V1.72-D52](../versions/v1.72/decisions.md#v1-72-d52)。
+- 当前规范：[统一 Rust Host](../architecture/unified-rust-host.md)、[原生 Server 数据与分发](../architecture/unified-rust-host.md#原生-server-数据与分发)、[Host Lifecycle v2](../contracts/host-lifecycle-v2.md)、[Host Web v10](../contracts/host-web-v11.md)与[Server 开发预览](../development/server-preview.md)。Task 旧 payload reconciliation clean break 理由见 [V1.63-D02](../versions/v1.63/decisions.md#v1-63-d02)。
+- 浏览器文件传输：[Host Web v10](../contracts/host-web-v11.md)、[统一 Host 用户文件](../architecture/unified-rust-host.md#草稿与用户文件)；采用独立短期能力、准入后直接流式发送与浏览器下载管理器的取舍见 [V1.72-D52](../versions/v1.72/decisions.md#v1-72-d52)。
 - 理由来源：[V1.59-D01](../versions/v1.59/decisions.md#v1-59-d01)、[V1.59-D02](../versions/v1.59/decisions.md#v1-59-d02)。
 
 - 新对话默认队伍归属：[Host Web v2](../contracts/host-web-v2.md#shared-creation-preferences)、[Thread Activation](../architecture/camp-activation-lifecycle.md#component-authority)；理由见 [V1.59-D03](../versions/v1.59/decisions.md#v1-59-d03)。

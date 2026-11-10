@@ -140,6 +140,22 @@ pub enum ComposerSegment {
     Atom { atom: ComposerAtom },
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectFileTargetKind {
+    #[default]
+    File,
+    Directory,
+}
+impl ProjectFileTargetKind {
+    pub fn is_file(&self) -> bool {
+        *self == Self::File
+    }
+    pub fn byte_len(&self) -> usize {
+        if self.is_file() { 0 } else { 9 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ComposerAtom {
@@ -161,6 +177,20 @@ pub enum ComposerAtom {
         mission_id: String,
         #[serde(rename = "labelFallback", skip_serializing_if = "Option::is_none")]
         label_fallback: Option<String>,
+    },
+    ProjectFileReference {
+        #[serde(rename = "threadId")]
+        thread_id: String,
+        #[serde(rename = "rawReference")]
+        raw_reference: String,
+        #[serde(rename = "labelFallback")]
+        label_fallback: String,
+        #[serde(
+            default,
+            rename = "targetKind",
+            skip_serializing_if = "ProjectFileTargetKind::is_file"
+        )]
+        target_kind: ProjectFileTargetKind,
     },
     Skill {
         #[serde(rename = "skillId")]
@@ -203,6 +233,22 @@ pub enum StructuredThreadMessageSegment {
         #[serde(rename = "titleAtSend")]
         title_at_send: String,
     },
+    ProjectFileReference {
+        #[serde(rename = "threadId")]
+        thread_id: String,
+        #[serde(rename = "rawReference")]
+        raw_reference: String,
+        #[serde(rename = "pathAtSend")]
+        path_at_send: String,
+        #[serde(rename = "labelAtSend")]
+        label_at_send: String,
+        #[serde(
+            default,
+            rename = "targetKind",
+            skip_serializing_if = "ProjectFileTargetKind::is_file"
+        )]
+        target_kind: ProjectFileTargetKind,
+    },
     ExternalQuote {
         #[serde(rename = "senderDisplayName")]
         sender_display_name: String,
@@ -224,6 +270,18 @@ pub struct ExternalQuoteAttachmentSummary {
 const MAX_CONTENT_SEGMENTS: usize = 4_096;
 const MAX_CONTENT_TEXT_BYTES: usize = 1_048_576;
 
+#[derive(Debug)]
+pub struct ContentSegmentError {
+    pub segment_index: usize,
+    message: &'static str,
+}
+impl std::fmt::Display for ContentSegmentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.message)
+    }
+}
+impl std::error::Error for ContentSegmentError {}
+
 pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
     anyhow::ensure!(
         document.version == COMPOSER_DOCUMENT_VERSION,
@@ -233,7 +291,7 @@ pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
         anyhow::bail!("Composer Document has too many segments");
     }
     let mut text_bytes = 0_usize;
-    for segment in &document.segments {
+    for (index, segment) in document.segments.iter().enumerate() {
         match segment {
             ComposerSegment::Text { text } => {
                 text_bytes = text_bytes
@@ -294,6 +352,22 @@ pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
                 }
             }
             ComposerSegment::Atom {
+                atom:
+                    ComposerAtom::ProjectFileReference {
+                        thread_id,
+                        raw_reference,
+                        label_fallback,
+                        target_kind,
+                    },
+            } => {
+                validate_composer_identity(thread_id, "Project File Thread")?;
+                crate::project_file_reference::validate_locator(raw_reference, label_fallback)?;
+                text_bytes += thread_id.len()
+                    + raw_reference.len()
+                    + label_fallback.len()
+                    + target_kind.byte_len();
+            }
+            ComposerSegment::Atom {
                 atom: ComposerAtom::AllMembers,
             } => {}
             ComposerSegment::Atom {
@@ -307,9 +381,13 @@ pub fn validate_composer_document(document: &ComposerDocument) -> Result<()> {
                 crate::skill::validate_skill_reference_name(skill_id, name_at_send)?;
             }
         }
-    }
-    if text_bytes > MAX_CONTENT_TEXT_BYTES {
-        anyhow::bail!("Composer Document text exceeds 1 MiB");
+        if text_bytes > MAX_CONTENT_TEXT_BYTES {
+            return Err(ContentSegmentError {
+                segment_index: index,
+                message: "Composer Document text exceeds 1 MiB",
+            }
+            .into());
+        }
     }
     Ok(())
 }
@@ -348,6 +426,15 @@ pub fn composer_document_to_content(
     document: &ComposerDocument,
 ) -> Result<StructuredThreadMessageContent> {
     validate_composer_document(document)?;
+    anyhow::ensure!(
+        !document.segments.iter().any(|s| matches!(
+            s,
+            ComposerSegment::Atom {
+                atom: ComposerAtom::ProjectFileReference { .. }
+            }
+        )),
+        "Project File references require Core preflight"
+    );
     Ok(normalize_content(
         document
             .segments
@@ -384,6 +471,9 @@ pub fn composer_document_to_content(
                     title_at_send: label_fallback.clone().unwrap_or_else(|| mission_id.clone()),
                 },
                 ComposerSegment::Atom {
+                    atom: ComposerAtom::ProjectFileReference { .. },
+                } => unreachable!("file references require validated publication"),
+                ComposerSegment::Atom {
                     atom: ComposerAtom::AllMembers,
                 } => StructuredThreadMessageSegment::AllMembersMention,
                 ComposerSegment::Atom {
@@ -404,7 +494,7 @@ pub fn composer_document_to_content(
 pub fn composer_document_from_content(
     content: &[StructuredThreadMessageSegment],
 ) -> Result<ComposerDocument> {
-    validate_user_authored_content(content)?;
+    validate_content(content)?;
     let mut segments = Vec::with_capacity(content.len());
     for segment in normalize_content(content.to_vec()) {
         segments.push(match segment {
@@ -445,6 +535,20 @@ pub fn composer_document_from_content(
                     label_fallback: Some(title_at_send),
                 },
             },
+            StructuredThreadMessageSegment::ProjectFileReference {
+                thread_id,
+                raw_reference,
+                label_at_send,
+                target_kind,
+                ..
+            } => ComposerSegment::Atom {
+                atom: ComposerAtom::ProjectFileReference {
+                    thread_id,
+                    raw_reference,
+                    label_fallback: label_at_send,
+                    target_kind,
+                },
+            },
             StructuredThreadMessageSegment::CurrentUserMention { .. }
             | StructuredThreadMessageSegment::ExternalQuote { .. } => {
                 anyhow::bail!("Composer Document cannot contain Core-owned message segments")
@@ -464,6 +568,7 @@ pub fn parse_composer_document_json(value: &str) -> Result<ComposerDocument> {
     let document = if json.is_array() {
         let legacy: StructuredThreadMessageContent =
             serde_json::from_value(json).context("Legacy Composer content is invalid")?;
+        validate_user_authored_content(&legacy)?;
         composer_document_from_content(&legacy)?
     } else {
         serde_json::from_value::<ComposerDocument>(json).context("Composer Document is invalid")?
@@ -526,6 +631,9 @@ pub fn render_composer_plain_text(
                 label_fallback.as_deref().unwrap_or(mission_id),
             )),
             ComposerSegment::Atom {
+                atom: ComposerAtom::ProjectFileReference { label_fallback, .. },
+            } => rendered.push_str(label_fallback),
+            ComposerSegment::Atom {
                 atom: ComposerAtom::AllMembers,
             } => rendered.push_str("@所有队员"),
             ComposerSegment::Atom {
@@ -544,7 +652,7 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
         anyhow::bail!("Structured Thread Message Content has too many segments");
     }
     let mut text_bytes = 0_usize;
-    for segment in content {
+    for (index, segment) in content.iter().enumerate() {
         match segment {
             StructuredThreadMessageSegment::Text { text } => {
                 text_bytes = text_bytes
@@ -577,6 +685,26 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
                 )?;
                 crate::thread_reference::validate_label(title_at_send)?;
                 text_bytes += title_at_send.len();
+            }
+            StructuredThreadMessageSegment::ProjectFileReference {
+                thread_id,
+                raw_reference,
+                path_at_send,
+                label_at_send,
+                target_kind,
+            } => {
+                validate_composer_identity(thread_id, "Project File Thread")?;
+                crate::project_file_reference::validate_locator(raw_reference, label_at_send)?;
+                crate::project_file_reference::render_target_link(
+                    path_at_send,
+                    label_at_send,
+                    *target_kind,
+                )?;
+                text_bytes += thread_id.len()
+                    + raw_reference.len()
+                    + path_at_send.len()
+                    + label_at_send.len()
+                    + target_kind.byte_len();
             }
             StructuredThreadMessageSegment::AllMembersMention => {}
             StructuredThreadMessageSegment::CurrentUserMention { user_id } => {
@@ -663,9 +791,13 @@ pub fn validate_content(content: &[StructuredThreadMessageSegment]) -> Result<()
                     .context("Structured Thread Message Content size overflow")?;
             }
         }
-    }
-    if text_bytes > MAX_CONTENT_TEXT_BYTES {
-        anyhow::bail!("Structured Thread Message Content text exceeds 1 MiB");
+        if text_bytes > MAX_CONTENT_TEXT_BYTES {
+            return Err(ContentSegmentError {
+                segment_index: index,
+                message: "Structured Thread Message Content text exceeds 1 MiB",
+            }
+            .into());
+        }
     }
     Ok(())
 }
@@ -688,6 +820,14 @@ pub fn validate_user_authored_content(content: &[StructuredThreadMessageSegment]
         )
     }) {
         anyhow::bail!("External Quote can only be generated by trusted channel ingress");
+    }
+    if content.iter().any(|segment| {
+        matches!(
+            segment,
+            StructuredThreadMessageSegment::ProjectFileReference { .. }
+        )
+    }) {
+        anyhow::bail!("Published project file fields can only be generated by Core");
     }
     Ok(())
 }
@@ -800,6 +940,16 @@ fn render_plain_text_with_user_offsets(
                 mission_id,
                 title_at_send,
             )),
+            StructuredThreadMessageSegment::ProjectFileReference {
+                path_at_send,
+                label_at_send,
+                target_kind,
+                ..
+            } => rendered.push_str(&crate::project_file_reference::render_target_link(
+                path_at_send,
+                label_at_send,
+                *target_kind,
+            )?),
             StructuredThreadMessageSegment::AllMembersMention => rendered.push_str("@所有队员"),
             StructuredThreadMessageSegment::CurrentUserMention { user_id } => {
                 if user_id != CURRENT_USER_ID {
@@ -846,6 +996,13 @@ fn render_plain_text_with_user_offsets(
                 }
             }
         }
+        if rendered.len() > MAX_CONTENT_TEXT_BYTES {
+            return Err(ContentSegmentError {
+                segment_index: index,
+                message: "Projected message exceeds 1 MiB",
+            }
+            .into());
+        }
     }
     Ok(rendered)
 }
@@ -863,7 +1020,8 @@ fn segment_projects_nonempty(segment: &StructuredThreadMessageSegment) -> bool {
         | StructuredThreadMessageSegment::SkillMention { .. }
         | StructuredThreadMessageSegment::ExternalQuote { .. }
         | StructuredThreadMessageSegment::ThreadReference { .. }
-        | StructuredThreadMessageSegment::MissionReference { .. } => true,
+        | StructuredThreadMessageSegment::MissionReference { .. }
+        | StructuredThreadMessageSegment::ProjectFileReference { .. } => true,
     }
 }
 
@@ -1073,6 +1231,7 @@ pub fn canonical_content_digest(content: &[StructuredThreadMessageSegment]) -> R
 
 #[cfg(all(test, feature = "extended-tests"))]
 mod tests {
+    use super::ProjectFileTargetKind;
     use super::{
         ComposerAtom, ComposerDocument, ComposerSegment, ExternalQuoteAttachmentSummary,
         StructuredThreadMessageSegment as Segment, canonical_content_digest,
@@ -1188,6 +1347,114 @@ mod tests {
                     label_fallback: Some("旧名字".to_string()),
                 },
             }
+        );
+        let file_atom = serde_json::json!({"type":"project_file_reference", "threadId":"thread", "rawReference":"x".repeat(16_384), "labelFallback":"目录/".repeat(600)+"a.test.ts"});
+        let file_doc =
+            serde_json::json!({"version":2,"segments":[{"kind":"atom","atom":file_atom}]});
+        let draft = parse_composer_document_json(&file_doc.to_string()).unwrap();
+        assert_eq!(
+            parse_composer_document_json(&serialize_composer_document(&draft).unwrap()).unwrap(),
+            draft
+        );
+        assert!(composer_document_to_content(&draft).is_err()); // Client cannot mint frozen publication fields.
+        for field in ["pathAtSend", "scopeId", "entryId"] {
+            let mut forged = file_doc.clone();
+            forged["segments"][0]["atom"][field] = "forged".into();
+            assert!(parse_composer_document_json(&forged.to_string()).is_err());
+        }
+        let mut missing = file_doc.clone();
+        missing["segments"][0]["atom"]
+            .as_object_mut()
+            .unwrap()
+            .remove("labelFallback");
+        assert!(parse_composer_document_json(&missing.to_string()).is_err());
+        let mut overlong = file_doc.clone();
+        overlong["segments"][0]["atom"]["rawReference"] = "中".repeat(5462).into();
+        assert!(parse_composer_document_json(&overlong.to_string()).is_err());
+        let published: Vec<Segment> = serde_json::from_value(serde_json::json!([
+            {"kind":"text","text":"请检查 "},
+            {"kind":"project_file_reference","threadId":"thread","rawReference":"opaque","pathAtSend":"/project/中文 (a)#\\b.test.ts","labelAtSend":"中文 (a)#\\b.test.ts"}
+        ])).unwrap();
+        validate_content(&published).unwrap();
+        assert!(validate_user_authored_content(&published).is_err());
+        assert!(member_mention_ids(&published).is_empty());
+        assert_eq!(
+            render_plain_text(&published, |_| None).unwrap(),
+            "请检查 [中文 (a)#\\\\b.test.ts](file:///project/%E4%B8%AD%E6%96%87%20%28a%29%23%5Cb.test.ts)"
+        );
+        for (path, uri) in [
+            ("/project/100%25.ts", "file:///project/100%2525.ts"),
+            (r"C:\project\100%25.ts", "file:///C:/project/100%2525.ts"),
+            (r"\\server\share\a b.ts", "file://server/share/a%20b.ts"),
+            (
+                r"\\?\C:\project\100%25.ts",
+                "file:///C:/project/100%2525.ts",
+            ),
+            (
+                r"\\?\UNC\server\share\a b.ts",
+                "file://server/share/a%20b.ts",
+            ),
+        ] {
+            assert_eq!(
+                crate::project_file_reference::render_link(path, "file.ts").unwrap(),
+                format!("[file.ts]({uri})")
+            );
+        }
+        let mut directory_doc = file_doc.clone();
+        directory_doc["segments"][0]["atom"]["targetKind"] = "directory".into();
+        let directory = parse_composer_document_json(&directory_doc.to_string()).unwrap();
+        assert_eq!(
+            serde_json::to_value(directory).unwrap()["segments"][0]["atom"]["targetKind"],
+            "directory"
+        );
+        directory_doc["segments"][0]["atom"]["targetKind"] = "folder".into();
+        assert!(parse_composer_document_json(&directory_doc.to_string()).is_err());
+        assert!(
+            serde_json::to_value(&draft).unwrap()["segments"][0]["atom"]
+                .get("targetKind")
+                .is_none()
+        );
+        for (path, uri) in [
+            (
+                "/project/中文 (a)#/auth",
+                "file:///project/%E4%B8%AD%E6%96%87%20(a)%23/auth/",
+            ),
+            ("/project/100%25", "file:///project/100%2525/"),
+            (r"C:\project\a b#1", "file:///C:/project/a%20b%231/"),
+            (r"\\server\share\a b", "file://server/share/a%20b/"),
+        ] {
+            let link = crate::project_file_reference::render_target_link(
+                path,
+                "src/auth",
+                ProjectFileTargetKind::Directory,
+            )
+            .unwrap();
+            assert_eq!(
+                link,
+                format!("[auth]({})", uri.replace('(', "%28").replace(')', "%29"))
+            );
+        }
+        // The frozen URI projection can exceed the input metadata budget through percent encoding.
+        let projected_overflow = vec![
+            Segment::Text {
+                text: "x".repeat(1_000_000),
+            },
+            Segment::ProjectFileReference {
+                thread_id: "thread".into(),
+                raw_reference: "opaque".into(),
+                path_at_send: format!("/project/{}", "中".repeat(8_000)),
+                label_at_send: "file.ts".into(),
+                target_kind: ProjectFileTargetKind::File,
+            },
+        ];
+        validate_content(&projected_overflow).unwrap();
+        assert_eq!(
+            render_plain_text(&projected_overflow, |_| None)
+                .unwrap_err()
+                .downcast_ref::<super::ContentSegmentError>()
+                .unwrap()
+                .segment_index,
+            1
         );
         let thread_id = crate::camp_id::ThreadId::new().to_string();
         let mission_id = format!("rvm_{}", uuid::Uuid::now_v7().simple());

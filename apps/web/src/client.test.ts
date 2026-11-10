@@ -9,7 +9,7 @@ describe('console transport', () => {
   it('uses Host channel capabilities and fences a channel reply across reauthentication', async () => {
     let pending: ((value: Response) => void) | undefined
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async url => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
       return new Promise(resolve => { pending = resolve })
     })
     const client = new ConsoleClient('http://127.0.0.1:4317', fetcher)
@@ -33,7 +33,7 @@ describe('console transport', () => {
   it('sends the Lark provider kind unchanged for publish and retry', async () => {
     const bodies: unknown[] = []
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', channels: 'desktop' })
       bodies.push(JSON.parse(String(init?.body)))
       return Response.json({ result: { schemaVersion: 4 } })
     })
@@ -54,8 +54,8 @@ describe('console transport', () => {
     await expect(client.login('b'.repeat(64))).rejects.toThrow('协议')
     await expect(client.request('app.info')).rejects.toBeInstanceOf(SessionRequired)
     expect(fetcher).toHaveBeenCalledOnce()
-    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).protocolVersion).toBe(5)
-    const session = { protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' }
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body)).protocolVersion).toBe(7)
+    const session = { protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' }
     fetcher.mockResolvedValue(Response.json(session))
     await client.login('b'.repeat(64))
     const scope = client.editingScope
@@ -71,7 +71,7 @@ describe('console transport', () => {
     let delayedLogout: ((value: Response) => void) | undefined
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async function (this: typeof globalThis, url, options) {
       expect(this).toBe(globalThis)
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token, clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token, clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/logout')) return new Promise<Response>(resolve => { delayedLogout = resolve })
       if (String(url).endsWith('/request') && JSON.parse(String(options?.body)).params.delayed) {
         return new Promise<Response>((resolve) => { delayed = resolve })
@@ -125,6 +125,8 @@ describe('console transport', () => {
     expect(scoped.takeChanges()).toEqual([])
     scoped.push('event: invalidate\ndata: {"notificationsChanged":true,"private":"ignored"}\n\n')
     expect(scoped.takeChanges()).toEqual([{ messages: [], notificationsChanged: true }])
+    scoped.push('event: invalidate\ndata: {"nativeInteractionsChanged":true,"answer":"ignored"}\n\n')
+    expect(scoped.takeChanges()).toEqual([{ messages: [], nativeInteractionsChanged: true }])
     scoped.push('event: invalidate\ndata: {"notificationsChanged":"true"}\n\n')
     expect(scoped.takeChanges()).toEqual([{ messages: [] }])
     scoped.push('event: invalidate\ndata: {"teamsChanged":true,"private":"ignored"}\n\n')
@@ -142,7 +144,7 @@ describe('console transport', () => {
     const params = { commandId: newCommandId(), threadId: 'test', draftRevision: 4, execution: null }
     const result = { commandResult: { status: 'applied', payload: { threadMessageId: 'once' } } }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
       if (body.operation === 'thread.messages.send') throw new TypeError('connection lost after admission')
       expect(body).toEqual({ operation: 'commands.reconcile', params: { operation: 'thread.messages.send', params } })
@@ -170,7 +172,7 @@ describe('console transport', () => {
     let reply: (value: Response) => void = () => undefined
     let native = true
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async url => String(url).endsWith('/login')
-      ? Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', fileTransfers: { nativeDownload: native, uploadMaxBytes: 30 * 1024 * 1024 } })
+      ? Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', fileTransfers: { nativeDownload: native, uploadMaxBytes: 30 * 1024 * 1024 } })
       : new Promise(resolve => { reply = resolve }))
     const link = { href: '', download: '', rel: '', referrerPolicy: '', click: vi.fn(), remove: vi.fn() }
     vi.stubGlobal('document', { createElement: () => link, body: { append: vi.fn() } })
@@ -203,7 +205,7 @@ describe('console transport', () => {
   it('uses the advertised per-file upload limit and does not clear existing editing data', async () => {
     let modern = true
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', ...(modern ? { fileTransfers: { uploadMaxBytes: 30 * 1024 * 1024 } } : {}) })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user', ...(modern ? { fileTransfers: { uploadMaxBytes: 30 * 1024 * 1024 } } : {}) })
       const intent = JSON.parse(String((options?.body as FormData).get('intent')))
       return Response.json({ draft: { id: intent.commandId, kind: 'file', observedByteSize: intent.byteSize } })
     })
@@ -223,7 +225,7 @@ describe('console transport', () => {
     const values = new Map<string, string>()
     const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value) }, removeItem: (key: string) => { values.delete(key) } }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async url => {
-      if (String(url).endsWith('/login') || String(url).endsWith('/session')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login') || String(url).endsWith('/session')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/uploads')) throw new TypeError('lost response')
       return Response.json(bound ? { draft: { id: 'received' } } : { state: 'unknown' })
     })
@@ -249,7 +251,7 @@ describe('console transport', () => {
 
   it.each(['request', 'body', 'error body'])('keeps a healthy page usable when cancelling the upload %s with an unknown receipt', async phase => {
     const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/uploads')) {
         if (phase === 'request') return new Promise((_resolve, reject) => {
           options!.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
@@ -283,7 +285,7 @@ describe('console transport', () => {
     let receiptBody: ReadableStreamDefaultController | undefined
     const intents: string[] = []
     const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/uploads')) return new Promise((_resolve, reject) => {
         options!.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
       })
@@ -333,7 +335,7 @@ describe('console transport', () => {
     const intents: string[] = []
     let retrySignal: AbortSignal | null | undefined
     const fetcher = vi.fn<typeof fetch>(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/uploads/reconcile')) return Response.json({ state: 'unknown' })
       intents.push(String((options!.body as FormData).get('intent')))
       if (intents.length === 1) throw new TypeError('connection lost')
@@ -361,7 +363,7 @@ describe('console transport', () => {
     let intent: unknown
     const draft = { id: 'bound', sourcePath: '/tmp/upload/source', displayName: 'input.txt', kind: 'file', mediaType: null, observedByteSize: 5 }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       if (String(url).endsWith('/uploads')) {
         intent = JSON.parse(String((options?.body as FormData).get('intent')))
         expect(intent).toMatchObject({ threadId: 'test', expectedRevision: 1, displayName: 'input.txt', byteSize: 5 })
@@ -389,7 +391,7 @@ describe('console transport', () => {
     let recorded = false
     let sends = 0
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
       if (body.operation === 'messageQuotes.mutateDraft') { sends++; throw new TypeError('reply lost after rejection was recorded') }
       expect(body.operation).toBe('commands.reconcile')
@@ -421,7 +423,7 @@ describe('console transport', () => {
     let allowRetry = false
     const result = { commandResult: { status: 'applied' }, replayed: true }
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async (url, options) => {
-      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 5, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
+      if (String(url).endsWith('/login')) return Response.json({ protocolVersion: 7, token: 'a'.repeat(64), clientId: 'd'.repeat(64), editorProof: 'e'.repeat(64), ownerId: 'local_user' })
       const body = JSON.parse(String(options?.body))
       if (body.operation === 'commands.reconcile') return Response.json({ result: { state: 'unknown' } })
       if (body.operation === 'app.info') return Response.json({ result: {} })
@@ -452,7 +454,7 @@ describe('tab session recovery', () => {
     const values = new Map<string, string>()
     return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value) }, removeItem: (key: string) => { values.delete(key) } }
   }
-  const identity = { protocolVersion: 5, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'local_user', channels: 'desktop' }
+  const identity = { protocolVersion: 7, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'local_user', channels: 'desktop' }
   it('reselects lost bytes after refresh using the original unresolved upload intent', async () => {
     const storage = memory()
     const intents: string[] = []
@@ -495,7 +497,7 @@ describe('tab session recovery', () => {
     expect(fetcher.mock.calls[0][0]).toBe('http://localhost:4317/api/v1/login-ticket')
     const options = fetcher.mock.calls[0][1]!
     expect(options).toMatchObject({ method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store' })
-    expect(JSON.parse(String(options.body))).toEqual({ protocolVersion: 5, ticket: 'e'.repeat(64), editor: { clientId: identity.clientId, proof: identity.editorProof } })
+    expect(JSON.parse(String(options.body))).toEqual({ protocolVersion: 7, ticket: 'e'.repeat(64), editor: { clientId: identity.clientId, proof: identity.editorProof } })
     expect(storage.getItem('rovai.web.session.v1')).not.toContain('e'.repeat(64))
     expect(storage.getItem('rovai.web.edits.v1')).toBe('original unsaved text')
     const copy = new ConsoleClient('http://localhost:4317', fetcher, storage)
@@ -580,7 +582,7 @@ describe('tab session recovery', () => {
 describe('renewable browser authentication', () => {
   const origin = 'http://localhost:4317'
   const day = 86_400_000
-  const identity = { protocolVersion: 5, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'owner' }
+  const identity = { protocolVersion: 7, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'owner' }
   const memory = () => {
     const values = new Map<string, string>()
     return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value) }, removeItem: (key: string) => { values.delete(key) } }

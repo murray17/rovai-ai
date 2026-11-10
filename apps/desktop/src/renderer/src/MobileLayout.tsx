@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type Ref } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode, type Ref, type RefObject } from 'react'
+import * as Dialog from '@radix-ui/react-dialog'
 import { NavigationIcon } from './NavigationIcon'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { uiAttribute } from './interface-language'
@@ -60,6 +61,36 @@ export function MobileLayoutProvider({ value, children }: { value: boolean; chil
 
 export function MobileBack({ onClick, label = '返回' }: { onClick(): void; label?: string }): React.JSX.Element {
   return <button className="mobile-icon-button mobile-back" type="button" aria-label={label} onClick={onClick}><NavigationIcon name="arrow-left" /></button>
+}
+
+export function MobileConversationDrawer({ open, onOpenChange, triggerRef, scrollPosition, children }: {
+  open: boolean; onOpenChange(open: boolean): void
+  triggerRef: RefObject<HTMLButtonElement | null>; scrollPosition: RefObject<number>; children: ReactNode
+}): React.JSX.Element {
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal>
+    <Dialog.Overlay className="mobile-conversation-scrim" />
+    <Dialog.Content id="mobile-app-menu" className="mobile-conversation-drawer app-menu" aria-describedby={undefined} tabIndex={-1}
+      onOpenAutoFocus={event => {
+        event.preventDefault()
+        const menu = document.getElementById('mobile-app-menu')
+        const list = menu?.querySelector<HTMLElement>('.navigation-scroll')
+        if (list) list.scrollTop = scrollPosition.current
+        menu?.focus()
+      }}
+      onScrollCapture={event => { if (event.target instanceof HTMLElement && event.target.classList.contains('navigation-scroll')) scrollPosition.current = event.target.scrollTop }}
+      onCloseAutoFocus={event => {
+        event.preventDefault()
+        const trigger = triggerRef.current
+        const visibleTrigger = trigger?.getClientRects().length ? trigger
+          : [...document.querySelectorAll<HTMLButtonElement>('.app-shell [aria-label="打开主菜单"]')].find(button => button.getClientRects().length)
+        visibleTrigger?.focus({ preventScroll: true })
+      }}>
+      <header className="app-menu-heading"><Dialog.Title>Rovai AI</Dialog.Title>
+        <Dialog.Close asChild><button className="mobile-icon-button" type="button" aria-label={uiAttribute('关闭主菜单')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.65" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg></button></Dialog.Close>
+      </header>
+      {children}
+    </Dialog.Content>
+  </Dialog.Portal></Dialog.Root>
 }
 
 export function MobilePageHeader({ title, onOpenMenu, menuOpen, triggerRef, children }: {

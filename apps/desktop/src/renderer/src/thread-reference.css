@@ -82,3 +82,39 @@
 .message-mention-token.skill-mention::before { content:''; display:inline-block; width:13px; height:13px; margin-right:3px; vertical-align:-2px; background:currentColor; mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.7%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m12%203-1.1%203.4a2%202%200%200%201-1.3%201.3L6.2%208.8l3.4%201.1a2%202%200%200%201%201.3%201.3L12%2014.6l1.1-3.4a2%202%200%200%201%201.3-1.3l3.4-1.1-3.4-1.1a2%202%200%200%201-1.3-1.3Z%22%2F%3E%3Cpath%20d%3D%22m19%2015-.6%201.8a1.2%201.2%200%200%201-.8.8l-1.8.6%201.8.6a1.2%201.2%200%200%201%20.8.8l.6%201.8.6-1.8a1.2%201.2%200%200%201%20.8-.8l1.8-.6-1.8-.6a1.2%201.2%200%200%201-.8-.8Z%22%2F%3E%3Cpath%20d%3D%22m5%2015-.45%201.3a1%201%200%200%201-.65.65l-1.3.45%201.3.45a1%201%200%200%201%20.65.65L5%2019.8l.45-1.3a1%201%200%200%201%20.65-.65l1.3-.45-1.3-.45a1%201%200%200%201-.65-.65Z%22%2F%3E%3C%2Fsvg%3E") center/contain no-repeat; }
 
 .ref-candidate-title,.ref-candidate-project { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* File references keep the existing compact token rhythm and the shared file type palette. */
+.project-file-reference { max-width: min(100%, 28rem); vertical-align: baseline; }
+.project-file-token-content, .message-mention-token.project-file-reference { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.project-file-token-content { pointer-events: none; max-width: 100%; }
+.project-file-reference .project-file-icon { width: 13px; height: 13px; flex: 0 0 13px; pointer-events: none; }
+.structured-mention-token.project-file-reference { display: inline-flex; }
+.structured-mention-token.project-file-reference::before { content: none; display: none; }
+.project-file-reference .reference-token-label { display: inline-flex; min-width: 0; overflow: hidden; white-space: nowrap; }
+.file-reference-directory { flex: 0 2 auto; max-width: 38%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-reference-name { display: inline-flex; min-width: 0; flex: 1 1 auto; }
+.file-reference-stem { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-reference-extension { flex: none; }
+.ref-group-label { box-sizing: border-box; height: 22px; line-height: 12px; }
+.ref-menu button.ref-file-option[role=option] { display:flex; align-items:center; gap:8px; height:32px; min-height:32px; grid-template-rows:none; }
+.ref-file-option .ref-candidate-icon { display:flex; align-items:center; justify-content:center; flex:0 0 16px; grid-row:auto; }
+.ref-menu .ref-file-option .ref-candidate-project { flex:0 10 auto; min-width:0; max-width:none; width:auto; margin:0; justify-self:start; text-align:left; line-height:20px; }
+.ref-group-label, .ref-source-note { padding: 5px 10px; font-size: 11px; color: var(--muted); }
+.file-reference-error { color: var(--danger); font-size: 11px; margin-inline: 4px; }
+.ref-menu .ref-options { max-height: min(352px, 45vh); }
+@media (max-width: 600px) { .project-file-reference { max-width: min(100%, 19rem); } .ref-menu { max-width: calc(100vw - 24px); } }
+@media (pointer: coarse), (max-width: 600px) { .project-file-actions .ref-popover-actions button { min-height: 44px; min-width: 44px; } }
+
+/* Shared file/folder candidate layout; filename takes priority over its parent path. */
+.structured-mention-menu.ref-menu { width:min(480px,100%); max-width:calc(100vw - 24px); }
+.ref-menu .ref-file-option .ref-candidate-title { flex:0 0 auto; max-width:calc(100% - 64px); min-width:0; line-height:20px; }
+.ref-menu .ref-file-option .ref-candidate-project[hidden] { display:none; }
+.ref-menu .ref-options[data-filter="file"] { max-height:min(256px,45vh); }
+.project-file-reference .project-folder-icon { width:13px; height:13px; flex:0 0 13px; pointer-events:none; }
+@media(max-width:700px) {
+  [data-mobile-web=true] .ref-menu button.ref-file-option[role=option] { height:44px; min-height:44px; }
+  [data-mobile-web=true] .ref-menu .ref-options[data-filter="file"] { max-height:min(352px,45vh); }
+}
+
+.ref-file-option .ref-candidate-title, .ref-file-option .reference-token-label { display:inline-flex; align-items:center; min-width:0; }
+.ref-file-option .file-reference-name { display:inline-flex; min-width:0; }

@@ -131,10 +131,13 @@ export interface RuntimeModelCatalogCache {
 }
 
 export interface RuntimeModelCatalogTarget {
-  modelId: string
+  /** DSH-only target; omitted for a shared catalog refresh. */
+  modelId?: string
   dshSource?: 'native' | 'web'
   /** Validate cached DSH capability context without starting a Runtime. */
   cacheOnly?: boolean
+  /** Read natively even when the same identity's cached catalog is fresh. */
+  forceRefresh?: boolean
 }
 
 export interface RuntimeModelCatalogView {
@@ -969,6 +972,7 @@ export interface SingleChatRunView {
 }
 
 export interface SingleChatSnapshot {
+  nativeInteractions?: NativeInteractionView[]
   conversation: SingleChatConversationView
   approvals: ActionApprovalView[]
   messages: SingleChatMessageView[]
@@ -1231,6 +1235,7 @@ export type StructuredThreadMessageSegment =
   | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
   | { kind: 'thread_reference'; threadId: string; titleAtSend: string }
   | { kind: 'mission_reference'; missionId: string; titleAtSend: string }
+  | PublishedProjectFileReference
   | {
       kind: 'external_quote'
       senderDisplayName: string
@@ -1256,6 +1261,7 @@ export type ComposerAtom =
   | SkillComposerAtom
   | ThreadReferenceComposerAtom
   | MissionReferenceComposerAtom
+  | ProjectFileReferenceAtom
 
 export interface MemberComposerAtom {
   type: 'member'
@@ -1284,6 +1290,44 @@ export interface MissionReferenceComposerAtom {
   missionId: string
   labelFallback?: string
 }
+
+export type ProjectFileTargetKind = 'file' | 'directory'
+
+export interface ProjectFileReferenceAtom {
+  type: 'project_file_reference'
+  threadId: string
+  rawReference: string
+  /** Complete project-relative path, never used as location authority. */
+  labelFallback: string
+  targetKind?: ProjectFileTargetKind
+}
+
+export interface PublishedProjectFileReference {
+  kind: 'project_file_reference'
+  threadId: string
+  rawReference: string
+  pathAtSend: string
+  labelAtSend: string
+  targetKind?: ProjectFileTargetKind
+}
+
+/** Root-bound metadata returned by projectFiles.open; directories are never file-preview inputs. */
+export interface ProjectFileReferenceSource {
+  kind: 'project_file'
+  threadId: string
+  rawReference: string
+  targetKind?: ProjectFileTargetKind
+  expectedPathAtSend?: string
+}
+
+export interface ProjectFileReferencesResolveRequest {
+  threadId: string
+  references: Array<{ threadId: string; rawReference: string; targetKind?: ProjectFileTargetKind }>
+}
+export type ProjectFileReferenceResolution =
+  | { status: 'available'; reference: ProjectFileReferenceAtom }
+  | { status: 'needs_reselect'; reason: 'root_mismatch' | 'source_unavailable' }
+  | { status: 'unavailable'; reason: string }
 
 export type ReferenceKind = 'thread' | 'mission'
 export interface ReferenceIdentity { kind: ReferenceKind; id: string }
@@ -1593,6 +1637,7 @@ export type OpenFilePreviewRequest =
       threadId: string
       /** Host-issued reference to the current root generation and file. */
       rawReference: string
+      expectedPathAtSend?: string
     }
   | {
       kind: 'skill_reference'
@@ -1865,6 +1910,10 @@ export interface ProjectFilesRequest {
   query?: string
   queryRevision?: number
   revision?: number
+  /** Directory activation validates the original root and optional published path. */
+  rawReference?: string
+  expectedPathAtSend?: string
+  targetKind?: ProjectFileTargetKind
 }
 export type ProjectFilesResult<T> = { ok: true; value: T } | { ok: false; error: { code: string } }
 export interface ProjectFilesApi {
@@ -2444,6 +2493,31 @@ export interface ActionView {
   updatedAt: string
 }
 
+export interface NativeInteractionQuestion {
+  id: string
+  kind: 'confirm' | 'select' | 'input'
+  title: string
+  description: string | null
+  options: { id: string; label: string }[]
+  placeholder: string | null
+  prefill: string | null
+  multiline: boolean
+}
+export type NativeInteractionStatus = 'pending' | 'sent' | 'skipped' | 'expired' | 'unavailable' | 'unknown' | 'failed'
+export interface NativeInteractionView {
+  id: string
+  agentRunId: string
+  executionEpoch: number
+  questions: NativeInteractionQuestion[]
+  canSkip: boolean
+  createdAt: number
+  expiresAt: number | null
+  status: NativeInteractionStatus
+}
+export type NativeInteractionAnswer = { kind: 'confirm'; confirmed: boolean }
+  | { kind: 'select'; optionId: string } | { kind: 'input'; value: string } | { kind: 'skip' }
+export interface NativeInteractionResult { status: NativeInteractionStatus; alreadyHandled?: boolean }
+
 export interface ActionApprovalView {
   id: string
   actionId: string
@@ -2594,6 +2668,7 @@ export interface ThreadSnapshot {
   agentRunImages?: AgentRunImagesView[]
   contextManifests: ContextManifestView[]
   approvals: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
   actions: ActionView[]
   timeline: DomainEventView[]
 }
@@ -2628,6 +2703,7 @@ export interface ThreadOpenProjection {
   agentRunFileChanges: AgentRunFileChangesView[]
   agentRunImages?: AgentRunImagesView[]
   approvals: ActionApprovalView[]
+  nativeInteractions?: NativeInteractionView[]
   coverage: {
     tasks?: ThreadOpenCollectionCoverage
     messages: ThreadOpenMessageCoverage
@@ -2694,6 +2770,7 @@ export interface ThreadMessageChange {
 export interface ThreadReadInvalidation {
   referencesChanged?: boolean
   notificationsChanged?: boolean
+  nativeInteractionsChanged?: boolean
   tasksChanged?: boolean
   teamsChanged?: boolean
   resync?: boolean
@@ -2825,7 +2902,20 @@ export interface EventBatch {
 
 export type NotificationEpisodeKind = 'collaboration' | 'message' | 'approval' | 'round' | 'mission' | 'task' | 'single_chat'
 
+// native_interaction_pending is transient Runtime attention, never a persisted Episode.
+export interface NativeInteractionNotification {
+  id: string
+  thread: NotificationEpisodeView['thread']
+  agentRunId: string
+  executionEpoch: number
+  agentDisplayName: string
+  singleChat: NotificationSingleChatSource | null
+  createdAt: number
+  expiresAt: number | null
+}
+
 export type NotificationSemantic =
+  | 'native_interaction_pending'
   | 'approval_pending'
   | 'user_mention'
   | 'turn_completed'
@@ -2849,6 +2939,7 @@ export type NotificationReasonState =
   | 'satisfied'
 
 export type NotificationActionKind =
+  | 'open_native_interaction'
   | 'open_approval'
   | 'open_camp_message'
   | 'open_camp_turn'
@@ -2892,6 +2983,7 @@ export interface NotificationSubject {
 }
 
 export interface NotificationActionView {
+  interactionId?: string
   actionId: string
   kind: NotificationActionKind
   available: boolean
@@ -2967,6 +3059,8 @@ export interface NotificationThreadInterruptions {
 }
 
 export interface NotificationHeadsUpSignal {
+  // Present only for transient Runtime-owned questions, outside the durable Journal.
+  nativeInteraction?: NativeInteractionNotification
   semantic: NotificationSemantic
   admittedAttentionRevision: number
   action: NotificationActionView
@@ -3410,11 +3504,12 @@ export type InterfaceLanguagePreference = 'system' | InterfaceLanguage
 
 /** Disk/browser representation. Resolved language and read status are never persisted. */
 export interface GeneralPreferencesStorage {
-  schemaVersion: 7
+  schemaVersion: 8
   interfaceLanguagePreference: InterfaceLanguagePreference
   startupLocationMode: StartupLocationMode
   lastSettingsSection: SettingsSection
   executionConsolePlacement: ExecutionConsolePlacement
+  executionConsoleAutoOpen: boolean
   newConversationDefaults: NewConversationDefaults | null
   newConversationTeamId: string | null
   newConversationDefaultsRequireConfirmation: boolean
@@ -3490,6 +3585,7 @@ export interface GeneralPreferencesApi extends InterfaceLanguageApi {
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot>
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot>
   setExecutionConsolePlacement(placement: ExecutionConsolePlacement): Promise<GeneralPreferencesSnapshot>
+  setExecutionConsoleAutoOpen(enabled: boolean): Promise<GeneralPreferencesSnapshot>
   /** Saves the team atomically with enabling one-click when requested; otherwise preserves its current flag. */
   setNewConversationTeam(teamId: string | null, enableOneClick?: boolean): Promise<GeneralPreferencesSnapshot>
   setNewConversationDefaults(defaults: NewConversationDefaults, enableOneClick?: boolean): Promise<GeneralPreferencesSnapshot>
@@ -4296,6 +4392,7 @@ export interface UpdateAutomationCommand {
 
 export type CoreMethod =
   | 'projectFiles.request'
+  | 'projectFileReferences.resolve'
   | 'preferences.tasks.get'
   | 'preferences.tasks.set'
   | 'teams.list'
@@ -4459,6 +4556,8 @@ export type CoreMethod =
   | 'channels.lark.roster.reconcile'
   | 'channels.lark.deliveries.settle'
   | 'channels.lark.host.tick'
+  | 'channels.lark.nativeInteractions.source'
+  | 'channels.lark.nativeInteractions.respond'
   | 'channels.lark.executionConsole.page.authorize'
   | 'channels.lark.executionConsole.recentOutput.authorize'
   | 'channels.lark.executionConsole.agentRun.cancel'
@@ -4480,6 +4579,8 @@ export type CoreMethod =
   | 'channels.dingtalk.roster.reconcile'
   | 'channels.dingtalk.inbound.finalize'
   | 'channels.dingtalk.host.tick'
+  | 'channels.dingtalk.nativeInteractions.source'
+  | 'channels.dingtalk.nativeInteractions.respond'
   | 'channels.dingtalk.executionConsole.page.authorize'
   | 'channels.dingtalk.executionConsole.recentOutput.authorize'
   | 'channels.dingtalk.executionConsole.agentRun.cancel'
@@ -4492,6 +4593,8 @@ export type CoreMethod =
   | 'channels.inbound.attachments.complete'
   | 'channels.host.tick'
   | 'channels.executionConsole.source'
+  | 'channels.nativeInteractions.source'
+  | 'channels.nativeInteractions.respond'
   | 'channels.executionConsole.page.authorize'
   | 'channels.executionConsole.recentOutput.authorize'
   | 'channels.executionConsole.agentRun.cancel'
@@ -4563,6 +4666,8 @@ export type CoreMethod =
   | 'thread.messages.withdraw'
   | 'userAutomation.thread.send'
   | 'action.approvals.resolve'
+  | 'nativeInteractions.respond'
+  | 'nativeInteractions.notifications'
   | 'notifications.inbox'
   | 'notifications.threadInterruptions'
   | 'notifications.changesSince'

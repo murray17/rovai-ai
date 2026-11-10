@@ -142,7 +142,11 @@ describe('local Thread Composer drafts', () => {
       ...emptyLocalThreadComposerDraft('camp-a'),
       content: { version: 2, segments: [{ kind: 'atom', atom: { type: 'member' } }] }
     }))
-    expect(loadLocalThreadComposerDraft('camp-a', storage)).toBeNull()
+    const original = storage.getItem('rovai.camp-composer-draft.v1:camp-a')
+    expect(() => loadLocalThreadComposerDraft('camp-a', storage)).toThrow('不兼容')
+    expect(() => saveLocalThreadComposerDraft(emptyLocalThreadComposerDraft('camp-a'), storage)).toThrow('不兼容')
+    expect(() => clearLocalThreadComposerDraft('camp-a', storage)).toThrow('不兼容')
+    expect(storage.getItem('rovai.camp-composer-draft.v1:camp-a')).toBe(original)
   })
 
   it('continues only the last accepted unique explicit non-Lead route', () => {

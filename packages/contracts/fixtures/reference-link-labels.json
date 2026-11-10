@@ -1,0 +1,62 @@
+[
+  {
+    "label": "alpha.md",
+    "escaped": "alpha.md"
+  },
+  {
+    "label": "composer-trigger.test.ts",
+    "escaped": "composer-trigger.test.ts"
+  },
+  {
+    "label": "登录-重构 v1.2",
+    "escaped": "登录-重构 v1.2"
+  },
+  {
+    "label": "中文 参数 (草稿)#1.ts",
+    "escaped": "中文 参数 (草稿)#1.ts"
+  },
+  {
+    "label": "src/auth",
+    "escaped": "src/auth"
+  },
+  {
+    "label": "[note].md",
+    "escaped": "\\[note\\].md"
+  },
+  {
+    "label": "a\\b.md",
+    "escaped": "a\\\\b.md"
+  },
+  {
+    "label": "_draft_.md",
+    "escaped": "\\_draft\\_.md"
+  },
+  {
+    "label": "**draft**.md",
+    "escaped": "\\*\\*draft\\*\\*.md"
+  },
+  {
+    "label": "~~draft~~.md",
+    "escaped": "\\~\\~draft\\~\\~.md"
+  },
+  {
+    "label": "a`b`c.md",
+    "escaped": "a\\`b\\`c.md"
+  },
+  {
+    "label": "&copy;.md",
+    "escaped": "\\&copy;.md"
+  },
+  {
+    "label": "<x>.md",
+    "escaped": "\\<x>.md"
+  },
+  {
+    "label": "a|b.md",
+    "escaped": "a\\|b.md"
+  },
+  {
+    "label": "a + b, v1:2; x!?\".md",
+    "escaped": "a + b, v1:2; x!?\".md"
+  }
+]

@@ -36,7 +36,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-const HOST_WEB_PROTOCOL_VERSION: u32 = 5;
+const HOST_WEB_PROTOCOL_VERSION: u32 = 7;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -680,6 +680,9 @@ async fn events(
                         if change["method"] == "teams.changed" { payload["teamsChanged"] = json!(true); }
                         if matches!(change["method"].as_str(), Some("notification_episode.changed" | "notification_episode.preference_changed")) {
                             payload["notificationsChanged"] = json!(true);
+                        }
+                        if matches!(change["method"].as_str(), Some("agent_run.interaction_changed" | "agent_run.terminal" | "agent_run.cancelled" | "single_chat.ended")) {
+                            payload["nativeInteractionsChanged"] = json!(true);
                         }
                         if change["method"] == "thread.messages.changed" {
                             let params = &change["params"];

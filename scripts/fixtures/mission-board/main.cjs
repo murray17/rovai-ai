@@ -44,6 +44,52 @@ app.whenReady().then(async () => {
     await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 1000 })
   }
   const settle = () => window.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 250))', true)
+  if (mode === 'execution-auto-open') {
+    stage = 'Mission execution auto-open'
+    const run = code => window.webContents.executeJavaScript(code, true)
+    const cases = []
+    const executionSelected = `!!document.querySelector('.file-preview-tab-activate[aria-label="执行"][aria-selected="true"]')`
+    const executionVisible = `!!document.querySelector('.execution-drawer')?.checkVisibility()`
+    for (const enabled of [false, true]) {
+      await window.loadFile(renderer, { query: { executionAutoOpen: enabled ? '1' : '0' } })
+      await waitFor(`!!document.querySelector('.mission-board-card[data-mission-id="mission-1"]')`, 'Running Mission is available')
+      await run(`localStorage.setItem('rovai.mission-drawer-width', '1040')`)
+      await click('.mission-board-card[data-mission-id="mission-1"]')
+      await waitFor(`!!document.querySelector('.mission-drawer #camp-message') && !!document.querySelector('.file-preview-tab-activate[aria-selected="true"]')`, 'Mission drawer and preview are ready')
+      await settle()
+      assert.equal(await run(executionSelected), enabled, 'Running Mission drawer follows the saved auto-open preference')
+      assert.equal(await run(executionVisible), enabled, 'Drawer visibility follows the preference')
+      cases.push(`running-drawer-auto-open-${enabled}`)
+      await click('[aria-label="展开为完整会话"]')
+      await waitFor(`!!document.querySelector('.mission-full')`, 'Mission expands into the full conversation')
+      await settle()
+      assert.equal(await run(executionSelected), enabled, 'Full Mission preserves the same auto-open policy')
+      assert.equal(await run(executionVisible), enabled, 'Full visibility follows the preference')
+      cases.push(`running-full-auto-open-${enabled}`)
+      if (!enabled) {
+        await click('.mission-session-header .camp-detail-entry[data-detail="execution"]')
+        await waitFor(executionVisible, 'Explicit execution entry still opens when auto-open is disabled')
+        cases.push('manual-full-with-auto-open-disabled')
+        await click('[aria-label="折叠为使命抽屉"]')
+        await waitFor(`!!document.querySelector('.mission-drawer') && ${executionVisible}`, 'Folding retains the manually opened execution desk')
+        cases.push('manual-drawer-with-auto-open-disabled')
+      }
+    }
+    window.setContentSize(390, 844)
+    await window.loadFile(renderer, { query: { executionAutoOpen: '1' } })
+    await waitFor(`!!document.querySelector('.mission-status-tabs')`, 'Mobile Mission status tabs are ready')
+    await click('.mission-status-tabs button:nth-child(3)')
+    await waitFor(`!!document.querySelector('.mission-board-card[data-mission-id="mission-1"]')`, 'Mobile Mission list is ready')
+    await click('.mission-board-card[data-mission-id="mission-1"]')
+    await waitFor(`!!document.querySelector('#camp-message') && !!document.querySelector('.mobile-camp-tabs')`, 'Mobile Mission conversation is ready')
+    await settle()
+    assert.equal(await run(executionSelected), false, 'Mobile ignores the enabled auto-open preference')
+    assert.equal(await run(executionVisible), false, 'Mobile Mission execution remains manual')
+    cases.push('mobile-mission-manual-with-auto-open-enabled')
+    console.log(JSON.stringify({ ok: true, cases }))
+    app.exit(0)
+    return
+  }
   if (mode === 'splitters') {
     await require('./splitters.cjs')({ window, waitFor, click, settle })
     console.log(JSON.stringify({ ok: true, cases: ['Mission drawer and Diff tree settle final release, interruption, drag-click isolation and Escape'] }))

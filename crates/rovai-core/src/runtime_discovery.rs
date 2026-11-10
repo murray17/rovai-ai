@@ -54,9 +54,7 @@ use crate::{
 
 #[cfg(unix)]
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
-const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
-const CODEBUDDY_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
-const PI_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
+pub const RUNTIME_VERSION_TIMEOUT: Duration = Duration::from_secs(15);
 #[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
@@ -1136,6 +1134,44 @@ pub async fn discover_runtime_version(
     .await;
 }
 
+/// Project this observation's version failure without replacing retained health
+/// attempts. Passive discovery has no version outcome and creates no failure.
+pub fn version_probe_failure(
+    observation: &RuntimeDiscoveryObservation,
+) -> Option<crate::runtime_failure::RuntimeFailureView> {
+    if observation.version_probe_succeeded != Some(false) {
+        return None;
+    }
+    let diagnostic = observation
+        .diagnostic_code
+        .as_deref()
+        .unwrap_or("runtime_version_failed");
+    let code = if diagnostic.starts_with("runtime_")
+        && diagnostic
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte == b'_')
+    {
+        diagnostic
+    } else {
+        "runtime_version_failed"
+    };
+    Some(crate::runtime_failure::public_runtime_failure_from_output(
+        observation.runtime_kind,
+        crate::runtime_failure::RuntimeFailureOrigin::Environment,
+        crate::runtime_failure::RuntimeFailurePhase::Spawn,
+        code,
+        "智能体版本读取失败，请重试检查。",
+        Some(diagnostic),
+        &observation
+            .executable_path
+            .as_deref()
+            .map(|path| (Path::new(path), "<runtime-executable>"))
+            .into_iter()
+            .collect::<Vec<_>>(),
+        true,
+    ))
+}
+
 async fn discover_runtime_version_scoped(
     observation: &mut RuntimeDiscoveryObservation,
     search: &RuntimeSearchEnvironment,
@@ -1309,18 +1345,6 @@ fn version_arguments(kind: AdapterKind) -> &'static [&'static str] {
     }
 }
 
-fn version_timeout(kind: AdapterKind) -> Duration {
-    match kind {
-        AdapterKind::CodebuddyCli => CODEBUDDY_VERSION_TIMEOUT,
-        AdapterKind::HermesCli => Duration::from_secs(20),
-        // Pi's packaged JavaScript entrypoint may need a cold Node startup before it can
-        // answer `--version`. Keep the bounded probe, but do not apply the native-binary
-        // deadline to this runtime.
-        AdapterKind::Pi | AdapterKind::ZcodeApp => PI_VERSION_TIMEOUT,
-        _ => VERSION_TIMEOUT,
-    }
-}
-
 /// Reads only the selected program's version during an already-authorized launch.
 /// This does not run a model or refresh installation capabilities.
 pub async fn read_runtime_version_for_launch(
@@ -1362,7 +1386,7 @@ async fn bounded_version_command(
     let output = run_bounded_command(
         &mut command,
         ProbeCommandLimits {
-            deadline: version_timeout(kind),
+            deadline: RUNTIME_VERSION_TIMEOUT,
             stdout_bytes: MAX_VERSION_OUTPUT_BYTES,
             stderr_bytes: MAX_VERSION_OUTPUT_BYTES,
             cleanup_timeout: Duration::from_secs(1),
@@ -1419,7 +1443,7 @@ fn capture_shell_path_from(
         .file_name()
         .map(|value| value.to_string_lossy().to_string());
     let marker = format!("__ROVAI_PATH_{}__", Uuid::new_v4().simple());
-    let script = format!("printf '%s\\n%s\\n%s\\n' '{marker}' \"$PATH\" '{marker}'");
+    let script = format!("printf '\\n%s\\n%s\\n%s\\n' '{marker}' \"$PATH\" '{marker}'");
     let mut command = Command::new(shell_path);
     command
         .arg("-ilc")
@@ -1977,20 +2001,6 @@ pub fn catalog_entries() -> Vec<BTreeMap<&'static str, &'static str>> {
         .collect()
 }
 
-#[cfg(test)]
-mod version_timeout_tests {
-    use super::*;
-
-    #[test]
-    fn pi_version_probe_allows_js_cold_start() {
-        assert_eq!(version_timeout(AdapterKind::Pi), Duration::from_secs(5));
-        assert_eq!(
-            version_timeout(AdapterKind::CodexCli),
-            Duration::from_secs(2)
-        );
-    }
-}
-
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -2243,31 +2253,105 @@ mod tests {
         let shell = directory.join("fixture-shell");
         let tools = directory.join("tools with spaces");
         fs::create_dir_all(&tools).unwrap();
+        let startup_outputs: [(&str, &str, &[u8]); 6] = [
+            ("no startup output", "", b""),
+            (
+                "text with newline",
+                r"printf 'shell startup output\n'",
+                b"shell startup output\n",
+            ),
+            (
+                "text without newline",
+                "printf '%s' 'shell startup output'",
+                b"shell startup output",
+            ),
+            (
+                "ANSI without newline",
+                r"printf '\033[32mfixture\033[0m'",
+                b"\x1b[32mfixture\x1b[0m",
+            ),
+            (
+                "OSC without newline",
+                r"printf '\033]0;fixture-title\007'",
+                b"\x1b]0;fixture-title\x07",
+            ),
+            (
+                "text ending in carriage return",
+                r"printf 'shell startup output\r'",
+                b"shell startup output\r",
+            ),
+        ];
+        let mut capture_failures = Vec::new();
+        for (name, startup, expected_bytes) in startup_outputs {
+            // Check actual bytes before using the snippet in the capture fixture;
+            // literal escape text would not exercise terminal control output.
+            let emitted = Command::new("/bin/sh")
+                .args(["-c", startup])
+                .env_clear()
+                .current_dir(&directory)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+            assert!(emitted.status.success(), "{name}: fixture startup failed");
+            assert_eq!(emitted.stdout, expected_bytes, "{name}: fixture bytes");
+            executable(
+                &shell,
+                &format!(
+                    "#!/bin/sh\n[ \"$1\" = '-ilc' ] || exit 1\n{startup}\nexport PATH='{}'\nexec /bin/sh -c \"$2\"\n",
+                    tools.display()
+                ),
+            );
+            let (status, _, paths) = capture_shell_path_from(&shell, Duration::from_secs(1));
+            if status != ShellPathStatus::Captured || paths != vec![tools.clone()] {
+                capture_failures.push(format!("{name}: {status:?}, paths={paths:?}"));
+            }
+        }
+
         executable(
             &shell,
-            &format!(
-                "#!/bin/sh\n[ \"$1\" = '-ilc' ] || exit 1\nprintf 'shell startup output\\n'\nexport PATH='{}'\nexec /bin/sh -c \"$2\"\n",
-                tools.display()
-            ),
+            "#!/bin/sh\n[ \"$1\" = '-ilc' ] || exit 1\nexport PATH=''\nexec /bin/sh -c \"$2\"\n",
         );
         let (status, _, paths) = capture_shell_path_from(&shell, Duration::from_secs(1));
         assert_eq!(status, ShellPathStatus::Captured);
-        assert_eq!(paths, vec![tools]);
+        assert_eq!(paths, vec![PathBuf::new()], "empty PATH is captured output");
 
-        for script in [
-            "#!/bin/sh\nprintf 'incomplete shell output\\n'\nexit 1\n".to_owned(),
-            "#!/bin/sh\nprintf 'incomplete shell output\\n'\n".to_owned(),
-            format!(
-                "#!/bin/sh\nprintf '%s' '{}'\nexec /bin/sh -c \"$2\"\n",
-                "x".repeat(MAX_SHELL_PATH_BYTES as usize + 1)
+        for (name, script) in [
+            ("empty stdout", "#!/bin/sh\nexit 0\n".to_owned()),
+            (
+                "failed shell with incomplete output",
+                "#!/bin/sh\nprintf 'incomplete shell output\\n'\nexit 1\n".to_owned(),
+            ),
+            (
+                "missing markers",
+                "#!/bin/sh\nprintf 'incomplete shell output\\n'\n".to_owned(),
+            ),
+            (
+                "missing end marker",
+                "#!/bin/sh\n/bin/sh -c \"$2\" | /usr/bin/sed '$d'\n".to_owned(),
+            ),
+            (
+                "mismatched end marker",
+                "#!/bin/sh\n/bin/sh -c \"$2\" | /usr/bin/sed '$s/.*/__ROVAI_WRONG_END__/'\n"
+                    .to_owned(),
+            ),
+            (
+                "failed shell with complete output",
+                "#!/bin/sh\n/bin/sh -c \"$2\"\nexit 1\n".to_owned(),
+            ),
+            (
+                "output exceeds byte limit",
+                format!(
+                    "#!/bin/sh\nprintf '%s' '{}'\nexec /bin/sh -c \"$2\"\n",
+                    "x".repeat(MAX_SHELL_PATH_BYTES as usize + 1)
+                ),
             ),
         ] {
             executable(&shell, &script);
             let (status, _, paths) = capture_shell_path_from(&shell, Duration::from_secs(1));
-            assert_eq!(status, ShellPathStatus::Failed);
+            assert_eq!(status, ShellPathStatus::Failed, "{name}");
             assert!(
                 paths.is_empty(),
-                "failed capture leaves inherited/known PATH fallback intact"
+                "{name}: failed capture leaves inherited/known PATH fallback intact"
             );
         }
 
@@ -2300,6 +2384,11 @@ mod tests {
             assert!(started.elapsed() < Duration::from_secs(2));
         }
         fs::remove_dir_all(directory).unwrap();
+        assert!(
+            capture_failures.is_empty(),
+            "startup output must not break PATH capture:\n{}",
+            capture_failures.join("\n")
+        );
     }
 
     #[cfg(feature = "extended-tests")]
@@ -3412,19 +3501,6 @@ mod windows_tests {
         .await;
         assert_eq!(inherited_path, search.path_value());
         fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn script_runtime_version_probes_allow_cold_start() {
-        assert_eq!(
-            version_timeout(AdapterKind::CodebuddyCli),
-            Duration::from_secs(5)
-        );
-        assert_eq!(version_timeout(AdapterKind::Pi), Duration::from_secs(5));
-        assert_eq!(
-            version_timeout(AdapterKind::CodexCli),
-            Duration::from_secs(2)
-        );
     }
 }
 

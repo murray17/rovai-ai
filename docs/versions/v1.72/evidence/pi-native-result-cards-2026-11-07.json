@@ -1,0 +1,288 @@
+{
+  "observedAt": "2026-11-07T15:59:47.848613+00:00",
+  "status": "feishu-lark-readonly-results-live-accepted",
+  "baseCommit": "23fe2738c6121f89ebac6241e64537ccfb1350a3",
+  "sourceSha256": {
+    "apps/desktop/src/main/native-interaction-cards.ts": "88554f93861ea290cc6dfeb2f0b438fb5afe87788f4932b0789102418b6cab7c",
+    "apps/desktop/src/main/channel-settings.ts": "488642a7da70b409915ed4b429011141874f929042041e3b2aca79052e8eb85b",
+    "crates/rovai-core/src/application.rs": "24c843a9c78cccb77908154fdf1a0f58a0e22e90afb355dc4afc9067dcf382eb",
+    "crates/rovai-core/src/native_interaction.rs": "2998c88501705de890fa2a488721679d01fc563fc7426fee01b9fa2b5c8a51a9",
+    "crates/rovai-core/src/pi/host.rs": "87cb39fe52ae014ae0de527a203f613583cae406fd5435ceefbd3c336237a6ca",
+    "crates/rovai-core/src/pi/interactions.rs": "2cb24da7a9f2c0fbf3ddc0aa08e27990eebadd297fc858c22a4b1dbf82f1de90",
+    "crates/rovai-core/src/channel/native_interactions.rs": "0db7688bfee8d91c86d34af3e2e9ba1016edac6da789f0719144fd4a13b110b8"
+  },
+  "runtime": {
+    "pi": "1.1.0",
+    "provider": "sub2api",
+    "model": "gpt-6.1-sol",
+    "realExternalModelCalls": true,
+    "controlledExtensions": [
+      "native_card_result_probe",
+      "native_channel_probe"
+    ],
+    "thirdPartyQuestionnaireExtension": null,
+    "coreDataIsolated": true,
+    "skillsIsolated": true,
+    "homeIsolated": true,
+    "mcpPathIsolated": true,
+    "dailyAppRestartedOrStopped": false
+  },
+  "implementation": {
+    "newTables": 0,
+    "migrations": 0,
+    "newDeliveryStates": 0,
+    "optionalDisplayStrings": [
+      "questionPreview",
+      "answerPreview"
+    ],
+    "previewLimitCodepoints": 300,
+    "overflowSuffix": "……（仅展示部分内容）",
+    "prefixIncludedInLimit": true,
+    "firstNativeWriteWins": true,
+    "sameOriginalMessageUpdated": true,
+    "rawNativeTextUnchanged": true,
+    "legacyRecordsNotBackfilled": true,
+    "dingTalkRendererChanged": false
+  },
+  "feishuLark": {
+    "feishu": {
+      "startedAt": "2026-11-07T15:12:41.921Z",
+      "finishedAt": "2026-11-07T15:22:05.543Z",
+      "scope": "Production Main ChannelSettingsService and SDK, isolated production Core NativeInteraction source/respond + Owner/App/card authorization + Outbox send/update, installed Pi 1.1.0 and real sub2api/gpt-6.1-sol. Account/verified Owner/routing are seeded metadata, not provisioning acceptance.",
+      "threadId": "rvcamp_01m6v8wsbcfds8tq1dvaejqprn",
+      "agentRunId": "10d8c8d9-adc7-46ec-99b4-1eb63f747f21",
+      "runtimeCalls": [
+        {
+          "provider": "sub2api",
+          "model": "gpt-6.1-sol",
+          "tool": "native_card_result_probe"
+        }
+      ],
+      "realClientCallbacks": 5,
+      "completedRequests": 5,
+      "sameExternalMessageUpdates": 5,
+      "questionVisibleOnEveryCompletedCard": true,
+      "answerShownOnlyForSent": true,
+      "completedControls": 0,
+      "nativeToolResultMatchesAllExpectedAnswers": true,
+      "nativeEditorCodepoints": 458,
+      "nativeEditorSha256": "ca0de3d9ad7cd470b9278d122457ef717d81dc3bba490bc99e6fa329fb89434e",
+      "boundedEditorPreviewCodepoints": 311,
+      "boundedEditorPreviewSha256": "44c2338fd9d0091827061400855155653b6e4d999a1fef72c579ad521923d156",
+      "firstConfirmWasNo": true,
+      "skipIsDifferentCoreStatus": true,
+      "explicitEmptyTextReceived": true,
+      "cards": [
+        {
+          "interactionId": "77ec1e9d-c840-4015-b45b-c0b552780e44",
+          "messageId": "om_x100b61c7b1965068b4b2ec386d944d5",
+          "kind": "confirm",
+          "multiline": false,
+          "status": "skipped"
+        },
+        {
+          "interactionId": "5a439915-36c8-435a-9dff-1a0a00be418b",
+          "messageId": "om_x100b61c7b1aa2ca8ceed6c330a73c88",
+          "kind": "input",
+          "multiline": false,
+          "status": "sent"
+        },
+        {
+          "interactionId": "df994164-54f6-4852-9320-f82ea9c95353",
+          "messageId": "om_x100b61c7b1bf04a4b051f4b40b1faf8",
+          "kind": "confirm",
+          "multiline": false,
+          "status": "sent"
+        },
+        {
+          "interactionId": "92d61fd4-7f87-4141-ab63-d39fd98447a2",
+          "messageId": "om_x100b61c7b1b030a0cd346103afaad6a",
+          "kind": "select",
+          "multiline": false,
+          "status": "sent"
+        },
+        {
+          "interactionId": "eca9ff30-ba91-43f2-8e1e-01517c22cd6b",
+          "messageId": "om_x100b61c7b14538a0b4a2656f915a88e",
+          "kind": "input",
+          "multiline": true,
+          "status": "sent"
+        }
+      ],
+      "testConnectionsClosed": true,
+      "temporaryModelCredentialsRemoved": true
+    },
+    "lark": {
+      "startedAt": "2026-11-07T15:36:02.374Z",
+      "finishedAt": "2026-11-07T15:41:40.438Z",
+      "scope": "Production Lark Main ChannelSettingsService and SDK, isolated production Core NativeInteraction source/respond + Owner/App/card authorization + Outbox send/update, installed Pi 1.1.0 and real sub2api/gpt-6.1-sol. Account/verified Owner/routing are seeded metadata, not provisioning acceptance.",
+      "threadId": "rvcamp_01m6va7pjpfkgbvng3xp2q6jqh",
+      "agentRunId": "e83e6c65-7643-4e2b-bc61-13111d37cf35",
+      "runtimeCalls": [
+        {
+          "provider": "sub2api",
+          "model": "gpt-6.1-sol",
+          "tool": "native_card_result_probe"
+        }
+      ],
+      "realClientCallbacks": 5,
+      "completedRequests": 6,
+      "sameExternalMessageUpdates": 6,
+      "questionVisibleOnEveryCompletedCard": true,
+      "answerShownOnlyForSent": true,
+      "completedControls": 0,
+      "nativeToolResultMatchesAllExpectedAnswers": true,
+      "nativeEditorCodepoints": 458,
+      "nativeEditorSha256": "ca0de3d9ad7cd470b9278d122457ef717d81dc3bba490bc99e6fa329fb89434e",
+      "boundedEditorPreviewCodepoints": 311,
+      "boundedEditorPreviewSha256": "44c2338fd9d0091827061400855155653b6e4d999a1fef72c579ad521923d156",
+      "firstConfirmWasNo": true,
+      "skipIsDifferentCoreStatus": true,
+      "explicitEmptyTextReceived": true,
+      "cards": [
+        {
+          "interactionId": "aabbd0bf-dd4d-479c-b881-b29ab398af21",
+          "messageId": "om_x100b61c0181104a8eda8267234ecad0",
+          "kind": "input",
+          "multiline": true,
+          "status": "sent"
+        },
+        {
+          "interactionId": "a162dada-ef84-4347-af7a-c21014e4e6da",
+          "messageId": "om_x100b61c0182458a0ed8011cb9f6a9a9",
+          "kind": "input",
+          "multiline": false,
+          "status": "sent"
+        },
+        {
+          "interactionId": "3ce84837-7b73-4810-9966-499b8cec7e46",
+          "messageId": "om_x100b61c0183a70a4edadcb78cbe778c",
+          "kind": "input",
+          "multiline": false,
+          "status": "sent"
+        },
+        {
+          "interactionId": "dcd5628b-289b-4623-83e0-7957c50ad050",
+          "messageId": "om_x100b61c019cecca4eee57822b133de1",
+          "kind": "select",
+          "multiline": false,
+          "status": "sent"
+        },
+        {
+          "interactionId": "050089b5-d11a-41c3-a4d4-95dec2e1c3bf",
+          "messageId": "om_x100b61c019c288aced888e8d382c096",
+          "kind": "confirm",
+          "multiline": false,
+          "status": "skipped"
+        },
+        {
+          "interactionId": "200d4aee-12da-4037-ae69-541c311b3e42",
+          "messageId": "om_x100b61c019d688a0eda0b3c547fde28",
+          "kind": "confirm",
+          "multiline": false,
+          "status": "sent"
+        }
+      ],
+      "testConnectionsClosed": true,
+      "temporaryModelCredentialsRemoved": true,
+      "desktopWebCoreEntry": {
+        "interactionId": "3ce84837-7b73-4810-9966-499b8cec7e46",
+        "requested": true,
+        "scope": "Actual public Core entry used by Desktop/Web; no Desktop GUI click",
+        "status": "sent"
+      }
+    }
+  },
+  "dingTalkExistingBehavior": {
+    "scope": "Real native clients and platform callbacks through current production card renderers/answer decoders into an isolated Core and real Pi/LLM. Main channel Host source/respond and Outbox authorization are not invoked by this acceptance relay.",
+    "usesExistingOfficialTemplate": "c2a6355b-9724-4f7e-9653-d33fcb3311bb.schema",
+    "acceptedRealClientMethodsAcrossTwoRuns": [
+      "confirm",
+      "input",
+      "editor",
+      "select"
+    ],
+    "firstRun": {
+      "threadId": "rvcamp_01m6va7pxpebhrm929h2kw13gj",
+      "acceptedCallbacks": 3,
+      "stoppedByOwnedFixtureCleanup": true,
+      "unansweredSelectNotCountedAsPassed": true,
+      "nativeToolResultsAfterCleanupMatchAcceptedAnswers": true,
+      "missingFieldCallbackRejected": true
+    },
+    "selectOnlyRun": {
+      "threadId": "rvcamp_01m6vbh547f3rbtwjt1cjxzybv",
+      "runStatus": "succeeded",
+      "acceptedCallbacks": 1,
+      "nativeResultWindows": true
+    },
+    "inputWhitespaceMatchesNativeToolResult": true,
+    "editorWhitespaceAndNewlinesMatchNativeToolResult": true,
+    "testConnectionsClosed": true,
+    "temporaryModelCredentialsRemoved": true,
+    "productionMainOutboxAuthorizationCovered": false,
+    "crossEnterpriseTemplateUseCovered": false
+  },
+  "checks": [
+    {
+      "command": "pnpm exec vitest run apps/desktop/src/main/native-interaction-cards.test.ts apps/desktop/src/main/channel-settings.test.ts",
+      "passed": 92,
+      "files": 2
+    },
+    {
+      "command": "cargo test --workspace",
+      "status": "passed"
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib native_",
+      "passed": 72,
+      "failed": 1,
+      "ignored": 1,
+      "failure": "db::tests::v95_invalidates_native_session_context_and_nonterminal_runs",
+      "cause": "Unchanged historical migration test expects formatter SQL count 42; current source has 43. Already recorded in current version; not relaxed or disabled."
+    },
+    {
+      "command": "cargo test -p rovai-core --features extended-tests --lib active_input_receipts_and_late_abort_keep_exact_rpc_correlation",
+      "passed": 1
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build:desktop",
+      "status": "passed"
+    },
+    {
+      "command": "cargo build -p rovai-core --bin rovai-core",
+      "status": "passed"
+    },
+    {
+      "command": "cargo fmt --all -- --check",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm docs:test",
+      "status": "passed"
+    },
+    {
+      "command": "DOCS_BASE_REF=23fe2738c6121f89ebac6241e64537ccfb1350a3 pnpm docs:check:ci",
+      "status": "passed"
+    }
+  ],
+  "screenshots": [
+    "feishu-readonly-results-20261107.png",
+    "feishu-readonly-long-text-20261107.png",
+    "lark-readonly-text-20261107.png",
+    "lark-readonly-results-20261107.png",
+    "dingtalk-native-submitted-20261107.png"
+  ],
+  "acceptanceLimits": [
+    "Feishu/Lark account, App, verified Owner and private-chat routing were seeded metadata in an isolated database. This is not account provisioning acceptance.",
+    "The Lark cross-entry case invokes the real public Core operation used by Desktop/Web, not a Desktop GUI click.",
+    "Existing clients for the same Bot remained online. Some GUI clicks produced no callback on the test connection; a fresh DingTalk select-only run succeeded. No product answer retry or replay was added. First-click reliability with competing listeners is not claimed.",
+    "Feishu first setup attempt lacked appId in the fixture credential shape and delivered no cards. Corrected fixture setup then completed the live acceptance run.",
+    "Native macOS desktop clients tested; mobile and DingTalk cross-enterprise template availability not claimed.",
+    "DingTalk used a thin callback relay with current renderer/decoder and isolated Core, not the production Main Host/Outbox. Its result display was not changed."
+  ]
+}

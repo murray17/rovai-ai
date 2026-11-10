@@ -1,0 +1,433 @@
+{
+  "recordedAt": "2026-11-08T05:44:16.784Z",
+  "branch": "rovai/project-file-references",
+  "reviewedCommit": "4c3b5d330bfbb31a41aba9833fbf613b5f050ca9",
+  "platform": "macOS arm64",
+  "scope": "Three complex file locations through production Host/Core and actual Codex and Claude file tools. Separate from the earlier simple file-read matrix.",
+  "overallPassed": true,
+  "plannedInputs": 8,
+  "readCases": 6,
+  "preparationCases": 2,
+  "unconfirmedCharterGuidanceInjected": false,
+  "isolation": "Private Core data, Skills, MCP, Runtime homes, Git repository and Mission worktrees; native authentication copies removed after execution.",
+  "interruptions": [
+    {
+      "error": "mission.invalid_tag",
+      "completed": [
+        "I1-same-name-codex",
+        "I2-special-path-codex"
+      ],
+      "resumedAt": "2026-11-08T05:38:21.501Z"
+    },
+    {
+      "error": "EEXIST: file already exists, mkdir '<FIXTURE>/empty-hooks'",
+      "completed": [
+        "I1-same-name-codex",
+        "I2-special-path-codex"
+      ],
+      "resumedAt": "2026-11-08T05:38:51.007Z"
+    }
+  ],
+  "cases": [
+    {
+      "case": "I1-same-name-codex",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": null,
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project",
+        "access": "write",
+        "isolation": "shared"
+      },
+      "frozenInputSha256": [
+        "3fd64d4c4e92969180d3192545dbc89804eb5ce66c0a0f1a6ad7601fbdeb6b41"
+      ],
+      "bodyProjection": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/billing\\/config\\.ts](file://<FIXTURE>/project/src/billing/config.ts)",
+      "frozenRunInputMessages": [
+        {
+          "body": "@叮叮 Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/billing\\/config\\.ts](file://<FIXTURE>/project/src/billing/config.ts)",
+          "mentions": [],
+          "messageId": "f90944c8-3e10-4312-9ec1-79c35878dbea",
+          "senderId": "user",
+          "senderType": "user",
+          "sequence": 1
+        }
+      ],
+      "reply": "NONCE: `11dc16102f51a8f92dffee92`",
+      "publishedFile": {
+        "pathAtSend": "<FIXTURE>/project/src/billing/config.ts",
+        "labelAtSend": "src/billing/config.ts",
+        "rawReferenceSha256": "34e2cc3f7ad14c8a0856b869f0d29103a7baee68c98a33eaa4b118dd9041b1e5"
+      },
+      "selectedNonce": "11dc16102f51a8f92dffee92",
+      "decoyNonce": "4f36c0a82da3f37232959271",
+      "frozenUriMatchesPublishedPath": true,
+      "noStandaloneFilesField": true,
+      "noFileContentInjected": true,
+      "coreReadOperation": {
+        "operationKind": "read",
+        "path": "src/billing/config.ts",
+        "schemaVersion": 2,
+        "source": "runtime_reported",
+        "sourceMetadata": {
+          "adapterKind": "codex-cli",
+          "observedRuntimeVersion": "codex-cli 0.166.0",
+          "sourceEventKind": "activity.commandExecution.read"
+        },
+        "status": "available"
+      },
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c 'cat <FIXTURE>/project/src/billing/config.ts'",
+          "cwd": "<FIXTURE>/project",
+          "output": "export const NONCE = '11dc16102f51a8f92dffee92'\n",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "case": "I2-special-path-codex",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project",
+        "access": "write",
+        "isolation": "shared"
+      },
+      "frozenInputSha256": [
+        "859ce8147f00cb7fca8d5e17858cd6471f4f61e0c95b49a3d924496e225f23fe"
+      ],
+      "bodyProjection": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/中文 目录\\/参数 \\(草稿\\)\\#1\\.ts](file://<FIXTURE>/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231.ts)",
+      "frozenRunInputMessages": [
+        {
+          "body": "@叮叮 Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/中文 目录\\/参数 \\(草稿\\)\\#1\\.ts](file://<FIXTURE>/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231.ts)",
+          "mentions": [],
+          "messageId": "48cd1030-b145-4158-af11-ce6b3d3e67d9",
+          "senderId": "user",
+          "senderType": "user",
+          "sequence": 1
+        }
+      ],
+      "reply": "NONCE: `1ae232d6acd473db69c6ae9e`",
+      "publishedFile": {
+        "pathAtSend": "<FIXTURE>/project/src/中文 目录/参数 (草稿)#1.ts",
+        "labelAtSend": "src/中文 目录/参数 (草稿)#1.ts",
+        "rawReferenceSha256": "6fb9dccc0f420f9d1e317989db7f2851ecd0e0ff31c7af5cf50de141ca816da1"
+      },
+      "selectedNonce": "1ae232d6acd473db69c6ae9e",
+      "decoyNonce": "7ba7c65d03b2797d42ed1785",
+      "frozenUriMatchesPublishedPath": true,
+      "noStandaloneFilesField": true,
+      "noFileContentInjected": true,
+      "coreReadOperation": {
+        "operationKind": "read",
+        "path": "src/中文 目录/参数 (草稿)#1.ts",
+        "schemaVersion": 2,
+        "source": "runtime_reported",
+        "sourceMetadata": {
+          "adapterKind": "codex-cli",
+          "observedRuntimeVersion": "codex-cli 0.166.0",
+          "sourceEventKind": "activity.commandExecution.read"
+        },
+        "status": "available"
+      },
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c \"cat 'src/中文 目录/参数 (草稿)#1.ts'\"",
+          "cwd": "<FIXTURE>/project",
+          "output": "export const NONCE = '1ae232d6acd473db69c6ae9e'\n",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "case": "I3-worktree-codex",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project-mission-001/",
+        "access": "write",
+        "isolation": "git_worktree"
+      },
+      "frozenInputSha256": [
+        "ff8a52b4f0ed327333615257aab899586c3e02100b3015b883a969023b8f2706"
+      ],
+      "bodyProjection": "[config\\.ts](file://<FIXTURE>/project-mission-001/config.ts)",
+      "frozenRunInputMessages": [
+        {
+          "body": "@叮叮 [config\\.ts](file://<FIXTURE>/project-mission-001/config.ts)",
+          "mentions": [],
+          "messageId": "29b3fada-c474-4e76-a27a-b1424fbbeea7",
+          "senderId": "user",
+          "senderType": "user",
+          "sequence": 3
+        }
+      ],
+      "reply": "NONCE: 1e30143a637d46df28f7f47a",
+      "publishedFile": {
+        "pathAtSend": "<FIXTURE>/project-mission-001/config.ts",
+        "labelAtSend": "config.ts",
+        "rawReferenceSha256": "5f0c4d6cb1311e04608e57026b0cae9d60d0ec4ea88fd5943d2181abaa1135bc"
+      },
+      "selectedNonce": "1e30143a637d46df28f7f47a",
+      "decoyNonce": "5f146820516917e7ad2f73bb",
+      "sourceDirectory": "<FIXTURE>/project",
+      "frozenUriMatchesPublishedPath": true,
+      "noStandaloneFilesField": true,
+      "noFileContentInjected": true,
+      "coreReadOperation": {
+        "operationKind": "read",
+        "path": "config.ts",
+        "schemaVersion": 2,
+        "source": "runtime_reported",
+        "sourceMetadata": {
+          "adapterKind": "codex-cli",
+          "observedRuntimeVersion": "codex-cli 0.166.0",
+          "sourceEventKind": "activity.commandExecution.read"
+        },
+        "status": "available"
+      },
+      "tools": [
+        {
+          "kind": "command",
+          "command": "/bin/zsh -c 'cat <FIXTURE>/project-mission-001/config.ts'",
+          "cwd": "<FIXTURE>/project-mission-001",
+          "output": "export const NONCE = '1e30143a637d46df28f7f47a'\n",
+          "exitCode": 0
+        }
+      ]
+    },
+    {
+      "case": "I1-same-name-claude",
+      "runtime": "claude-code-cli",
+      "version": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project",
+        "access": "write",
+        "isolation": "shared"
+      },
+      "frozenInputSha256": [
+        "ee3bbe201f98d5a87baeeed588aebdbd7769edd8351e44e94a527b42b1d136f1"
+      ],
+      "bodyProjection": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/billing\\/config\\.ts](file://<FIXTURE>/project/src/billing/config.ts)",
+      "frozenRunInputMessages": [
+        {
+          "body": "@芝士 Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/billing\\/config\\.ts](file://<FIXTURE>/project/src/billing/config.ts)",
+          "mentions": [],
+          "messageId": "ae1089bb-178d-4022-bdb5-fbdda39f0e6a",
+          "senderId": "user",
+          "senderType": "user",
+          "sequence": 1
+        }
+      ],
+      "reply": "NONCE: `46cd7b8978bf627640e8376b`",
+      "publishedFile": {
+        "pathAtSend": "<FIXTURE>/project/src/billing/config.ts",
+        "labelAtSend": "src/billing/config.ts",
+        "rawReferenceSha256": "6922c94b8f044fe6a7300c011add1ee371a42eb0f210539dfff6985a4eecb0c0"
+      },
+      "selectedNonce": "46cd7b8978bf627640e8376b",
+      "decoyNonce": "aa0527f72f8f8c6f80ef7d24",
+      "frozenUriMatchesPublishedPath": true,
+      "noStandaloneFilesField": true,
+      "noFileContentInjected": true,
+      "coreReadOperation": {
+        "operationKind": "read",
+        "path": "src/billing/config.ts",
+        "schemaVersion": 2,
+        "source": "runtime_reported",
+        "sourceMetadata": {
+          "adapterKind": "claude-code-cli",
+          "observedRuntimeVersion": "2.1.311 (Claude Code)",
+          "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+        },
+        "status": "available"
+      },
+      "tools": [
+        {
+          "kind": "Read",
+          "filePath": "<FIXTURE>/project/src/billing/config.ts",
+          "output": "1\texport const NONCE = '46cd7b8978bf627640e8376b'\n2\t"
+        }
+      ]
+    },
+    {
+      "case": "I2-special-path-claude",
+      "runtime": "claude-code-cli",
+      "version": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project",
+        "access": "write",
+        "isolation": "shared"
+      },
+      "frozenInputSha256": [
+        "7f7f1d88a548bbc2299836a8900a9871e918c45e063da4c495c396dbc5d71e64"
+      ],
+      "bodyProjection": "Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/中文 目录\\/参数 \\(草稿\\)\\#1\\.ts](file://<FIXTURE>/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231.ts)",
+      "frozenRunInputMessages": [
+        {
+          "body": "@芝士 Read only the referenced file with your file tools and report its NONCE. Do not edit files or delegate. [src\\/中文 目录\\/参数 \\(草稿\\)\\#1\\.ts](file://<FIXTURE>/project/src/%E4%B8%AD%E6%96%87%20%E7%9B%AE%E5%BD%95/%E5%8F%82%E6%95%B0%20%28%E8%8D%89%E7%A8%BF%29%231.ts)",
+          "mentions": [],
+          "messageId": "f8f3974c-bd46-4ba2-b849-f2c551fe1348",
+          "senderId": "user",
+          "senderType": "user",
+          "sequence": 1
+        }
+      ],
+      "reply": "NONCE: `35d84f49cbc53ad818bb4ab1`",
+      "publishedFile": {
+        "pathAtSend": "<FIXTURE>/project/src/中文 目录/参数 (草稿)#1.ts",
+        "labelAtSend": "src/中文 目录/参数 (草稿)#1.ts",
+        "rawReferenceSha256": "d511c6d84d2d146a2f63c6bf4394d4c0ddd85da6578c045cc94d67ed1bd8c0c3"
+      },
+      "selectedNonce": "35d84f49cbc53ad818bb4ab1",
+      "decoyNonce": "f1bbb31b1068c77eb091770d",
+      "frozenUriMatchesPublishedPath": true,
+      "noStandaloneFilesField": true,
+      "noFileContentInjected": true,
+      "coreReadOperation": {
+        "operationKind": "read",
+        "path": "src/中文 目录/参数 (草稿)#1.ts",
+        "schemaVersion": 2,
+        "source": "runtime_reported",
+        "sourceMetadata": {
+          "adapterKind": "claude-code-cli",
+          "observedRuntimeVersion": "2.1.311 (Claude Code)",
+          "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+        },
+        "status": "available"
+      },
+      "tools": [
+        {
+          "kind": "Read",
+          "filePath": "<FIXTURE>/project/src/中文 目录/参数 (草稿)#1.ts",
+          "output": "1\texport const NONCE = '35d84f49cbc53ad818bb4ab1'\n2\t"
+        }
+      ]
+    },
+    {
+      "case": "I3-worktree-claude",
+      "runtime": "claude-code-cli",
+      "version": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project-mission-002/",
+        "access": "write",
+        "isolation": "git_worktree"
+      },
+      "frozenInputSha256": [
+        "3235e8536d47e2784f9482bee6d8ab333c0050cb296166f3db6cdd28f1448b47"
+      ],
+      "bodyProjection": "[config\\.ts](file://<FIXTURE>/project-mission-002/config.ts)",
+      "frozenRunInputMessages": [
+        {
+          "body": "@芝士 [config\\.ts](file://<FIXTURE>/project-mission-002/config.ts)",
+          "mentions": [],
+          "messageId": "40c46ccd-ec7c-4187-bc14-be51f33ae05e",
+          "senderId": "user",
+          "senderType": "user",
+          "sequence": 3
+        }
+      ],
+      "reply": "NONCE: `058f9218a969029b1cc7a50a`",
+      "publishedFile": {
+        "pathAtSend": "<FIXTURE>/project-mission-002/config.ts",
+        "labelAtSend": "config.ts",
+        "rawReferenceSha256": "0a314d385b3bbb91b2d6ad3a4882b5c185e218073a0fee5d4d74de532ff49fff"
+      },
+      "selectedNonce": "058f9218a969029b1cc7a50a",
+      "decoyNonce": "d269e6f493a87b7bb0371e8b",
+      "sourceDirectory": "<FIXTURE>/project",
+      "frozenUriMatchesPublishedPath": true,
+      "noStandaloneFilesField": true,
+      "noFileContentInjected": true,
+      "coreReadOperation": {
+        "operationKind": "read",
+        "path": "config.ts",
+        "schemaVersion": 2,
+        "source": "runtime_reported",
+        "sourceMetadata": {
+          "adapterKind": "claude-code-cli",
+          "observedRuntimeVersion": "2.1.311 (Claude Code)",
+          "sourceEventKind": "assistant.tool_use.file+user.tool_result.completed"
+        },
+        "status": "available"
+      },
+      "tools": [
+        {
+          "kind": "Read",
+          "filePath": "<FIXTURE>/project-mission-002/config.ts",
+          "output": "1\texport const NONCE = '058f9218a969029b1cc7a50a'\n2\t"
+        }
+      ]
+    }
+  ],
+  "preparation": [
+    {
+      "case": "I3-prepare-codex",
+      "runtime": "codex-cli",
+      "version": {
+        "initial": "codex-cli 0.166.0",
+        "observed": "codex-cli 0.166.0"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project-mission-001/",
+        "access": "write",
+        "isolation": "git_worktree"
+      },
+      "frozenInputSha256": [
+        "dc06dbaf12a9a82a6077256de155cb0ae3725cc426d4ba5c06b79764c1f7f953"
+      ]
+    },
+    {
+      "case": "I3-prepare-claude",
+      "runtime": "claude-code-cli",
+      "version": {
+        "initial": "2.1.311 (Claude Code)",
+        "observed": "2.1.311 (Claude Code)"
+      },
+      "status": "succeeded",
+      "passed": true,
+      "workspace": {
+        "executionRoot": "<FIXTURE>/project-mission-002/",
+        "access": "write",
+        "isolation": "git_worktree"
+      },
+      "frozenInputSha256": [
+        "b2b52481dbe51983543ebfb88f14a329978197a792fba3c4a614027e22275e54"
+      ]
+    }
+  ]
+}

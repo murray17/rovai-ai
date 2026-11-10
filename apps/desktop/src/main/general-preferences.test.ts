@@ -34,7 +34,7 @@ describe('general preferences', () => {
 
   it('preserves schema 5–6 languages and keeps only the preference on disk across system changes', async () => {
     const file = join(await temporaryDirectory(), 'general.json')
-    const { interfaceLanguagePreference: _preference, newConversationTeamId: _team, ...common } = DEFAULT_STORED_GENERAL_PREFERENCES
+    const { interfaceLanguagePreference: _preference, newConversationTeamId: _team, executionConsoleAutoOpen: _autoOpen, ...common } = DEFAULT_STORED_GENERAL_PREFERENCES
     for (const language of ['zh-CN', 'en'] as const) {
       await writeFile(file, JSON.stringify({ ...common, schemaVersion: 5, interfaceLanguage: language }))
       const store = await GeneralPreferencesStore.load(file, () => ['zh-Hant'])
@@ -43,7 +43,7 @@ describe('general preferences', () => {
     for (const preference of ['system', 'zh-CN', 'en'] as const) {
       await writeFile(file, JSON.stringify({ ...common, schemaVersion: 6, interfaceLanguagePreference: preference }))
       const store = await GeneralPreferencesStore.load(file, () => ['zh-Hant'])
-      expect(store.get()).toMatchObject({ schemaVersion: 7, interfaceLanguagePreference: preference, newConversationTeamId: null, readError: null })
+      expect(store.get()).toMatchObject({ schemaVersion: 8, interfaceLanguagePreference: preference, newConversationTeamId: null, readError: null })
     }
     expect(parseGeneralPreferences({ ...DEFAULT_STORED_GENERAL_PREFERENCES, newConversationTeamId: 'team-a', oneClickNewConversationEnabled: true }))
       .toMatchObject({ newConversationDefaults: null, newConversationTeamId: 'team-a', oneClickNewConversationEnabled: true })
@@ -139,7 +139,8 @@ describe('general preferences', () => {
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics'
     })).toEqual({
-      schemaVersion: 7,
+      schemaVersion: 8,
+      executionConsoleAutoOpen: false,
       newConversationTeamId: null,
       interfaceLanguagePreference: 'zh-CN',
       startupLocationMode: 'quick_chat',
@@ -176,7 +177,8 @@ describe('general preferences', () => {
       newConversationDefaultsRequireConfirmation: true,
       oneClickNewConversationEnabled: true
     })).toEqual({
-      schemaVersion: 7,
+      schemaVersion: 8,
+      executionConsoleAutoOpen: false,
       newConversationTeamId: null,
       interfaceLanguagePreference: 'zh-CN',
       startupLocationMode: 'quick_chat',
@@ -256,6 +258,21 @@ describe('general preferences', () => {
     })).toBeNull()
   })
 
+  it('migrates schema 7 with auto-open disabled and persists explicit changes across reloads', async () => {
+    const file = join(await temporaryDirectory(), 'general.json')
+    const { executionConsoleAutoOpen: _autoOpen, ...legacy } = DEFAULT_STORED_GENERAL_PREFERENCES
+    await writeFile(file, JSON.stringify({ ...legacy, schemaVersion: 7, executionConsolePlacement: 'right', worldMapEnabled: true, newConversationTeamId: 'team-a', oneClickNewConversationEnabled: true }))
+    const store = await GeneralPreferencesStore.load(file)
+    expect(store.get()).toMatchObject({ executionConsoleAutoOpen: false, executionConsolePlacement: 'right', worldMapEnabled: true, newConversationTeamId: 'team-a', oneClickNewConversationEnabled: true })
+    await store.setExecutionConsoleAutoOpen(true)
+    const reloaded = await GeneralPreferencesStore.load(file)
+    expect(reloaded.get().executionConsoleAutoOpen).toBe(true)
+    await reloaded.setExecutionConsoleAutoOpen(false)
+    expect((await GeneralPreferencesStore.load(file)).get().executionConsoleAutoOpen).toBe(false)
+    expect(parseGeneralPreferences({ ...DEFAULT_STORED_GENERAL_PREFERENCES, executionConsoleAutoOpen: 'true' })).toBeNull()
+    await expect(store.setExecutionConsoleAutoOpen('true' as unknown as boolean)).rejects.toThrow('Invalid execution console')
+  })
+
   it('serializes concurrent mutations in call order and writes a private exact snapshot', async () => {
     const directory = await temporaryDirectory()
     const filePath = join(directory, 'general-preferences.json')
@@ -265,15 +282,17 @@ describe('general preferences', () => {
       store.setStartupLocationMode('quick_chat'),
       store.setLastSettingsSection('toolbox'),
       store.setExecutionConsolePlacement('bottom'),
+      store.setExecutionConsoleAutoOpen(true),
       store.setWorldMapEnabled(false),
       store.setInterfaceLanguagePreference('en'),
       store.setStartupLocationMode('last_location')
     ])
 
     expect(store.get()).toEqual({
-      schemaVersion: 7,
+      schemaVersion: 8,
+      executionConsoleAutoOpen: true,
       newConversationTeamId: null,
-      interfaceLanguagePreference: 'en', interfaceLanguage: 'en', systemLanguage: 'en', languageRevision: 6, readError: null,
+      interfaceLanguagePreference: 'en', interfaceLanguage: 'en', systemLanguage: 'en', languageRevision: 7, readError: null,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'toolbox',
       executionConsolePlacement: 'bottom',

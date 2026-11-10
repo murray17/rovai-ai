@@ -59,5 +59,5 @@ Core-owned Draft 或 Pending 编辑会话。拖放本身不发送消息、
 ## References
 
 - [Camp Attachment v10](../../contracts/camp-attachment-v10.md)
-- [Camp Composer Draft v20](../../contracts/camp-composer-draft-v20.md)
+- [Camp Composer Draft v21](../../contracts/camp-composer-draft-v21.md)
 - [Thread 资源不变量](../../architecture/foundational-invariants.md#camp-resources)

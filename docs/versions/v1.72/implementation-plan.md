@@ -3,10 +3,389 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-02
+last_updated: 2026-11-10
 ---
 
 # v1.72 实施与验收
+
+## 手动目录刷新并发与 DSH 语义收尾（2026-11-10）
+
+- Work item：后加入强刷不能由缓存任务完成；DSH 模型按钮刷新完整目录并去掉强刷前的缓存预读。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai`（复用干净主目录）；
+  Branch：`rovai/model-refresh-followup`；Base：`origin/main` / `1efd3f7194236550e0d4e9c762120e7307990a74`；
+  Governance：none；Status：ready（验收完成，交付结果以 PR／安装记录为准）。保留 #1058 的控件、文案、缓存身份及 Run 边界。
+- 先扩展原 Codex owner：以原提交锁及 Manager acknowledgement 确定普通 worker 已启动但尚未决定是否复用 Fresh，
+  再发强刷及重复强刷。修复前第二个请求被合入普通任务、断言失败；修复后强刷排队且重复请求合并，最终仅一次原生 `model/list`。
+  原 `runtime_check_activity_has_two_slots_and_one_terminal_owner` 同时覆盖目标进度归并时不能折入强刷，未增加 Rust 测试函数。
+- 只收窄运行中任务的合并条件，保留未启动任务升级强刷的能力；删除运行后无效的布尔赋值。
+  不增加共享原子状态、阶段事件、调度器或持久字段，普通 Run 不参与该流程。
+- 原 Electron picker 回归先确认 DSH 手动刷新仍有一次 `cacheOnly`，且没有读取完整目录。
+  修复后先发送无 `modelId` 的目录强刷，再走原目标入口，前端预读为零；Core 自行复用有效目标缓存。
+  已成功目录立即供候选使用，后续参数补读失败也保留目录与用户选择；页面／目标和最终结果校验继续沿用原归属检查。
+- 两条定向回归已完成失败到通过的验证；Codex 目录 owner 1 passed，原 Electron picker owner 1 passed，
+  其中新增断言覆盖 DSH 先读目录、无缓存预读、目录成功但后续参数失败仍保留候选。
+  类型检查、50 项相关单元、前端全量 3,251 passed / 2 skipped（275 文件）、Node 末组 377 passed / 2 平台 skipped、
+  默认 Rust workspace 483 passed / 1 ignored 及 Desktop/Web 构建通过。
+  主目录既有 ignored 原型含失效 Markdown 链接，因此同一通用文档门禁与 10 项文档单测在只含已提交文件的验证副本中通过，
+  没有移动这些原型、放宽 checker 或增加例外。完整日志与交付结果保存在本轮验收资料中。
+
+## 应用标识与快速对话空状态（2026-11-10）
+
+- 从 `origin/main` / `96198639004d1531d0f7756024fe7ea02a64e0f6` 建立独立 worktree，
+  分支 `rovai/brand-symbol-empty-actions`；无前置主线治理要求，不修改模型上下文、Core、协议或安装图标。
+- `RovaiBrandMark` 统一八个组件的标识呈现，复用透明 SVG；星形和弧线均为 `#7897AE`，
+  保持 App 图标几何、原组件尺寸及可访问名称。六张外观缩略图中的十二个内嵌图形同步更新。
+- 无可用队员的两个操作共用规格，保留“前往队员”的灰底和“查看智能体”的次要文字样式。
+  文案、去向、队员可用性判定、新对话与最近对话行为保持。
+- 验证：`pnpm typecheck`、`TZ=UTC pnpm exec vitest run --maxWorkers=4`（3,251 通过、2 项既有跳过）、
+  `pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check` 与指定真实基线的 `pnpm docs:check:ci` 通过。
+  直接构建生产组件且不叠加原型图形或样式的浏览器验收通过 183 项，覆盖五套主题、四种窗口尺寸、九个界面、
+  缩略图十二处图形、登录／公开执行页状态和手机隐藏规则；不以原型样式替代生产实现。
+  公开执行页使用打包 SVG 的可信静态内联内容，保持禁止图像加载的原 CSP；未启动 App、Core 或 Runtime。
+
+## 模型选择器 v3 交互稿落地（2026-11-09）
+
+- Work item：固定模型刷新入口、首次加载与已有列表刷新、自定义 ID 操作及中英文交互稿还原。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；
+  Branch：`rovai/model-catalog-clean`；Base：`origin/main` / `33979e07f76b2beea61cafdc13e3f155f38a62e6`；
+  Governance：none；Status：merged（PR #1058，`961986390`；本机安装已完成）。复用本节下方目录修复的干净分支，同步 #1056、#1057，
+  保留此前健康解耦、身份隔离及重启代次修复，不引入旧集成分支的其他功能或迁移。
+- 模型菜单搜索框右侧固定清除与刷新位置，刷新原位转动、阻止重复点击并保持键盘焦点；删除状态条和独占重试行。
+  首次无真实目录才显示中性加载占位，历史列表刷新保持搜索、选项和滚动；失败继续保留保存值、默认项和手工输入。
+  自定义 ID 操作固定在滚动区外、默认项上方，显示标题、等宽 ID 与箭头；保持完整 ID 去重、IME 和键盘选择语义。
+- 关联参数保留原下拉及加载指示，不加 DSH 参数刷新按钮；MiniMax 继续使用同款交互及既有逐模型补齐。
+  原 `runtime.modelCatalog.open` 增加可选 `forceRefresh`，显式刷新绕过接口、worker 和 DSH 的 Fresh 短路，
+  使用原请求队列与合并、身份校验、保存路径；`cacheOnly` 优先。标记只存在于请求生命周期，不增加持久字段或缓存。
+- Rust 扩展现有 Codex 进程/数据库 owner：普通 Fresh 访问零原生读取，强制刷新实际取得新目录且不要求健康 Ready；
+  前端原 picker owner 增补固定刷新、焦点、pending 去重与标记传递，并将旧重试操作迁到模型菜单。
+  `runtime-check.test.ts` 覆盖 Codex、DSH、MiniMax 的刷新意图透传。没有新增 Rust 测试函数。
+- `pnpm typecheck`、2 文件 / 50 项相关单元、隔离 Electron picker、Desktop/Web 构建及通用文档门禁通过。
+  UTC 前端全量：275 文件、3,251 passed / 2 skipped；Node 末组 377 passed / 2 平台 skipped。
+  默认 Rust workspace：483 passed / 1 ignored。正式生产组件及 CSS 的离线目录夹具复跑 v3 的 14 条交互路径，
+  英文首次加载、刷新失败和手工选择检查通过；五主题、三尺寸、缩放、DSH 迟到响应均由既有 owner 覆盖。
+- `--features slow-tests --lib catalog` 广筛为 45 passed / 4 failed / 1 ignored：Codex、Pi、MiniMax 目录 owners 通过；
+  Claude 用例因并发环境中的 PATH 缺失系统命令失败，独立重跑 1 passed。
+  其余为 v104/v105/v107 的旧迁移夹具分组 CHECK 约束失败；对照 main，该 DB 文件仅增加说明注释，
+  这些迁移与测试未改动。本轮记录该额外范围的失败，不修改迁移或测试准入。
+  未运行真实模型或使用日常数据验收；安装采用专用 daily 打包/验签门及独立 userData / Skill 目录启动验收。
+
+## 模型目录与强度共享加载修复（2026-11-09）
+
+Work item：目录轻量读取、共享加载与审查修订。Worktree：
+`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；Branch：`rovai/model-catalog-clean`；
+Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；Governance：none；Status：ready（待审阅，未合入）。
+该工作目录从干净 main 建立新分支，只移植目录修复；旧 `rovai/model-catalog-loading` 保留供对照，
+不继承其 PR #986 集成提交、Windows/聊天功能或迁移。Data Contract 保持 v1.72 / schema 172。
+环境代次记录只记录数字，目录清理移回已确认实际输入变化的分支；不增加字段、表或 Migration，接口和共享安装投影保持。
+整理期间 main 合入 #1054，保留其普通 UI 轻量版本检查、独立目录读取、目标安装发现、身份复核和原生错误反馈。
+本分支只补齐未覆盖的失效路径、共享 Renderer 生命周期与诊断目录提交，不恢复旧分支的重复解析或调度分支。
+随后同步 #1055：启动设置页对未保存草稿使用 `runtime.startup.inspect` 的改动完整保留；
+上游 `revalidateAfter` 修复由现有共享 `ensureCatalog` / `runtimeModelCatalogIsFresh` 承接，不恢复旧 `RuntimeModelPicker`。
+保留上游受控时钟回归并合并原有共享加载、Pi、DSH 与隐藏页测试；文档同时保留原值展示规则。
+本次同步不修改 Core、数据库或协议，原目录修复提交 `1ed54025a` 保留，不改写已推送历史。
+
+当前语义由 [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实)、
+[Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#用户界面)、
+[队员配置](../../ui/components/member-identity.md)及[引导页](../../ui/components/first-run-onboarding.md)拥有。
+
+- 目录读取和提交不要求历史健康 Ready，也不回退完整检查；目录 pending 不投影机器检查。
+  同用途请求合并，排在完整检查后先复用它已经提交的有效目录。保存值原样保留，目录不改草稿和运行门槛。
+- 删除健康 `stale_at` 与目录时间的比较；同身份的认证/健康失败保留目录。
+  真正的程序/安装配置/有效环境变化，在既有失效路径里清空 `model_catalog_succeeded_at`，并继续拒绝旧身份写回。
+  同身份版本、静态快照和健康补写保留自己的成功目录，完整诊断后续失败不丢弃已经取得的目录。
+- Renderer 保持一个共享加载所有者；进入与打开列表时核对 `revalidateAfter`，同一观察的共享缓存状态优先，
+  过期重入可重新读取。普通健康元数据不重启读取，真实成功时间清空时结束旧请求作用域。
+  DSH 在 `cacheOnly` 返回后重新核对 pageActive、key 和 generation，再决定是否启动补读。
+  目标补读结束复用既有 `runtime.availability.updated` 安装投影，其他队员可收到目录更新，不建立健康检查状态。
+  引导页直接返回目录，安装投影独立刷新，投影失败不改写成功目录。
+- MiniMax 保留原遍历与临时 Session，RPC 错误保留 code/data。
+  本机官方 mcode 0.6.12 包的 `run-acp-command-MV4O4NBX.js` 静态源码确认：模型选择不在当前原生列表时
+  返回 `-32602 / Model selection is not advertised.`，无附加 data。只跳过这类明确响应；方法、内部、
+  其他参数错误、未知 data、断连和坏协议均使整轮失败并保留旧目录。没有运行该 CLI 或真实模型。
+
+验证扩展既有 Rust owner，不增加测试函数：
+
+- `health_failures_preserve_catalog_and_identity_changes_invalidate_it`（原 `failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale`）：
+  同身份认证失败仍可见，旧健康 stale 之后的新目录遇到配置变化仍失效；修改 Claude 后重开测试库并重记代次 1，Codex 目录仍保留，Codex 自身设置变化仍失效。
+- `discovered_entry_configures_and_freezes_without_health_evidence`、`fingerprint_change_revokes_ready_but_retains_lkg_and_hides_old_attempt`：
+  元数据穿插提交、当前程序替换与旧请求拒绝；保留历史 JSON 不等于有当前成功目录。
+- `codex_catalog_waiters_share_refresh_without_satisfying_full_validation`：用途隔离、排队后复用、schema 失败保留目录及身份 fencing。
+  同一 owner 继续验证目标补读通过既有安装事件发布、不创建健康证据。
+- `minimax_check_and_catalog_keep_their_intent_and_complete_options`：明确模型拒绝、`-32603`、`-32601`、一般 `-32602`、未知 data 与传输/协议失败。
+- `independent_checks_refresh_unchanged_inputs_and_join_same_target` 和
+  `saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_probe`：main 已将版本与目标同步请求统一为 `UserCheck`，本轮保持并补跑，
+  保留同用途合并与旧配置拒绝；目录隔离继续由目录 owner 覆盖。
+
+main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_current_full_acp_evidence` 与生产判断一起退役；
+主动完整检查的能力校验仍保留，由以上目录/事务 owner 负责新边界。Renderer 复用参数单元与隔离 Electron picker owner，
+覆盖 Fresh 已过期、同观察降为 Expired 后重入、健康元数据、真实失效、DSH 迟到缓存未命中；
+`runtime-check.test.ts` 执行生产引导回调，验证投影 pending/失败均不延迟或拒绝目录成功。
+
+原交付基线 `a8a60a41f` 的验证（`1ed54025a`）：
+
+- `cargo test --workspace`：483 passed / 1 ignored；`agent_profile::slow_tests::`：32 passed。
+- `application::runtime_check_environment::tests::`：10 passed，包含上述两条旧同步 owner 和 MiniMax owner。
+  Codex 目录 owner（含目标安装事件）、Pi 独立观察 owner、MiniMax 错误矩阵和
+  `catalog_refresh_skips_version_and_help` 均定向通过，均为非零用例；没有以默认层替代 slow-tests。
+- `TZ=UTC pnpm test`：274 个 Vitest 文件，3,203 passed / 2 skipped；末组 Node 377 passed / 2 平台 skipped。
+  干净基线的 Product Contract Fingerprint 断言与 schema 172 一致，未修改其测试或 schema 常量。
+- 类型检查、隔离 Electron picker、Desktop/Web/只读执行页构建、macOS arm64 Core 三个 debug sidecar 构建通过。
+  通用文档单测与治理门禁使用当时的真实 main base `a8a60a41f`；交付范围按相对该 main 的完整差异核对。
+
+同步 #1055 后的定向回归：类型检查、参数与目录请求单元测试（2 文件 / 50 passed）、隔离 Picker（1 passed）及
+隔离 Settings Workspace（1 passed）通过。受控时钟覆盖截止前复用、到期但 Core 仍投影 Fresh 时主动读取、
+等待期间不重复、纯时间流逝与隐藏页不启动后台读取、过期后页面重入；启动检查只发送 `runtime.startup.inspect`，
+携带未保存路径和环境草稿，不发送 `runtime.startup.check` 或保存全局状态。
+通用文档门禁以当前真实 main base 执行；Core 源码相对原交付无变化，不重复声称执行了新一轮 Rust 全量测试。
+
+按用户最新要求，候选区静默降级：失败或 deferred 保留同身份已有列表，首次没有目录时只显示原生默认项、
+已保存模型/强度和手工模型 ID 输入，不显示目录错误、失败摘要或环境更新文字；保留原“重试”按钮，不新增入口。
+删除已被替代的错误详情状态和 props，不修改全局错误函数、协议或原生诊断日志，也不隐藏保存/运行自身的失败。
+扩展既有 Picker owner：普通 Error、可克隆 failure、无 message 对象、空目录、两个入口的 deferred 及 DSH 内部拒绝，
+均验证静默列表、保存值不变、手填可用、原生默认可选、无额外自动读取。相关单元测试 3 文件 / 58 passed、类型检查及隔离 Picker 通过。
+
+重启缓存回归修正：原 SQL 在 `generation 2 → 1` 时误清其他 Runtime 的目录，改动前已在既有
+`health_failures_preserve_catalog_and_identity_changes_invalidate_it` 中复现“Claude 编辑后重启仍保留 Codex”断言失败。
+`record_runtime_search_environment_generation` 恢复单纯记录；目录清理在 `refresh_runtime_check_environment` 的
+`changed = !current.same_inputs(&search)` 分支执行。程序身份与按 Runtime 保存配置的原有失效规则继续保留。
+同一 profile owner 覆盖重开数据库、代次回到 1、其他 Runtime 缓存保留及 Codex 自身配置变更失效；
+既有 `fresh_formal_and_draft_checks_preserve_program_selection_and_private_state` 覆盖相同输入保留、真实 PATH 输入变更失效且选中程序不变。
+新增回归均扩展既有 owner，Rust 测试函数净增 0。修复后的 profile 模块 32 passed，Renderer 58 项相关单元、
+隔离 Picker、真实 Electron bridge、类型检查及 UTC 前端全量通过；Runtime 环境模块、workspace 与最终打包安装结果记录在本轮任务验收附件中。
+本轮按用户要求安装到日常位置，采用非终止安装交接；当前会话进程保留，备份不删除，独立 userData/Skill 文件目录用于打包启动验收。
+
+加载文案继续收口：移除模型与强度菜单的“正在读取可选项…”及对应文案 prop，pending 只沿用现有布尔状态与 aria-busy。
+冷缓存等待期间直接保留原生默认项；有历史时继续展示历史，原值、选项、手工输入及读取生命周期保持。
+此轮不修改 Core，沿用参数/目录单元测试与隔离 Picker owner 验证冷/热等待均无加载说明且菜单仍可操作。
+类型检查、2 文件 / 50 项相关单元测试、隔离 Picker 与通用文档门禁通过；Core 与上一安装提交相同，不重复执行 Rust 全量回归。
+
+相对当前 main 保留原目录修复、展示修订与一次 main 同步合并，完整差异为 21 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
+`application.rs`、`db.rs`、`runtime_check_environment.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
+`MemberRuntimeParameters.tsx`、`RuntimeModelSearch.tsx`、`RuntimeParameterSelect.tsx`、`BusinessApp.tsx`、
+英文文案及两个现有单元测试；两个 picker fixture 文件；本文及四份既有架构／合同／界面文档。
+
+本轮验收使用临时数据库、受控原生协议夹具及独立 Electron userData，不修改日常 App 或叮叮目录；
+不将这些结果表述为真实账号、真实 Run 并发或 Windows/Linux 实机验收。
+
+## 队员智能体名称搜索（2026-11-09）
+
+- Work item：队员 `@` 搜索的智能体产品名、别名、前缀与匹配优先级。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-mention-agent-search`；
+  Branch：`rovai/mention-agent-search`；Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；
+  Governance：none（局部可逆搜索交互，无主线治理先行要求）；Status：ready（任务分支交付，尚未合入）。
+- `member-mention-search.ts` 从现有产品目录生成搜索键，补齐已确认简称，依据当前 `runtimeKind` 匹配。
+  产品名和查询使用 NFKC、小写并去除空格、连字符与下划线；只作完整／前缀匹配，模型和展示标签不参与归属。
+- `member-search.ts` 保留姓名／角色原有模糊和拼音资格，额外区分完整、前缀与其他模糊匹配。
+  Composer 先按当前会话／可邀请资格排序，再按确认的六级相关度稳定排序，按 `agentId` 去重后应用原候选配额。
+  空查询、广播、邀请与具体 Member Atom 的插入、草稿和投递沿用原路径。
+- 公屏、Pending 和使命描述复用同一搜索入口；没有 Core、Schema、模型输入或 Runtime 启动改动。
+  当前交互规范同步至 [Member Typeahead](../../ui/components/structured-mentions.md#member-typeahead)，
+  局部可逆选择不满足 Version Decision 的准入门槛。
+- 定向 Vitest 两个文件 97 项、`pnpm typecheck` 与 `pnpm build:desktop` 通过。
+  `TZ=UTC pnpm test`：274 个 Vitest 文件、3,243 passed / 2 skipped；Node 主套件 377 passed / 2 skipped，
+  文档、Skills 和 Electron sandbox capability 门禁一并通过。
+  `CARGO_BUILD_JOBS=4 pnpm test:rust:pr`：默认 workspace 483 passed / 1 ignored，无 Rust 输入改动。
+- `pnpm test:composer-input` 三个 owner 全部通过：原生 Composer 49 个场景、Web 链接及公屏／Pending 邀请。
+  原生场景验证 `@com`、皮皮与 PI 的排序、方向键／Enter 的实际选择和准确的 Member Atom；
+  生产 ThreadWorkspace 验证公屏／Pending 的 `@cod`、`@CODEX`、在队优先和待邀请身份，使命描述验证同一智能体前缀。
+  邀请夹具的 member-search report 共 18 项，包含 5 个智能体搜索场景，截图与 JSON 交付至本次 Thread 附件目录。
+- 组合夹具首次停在已过时的默认分组／无选中 Tab 断言。使用上述基线 SHA 的 Composer 和姓名搜索源码进行
+  Vite load 替换，在独立临时 userData／Skill Library 下复现同一断言；当前组件已为单类别 Tab 面板。
+  本次仅将该夹具更新为现有规范的默认队员 Tab、三类别循环和自动标题类别，并等待真实标题候选返回；
+  同时补齐本次智能体搜索场景，没有更改生产 Tab、分类或引用逻辑。
+- 通用文档门禁使用上述真实 base SHA；`git diff --check` 通过。验收范围为本机 macOS 的生产组件夹具，
+  使用独立临时 userData／Skill Library，不启动日常 App、Core 或真实模型；不宣称跨平台整机验收。
+  交付按用户偏好提交并推送任务分支，保留 worktree，后续复用同一目录。
+
+## Shell PATH 探测边界（2026-11-09）
+
+- Work item：Issue #1050 的 Shell 无换行启动输出解析缺陷。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-1050-shell-path`；
+  Branch：`rovai/fix-1050-shell-path-boundary`；Base：`origin/main` / `913b46095cd212f41019affa1844828c84527bf0`；
+  Governance：none；Status：ready（任务分支交付，尚未合入）。
+- 生产改动仅在 `capture_shell_path_from` 的原 `printf` 格式前加入 `\n`，保持同一次输出。
+  随机标记、`-ilc`、严格三行校验、原总期限、64 KiB 累计上限与管道／进程组清理保持。
+  属于内部输出边界修正，不改变当前 Architecture／Contract 或模型输入，无需新增 Version Decision。
+- 扩展既有 `shell_path_capture_uses_interactive_login_and_bounds_failures`，不新增 Rust 测试函数。
+  合成 Shell 始终调用真实采集器；六种启动输出分别为无输出、带换行文本、无换行文本、ANSI、OSC、
+  仅回车结尾，均核对准确的含空格 PATH；ANSI／OSC 等片段另核对实际输出字节。
+  空 PATH 独立保留成功捕获及空路径分量语义。
+- 保留原异常退出、缺标记、超限、超时和后台持有 stdout 用例，补空 stdout、开始有效而结束缺失／不匹配、
+  完整探测块后异常退出。失败结果不得返回路径；原有界返回断言保留。
+- 修复前在生产代码未改时执行该 owner：无换行普通文本、ANSI、OSC 和仅回车四种输入均为
+  `Failed, paths=[]`，测试在运行全部场景及清理后统一报告失败；其余场景通过。
+  最小命令：`cargo test -p rovai-core --lib runtime_discovery::tests::shell_path_capture_uses_interactive_login_and_bounds_failures -- --exact --nocapture`。
+- 修复后同一 owner 通过：1 passed，覆盖 7 个成功输入和 10 个失败／资源边界场景。
+  `pnpm test:rust:pr` 默认 workspace 为 483 passed / 1 ignored；`cargo fmt --all --check`、
+  `pnpm typecheck` 与 `git diff --check` 通过。
+- 完整 `pnpm test` 首轮在 `Pacific/Honolulu` 为 Vitest 3199 passed / 2 failed / 2 skipped，
+  两项失败均为 `AboutUpdatesSettings` 固定 UTC 日期的断言：`2026-08-24T08:00Z` 在本机显示为 8 月 23 日。
+  该测试与生产组件的 Git blob 均与基线一致。`TZ=UTC` 定向 31 项通过，再执行完整
+  `TZ=UTC pnpm test`：274 个 Vitest 文件、3201 passed / 2 skipped；末组 Node 377 passed / 2 skipped，
+  文档、Skills 与 sandbox capability 检查一并通过。未修改前端日期处理或测试断言。
+  通用文档门禁使用上述真实 base SHA 复核最终记录。
+- 安装包验收尚未执行。本机未安装 asdf，也未准备非默认 asdf 目录及旧安装包的隔离升级环境；
+  Dock 冷启动、退出后重开、升级后重开、主动重新检测，以及 CLI 启动／完整能力检查均保持待验收。
+  合成 Shell 回归不代表这些端到端结果；未启动日常或验收 App、Core、真实智能体和模型任务。
+- 自动模式的已保存入口回退、发现失败状态写回继续单独跟踪，本次不修改；Issue #1050 保持打开。
+  本轮交付按用户偏好提交并推送任务分支，后续复用此 worktree。
+
+## 执行台自动打开偏好（2026-11-08）
+
+独立 worktree 从 `origin/main` 的 `cab7f7788eddaad3308a9d5574de649ecb1ae6e5` 建立，
+分支为 `rovai/execution-auto-open-preference`。通用偏好 schema 8 增加默认 false 的
+`executionConsoleAutoOpen`，Desktop 私有文件和 Web 现有客户端存储分别保存；有效旧偏好升级时
+保留语言、位置、默认队伍与地图等字段，损坏记录不覆盖。设置失败保留已保存值。
+
+共享 ThreadWorkspace 只在偏好开启、非 Mobile 且当前 surface 允许时追踪发送后的精确执行导航，
+同一准入也覆盖初始 snapshot、延迟 snapshot 和 Thread 重入。关闭偏好会消费待处理导航，后续开启不补跳；
+不收起已打开面板，手动导航和现有执行 Tab 恢复继续保留。三项设置顺序和说明遵循
+[通用设置 brief](../../ui/surfaces/settings-workspace.md#通用)，复用现有生产问号帮助组件。
+通用设置在 Desktop、Web、Mobile 均展示同一开关、问号与保存反馈，不按视口或布局隐藏。
+Mobile 允许正常开关和保存；执行入口仍始终手动，不受该值影响。设置 owner 切换生产 MobileLayout
+上下文验证三项均展示、开关双向保存和布局切换后保留值；执行选择 owner 继续覆盖 Mobile 开启时不自动打开。
+使命标题栏的右侧执行优先也消费同一偏好，避免其进入效果绕过 ThreadWorkspace 的准入。使命 owner 使用
+含 running Run 的合成投影复现关闭开关仍打开执行的回归，再覆盖关闭／开启下的抽屉与完整会话、
+关闭时手动打开和折叠保留，以及 Mobile 开启开关仍手动，共七个场景，修正后全部通过。
+既有使命十三场景、App 185 项、类型与文档门禁通过；底部使命抽屉的既有手动规则保留。
+
+隔离 Electron 执行选择 owner 已通过三种承载位置的关闭／开启、运行中进入、延迟 Run 发布、
+关闭时保留选择、显式通知定位、等待期间关闭及 Mobile 强制手动场景；原有队员／总览记忆、文件保护、
+关闭和回复详情 owner 仍通过。隔离设置 owner 已通过问号原文、说明不触发开关、保存失败与重挂载恢复，
+并保留原有主题与缩放回归。测试只替换 transport，不启动 Core、真实 Runtime 或日常 App。
+TypeScript、完整 Desktop 构建（含 Web 与只读执行页）、真实 preload 桥接和通用文档门禁已通过。
+`TZ=UTC pnpm test`：Vitest 3,173 通过、2 既有跳过；Node 主套件 377 通过、2 平台跳过。
+Honolulu 首轮的两项既有日期断言和一次文件监听超时均在 UTC 完整重跑中通过，未修改相关实现或测试。
+`pnpm test:execution-avatar-rail` 三个 owner、`pnpm test:settings-workspace` 全部通过；
+消息执行行生产 owner 与回复分栏 owner 也通过。
+
+额外检查有两处未通过，未纳入本次修复：
+
+- `pnpm test:rust:pr` 的 Core 阶段为 437 通过、1 失败、1 ignored；
+  `runtime_probe_process::tests::successful_leader_with_stdio_holding_descendant_finishes_bounded`
+  报 `runtime_probe_stdout_cleanup_timed_out`。相同 workspace 组合的定向重跑复现，Core 单包定向通过；
+  `Cargo.toml`、`Cargo.lock`、`.cargo` 与全部 Rust 输入相对基线无变化。
+- `pnpm test:run-presence-ui` 为 2 通过、1 失败；回复原文定位的 `regroup-middle` 场景未满足
+  “closing details must actually regroup the same Run messages”。临时使用基线
+  `cab7f7788` 的 ThreadWorkspace 重跑同一 owner 仍复现，已逐字节恢复本次组件；执行条 owner 通过。
+
+## 手机会话身份行对齐（2026-11-08）
+
+按已确认交互稿，在 [`mobile.css`](../../../apps/web/src/mobile.css) 中统一队员消息与独立执行行的身份高度：
+44px 身份行内居中 32px 头像和姓名，模型摘要保留 44px 点击区；静态身份与换行摘要遵循同一首行对齐规则。
+连续消息仍通过既有分组省略重复身份。规则见 [Mobile 会话模型信息](../../ui/host-web-mobile.md#会话模型信息)。
+
+使用既有 `run-presence` 生产组件夹具，在独立 Chrome profile 中检查 360/390/430px 竖屏和 844px 横屏、
+五套配色、长姓名、运行中、长模型名、模型未记录、离队身份、连续消息及减少动效，共 45 组通过；
+头像与姓名中心偏差为 0px，模型点击区至少 44px，无消息区横向溢出，切换配色保留输入草稿。
+另核对三种桌面尺寸的原有身份几何；`pnpm typecheck`、`pnpm build:web` 与既有
+`node --test scripts/lib/run-presence.test.mjs` 通过。此处记录的是生产组件浏览器模拟验收。
+
+## 项目文件引用（2026-11-07，功能分支验收）
+
+独立分支 `rovai/project-file-references` 已从 `55a83f8` 建立，并核对 origin/main 相同。
+[R1 模型输入说明](model-context-change-project-file-reference.md)已获 User sequence 21 二次确认；
+正式实现、迁移及恢复已接通，Desktop／Web 真实界面通过。独立[实施记录](project-file-reference-implementation.md#实际实现与验收)
+拥有工作目录、模块与逐项结果。六项文件读取通过；User sequence 37 已取消专属任务询问规则及验收。
+sequence 26 的三个前端边界已修复，延迟真实响应的界面验证通过；复杂定位的六次真实读取及两个准备任务通过。
+详见同一实施记录和独立[复杂定位证据](project-file-reference-identity-evidence.json)，不增加文件专属的任务询问规则。
+
+## 执行 Tab 恢复与空选中回退（2026-11-05）
+
+User 将范围收敛为当前窗口内、按 Thread 记住队员或总览 Tab，并修复执行页已可见却没有选中对象的情况。
+不保存具体 Run、历史开合、卡片展开或阅读位置，不改变当前执行／历史呈现和自动开合条件。
+
+- `execution-tab-selection.ts` 只缓存有界的 Thread → Tab ID；`ThreadWorkspace.tsx` 在进入、可见空选中、普通打开和精确导航处统一选择。
+- 右侧执行标签直接激活、顶部入口、浮层与底部展开使用有效选择；已失效的队员回退总览，文件预览继续优先保留。
+- 复用 `execution-avatar-rail` 的生产组件与隔离 Electron owner，覆盖终态返回、文件保护、选择失效、显式导航与三种承载位置。
+- Review 后补充分离显式关闭意图与待恢复的空选择：底部布局从回复详情打开执行，再点底部收起时，
+  回复执行承载区仍可见，原补选 effect 会立即选回。现关闭期间禁止补选；显式选择或再次显示承载区后恢复原规则。
+
+任务分支 `rovai/execution-tab-selection`，基线 `940e3c4057fcf885898388d43b65e3710c0f1a1c`；独立 worktree 保留待 Review。
+
+验证结果：
+
+- `pnpm typecheck`、`TZ=UTC pnpm test`、默认 `pnpm test:rust:pr` 通过；前端全量 3,126 项通过、2 项既有跳过。
+- `pnpm test:execution-avatar-rail` 三项通过，覆盖原交互矩阵、新增 Tab 恢复场景及执行阶段更新。
+  新增 owner 另验证顶部打开、同一窗口按 Thread 隔离、无记录空态保留、浮层／底部关闭不自动重开、底部 Escape 焦点返回。
+  回复执行组合在修复前稳定复现关闭后重选；原生鼠标验证入口可达，修复后覆盖关闭、快照刷新、精确导航重新打开与再次显示右侧恢复。
+- `camp-open-projection` 的 formal-entry owner 通过：首次总览、缓存期显式选择、显式关闭不重开、恢复 Tab 后选择当前 Run。
+  `notification-attention` 的 AgentRun 精确定位 owner 通过，通知仍覆盖上次 Tab。
+- 初版 Tab 恢复实现的 `pnpm package:mac` 构建 0.5.9 arm64 开发包通过；独立 userData／Skill 目录的模拟数据实测确认：
+  全终态 A→B→A 保留原队员；文件前台 A→B→A（仍有 running Run）保留文件，再点执行恢复原队员。
+  历史折叠不恢复，继续走原默认逻辑；未调用真实模型，未安装或重启日常 App。
+- 原 `pnpm accept:runtime-activity-ui` 在 UI 运行前被既有夹具对已退役 `.runtime-camp-files-root.json` 的读取阻断。
+  未修改该夹具或补造标记，不把上述专项验证记作完整 Runtime 活动矩阵通过。
+- 文档单测、普通文档门禁和带真实 base SHA 的 `docs:check:ci` 均通过，最终内容已复检。
+
+
+## 会话执行查询取消旧 Turn 回退（2026-11-05）
+
+任务分支 `rovai/thread-open-scoped-queries`，基线 `aca8bf1f1`，集成 main `b3cec851b`。Run count/list 与文件变更列表直接按
+`agent_run.camp_id` 和已有会话索引读取；无 schema、Migration、历史回填或日常数据写入。
+旧 Turn-only 公开执行卡片退出普通列表，消息正文、当前单聊和按具体 Run 身份的详情／诊断保持。
+规则由 [Camp Open Projection v31](../../contracts/camp-open-projection-v31.md) 拥有，取舍见 [D75](decisions.md#v1-72-d75)。
+
+扩展既有完整 Open SQL 规模 owner，覆盖无关 Run/文件变更数量增长、旧卡片排除、新旧运行形态
+不串会话、原始状态不变。标题与分页 owner 保留当前 Run 的摘要、模型、正文窗口和边界断言；
+其旧 Turn-only Run 显示断言由当前的排除规则替代。没有新增 Rust 测试函数或进程 fixture。
+单查询测试不能捕获嵌套 loader 的全库扫描，因此沿用同一个完整 Read Side、SQLite VM 计步 owner。
+
+验证结果：
+
+- `cargo test --workspace` 与 `cargo fmt --all --check` 通过。
+- 缺少关联 Run/Delivery 的消息接收者不再显示“待处理”回执；真实 waiting Delivery 保留。
+  `pnpm typecheck`、`pnpm build:desktop`、`ThreadWorkspace.delivery-receipts.test.ts` 与 `App.test.ts` 共 204 项通过，
+  包括部分接收者缺少事实时的计数及最新主线的重试／停止后继续回执。
+- `cargo test -p rovai-core --features slow-tests --lib -- camp_open:: camp_open_slow_tests:: agent_run_file_change:: single_chat:: --nocapture`
+  覆盖的 40 项 owner 分批通过，其中单聊 9 项。原只读 owner 保留 SQL/Blob 零写入，并改为检查旧 Run
+  的存储状态仍为 waiting、列表已排除；文件投影 owner 改用当前 batch fixture，保留迟到事实、GC 与有界恢复断言。
+  业务保留 owner 显式开启 Task，继续验证原有 Task/历史事件内容；不改变产品默认值。
+- 无关 Run/文件卡片 100、1,000、10,000 条时，完整 Open 均为 2,887 SQL VM steps；无关事件
+  50,000／500,000／5,000,000 条及 Evidence 1,000／10,000／100,000 条时同样为 2,887 steps。
+- 对报告的真实 Thread 使用只读 Read Side helper 连续测量各 11 次：原版中位 31.49 ms、最高 198.65 ms，
+  本分支中位 4.80 ms、最高 13.00 ms；两组投影均为 160,056 bytes。目标会话仍在使用，先前投影大小变化
+  的一组未用于此对照。测量不包含数据库锁等待、IPC 或 Renderer 绘制，未启动 Core/Runtime 或写日常数据。
+- `pnpm docs:test` 10 项通过。原 checkout 的 `pnpm docs:check` 被 Git 忽略的本地原型坏链阻断；
+  对 Git 受控源码加本任务文档的隔离树执行同一版本／决定 Node 门禁（包含固定 base 的 `--require-base`）通过，
+  未修改 checker 或本地原型。
+
+扩大的 `read_model::` 慢测另有两项既有失败：`event_reader_hydrates_mixed_command_result_storage_without_changing_pagination`
+的 `first.has_more` 断言，以及 `snapshot_treats_accepted_input_without_shutdown_error_as_settled` 的 Manifest
+source fixture 约束。恢复基线 `aca8bf1f1` 的生产文件后分别重跑，失败一致；本次不改写这两个无关 owner。
+
+### thread.runs 同步收敛
+
+User 在本 Thread sequence 8 明确要求删除内置公开查询的旧 Turn 关联。`thread_runs::CANDIDATES_SQL`
+删除 `legacy_runs` 与其 UNION，只通过 Run 的直接 `camp_id` 选择实际执行；当前 waiting Delivery 继续
+独立聚合。合同更新为 [Thread Runs v2](../../contracts/thread-runs-v2.md)，原始记录不迁移或回填。
+输入／输出 schema、CLI 帮助、工具描述、游标 v1、Bootstrap/Dynamic Context、冻结输入和证据版本轴均保持。
+
+扩展既有 `thread_runs::read_tests` 两个 owner：公开 scope 的正反向运行状态、当前失败记录与旧 waiting/failed/succeeded
+记录隔离；50,000 个当前 Run 的纳秒排序、队列聚合、分页接缝和深页保持，并验证同 Thread 的 50,000 个旧 Run
+加其他 Thread 的 50,000 个 Run 不增加候选 SQL 工作量、禁止读取 camp_turn。
+
+User sequence 10 指出的生产形态约束由同组 fixture 补齐：当前 Run 全部使用 batch，
+带非空 camp_id／anchor／public tail、空 camp_turn_id，终态补 ended_at；旧 Run 保持 direct 与空 camp_id。
+内存表加入归属 CHECK，当前 batch 的公开投影同步验证冻结输入。规模 owner 仍只测候选 SQL，
+不为 50,000 个 Run 构造不参与查询的完整执行链。
+
+新增 `production_schema_reads_batch_inputs_and_excludes_turn_only_runs`，作为生产 schema 与候选／冻结输入读取的
+唯一集成 owner。它通过真实建 Thread／投递 claim 路径生成两个合法 batch，验证非法 direct 归属、batch
+挂 Turn、缺 camp_id／anchor／tail 均被生产 CHECK 拒绝；合法 batch 可读取、旧 waiting Run 排除且存储不变、
+读取零写入。原内存 owner 无法证明生产约束，因此单独使用临时完整数据库；没有 Core/Runtime 进程或模型调用。
+本轮 Rust 测试函数从 4 项增为 5 项，保留原排序、分页、队列、状态与 schema 边界。
+
+验证：`cargo test -p rovai-core --features extended-tests --lib thread_runs:: -- --nocapture` 5 项通过。
+固定 50,000 个当前 Run，加入 50,000 个同 Thread 的 Turn-only Run 和 50,000 个其他 Thread Run 后，
+合法 batch 夹具的候选 SQL 从 1,953,460 steps 变为 1,953,461 steps；测试拒绝读取 camp_turn，当前 Run/队列的排序和分页仍通过。
+`cargo fmt --all --check`、文档单测 10 项通过；通用文档门禁按本节前述受控源码隔离树执行。
+默认 workspace 首轮两项 Runtime discovery 探测超时，分别串行复核通过后，
+`cargo test --workspace -- --test-threads=2` 完整通过；未改动 Runtime discovery 代码或测试。
+
+PR #1023 首轮 CI 的三个既有钉钉 suite 因间接加载真实 Electron、而 `--ignore-scripts` 不安装其二进制而在
+收集阶段失败。按相邻 gateway/session 测试的边界补齐本地 Electron mock，保留全部业务断言与 CI 安装策略；
+三个 suite 共 103 项及 `pnpm typecheck` 通过，没有改动钉钉生产代码。
 
 ## 原生子代理平铺执行记录（2026-11-01）
 
@@ -4569,3 +4948,24 @@ devDependency，避免在编译后的前端之外重复携带 npm 包；不升�
 修订后的完整原生预览 owner 通过，覆盖阅读状态、窄窗、主题、File Change、查找与自动刷新。
 macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；实际安装结果及打包 App 隔离验收记录随本次交付保存。
 本轮不据此推导 Windows/Linux、原用户数据副本或崩溃恢复验收。
+
+
+## Pi 待回答提醒（2026-11-08）
+
+在 `rovai/pi-native-question-notifications` 从 main `958784f6e` 实施。Pi 待回答通过只读轻量来源接入
+既有 heads-up 队列，不新增数据库表、问卷服务或持久 Notification 语义。共用审批提醒开关，支持
+中英文、公屏/原单聊精确定位、多个独立请求、已有请求基线、原生期限及已处理来源撤下；小点使用现有主题映射。
+规则见[通知架构](../../architecture/notification-episodes.md#原生待回答的临时来源)、
+[原生交互合同](../../contracts/native-interactions-v1.md#应用内待回答提醒)及
+[提醒 UI](../../ui/components/notification-center.md#应用内提醒)。
+
+验证复用 NotificationAttentionController / NotificationSettings / App、Web 失效解码与现有隔离 Electron
+通知夹具。Core 扩展既有 `native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery`，
+覆盖公屏/原单聊来源、原单聊结束、旧 epoch、过期、unknown 与停止；不增加 Rust 测试函数，不引入另一份 SQLite fixture。
+最小 Rust 命令为 `cargo test -p rovai-core --features extended-tests --lib native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery`。
+已通过 `pnpm typecheck`、`TZ=UTC pnpm test`（Vitest 3,194 通过、2 跳过）、
+`pnpm test:notification-attention`（3 项隔离 Electron 回归）、上述 Core 扩展 owner、
+`pnpm test:rust:pr`（workspace 484 通过、1 ignored）、`pnpm build:desktop` 和通用文档门禁。
+本机 HST 下两个既有更新日期测试依赖 UTC 日期；以显式 `TZ=UTC` 完成全量测试，未改动它们。
+隔离 UI 覆盖混合队列、独立请求、原单聊定位、日夜蓝点、到期/处理撤下及刷新静默。
+本次未运行真实模型/Pi 或 Windows 原生验收，不把受控 Runtime 元数据与 Electron 夹具当作此类证据。

@@ -76,13 +76,17 @@ async function refresh() {
     console.error(JSON.stringify({ check: checked, attempt: failed?.lastProbeAttempt, snapshot: failed?.snapshot }))
   }
   assert.equal(checked.ready, true, JSON.stringify(checked))
-  const deadline = Date.now() + 45000
-  while (Date.now() < deadline) {
-    installation = (await core.request('runtime.installations.list')).find(row => row.adapterKind === 'deepseek-harness')
-    if (installation?.snapshot?.probeStatus === 'ready') return installation.snapshot.models
-    await new Promise(done => setTimeout(done, 100))
-  }
-  assert.fail('DSH probe did not become ready')
+  installation = (await core.request('runtime.installations.list')).find(row => row.adapterKind === 'deepseek-harness')
+  // Advance only this fixture's directory timestamp to exercise a real refresh.
+  const cacheDb = new DatabaseSync(join(data, 'rovai.sqlite'))
+  try {
+    cacheDb.prepare('UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at = ? WHERE installation_id = ? AND model_catalog_succeeded_at IS NOT NULL')
+      .run(new Date(Date.now() - 3600000).toISOString(), installation.id)
+  } finally { cacheDb.close() }
+  const catalog = await core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness', waitForRefresh: true })
+  assert.equal(catalog.refreshStatus, 'completed')
+  installation = (await core.request('runtime.installations.list')).find(row => row.adapterKind === 'deepseek-harness')
+  return catalog.models
 }
 async function select(provider, source, model = 'same-model', options = { reasoning_effort: 'high' }) {
   const profile = await core.request('members.get', { agentId: 'agent_2' })
@@ -277,9 +281,9 @@ child.on('close', code => process.exit(code ?? 1))
   ageB()
   const failedTime = successfulAt(await cachedTarget('effort-b'), 'effort-b')
   await writeFile(join(root, 'fail-options'), '')
-  const failedRead = await core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness',
-    modelId: modelId('thinking', 'effort-b'), dshSource: 'web' })
-  assert.equal(failedRead.refreshStatus, 'failed')
+  await assert.rejects(core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness',
+    modelId: modelId('thinking', 'effort-b'), dshSource: 'web' }), /isolated option failure/)
+  const failedRead = await cachedTarget('effort-b')
   assert.equal(successfulAt(failedRead, 'effort-b'), failedTime, 'Failure cannot refresh the success timestamp')
   assert(failedRead.models.find(model => model.id === modelId('thinking', 'effort-b')).options.length)
   await rm(join(root, 'fail-options'))
@@ -295,8 +299,8 @@ child.on('close', code => process.exit(code ?? 1))
   web[0].config.providers.thinking.models[1].reasoningEfforts = { low: 'low' }
   await json(webPath, web)
   await rm(join(root, 'hold-options'))
-  const rejectedRead = await changingRead
-  assert(['failed', 'deferred'].includes(rejectedRead.refreshStatus))
+  await assert.rejects(changingRead, /dsh_model_configuration_changed_during_preparation/)
+  const rejectedRead = await cachedTarget('effort-b')
   assert.equal(successfulAt(rejectedRead, 'effort-b'), failedTime, 'Old-context result must not be published')
   assert.equal(rejectedRead.models.find(model => model.id === modelId('thinking', 'effort-b')).runtimeMetadata.dshOptionsResolved, false)
   assert.deepEqual(await target('effort-b'), ['low'])
@@ -340,13 +344,15 @@ child.on('close', code => process.exit(code ?? 1))
   assert(!plain.wire.some(message => message.configId === 'reasoning_effort'))
   await select('thinking', 'web', 'effort-b', { reasoning_effort: 'max' })
   const count = requests.length
-  const invalid = await run(a.threadId, 'failed', 'runtime_model_option_invalid')
+  const invalid = await run(a.threadId, 'failed', 'runtime_launch_failed')
   assert.equal(requests.length, count, 'Invalid explicit max must submit zero business requests')
-  assert(!invalid.wire.some(message => message.method === 'session/prompt' || message.configId === 'reasoning_effort'))
+  assert(!invalid.wire.some(message => message.method === 'session/prompt'))
+  assert.deepEqual(invalid.wire.filter(message => message.configId === 'reasoning_effort').map(message => message.value), ['max'],
+    'The existing execution path must pass the exact intent to native validation once')
   assert.equal(invalid.wire.filter(message => message.configId === 'model').length, 1, 'No Session or route retry after invalid effort')
   assert.deepEqual(invalid.frozen.model.options, { reasoning_effort: 'max' })
   assert.match(invalid.failure.public_runtime_failure_json, /max/)
-  assert.match(invalid.failure.public_runtime_failure_json, /xhigh/)
+  assert.match(invalid.failure.public_runtime_failure_json, /unknown reasoning effort/)
   web[0].config.providers.thinking.models[1].reasoningEfforts = { low: 'low' }
   await json(webPath, web)
   const changedCache = await cachedTarget('effort-b')

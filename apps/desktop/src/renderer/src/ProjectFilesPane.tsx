@@ -1,3 +1,4 @@
+import { useProjectFileComposer } from './ProjectFileComposerContext'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import type { ProjectFileEntry } from '@contracts'
 import { ProjectFileIcon, ProjectFolderIcon } from './ProjectFileIcon'
@@ -20,10 +21,14 @@ export function ProjectFilesButton(): React.JSX.Element | null {
 
 interface Row { entry: ProjectFileEntry; depth: number; parent: string }
 function FileTree({ store, onOpen }: { store: ProjectFilesStore; onOpen(entry: ProjectFileEntry): Promise<void> }): React.JSX.Element {
+  const composer = useProjectFileComposer()
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const search = !!state.query.trim()
   const scroll = useRef<HTMLDivElement>(null), input = useRef<HTMLInputElement>(null)
   const [focused, setFocused] = useState<string | null>(state.selected)
+  const [referenceError, setReferenceError] = useState(false)
+  useEffect(() => setReferenceError(false), [store, state.query])
+  useLayoutEffect(() => { if (state.selected) { setFocused(state.selected); scroll.current?.querySelector<HTMLElement>('[aria-selected=true]')?.scrollIntoView({ block: 'nearest' }) } }, [state.selected, state.expanded, state.pages])
   const rows: Row[] = []
   function visit(parent: string, depth: number): void {
     const page = state.pages.get(parent)
@@ -46,6 +51,7 @@ function FileTree({ store, onOpen }: { store: ProjectFilesStore; onOpen(entry: P
   }
   const activate = (entry: ProjectFileEntry): void => { setFocused(entry.id); if (entry.directory) void store.toggle(entry); else void onOpen(entry) }
   const key = (event: KeyboardEvent, row: Row): void => {
+    if (event.target !== event.currentTarget) return
     const index = rows.findIndex(value => value.entry.id === row.entry.id)
     let target: Row | undefined
     if (event.key === 'ArrowDown') target = rows[Math.min(rows.length - 1, index + 1)]
@@ -73,6 +79,7 @@ function FileTree({ store, onOpen }: { store: ProjectFilesStore; onOpen(entry: P
       }}/>
       {state.query && <button type="button" aria-label={uiAttribute('清除搜索')} title={uiAttribute('清除搜索')} onClick={() => { store.setQuery(''); input.current?.focus() }}>×</button>}
     </div>
+    {referenceError && <p className="ref-source-note" role="status">{uiAttribute('暂时无法引用此文件，请重试')}</p>}
     {problem && <div className="project-files-feedback" role="status"><span>{uiAttribute(problem === 'root_unavailable' || problem === 'scope_expired' ? '工作目录不可用' : '无法读取目录')}</span><button onClick={store.retry}>{uiAttribute('重试')}</button></div>}
     {!problem && state.watchFailed && <div className="project-files-feedback" role="status"><span>{uiAttribute('自动刷新不可用')}</span><button onClick={store.retry}>{uiAttribute('刷新')}</button></div>}
     <div ref={scroll} className="project-files-rows" role="tree" aria-label={state.name || uiAttribute('文件目录')} aria-busy={state.loading || state.searching} onScroll={event => { if (!state.loading) store.scrollTop = event.currentTarget.scrollTop }}>
@@ -84,6 +91,14 @@ function FileTree({ store, onOpen }: { store: ProjectFilesStore; onOpen(entry: P
           <span className="project-files-chevron">{row.entry.directory && <svg viewBox="0 0 16 16" className={state.expanded.has(row.entry.id) ? 'is-expanded' : ''} aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg>}</span>
           {row.entry.directory ? <ProjectFolderIcon /> : <ProjectFileIcon fileName={row.entry.name}/>}
           <span className="project-files-name">{row.entry.name}{search && <small>{row.entry.relativePath}</small>}</span>
+          {!row.entry.unavailable && composer?.target?.enabled && composer.target.threadId === store.threadId && <button type="button" className="project-files-reference" aria-label={uiAttribute('引用 {0} 到输入框', row.entry.relativePath)} title={uiAttribute('引用到输入框')} onClick={event => {
+            event.stopPropagation()
+            setReferenceError(false)
+            void composer.reference(store.threadId, async () => {
+              const source = await store.open(row.entry)
+              return source?.kind === 'project_file' ? source : null
+            }).catch(() => setReferenceError(true))
+          }}>@</button>}
         </div>
         {row.entry.directory && state.expanded.has(row.entry.id) && state.pages.get(row.entry.id)?.error && <div className="project-files-feedback"><span>{uiAttribute('无法读取目录')}</span><button onClick={() => { void store.load(row.entry.id) }}>{uiAttribute('重试')}</button></div>}
         {row.entry.directory && state.expanded.has(row.entry.id) && state.pages.get(row.entry.id)?.loading && <div className="project-files-status">{uiAttribute('正在载入…')}</div>}
@@ -116,7 +131,8 @@ export function ProjectFilesPane(): React.JSX.Element | null {
     const source = await browser.store!.open(entry)
     if (!source || !preview) return
     initialize?.()
-    void preview.open(source, undefined, { fileName: entry.name })
+    if (source.kind !== 'project_file' || source.targetKind === 'directory') return
+    void preview.open({ kind: 'project_file', threadId: source.threadId, rawReference: source.rawReference }, undefined, { fileName: entry.name })
     if (layout?.directoryDrawer) browser.hide()
   }
   return <>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { ThreadMessageView } from '@contracts'
 import { AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader } from './AppDialog'
@@ -12,6 +12,7 @@ import { CopyIcon } from './CopyIcon'
 import { formatByteSize } from './ui-model'
 import { AgentArtifactIcon, classifyAttachmentDisplay } from './attachment-presentation'
 import { MessageExportContext } from './message-export-context'
+import { PUBLIC_MESSAGE_GROUP_HEIGHT } from './public-message-grouping'
 import {
   defaultMessageExportOptions, defaultMessageExportTitle, downloadMessageExport, exportableMessages, exportDocumentPNG,
   exportEntryShowsTime, exportFilename, messageExportMarkdown, snapshotExportDocument, standaloneExportHTML, toggleExportSelection,
@@ -98,21 +99,36 @@ function ExportAttachment({ threadId, messageId, attachment, runtime = false }: 
       {attachment.previewKind === 'image' && !pending && !image && <> · <UiText zh="原图不可用" /></>}</small></span>
   </div>
 }
-export function MessageExportDialog({ threadId, title: sourceTitle, entries, renderBody, onClose }: {
+export function MessageExportDialog({ threadId, title: sourceTitle, entries, renderBody, onClose, conversation }: {
   threadId: string; title: string; entries: MessageExportEntry[] | null
   renderBody(message: ThreadMessageView): ReactNode; onClose(): void
+  conversation?: { status: 'loading' | 'ready' | 'error'; onRetry(): void }
 }): React.JSX.Element {
   const [format, setFormat] = useState<MessageExportFormat>('html')
   const [settings, setSettings] = useState<Record<MessageExportFormat, MessageExportOptions>>(() => ({ html: defaultMessageExportOptions('html'), png: defaultMessageExportOptions('png'), markdown: defaultMessageExportOptions('markdown') }))
   const [customTitle, setCustomTitle] = useState<string | null>(null)
-  const defaultTitle = defaultMessageExportTitle(sourceTitle)
+  const defaultTitle = defaultMessageExportTitle(sourceTitle, conversation ? 'conversation' : 'selected')
   const title = customTitle ?? defaultTitle
   const [renaming, setRenaming] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const [manualCopy, setManualCopy] = useState<string | null>(null), [zoom, setZoom] = useState<string | null>(null), [copied, setCopied] = useState(false)
   const trigger = useRef<HTMLElement | null>(null)
+  const revision = useRef(0)
   const reader = useRef<HTMLElement>(null), controller = useRef<AbortController | null>(null), options = settings[format]
-  useEffect(() => () => controller.current?.abort(), [])
-  useEffect(() => { setError(null); setManualCopy(null); setZoom(null) }, [entries])
+  const loading = conversation?.status === 'loading'
+  const unavailable = !!conversation && (conversation.status !== 'ready' || !entries?.length)
+  const [showSpinner, setShowSpinner] = useState(false)
+  useEffect(() => {
+    setShowSpinner(false)
+    if (!loading) return
+    const timer = setTimeout(() => setShowSpinner(true), 350)
+    return () => clearTimeout(timer)
+  }, [loading])
+  const shortMessages = useExportMessageLayout(reader, !!conversation, entries, format, options)
+  useLayoutEffect(() => () => { revision.current++; controller.current?.abort() }, [])
+  useLayoutEffect(() => {
+    revision.current++
+    controller.current?.abort(); setBusy(false); setError(null); setManualCopy(null); setZoom(null)
+  }, [entries, conversation?.status])
   useEffect(() => { setCopied(false) }, [entries, format])
   useEffect(() => {
     reader.current?.querySelectorAll<HTMLElement>('button:not(.markdown-code-copy), a:not([href^="https://"]):not([href^="http://"])').forEach(node => { node.tabIndex = -1 })
@@ -121,7 +137,7 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
   const markdown = entries ? messageExportMarkdown(name, entries, options) : ''
   const close = () => { if (!busy) onClose() }
   const download = async () => {
-    if (busy || !entries?.length) return
+    if (busy || unavailable || !entries?.length) return
     const control = new AbortController(); controller.current?.abort(); controller.current = control
     setBusy(true); setError(null)
     try {
@@ -136,11 +152,15 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
     } catch (e) { if (!control.signal.aborted) setError(e instanceof Error ? e.message : uiAttribute('导出失败，请重试。')) }
     finally { if (!control.signal.aborted) setBusy(false) }
   }
-  return <Dialog.Root open={entries !== null} onOpenChange={open => { if (!open) close() }}><Dialog.Portal>
+  return <Dialog.Root open={!!conversation || entries !== null} onOpenChange={open => { if (!open) close() }}><Dialog.Portal>
     <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
     <AppDialogContent className="message-export-dialog" width="wide"
-      onOpenAutoFocus={() => { trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }}
-      onCloseAutoFocus={event => { event.preventDefault(); if (trigger.current?.isConnected) trigger.current.focus() }}
+      onOpenAutoFocus={() => {
+        trigger.current = conversation
+          ? [...document.querySelectorAll<HTMLElement>(`[data-thread-id="${CSS.escape(threadId)}"] .camp-nav-open`)].find(node => node.getClientRects().length > 0) ?? null
+          : document.activeElement instanceof HTMLElement ? document.activeElement : null
+      }}
+      onCloseAutoFocus={event => { event.preventDefault(); const element = trigger.current; requestAnimationFrame(() => { if (element?.isConnected) element.focus() }) }}
       onEscapeKeyDown={event => { if (busy || zoom) { event.preventDefault(); if (zoom) setZoom(null) } }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
       <AppDialogHeader title={uiAttribute('导出预览')} description={uiAttribute('预览并导出选中的消息')} hideDescription closeDisabled={busy} />
       <AppDialogBody className="message-export-body">
@@ -150,25 +170,29 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
           {(['png', 'html', 'markdown'] as const).map(f => <button key={f} type="button" aria-pressed={f === format} disabled={busy} onClick={() => { setFormat(f); setError(null); setManualCopy(null) }}>{f === 'png' ? uiAttribute('图片 PNG') : f === 'html' ? uiAttribute('网页 HTML') : 'Markdown'}</button>)}
         </div>
         <div className="message-export-options" role="group" aria-label={uiAttribute('包含信息')}>
-          {(['avatars', 'authors', 'times', 'recipients'] as const).filter(k => !(k === 'avatars' && format === 'markdown') && !(k === 'recipients' && entries?.every(e => e.excerpt !== undefined))).map(k => <label key={k}><input type="checkbox" checked={options[k]} disabled={busy} onChange={e => setSettings(s => ({ ...s, [format]: { ...s[format], [k]: e.target.checked } }))} />{uiAttribute({ avatars: '头像', authors: '作者', times: '时间', recipients: '发送对象' }[k])}</label>)}
+          {(['avatars', 'authors', 'times', 'recipients'] as const).filter(k => !(k === 'avatars' && format === 'markdown')).map(k => <label key={k}><input type="checkbox" checked={options[k]} disabled={busy} onChange={e => setSettings(s => ({ ...s, [format]: { ...s[format], [k]: e.target.checked } }))} />{uiAttribute({ avatars: '头像', authors: '作者', times: '时间', recipients: '发送对象' }[k])}</label>)}
         </div>
-        <div className="message-export-preview" tabIndex={0} aria-label={uiAttribute('导出内容预览')}>
-          {format === 'markdown' ? <pre className="message-export-markdown">{markdown}</pre> : <MessageExportContext.Provider value={true}>
+        <div className="message-export-preview" tabIndex={0} aria-label={uiAttribute('导出内容预览')} aria-busy={loading || undefined}>
+          {unavailable ? <div className="message-export-read-state">
+            {loading ? showSpinner && <span className="message-export-read-spinner" role="progressbar" aria-label={uiAttribute('读取会话历史')} />
+              : conversation?.status === 'error' ? <><p role="alert"><UiText zh="无法读取会话，请重试。" /></p><button type="button" className="quiet-button" onClick={conversation.onRetry}><UiText zh="重试" /></button></>
+                : <p role="status"><UiText zh="没有可导出的消息" /></p>}
+          </div> : format === 'markdown' ? <pre className="message-export-markdown">{markdown}</pre> : <MessageExportContext.Provider value={true}>
             <article ref={reader} className="message-export-document" data-export-format={format}><h2>{name}</h2>
-              {entries?.map((e, index) => <section className={`message-export-entry${e.message.authorType === 'agent' ? '' : ' is-user'}${options.avatars ? ' has-avatar' : ''}`} key={e.message.id}>
+              {entries?.map((e, index) => <section className={`message-export-entry${e.message.authorType === 'agent' ? '' : ' is-user'}${options.avatars ? ' has-avatar' : ''}`} key={e.message.id} data-export-message-id={e.message.id}>
                 {options.avatars && (e.message.authorType === 'user'
                   ? <CurrentUserAvatar profile={{ displayName: e.author, avatarDataUrl: e.avatarDataUrl ?? null }} className="local-message-avatar" />
                   : <MemberAvatar agentId={e.message.authorId} avatarRef={e.avatarRef} displayName={e.author} size="list" decorative />)}
-                <div className="message-export-stack"><div className="message-export-meta">{options.authors && <strong>{e.author}</strong>}{options.times && exportEntryShowsTime(e, entries[index + 1]) && <time>{new Date(e.message.createdAt).toLocaleString()}</time>}</div>
+                <div className="message-export-stack"><div className="message-export-meta">{options.authors && <strong>{e.author}</strong>}{options.times && (exportEntryShowsTime(e, entries[index + 1]) || (!!conversation && !shortMessages.has(e.message.id))) && <time>{new Date(e.message.createdAt).toLocaleString()}</time>}</div>
                   <div className="message-export-bubble" onClickCapture={event => {
                     const target = event.target as Element
                     if (format !== 'html' || (!target.closest('.markdown-code-copy') && !target.closest('a[href^="https://"],a[href^="http://"]'))) { event.preventDefault(); event.stopPropagation() }
                   }}>
-                    {e.excerpt !== undefined ? <p className="message-export-excerpt">{e.excerpt}</p> : <>{e.reply && <blockquote>{e.reply}</blockquote>}{renderBody(e.message)}</>}
+                    {e.reply && <blockquote>{e.reply}</blockquote>}{renderBody(e.message)}
                   </div>
-                  {e.excerpt === undefined && e.message.attachments.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment threadId={threadId} messageId={e.message.id} attachment={a} /></div>)}
-                  {e.excerpt === undefined && e.runtimeImages?.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment runtime threadId={threadId} messageId={e.message.id} attachment={{ ...a, kind: 'file', fileCount: null, availability: 'available', previewKind: 'image' }} /></div>)}
-                  {e.excerpt === undefined && options.recipients && e.recipients.length > 0 && <div className="message-export-recipients"><UiText zh="发送给" /> {e.recipients.map(n => '@' + n).join('、')}</div>}
+                  {e.message.attachments.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment threadId={threadId} messageId={e.message.id} attachment={a} /></div>)}
+                  {e.runtimeImages?.map(a => <div key={a.id} onClick={event => { const im = (event.target as Element).closest('img'); if (im && format === 'html') setZoom(im.src) }}><ExportAttachment runtime threadId={threadId} messageId={e.message.id} attachment={{ ...a, kind: 'file', fileCount: null, availability: 'available', previewKind: 'image' }} /></div>)}
+                  {options.recipients && e.recipients.length > 0 && <div className="message-export-recipients"><UiText zh="发送给" /> {e.recipients.map(n => '@' + n).join('、')}</div>}
                 </div>
               </section>)}
             </article>
@@ -177,9 +201,9 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
         {manualCopy && <textarea className="message-export-manual-copy" readOnly value={manualCopy} onFocus={e => e.currentTarget.select()} aria-label={uiAttribute('请选择并复制文本')} />}
         {error && <p className="message-export-error" role="alert">{error}</p>}
       </AppDialogBody>
-      <AppDialogFooter leading={<button type="button" className="quiet-button" disabled={busy} onClick={close}><UiText zh="返回调整" /></button>}>
-        <button type="button" className="quiet-button message-export-copy" disabled={busy} onClick={() => { void writeClipboardText(markdown).then(ok => { setCopied(ok); if (!ok) { setManualCopy(markdown); setError(uiAttribute('复制失败，请手动复制。')) } }) }}><CopyIcon copied={copied} />{copied ? uiAttribute('已复制') : uiAttribute('复制文本')}</button>
-        <button type="button" className="primary-button" disabled={busy} aria-busy={busy} onClick={() => void download()}><ExportGlyph />{busy ? uiAttribute('正在生成…') : uiAttribute('下载 {0}', format === 'markdown' ? 'Markdown' : format.toUpperCase())}</button>
+      <AppDialogFooter leading={<button type="button" className="quiet-button" disabled={busy} onClick={close}><UiText zh={conversation ? '关闭' : '返回调整'} /></button>}>
+        <button type="button" className="quiet-button message-export-copy" disabled={busy || unavailable} onClick={() => { const current = revision.current; void writeClipboardText(markdown).then(ok => { if (current !== revision.current) return; setCopied(ok); if (!ok) { setManualCopy(markdown); setError(uiAttribute('复制失败，请手动复制。')) } }) }}><CopyIcon copied={copied} />{copied ? uiAttribute('已复制') : uiAttribute('复制文本')}</button>
+        <button type="button" className="primary-button" disabled={busy || unavailable} aria-busy={busy} onClick={() => void download()}><ExportGlyph />{busy ? uiAttribute('正在生成…') : uiAttribute('下载 {0}', format === 'markdown' ? 'Markdown' : format.toUpperCase())}</button>
       </AppDialogFooter>
       <Dialog.Root open={zoom !== null} onOpenChange={open => { if (!open) setZoom(null) }}><Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
@@ -190,4 +214,32 @@ export function MessageExportDialog({ threadId, title: sourceTitle, entries, ren
       </Dialog.Portal></Dialog.Root>
     </AppDialogContent>
   </Dialog.Portal></Dialog.Root>
+}
+
+/** Complete exports have no browsing DOM. Measure their content using the shared grouping height rule. */
+function useExportMessageLayout(reader: RefObject<HTMLElement | null>, enabled: boolean, entries: MessageExportEntry[] | null,
+  format: MessageExportFormat, options: MessageExportOptions): ReadonlySet<string> {
+  const [short, setShort] = useState<Set<string>>(() => new Set())
+  useLayoutEffect(() => {
+    const root = reader.current
+    if (!enabled || !root) return
+    let active = true
+    const measure = () => {
+      if (!active) return
+      const next = new Set<string>()
+      root.querySelectorAll<HTMLElement>('[data-export-message-id]').forEach(entry => {
+        const bubble = entry.querySelector('.message-export-bubble'), stack = entry.querySelector('.message-export-stack')
+        if (!bubble || !stack || entry.querySelector('[data-export-pending="true"]') || [...entry.querySelectorAll('img')].some(img => !img.complete)) return
+        if (stack.getBoundingClientRect().bottom - bubble.getBoundingClientRect().top < PUBLIC_MESSAGE_GROUP_HEIGHT) next.add(entry.dataset.exportMessageId!)
+      })
+      setShort(previous => previous.size === next.size && [...next].every(id => previous.has(id)) ? previous : next)
+    }
+    const resize = new ResizeObserver(measure)
+    root.querySelectorAll('.message-export-stack').forEach(node => resize.observe(node))
+    root.addEventListener('load', measure, true); root.addEventListener('error', measure, true)
+    void document.fonts.ready.then(measure)
+    measure()
+    return () => { active = false; resize.disconnect(); root.removeEventListener('load', measure, true); root.removeEventListener('error', measure, true) }
+  }, [reader, enabled, entries, format, options])
+  return short
 }

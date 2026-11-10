@@ -86,6 +86,7 @@ impl ChannelProviderSpec {
 const LARK_PROVIDER: &str = "lark";
 const FEISHU_PROVIDER: &str = FEISHU_SPEC.provider;
 pub mod inbound_attachments;
+pub mod native_interactions;
 const DINGTALK_PROVIDER: &str = "dingtalk";
 #[cfg(all(test, feature = "extended-tests"))]
 const FEISHU_CHANNEL_HOST_COMPONENT: &str = FEISHU_SPEC.host_component;
@@ -6852,6 +6853,14 @@ impl ChannelService {
             let payload: Value = serde_json::from_str(&payload_json)
                 .context("stored channel delivery payload is invalid")?;
             match delivery_kind.as_str() {
+                "native_interaction" if envelope.payload.outcome == "sent" => {
+                    let external_id = envelope.payload.external_update_message_id.as_deref()
+                        .or(envelope.payload.external_delivery_message_id.as_deref());
+                    if let Some(external_id) = external_id {
+                        transaction.execute("UPDATE channel_delivery SET payload_json=json_set(payload_json,'$.externalMessageId',?2) WHERE id=?1",
+                            params![envelope.payload.delivery_id, external_id])?;
+                    }
+                }
                 "execution_console_upsert" if envelope.payload.outcome == "sent" => {
                     let console_id = console_id
                         .as_deref()
@@ -11499,6 +11508,8 @@ fn claim_deliveries(
                    delivery.payload_json,
                    delivery.attempt_count,
                    CASE
+                       WHEN delivery.delivery_kind = 'native_interaction'
+                       THEN json_extract(delivery.payload_json, '$.externalMessageId')
                        WHEN delivery.delivery_kind IN (
                            'execution_console_upsert', 'execution_console_recall'
                        ) THEN console.external_message_id
@@ -15816,6 +15827,644 @@ mod tests {
             );
             transaction.rollback().unwrap();
             assert_eq!(claim_waiting_runs(&mut database).len(), 1);
+        }
+    }
+
+    #[test]
+    fn native_question_carriers_fence_owner_scope_and_reconcile_terminal_delivery() {
+        use crate::native_interaction::{
+            NativeInteractionAnswer, NativeInteractionStatus as Status, NativeInteractionView,
+            NativeQuestion, NativeQuestionKind,
+        };
+        // Owns the new NativeInteraction -> existing channel Outbox/auth seam.
+        // No Runtime or provider network is needed to prove identity and races.
+        for provider in [FEISHU_PROVIDER, DINGTALK_PROVIDER] {
+            let mut db = seeded_runtime_database_owned();
+            let service = ChannelService::default();
+            let (app, tenant, owner) = if provider == FEISHU_PROVIDER {
+                connect_account(&service, &mut db);
+                publish_bot(&service, &mut db, "agent_1", "cli_app_1");
+                ("cli_app_1", "tenant_1", "user_1")
+            } else {
+                connect_dingtalk_account(&service, &mut db);
+                publish_dingtalk_bot(&service, &mut db, "agent_1");
+                ("ding-app-agent_1", "ding-corp-1", "owner-staff-1")
+            };
+            let host = provider_host_envelope(
+                provider,
+                "native-owner",
+                VerifyFeishuOwnerCommand {
+                    provider: provider.into(),
+                    app_id: app.into(),
+                    tenant_key: tenant.into(),
+                    sender_open_id: (provider == FEISHU_PROVIDER).then(|| "ou_user".into()),
+                    sender_user_id: Some(owner.into()),
+                    sender_union_id: (provider == FEISHU_PROVIDER).then(|| "union_user".into()),
+                    sender_display_name: "Owner".into(),
+                },
+            );
+            service.verify_feishu_owner(&mut db, &host).unwrap();
+            let mut observation = observation_command(
+                app,
+                "native-message",
+                "native-chat",
+                "",
+                "p2p",
+                "ask",
+                &[("agent_1", app)],
+                true,
+            );
+            if provider == DINGTALK_PROVIDER {
+                use_dingtalk_observation_identity(&mut observation);
+            }
+            let observed = service
+                .observe_inbound(
+                    &mut db,
+                    &provider_host_envelope(provider, "native-observe", observation),
+                )
+                .unwrap();
+            let quick = quick_chat_path(&db);
+            service
+                .finalize_inbound(
+                    &mut db,
+                    &quick,
+                    &provider_host_envelope(
+                        provider,
+                        "native-finalize",
+                        FinalizeChannelInboundCommand {
+                            aggregate_id: observed.result.payload["aggregateId"]
+                                .as_str()
+                                .unwrap()
+                                .into(),
+                        },
+                    ),
+                )
+                .unwrap();
+            let runs = claim_waiting_runs(&mut db);
+            assert_eq!(runs.len(), 1);
+            db.connection()
+                .execute(
+                    "UPDATE agent_run SET status='running',started_at=datetime('now') WHERE id=?1",
+                    [&runs[0]],
+                )
+                .unwrap();
+            service
+                .host_tick(
+                    &mut db,
+                    &host.actor,
+                    &ChannelHostTickRequest {
+                        worker_id: "migration-fixture".into(),
+                        limit: 100,
+                        inbound_attachment_app_ids: vec![],
+                    },
+                )
+                .unwrap();
+            crate::db::assert_native_channel_upgrade(&mut db);
+            let (thread, epoch): (String, i64) = db
+                .connection()
+                .query_row(
+                    "SELECT camp_id,execution_epoch FROM agent_run WHERE id=?1",
+                    [&runs[0]],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            let question = |id: &str| NativeInteractionView {
+                id: id.into(),
+                agent_run_id: runs[0].clone(),
+                execution_epoch: epoch,
+                questions: vec![NativeQuestion {
+                    id: "question".into(),
+                    kind: NativeQuestionKind::Input,
+                    title: "原问题".into(),
+                    description: Some(" 原说明\n第二行 ".into()),
+                    options: vec![],
+                    placeholder: None,
+                    prefill: Some("未提交的预填文本".into()),
+                    multiline: true,
+                }],
+                can_skip: true,
+                created_at: 1,
+                expires_at: None,
+                status: Status::Pending,
+            };
+            let questions = vec![
+                (thread.clone(), question("native-a")),
+                (thread.clone(), question("native-b")),
+            ];
+            let notice = crate::native_interaction::notification_source(
+                db.connection(),
+                &thread,
+                &questions[0].1,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(notice["thread"]["id"], thread);
+            assert_eq!(notice["thread"]["channelSource"]["provider"], provider);
+            assert_eq!(notice["id"], "native-a");
+            assert!(notice["singleChat"].is_null());
+            assert!(notice.get("questions").is_none());
+            assert!(notice.get("answer").is_none());
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    "other-thread",
+                    &questions[0].1
+                )
+                .unwrap()
+                .is_none()
+            );
+            let mut stale_notice = question("stale-notice");
+            stale_notice.execution_epoch += 1;
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &stale_notice
+                )
+                .unwrap()
+                .is_none()
+            );
+            stale_notice.execution_epoch = epoch;
+            stale_notice.expires_at = Some(0);
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &stale_notice
+                )
+                .unwrap()
+                .is_none()
+            );
+            stale_notice.expires_at = None;
+            stale_notice.status = Status::Unknown;
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &stale_notice
+                )
+                .unwrap()
+                .is_none()
+            );
+            db.connection()
+                .execute_batch("SAVEPOINT native_notice_scope")
+                .unwrap();
+            db.connection()
+                .execute(
+                    "UPDATE agent_run SET cancel_requested_at=datetime('now'),cancel_reason_code='user_cancelled' WHERE id=?1",
+                    [&runs[0]],
+                )
+                .unwrap();
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &questions[0].1
+                )
+                .unwrap()
+                .is_none()
+            );
+            db.connection()
+                .execute_batch("ROLLBACK TO native_notice_scope; RELEASE native_notice_scope")
+                .unwrap();
+            let mut private_open = actor_envelope(
+                &ActorRef::User {
+                    user_id: "local_user".into(),
+                },
+                "native-notice-private".into(),
+                crate::single_chat::OpenSingleChatCommand {
+                    draft_client: Default::default(),
+                    camp_id: thread.clone(),
+                    agent_id: "agent_1".into(),
+                },
+            );
+            private_open.camp_id = Some(thread.clone());
+            let opened = crate::single_chat::SingleChatService::default()
+                .open(&mut db, &private_open)
+                .unwrap();
+            assert_eq!(opened.result.status, CommandResultStatus::Applied);
+            let private_id = opened.result.payload["conversationId"].as_str().unwrap();
+            let mut private_send = actor_envelope(
+                &ActorRef::User {
+                    user_id: "local_user".into(),
+                },
+                "native-notice-private-send".into(),
+                crate::single_chat::SendSingleChatMessageCommand {
+                    draft_client: Default::default(),
+                    camp_id: thread.clone(),
+                    conversation_id: private_id.into(),
+                    body: "验证原单聊问答提醒".into(),
+                    draft_revision: 0,
+                },
+            );
+            private_send.camp_id = Some(thread.clone());
+            let sent = crate::single_chat::SingleChatService::default()
+                .send(&mut db, &private_send)
+                .unwrap();
+            assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+            let mut private_question = question("native-private");
+            private_question.agent_run_id =
+                sent.result.payload["agentRunId"].as_str().unwrap().into();
+            private_question.execution_epoch = db
+                .connection()
+                .query_row(
+                    "SELECT execution_epoch FROM agent_run WHERE id=?1",
+                    [&private_question.agent_run_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            // A native dialog can only arrive after the admitted Run starts.
+            db.connection()
+                .execute(
+                    "UPDATE agent_run SET status='running',started_at=datetime('now') WHERE id=?1",
+                    [&private_question.agent_run_id],
+                )
+                .unwrap();
+            let private_notice = crate::native_interaction::notification_source(
+                db.connection(),
+                &thread,
+                &private_question,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(private_notice["singleChat"]["conversationId"], private_id);
+            assert_eq!(private_notice["singleChat"]["agentId"], "agent_1");
+            db.connection()
+                .execute_batch("SAVEPOINT native_notice_private")
+                .unwrap();
+            db.connection()
+                .execute(
+                    "UPDATE conversation SET ended_at=datetime('now'),ended_reason='user_ended',ended_binding_generation=native_binding_generation WHERE id=?1",
+                    [private_id],
+                )
+                .unwrap();
+            assert!(
+                crate::native_interaction::notification_source(
+                    db.connection(),
+                    &thread,
+                    &private_question
+                )
+                .unwrap()
+                .is_none()
+            );
+            db.connection()
+                .execute_batch("ROLLBACK TO native_notice_private; RELEASE native_notice_private")
+                .unwrap();
+            native_interactions::project_pending(&mut db, provider, &questions).unwrap();
+            native_interactions::project_pending(&mut db, provider, &questions).unwrap();
+            assert_eq!(
+                native_interactions::references(&db, provider)
+                    .unwrap()
+                    .len(),
+                2
+            );
+            // Neither a wrong Thread nor a stale execution can acquire a card.
+            let mut stale = question("stale");
+            stale.execution_epoch += 1;
+            native_interactions::project_pending(
+                &mut db,
+                provider,
+                &[
+                    ("wrong-thread".into(), question("wrong-scope")),
+                    (thread.clone(), stale),
+                ],
+            )
+            .unwrap();
+            assert_eq!(
+                native_interactions::references(&db, provider)
+                    .unwrap()
+                    .len(),
+                2
+            );
+            let actor = host.actor;
+            let tick = service
+                .host_tick(
+                    &mut db,
+                    &actor,
+                    &ChannelHostTickRequest {
+                        worker_id: "native-worker".into(),
+                        limit: 100,
+                        inbound_attachment_app_ids: vec![],
+                    },
+                )
+                .unwrap();
+            let deliveries: Vec<_> = tick
+                .deliveries
+                .iter()
+                .filter(|d| d.delivery_kind == "native_interaction")
+                .collect();
+            assert_eq!(deliveries.len(), 2);
+            let first = deliveries
+                .iter()
+                .find(|d| d.payload["nativeInteraction"]["interactionId"] == "native-a")
+                .unwrap();
+            let source =
+                native_interactions::source_reference(&db, provider, &first.delivery_id, app)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(source.2.thread_id, thread);
+            assert_eq!(
+                source.2.question_preview.as_deref(),
+                Some("原问题\n\n 原说明\n第二行 ")
+            );
+            assert!(source.2.answer_preview.is_none());
+            assert!(
+                native_interactions::source_reference(
+                    &db,
+                    provider,
+                    &first.delivery_id,
+                    "wrong-app"
+                )
+                .unwrap()
+                .is_none()
+            );
+            service
+                .settle_delivery(
+                    &mut db,
+                    &provider_host_envelope(
+                        provider,
+                        "native-settle",
+                        SettleChannelDeliveryCommand {
+                            delivery_id: first.delivery_id.clone(),
+                            worker_id: "native-worker".into(),
+                            outcome: "sent".into(),
+                            external_delivery_message_id: Some("carrier-a".into()),
+                            external_update_message_id: Some("card-a".into()),
+                            failure_code: None,
+                            retryable: false,
+                        },
+                    ),
+                )
+                .unwrap();
+            let mut answer = native_interactions::AnswerParams {
+                delivery_id: first.delivery_id.clone(),
+                interaction_id: "native-a".into(),
+                app_id: app.into(),
+                external_message_id: "card-a".into(),
+                chat_id: Some("native-chat".into()),
+                operator_open_id: (provider == FEISHU_PROVIDER).then(|| "ou_user".into()),
+                operator_user_id: Some(owner.into()),
+                operator_union_id: None,
+                answer: NativeInteractionAnswer::Input {
+                    value: "  private answer\n".into(),
+                },
+            };
+            assert!(
+                native_interactions::authorize_answer(
+                    &mut db,
+                    &ActorRef::System {
+                        component_id: "wrong-host".into()
+                    },
+                    provider,
+                    &answer
+                )
+                .is_err()
+            );
+            assert_eq!(
+                native_interactions::authorize_answer(&mut db, &actor, provider, &answer)
+                    .unwrap()
+                    .1,
+                Status::Pending
+            );
+            answer.operator_open_id = None;
+            answer.operator_user_id = Some("someone-else".into());
+            assert!(
+                native_interactions::authorize_answer(&mut db, &actor, provider, &answer).is_err()
+            );
+            answer.operator_user_id = Some(owner.into());
+            answer.operator_open_id = (provider == FEISHU_PROVIDER).then(|| "ou_user".into());
+            for (field, bad) in [
+                ("card", "carrier-a"),
+                ("chat", "wrong-chat"),
+                ("question", "native-b"),
+                ("app", "wrong-app"),
+            ] {
+                let before = match field {
+                    "card" => std::mem::replace(&mut answer.external_message_id, bad.into()),
+                    "chat" => answer.chat_id.replace(bad.into()).unwrap(),
+                    "question" => std::mem::replace(&mut answer.interaction_id, bad.into()),
+                    _ => std::mem::replace(&mut answer.app_id, bad.into()),
+                };
+                assert!(
+                    native_interactions::authorize_answer(&mut db, &actor, provider, &answer)
+                        .is_err(),
+                    "{provider}/{field}"
+                );
+                match field {
+                    "card" => answer.external_message_id = before,
+                    "chat" => answer.chat_id = Some(before),
+                    "question" => answer.interaction_id = before,
+                    _ => answer.app_id = before,
+                };
+            }
+            let preview = questions[0].1.questions[0]
+                .answer_preview(&answer.answer)
+                .unwrap();
+            // A lifecycle sweep can finish before the writer records its native
+            // success. Its stale marker must not suppress the actual answer.
+            db.connection().execute("UPDATE channel_delivery SET payload_json=json_set(payload_json,'$.nativeInteraction.status','unavailable') WHERE id=?1", [&first.delivery_id]).unwrap();
+            native_interactions::record_status(&mut db, "native-a", Status::Sent, Some(&preview))
+                .unwrap();
+            native_interactions::record_status(
+                &mut db,
+                "native-a",
+                Status::Sent,
+                Some("late duplicate must not replace the answer"),
+            )
+            .unwrap();
+            native_interactions::record_status(&mut db, "native-a", Status::Unavailable, None)
+                .unwrap();
+            let completed =
+                native_interactions::source_reference(&db, provider, &first.delivery_id, app)
+                    .unwrap()
+                    .unwrap()
+                    .2;
+            assert_eq!(completed.answer_preview.as_deref(), Some(preview.as_str()));
+            assert_eq!(
+                native_interactions::authorize_answer(&mut db, &actor, provider, &answer)
+                    .unwrap()
+                    .1,
+                Status::Sent
+            );
+            // The second answer beats the HTTP send receipt; settlement must still
+            // produce exactly one closing PATCH, never a second answer delivery.
+            let second = deliveries
+                .iter()
+                .find(|d| d.payload["nativeInteraction"]["interactionId"] == "native-b")
+                .unwrap();
+            native_interactions::record_status(&mut db, "native-b", Status::Skipped, None).unwrap();
+            service
+                .settle_delivery(
+                    &mut db,
+                    &provider_host_envelope(
+                        provider,
+                        "native-settle-b",
+                        SettleChannelDeliveryCommand {
+                            delivery_id: second.delivery_id.clone(),
+                            worker_id: "native-worker".into(),
+                            outcome: "sent".into(),
+                            external_delivery_message_id: Some("carrier-b".into()),
+                            external_update_message_id: Some("card-b".into()),
+                            failure_code: None,
+                            retryable: false,
+                        },
+                    ),
+                )
+                .unwrap();
+            native_interactions::reconcile_delivered(&mut db, provider).unwrap();
+            native_interactions::reconcile_delivered(&mut db, provider).unwrap();
+            let payloads:Vec<String>=query_rows(db.connection(),"SELECT payload_json FROM channel_delivery WHERE delivery_kind='native_interaction'",[],|r|r.get(0)).unwrap();
+            assert_eq!(payloads.len(), 4);
+            assert!(
+                payloads
+                    .iter()
+                    .all(|p| !p.contains("未提交的预填文本") && !p.contains("late duplicate"))
+            );
+            let skipped =
+                native_interactions::source_reference(&db, provider, &second.delivery_id, app)
+                    .unwrap()
+                    .unwrap()
+                    .2;
+            assert_eq!(skipped.status, Status::Skipped);
+            assert!(skipped.answer_preview.is_none());
+            let updates = service
+                .host_tick(
+                    &mut db,
+                    &actor,
+                    &ChannelHostTickRequest {
+                        worker_id: "native-worker".into(),
+                        limit: 100,
+                        inbound_attachment_app_ids: vec![],
+                    },
+                )
+                .unwrap();
+            let updates: Vec<_> = updates
+                .deliveries
+                .iter()
+                .filter(|d| d.delivery_kind == "native_interaction")
+                .collect();
+            assert_eq!(updates.len(), 2);
+            assert!(updates.iter().all(|d| {
+                d.update_message_id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("card-"))
+            }));
+            native_interactions::project_pending(
+                &mut db,
+                provider,
+                &[(thread.clone(), question("native-unknown"))],
+            )
+            .unwrap();
+            let tick = service
+                .host_tick(
+                    &mut db,
+                    &actor,
+                    &ChannelHostTickRequest {
+                        worker_id: "native-worker".into(),
+                        limit: 100,
+                        inbound_attachment_app_ids: vec![],
+                    },
+                )
+                .unwrap();
+            let unknown = tick
+                .deliveries
+                .iter()
+                .find(|d| d.delivery_kind == "native_interaction")
+                .unwrap();
+            service
+                .settle_delivery(
+                    &mut db,
+                    &provider_host_envelope(
+                        provider,
+                        "native-settle-unknown",
+                        SettleChannelDeliveryCommand {
+                            delivery_id: unknown.delivery_id.clone(),
+                            worker_id: "native-worker".into(),
+                            outcome: "sent".into(),
+                            external_delivery_message_id: Some("carrier-unknown".into()),
+                            external_update_message_id: Some("card-unknown".into()),
+                            failure_code: None,
+                            retryable: false,
+                        },
+                    ),
+                )
+                .unwrap();
+            native_interactions::record_status(&mut db, "native-unknown", Status::Unknown, None)
+                .unwrap();
+            native_interactions::record_status(
+                &mut db,
+                "native-unknown",
+                Status::Unavailable,
+                None,
+            )
+            .unwrap();
+            native_interactions::reconcile_delivered(&mut db, provider).unwrap();
+            let count:i64=db.connection().query_row("SELECT COUNT(*) FROM channel_delivery WHERE json_extract(payload_json,'$.rootDeliveryId')=?1",[&unknown.delivery_id],|r|r.get(0)).unwrap();
+            assert_eq!(
+                count, 0,
+                "unknown feedback must not repaint and discard the client's form"
+            );
+            let source =
+                native_interactions::source_reference(&db, provider, &unknown.delivery_id, app)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(source.2.status, Status::Unknown);
+            // A later native request in this same Run creates its own card;
+            // neither an earlier answer nor a matching Run supplies a parent question.
+            native_interactions::project_pending(
+                &mut db,
+                provider,
+                &[(thread.clone(), question("project-name"))],
+            )
+            .unwrap();
+            let next_tick = service
+                .host_tick(
+                    &mut db,
+                    &actor,
+                    &ChannelHostTickRequest {
+                        worker_id: "native-worker".into(),
+                        limit: 100,
+                        inbound_attachment_app_ids: vec![],
+                    },
+                )
+                .unwrap();
+            let next = next_tick
+                .deliveries
+                .iter()
+                .find(|d| d.payload["nativeInteraction"]["interactionId"] == "project-name")
+                .unwrap();
+            assert!(next.update_message_id.is_none());
+            assert_ne!(next.delivery_id, first.delivery_id);
+            let previous =
+                native_interactions::source_reference(&db, provider, &first.delivery_id, app)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(previous.2.interaction_id, "native-a");
+            assert_eq!(previous.2.status, Status::Sent);
+            // A legacy payload without display text keeps its status-only shape.
+            db.connection().execute("UPDATE channel_delivery SET payload_json=json_remove(payload_json,'$.nativeInteraction.questionPreview','$.nativeInteraction.answerPreview') WHERE id=?1", [&first.delivery_id]).unwrap();
+            native_interactions::record_status(
+                &mut db,
+                "native-a",
+                Status::Sent,
+                Some("no historical backfill"),
+            )
+            .unwrap();
+            let legacy =
+                native_interactions::source_reference(&db, provider, &first.delivery_id, app)
+                    .unwrap()
+                    .unwrap()
+                    .2;
+            assert!(legacy.question_preview.is_none() && legacy.answer_preview.is_none());
+            db.connection()
+                .execute(
+                    "UPDATE channel_conversation_binding SET camp_id=NULL WHERE camp_id=?1",
+                    [&thread],
+                )
+                .unwrap();
+            assert!(
+                native_interactions::authorize_answer(&mut db, &actor, provider, &answer).is_err()
+            );
         }
     }
 

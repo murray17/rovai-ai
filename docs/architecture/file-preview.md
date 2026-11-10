@@ -304,7 +304,7 @@ Desktop Main 和 Web resources 从其持有的句柄构造内部请求；Core �
 由现有预览 session 持有不占文件句柄的 `file_picker` 空标签；第一次目录文件打开后替换为普通文件标签。
 文件标签的 `openedFromDirectory` 标记随 session 保留、去重时合并；最后一个目录来源标签关闭后收起目录，
 不连带关闭仅从会话链接打开的标签。目录可单独折叠，sidecar 隐藏时暂停目录显示和监听，保留浏览状态。
-`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v26.md) 请求。
+`ProjectFilesPane` 组合现有 Header、Splitter 与预览入口；两端适配器只运输 [v26](../contracts/file-preview-v28.md) 请求。
 Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；该命令不进入普通写命令队列或数据库事务。
 
 每个正在浏览的作用域共享一组非递归目录监听；变更通知只使可见目录缓存失效，与现有文件预览监听各负其责。
@@ -313,3 +313,9 @@ Core `project_files` 解析当前业务根，阻塞池执行有界文件 I/O；�
 普通条目直接使用目录遍历返回的类型，链接及实际访问时再解析目标。监听忽略打开、读取等非变更事件。
 目录条目不读取正文；树、搜索、标签共用现有 `ProjectFileIcon`，导航使用界面字体，代码正文沿用 CodeMirror 等宽字体。
 没有文件管理、工作副本选择器、后台索引、搜索续传或新的编辑框架。目录中的不支持格式只显示信息与现有主动打开/下载操作。
+
+## 项目目录引用
+
+项目条目的选择来源允许文件与目录，二者保留明确类型。目录激活复用当前 Thread 的文件树，并在 Host
+校验原根、目录类型和历史冻结位置后揭示祖先链；不创建文件读取 handle 或递归加载整个目录。
+界面与草稿合同见[项目引用 v2](../contracts/project-file-reference-v2.md)，元数据 API 见[预览 v28](../contracts/file-preview-v28.md)。

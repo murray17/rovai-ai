@@ -197,6 +197,7 @@ console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
 
 const allowedMethods = new Set<CoreMethod>([
   'projectFiles.request',
+  'projectFileReferences.resolve',
   'health.check',
   'preferences.tasks.get',
   'preferences.tasks.set',
@@ -352,6 +353,8 @@ const allowedMethods = new Set<CoreMethod>([
   'thread.messages.withdraw',
   'userAutomation.thread.send',
   'action.approvals.resolve',
+  'nativeInteractions.respond',
+  'nativeInteractions.notifications',
   'notifications.inbox',
   'notifications.threadInterruptions',
   'notifications.changesSince',
@@ -1523,6 +1526,11 @@ ipcMain.handle('rovai:general-preferences-set-execution-placement', (_event, pla
   return hostGeneralPreferences().setExecutionConsolePlacement(
     placement as ExecutionConsolePlacement
   )
+})
+
+ipcMain.handle('rovai:general-preferences-set-execution-auto-open', (_event, enabled: unknown) => {
+  if (typeof enabled !== 'boolean') throw new Error('Invalid execution console auto-open preference')
+  return hostGeneralPreferences().setExecutionConsoleAutoOpen(enabled)
 })
 
 ipcMain.handle('rovai:general-preferences-set-team', (_event, teamId: unknown, enableOneClick: unknown = false) => {

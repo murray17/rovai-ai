@@ -62,6 +62,8 @@ export async function exerciseBrowserManagement({ web, read, fixture, capture, o
   await web.wait(`Boolean(document.querySelector('.member-portrait img')?.naturalWidth) || [...document.querySelectorAll('.member-avatar img')].some(e=>e.src.startsWith('blob:') && e.naturalWidth>0)`)
   await capture('web-member-avatar.png')
 
+  await exerciseBrowserMemberPresence({ web, read, member, capture })
+
   await web.click(`document.querySelector('.rail-button[aria-label="定时任务"]')`)
   await click('新建')
   await fill('.automation-name-input', 'Browser management fixture')
@@ -136,4 +138,17 @@ export async function exerciseBrowserManagement({ web, read, fixture, capture, o
   assert.equal((await read('camps.open', { threadId, traceId: crypto.randomUUID() })).tasks.find(item=>item.taskId===task.taskId).status, 'cancelled')
   await capture('web-task-management.png')
   await web.click(`document.querySelector('[aria-label="收起会话详情"]')`)
+}
+
+export async function exerciseBrowserMemberPresence({ web, read, member, capture }) {
+  for (const [label, presence] of [['暂时离队', 'away'], ['归队', 'present']]) {
+    await web.wait(`document.querySelector('[aria-label="管理 ${member.displayName}"]:not(:disabled)')!==null`)
+    await web.click(`document.querySelector('[aria-label="管理 ${member.displayName}"]')`)
+    const action = `[...document.querySelectorAll('[role=menuitem]')].find(e=>e.textContent.trim()===${JSON.stringify(label)})`
+    await web.wait(`Boolean(${action})`)
+    await web.click(action)
+    await web.wait(`document.querySelector('.member-presence-label.presence-${presence}')!==null && Boolean(document.querySelector('.member-editor-inline-notice'))`)
+    assert.equal((await read('members.get', { agentId: member.agentId })).presence, presence, 'browser member action must persist in the shared Core')
+    await capture(`web-member-${presence}.png`)
+  }
 }

@@ -199,10 +199,11 @@ export function singleChatChangeRefreshTarget(
   currentConversationId: string | null,
   panelVisible = true
 ): SingleChatChangeRefreshTarget {
-  if (event.method !== 'single_chat.changed') return 'none'
+  if (event.method !== 'single_chat.changed' && event.method !== 'agent_run.interaction_changed') return 'none'
   const params = eventRecord(event.params)
   if (params?.threadId !== threadId) return 'none'
   if (!panelVisible) return 'conversation-list'
+  if (event.method === 'agent_run.interaction_changed' && currentConversationId) return 'current-conversation'
   const result = eventRecord(params.result)
   const resultPayload = eventRecord(result?.payload)
   const conversationId = nonEmptyEventString(params.conversationId)
@@ -694,7 +695,7 @@ export function SingleChatPanel({
   onVisibleNotificationSources?(sources: VisibleNotificationSources): void
   profileById?: Map<string, AgentProfile>
   busy?: boolean
-  onResolveApproval?(approval: ActionApprovalView, optionId: string): void
+  onResolveApproval?(approval: ActionApprovalView, optionId: string): void | Promise<void>
   threadId: string
   members: ThreadMemberView[]
   entryHost?: HTMLElement | null
@@ -861,6 +862,11 @@ export function SingleChatPanel({
     ) return
     if (next && snapshotRef.current?.conversation.id === conversationId
       && next.draft.revision < snapshotRef.current.draft.revision) return
+    // Mutation projections own database drafts, not Runtime-local question state.
+    // The authoritative singleChat.get always supplies an explicit list, including [].
+    if (next && next.nativeInteractions === undefined && snapshotRef.current?.conversation.id === conversationId) {
+      next = { ...next, nativeInteractions: snapshotRef.current.nativeInteractions }
+    }
     snapshotRef.current = next
     setSnapshot(next)
     setError(null)
@@ -1203,7 +1209,7 @@ export function SingleChatPanel({
   }, [threadId, currentSnapshot, onVisibleNotificationSources, visible])
 
   useEffect(() => {
-    if (!visible || !notificationFocus?.active || notificationFocus.approvalId
+    if (!visible || !notificationFocus?.active || notificationFocus.approvalId || notificationFocus.interactionId
       || currentSnapshot?.conversation.id !== notificationFocus.conversationId) return
     const node = viewportRef.current?.querySelector<HTMLElement>(
       `[data-single-chat-run-id="${CSS.escape(notificationFocus.agentRunId ?? '')}"]`)
@@ -1796,11 +1802,21 @@ export function SingleChatPanel({
         onLatest={() => { followLatestRef.current = true }}
       />
       </div>
-      {currentSnapshot && currentSnapshot.approvals.length > 0 && <ApprovalDock
+      {currentSnapshot && <ApprovalDock
         approvals={currentSnapshot.approvals} profileById={profileById} busy={busy}
+        interactions={currentSnapshot.nativeInteractions ?? []} threadId={threadId} conversationId={currentSnapshot.conversation.id} onNotice={onNotify}
+        agentRuns={currentSnapshot.agentRuns.map(run => ({ id: run.id, agentId: currentSnapshot.conversation.agentId }))}
+        onRespond={async (interaction, answer) => {
+          const result = await client.request<import('@contracts').NativeInteractionResult>('nativeInteractions.respond', {
+            commandId: newCommandId(), threadId, agentRunId: interaction.agentRunId,
+            executionEpoch: interaction.executionEpoch, interactionId: interaction.id, answer
+          })
+          void refreshCurrent().catch(() => undefined)
+          return result
+        }}
         onResolve={onResolveApproval} containerRef={approvalRef}
-        focusRequest={notificationFocus?.active && notificationFocus.approvalId ? notificationFocus.requestId : null}
-        focusApprovalId={notificationFocus?.approvalId ?? null}
+        focusRequest={notificationFocus?.active && (notificationFocus.approvalId || notificationFocus.interactionId) ? notificationFocus.requestId : null}
+        focusApprovalId={notificationFocus?.interactionId ?? notificationFocus?.approvalId ?? null}
         onFocusPresented={onNotificationFocusPresented}
       />}
 

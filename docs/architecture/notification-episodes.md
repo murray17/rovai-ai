@@ -82,6 +82,20 @@ Episode 推荐动作从不参与该来源集合。执行台由稳定 Portal 在�
 与命令保持不变；Renderer 只保留轻量 Attention Controller、临时 heads-up 和会话导航未读点，避免为了
 隐藏 surface 持续水合完整 Inbox。
 
+## 原生待回答的临时来源
+
+Pi 的待答请求由 Runtime 内存拥有，`nativeInteractions.notifications` 只返回当前有效请求的标识、
+Thread/Run/epoch、队员、冻结的单聊来源及期限，不读取或持久化问题与答案正文。Core 同时核对运行、停止、
+成员和私聊归属；Runtime/Core 重启不恢复旧等待。
+
+Renderer 在启动/重建基线时记住已有请求，不补弹；随后由交互、运行终态和原单聊结束事件，以及既有
+恢复轮询收敛当前来源。Web 通过既有失效流的 `nativeInteractionsChanged` 标识传递这些变化，不广播原生内容。
+新请求只投影到同一个临时 heads-up 队列，共用待审批开关、静默、关闭、暂停计时与来源定位。
+这类条目没有持久 Episode 或 ACK，不进入通知时钟、Journal、未读数或中断投影。
+
+作答、跳过、到期或运行失效撤下对应条目；有原生期限时只在 Renderer 到期撤下提醒，不回复默认答案。
+点击先重验当前来源，再打开原公屏/原单聊并定位 interactionId；不改权限规则、不在浮层作答。
+
 ## 并发和恢复
 
 - 每个 attention-worthy source 先获得全局 change sequence，再以同一边界写 Occurrence 与 Journal；

@@ -35,6 +35,12 @@ describe('General settings', () => {
     expect(markup).toContain('使用入口对应的项目')
     expect(markup).toContain('请先保存默认队员与默认队长')
     expect(markup).toContain('<h2 id="general-conversation-heading">会话</h2>')
+    expect(markup.indexOf('general-execution-auto-open-setting')).toBeLessThan(markup.indexOf('general-task-setting'))
+    expect(markup.indexOf('general-task-setting')).toBeLessThan(markup.indexOf('general-world-map-description'))
+    expect(markup).toContain('aria-label="自动打开执行台说明"')
+    expect(markup).toContain('aria-label="会话任务说明"')
+    expect(markup).not.toContain('id="general-task-description"')
+    expect(markup).not.toMatch(/aria-label="自动打开执行台"[^>]*checked=""/)
     expect(markup).not.toMatch(/aria-label="启用世界地图"[^>]*checked=""/)
     expect(markup).not.toContain('默认开启')
     expect(markup.indexOf('general-new-conversation-heading'))
@@ -63,7 +69,8 @@ describe('General settings', () => {
     const agents = [profile('agent-a', '洛可'), profile('agent-b', '沐瓦')]
     agents[1].runtimeReadiness.status = 'needs_attention'
     const preferences: GeneralPreferencesSnapshot = {
-      schemaVersion: 7,
+      schemaVersion: 8,
+      executionConsoleAutoOpen: false,
       newConversationTeamId: null,
       interfaceLanguagePreference: 'zh-CN', systemLanguage: 'en', languageRevision: 0, readError: null,
       interfaceLanguage: 'zh-CN',

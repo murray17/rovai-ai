@@ -55,6 +55,20 @@ module.exports = async ({ evaluate, wait, key, click, window, evidence }) => {
     checks.push((pending ? 'Pending' : 'Public') + ': pinyin Enter, Tab categories, repeat identity, caret, pending invitation and no send')
   }
 
+  for (const pending of [false, true]) {
+    for (const query of ['cod', 'CODEX']) {
+      await reset(pending)
+      await insert('@' + query)
+      await candidate(); await ready()
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.ref-options [data-agent-id]')].map(node => node.dataset.agentId)"), ['lead', 'outside'])
+      writeFileSync(join(evidence, 'runtime-' + query + '-' + (pending ? 'pending' : 'public') + '.png'), (await window.webContents.capturePage()).toPNG())
+      await key('ArrowDown', 40)
+      await key('Enter', 13)
+      assert.equal((await expectSelection()).text, '@爱丽丝 ')
+      checks.push((pending ? 'Pending' : 'Public') + ': Runtime ' + query + ', roster priority, identity selection and pending invitation')
+    }
+  }
+
   for (const query of ['AILI', 'ＡＩＬＩ', '爱li', 'ai丽']) {
     await reset(false)
     await insert('前文 @' + query + ' 结尾')
@@ -105,10 +119,12 @@ module.exports = async ({ evaluate, wait, key, click, window, evidence }) => {
     checks.push(label + ': manual category survives member pinyin, title remains literal')
   }
   for (const [query, label] of [['会话', '对话'], ['使命', '使命']]) {
-    await reset(false); await insert('@' + query); await ready()
+    await reset(false); await insert('@' + query)
+    await wait("!!document.querySelector('.ref-thread-option strong')"); await ready()
     assert.equal(await evaluate("document.querySelector('.ref-filters [aria-selected=true]').textContent"), label)
+    assert.ok(await evaluate("[...document.querySelectorAll('.ref-thread-option strong')].some(node => node.textContent.includes(" + JSON.stringify(query) + "))"))
   }
-  checks.push('automatic title categories still match original Chinese text')
+  checks.push('automatic title category still matches original Chinese text')
   await reset(false); await insert('/sheji')
   await wait("!!document.querySelector('.structured-skill-menu .structured-mention-empty')")
   assert.equal(await evaluate("document.querySelectorAll('.structured-skill-menu [role=option]').length"), 0)
@@ -142,6 +158,16 @@ module.exports = async ({ evaluate, wait, key, click, window, evidence }) => {
   assert.equal((await state()).submissions.length, 0)
   assert.deepEqual((await state()).memberIds, ['lead'])
   checks.push('production mission editor: pinyin Enter, initials Tab, repeat mention and caret')
+  await insert(' @cod')
+  await wait("!!document.querySelector('.structured-mention-menu [data-agent-id=outside]')")
+  assert.deepEqual((await evaluate("[...document.querySelectorAll('.structured-mention-menu [data-agent-id]')].map(node => node.dataset.agentId)")).slice(0, 2), ['lead', 'outside'])
+  await key('ArrowDown', 40)
+  await key('Enter', 13)
+  const runtimeMission = await evaluate('invitationTest.missionContent()')
+  assert.deepEqual(runtimeMission.slice(-2), [{ kind: 'member_mention', agentId: 'outside' }, { kind: 'text', text: ' ' }])
+  assert.equal(runtimeMission.filter(segment => segment.kind === 'member_mention').length, 3)
+  assert.equal((await state()).submissions.length, 0)
+  checks.push('production mission editor: Runtime prefix, roster order and concrete member identity')
   await evaluate('invitationTest.mission(false)')
   await reset(true)
   writeFileSync(join(evidence, 'member-search.json'), JSON.stringify({ ok: true, checks }, null, 2) + '\n')

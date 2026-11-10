@@ -18,7 +18,7 @@ export function RuntimePickerChevron(): React.JSX.Element {
 }
 
 /** Short Runtime enums share the model picker surface; only model catalogs need search. */
-export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loadingLabel }: {
+export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loading, onOpen }: {
   label: string
   value: string
   choices: RuntimeParameterChoice[]
@@ -26,7 +26,8 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
   disabled: boolean
   recommendedValue?: string
   menuGuidance?: string
-  loadingLabel?: string
+  loading?: boolean
+  onOpen?(): void
   onChange(value: string): void
 }): React.JSX.Element {
   const id = useId()
@@ -37,12 +38,11 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
     hasRecommendation && choice.value === recommendedValue ? t('推荐') : undefined
   return <div className="field-label">
     <label htmlFor={id}>{label}</label>
-    <Menu.Root>
+    <Menu.Root onOpenChange={open => { if (open) onOpen?.() }}>
       <Menu.Trigger asChild>
         <button id={id} type="button" className="runtime-model-picker-trigger" disabled={disabled}
           aria-label={[label, selected?.label ?? value, selected?.description, selected && recommendation(selected)].filter(Boolean).join('，')}
-          aria-busy={loadingLabel ? true : undefined}
-          aria-description={loadingLabel}
+          aria-busy={loading || undefined}
           title={[selected?.label ?? value, selected?.description].filter(Boolean).join('\n')}>
           <span><strong>{selected?.label ?? value}</strong>{selected?.description && <small>{selected.description}</small>}</span><RuntimePickerChevron />
         </button>
@@ -67,4 +67,14 @@ function Choice({ choice, disabled, recommendation }: { choice: RuntimeParameter
     {recommendation && <span className="permission-option-note">{recommendation}</span>}
     <Menu.ItemIndicator className="runtime-model-picker-check"><RuntimePickerCheck /></Menu.ItemIndicator>
   </Menu.RadioItem>
+}
+
+export function CatalogRefreshButton({ loading, disabled, onRefresh, label, busyLabel }: { loading?: boolean; disabled?: boolean; onRefresh?: () => void; label: string; busyLabel: string }): React.JSX.Element {
+  const t = useUiText()
+  return <button type="button" className="catalog-refresh-button" disabled={disabled || !onRefresh}
+    aria-label={t(loading ? busyLabel : label)} title={t(loading ? busyLabel : label)}
+    aria-busy={loading || undefined} aria-disabled={loading || undefined}
+    onClick={() => { if (!loading && !disabled) onRefresh?.() }}>
+    <svg aria-hidden="true" viewBox="0 0 16 16"><path d="M13.1 6A5.35 5.35 0 1 0 13 10.2M13.2 2.8v3.6H9.6" /></svg>
+  </button>
 }

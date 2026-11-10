@@ -3,10 +3,26 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-01
+last_updated: 2026-11-05
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d75"></a>
+## V1.72-D75：公开执行列表只按 Run 的直接会话归属读取
+
+- 状态：accepted
+- 日期：2026-11-05
+- 授权：User 在会话切换调查 Thread sequence 5 明确选择取消旧执行卡片兼容，不处理历史数据；sequence 8 阅读 `thread.runs` 旧查询及入口差异后，明确要求删除其旧 Turn 关联。
+- 当前权威：[Camp Open Projection v31](../../contracts/camp-open-projection-v31.md)、[Thread Runs v2](../../contracts/thread-runs-v2.md)、[Thread Open Read Path](../../architecture/camp-open-read-path.md#enter-and-refresh-flow)。
+
+跨表合并 Run/旧 Turn 归属会让普通会话的运行计数、执行列表和文件变更卡片读取扫描全库历史。
+选择直接按 Run 的 Thread 索引读取，并接受只由旧 Turn 关联的公开运行不再显示这些卡片和数量。
+原始状态、消息与证据保留，当前单聊及定向诊断继续使用现有归属规则。
+`thread.runs` 同样是公开执行查询，采用直接归属规则，不单独定义成旧 Run 诊断入口；当前等待投递继续独立聚合。
+
+拒绝一次性回填及运行时双路兼容：前者把所有用户的历史处理引入升级路径，后者继续扩大读取的维护边界。
+本次不增加 Migration、后台修复或持久副本。接受旧公开执行卡片退出普通列表这一兼容代价，换取统一的会话查询路径。
 
 <a id="v1-72-d72"></a>
 ## V1.72-D72：原生子代理沿用平铺 command，状态归本次工具调用

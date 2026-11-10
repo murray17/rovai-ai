@@ -108,7 +108,7 @@ def main():
             process, origin = start()
             assert http(origin, '/')[0] == 200
             token = subprocess.check_output([binary, '--data-dir', str(data), 'token'], env=environment, text=True).strip()
-            _, raw = http(origin, '/api/v1/login', {'protocolVersion': 5, 'administratorToken': token})
+            _, raw = http(origin, '/api/v1/login', {'protocolVersion': 7, 'administratorToken': token})
             session = json.loads(raw)
             try:
                 http(origin, '/api/v1/request', {'operation': 'navigation.snapshot', 'params': {}})

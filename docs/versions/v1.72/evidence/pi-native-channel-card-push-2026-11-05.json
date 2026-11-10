@@ -1,0 +1,158 @@
+{
+  "batch": "108c7776-8814-475e-b8d0-aca0de1501a8",
+  "startedAt": "2026-11-06T08:33:11.712Z",
+  "agentId": "agent_6",
+  "target": "each provider verified Owner private chat with Alice",
+  "purpose": "delivery and visual preview only; no native answer bridge or new Runtime",
+  "usesExistingStreamConnections": true,
+  "cards": [
+    {
+      "provider": "feishu",
+      "agentName": "爱丽丝",
+      "type": "confirm",
+      "deliveryId": "preview-e2f41abd-774c-4a03-a409-ac44b8578feb",
+      "status": "delivered",
+      "messageId": "om_x100b61ed42469cb0c0e95649095e9f1",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "feishu",
+      "agentName": "爱丽丝",
+      "type": "select",
+      "deliveryId": "preview-6aa2915c-8afe-4041-a600-fe7605628c4e",
+      "status": "delivered",
+      "messageId": "om_x100b61ed426e3cacc01f1dd9722d892",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "feishu",
+      "agentName": "爱丽丝",
+      "type": "input",
+      "deliveryId": "preview-8d9f58a5-9bb4-4d55-b124-9098433a6768",
+      "status": "delivered",
+      "messageId": "om_x100b61ed4277f8b4c13aeba591f28c1",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "feishu",
+      "agentName": "爱丽丝",
+      "type": "editor",
+      "deliveryId": "preview-aeb07ace-bfae-4323-8523-d548576b6bed",
+      "status": "delivered",
+      "messageId": "om_x100b61ed421c58b4c0193b638db1d25",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "lark",
+      "agentName": "爱丽丝",
+      "type": "confirm",
+      "deliveryId": "preview-e1e7a3cd-10e8-4d3b-8cec-b3d2b51dd403",
+      "status": "delivered",
+      "messageId": "om_x100b61ed4220c0b0eee8d0719db2b9c",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "lark",
+      "agentName": "爱丽丝",
+      "type": "select",
+      "deliveryId": "preview-2d042eb0-0da0-4b09-a725-4700e97ad30a",
+      "status": "delivered",
+      "messageId": "om_x100b61ed43c94ca0eee89a1ffa90980",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "lark",
+      "agentName": "爱丽丝",
+      "type": "input",
+      "deliveryId": "preview-5a891220-fb15-4f12-bb2a-5a04a36aaba4",
+      "status": "delivered",
+      "messageId": "om_x100b61ed43d7c0a8eeef59c7d062556",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "lark",
+      "agentName": "爱丽丝",
+      "type": "editor",
+      "deliveryId": "preview-84a034f1-7faf-42ed-84c8-99cc607c7656",
+      "status": "delivered",
+      "messageId": "om_x100b61ed43e294a4ed937c090b632fd",
+      "readbackConfirmed": true,
+      "readbackCode": 0
+    },
+    {
+      "provider": "dingtalk",
+      "agentName": "爱丽丝",
+      "type": "confirm",
+      "deliveryId": "preview-e65a2e05-2c3c-4db2-a851-d45b74f3e4e2",
+      "status": "delivered",
+      "outTrackId": "rovai_native_preview-e65a2e05-2c3c-4db2-a851-d45b74f3e4e2",
+      "carrierId": "19nDXhHehJH3ZS2tzuTbeJtnQOWCpu2uZqCUV+U6QWk="
+    },
+    {
+      "provider": "dingtalk",
+      "agentName": "爱丽丝",
+      "type": "select",
+      "deliveryId": "preview-f324ad8e-5626-4cd0-9837-0120737ebc9a",
+      "status": "delivered",
+      "outTrackId": "rovai_native_preview-f324ad8e-5626-4cd0-9837-0120737ebc9a",
+      "carrierId": "alSJ7+UDPaZXU7FU4xVACLLZ7b3vwxPXijiclXwF+cs="
+    },
+    {
+      "provider": "dingtalk",
+      "agentName": "爱丽丝",
+      "type": "input",
+      "deliveryId": "preview-118b9846-716a-4be6-b617-c4bd125787bf",
+      "status": "delivered",
+      "outTrackId": "rovai_native_preview-118b9846-716a-4be6-b617-c4bd125787bf",
+      "carrierId": "o3qvUdiRps6Cpm042sB24oU5FifeMzwZ1MTm6D/HoDY="
+    },
+    {
+      "provider": "dingtalk",
+      "agentName": "爱丽丝",
+      "type": "editor",
+      "deliveryId": "preview-255313f3-0618-44fb-b800-ec5286480085",
+      "status": "delivered",
+      "outTrackId": "rovai_native_preview-255313f3-0618-44fb-b800-ec5286480085",
+      "carrierId": "zQY9tZc/Jb8PX+jlXZeJkkfhjhjdemkgdytmY3DOY58="
+    }
+  ],
+  "finishedAt": "2026-11-06T08:33:24.455Z",
+  "sourceCommit": "f45ad8d97fb7d534b09e7053e30fac76b269f438",
+  "scope": "Authorized live card delivery/visual preview, not a NativeInteraction answer round trip",
+  "sourceSha256": {
+    "apps/desktop/src/main/native-interaction-cards.ts": "805c7fb20d04e573d88def3b36978cb831ee8ed9169d7ab9e4f291fc8ab4ddce",
+    "apps/desktop/src/main/dingtalk-open-api.ts": "e457c258db6f620df9b1a736396e32af443bb6aafd681b4795648adfe3fb9298"
+  },
+  "summary": {
+    "feishu": {
+      "sent": 4,
+      "readbackConfirmed": 4
+    },
+    "lark": {
+      "sent": 4,
+      "readbackConfirmed": 4
+    },
+    "dingtalk": {
+      "sent": 4,
+      "readbackConfirmed": 0
+    }
+  },
+  "boundaries": {
+    "recipient": "Verified owner private chat with the already published Alice Bot on each provider",
+    "onlyCurrentEnterprise": true,
+    "crossEnterpriseProven": false,
+    "clientVisualObserved": false,
+    "answerCallbacksTested": false,
+    "newCoreOrRuntimeStarted": false,
+    "dailySqliteReadOnly": true,
+    "newBotConnectionsStarted": false,
+    "customTemplateCreatedOrPublished": false
+  }
+}

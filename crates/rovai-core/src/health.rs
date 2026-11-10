@@ -20,9 +20,9 @@ use rovai_core::{
     },
     managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
-        RuntimeLaunchPurpose, configure_active_runtime_command, configure_runtime_command,
-        discover_static_runtime_version, is_cursor_agent_version, is_executable_file,
-        runtime_launch_allowed,
+        RUNTIME_VERSION_TIMEOUT, RuntimeLaunchPurpose, configure_active_runtime_command,
+        configure_runtime_command, discover_static_runtime_version, is_cursor_agent_version,
+        is_executable_file, runtime_launch_allowed,
     },
     runtime_failure::{
         RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -39,6 +39,37 @@ use sha2::{Digest, Sha256};
 use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
 const CODEX_RUNTIME_KIND: &str = "codex-cli";
+
+#[derive(Debug)]
+struct RpcRejection {
+    request_id: u64,
+    error: Value,
+}
+
+impl std::fmt::Display for RpcRejection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "RPC request {} was rejected: {}",
+            self.request_id, self.error
+        )
+    }
+}
+
+impl std::error::Error for RpcRejection {}
+
+fn minimax_model_unavailable(error: &anyhow::Error) -> bool {
+    // Official mcode 0.6.12 set_config_option(model) emits this exact rejection
+    // when the requested model/variant is absent from the Session's native list.
+    // Other invalid params, method/session/internal errors and unknown data fail.
+    error
+        .downcast_ref::<RpcRejection>()
+        .is_some_and(|rejection| {
+            rejection.error["code"].as_i64() == Some(-32602)
+                && rejection.error["message"].as_str() == Some("Model selection is not advertised.")
+                && rejection.error.get("data").is_none_or(Value::is_null)
+        })
+}
 
 struct ProbeRootCleanup(PathBuf);
 
@@ -71,10 +102,90 @@ async fn bounded_output(command: &mut Command, deadline: Duration) -> Result<Bou
     .await
 }
 
-pub(crate) async fn read_opencode_version(path: &Path) -> Result<String> {
-    let mut command = runtime_command(path, Some(AdapterKind::OpencodeCli));
+// Keep the full check's adapter command, deadline and parsing here. Callers may
+// persist this observation before starting a connection, then pass it to the
+// capability probe so that the same check never reads the version twice.
+pub(crate) async fn read_runtime_version_for_probe(
+    path: &Path,
+    kind: AdapterKind,
+) -> std::result::Result<String, RuntimeFailureView> {
+    let failure = |origin, phase, code: &str, raw_detail: &str| {
+        let mut failure = public_probe_failure(
+            kind,
+            origin,
+            phase,
+            code,
+            "智能体版本读取失败，请重试检查。",
+            raw_detail,
+            path,
+            true,
+        );
+        if let Some(redactor) = probe_redactor(kind) {
+            failure.summary = redactor.text(&failure.summary);
+            failure.detail = failure
+                .detail
+                .as_deref()
+                .map(|detail| redactor.text(detail));
+        }
+        failure
+    };
+    let output = runtime_version_output(path, kind).await.map_err(|error| {
+        failure(
+            RuntimeFailureOrigin::Environment,
+            RuntimeFailurePhase::Spawn,
+            "runtime_version_failed",
+            &format!("{error:#}"),
+        )
+    })?;
+    let version = if matches!(kind, AdapterKind::CodexCli | AdapterKind::Pi) {
+        let text = String::from_utf8_lossy(&output.stdout.bytes)
+            .trim()
+            .to_string();
+        (!text.is_empty()).then_some(text)
+    } else {
+        first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
+    };
+    let code = if !output.status.success() {
+        Some("runtime_version_failed")
+    } else if output.stdout.truncated || output.stderr.truncated {
+        Some("runtime_version_output_truncated")
+    } else if version.is_none() {
+        Some("runtime_version_empty")
+    } else if kind == AdapterKind::CursorAgent
+        && version
+            .as_deref()
+            .is_some_and(|version| !is_cursor_agent_version(version))
+    {
+        Some("runtime_identity_mismatch")
+    } else {
+        None
+    };
+    if let Some(code) = code {
+        return Err(failure(
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            code,
+            &command_detail(&output.stdout.bytes, &output.stderr.bytes, code),
+        ));
+    }
+    Ok(version.expect("successful version read has nonempty output"))
+}
+
+async fn runtime_version_output(path: &Path, kind: AdapterKind) -> Result<BoundedCommandOutput> {
+    let mut command = if kind == AdapterKind::ZcodeApp {
+        rovai_core::zcode::command(path)?
+    } else {
+        runtime_command(path, Some(kind))
+    };
     command.arg("--version");
-    let output = bounded_output(&mut command, Duration::from_secs(15))
+    if kind == AdapterKind::Pi {
+        command.stdin(Stdio::null());
+    }
+    bounded_output(&mut command, RUNTIME_VERSION_TIMEOUT).await
+}
+
+pub(crate) async fn read_opencode_version(path: &Path) -> Result<String> {
+    let output = runtime_version_output(path, AdapterKind::OpencodeCli)
         .await
         .context("OpenCode initialization could not read the selected executable's version")?;
     if !output.status.success() {
@@ -334,32 +445,6 @@ pub async fn antigravity_capability_probe_at(
     antigravity_probe_at(path, true, fingerprint, known_version, known_capabilities).await
 }
 
-/// Only the existing verified snapshot authorizes omitting full checks. Session
-/// authentication/handshakes required to read a native catalog still run.
-pub fn catalog_refresh_evidence_current(
-    kind: AdapterKind,
-    snapshot: &rovai_core::agent_profile::AdapterCapabilitySnapshot,
-) -> bool {
-    let required = match kind {
-        AdapterKind::CodexCli => vec!["model.list".into(), "app_server.initialize".into()],
-        AdapterKind::ClaudeCodeCli => vec![CLAUDE_MODEL_CATALOG_CAPABILITY.into()],
-        AdapterKind::AntigravityApp => vec!["model.list".into()],
-        AdapterKind::Pi => pi_machine_ready_requirements(),
-        _ => acp_required_capabilities(kind),
-    };
-    snapshot.probe_status == "ready"
-        && snapshot.authentication_status == "authenticated"
-        && snapshot.stale_at.is_none()
-        && snapshot.last_successful_probe_at.is_some()
-        && rovai_core::agent_runtime_adapter::validate_machine_ready_snapshot(kind, snapshot)
-            .is_ok()
-        && (kind != AdapterKind::ZcodeApp
-            || rovai_core::zcode::supported_version(snapshot.reported_version.as_deref()))
-        && required
-            .iter()
-            .all(|capability| snapshot.capabilities.contains(capability))
-}
-
 /// Catalog-only branch of the same check task. Returns models, never Ready evidence.
 #[derive(Debug)]
 pub struct RefreshedModelCatalog {
@@ -367,6 +452,7 @@ pub struct RefreshedModelCatalog {
     pub dsh_preparation: Option<Value>,
 }
 
+#[cfg(test)]
 pub async fn refresh_model_catalog(
     path: &Path,
     kind: AdapterKind,
@@ -470,9 +556,7 @@ pub async fn pi_capability_probe_at(
     let version = if let Some(version) = known_version {
         Some(version.to_owned())
     } else {
-        let mut version_command = runtime_command(&path, Some(AdapterKind::Pi));
-        version_command.arg("--version").stdin(Stdio::null());
-        bounded_output(&mut version_command, Duration::from_secs(5))
+        runtime_version_output(&path, AdapterKind::Pi)
             .await
             .ok()
             .filter(|output| output.status.success())
@@ -617,9 +701,7 @@ async fn claude_code_probe_at(
     let reported_version = if let Some(version) = known_version {
         Some(version.to_owned())
     } else {
-        let mut version_command = runtime_command(&canonical, Some(AdapterKind::ClaudeCodeCli));
-        version_command.arg("--version");
-        let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
+        let version = runtime_version_output(&canonical, AdapterKind::ClaudeCodeCli).await;
         match version {
             Ok(output) if output.status.success() => {
                 first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
@@ -961,9 +1043,7 @@ async fn antigravity_probe_at(
     let reported_version = if let Some(version) = known_version {
         Some(version.to_owned())
     } else if full_check {
-        let mut version_command = runtime_command(&canonical, Some(AdapterKind::AntigravityApp));
-        version_command.arg("--version");
-        let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
+        let version = runtime_version_output(&canonical, AdapterKind::AntigravityApp).await;
         match version {
             Ok(output) if output.status.success() => {
                 first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
@@ -1349,7 +1429,7 @@ pub(crate) fn model_catalog_failure(
     } else {
         RuntimeFailureOrigin::Unknown
     };
-    public_probe_failure(
+    let mut failure = public_probe_failure(
         kind,
         origin,
         RuntimeFailurePhase::ModelCatalog,
@@ -1362,7 +1442,15 @@ pub(crate) fn model_catalog_failure(
         &detail,
         path,
         true,
-    )
+    );
+    if let Some(redactor) = probe_redactor(kind) {
+        failure.summary = redactor.text(&failure.summary);
+        failure.detail = failure
+            .detail
+            .as_deref()
+            .map(|detail| redactor.text(detail));
+    }
+    failure
 }
 
 #[expect(
@@ -1786,73 +1874,47 @@ async fn acp_probe_at(
     let reported_version = if let Some(version) = known_version {
         Some(version.to_owned())
     } else {
-        let mut version_command = runtime_command(&canonical, Some(kind));
-        if kind == AdapterKind::ZcodeApp {
-            // Discovery already validated the bundle; do not execute its UI entrypoint.
-            match rovai_core::zcode::command(&canonical) {
-                Ok(command) => version_command = command,
-                Err(error) => {
-                    return AcpCapabilityProbe {
-                        result: agent_probe_result(
-                            kind.as_str(),
-                            Some(path_text),
-                            None,
-                            fingerprint,
-                            AgentRuntimeProbeStatus::ProbeFailed,
-                            Vec::new(),
-                            required_capabilities,
-                            Some(error.to_string()),
-                            probed_at,
-                        ),
-                        initialize_result: None,
-                        session_result: None,
-                    };
-                }
+        let version_output = match runtime_version_output(&canonical, kind).await {
+            Ok(output) if output.status.success() => output,
+            Ok(output) => {
+                return AcpCapabilityProbe {
+                    result: agent_probe_result(
+                        kind.as_str(),
+                        Some(path_text),
+                        None,
+                        fingerprint,
+                        AgentRuntimeProbeStatus::ProbeFailed,
+                        Vec::new(),
+                        required_capabilities.clone(),
+                        Some(command_detail(
+                            &output.stdout.bytes,
+                            &output.stderr.bytes,
+                            "Runtime version check failed",
+                        )),
+                        probed_at,
+                    ),
+                    initialize_result: None,
+                    session_result: None,
+                };
             }
-        }
-        version_command.arg("--version");
-        let version_output =
-            match bounded_output(&mut version_command, Duration::from_secs(15)).await {
-                Ok(output) if output.status.success() => output,
-                Ok(output) => {
-                    return AcpCapabilityProbe {
-                        result: agent_probe_result(
-                            kind.as_str(),
-                            Some(path_text),
-                            None,
-                            fingerprint,
-                            AgentRuntimeProbeStatus::ProbeFailed,
-                            Vec::new(),
-                            required_capabilities.clone(),
-                            Some(command_detail(
-                                &output.stdout.bytes,
-                                &output.stderr.bytes,
-                                "Runtime version check failed",
-                            )),
-                            probed_at,
-                        ),
-                        initialize_result: None,
-                        session_result: None,
-                    };
-                }
-                Err(error) => {
-                    return AcpCapabilityProbe {
-                        result: agent_probe_result(
-                            kind.as_str(),
-                            Some(path_text),
-                            None,
-                            fingerprint,
-                            AgentRuntimeProbeStatus::ProbeFailed,
-                            Vec::new(),
-                            required_capabilities.clone(),
-                            Some(format!("failed to inspect Runtime CLI: {error}")),
-                            probed_at,
-                        ),
-                        initialize_result: None,
-                        session_result: None,
-                    };
-                }
-            };
+            Err(error) => {
+                return AcpCapabilityProbe {
+                    result: agent_probe_result(
+                        kind.as_str(),
+                        Some(path_text),
+                        None,
+                        fingerprint,
+                        AgentRuntimeProbeStatus::ProbeFailed,
+                        Vec::new(),
+                        required_capabilities.clone(),
+                        Some(format!("failed to inspect Runtime CLI: {error}")),
+                        probed_at,
+                    ),
+                    initialize_result: None,
+                    session_result: None,
+                };
+            }
+        };
         first_nonempty_line(&version_output.stdout.bytes, &version_output.stderr.bytes)
     };
     if kind == AdapterKind::ZcodeApp
@@ -2317,29 +2379,36 @@ async fn run_acp_probe_with_scope(
                     // Native catalogs may include an unconfigured Provider or a
                     // variant that this release cannot select. Its unavailable
                     // options must not hide the working native default/catalog.
-                    let Ok(selected) = read_rpc_result(lines, id).await else {
-                        continue;
+                    let selected = match read_rpc_result(lines, id).await {
+                        Ok(selected) => selected,
+                        Err(error) if minimax_model_unavailable(&error) => {
+                            continue;
+                        }
+                        Err(error) => return Err(error),
                     };
-                    if crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
-                        .as_deref()
-                        != Some(model.id.as_str())
-                    {
-                        continue;
-                    }
-                    let Some(chosen) = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                    anyhow::ensure!(
+                        crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
+                            .as_deref()
+                            == Some(model.id.as_str()),
+                        "MiniMax model selection response did not match the requested model"
+                    );
+                    let chosen = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
                         kind, &selected,
-                    )
-                    .ok()
-                    .and_then(|models| models.into_iter().find(|entry| entry.id == model.id)) else {
-                        continue;
-                    };
+                    )?
+                    .into_iter()
+                    .find(|entry| entry.id == model.id)
+                    .context("MiniMax selected model was missing from its response")?;
                     options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
                 }
                 if let Some(original) = original {
                     let id = 1000 + models.len() as u64;
                     write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
                         "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
-                    let _ = read_rpc_result(lines, id).await;
+                    if let Err(error) = read_rpc_result(lines, id).await
+                        && !minimax_model_unavailable(&error)
+                    {
+                        return Err(error);
+                    }
                 }
                 session["_meta"]["rovaiMinimaxModelOptions"] = Value::Object(options);
             }
@@ -3145,6 +3214,10 @@ fn classify_acp_probe_failure(detail: &str) -> AgentRuntimeProbeStatus {
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
+    codex_model_catalog_at(path, false).await
+}
+
+async fn codex_model_catalog_at(path: &Path, require_account: bool) -> Result<Value> {
     let mut command = runtime_command(path, Some(AdapterKind::CodexCli));
     command.args(["app-server", "--listen", "stdio://"]);
     let mut process =
@@ -3179,19 +3252,21 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
             );
             write_json_line(stdin, &json!({"method": "initialized", "params": {}})).await?;
 
-            write_json_line(
-                stdin,
-                &json!({
-                    "method": "account/read", "id": 2,
-                    "params": { "refreshToken": false }
-                }),
-            )
-            .await?;
-            let account = read_rpc_result(lines, 2).await?;
-            anyhow::ensure!(
-                crate::codex::authentication_available_from_account(&account),
-                "Codex authentication is required"
-            );
+            if require_account {
+                write_json_line(
+                    stdin,
+                    &json!({
+                        "method": "account/read", "id": 2,
+                        "params": { "refreshToken": false }
+                    }),
+                )
+                .await?;
+                let account = read_rpc_result(lines, 2).await?;
+                anyhow::ensure!(
+                    crate::codex::authentication_available_from_account(&account),
+                    "Codex authentication is required"
+                );
+            }
 
             let mut models = Vec::new();
             let mut cursor: Option<String> = None;
@@ -3267,7 +3342,11 @@ async fn read_rpc_result(
             continue;
         }
         if let Some(error) = message.get("error") {
-            bail!("RPC request {request_id} was rejected: {error}");
+            return Err(RpcRejection {
+                request_id,
+                error: error.clone(),
+            }
+            .into());
         }
         return message
             .get("result")
@@ -3295,46 +3374,43 @@ async fn codex_runtime_probe_uncached(
     let reported_version = if let Some(version) = known_version {
         Some(version.to_owned())
     } else {
-        let mut version_command = runtime_command(&path, Some(AdapterKind::CodexCli));
-        version_command.arg("--version");
-        let version_output =
-            match bounded_output(&mut version_command, Duration::from_secs(15)).await {
-                Ok(output) if output.status.success() => output,
-                Ok(output) => {
-                    return CodexCapabilityProbe {
-                        raw_model_catalog: None,
-                        result: probe_result(
-                            Some(path_text),
-                            None,
-                            fingerprint,
-                            AgentRuntimeProbeStatus::ProbeFailed,
-                            Vec::new(),
-                            required_capability_names(),
-                            Some(command_detail(
-                                &output.stdout.bytes,
-                                &output.stderr.bytes,
-                                "Codex version check failed",
-                            )),
-                            probed_at,
-                        ),
-                    };
-                }
-                Err(error) => {
-                    return CodexCapabilityProbe {
-                        raw_model_catalog: None,
-                        result: probe_result(
-                            Some(path_text),
-                            None,
-                            fingerprint,
-                            AgentRuntimeProbeStatus::ProbeFailed,
-                            Vec::new(),
-                            required_capability_names(),
-                            Some(format!("failed to inspect Codex CLI: {error}")),
-                            probed_at,
-                        ),
-                    };
-                }
-            };
+        let version_output = match runtime_version_output(&path, AdapterKind::CodexCli).await {
+            Ok(output) if output.status.success() => output,
+            Ok(output) => {
+                return CodexCapabilityProbe {
+                    raw_model_catalog: None,
+                    result: probe_result(
+                        Some(path_text),
+                        None,
+                        fingerprint,
+                        AgentRuntimeProbeStatus::ProbeFailed,
+                        Vec::new(),
+                        required_capability_names(),
+                        Some(command_detail(
+                            &output.stdout.bytes,
+                            &output.stderr.bytes,
+                            "Codex version check failed",
+                        )),
+                        probed_at,
+                    ),
+                };
+            }
+            Err(error) => {
+                return CodexCapabilityProbe {
+                    raw_model_catalog: None,
+                    result: probe_result(
+                        Some(path_text),
+                        None,
+                        fingerprint,
+                        AgentRuntimeProbeStatus::ProbeFailed,
+                        Vec::new(),
+                        required_capability_names(),
+                        Some(format!("failed to inspect Codex CLI: {error}")),
+                        probed_at,
+                    ),
+                };
+            }
+        };
         Some(
             String::from_utf8_lossy(&version_output.stdout.bytes)
                 .trim()
@@ -3342,7 +3418,7 @@ async fn codex_runtime_probe_uncached(
         )
     };
 
-    let raw_model_catalog = match codex_model_catalog(&path).await {
+    let raw_model_catalog = match codex_model_catalog_at(&path, true).await {
         Ok(catalog) => catalog,
         Err(error) => {
             let detail = format!("Codex app-server check failed: {error:#}");
@@ -3372,7 +3448,7 @@ async fn codex_runtime_probe_uncached(
             Ok(result) => result,
             Err(error) => {
                 return CodexCapabilityProbe {
-                    raw_model_catalog: None,
+                    raw_model_catalog: Some(raw_model_catalog),
                     result: probe_result(
                         Some(path_text),
                         reported_version,
@@ -4007,66 +4083,6 @@ for line in sys.stdin:
                     assert_eq!(launches.lines().count(), 1);
                     assert!(!launches.contains("--experimental"));
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn catalog_refresh_requires_current_full_acp_evidence() {
-        for kind in [
-            AdapterKind::HermesCli,
-            AdapterKind::OpencodeCli,
-            AdapterKind::CopilotCli,
-            AdapterKind::KiroCli,
-            AdapterKind::QoderCli,
-            AdapterKind::CodebuddyCli,
-            AdapterKind::QwenCode,
-            AdapterKind::TraeCnCli,
-            AdapterKind::CursorAgent,
-            AdapterKind::KimiCodeCli,
-            AdapterKind::GrokBuild,
-            AdapterKind::ZcodeApp,
-        ] {
-            let snapshot = AgentRuntimeAdapterRegistry::default().acp_capability_snapshot(AcpProbeObservation {
-                adapter_kind: kind,
-                reported_version: Some(if kind == AdapterKind::ZcodeApp { "0.17.0" } else { "1.0.0" }.into()),
-                executable_fingerprint: Some("sha256:fixture".into()),
-                authentication_status: "authenticated".into(), probe_status: "ready".into(),
-                capabilities: acp_required_capabilities(kind),
-                initialize_result: Some(json!({"protocolVersion":1})),
-                session_result: Some(json!({"sessionId":"fixture-session", "models":{
-                    "currentModelId":"fixture", "availableModels":[{"modelId":"fixture", "name":"Fixture"}]},
-                    "modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]}})),
-                attempted_at: "2000-01-01T00:00:00Z".into(), last_error: None,
-            }).unwrap();
-            assert!(
-                catalog_refresh_evidence_current(kind, &snapshot),
-                "{kind:?}: expired directory alone must not require full verification"
-            );
-            for invalidation in ["status", "auth", "capability", "stale", "success"] {
-                let mut invalid = snapshot.clone();
-                match invalidation {
-                    "status" => invalid.probe_status = "installed_unverified".into(),
-                    "auth" => invalid.authentication_status = "unknown".into(),
-                    "capability" => invalid.capabilities.clear(),
-                    "stale" => invalid.stale_at = Some("2000-01-02T00:00:00Z".into()),
-                    "success" => invalid.last_successful_probe_at = None,
-                    _ => unreachable!(),
-                }
-                assert!(
-                    !catalog_refresh_evidence_current(kind, &invalid),
-                    "{kind:?}: {invalidation}"
-                );
-            }
-            if kind == AdapterKind::HermesCli {
-                let mut legacy = snapshot;
-                legacy
-                    .capabilities
-                    .push("context.charter.managed_system_prompt".into());
-                assert!(
-                    catalog_refresh_evidence_current(kind, &legacy),
-                    "extra legacy metadata cannot invalidate usable catalog protocol evidence"
-                );
             }
         }
     }

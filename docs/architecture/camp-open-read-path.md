@@ -3,12 +3,12 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-10-15
+last_updated: 2026-11-05
 ---
 
 # Thread Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v29](../contracts/camp-open-projection-v29.md)与
+字段与窗口见 [Camp Open Projection v32](../contracts/camp-open-projection-v32.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -36,6 +36,12 @@ last_updated: 2026-10-15
 | Full Thread snapshot | 兼容、诊断与定向测试面；保持纯读，但不服务普通 open/refresh |
 
 ## Enter and refresh flow
+
+公开 Run 列表、Run coverage 与文件变更卡片直接通过 `agent_run.camp_id` 的会话索引选择运行，
+再按 Run 身份读取关联记录；不通过旧 CampTurn 回退归属，不扫描其他 Thread 的 Run/文件变更投影。
+只由旧 Turn 关联的公开执行卡片退出这些列表，原始数据与消息正文保留；不增加 Migration 或历史回填。
+当前单聊的 Turn 归属和定向 Run 详情、诊断继续由原接口拥有。精确范围见
+[公开执行归属](../contracts/camp-open-projection-v32.md#公开执行列表的会话归属)。
 
 service 在读取投影前不再执行取消修复或文本定稿。退役两阶段取消协议留下的持久中间态在 Full Core 启动时、
 通用 execution/input/delivery recovery 之前一次性使用统一 settlement 收口；它只匹配精确取消意图和未完成关联状态，
@@ -142,7 +148,7 @@ Renderer 不通过 event replay 补齐权威对象。
 ## 用户消息目录与定位窗口
 
 进入 Thread 时先取得并展示正文首屏，再由页面独立读取完整用户目录；同一有效目录请求合并，不在激活／恢复时预取。
-Core 仅选择直接 reply 到目标用户消息的首条有效队员回复，悬浮／聚焦后才读取一个摘要，不使用 Run／Turn 推断。详见 [全会话导航合同](../contracts/camp-open-projection-v29.md)。
+Core 仅选择直接 reply 到目标用户消息的首条有效队员回复，悬浮／聚焦后才读取一个摘要，不使用 Run／Turn 推断。详见 [全会话导航合同](../contracts/camp-open-projection-v32.md)。
 预览只在该条回复的主键读取中关联作者 Profile 的 ID、当前姓名与头像引用，并与摘要材料同事务返回；
 完整目录不携带身份或图片，图片仍由既有受管头像入口惰性读取。头像引用变化只使访问过的预览失效，不刷新目录。
 正文保持原有连续分页。Renderer 的锚点局部模块持有目录、访问过的预览与单个可替换定位窗口；不把 around 消息
@@ -216,7 +222,7 @@ Memory 仍分别拥有读取与错误状态，但冷启动可见反馈共用不�
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v29](../contracts/camp-open-projection-v29.md)
+- [Camp Open Projection v32](../contracts/camp-open-projection-v32.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)
 - [Desktop Navigation Refresh](desktop-navigation-refresh.md)
 

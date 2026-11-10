@@ -34,6 +34,7 @@ export interface ComposerTypeaheadPluginProps {
   menuAnchor?: 'editor' | 'caret'
   selectionScope?: string
   optionCount: number
+  optionKeys?: readonly string[]
   getOptionState(match: ComposerTriggerMatch): ComposerTypeaheadOptionState
   onMatchChange(match: ComposerTriggerMatch | null): void
   onSelect(index: number, match: ComposerTriggerMatch): boolean
@@ -63,6 +64,7 @@ export function ComposerTypeaheadPlugin({
   menuAnchor = 'editor',
   selectionScope,
   optionCount,
+  optionKeys,
   getOptionState,
   onMatchChange,
   onSelect,
@@ -86,6 +88,7 @@ export function ComposerTypeaheadPlugin({
       return root?.getBoundingClientRect() ?? new DOMRect()
     }
   } }), [editor])
+  const selectedIdentity = useRef<string | null>(null)
   const selectedIndexRef = useRef(selectedIndex)
   const dismissedMatch = useRef<ComposerTriggerMatch | null>(null)
   const memberOnlyRef = useRef(memberOnly)
@@ -206,11 +209,17 @@ export function ComposerTypeaheadPlugin({
     return () => unregister.forEach((cleanup) => cleanup())
   }, [close, editor, findMatch])
 
-  useEffect(() => {
-    setSelectedIndex((index) => optionCount === 0 ? 0 : Math.min(index, optionCount - 1))
-  }, [optionCount])
+  useLayoutEffect(() => {
+    if (!optionKeys) { setSelectedIndex(index => optionCount === 0 ? 0 : Math.min(index, optionCount - 1)); return }
+    const index = selectedIdentity.current ? optionKeys.indexOf(selectedIdentity.current) : -1
+    setSelectedIndex(index >= 0 ? index : 0)
+    if (index < 0) selectedIdentity.current = optionKeys[0] ?? null
+  }, [optionKeys, optionCount])
 
-  useEffect(() => { setSelectedIndex(0) }, [match?.kind, match?.nodeKey, match?.fromOffset, selectionScope])
+  useLayoutEffect(() => {
+    selectedIdentity.current = null; setSelectedIndex(0)
+  }, [match?.kind, match?.nodeKey, match?.fromOffset, match?.query, selectionScope])
+  useLayoutEffect(() => { selectedIdentity.current = optionKeys?.[selectedIndex] ?? null }, [selectedIndex])
 
   useLayoutEffect(() => {
     const root = editor.getRootElement()
@@ -235,7 +244,7 @@ export function ComposerTypeaheadPlugin({
   }, [editor, match, optionCount, portalHost, selectedIndex])
 
   if (!match || !portalHost) return null
-  const menu = renderMenu({ selectedIndex, setHighlightedIndex: setSelectedIndex, selectIndex })
+  const menu = renderMenu({ selectedIndex, setHighlightedIndex: index => { selectedIdentity.current = optionKeys?.[index] ?? null; setSelectedIndex(index) }, selectIndex })
   return createPortal(menuAnchor === 'caret'
     ? <Popover.Root open onOpenChange={(open) => { if (!open) close() }}>
         <Popover.Anchor virtualRef={caretAnchor} />

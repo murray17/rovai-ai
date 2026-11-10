@@ -44,6 +44,8 @@ import {
   type DingTalkCardButton
 } from './dingtalk-open-api'
 import { DingTalkStreamRegistry, type DingTalkCardCallback } from './dingtalk-stream-registry'
+import { DINGTALK_NATIVE_CARD_PREFIX, DINGTALK_QUESTION_TEMPLATE_ID, dingtalkNativeAnswer,
+  dingtalkNativeQuestionCard, dingtalkNativeFailure, nativeCardResultText, type NativeCardSource } from './native-interaction-cards'
 import type { DingTalkInboundMessage } from './dingtalk-inbound'
 import {
   memberBotAppDescription,
@@ -254,7 +256,7 @@ type ClaimedDelivery = {
   provider: 'dingtalk'
   requestId: string | null
   deliveryKind: 'project_selection' | 'queue_ack' | 'execution_console_upsert'
-    | 'execution_console_recall' | 'agent_output' | 'agent_attachment' | 'attention'
+    | 'execution_console_recall' | 'agent_output' | 'agent_attachment' | 'attention' | 'native_interaction'
   targetAppId: string
   credentialRef: string
   chatId: string
@@ -366,6 +368,7 @@ export class DingTalkChannelSettingsService {
     this.#stream = dependencies.streamRegistry ?? new DingTalkStreamRegistry({
       onMessage: (message) => this.#queueInbound(message),
       onCard: (callback) => this.#handleCard(callback),
+      onNativeCard: (callback) => this.#handleNativeCard(callback),
       onFailure: (appKey, error) => {
         console.warn(`[rovai] DingTalk Stream ${digest(appKey)}: ${failureCode(error)}`)
       }
@@ -1325,6 +1328,10 @@ export class DingTalkChannelSettingsService {
   }
 
   async #handleCard(callback: DingTalkCardCallback): Promise<void> {
+    if (typeof callback.payload.outTrackId === 'string' && callback.payload.outTrackId.startsWith(DINGTALK_NATIVE_CARD_PREFIX)) {
+      await this.#handleNativeCard(callback)
+      return
+    }
     const outTrackId = recursiveString(callback.payload, 'outTrackId') ?? callback.messageId
     const encodedValue = dingtalkCardCallbackValue(callback.payload)
     const buttonText = dingtalkCardCallbackText(callback.payload)
@@ -1453,6 +1460,36 @@ export class DingTalkChannelSettingsService {
     })
   }
 
+  async #handleNativeCard(callback: DingTalkCardCallback): Promise<Record<string, unknown>> {
+    if (this.#stopped) return dingtalkNativeFailure('Rovai 当前不可用，内容已保留')
+    let action: ReturnType<typeof dingtalkNativeAnswer>
+    try { action = dingtalkNativeAnswer(callback.payload) }
+    catch { return dingtalkNativeFailure('未读取到有效回答，填写内容已保留') }
+    if (!action) return {}
+    const outTrackId = callback.payload.outTrackId
+    // Only the authenticated platform envelope carries an operator. Nested form
+    // fields and button parameters cannot supply identity or a card target.
+    const operatorUserId = typeof callback.payload.userId === 'string' ? callback.payload.userId : null
+    if (!operatorUserId || outTrackId !== DINGTALK_NATIVE_CARD_PREFIX + action.deliveryId) return dingtalkNativeFailure('当前账号或卡片无法回答此问题')
+    return this.#enqueueExecutionCard(`native:${action.interactionId}`, async () => {
+      try {
+        const result = await this.#dependencies.core.request<import('@contracts').NativeInteractionResult>('channels.dingtalk.nativeInteractions.respond', {
+          ...action, appId: callback.appKey, externalMessageId: outTrackId, chatId: null,
+          operatorOpenId: null, operatorUserId, operatorUnionId: null
+        })
+        this.#hostPump.wake()
+        if (result.status === 'failed' || result.status === 'pending' || result.status === 'unknown') {
+          return dingtalkNativeFailure(nativeCardResultText(result) + (result.status === 'unknown' ? '，内容已保留' : ''))
+        }
+        // The existing Outbox owns this question's final card state and clears private errors.
+        return {}
+      } catch {
+        this.#hostPump.wake()
+        return dingtalkNativeFailure('暂未取得提交结果，内容已保留，请核对问题状态')
+      }
+    })
+  }
+
   async #pumpOnce(): Promise<boolean> {
     if (this.#stopped) return false
     const snapshot = await this.#snapshot()
@@ -1538,6 +1575,10 @@ export class DingTalkChannelSettingsService {
   }
 
   async #deliver(delivery: ClaimedDelivery): Promise<void> {
+    if (delivery.deliveryKind === 'native_interaction') {
+      const reference = delivery.payload.nativeInteraction as { interactionId: string }
+      return this.#enqueueExecutionCard(`native:${reference.interactionId}`, () => this.#deliverNow(delivery, null))
+    }
     if (delivery.deliveryKind === 'execution_console_upsert') {
       const agentRunId = requiredPayloadString(delivery.payload, 'agentRunId')
       return this.#enqueueExecutionCard(agentRunId, () => this.#deliverNow(delivery, agentRunId))
@@ -1573,7 +1614,28 @@ export class DingTalkChannelSettingsService {
       let deliveryMessageId: string | null = null
       let externalUpdateMessageId: string | null = null
       let externalId = delivery.updateMessageId
-      if (delivery.deliveryKind === 'agent_output') {
+      if (delivery.deliveryKind === 'native_interaction') {
+        const source = await this.#dependencies.core.request<NativeCardSource | null>('channels.dingtalk.nativeInteractions.source', {
+          deliveryId: delivery.deliveryId, appId: delivery.targetAppId
+        })
+        if (source) {
+          const params = dingtalkNativeQuestionCard(source)
+          if (externalId) {
+            await api.updateCard(externalId, params, { cardUpdateOptions: { updateCardDataByKey: true, updatePrivateDataByKey: true },
+              ...(source.ownerUserId ? { privateData: { [source.ownerUserId]: { cardParamMap: { question_desc: params.question_desc } } } } : {}) })
+          } else if (source.interaction.status === 'pending') {
+            if (!source.ownerUserId) throw new Error('native_card_owner_identity_missing')
+            const sent = await api.createAndDeliverCard({ outTrackId: DINGTALK_NATIVE_CARD_PREFIX + source.deliveryId,
+              openSpaceId: delivery.conversationKind === 'group' ? `dtv1.card//IM_GROUP.${delivery.chatId}` : `dtv1.card//IM_ROBOT.${delivery.recipientOpenId ?? delivery.chatId}`,
+              robotCode: bot.robotCode, space: delivery.conversationKind, cardParamMap: params,
+              cardTemplateId: DINGTALK_QUESTION_TEMPLATE_ID, creatorUserId: source.ownerUserId })
+            externalId = sent.outTrackId
+            deliveryMessageId = sent.recallMessageId
+          }
+          externalUpdateMessageId = externalId
+          if (source.interaction.expiresAt !== null && source.interaction.status === 'pending') this.#hostPump.wakeAt(new Date(source.interaction.expiresAt).toISOString())
+        }
+      } else if (delivery.deliveryKind === 'agent_output') {
         const body = dingtalkAgentOutputMarkdown(delivery.payload)
         const title = bot.botDisplayName
         deliveryMessageId = delivery.conversationKind === 'group'

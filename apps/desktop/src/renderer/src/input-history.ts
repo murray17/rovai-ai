@@ -11,7 +11,7 @@ export function threadInputHistory(messages: readonly Pick<ThreadMessageView,
     // An otherwise empty structured message must not resurrect quote text from body.
     const content = message.content.length ? composerDocumentFromLegacyContent(message.content.filter(segment =>
       segment.kind === 'text' || segment.kind === 'member_mention'
-      || segment.kind === 'all_members_mention' || segment.kind === 'skill_mention' || segment.kind === 'thread_reference' || segment.kind === 'mission_reference'
+      || segment.kind === 'all_members_mention' || segment.kind === 'skill_mention' || segment.kind === 'thread_reference' || segment.kind === 'mission_reference' || segment.kind === 'project_file_reference'
     )) : composerDocumentFromText(message.body)
     return content.segments.some(segment => segment.kind === 'atom' || segment.text.trim()) ? [content] : []
   })

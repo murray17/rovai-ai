@@ -38,6 +38,7 @@ const preferenceApi: GeneralPreferencesApi = {
   setStartupLocationMode: startupLocationMode => save({ startupLocationMode }),
   setLastSettingsSection: lastSettingsSection => save({ lastSettingsSection }),
   setExecutionConsolePlacement: executionConsolePlacement => save({ executionConsolePlacement }),
+  setExecutionConsoleAutoOpen: executionConsoleAutoOpen => save({ executionConsoleAutoOpen }),
   setNewConversationDefaults: newConversationDefaults => save({ newConversationDefaults }),
   setOneClickNewConversationEnabled: oneClickNewConversationEnabled => save({ oneClickNewConversationEnabled }),
   setWorldMapEnabled: worldMapEnabled => save({ worldMapEnabled }),

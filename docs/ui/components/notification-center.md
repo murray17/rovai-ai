@@ -14,7 +14,7 @@ Change Journal。Renderer 只呈现短暂应用内提醒和 Thread 行“有新�
 
 ## 应用内提醒
 
-设置侧栏使用用户语言“提醒”。总开关下按“会话 / 使命 / 任务”分开：会话包含待审批、提到你、
+设置侧栏使用用户语言“提醒”。总开关下按“会话 / 使命 / 任务”分开：会话包含待审批与回答、提到你、
 本轮完成、单聊回复、执行未完成；使命包含使命需要你、使命状态变更；任务包含任务状态变更。
 任务状态默认关闭，预选已完成、受阻、已取消；使命状态默认开启且只选已完成。各状态筛选内联展开，
 总开关或分类关闭时保留选择，保存失败回读当前值并允许重试。宽屏会话组占左侧两行，使命和任务各占右侧一组；
@@ -40,6 +40,14 @@ acknowledge、不 clear。关闭当前卡片后的剩余项以“还有 N 条提
 队列 signal 由 Journal 的 exact acknowledgement、Clear revision、source resolved 或 Episode remove invalidation 失效；当前 Thread quiet scope 或精确内容已读也会抑制并撤下临时呈现。
 resolved Approval 的旧 pending signal 必须删除，即使该 Occurrence 仍未确认；reset/重新建立 baseline
 直接清空队列，不从历史或 Episode 推荐动作恢复。
+
+原生待回答复用上述浮层、队列和一个“待审批与回答”开关；文案为“{队员}在等你回答”，英文为
+“{member} is waiting for your answer”。来源保留原单聊身份；点开原问题，关闭提醒不跳过问题。
+启动/刷新不补弹旧请求，作答、到期和失效撤下对应提醒，具体来源边界见
+[Native Interactions](../../contracts/native-interactions-v1.md#应用内待回答提醒)。
+
+小点沿用主题 `--conversation-unread`；审批和执行未完成使用 `--attention`，执行失败使用 `--danger`。
+问答卡片和文字仍保持既有中性色，不增加类型标签或成功 Toast。
 
 ## 会话未读点
 

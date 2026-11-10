@@ -6,10 +6,84 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-04
+last_updated: 2026-11-10
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
+
+## 应用标识与快速对话空状态（2026-11-10）
+
+按 User 确认的交互稿，应用内标识统一采用 App 图标的星形和弧线，两者使用固定蓝色、透明背景，
+移除黑色底座和黄点；导航、启动、引导、关于、外观预览与缩略图、Web 登录及公开执行页统一覆盖。
+“无可用队员”的“前往队员 / 查看智能体”统一规格并保留灰底主入口与次要文字入口。
+规则归 [DESIGN](../../../DESIGN.md#brand-mark) 与 [App Shell](../../ui/components/app-shell-navigation.md#快速对话空状态)，
+实现和验证见[实施记录](implementation-plan.md#应用标识与快速对话空状态2026-11-10)。
+
+## 队员智能体名称搜索（2026-11-09）
+
+按 User 确认，在队员 `@` 候选中增加智能体产品名、简称和前缀搜索，沿用具体队员选择与邀请流程。
+当前会话优先，同范围依次为姓名完整、姓名前缀、智能体完整、智能体前缀、姓名模糊、角色；
+例如 `@com` 找到 Command Code 队员，`@pi` 先列皮皮再列其他 PI 队员。
+当前规则见[Member Typeahead](../../ui/components/structured-mentions.md#member-typeahead)，
+分支实施与验证见[实施记录](implementation-plan.md#队员智能体名称搜索2026-11-09)。
+
+## Shell PATH 探测边界（2026-11-09）
+
+Issue #1050 的局部修复由采集器在随机标记前主动输出换行，与探测块共用一个 `printf`。
+严格标记解析、超时、输出上限及清理机制沿用原实现；不改入口回退和发现状态写回。
+真实采集函数的回归与安装包验收边界见[实施记录](implementation-plan.md#shell-path-探测边界2026-11-09)。
+
+## Pi 待回答提醒（2026-11-08）
+
+Pi 原生待答来源接入现有审批提醒队列，共用开关、静默、定位和主题小点；不新增问卷持久化或改动
+答复协议。实现和验收范围见[实施记录](implementation-plan.md#pi-待回答提醒2026-11-08)。
+
+## Hermes 思考强度（2026-11-08）
+
+复用队员模型参数保存与官方 ACP 设置 `reasoning_effort`。按 User 2026-11-09 修正，界面只保留通用
+“跟随模型默认值”和原生档位；清除强度字段后由 Hermes 适配器发送 `default`，清除原生旧覆盖。
+队员摘要与已有历史默认值使用同一通用文案，`none` 仍保留原生关闭语义。
+已知旧 ACP 有覆盖在 prompt 前报错，无覆盖继续使用；回显沿用尽力处理，不增加生效确认或历史观测。
+规则见[Hermes 合同](../../contracts/hermes-managed-runtime-v1.md#模型权限skills-与-mcp)，官方版本、Provider 参数与
+覆盖见[验收记录](../../research/hermes-runtime/README.md#通用默认交互2026-11-09)。
+
+## 执行台自动打开偏好（2026-11-08）
+
+按 User 确认，在“通用 → 会话”增加默认关闭的“自动打开执行台”，统一控制 Desktop／宽屏 Web
+发送后及进入运行中会话时的自动展开与选中；手机展示同一开关并正常保存，但仍保持手动打开。关闭时不追踪补跳，保留主动查看、通知定位、
+执行 Tab 记忆及当前阅读。设置顺序为自动打开执行台、会话任务、世界地图；前两项说明收进问号，
+任务保留原文，地图保留行下说明。规则和 schema 8 兼容边界见
+[设置 brief](../../ui/surfaces/settings-workspace.md#通用)及[会话执行过程](../../ui/components/conversation-workspace.md#thread-执行过程)。
+实施与验证见[实施记录](implementation-plan.md#执行台自动打开偏好2026-11-08)。
+
+## 项目文件引用（2026-11-07，功能分支验收）
+
+已按 User 的正式实施请求建立独立 worktree。公开 Active／普通 Pending 的文件身份、短标签、
+分组搜索、跨对话恢复与仅文件输入以 [R1 独立说明](model-context-change-project-file-reference.md)
+为已确认范围（User sequence 21）。Core 与 Desktop／Web 主链已实现；类型、事务、恢复和真实界面通过，
+六项真实文件读取通过。User sequence 37 已取消专属任务询问规则及其专项验收，相关测试与待办已移除。
+sequence 26 复核的三处前端边界已修复，全量 Vitest 3,146 项通过。
+sequence 30 已隐藏快速对话的文件类别并同步键盘导航；Desktop／认证 Web 扩展至 22 项通过。
+另补同名、特殊路径与 Mission 工作副本三组真实定位，Codex／Claude 六次读取通过，两个准备任务另计，
+见[复杂定位证据](project-file-reference-identity-evidence.json)与[延迟界面验证](project-file-reference-review-ui-evidence.json)。
+模块、逐项验证及已知限制见[实施记录](project-file-reference-implementation.md#实际实现与验收)，
+真实输入哈希、文件读取及早期执行记录见[脱敏证据](project-file-reference-evidence.json)。主功能经 PR #1028 合入 main，安装按 User 请求继续。
+
+## 执行 Tab 恢复与空选中回退（2026-11-05）
+
+按 User 确认的最小范围，当前窗口按 Thread 记住队员／总览 Tab；可见执行页恢复有效选择或回退总览。
+显式关闭只清除当前选择，不被可见空选中的补选逻辑撤销；再次打开仍恢复 Tab。
+不保存具体 Run、历史开合、卡片展开或滚动，不改变当前执行／历史呈现及自动开合条件。
+规则见[会话执行过程](../../ui/components/conversation-workspace.md#thread-执行过程)，实现与验证见
+[实施记录](implementation-plan.md#执行-tab-恢复与空选中回退2026-11-05)。
+
+## 会话执行查询取消旧 Turn 回退（2026-11-05）
+
+按 User 确认，公开运行计数、运行列表、文件变更卡片与 `thread.runs` 统一按 Run 的直接会话归属读取；
+旧 Turn-only 公开运行不再显示这些执行卡片，不迁移或回填历史数据，当前单聊与消息正文保持。
+当前规则见 [Camp Open Projection v31](../../contracts/camp-open-projection-v31.md)、[Thread Runs v2](../../contracts/thread-runs-v2.md) 与
+[读取架构](../../architecture/camp-open-read-path.md)，取舍见 [D75](decisions.md#v1-72-d75)，
+代码与验证见[实施记录](implementation-plan.md#会话执行查询取消旧-turn-回退2026-11-05)。
 
 ## 原生成功与空最终文字（2026-11-04，Issue #1012）
 
@@ -1459,3 +1533,21 @@ Windows 实测与残余边界见[Windows Preview 开放](command-code-native-sim
 
 原路径附件显示名、ACP 恢复等待、原生 Skill 正文预览与普通任务的 Mission 等待按独立提交收窄。
 工作边界、回归证据与未验证项见[实施记录](usability-check-simplification.md)。
+
+## Pi 原生交互桥接（2026-11-05）
+
+Pi 四类原生问答复用现有待处理区域；协议、答案和运行归属保持原生语义，未扩展其他 Runtime。
+范围、代码归属和验证边界见[实施记录](pi-native-interactions-implementation.md)。
+
+飞书/Lark 与钉钉的后续桥接另见[渠道实施记录](pi-native-channel-interactions.md)。共用提交与卡片适配已实现，
+钉钉模板跨企业和真实客户端验收仍待完成，不以本地 fixture 宣告交付。
+
+## 项目目录引用（2026-11-08）
+
+User 已确认目录与文件共用候选及发送链路，模型只获得目录路径，按需读取。目录名不带显示用尾斜线；
+根层省略辅助路径，四个候选 Tab 分开，桌面宽度 480px。正式目录 URI 仍保留尾斜线。
+范围与确认见[独立 R1](model-context-change-project-directory-reference.md)，
+工作目录、冻结验证及实际结果见[实施记录](project-directory-reference-implementation.md)。
+
+引用正文精简按 [R1](model-context-change-reference-projection-simplification.md)收敛：文件／目录只投影名称，完整 URI 和身份保持；
+链接标签采用必要转义，详情按类型与状态精简。按 User 明确的未上线范围，不升级格式号、不增加迁移或兼容分支。

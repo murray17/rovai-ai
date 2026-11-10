@@ -1,6 +1,6 @@
 # Approval Dock interaction fixture
 
-The fixture mounts the production `ApprovalDock` and stylesheet with synthetic approvals.
+The fixture mounts the production `ApprovalDock` and stylesheet with synthetic approvals and native questions.
 It exercises native mouse/keyboard input, notification focus, decision identity and Reason
 overflow under desktop and mobile layout changes. It uses isolated temporary Electron data and never starts Core
 or a Runtime. The surrounding controls and execution-console shell are test scaffolding.
@@ -24,3 +24,9 @@ phone geometry in Electron; they do not qualify a real iOS/Android keyboard or n
 ![Steel Night, 390px mobile approval](screenshots/mobile-night.png)
 
 ![Landscape approval, content and decisions remain scrollable](screenshots/mobile-landscape.png)
+
+Native question cases use the same production component: mixed approval/question queues, per-request drafts,
+single-line and multiline input, original option rows with immediate submission, native select/input continuation,
+blank input, confirm/skip capability, expiry without a response, inline failure, uncertain receipts, duplicate clicks,
+and disconnection fencing. Only the transport is controlled; these UI cases do not prove Pi delivery. The separate
+`node scripts/smoke-pi-native-interactions.mjs` starts isolated Core and real Pi with a controlled local provider.

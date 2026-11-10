@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type {
   GeneralPreferencesApi,
   NotificationActionView,
+  NotificationPreference,
   NotificationEpisodeChange,
   NotificationEpisodeChangeBatch,
   NotificationEpisodeView,
@@ -21,7 +22,8 @@ import {
   visibleAcknowledgementIntent,
   filterVisibleNotificationHeadsUp,
   shouldShowHeadsUp,
-  NotificationHeadsUp
+  NotificationHeadsUp,
+  reconcileNativeInteractionHeadsUp
 } from './NotificationAttentionController'
 import { preferenceFromUnknown } from './NotificationSettings'
 import { DEFAULT_GENERAL_PREFERENCES } from '../../shared/general-preferences-model'
@@ -590,4 +592,64 @@ it('coalesces only matching source identities in either arrival order without ac
   needs.primaryAction.subject.sourceMessageId = 'different'
   const separate = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [change(mention, 1), change(needs, 2)])
   expect(separate.entries.length + separate.overflowEntries.length).toBe(2)
+})
+
+
+function nativePreference(): NotificationPreference {
+  return preferenceFromUnknown({ headsUpEnabled: true, approvalHeadsUpEnabled: true,
+    userMentionHeadsUpEnabled: true, turnCompletedHeadsUpEnabled: true, turnIncompleteHeadsUpEnabled: true,
+    singleChatHeadsUpEnabled: true, missionNeedsYouHeadsUpEnabled: true, missionStatusHeadsUpEnabled: true,
+    taskStatusHeadsUpEnabled: false, missionStatuses: ['completed'], taskStatuses: ['completed'],
+    version: 1, updatedAt: '2026-11-08' })!
+}
+
+it('admits native questions once into the approval queue, with baseline, quiet and preference suppression', () => {
+  const source = { id: 'native-a', thread: { id: 'camp-native', title: '原会话' }, agentRunId: 'run-native',
+    executionEpoch: 7, agentDisplayName: '爱丽丝', singleChat: null, createdAt: 1, expiresAt: null }
+  const empty = { entries: [], overflowEntries: [] }
+  const preferences = nativePreference()
+  expect(reconcileNativeInteractionHeadsUp(empty, null, [source], preferences, null).entries).toEqual([])
+  expect(reconcileNativeInteractionHeadsUp(empty, new Set(), [source], preferences, source.thread.id).entries).toEqual([])
+  expect(reconcileNativeInteractionHeadsUp(empty, new Set(), [source], { ...preferences, approvalHeadsUpEnabled: false }, null).entries).toEqual([])
+  // A disabled/quiet observation is still consumed; reopening settings does not replay it.
+  expect(reconcileNativeInteractionHeadsUp(empty, new Set([source.id]), [source], preferences, null).entries).toEqual([])
+  const queued = reconcileNativeInteractionHeadsUp(empty, new Set(), [source], preferences, null)
+  const entry = queued.entries[0]
+  expect(entry.signal.action).toMatchObject({ kind: 'open_native_interaction', interactionId: source.id,
+    agentRunId: source.agentRunId, acknowledgementId: null, approvalId: null })
+  expect(notificationHeadsUpPresentation(entry.signal).message).toBe('爱丽丝在等你回答')
+  expect(shouldShowHeadsUp(entry.signal, preferences)).toBe(true)
+  expect(reconcileNativeInteractionHeadsUp(queued, new Set([source.id]), [source], preferences, null)).toEqual(queued)
+})
+
+it('removes only expired or resolved native sources and retains independent native and approval requests', () => {
+  const approval = episode('approval_pending')
+  let state = applyNotificationHeadsUpChanges({ entries: [], overflowEntries: [] }, [change(approval, 1)])
+  const source = { id: 'native-a', thread: { id: 'camp-native', title: '原会话' }, agentRunId: 'run-native',
+    executionEpoch: 7, agentDisplayName: '雾切响子', singleChat: { conversationId: 'original-private',
+      agentId: 'agent-2', agentDisplayName: '雾切响子', agentRunId: 'run-native' }, createdAt: 1, expiresAt: 100 }
+  const next = { ...source, id: 'native-b', expiresAt: null }
+  state = reconcileNativeInteractionHeadsUp(state, new Set(), [source, next], nativePreference(), null, 50)
+  expect(state.entries[0].signal.semantic).toBe('approval_pending')
+  expect(state.overflowEntries).toHaveLength(2)
+  expect(state.overflowEntries[0].signal.action.singleChat?.conversationId).toBe('original-private')
+  state = reconcileNativeInteractionHeadsUp(state, new Set([source.id, next.id]), [source, next], nativePreference(), null, 100)
+  expect(state.overflowEntries.map(entry => entry.signal.action.interactionId)).toEqual([next.id])
+  state = reconcileNativeInteractionHeadsUp(state, new Set([next.id]), [], nativePreference(), null, 101)
+  expect(state.overflowEntries).toEqual([])
+  expect(state.entries[0].signal.semantic).toBe('approval_pending')
+})
+
+it('localizes native attention without changing the original source name or permission semantics', async () => {
+  const source = { id: 'native-a', thread: { id: 'camp-native', title: '原会话' }, agentRunId: 'run-native',
+    executionEpoch: 7, agentDisplayName: 'Alice', singleChat: null, createdAt: 1, expiresAt: null }
+  const entry = reconcileNativeInteractionHeadsUp({ entries: [], overflowEntries: [] }, new Set(), [source], nativePreference(), null).entries[0]
+  await changeInterfaceLanguage(languageTestApi, 'en')
+  try {
+    expect(notificationHeadsUpPresentation(entry.signal)).toEqual({ label: 'Waiting for an answer', message: 'Alice is waiting for your answer' })
+    const markup = renderToStaticMarkup(createElement(NotificationHeadsUp, { entry, busy: false, onOpen() {}, onDismiss() {} }))
+    expect(markup).toContain('data-semantic="native_interaction_pending"')
+    expect(markup).toContain('原会话')
+    expect(markup).not.toContain('Allow once')
+  } finally { await changeInterfaceLanguage(languageTestApi, 'zh-CN') }
 })
