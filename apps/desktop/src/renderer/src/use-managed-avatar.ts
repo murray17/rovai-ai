@@ -1,5 +1,5 @@
 import { useThreadClient } from './camp-client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { parseControlledMemberAvatarRef } from '@contracts'
 import {
   managedAvatarImage,
@@ -14,6 +14,9 @@ type ManagedAvatarState = {
   image: ManagedAvatarImage | null
 }
 
+const noConnectionSubscription = (): (() => void) => () => undefined
+const connectedSnapshot = (): boolean => true
+
 export function useManagedAvatarUrl(
   avatarRef: string | null,
   rendition: ManagedAvatarRenditionKind
@@ -21,6 +24,12 @@ export function useManagedAvatarUrl(
   const client = useThreadClient()
   const parsed = avatarRef ? parseControlledMemberAvatarRef(avatarRef) : null
   const read = parsed?.kind === 'managed' ? client.memberAvatars.read : null
+  const connection = read ? client.connection : undefined
+  const connected = useSyncExternalStore(
+    connection?.subscribe ?? noConnectionSubscription,
+    connection?.getSnapshot ?? connectedSnapshot,
+    connectedSnapshot
+  )
   const key = parsed?.kind === 'managed' ? `${avatarRef}\u0000${rendition}` : null
   const [state, setState] = useState<ManagedAvatarState>({
     key: '',
@@ -29,7 +38,7 @@ export function useManagedAvatarUrl(
   })
 
   useEffect(() => {
-    if (!key || !avatarRef || !read) return undefined
+    if (!key || !avatarRef || !read || !connected) return undefined
     let ignore = false
     void managedAvatarImage(avatarRef, rendition, read).then((image) => {
       if (!ignore) setState({ key, read, settled: true, image })
@@ -37,7 +46,7 @@ export function useManagedAvatarUrl(
     return () => {
       ignore = true
     }
-  }, [avatarRef, key, rendition, read])
+  }, [avatarRef, key, rendition, read, connected])
 
   if (!key) return { loading: false, url: null, image: null }
   if (state.key !== key || state.read !== read) return { loading: true, url: null, image: null }

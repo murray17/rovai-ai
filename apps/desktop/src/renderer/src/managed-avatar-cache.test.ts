@@ -73,17 +73,29 @@ describe('managed avatar object URL cache', () => {
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:portrait')
   })
 
-  it('caches a missing or failed read without constructing an object URL', async () => {
+  it('caches a missing read without constructing an object URL', async () => {
     const missingRead = vi.fn<ManagedAvatarRead>().mockResolvedValue(null)
     await expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', missingRead)).resolves.toBeNull()
     await expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', missingRead)).resolves.toBeNull()
     expect(missingRead).toHaveBeenCalledTimes(1)
     expect(createObjectUrl).not.toHaveBeenCalled()
 
-    await invalidateManagedAvatarObjectUrl(AVATAR_REF, undefined, missingRead)
-    const failedRead = vi.fn<ManagedAvatarRead>().mockRejectedValue(new Error('corrupt'))
-    await expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', failedRead)).resolves.toBeNull()
+  })
+
+  it('retries a failed read after recovery while coalescing concurrent callers', async () => {
+    const read = vi.fn<ManagedAvatarRead>()
+      .mockRejectedValueOnce(new Error('temporarily unavailable'))
+      .mockResolvedValue({ mediaType: 'image/png', bytes: Uint8Array.from([1, 2, 3]), width: 192, height: 192,
+        crop: { centerX: 0.5, centerY: 0.5, size: 1 } })
+    const first = managedAvatarObjectUrl(AVATAR_REF, 'icon', read)
+    expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', read)).toBe(first)
+    await expect(first).resolves.toBeNull()
     expect(createObjectUrl).not.toHaveBeenCalled()
+
+    await expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', read)).resolves.toBe('blob:managed-avatar')
+    expect(read).toHaveBeenCalledTimes(2)
+    await expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', read)).resolves.toBe('blob:managed-avatar')
+    expect(read).toHaveBeenCalledTimes(2)
   })
 
   it('turns an invalidated in-flight result into null and revokes it immediately', async () => {

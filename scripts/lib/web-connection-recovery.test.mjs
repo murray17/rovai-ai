@@ -25,6 +25,9 @@ test('Web disconnect recovery blocks portals and shortcuts, preserves drafts and
       resolve: { alias: { '@contracts': join(root, 'packages/contracts/src/index.ts') } },
       logLevel: 'error', build: { outDir: dist, emptyOutDir: true } })
     let online = true, loss = null, rejectRetry = false, holdProbe = false, holdEvents = false, releaseProbe
+    let activeAvatarReads = 0, failAvatarRef = null
+    const avatarReads = [], avatarStatuses = []
+    const png = await readFile(join(root, 'apps/desktop/src/renderer/src/assets/characters/muwa/icon-192.png'))
     const dispatches = [], receipts = new Map()
     const identity = { protocolVersion: 7, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'fixture' }
     server = createServer(async (request, response) => {
@@ -49,6 +52,27 @@ test('Web disconnect recovery blocks portals and shortcuts, preserves drafts and
       let data = ''
       for await (const chunk of request) data += chunk
       const body = JSON.parse(data)
+      if (path.endsWith('/avatars')) {
+        assert.equal(body.action, 'read')
+        avatarReads.push(body.request.avatarRef)
+        if (body.request.avatarRef === failAvatarRef) {
+          failAvatarRef = null; holdEvents = true
+          for (const stream of streams) stream.end()
+          streams.clear()
+          avatarStatuses.push(503)
+          return json({ error: { code: 'core_unavailable' } }, 503)
+        }
+        if (activeAvatarReads >= 4) {
+          avatarStatuses.push(429)
+          return json({ error: { code: 'resource_capacity' } }, 429)
+        }
+        activeAvatarReads++
+        try {
+          await pause(20)
+          avatarStatuses.push(200)
+          return json({ mediaType: 'image/png', base64: png.toString('base64'), width: 192, height: 192, crop: { centerX: 0.5, centerY: 0.5, size: 1 } })
+        } finally { activeAvatarReads-- }
+      }
       if (body.operation === 'app.info') {
         const finish = () => { holdEvents = false; json({ result: { name: 'fixture' } }) }
         if (holdProbe) { releaseProbe = finish; return }
@@ -177,9 +201,38 @@ test('Web disconnect recovery blocks portals and shortcuts, preserves drafts and
     await browser.click(`document.querySelector('#send')`)
     await browser.wait(`document.querySelector('#draft').value === ''`)
     assert.equal(await browser.evaluate('connectionFixture.observations.mounts'), mounts)
+
+    // Use the production avatar component, cache, Web reader and connection
+    // subscription. Presence grouping/remounts must keep cached image bytes,
+    // while a failed mounted avatar recovers without a page reload.
+    const refs = Array.from({ length: 24 }, (_, i) => `rovai://member-avatar/managed/00000000-0000-4000-8000-${String(i).padStart(12, '0')}`)
+    await browser.evaluate(`showRecoveryAvatars(${JSON.stringify(refs)})`)
+    await browser.wait(`document.querySelectorAll('#avatars img').length === 24 && [...document.querySelectorAll('#avatars img')].every(img => img.naturalWidth > 0)`)
+    assert.equal(avatarReads.length, 24)
+    assert.ok(avatarStatuses.every(status => status === 200), 'a roster must not exhaust the shared resource slots')
+    const firstUrl = await browser.evaluate(`document.querySelector('#avatars img').src`)
+    await browser.evaluate(`showRecoveryAvatars([])`)
+    await browser.wait(`document.querySelectorAll('#avatars img').length === 0`)
+    await browser.evaluate(`showRecoveryAvatars(${JSON.stringify(refs)})`)
+    await browser.wait(`document.querySelectorAll('#avatars img').length === 24`)
+    assert.equal(avatarReads.length, 24, 'regrouping the roster reuses successful avatar reads')
+    assert.equal(await browser.evaluate(`document.querySelector('#avatars img').src`), firstUrl)
+
+    const failedRef = 'rovai://member-avatar/managed/00000000-0000-4000-8000-000000000099'
+    failAvatarRef = failedRef
+    await browser.evaluate(`showRecoveryAvatars(${JSON.stringify([...refs, failedRef])})`)
+    await browser.wait(`document.querySelector('.web-offline-dialog') !== null`)
+    await browser.evaluate(`window.mountedRecoveryAvatar = document.querySelector('#avatars > :last-child'); true`)
+    await retry(); await closed()
+    await browser.wait(`document.querySelectorAll('#avatars img').length === 25 && document.querySelector('#avatars > :last-child img').naturalWidth > 0`)
+    assert.equal(await browser.evaluate(`mountedRecoveryAvatar === document.querySelector('#avatars > :last-child')`), true, 'the failed avatar remains mounted through recovery')
+    assert.equal(avatarReads.filter(ref => ref === failedRef).length, 2, 'only the failed avatar is read again')
+    assert.equal(avatarReads.length, 26)
+    assert.equal(await browser.evaluate('connectionFixture.observations.mounts'), mounts)
+    await browser.capture(join(output, 'avatars-recovered.png'))
     assert.deepEqual(browser.errors, [])
     await writeFile(join(output, 'verification.json'), JSON.stringify({ fixture: 'fault-injection HTTP + production ConsoleClient/WebConnectionRecovery/AppDialog', coreExecutionVerified: false,
-      checks: ['SSE disconnect', 'failed reconnect', 'portal preservation', 'capture shortcut blocking', 'focus containment', 'busy focus containment', 'reduced motion', 'neutral day/night colors', 'mobile fit', 'keyboard recovery', 'unsent draft preservation', 'unknown exact retry', 'recorded no resend', 'definitive rejection releases lock', 'no remount', 'subsequent send'], dispatches: dispatches.length }, null, 2))
+      checks: ['SSE disconnect', 'failed reconnect', 'portal preservation', 'capture shortcut blocking', 'focus containment', 'busy focus containment', 'reduced motion', 'neutral day/night colors', 'mobile fit', 'keyboard recovery', 'unsent draft preservation', 'unknown exact retry', 'recorded no resend', 'definitive rejection releases lock', 'no remount', 'subsequent send', 'full roster avatar capacity', 'avatar regroup cache reuse', 'mounted avatar reconnect recovery'], dispatches: dispatches.length, avatarReads: avatarReads.length }, null, 2))
     console.log(`Recovery UI evidence: ${output}`)
   } finally {
     await browser?.close()

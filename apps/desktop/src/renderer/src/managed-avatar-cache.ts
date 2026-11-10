@@ -54,7 +54,12 @@ export function managedAvatarImage(
       }
       return { url: objectUrl, width: result.width, height: result.height, displayCrop: result.displayCrop }
     })
-    .catch(() => null)
+    .catch(() => {
+      // A transport/capacity failure says nothing about whether this avatar
+      // exists. Let a remount or connection recovery read it again.
+      if (managedAvatarCache.get(key)?.token === token) managedAvatarCache.delete(key)
+      return null
+    })
   managedAvatarCache.set(key, { token, promise, urlPromise: promise.then(image => image?.url ?? null) })
   return promise
 }
