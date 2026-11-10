@@ -109,6 +109,12 @@ describe('explicit Runtime check targeting', () => {
       runtimeKind: 'deepseek-harness', waitForRefresh: true,
       modelId: 'fixture-target', dshSource: 'web', cacheOnly: true, forceRefresh: true
     })
+    await openRuntimeModelCatalog('minimax-code-cli', request, true, {
+      modelId: 'm:provider:model:v:fast', dshSource: 'web', cacheOnly: true
+    })
+    expect(request).toHaveBeenLastCalledWith('runtime.modelCatalog.open', {
+      runtimeKind: 'minimax-code-cli', waitForRefresh: true, modelId: 'm:provider:model:v:fast', cacheOnly: true
+    })
   })
 
   it('waits for the backend-owned check and preserves its failure outcome without a separate rescan', async () => {
