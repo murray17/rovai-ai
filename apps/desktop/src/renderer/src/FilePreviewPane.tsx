@@ -353,7 +353,9 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
     void edits.save(doc); return true
   }, active)
   const editor = showEditor && active && doc && edits ? <EditableCodeViewer key={doc.key} doc={doc} store={edits} theme={resolvedTheme} target={tab.file?.target} /> : null
+  const [htmlToolbarTarget, setHtmlToolbarTarget] = useState<HTMLSpanElement | null>(null)
   const editActions = <div className="file-preview-edit-actions">
+    {tab.content?.kind === 'html' && <span className="file-preview-html-toolbar-actions" ref={setHtmlToolbarTarget} hidden={showEditor} />}
     {sourceSwitch && <FilePreviewViewSwitch interactive={tab.content?.kind === 'html'} sourceMode={!!tab.htmlSourceMode}
       onChange={source => { if (source !== !!tab.htmlSourceMode) toggleHtmlSource(tab.id) }} />}
     {doc && fileEditDirty(doc) && <button type="button" className="file-action-button" disabled={doc.saving}
@@ -409,7 +411,7 @@ function FilePreviewDocument({ tab }: { tab: FilePreviewTabModel }): React.JSX.E
       <div className="file-preview-path-row">{pathControl}{tab.isRefreshing ? null : updateAction}{editActions}{downloadAction}</div>
       {editFeedback}<FileDownloadFeedback tab={tab} />
       <div className="file-preview-saved-preview" hidden={showEditor} inert={showEditor}>
-        <HtmlViewer tab={doc ? { ...tab, htmlSourceMode: false } : tab} hideToolbar downloadAction={null} pathControl={null} updateAction={null} />
+        <HtmlViewer tab={doc ? { ...tab, htmlSourceMode: false } : tab} hideToolbar toolbarTarget={htmlToolbarTarget} downloadAction={null} pathControl={null} updateAction={null} />
       </div>
       {showEditor && <div className="file-preview-content">{editor}</div>}
     </>

@@ -1,9 +1,9 @@
 import type { BrowserWindow } from 'electron'
-import { writeFile } from 'node:fs/promises'
+import { appendFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ServerResponse } from 'node:http'
 
-export async function lifecycleAcceptance(window: BrowserWindow, userData: string): Promise<{ name: string; ok: boolean; evidence: unknown }[]> {
+export async function lifecycleAcceptance(window: BrowserWindow, userData: string, root: string): Promise<{ name: string; ok: boolean; evidence: unknown }[]> {
   const run = (code: string) => window.webContents.executeJavaScript(code)
   const wait = async (code: string): Promise<void> => {
     for (let count = 0; count < 300; count++) {
@@ -13,6 +13,7 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
     throw new Error(`Lifecycle prerequisite failed: ${code}`)
   }
   const stage = `document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-html-stage')`
+  const panel = `document.querySelector('.file-preview-tab-panel:not([hidden])')`
   const cases: { name: string; ok: boolean; evidence: unknown }[] = []
   const streams = new Set<ServerResponse>()
   const writeHead = ServerResponse.prototype.writeHead
@@ -41,23 +42,25 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
   const scrollBefore = await frame.executeJavaScript('scrollY')
   if (scrollBefore !== 150) throw new Error(`Fixture could not establish preview scroll position: ${scrollBefore}`)
   const timeOrigin = await frame.executeJavaScript('performance.timeOrigin')
-  const snapshot = () => run(`(() => {const stage=${stage}; return {document:stage?.dataset.documentState, channel:stage?.dataset.channelState,
+  const snapshot = () => run(`(() => {const stage=${stage},panel=${panel},info=panel.querySelector('.file-preview-html-info'); return {document:stage?.dataset.documentState, channel:stage?.dataset.channelState,
     diagnostics:stage?.dataset.serverDiagnosticsState, summary:stage?.querySelector('.file-preview-html-feedback')?.textContent ?? '',
     warning:Boolean(stage?.querySelector('.file-preview-html-feedback.is-problem')), alert:Boolean(stage?.querySelector('[role="alert"]')),
-    expanded:stage?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded'), sameFrame:stage?.querySelector('iframe')===window.lifecycleFrame,
+    info:Boolean(info),infoLabel:info?.getAttribute('aria-label'),inToolbar:Boolean(info?.closest('.file-preview-path-row')),
+    expanded:panel.querySelector('.file-preview-html-feedback,.file-preview-html-info')?.getAttribute('aria-expanded'), sameFrame:stage?.querySelector('iframe')===window.lifecycleFrame,
     text:stage?.textContent}})()`)
   {
     for (const stream of streams) stream.end()
     await wait(`${stage}?.dataset.serverDiagnosticsState==='unavailable'`)
     const interrupted = await snapshot()
-    await run(`${stage}.querySelector('.file-preview-html-feedback').click()`)
-    await wait(`${stage}.querySelector('[aria-expanded]')?.getAttribute('aria-expanded')==='true'`)
+    await run(`${panel}.querySelector('.file-preview-html-info').click()`)
+    await wait(`${panel}.querySelector('.file-preview-html-info')?.getAttribute('aria-expanded')==='true'`)
     await new Promise(resolve => setTimeout(resolve, 100))
     await writeFile(join(userData, 'diagnostic-interrupted-day.png'), (await window.webContents.capturePage()).toPNG())
     const retained = await frame.executeJavaScript('({value:window.retainedValue,input:document.querySelector("#retained-input").value,top:scrollY,timeOrigin:performance.timeOrigin})')
     cases.push({ name: 'HTTP diagnostic loss leaves the loaded page interactive and uses collapsed neutral details',
       ok: interrupted.document === 'loaded' && interrupted.channel === 'connected' && interrupted.sameFrame
-        && interrupted.summary === '诊断详情' && interrupted.expanded === 'false' && !interrupted.warning && !interrupted.alert
+        && !interrupted.summary && interrupted.info && interrupted.inToolbar && interrupted.infoLabel === '查看诊断详情'
+        && interrupted.expanded === 'false' && !interrupted.warning && !interrupted.alert
         && interrupted.text.includes('资源诊断连接中断，部分资源错误信息可能不完整')
         && retained.value === 42 && retained.input === '诊断断流后保留的输入' && retained.top === 150 && retained.timeOrigin === timeOrigin,
       evidence: { interrupted, scrollBefore, retained } })
@@ -66,7 +69,7 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
   const recovered = await snapshot()
   cases.push({ name: 'diagnostic recovery clears transient feedback without replacing the iframe',
     ok: recovered.sameFrame && recovered.document === 'loaded' && recovered.channel === 'connected' && !recovered.summary
-      && !recovered.text.includes('资源诊断连接中断'), evidence: recovered })
+      && !recovered.info && !recovered.text.includes('资源诊断连接中断'), evidence: recovered })
 
   // A fresh candidate can load its root while the supplemental endpoint fails.
   let diagnosticRequests = 0
@@ -76,6 +79,7 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
     callback({ cancel: diagnostic })
   })
   try {
+    await appendFile(join(root, 'history.html'), '\n<!-- diagnostic candidate refresh fixture -->\n')
     await run('window.previewAcceptance.reload(window.previewAcceptance.activeTabId)')
     await wait(`window.previewAcceptance.activeTab?.content?.preview?.origin!==${JSON.stringify(origin)} && !window.previewAcceptance.activeTab?.candidate && !window.previewAcceptance.activeTab?.isRefreshing && ${stage}?.dataset.documentState==='loaded' && ${stage}?.dataset.serverDiagnosticsState==='unavailable'`)
     const candidate = await snapshot()

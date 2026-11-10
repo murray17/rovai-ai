@@ -10,12 +10,12 @@ export async function feedbackAcceptance(window: BrowserWindow, userData: string
     throw new Error('HTML feedback fixture did not reach its prerequisite')
   }
   const stage = `document.querySelector('.file-preview-tab-panel:not([hidden]) .file-preview-html-stage')`
-  const snapshot = () => run(`(() => { const el=${stage}, details=el?.querySelector('.file-preview-html-diagnostics'), frame=el?.querySelector('iframe');return {
+  const snapshot = () => run(`(() => { const el=${stage}, panel=el?.closest('.file-preview-tab-panel'), details=el?.querySelector('.file-preview-html-diagnostics'), frame=el?.querySelector('iframe');return {
     text:el?.textContent, summary:el?.querySelector('.file-preview-html-feedback')?.textContent ?? '',
     expanded:el?.querySelector('[aria-expanded]')?.getAttribute('aria-expanded'), detailsVisible:Boolean(details && !details.hidden),
-    path:Boolean(el?.querySelector('.file-preview-path-row')), extraRow:Boolean(el?.querySelector('.file-preview-html-feedback-row')),
+    path:Boolean(panel?.querySelector('.file-preview-path-control')), feedback:Boolean(el?.querySelector('.file-preview-html-feedback')),
     disabled:details?.querySelector('button')?.disabled, frameRetained:frame===window.previewBookmarkedFrame,
-    source:Boolean(el?.querySelector('.file-preview-html-source')), frameVisible:Boolean(frame && !frame.hidden),
+    source:Boolean(panel?.querySelector('.file-preview-html-source,.cm-editor')), frameVisible:Boolean(frame && !frame.hidden),
     overflow:el.scrollWidth > el.clientWidth, frameHeight:frame?.getBoundingClientRect().height,
     detailsHeight:details?.getBoundingClientRect().height
   } })()`)
@@ -23,7 +23,7 @@ export async function feedbackAcceptance(window: BrowserWindow, userData: string
   await wait(() => run(`!${stage}.querySelector('iframe').hidden`))
   await pause()
   const quiet = await snapshot()
-  cases.push({ name: 'healthy workspace HTML has only the existing path and source action', ok: quiet.path && !quiet.extraRow && !quiet.summary && !quiet.detailsVisible && !quiet.text.includes('页面已加载') && !quiet.text.includes('查看详情'), evidence: quiet })
+  cases.push({ name: 'healthy workspace HTML has only the existing path and source action', ok: quiet.path && !quiet.feedback && !quiet.summary && !quiet.detailsVisible && !quiet.text.includes('页面已加载') && !quiet.text.includes('查看详情'), evidence: quiet })
   await writeFile(join(userData, 'feedback-healthy.png'), (await window.webContents.capturePage()).toPNG())
 
   await run(`window.previewAcceptance.open({kind:'attachment',threadId:'preview-test',locator:{owner:'message',threadId:'preview-test',messageId:'fixture-message',attachmentRefId:'history'}})`)
@@ -47,12 +47,12 @@ export async function feedbackAcceptance(window: BrowserWindow, userData: string
   await wait(() => run(`!${stage}.querySelector('iframe').hidden`))
   const retained = await frame.executeJavaScript(`({input:document.querySelector('#retained-input').value,scroll:window.scrollY,state:window.fixtureKept})`)
   const returned = await snapshot()
-  cases.push({ name: 'attachment source menu preserves the page, input and scroll without a path row', ok: !attachment.path && !attachment.extraRow && !attachment.summary && source.source && !source.frameVisible && source.frameRetained && returned.frameRetained && returned.frameVisible && retained.input === '已填写' && before === 120 && retained.scroll === before && retained.state === 91, evidence: { attachment, source, returned, before, retained } })
+  cases.push({ name: 'attachment source menu preserves the page, input and scroll without exposing internal paths', ok: !attachment.path && !attachment.feedback && !attachment.summary && source.source && !source.frameVisible && source.frameRetained && returned.frameRetained && returned.frameVisible && retained.input === '已填写' && before === 120 && retained.scroll === before && retained.state === 91, evidence: { attachment, source, returned, before, retained } })
   // A no-path document gains only a temporary problem entry when an error arrives.
   await frame.executeJavaScript(`setTimeout(()=>{throw new Error('attachment failure fixture')},0)`)
   await wait(() => run(`${stage}.textContent.includes('attachment failure fixture')`))
   const attachmentIssue = await snapshot()
-  cases.push({ name: 'attachment problems remain reachable without fabricating a path', ok: !attachmentIssue.path && attachmentIssue.extraRow && attachmentIssue.summary === '1 项问题' && !attachmentIssue.detailsVisible, evidence: attachmentIssue })
+  cases.push({ name: 'attachment problems remain reachable without fabricating a path', ok: !attachmentIssue.path && attachmentIssue.feedback && attachmentIssue.summary === '1 项问题' && !attachmentIssue.detailsVisible, evidence: attachmentIssue })
   await run('window.previewAcceptance.close(window.previewAcceptance.activeTabId)')
 
   await run(`window.previewAcceptance.activate(window.previewAcceptance.tabs.find(tab=>tab.file?.fileName==='errors.html').id)`)

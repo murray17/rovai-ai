@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Layout diagnostics</title></head>
+<body style="min-height:2000px">
+<h1>布局提示保留交互页面</h1>
+<input id="retained-input" value="保留输入">
+<div id="observed" style="width:100px;height:20px"></div>
+<button id="layout">触发布局通知</button>
+<button id="business">抛出同名业务异常</button>
+<script>
+window.layoutEvents = [];
+const message = 'ResizeObserver loop completed with undelivered notifications.';
+addEventListener('error', event => {
+  if (!(event instanceof ErrorEvent)) return;
+  window.layoutEvents.push({
+    message: event.message, trusted: event.isTrusted, filename: event.filename,
+    line: event.lineno, column: event.colno, errorType: typeof event.error,
+    errorIsNull: event.error === null, errorValue: String(event.error),
+    stack: event.error?.stack ?? null
+  });
+});
+document.getElementById('layout').onclick = () => {
+  let changed = false;
+  const observer = new ResizeObserver(([entry]) => {
+    if (changed) { observer.disconnect(); return; }
+    changed = true;
+    entry.target.style.width = `${entry.contentRect.width + 1}px`;
+  });
+  observer.observe(document.getElementById('observed'));
+};
+document.getElementById('business').onclick = () => {
+  setTimeout(() => { throw new Error(message); }, 0);
+  // Both browser-reported scalar errors and author-dispatched events must stay errors.
+  reportError(message);
+  dispatchEvent(new ErrorEvent('error', { message, error: null }));
+  const image = document.createElement('img');
+  image.src = './missing-layout.png'; document.body.append(image);
+};
+</script></body></html>

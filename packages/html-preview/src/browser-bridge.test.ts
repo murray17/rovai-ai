@@ -13,6 +13,7 @@ afterEach(() => { cleanup.splice(0).forEach(close => close()); vi.useRealTimers(
 // substitutes DOM surfaces and only the HTTP transport; the clock is deterministic.
 function fixture(fetcher: typeof fetch) {
   vi.useFakeTimers()
+  class FixtureErrorEvent extends Event {}
   const preview = { previewId: 'p', generation: 'g', origin: 'http://preview.localhost:9000',
     entryUrl: 'http://preview.localhost:9000/start', documentUrl: 'http://preview.localhost:9000/index.html' }
   const host = Object.assign(new EventTarget(), { location: { origin: 'http://app.localhost:8000' } })
@@ -30,7 +31,8 @@ function fixture(fetcher: typeof fetch) {
   const document = Object.assign(new EventTarget(), { readyState: 'complete', body: {}, querySelectorAll: () => [],
     currentScript: { getAttribute: () => '/__rovai-preview/bridge/root.js' } })
   for (const [key, value] of Object.entries({ window: frame, parent: host, document, crypto: webcrypto, fetch: fetcher,
-    addEventListener: frame.addEventListener.bind(frame), MutationObserver: class { observe() {} disconnect() {} }, scrollTo: vi.fn() })) vi.stubGlobal(key, value)
+    addEventListener: frame.addEventListener.bind(frame), ErrorEvent: FixtureErrorEvent,
+    MutationObserver: class { observe() {} disconnect() {} }, scrollTo: vi.fn() })) vi.stubGlobal(key, value)
   const channel = new HtmlPreviewHostChannel(preview, () => frame as unknown as Window)
   const messages: Record<string, unknown>[] = []
   channel.subscribe(message => messages.push(message))
@@ -48,7 +50,14 @@ function fixture(fetcher: typeof fetch) {
     Object.defineProperty(event, 'isTrusted', { value: isTrusted })
     document.dispatchEvent(event)
   }
-  return { channel, messages, close, preview, frame, host, policy }
+  const error = (message: string, patch: Record<string, unknown> = {}) => {
+    const event = new FixtureErrorEvent('error')
+    const { isTrusted = true, ...fields } = patch
+    Object.assign(event, { message, error: null, filename: preview.documentUrl, lineno: 0, colno: 0, ...fields })
+    Object.defineProperty(event, 'isTrusted', { value: isTrusted })
+    frame.dispatchEvent(event)
+  }
+  return { channel, messages, close, preview, frame, host, policy, error }
 }
 
 function responseStream(signal: AbortSignal) {
@@ -57,6 +66,40 @@ function responseStream(signal: AbortSignal) {
   signal.addEventListener('abort', () => controller.error(new Error('aborted')), { once: true })
   return { response: new Response(body), controller }
 }
+
+it.each([
+  'ResizeObserver loop completed with undelivered notifications.',
+  'ResizeObserver loop completed with undelivered notifications',
+  '  ResizeObserver loop completed with undelivered notifications.  ',
+  'ResizeObserver loop limit exceeded',
+  '\nResizeObserver loop limit exceeded.\t',
+])('retains the original layout message through the existing validated channel: %s', async message => {
+  const { messages, error } = fixture(vi.fn<typeof fetch>().mockRejectedValue(new Error('offline')))
+  await vi.advanceTimersByTimeAsync(0)
+  error(message); error(message)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(messages.filter(message => message.type === 'diagnostic')).toEqual([
+    expect.objectContaining({ diagnostic: expect.objectContaining({ kind: 'layout', message }) })
+  ])
+})
+
+it.each([
+  { error: new Error('ResizeObserver loop completed with undelivered notifications.') },
+  { error: 'ResizeObserver loop completed with undelivered notifications.' },
+  { error: undefined },
+  { isTrusted: false },
+  { message: 'ResizeObserver callback failed' },
+  { message: 'ResizeObserver loop limit exceeded during business work' },
+  { message: 'ResizeObserver loop completed with undelivered notifications..' },
+])('keeps uncertain and author-generated errors as script errors: %j', async patch => {
+  const { messages, error } = fixture(vi.fn<typeof fetch>().mockRejectedValue(new Error('offline')))
+  await vi.advanceTimersByTimeAsync(0)
+  error('ResizeObserver loop completed with undelivered notifications.', patch)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(messages.filter(message => message.type === 'diagnostic')).toEqual([
+    expect.objectContaining({ diagnostic: expect.objectContaining({ kind: 'script' }) })
+  ])
+})
 
 it('recovers only HTTP diagnostics and preserves the page channel, errors and commands', async () => {
   let stream!: ReturnType<typeof responseStream>
