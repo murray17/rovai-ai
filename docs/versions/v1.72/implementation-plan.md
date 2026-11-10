@@ -12,12 +12,16 @@ last_updated: 2026-11-09
 
 Work item：目录轻量读取、共享加载与审查修订。Worktree：
 `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；Branch：`rovai/model-catalog-clean`；
-Base：`origin/main` / `a8a60a41ff245e713f87627f05a1f1fa2b1894d0`；Governance：none；Status：ready（待审阅，未合入）。
+Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；Governance：none；Status：ready（待审阅，未合入）。
 该工作目录从干净 main 建立新分支，只移植目录修复；旧 `rovai/model-catalog-loading` 保留供对照，
 不继承其 PR #986 集成提交、Windows/聊天功能或迁移。Data Contract 保持 v1.72 / schema 172。
 `db.rs` 只改已有环境代次发布方法的事务，不增加字段、表或 Migration；接口和共享安装投影保持。
 整理期间 main 合入 #1054，保留其普通 UI 轻量版本检查、独立目录读取、目标安装发现、身份复核和原生错误反馈。
 本分支只补齐未覆盖的失效路径、共享 Renderer 生命周期与诊断目录提交，不恢复旧分支的重复解析或调度分支。
+随后同步 #1055：启动设置页对未保存草稿使用 `runtime.startup.inspect` 的改动完整保留；
+上游 `revalidateAfter` 修复由现有共享 `ensureCatalog` / `runtimeModelCatalogIsFresh` 承接，不恢复旧 `RuntimeModelPicker`。
+保留上游受控时钟回归并合并原有共享加载、Pi、DSH 与隐藏页测试；文档同时保留原值展示规则。
+本次同步不修改 Core、数据库或协议，原目录修复提交 `1ed54025a` 保留，不改写已推送历史。
 
 当前语义由 [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实)、
 [Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#用户界面)、
@@ -56,7 +60,7 @@ main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_cu
 覆盖 Fresh 已过期、同观察降为 Expired 后重入、健康元数据、真实失效、DSH 迟到缓存未命中；
 `runtime-check.test.ts` 执行生产引导回调，验证投影 pending/失败均不延迟或拒绝目录成功。
 
-基线更新后的验证：
+原交付基线 `a8a60a41f` 的验证（`1ed54025a`）：
 
 - `cargo test --workspace`：483 passed / 1 ignored；`agent_profile::slow_tests::`：32 passed。
 - `application::runtime_check_environment::tests::`：10 passed，包含上述两条旧同步 owner 和 MiniMax owner。
@@ -65,9 +69,15 @@ main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_cu
 - `TZ=UTC pnpm test`：274 个 Vitest 文件，3,203 passed / 2 skipped；末组 Node 377 passed / 2 平台 skipped。
   干净基线的 Product Contract Fingerprint 断言与 schema 172 一致，未修改其测试或 schema 常量。
 - 类型检查、隔离 Electron picker、Desktop/Web/只读执行页构建、macOS arm64 Core 三个 debug sidecar 构建通过。
-  通用文档单测与治理门禁使用上面的真实 main base；交付范围按相对该 main 的完整差异核对。
+  通用文档单测与治理门禁使用当时的真实 main base `a8a60a41f`；交付范围按相对该 main 的完整差异核对。
 
-相对该 main 只含一个修复提交、20 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
+同步 #1055 后的定向回归：类型检查、参数与目录请求单元测试（2 文件 / 50 passed）、隔离 Picker（1 passed）及
+隔离 Settings Workspace（1 passed）通过。受控时钟覆盖截止前复用、到期但 Core 仍投影 Fresh 时主动读取、
+等待期间不重复、纯时间流逝与隐藏页不启动后台读取、过期后页面重入；启动检查只发送 `runtime.startup.inspect`，
+携带未保存路径和环境草稿，不发送 `runtime.startup.check` 或保存全局状态。
+通用文档门禁以当前真实 main base 执行；Core 源码相对原交付无变化，不重复声称执行了新一轮 Rust 全量测试。
+
+相对当前 main 保留目录修复提交与一次 main 同步合并，完整差异为 20 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
 `application.rs`、`db.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
 `MemberRuntimeParameters.tsx`、`RuntimeModelSearch.tsx`、`RuntimeParameterSelect.tsx`、`BusinessApp.tsx`、
 英文文案及两个现有单元测试；两个 picker fixture 文件；本文及四份既有架构／合同／界面文档。
