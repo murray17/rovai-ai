@@ -19,30 +19,35 @@ describe('message model identity', () => {
     expect(modelSummary(fallback)).toBe('old-model · high')
   })
 
-  it('uses CodeBuddy thought_level in member summaries and the existing message effort field', () => {
-    const codebuddy: AdapterInstallation = {
+  it.each([
+    ['codebuddy-cli', 'thought_level', '推理强度'],
+    ['kilo-cli', 'effort', '推理强度'],
+    ['command-code-cli', 'effort', '思考强度'],
+    ['minimax-code-cli', 'thinkingEffort', '思考强度']
+  ] as const)('uses %s native effort in member summaries and frozen message labels', (adapterKind, effortKey, label) => {
+    const native: AdapterInstallation = {
       ...installation,
-      adapterKind: 'codebuddy-cli',
+      adapterKind,
       snapshot: {
         ...installation.snapshot!,
         models: [{
           ...installation.snapshot!.models[0],
-          options: [{ ...installation.snapshot!.models[0].options[0], key: 'thought_level' }]
+          options: [{ ...installation.snapshot!.models[0].options[0], key: effortKey }]
         }]
       }
     }
     const configuration: Parameters<typeof memberRuntimeConfigurationPresentation>[0] = {
-      adapterKind: 'codebuddy-cli',
+      adapterKind,
       model: {
         mode: 'explicit', modelId: 'old-model',
-        options: { thought_level: 'high', reasoning_effort: 'wrong' }
+        options: { [effortKey]: 'high', reasoning_effort: 'wrong' }
       },
-      permissions: { adapterKind: 'codebuddy-cli', schemaVersion: 1, values: {} }
+      permissions: { adapterKind, schemaVersion: 1, values: {} }
     }
-    expect(memberRuntimeConfigurationPresentation(configuration, codebuddy).effort)
-      .toEqual({ label: '推理强度', value: 'High' })
-    expect(messageRuntimeModelPresentation({ ...record, adapterKind: 'codebuddy-cli' }, codebuddy)?.effort)
-      .toEqual({ label: '推理强度', value: 'High' })
+    expect(memberRuntimeConfigurationPresentation(configuration, native).effort)
+      .toEqual({ label, value: 'High' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind }, native)?.effort)
+      .toEqual({ label, value: 'High' })
   })
 
   it('keeps an unknown record, Agent defaults and an unspecified effort distinct', () => {

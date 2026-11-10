@@ -256,6 +256,14 @@ fn admit_candidate(
             .flatten()
             .or_else(|| normalize_reported_path_for_display(execution_root, raw_path))
             .ok_or("runtime_diff_path_invalid")?;
+        if adapter == AdapterKind::KiloCli
+            && raw_entries.len() == 1
+            && let Some(operation_path) = file_operation_path
+            && normalize_reported_path_for_display(execution_root, operation_path).as_deref()
+                != Some(source_path.as_str())
+        {
+            return Err("runtime_diff_path_mismatch");
+        }
         let change_kind = normalized_change_kind(raw, semantic_kind)?;
         let path = if adapter == AdapterKind::CodexCli && change_kind == "update" {
             move_path
@@ -1295,6 +1303,29 @@ mod tests {
         assert_eq!(
             (admitted.entries[0].additions, admitted.entries[0].deletions),
             (1, 1)
+        );
+        let relative = admitted.entries[0].path.clone();
+        for operation_path in [&relative, &format!("/repo/{relative}")] {
+            assert!(
+                admit_runtime_diff_with_file_operation_path(
+                    &kilo,
+                    Path::new("/repo"),
+                    Some("kilo-cli"),
+                    Some(operation_path),
+                )
+                .unwrap()
+                .is_ok()
+            );
+        }
+        assert_eq!(
+            admit_runtime_diff_with_file_operation_path(
+                &kilo,
+                Path::new("/repo"),
+                Some("kilo-cli"),
+                Some("src/different.txt"),
+            )
+            .unwrap(),
+            Err("runtime_diff_path_mismatch")
         );
         kilo["runtimeDiff"]["entries"][0]["path"] = json!("src/other.ts");
         assert!(

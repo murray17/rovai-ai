@@ -156,6 +156,7 @@ pub(crate) fn adapt_acp_stdio_cwd(
     server: &mut Value,
     definition: &McpServerDefinition,
     session_cwd: &Path,
+    cli_executable: &Path,
 ) {
     if let McpServerDefinition::Stdio {
         command,
@@ -165,16 +166,10 @@ pub(crate) fn adapt_acp_stdio_cwd(
     } = definition
         && !crate::git::persisted_workspace_path_matches_canonical(Path::new(cwd), session_cwd)
     {
-        server["command"] = json!("node");
+        server["command"] = json!(cli_executable);
         server["args"] = json!(
             [
-                vec![
-                    "--eval".to_owned(),
-                    include_str!("runtime_mcp/cwd.cjs").to_owned(),
-                    "--".to_owned(),
-                    cwd.clone(),
-                    command.clone()
-                ],
+                vec!["__mcp-stdio-cwd".to_owned(), cwd.clone(), command.clone()],
                 args.clone()
             ]
             .concat()

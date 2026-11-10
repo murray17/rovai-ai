@@ -141,6 +141,7 @@ pub(crate) fn adapt_mcp_server(
     server: &mut Value,
     definition: &crate::mcp::McpServerDefinition,
     session_cwd: &Path,
+    cli_executable: &Path,
 ) {
     for field in ["env", "headers"] {
         if let Some(pairs) = server.get_mut(field).and_then(Value::as_array_mut) {
@@ -151,7 +152,7 @@ pub(crate) fn adapt_mcp_server(
             }
         }
     }
-    crate::runtime_mcp::adapt_acp_stdio_cwd(server, definition, session_cwd);
+    crate::runtime_mcp::adapt_acp_stdio_cwd(server, definition, session_cwd, cli_executable);
 }
 
 /// The registered Mod command consumes one JSON string without starting a
@@ -199,6 +200,7 @@ mod tests {
         use std::collections::BTreeMap;
 
         let session_cwd = Path::new("/project space");
+        let cli_executable = Path::new("/bundled tools/rovai");
         let command = "/tools/server space";
         let args = vec![
             "two words".to_owned(),
@@ -214,17 +216,15 @@ mod tests {
             };
             let mut server = json!({"name":"docs", "command":command, "args":args,
                 "env":[{"name":"LITERAL", "value":"$${literal} \\ '"}]});
-            adapt_mcp_server(&mut server, &definition, session_cwd);
+            adapt_mcp_server(&mut server, &definition, session_cwd, cli_executable);
             assert_eq!(server["env"][0]["value"], "$$${literal} \\ '");
             if cwd == Some("/other space") {
-                assert_eq!(server["command"], "node");
+                assert_eq!(server["command"], json!(cli_executable));
                 let argv = server["args"].as_array().unwrap();
-                assert_eq!(argv[0], "--eval");
-                assert_eq!(argv[1], include_str!("runtime_mcp/cwd.cjs"));
-                assert_eq!(argv[2], "--");
-                assert_eq!(argv[3], "/other space");
-                assert_eq!(argv[4], command);
-                assert_eq!(&argv[5..], json!(args).as_array().unwrap());
+                assert_eq!(argv[0], "__mcp-stdio-cwd");
+                assert_eq!(argv[1], "/other space");
+                assert_eq!(argv[2], command);
+                assert_eq!(&argv[3..], json!(args).as_array().unwrap());
             } else {
                 assert_eq!(server["command"], command);
                 assert_eq!(server["args"], json!(args));
@@ -236,7 +236,7 @@ mod tests {
         };
         let mut server = json!({"name":"remote", "type":"http", "url":"https://example.test/mcp",
             "headers":[{"name":"X-Literal", "value":"$${literal}"}]});
-        adapt_mcp_server(&mut server, &definition, session_cwd);
+        adapt_mcp_server(&mut server, &definition, session_cwd, cli_executable);
         assert_eq!(server["headers"][0]["value"], "$$${literal}");
         assert!(server.get("command").is_none());
     }

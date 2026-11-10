@@ -8,6 +8,25 @@ last_updated: 2026-11-09
 
 # v1.72 版本决定
 
+<a id="v1-72-d79"></a>
+## V1.72-D79：Kilo 边界修复收回共享入口
+
+- 状态：accepted
+- 日期：2026-11-09
+- 授权：User sequence 19 要求自检隐式 Node 与重复文件处理；沿已授权的简洁 ACP 接入收尾。
+- 当前权威：[Launch v80](../../contracts/runtime-launch-and-verification-v80.md)。
+
+不同 cwd 的 MCP 依赖裸 Node，会使独立 Kilo 与 Python MCP 无法运行；复用现有 bundled CLI 的绝对入口，
+用私有启动模式进入 cwd 后执行原程序，删除共享 Node wrapper。相同 cwd 与 HTTP 路径保持，
+不增加服务、PATH 依赖检查器或新的 Agent 命令。
+原生 config 回调不可与 pure 跳过插件同时成立，执行准备显式关闭 pure，目录探测不受影响。
+取消由 Core 统一绝对阶段期限，保留既有总预算；文件路径交共享 execution-root 语义核对，
+共同投影只构造一次，删除不伪装写入。effort 展示补齐原生键并收拢 TS 重复选择。
+
+保留有实际用途的原生配置保序/回调、单 Binding Host、多 RPC 收口与 Steer 退役策略；
+不以简化为由删除语义差异，也不新增框架、schema、迁移、加载握手或校验层。
+失败对照、严格无 Node 的官方 CLI/Core 结果及平台边界见[收尾记录](kilo-boundary-fixes.md)。
+
 <a id="v1-72-d78"></a>
 ## V1.72-D78：Kilo 使用原生禁后台与共享 Steer、文件投影
 

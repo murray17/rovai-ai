@@ -71,14 +71,12 @@ pub(super) fn project_model(
         "runtime_default" => observed_model.filter(|value| !value.trim().is_empty()),
         _ => return None,
     };
-    let effort_key = if adapter_kind == "claude-code-cli" {
-        "effort"
-    } else if adapter_kind == "pi" {
-        "thinking_level"
-    } else if adapter_kind == "codebuddy-cli" {
-        "thought_level"
-    } else {
-        "reasoning_effort"
+    let effort_key = match adapter_kind {
+        "claude-code-cli" | "command-code-cli" | "kilo-cli" => "effort",
+        "pi" => "thinking_level",
+        "codebuddy-cli" => "thought_level",
+        "minimax-code-cli" => "thinkingEffort",
+        _ => "reasoning_effort",
     };
     // Project only the display option, never permissions, provider credentials
     // or other fields from the frozen configuration.
@@ -129,6 +127,27 @@ mod tests {
                 json!({"source":"explicit","modelId":"codebuddy-model","options":{"thought_level":"high","reasoning_effort":"wrong-option"}}),
                 None,
                 Some("codebuddy-model"),
+                Some("high"),
+            ),
+            (
+                "kilo-cli",
+                json!({"source":"explicit","modelId":"sub2api/model","options":{"effort":"high","reasoning_effort":"wrong-option"}}),
+                None,
+                Some("sub2api/model"),
+                Some("high"),
+            ),
+            (
+                "command-code-cli",
+                json!({"source":"explicit","modelId":"native/model","options":{"effort":"high","reasoning_effort":"wrong-option"}}),
+                None,
+                Some("native/model"),
+                Some("high"),
+            ),
+            (
+                "minimax-code-cli",
+                json!({"source":"explicit","modelId":"native/model","options":{"thinkingEffort":"high","reasoning_effort":"wrong-option"}}),
+                None,
+                Some("native/model"),
                 Some("high"),
             ),
             (

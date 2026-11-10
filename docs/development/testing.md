@@ -183,6 +183,12 @@ Core smoke 增加同 Run 更正、待回执取消及普通后继。终态汇合�
 文件元数据、exists 与 patch 共用事件归一化和 native patch owners。真实 sub2api 开发 App 与受控 Provider 分开记账，
 结果和范围见[文件与 Steer 实施记录](../versions/v1.72/kilo-files-steer-verification.md)。
 
+边界自检沿原 smoke 限制 Runtime PATH 无 Node，Python MCP 分别使用相同/不同 cwd，
+验证 bundled CLI 的中文/空格路径和逐项 argv，继承 pure=true 的真实权限及相对 write 的持久 Diff。
+共享 MCP wire owner 验证 Kilo/Command Code 的同一原生 launcher；cleanup 原 owner 用 1.75 秒终态验证正式阶段预算。
+模型 metadata/Renderer 原 owners 覆盖 Kilo、Command Code 与 MiniMax effort；新增 Rust 测试函数仍为零。
+结果见[边界收尾](../versions/v1.72/kilo-boundary-fixes.md)。
+
 ## Rust 测试准入与退役门槛
 
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess

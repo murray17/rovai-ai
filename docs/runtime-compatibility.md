@@ -6,6 +6,20 @@ last_updated: 2026-11-09
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-09 Kilo 依赖与边界自检
+
+官方 Kilo **7.8.27**、macOS arm64，生产 Core/CLI 在 PATH 无 Node、继承 `KILO_PURE=true` 的隔离环境
+完成 **19 个 Run（17 成功、2 主动取消）**。绝对 Python MCP 的不同 cwd 通过 bundled CLI 私有入口执行，
+相同 cwd 直接执行；子进程均确认找不到 Node，中文/空格入口与包含空字符串的 literal argv 保持。
+原生具体权限/ask/deny、MCP A→B→A、Steer/unknown/普通后继和运行文件清理继续通过。
+相对 `allowed.txt` 的 write 形成持久化一个 add、+1/−0；冻结 Kilo effort=high 正确展示。
+
+旧 Core 在无 Node 的同一 MCP 场景失败；正式 cleanup 的受控 1.75 秒延迟终态也先复现提前截断，
+修正为共享 2 秒 interrupt、2.5 秒 flush 与既有非 Windows 3 秒总预算后通过。
+重复的是 file-operation JSON 投影，未发生第二次磁盘写入；delete 留在 Diff，共同投影不再覆盖。
+本轮未重新调用真实付费模型，也未验证 Windows launcher 或真实 Command Code；Preview 范围保持。
+[实施与失败对照](versions/v1.72/kilo-boundary-fixes.md)、[白名单结果](research/kilo-runtime/boundaries-7.8.27-macos-arm64.json)。
+
 ## 2026-11-09 Kilo 前台子代理、文件结果与 Steer
 
 macOS arm64、官方 Kilo **7.8.27** 的 `KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS=false`

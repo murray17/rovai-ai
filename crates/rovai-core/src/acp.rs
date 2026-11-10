@@ -5249,17 +5249,25 @@ impl AcpRuntime {
                             &mut server,
                             definition,
                             &self.execution_root,
+                            self.host
+                                .builtin_tool_process_config()
+                                .context("ACP Runtime has no bundled CLI")?
+                                .cli_executable(),
                         );
                     } else if self.host.adapter_kind == AdapterKind::KiloCli {
                         crate::runtime_mcp::adapt_acp_stdio_cwd(
                             &mut server,
                             definition,
                             &self.execution_root,
+                            self.host
+                                .builtin_tool_process_config()
+                                .context("ACP Runtime has no bundled CLI")?
+                                .cli_executable(),
                         );
                     }
-                    server
+                    Ok(server)
                 })
-                .collect()
+                .collect::<Result<Vec<_>>>()?
         } else {
             // These adapters receive Rovai servers through their native
             // additive configuration channel rather than ACP session fields.
@@ -6213,29 +6221,29 @@ impl AcpRuntime {
         Ok(true)
     }
 
-    pub async fn cancel(&self) -> Result<()> {
-        let session_id = self
-            .session_id()
-            .await
-            .context("ACP Session is not ready")?;
-        {
-            let mut child = self.host.child.lock().await;
-            self.host.capture_native_descendants(&mut child)?;
-        }
-        self.host
-            .fence_client_terminal_create(&session_id, &self.owner)
-            .await;
-        let cancellation = self
-            .host
-            .notify("session/cancel", json!({"sessionId": &session_id}))
-            .await;
-        self.host
-            .release_client_terminals_for_session(&session_id, &self.owner)
-            .await;
-        if self.adapter_kind() == AdapterKind::KiloCli && cancellation.is_ok() {
-            // Kilo releases its native turn/snapshot ownership while settling
-            // cancelled prompts. Let that finish before shared process teardown.
-            let _ = timeout(Duration::from_secs(2), async {
+    pub async fn cancel_until(&self, deadline: tokio::time::Instant) -> Result<()> {
+        tokio::time::timeout_at(deadline, async {
+            let session_id = self
+                .session_id()
+                .await
+                .context("ACP Session is not ready")?;
+            {
+                let mut child = self.host.child.lock().await;
+                self.host.capture_native_descendants(&mut child)?;
+            }
+            self.host
+                .fence_client_terminal_create(&session_id, &self.owner)
+                .await;
+            let cancellation = self
+                .host
+                .notify("session/cancel", json!({"sessionId": &session_id}))
+                .await;
+            self.host
+                .release_client_terminals_for_session(&session_id, &self.owner)
+                .await;
+            if self.adapter_kind() == AdapterKind::KiloCli && cancellation.is_ok() {
+                // Native turn/snapshot finalizers share the cleanup owner's
+                // interrupt deadline; no independent inner duration.
                 while self.host.is_alive()
                     && self
                         .host
@@ -6249,10 +6257,11 @@ impl AcpRuntime {
                 {
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
-            })
-            .await;
-        }
-        cancellation
+            }
+            cancellation
+        })
+        .await
+        .context("ACP cancellation deadline expired")?
     }
 
     pub(crate) fn preserve_zcode_host_after_cancel(&self) -> bool {
@@ -10230,20 +10239,24 @@ mod compaction_detector_tests {
             let mut command = Command::new("/selected/kilo");
             command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:{'git *':'allow','* --force':'deny'}},agent:{custom:{permission:{bash:{'git *':'allow','* --force':'deny'}}}},instructions:['native.md'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
             command.env("KILO_PERMISSION", r#"{"*":"allow","edit":"ask"}"#);
+            command.env("KILO_PURE", "true");
             crate::kilo::configure_command(&mut command);
-            assert_eq!(
-                command
-                    .as_std()
-                    .get_envs()
-                    .find(|(key, _)| *key == "KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS")
-                    .unwrap()
-                    .1
-                    .unwrap(),
-                "false"
-            );
             let file = root.join("kilo bootstrap 中文.md");
             crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
             crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
+            for key in ["KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "KILO_PURE"] {
+                assert_eq!(
+                    command
+                        .as_std()
+                        .get_envs()
+                        .find(|(name, _)| *name == key)
+                        .unwrap()
+                        .1
+                        .unwrap(),
+                    "false",
+                    "the required Kilo config hook must remain enabled"
+                );
+            }
             let content = command
                 .as_std()
                 .get_envs()
@@ -12038,7 +12051,10 @@ done
             .unwrap()
             .parse::<i32>()
             .unwrap();
-        runtime.cancel().await.unwrap();
+        runtime
+            .cancel_until(tokio::time::Instant::now() + Duration::from_secs(2))
+            .await
+            .unwrap();
 
         assert!(
             host.client_terminal_bridge
@@ -13259,7 +13275,10 @@ while IFS= read -r ignored; do :; done
                 break;
             }
         }
-        runtime.cancel().await.unwrap();
+        runtime
+            .cancel_until(tokio::time::Instant::now() + Duration::from_secs(2))
+            .await
+            .unwrap();
         loop {
             let incoming = tokio::time::timeout(Duration::from_secs(30), receiver.recv())
                 .await
@@ -13858,7 +13877,13 @@ while IFS= read -r ignored; do :; done
                             && reply["result"]["stopReason"] == "cancelled")
                             .then(|| {
                                 let runtime = runtime.clone();
-                                tokio::spawn(async move { runtime.cancel().await })
+                                tokio::spawn(async move {
+                                    runtime
+                                        .cancel_until(
+                                            tokio::time::Instant::now() + Duration::from_secs(2),
+                                        )
+                                        .await
+                                })
                             });
                         if let Some(cancellation) = cancellation.as_mut() {
                             timeout(Duration::from_secs(1), async {

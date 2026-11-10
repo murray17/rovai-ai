@@ -2905,11 +2905,11 @@ impl AgentRunRuntime {
         }
     }
 
-    async fn cancel(&self) -> Result<()> {
+    async fn cancel_until(&self, deadline: tokio::time::Instant) -> Result<()> {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
             Self::Pi(runtime) => runtime.cancel().await,
-            Self::Acp(runtime) => runtime.cancel().await,
+            Self::Acp(runtime) => runtime.cancel_until(deadline).await,
             Self::Claude {
                 adapter,
                 run_id,
@@ -6212,18 +6212,14 @@ impl Core {
                 {
                     return false;
                 }
-                match run_with_cancellation_deadline(
-                    RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
-                    runtime.cancel(),
-                )
-                .await
-                {
-                    Some(Ok(())) => {}
-                    Some(Err(error)) => eprintln!(
+                let deadline = tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT;
+                match tokio::time::timeout_at(deadline, runtime.cancel_until(deadline)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => eprintln!(
                         "planned stop failed for AgentRun {}: {error:#}",
                         execution.key.agent_run_id
                     ),
-                    None => eprintln!(
+                    Err(_) => eprintln!(
                         "planned stop timed out for AgentRun {}",
                         execution.key.agent_run_id
                     ),
@@ -15079,8 +15075,8 @@ impl Core {
         let started = tokio::time::Instant::now();
         let deadline = started + RUNTIME_CANCELLATION_TOTAL_TIMEOUT;
         tokio::time::timeout_at(deadline, async {
-            let interrupt_deadline = started + Duration::from_secs(1);
-            let flush_deadline = started + Duration::from_millis(1500);
+            let interrupt_deadline = started + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT;
+            let flush_deadline = interrupt_deadline + Duration::from_millis(500);
             let key = ActiveExecutionKey::new(agent_run_id, execution_epoch);
             self.planned_shutdown.cancel_active(&key).await;
             let mut flushed = false;
@@ -15099,7 +15095,11 @@ impl Core {
                 } else if let Some(runtime) =
                     self.agent_run_runtime(agent_run_id, execution_epoch).await
                 {
-                    let _ = tokio::time::timeout_at(interrupt_deadline, runtime.cancel()).await;
+                    let _ = tokio::time::timeout_at(
+                        interrupt_deadline,
+                        runtime.cancel_until(interrupt_deadline),
+                    )
+                    .await;
                     flushed =
                         tokio::time::timeout_at(flush_deadline, runtime.detach_and_flush_ingress())
                             .await
@@ -23457,7 +23457,9 @@ async fn process_acp_input_accepted(
                 "failed to mark mismatched ACP input evidence unknown for AgentRun {agent_run_id}: {mark_error:#}"
             );
         }
-        let _ = runtime.cancel().await;
+        let _ = runtime
+            .cancel_until(tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT)
+            .await;
         return;
     }
     match core
@@ -23472,7 +23474,9 @@ async fn process_acp_input_accepted(
             eprintln!(
                 "failed to persist ACP input acceptance for AgentRun {agent_run_id}: {error:#}"
             );
-            let _ = runtime.cancel().await;
+            let _ = runtime
+                .cancel_until(tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT)
+                .await;
         }
     }
 }
@@ -24286,14 +24290,14 @@ fn normalize_acp_event_with_completion(
             if adapter_kind == AdapterKind::KiloCli
                 && public_status == "completed"
                 && completion.is_some_and(|value| value.native_kind == "edit")
-                && let Some(entries) = crate::kilo::file_diff_entries(
-                    &update,
-                    completion.and_then(|value| value.public_file_operation_path.as_deref()),
-                )
+                && let Some(entries) = crate::kilo::file_diff_entries(&update)
             {
                 payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
                     "sourceEventKind":"session/update.tool_call_update.completed", "semanticKind":"kilo_file_patch","entries":entries});
-                if entries.as_array().is_some_and(|entries| entries.len() == 1) {
+                if payload.get("runtimeFileOperation").is_none()
+                    && entries.as_array().is_some_and(|entries| entries.len() == 1)
+                    && matches!(entries[0]["changeKind"].as_str(), Some("add" | "update"))
+                {
                     payload["runtimeFileOperation"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
                         "sourceEventKind":"session/update.tool_call_update.completed","operationKind":"write",
                         "path":entries[0]["path"],"changeKind":entries[0]["changeKind"]});
@@ -37670,6 +37674,95 @@ for line in sys.stdin:
         assert!(runtime.process_id().await.is_none());
         core.planned_shutdown.cleanup_completed(&late_key).await;
         drop(runtime);
+
+        // The production cleanup must let a native prompt settle after the old
+        // 1s interrupt / 1.5s flush windows, within the one total deadline.
+        let kilo_executable = root.join("delayed-kilo");
+        write_runtime_resolution_executable(
+            &kilo_executable,
+            r#"#!/usr/bin/python3
+import json, pathlib, sys, time
+prompt = None
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    if method == 'session/prompt':
+        prompt = request['id']
+        continue
+    if method == 'session/cancel':
+        time.sleep(1.75)
+        pathlib.Path(__file__).with_suffix('.settled').write_text('settled')
+        print(json.dumps({'jsonrpc':'2.0','id':prompt,'result':{'stopReason':'cancelled'}}), flush=True)
+        continue
+    if method == 'initialize':
+        result = {'protocolVersion':1,'agentCapabilities':{}}
+    elif method == 'session/new':
+        result = {'sessionId':'delayed-cancel-session','configOptions':[]}
+    else:
+        result = {}
+    if 'id' in request:
+        print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}), flush=True)
+"#,
+        );
+        let mut kilo_config = runtime_config.clone();
+        kilo_config.adapter_kind = AdapterKind::KiloCli;
+        kilo_config.executable_path = kilo_executable.to_string_lossy().into_owned();
+        kilo_config.executable_fingerprint = fingerprint_executable(&kilo_executable).unwrap();
+        kilo_config.reported_version = Some("7.8.27".into());
+        kilo_config.protocol_version = "acp-v1".into();
+        kilo_config.permissions = serde_json::from_value(
+            json!({"adapterKind":"kilo-cli","schemaVersion":1,"values":{"permission":"allow"}}),
+        )
+        .unwrap();
+        let workspace =
+            AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+        let adapter = core.acp_adapter(AdapterKind::KiloCli).unwrap();
+        let runtime = adapter
+            .ensure_agent_run_runtime(
+                "delayed-kilo",
+                1,
+                "cleanup-camp",
+                "cleanup-agent",
+                "delayed-binding",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &kilo_config,
+                &builtin_tools,
+                &BTreeMap::new(),
+                "mcp",
+                &root,
+                &Some("cleanup-kilo".into()),
+                Some("TEST_BOOTSTRAP"),
+                |runtime| async move { Ok(runtime) },
+            )
+            .await
+            .unwrap();
+        runtime
+            .start_or_resume_session_with_native_rules(
+                None,
+                acp::AcpSessionCapabilities::default(),
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        runtime.start_prompt("delayed-input", "run").await.unwrap();
+        let started = tokio::time::Instant::now();
+        let fence = core
+            .cleanup_agent_run_runtime("delayed-kilo", 1, "kilo-cli")
+            .await;
+        assert_ne!(fence, RuntimeCancellationIngressFence::Unproven);
+        assert!(
+            kilo_executable.with_extension("settled").exists(),
+            "cleanup truncated the native cancellation finalizer"
+        );
+        assert!(started.elapsed() >= Duration::from_millis(1750));
+        assert!(started.elapsed() < RUNTIME_CANCELLATION_TOTAL_TIMEOUT);
+        assert!(adapter.get_agent_run("delayed-kilo", 1).await.is_none());
+        drop(runtime);
         drop(builtin_tools);
         drop(core);
         std::fs::remove_dir_all(root).unwrap();
@@ -37765,23 +37858,35 @@ for line in sys.stdin:
             }
             assert!(!payload.to_string().contains("MINI_PRIVATE_DETAILS"));
         }
-        for (shape, status, truncated, has_diff) in [
-            ("write", "completed", false, true),
-            ("patch", "completed", false, true),
-            ("write", "failed", false, false),
-            ("patch", "in_progress", false, false),
-            ("write", "completed", true, false),
+        for (shape, status, truncated, operation_path, change_kind, has_diff) in [
+            ("write", "completed", false, "/repo/src/a.txt", "add", true),
+            ("write", "completed", false, "src/a.txt", "add", true),
+            ("write", "completed", false, "src/../src/a.txt", "add", true),
+            ("patch", "completed", false, "", "add", true),
+            ("patch", "completed", false, "", "delete", true),
+            ("write", "failed", false, "/repo/src/a.txt", "add", false),
+            ("patch", "in_progress", false, "", "add", false),
+            ("write", "completed", true, "/repo/src/a.txt", "add", false),
         ] {
-            let patch = "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -0,0 +1 @@\n+new\n";
+            let patch = if change_kind == "delete" {
+                "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -1 +0,0 @@\n-old\n"
+            } else {
+                "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -0,0 +1 @@\n+new\n"
+            };
             let mut metadata = if shape == "write" {
                 json!({"filepath":"/repo/src/a.txt","exists":false,"filediff":{"file":"/repo/src/a.txt","patch":patch}})
             } else {
-                json!({"files":[{"filePath":"/repo/src/a.txt","type":"add","patch":patch}]})
+                json!({"files":[{"filePath":"/repo/src/a.txt","type":change_kind,"patch":patch}]})
             };
             metadata["truncated"] = json!(truncated);
             metadata["private"] = json!("KILO_PRIVATE_METADATA");
+            let locations = if operation_path.is_empty() {
+                json!([])
+            } else {
+                json!([{"path":operation_path}])
+            };
             let params = json!({"update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-file","kind":"edit","status":status,
-                "locations":[{"path":"/repo/src/a.txt"}],"rawOutput":{"metadata":metadata}}});
+                "locations":locations,"rawOutput":{"metadata":metadata}}});
             let completion = acp::completed_action(AdapterKind::KiloCli, &params).unwrap();
             let (_, payload) = normalize_acp_event_with_completion(
                 AdapterKind::KiloCli,
@@ -37792,22 +37897,54 @@ for line in sys.stdin:
             assert_eq!(
                 !payload["runtimeDiff"].is_null(),
                 has_diff,
-                "{shape} {status}"
+                "{shape} {status} {operation_path}"
             );
             if has_diff {
-                let admitted = rovai_core::runtime_diff::admit_runtime_diff(
-                    &payload,
-                    Path::new("/repo"),
-                    Some("kilo-cli"),
-                )
-                .unwrap()
-                .unwrap();
+                let admitted =
+                    rovai_core::runtime_diff::admit_runtime_diff_with_file_operation_path(
+                        &payload,
+                        Path::new("/repo"),
+                        Some("kilo-cli"),
+                        payload
+                            .pointer("/runtimeFileOperation/path")
+                            .and_then(Value::as_str),
+                    )
+                    .unwrap()
+                    .unwrap();
                 assert_eq!(
                     (admitted.entries[0].additions, admitted.entries[0].deletions),
-                    (1, 0)
+                    if change_kind == "delete" {
+                        (0, 1)
+                    } else {
+                        (1, 0)
+                    }
                 );
-                assert_eq!(admitted.entries[0].change_kind, "add");
-                assert_eq!(payload["runtimeFileOperation"]["path"], "/repo/src/a.txt");
+                assert_eq!(admitted.entries[0].change_kind, change_kind);
+                if change_kind == "delete" {
+                    assert!(
+                        payload.get("runtimeFileOperation").is_none(),
+                        "deletion belongs to Diff, never a write operation"
+                    );
+                } else {
+                    let expected_path = if shape == "write" {
+                        operation_path
+                    } else {
+                        "/repo/src/a.txt"
+                    };
+                    assert_eq!(
+                        payload["runtimeFileOperation"]["path"], expected_path,
+                        "preserve the common operation instead of rebuilding it"
+                    );
+                    assert!(
+                        rovai_core::runtime_file_operation::admit_runtime_file_operation(
+                            &payload,
+                            Path::new("/repo"),
+                            Some("kilo-cli")
+                        )
+                        .unwrap()
+                        .is_ok()
+                    );
+                }
             }
             assert!(!payload.to_string().contains("KILO_PRIVATE_METADATA"));
         }

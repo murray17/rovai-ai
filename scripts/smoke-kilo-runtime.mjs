@@ -5,7 +5,7 @@ import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { createInterface } from 'node:readline'
-import { mkdtemp, mkdir, realpath, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, realpath, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
@@ -17,8 +17,10 @@ const executable = process.env.ROVAI_KILO_BIN
 assert(executable && isAbsolute(executable), 'ROVAI_KILO_BIN must select an absolute official CLI')
 const repo = resolve(import.meta.dirname, '..')
 const root = await realpath(process.env.ROVAI_KILO_SMOKE_ROOT ?? await mkdtemp(join(tmpdir(), 'rovai-kilo-core-')))
-for (const part of ['home','project','core','config','data','member-data','cache','state','evidence','service']) await mkdir(join(root,part))
+for (const part of ['home','project','core','config','data','member-data','cache','state','evidence','service','bundled tools']) await mkdir(join(root,part))
 const project = join(root,'project'), data = join(root,'core')
+const binaries=join(root,'bundled tools')
+for(const name of ['rovai-core','rovai'])await copyFile(join(repo,'target/debug',name),join(binaries,name))
 execFileSync('git',['init','--quiet',project])
 const startedFile = join(project,'cancel-started'), lateFile = join(project,'cancel-late')
 const quote = s => "'"+s.replaceAll("'","'\\''")+"'"
@@ -65,7 +67,7 @@ async function serve(req,res) {
     delta={role:'assistant',tool_calls:[{index:0,id:'call_mcp_'+calls.length,type:'function',function:{name:tool.function.name,arguments:'{"text":"CORE_MCP_MARKER"}'}}]};finish='tool_calls'
   } else if(body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_WRITE') && body.tools?.some(t=>t.function.name==='write')) {
     const filename=content.includes('CORE_WRITE_ALLOW')?'allowed.txt':'denied.txt'
-    delta={role:'assistant',tool_calls:[{index:0,id:'call_write_'+calls.length,type:'function',function:{name:'write',arguments:JSON.stringify({filePath:join(project,filename),content:'KILO_WRITE_OK'})}}]};finish='tool_calls'
+    delta={role:'assistant',tool_calls:[{index:0,id:'call_write_'+calls.length,type:'function',function:{name:'write',arguments:JSON.stringify({filePath:filename,content:'KILO_WRITE_OK'})}}]};finish='tool_calls'
   } else if(body.messages.at(-1)?.role!=='tool' && body.tools?.some(t=>t.function.name==='bash')) {
     let command
     if(content?.includes('CORE_FIRST_CLI')) command="printf KILO_CORE_STDOUT; rovai send --public-only --body KILO_CORE_CLI"
@@ -102,14 +104,19 @@ const config={permission:{bash:{'printf *':'allow','* KILO_INLINE_BLOCKED*':'den
   agent:{build:{permission:{bash:{'printf KILO_AGENT*':'allow','* KILO_AGENT_BLOCKED*':'deny'}}}},autoupdate:false,share:'disabled',enabled_providers:['local'],model:'local/local-model',small_model:'local/local-model',
   provider:{local:{name:'Local smoke',npm:'@ai-sdk/openai-compatible',env:[],options:{apiKey:'fixture-key',baseURL:'http://127.0.0.1:'+provider.address().port+'/v1'},
     models:{'local-model':{name:'Local model',tool_call:true,variants:{low:{temperature:0.1},high:{temperature:0.8}},cost:{input:1,output:2,cache_read:0.5,cache_write:1},limit:{context:32768,output:2048}}}}}}
-const environment={...isolatedKiloEnvironment(root),ROVAI_KILO_BIN:executable,
+const noNodePath='/usr/bin:/bin:/usr/sbin:/sbin'
+const python=execFileSync('python3',['-c','import sys; print(sys.executable)'],{encoding:'utf8'}).trim()
+const environment={...isolatedKiloEnvironment(root),PATH:noNodePath,ROVAI_KILO_BIN:executable,
   XDG_CONFIG_HOME:join(root,'config'),XDG_DATA_HOME:join(root,'data'),XDG_CACHE_HOME:join(root,'cache'),XDG_STATE_HOME:join(root,'state'),
-  KILO_CONFIG_CONTENT:JSON.stringify(config),KILO_CLIENT:'acp',KILO_DISABLE_AUTOUPDATE:'1',
+  KILO_CONFIG_CONTENT:JSON.stringify(config),KILO_PURE:'true',KILO_CLIENT:'acp',KILO_DISABLE_AUTOUPDATE:'1',
   KILO_DISABLE_MODELS_FETCH:'1',KILO_DISABLE_EXTERNAL_SKILLS:'1',KILO_DISABLE_CLAUDE_CODE:'1',
   KILO_DISABLE_DEFAULT_PLUGINS:'1',KILO_DISABLE_LSP_DOWNLOAD:'1',KILO_EXPERIMENTAL_DISABLE_FILEWATCHER:'1'}
+assert.throws(()=>execFileSync('node',['--version'],{env:environment,stdio:'pipe'}),error=>error.code==='ENOENT','The runtime fixture must have no Node in PATH')
+result.checks.nodeAbsentFromPath=true
+result.checks.inheritedPureMode=true
 let core, index=0
 async function openCore(){
-  const child=spawn(join(repo,'target/debug/rovai-core'),[...coreDataDirectoryArguments(data,{homeDirectory:join(root,'home')}),'--skill-library-root',join(data,'managed-skill-library'),'--mcp-config-path',join(data,'mcp.json')],{cwd:repo,env:environment,stdio:['pipe','pipe','pipe']})
+  const child=spawn(join(binaries,'rovai-core'),[...coreDataDirectoryArguments(data,{homeDirectory:join(root,'home')}),'--skill-library-root',join(data,'managed-skill-library'),'--mcp-config-path',join(data,'mcp.json')],{cwd:repo,env:environment,stdio:['pipe','pipe','pipe']})
   const pending=new Map();let id=0,stderr='',closePromise,ended=false
   const closed=new Promise(r=>child.once('close',(code,signal)=>{ended=true;r({code,signal})}))
   child.stderr.on('data',b=>stderr=(stderr+b).slice(-64000))
@@ -249,10 +256,31 @@ try{
   assert.equal(c.started.nativeThreadId,a.started.nativeThreadId,'Core restart must preserve exact native ID')
   assert.notEqual(c.started.hostInstanceId,a.started.hostInstanceId,'Cold resume must create a fresh Host')
   assert(calls.slice(before).some(c=>JSON.stringify(c.messages).includes('CORE_WARM')),'Native history must survive Core restart')
+  assert.equal(c.run.runtimeModel.reasoningEffort,'high','Frozen Kilo effort must reach the history read model')
   result.checks.cold={run:c.run.id,host:c.started.hostInstanceId,session:c.started.nativeThreadId}
   const startsPath=join(root,'evidence','mcp-starts.jsonl')
-  const serverCode="import {appendFileSync} from 'node:fs'; appendFileSync(process.env.STARTS,JSON.stringify({pid:process.pid,cwd:process.cwd(),source:process.env.ROVAI_MCP_SMOKE_SOURCE})+'\\n'); await import("+JSON.stringify(new URL('./crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs','file://'+repo+'/').href)+")"
-  const definition=source=>JSON.stringify({mcpServers:{kilo_review:{command:process.execPath,args:['--input-type=module','--eval',serverCode],cwd:join(root,'service'),env:{STARTS:startsPath,ROVAI_MCP_SMOKE_SOURCE:source}}}})
+  const serverFile=join(root,'service','mcp.py')
+  await writeFile(serverFile,`import json, os, shutil, sys
+source=os.environ['ROVAI_MCP_SMOKE_SOURCE']
+with open(os.environ['STARTS'],'a') as log:
+    log.write(json.dumps({'pid':os.getpid(),'cwd':os.getcwd(),'source':source,'args':sys.argv[1:],'node':shutil.which('node')})+'\\n')
+for line in sys.stdin:
+    request=json.loads(line)
+    if 'id' not in request: continue
+    method=request.get('method')
+    if method=='initialize':
+        result={'protocolVersion':request.get('params',{}).get('protocolVersion','2025-06-18'),'capabilities':{'tools':{}},'serverInfo':{'name':'kilo-python-smoke','version':'1.0.0'}}
+    elif method=='tools/list':
+        result={'tools':[{'name':'echo','description':'Return the fixture marker','inputSchema':{'type':'object','properties':{'text':{'type':'string'}},'required':['text'],'additionalProperties':False}}]}
+    elif method=='tools/call':
+        result={'content':[{'type':'text','text':source+':'+request.get('params',{}).get('arguments',{}).get('text','')}]}
+    else:
+        print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32601,'message':'Unsupported method'}}),flush=True)
+        continue
+    print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
+`)
+  const literalArgs=['two words','中文 & 空格','$() `literal`','--flag=value','']
+  const definition=(source,cwd=join(root,'service'))=>JSON.stringify({mcpServers:{kilo_review:{command:python,args:['-u',serverFile,...literalArgs],cwd,env:{PATH:noNodePath,STARTS:startsPath,ROVAI_MCP_SMOKE_SOURCE:source}}}})
   let mcp=await core.request('mcp.config.get')
   let mutation=await core.request('mcp.servers.create',{expectedConfigDigest:mcp.configDigest,definitionJson:definition('KILO_MCP_A')})
   assert.equal(mutation.status,'ok',JSON.stringify(mutation));mcp=mutation.config
@@ -268,12 +296,16 @@ try{
   const childA=(await starts()).at(-1)
   assert.equal(childA.source,'KILO_MCP_A')
   assert.equal(childA.cwd,join(root,'service'),'MCP explicit cwd must survive ACP projection')
-  mutation=await core.request('mcp.servers.update',{expectedConfigDigest:mcp.configDigest,serverId,definitionJson:definition('KILO_MCP_B')})
+  assert.equal(childA.node,null,'The actual MCP child must also have no Node in PATH')
+  assert.deepEqual(childA.args,literalArgs,'The bundled launcher must preserve literal argv without Node or a shell')
+  mutation=await core.request('mcp.servers.update',{expectedConfigDigest:mcp.configDigest,serverId,definitionJson:definition('KILO_MCP_B',project)})
   assert.equal(mutation.status,'ok',JSON.stringify(mutation));mcp=mutation.config
   await dead(childA.pid)
   const bMcp=await settle(await send('CORE_MCP_B'))
   const childB=(await starts()).at(-1)
   assert.equal(childB.source,'KILO_MCP_B')
+  assert.equal(childB.cwd,project,'Same-cwd MCP must start directly without a launcher')
+  assert.equal(childB.node,null)
   assert.notEqual(bMcp.started.hostInstanceId,aMcp.started.hostInstanceId)
   const active=await send('CORE_MCP_BUSY')
   await Promise.race([busyEntered,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Busy MCP model gate timeout')),10000))])
@@ -288,7 +320,7 @@ try{
   assert.notEqual(restored.started.hostInstanceId,bMcp.started.hostInstanceId)
   assert.equal(restored.started.nativeThreadId,a.started.nativeThreadId)
   assert.equal((await starts()).at(-1).source,'KILO_MCP_A')
-  result.checks.mcp={cwd:childA.cwd,idleRetiredPid:childA.pid,busyRetiredPid:childB.pid,busyRun:busy.run.id,firstHost:aMcp.started.hostInstanceId,secondHost:bMcp.started.hostInstanceId,restoredHost:restored.started.hostInstanceId}
+  result.checks.mcp={cwd:childA.cwd,sameCwd:childB.cwd,literalArgsPreserved:true,nodeAbsentInChild:true,idleRetiredPid:childA.pid,busyRetiredPid:childB.pid,busyRun:busy.run.id,firstHost:aMcp.started.hostInstanceId,secondHost:bMcp.started.hostInstanceId,restoredHost:restored.started.hostInstanceId}
   const setPermission=async(permission)=>{
     const current=await core.request('members.get',{agentId:'agent_2'})
     const receipt=await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{agentId:'agent_2',expectedVersion:current.version,adapterKind:'kilo-cli',model:current.runtimeConfiguration.model,permissions:{...current.runtimeConfiguration.permissions,values:{permission}}}})
@@ -298,6 +330,22 @@ try{
   approvalDecision='allow_once'
   const allowed=await settle(await send('CORE_WRITE_ALLOW'))
   assert.equal(await readFile(join(project,'allowed.txt'),'utf8'),'KILO_WRITE_OK')
+  const fileProjectionDatabase=new DatabaseSync(join(data,'rovai.sqlite'),{readOnly:true})
+  try {
+    let projection
+    const deadline=Date.now()+5000
+    while(Date.now()<deadline) {
+      await core.request('camps.snapshot',{threadId})
+      projection=fileProjectionDatabase.prepare('SELECT status,file_count,additions,deletions,files_summary_json FROM agent_run_file_change_projection WHERE agent_run_id=?').get(allowed.run.id)
+      if(projection?.status==='complete')break
+      await delay()
+    }
+    assert(projection?.status==='complete','Relative native write must publish a completed file projection')
+    assert.deepEqual([projection.file_count,projection.additions,projection.deletions],[1,1,0])
+    const files=JSON.parse(projection.files_summary_json)
+    assert.equal(files[0].path,'allowed.txt');assert.equal(files[0].changeKind,'add')
+    result.checks.relativeWriteDiff={run:allowed.run.id,path:files[0].path,additions:projection.additions,deletions:projection.deletions}
+  } finally {fileProjectionDatabase.close()}
   approvalDecision='deny'
   const denied=await settle(await send('CORE_WRITE_DENY'))
   assert.equal(await readFile(join(project,'denied.txt'),'utf8').catch(e=>e.code==='ENOENT'?null:Promise.reject(e)),null)

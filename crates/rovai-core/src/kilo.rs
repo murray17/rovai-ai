@@ -14,7 +14,7 @@ pub(crate) const BOOTSTRAP_FILE: &str = "bootstrap.md";
 
 /// Applied result patches from Kilo's native write/edit and apply_patch tools.
 /// Header/path validation and rendering remain in the shared Diff projection.
-pub(crate) fn file_diff_entries(update: &Value, operation_path: Option<&str>) -> Option<Value> {
+pub(crate) fn file_diff_entries(update: &Value) -> Option<Value> {
     let metadata = update.pointer("/rawOutput/metadata")?;
     if metadata["truncated"] == true {
         return None;
@@ -29,9 +29,6 @@ pub(crate) fn file_diff_entries(update: &Value, operation_path: Option<&str>) ->
     }
     let file = metadata.get("filediff")?;
     let path = file["file"].as_str()?;
-    if operation_path != Some(path) {
-        return None;
-    }
     Some(
         json!([{"path":path,"changeKind":if metadata["exists"] == false {"add"} else {"update"},"diff":file["patch"].as_str()?}]),
     )
@@ -156,6 +153,9 @@ pub(crate) fn configure_execution(
     .context("failed to write Kilo native config hook")?;
     config.append_path("instructions", bootstrap_file)?;
     config.append_path("plugin", &plugin)?;
-    command.env("KILO_CONFIG_CONTENT", serde_json::to_string(&config)?);
+    // Saved permissions require this native config hook during execution.
+    command
+        .env("KILO_CONFIG_CONTENT", serde_json::to_string(&config)?)
+        .env("KILO_PURE", "false");
     Ok(())
 }
