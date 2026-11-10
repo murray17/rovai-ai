@@ -1794,10 +1794,10 @@ version/auth 零调用及一次正文/零重放。Codex 既有真实 Host owner 
 `cargo test -p rovai-core --features slow-tests --lib dsh_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`。
 
 现有 Core 检查队列 owner `codex_catalog_waiters_share_refresh_without_satisfying_full_validation` 验证其他
-Runtime 的合并与检查强度不变；DSH 原生计数和配置变更屏障进入既有
+Runtime 的同用途合并与目录／完整检查隔离；DSH 原生计数和配置变更屏障进入既有
 `scripts/smoke-dsh-model-availability.mjs`，使用合成凭据和本地接收服务。60 秒过期场景仅在隔离数据库
 将对应成功时间调旧，不通过睡眠拖慢验收，不修改日常数据库。生产参数控件继续由
-`node --test scripts/lib/runtime-model-picker.test.mjs` 验证默认模型零查询、历史显示及迟到结果保护。
+`node --test scripts/lib/runtime-model-picker.test.mjs` 验证可见区域按需读取目录、默认模型不额外查询逐模型参数、历史显示及迟到结果保护。
 
 ## 原生会话恢复 owner（2026-10-12）
 

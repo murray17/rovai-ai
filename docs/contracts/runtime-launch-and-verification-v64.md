@@ -109,7 +109,7 @@ Pi 保留初始 Session ID/file/cwd、managed extension 和模型一致性校验
 ZCode 只有明确的 probe 入口从 `session/create` snapshot 形成结果，跳过事件订阅与重复 `setMode`。
 正式新建和恢复即使尚无输入，也仍执行订阅与对应状态处理；不以是否存在 Prompt 判断。
 
-所有检查函数可复用绑定当前 Installation／路径／文件身份的可信版本。成功且未失效的同程序能力快照
+完整检查每轮重新读取版本，后续适配器调用复用绑定当前 Installation／路径／文件身份的本轮版本。成功且未失效的同程序能力快照
 已含当前适配器所需静态证据时，Claude／Antigravity 跳过 help，Codex 跳过普通 Schema 导出；
 缺证据仍走现有有界探测。Codex 只顺带记录普通 Schema 中的 Fast 字段，或保留同程序已有的正向证据；
 不为补 Fast 证据执行 experimental Schema 导出。Fast 保存与实际参数下发遵循
@@ -122,13 +122,12 @@ Windows 命令包装入口继续执行既有依赖校验，不套用普通单文
 
 ## MiniMax 健康结果与完整参数目录
 
-MiniMax 普通检查读取 `session/new` 的模型列表和当前模型参数，不执行模型切换／恢复循环。
+MiniMax 保留的完整检查读取 `session/new` 的模型列表和当前模型参数，不执行模型切换／恢复循环。
 完整参数仍由现有 `CatalogOpen` 请求在同一临时 Session 逐模型读取。Check Manager 的 pending、active
-合并均区分 MiniMax 的普通检查与目录意图；同意图／同目标仍合并，其他 Runtime 的现有复用边界保持。
-首次或健康证据失效的目录请求走完整检查回退时，保留目录意图并读完参数后才完成等待者。
+合并均按同用途／同目标处理；目录请求直接读取原生目录，不因首次或健康证据失效回退完整检查。
 
-普通检查成功只更新健康成功时间。同一有效身份与配置下已有完整目录时保留其内容和原目录成功时间；
+完整检查成功只更新健康成功时间。同一有效身份与配置下已有完整目录时保留其内容和原目录成功时间；
 只有当前模型信息时保存实际结果，`model_catalog_succeeded_at` 仍无完整成功证据。程序、locator 或配置
 失效的旧目录不能由部分结果重新生效。MiniMax 不以健康成功时间回填目录成功时间；无完整证据使用现有
 `unavailable`／`invalidated`，不能用 `stale` 冒充完整目录而参与已保存参数的过滤。完整目录成功才更新
-既有目录时间；没有新增持久字段或目录状态。其他 Runtime 的目录时间回退与 Fresh/Stale 语义保持。
+既有目录时间；没有新增持久字段或目录状态。其他 Runtime 同样使用目录自身成功时间，Fresh/Stale 的 TTL 保持。

@@ -76,13 +76,17 @@ async function refresh() {
     console.error(JSON.stringify({ check: checked, attempt: failed?.lastProbeAttempt, snapshot: failed?.snapshot }))
   }
   assert.equal(checked.ready, true, JSON.stringify(checked))
-  const deadline = Date.now() + 45000
-  while (Date.now() < deadline) {
-    installation = (await core.request('runtime.installations.list')).find(row => row.adapterKind === 'deepseek-harness')
-    if (installation?.snapshot?.probeStatus === 'ready') return installation.snapshot.models
-    await new Promise(done => setTimeout(done, 100))
-  }
-  assert.fail('DSH probe did not become ready')
+  installation = (await core.request('runtime.installations.list')).find(row => row.adapterKind === 'deepseek-harness')
+  // Advance only this fixture's directory timestamp to exercise a real refresh.
+  const cacheDb = new DatabaseSync(join(data, 'rovai.sqlite'))
+  try {
+    cacheDb.prepare('UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at = ? WHERE installation_id = ? AND model_catalog_succeeded_at IS NOT NULL')
+      .run(new Date(Date.now() - 3600000).toISOString(), installation.id)
+  } finally { cacheDb.close() }
+  const catalog = await core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness', waitForRefresh: true })
+  assert.equal(catalog.refreshStatus, 'completed')
+  installation = (await core.request('runtime.installations.list')).find(row => row.adapterKind === 'deepseek-harness')
+  return catalog.models
 }
 async function select(provider, source, model = 'same-model', options = { reasoning_effort: 'high' }) {
   const profile = await core.request('members.get', { agentId: 'agent_2' })
@@ -277,9 +281,9 @@ child.on('close', code => process.exit(code ?? 1))
   ageB()
   const failedTime = successfulAt(await cachedTarget('effort-b'), 'effort-b')
   await writeFile(join(root, 'fail-options'), '')
-  const failedRead = await core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness',
-    modelId: modelId('thinking', 'effort-b'), dshSource: 'web' })
-  assert.equal(failedRead.refreshStatus, 'failed')
+  await assert.rejects(core.request('runtime.modelCatalog.open', { runtimeKind: 'deepseek-harness',
+    modelId: modelId('thinking', 'effort-b'), dshSource: 'web' }), /isolated option failure/)
+  const failedRead = await cachedTarget('effort-b')
   assert.equal(successfulAt(failedRead, 'effort-b'), failedTime, 'Failure cannot refresh the success timestamp')
   assert(failedRead.models.find(model => model.id === modelId('thinking', 'effort-b')).options.length)
   await rm(join(root, 'fail-options'))
