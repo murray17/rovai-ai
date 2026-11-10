@@ -38,6 +38,7 @@ export function openRuntimeModelCatalog(runtimeKind: AdapterKind, request: Rovai
   return request<RuntimeModelCatalogView>('runtime.modelCatalog.open', {
     runtimeKind,
     ...(waitForRefresh ? { waitForRefresh: true } : {}),
+    ...(target?.forceRefresh ? { forceRefresh: true } : {}),
     ...(runtimeKind === 'deepseek-harness' && target ? target : {})
   })
 }

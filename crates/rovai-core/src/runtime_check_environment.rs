@@ -86,13 +86,18 @@ impl Core {
         let search = Arc::new(search.with_generation(generation));
         let summary = search.summary();
         if changed {
-            self.database
-                .lock()
-                .await
-                .record_runtime_search_environment_generation(
-                    summary.generation,
-                    &summary.created_at,
-                )?;
+            let mut database = self.database.lock().await;
+            // Only a comparison of actual inputs invalidates shared catalogs;
+            // startup's counter reset must not clear unrelated Runtime caches.
+            database.connection().execute(
+                "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=NULL",
+                [],
+            )?;
+            database.record_runtime_search_environment_generation(
+                summary.generation,
+                &summary.created_at,
+            )?;
+            drop(database);
             search.activate_for_runtime_commands();
             self.native_skill_discovery.invalidate_cache();
         }

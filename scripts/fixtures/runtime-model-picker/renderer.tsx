@@ -47,19 +47,23 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
 function Fixture(): React.JSX.Element {
   const [kind, setKind] = useState<AdapterKind>('codex-cli')
   const [page, setPage] = useState('member')
+  const [visible, setVisible] = useState(true)
   const [mode, setMode] = useState('normal')
   const [generation, setGeneration] = useState(1)
   const [catalogExpired, setCatalogExpired] = useState(false)
   const [disabled, setDisabled] = useState(false)
-  const [visible, setVisible] = useState(true)
   const [dshReadMode, setDshReadMode] = useState('normal')
   const [observation, setObservation] = useState(0)
-  const installation = fixture(kind, mode === 'empty' || mode === 'pending', generation,
-    mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
+  const [projection, setProjection] = useState<RuntimeModelCatalogView | null>(null)
+  const installation = fixture(kind, ['empty', 'pending', 'failed-no-cache', 'deferred-empty'].includes(mode), generation,
+    mode.startsWith('failed') || mode.startsWith('deferred') || mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
-  if (mode === 'failed' || mode === 'failed-empty' || (kind === 'deepseek-harness' && state.holdDshCatalog)) installation.modelCatalog.status = 'stale'
-  if (state.expiredPublishedCatalog) installation.modelCatalog = { ...state.expiredPublishedCatalog, status: 'expired' }
+  if (projection?.runtimeKind === kind) {
+    installation.modelCatalog = projection.cache
+    installation.snapshot!.models = projection.models
+  }
+  if (state.healthStale) installation.snapshot!.staleAt = state.healthStale
   if (kind === 'pi' && state.piInvalidated) installation.modelCatalog.status = 'invalidated'
   const nativeDshModels = kind === 'deepseek-harness' ? fixture(kind, false, generation).snapshot!.models : []
   if (kind === 'deepseek-harness' && state.dshCacheShape) {
@@ -71,19 +75,23 @@ function Fixture(): React.JSX.Element {
     draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled, setVisible,
     advanceClock: (milliseconds: number) => { clockNow += milliseconds },
     expireCatalog: () => setCatalogExpired(true),
-    expirePublishedCatalog: () => { state.expiredPublishedCatalog = state.lastCatalog?.cache; setObservation(value => value + 1) },
+    expireLive: () => { clockNow = Date.parse(state.lastCatalog.cache.revalidateAfter) + 1; setObservation(value => value + 1) },
+    publishExpired: () => setProjection({ ...state.lastCatalog, cache: { ...state.lastCatalog.cache, status: 'expired', revalidateAfter: new Date(Date.now() - 1).toISOString() } }),
+    publishFresh: () => setProjection({ ...state.lastCatalog, cache: { ...state.lastCatalog.cache, status: 'fresh', revalidateAfter: new Date(Date.now() + 60000).toISOString() } }),
+    publishHealthFailure: () => { state.healthStale = new Date().toISOString(); setObservation(value => value + 1) },
+    clearCatalogSuccess: () => setProjection({ ...state.lastCatalog, cache: { status: 'unavailable', observedAt: null, revalidateAfter: null, expiresAt: null } }),
     invalidatePiCatalog: () => { state.piInvalidated = true; setObservation(value => value + 1) },
     setDshReadMode,
     setDshCacheShape: (shape: string | null) => { state.dshCacheShape = shape; state.dshCache = {}; setObservation(value => value + 1) },
-    refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setObservation(value => value + 1) },
+    refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setGeneration(value => value + 1) },
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
     switchKind: (next: AdapterKind) => { setKind(next); setDraft(draftFromDefaults(fixture(next, false, generation).memberRuntimeDefaults!)) },
-    reset: (nextPage = 'member', nextMode = 'normal') => {
+    reset: (nextPage = 'member', nextMode = 'normal', nextVisible = true) => {
       clockNow = clockStartedAt
       state.changes = 0
-      state.expiredPublishedCatalog = null
+      state.lastCatalog = null; state.healthStale = null; state.holdDshCache = false; state.dshCacheReads = []; setProjection(null)
       state.piInvalidated = false; state.piCatalogModels = null; setObservation(0)
-      setPage(nextPage); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false); setVisible(true)
+      setPage(nextPage); setVisible(nextVisible); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false)
       const item = fixture('codex-cli', false, 1); setKind('codex-cli')
       setDraft({ model: onboardingRuntimeSelectionFor('codex-cli', [item]).model!, permissions: item.memberRuntimeDefaults!.permissions })
     },
@@ -91,10 +99,12 @@ function Fixture(): React.JSX.Element {
   }) })
   const catalog = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
     state.calls++
+    state.catalogRequests ??= []
+    state.catalogRequests.push({ kind, ...target })
     if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
       cache: { status: 'fresh', ...cacheTimes(new Date(clockStartedAt + 2000).toISOString()) }, models: state.piCatalogModels,
-      refreshStatus: state.piCatalogModels.length ? 'completed' : 'failed', diagnosticCode: null })
-    if (kind === 'deepseek-harness' && target) {
+      refreshStatus: 'completed', diagnosticCode: null })
+    if (kind === 'deepseek-harness' && target?.modelId) {
       state.dshReads ??= []
       state.dshCache ??= {}
       const context = state.dshContext ?? 0
@@ -115,9 +125,12 @@ function Fixture(): React.JSX.Element {
         if (state.dshCacheShape) cachedView.models = state.dshCacheShape === 'empty' ? []
           : cachedView.models.filter(model => model.id !== target.modelId)
         if (state.dshWrongIdentity) cachedView.selectedModelId = 'wrong-target'
+        if (state.holdDshCache) return new Promise(resolve => {
+          state.dshCacheReads.push({ modelId: target.modelId, resolve: () => resolve(cachedView) })
+        })
         return Promise.resolve(cachedView)
       }
-      if (fresh) return Promise.resolve(view('not_required'))
+      if (fresh && !target.forceRefresh) return Promise.resolve(view('not_required'))
       state.dshPending ??= {}
       const pendingKey = JSON.stringify([target.modelId, context])
       if (state.dshPending[pendingKey]) return state.dshPending[pendingKey]
@@ -125,7 +138,7 @@ function Fixture(): React.JSX.Element {
       const values = state.dshValues?.[target.modelId] ?? (target.modelId.endsWith('-2') ? [] : ['high', 'xhigh'])
       const pending = new Promise<RuntimeModelCatalogView>((resolve, reject) => {
         const done = () => {
-          if (context !== (state.dshContext ?? 0)) { resolve(view('deferred')); return }
+          if (state.dshDeferredActual || context !== (state.dshContext ?? 0)) { resolve(view('deferred')); return }
           state.dshCache[target.modelId] = { ...model,
             runtimeMetadata: { dshSource: 'native', dshOptionsResolved: true, dshOptionsContext: String(context), dshOptionsObservedAt: new Date(Date.now()).toISOString() },
             options: values.length ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
@@ -135,8 +148,9 @@ function Fixture(): React.JSX.Element {
           if (state.dshMissingActual) state.dshPublished.models = state.dshPublished.models.filter((item: { id: string }) => item.id !== target.modelId)
           resolve(state.dshPublished)
         }
-        state.dshReads.push({ modelId: target.modelId, resolve: done, reject: () => reject(new Error('fixture unavailable')) })
-        if (dshReadMode === 'failed') reject(new Error('fixture unavailable'))
+        const failure = { code: 'runtime_model_catalog_refresh_failed', message: 'fixture unavailable', retryable: true, details: {} }
+        state.dshReads.push({ modelId: target.modelId, resolve: done, reject: () => reject(failure) })
+        if (dshReadMode === 'failed') reject(failure)
         else if (dshReadMode !== 'pending') done()
       })
       state.dshPending[pendingKey] = pending
@@ -150,7 +164,11 @@ function Fixture(): React.JSX.Element {
     }
     if (kind === 'deepseek-harness' && state.dshPublished) return Promise.resolve(state.dshPublished)
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))
+    if (mode === 'failed-object' || mode === 'failed-no-cache') return Promise.reject({ code: 'runtime_model_catalog_refresh_failed', message: 'fixture structured unavailable', retryable: true, details: {} })
+    if (mode === 'failed-opaque') return Promise.reject({ code: 'fixture_unavailable' })
     if (mode === 'failed-empty') return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog, ...cacheTimes(new Date(clockStartedAt + 3000).toISOString()) }, models: [], refreshStatus: 'failed', diagnosticCode: 'runtime_model_catalog_refresh_failed' })
+    if (mode.startsWith('deferred')) return Promise.resolve({ runtimeKind: kind, cache: installation.modelCatalog,
+      models: installation.snapshot!.models, refreshStatus: 'deferred', diagnosticCode: null })
     if (mode === 'clock-expiry') {
       const result: RuntimeModelCatalogView = { runtimeKind: kind, cache: { status: 'fresh', ...cacheTimes(new Date(Date.now()).toISOString()) },
         models: installation.snapshot!.models, refreshStatus: 'completed', diagnosticCode: null }
@@ -183,7 +201,7 @@ function Fixture(): React.JSX.Element {
       {page === 'member' && <MemberRuntimePicker id="runtime" value={kind} disabled={disabled} isDisabled={next => !['codex-cli', 'claude-code-cli', 'command-code-cli'].includes(next)} onChange={next => { if (next) state.switchKind(next) }} />}
       {page === 'member'
         ? <div className="member-editor-runtime-fields"><MemberRuntimeParameters active={visible} adapterKind={kind} installation={installation} draft={draft} disabled={disabled} onOpenModelCatalog={catalog} onChange={next => { state.changes++; setDraft(next) }} /></div>
-        : visible ? <MemberModelParameters adapterKind={kind} installation={installation} model={draft.model} disabled={disabled} onOpenModelCatalog={catalog} onChange={model => { state.changes++; setDraft({ ...draft, model }) }} /> : null}
+        : <MemberModelParameters active={visible} adapterKind={kind} installation={installation} model={draft.model} disabled={disabled} onOpenModelCatalog={catalog} onChange={model => { state.changes++; setDraft({ ...draft, model }) }} />}
       <button id="after" type="button">下一项</button>
       <p style={{ marginTop: 360 }}>原生输入集成夹具；不启动 Core 或 Runtime。</p>
     </section>

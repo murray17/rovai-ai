@@ -7192,9 +7192,30 @@ body:has(.composer-image-attachment[data-context-open="true"]) .image-action-not
 .runtime-model-specify-copy > span { flex: none; color: var(--muted); font-size: 12px; }
 .runtime-model-specify-copy code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 400; }
 html[data-mobile-web=true] .runtime-model-specify { min-height: 44px; }
+.catalog-refresh-button { display: inline-grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; padding: 0; border: 0; border-radius: 4px; color: var(--muted); background: transparent; cursor: pointer; }
+.catalog-refresh-button:hover { background: var(--surface-hover); color: var(--ink); }
+.catalog-refresh-button:active:not(:disabled) { transform: none; }
+.catalog-refresh-button[aria-disabled="true"] { cursor: default; }
+.catalog-refresh-button svg { display: block; width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.catalog-refresh-button[aria-busy="true"] svg { animation: catalog-refresh-spin .85s linear infinite; }
+@keyframes catalog-refresh-spin { to { transform: rotate(360deg); } }
+.runtime-model-search { gap: 7px; }
+.runtime-model-search-actions { display: flex; flex: 0 0 59px; align-items: center; gap: 3px; }
+.runtime-model-search-clear.is-empty { visibility: hidden; pointer-events: none; }
+.runtime-model-search-actions .runtime-model-search-clear svg { stroke: currentColor; }
+.runtime-model-search-actions .runtime-model-search-clear { color: var(--muted); }
+.catalog-cold-loading { margin: 0; min-height: 38px; display: flex; align-items: center; padding: 9px 10px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.runtime-model-custom-action { flex: 0 0 auto; margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.runtime-model-custom-action .runtime-model-specify { min-height: 54px; margin-top: 0; gap: 10px; background: var(--surface-subtle); }
+.runtime-model-custom-action .runtime-model-specify-copy { display: grid; flex: 1; min-width: 0; gap: 4px; align-items: start; }
+.runtime-model-custom-action .runtime-model-specify-copy strong { color: var(--ink); font-size: 12px; line-height: 1.4; font-weight: 600; }
+.runtime-model-custom-action .runtime-model-specify-copy code { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.runtime-model-specify-icon, .runtime-model-specify-arrow { flex: 0 0 16px; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; color: var(--muted); }
+.runtime-model-specify-arrow { width: 14px; height: 14px; flex-basis: 14px; }
+.runtime-model-custom-action .runtime-model-specify:is([data-highlighted], :hover) { background: var(--neutral-hover); }
+@media (prefers-reduced-motion: reduce) { .catalog-refresh-button[aria-busy="true"] svg { animation: none; } }
+
 .runtime-model-picker-empty { margin: 0; padding: 20px 12px; color: var(--muted); text-align: center; font-size: 11.5px; line-height: 1.6; }
-.runtime-model-picker-notice { display: flex; flex: 0 0 auto; margin: 0 3px 5px; padding: 4px 6px; align-items: baseline; gap: 8px; color: var(--attention); font-size: 11px; font-weight: 400; line-height: 1.5; }
-.runtime-model-picker-retry { flex-shrink: 0; min-height: 28px; padding: 0 4px; border: 0; color: inherit; background: transparent; text-decoration: underline; cursor: pointer; }
 .runtime-parameter-empty,
 .runtime-parameter-unavailable { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .runtime-parameter-switch {
