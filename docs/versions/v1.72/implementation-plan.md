@@ -3,10 +3,43 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-08
+last_updated: 2026-11-09
 ---
 
 # v1.72 实施与验收
+
+## Shell PATH 探测边界（2026-11-09）
+
+- Work item：Issue #1050 的 Shell 无换行启动输出解析缺陷。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-1050-shell-path`；
+  Branch：`rovai/fix-1050-shell-path-boundary`；Base：`origin/main` / `913b46095cd212f41019affa1844828c84527bf0`；
+  Governance：none；Status：ready（任务分支交付，尚未合入）。
+- 生产改动仅在 `capture_shell_path_from` 的原 `printf` 格式前加入 `\n`，保持同一次输出。
+  随机标记、`-ilc`、严格三行校验、原总期限、64 KiB 累计上限与管道／进程组清理保持。
+  属于内部输出边界修正，不改变当前 Architecture／Contract 或模型输入，无需新增 Version Decision。
+- 扩展既有 `shell_path_capture_uses_interactive_login_and_bounds_failures`，不新增 Rust 测试函数。
+  合成 Shell 始终调用真实采集器；六种启动输出分别为无输出、带换行文本、无换行文本、ANSI、OSC、
+  仅回车结尾，均核对准确的含空格 PATH；ANSI／OSC 等片段另核对实际输出字节。
+  空 PATH 独立保留成功捕获及空路径分量语义。
+- 保留原异常退出、缺标记、超限、超时和后台持有 stdout 用例，补空 stdout、开始有效而结束缺失／不匹配、
+  完整探测块后异常退出。失败结果不得返回路径；原有界返回断言保留。
+- 修复前在生产代码未改时执行该 owner：无换行普通文本、ANSI、OSC 和仅回车四种输入均为
+  `Failed, paths=[]`，测试在运行全部场景及清理后统一报告失败；其余场景通过。
+  最小命令：`cargo test -p rovai-core --lib runtime_discovery::tests::shell_path_capture_uses_interactive_login_and_bounds_failures -- --exact --nocapture`。
+- 修复后同一 owner 通过：1 passed，覆盖 7 个成功输入和 10 个失败／资源边界场景。
+  `pnpm test:rust:pr` 默认 workspace 为 483 passed / 1 ignored；`cargo fmt --all --check`、
+  `pnpm typecheck` 与 `git diff --check` 通过。
+- 完整 `pnpm test` 首轮在 `Pacific/Honolulu` 为 Vitest 3199 passed / 2 failed / 2 skipped，
+  两项失败均为 `AboutUpdatesSettings` 固定 UTC 日期的断言：`2026-08-24T08:00Z` 在本机显示为 8 月 23 日。
+  该测试与生产组件的 Git blob 均与基线一致。`TZ=UTC` 定向 31 项通过，再执行完整
+  `TZ=UTC pnpm test`：274 个 Vitest 文件、3201 passed / 2 skipped；末组 Node 377 passed / 2 skipped，
+  文档、Skills 与 sandbox capability 检查一并通过。未修改前端日期处理或测试断言。
+  通用文档门禁使用上述真实 base SHA 复核最终记录。
+- 安装包验收尚未执行。本机未安装 asdf，也未准备非默认 asdf 目录及旧安装包的隔离升级环境；
+  Dock 冷启动、退出后重开、升级后重开、主动重新检测，以及 CLI 启动／完整能力检查均保持待验收。
+  合成 Shell 回归不代表这些端到端结果；未启动日常或验收 App、Core、真实智能体和模型任务。
+- 自动模式的已保存入口回退、发现失败状态写回继续单独跟踪，本次不修改；Issue #1050 保持打开。
+  本轮交付按用户偏好提交并推送任务分支，后续复用此 worktree。
 
 ## 执行台自动打开偏好（2026-11-08）
 

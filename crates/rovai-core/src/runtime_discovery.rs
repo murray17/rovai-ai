@@ -1443,7 +1443,7 @@ fn capture_shell_path_from(
         .file_name()
         .map(|value| value.to_string_lossy().to_string());
     let marker = format!("__ROVAI_PATH_{}__", Uuid::new_v4().simple());
-    let script = format!("printf '%s\\n%s\\n%s\\n' '{marker}' \"$PATH\" '{marker}'");
+    let script = format!("printf '\\n%s\\n%s\\n%s\\n' '{marker}' \"$PATH\" '{marker}'");
     let mut command = Command::new(shell_path);
     command
         .arg("-ilc")
@@ -2253,31 +2253,105 @@ mod tests {
         let shell = directory.join("fixture-shell");
         let tools = directory.join("tools with spaces");
         fs::create_dir_all(&tools).unwrap();
+        let startup_outputs: [(&str, &str, &[u8]); 6] = [
+            ("no startup output", "", b""),
+            (
+                "text with newline",
+                r"printf 'shell startup output\n'",
+                b"shell startup output\n",
+            ),
+            (
+                "text without newline",
+                "printf '%s' 'shell startup output'",
+                b"shell startup output",
+            ),
+            (
+                "ANSI without newline",
+                r"printf '\033[32mfixture\033[0m'",
+                b"\x1b[32mfixture\x1b[0m",
+            ),
+            (
+                "OSC without newline",
+                r"printf '\033]0;fixture-title\007'",
+                b"\x1b]0;fixture-title\x07",
+            ),
+            (
+                "text ending in carriage return",
+                r"printf 'shell startup output\r'",
+                b"shell startup output\r",
+            ),
+        ];
+        let mut capture_failures = Vec::new();
+        for (name, startup, expected_bytes) in startup_outputs {
+            // Check actual bytes before using the snippet in the capture fixture;
+            // literal escape text would not exercise terminal control output.
+            let emitted = Command::new("/bin/sh")
+                .args(["-c", startup])
+                .env_clear()
+                .current_dir(&directory)
+                .stdin(Stdio::null())
+                .output()
+                .unwrap();
+            assert!(emitted.status.success(), "{name}: fixture startup failed");
+            assert_eq!(emitted.stdout, expected_bytes, "{name}: fixture bytes");
+            executable(
+                &shell,
+                &format!(
+                    "#!/bin/sh\n[ \"$1\" = '-ilc' ] || exit 1\n{startup}\nexport PATH='{}'\nexec /bin/sh -c \"$2\"\n",
+                    tools.display()
+                ),
+            );
+            let (status, _, paths) = capture_shell_path_from(&shell, Duration::from_secs(1));
+            if status != ShellPathStatus::Captured || paths != vec![tools.clone()] {
+                capture_failures.push(format!("{name}: {status:?}, paths={paths:?}"));
+            }
+        }
+
         executable(
             &shell,
-            &format!(
-                "#!/bin/sh\n[ \"$1\" = '-ilc' ] || exit 1\nprintf 'shell startup output\\n'\nexport PATH='{}'\nexec /bin/sh -c \"$2\"\n",
-                tools.display()
-            ),
+            "#!/bin/sh\n[ \"$1\" = '-ilc' ] || exit 1\nexport PATH=''\nexec /bin/sh -c \"$2\"\n",
         );
         let (status, _, paths) = capture_shell_path_from(&shell, Duration::from_secs(1));
         assert_eq!(status, ShellPathStatus::Captured);
-        assert_eq!(paths, vec![tools]);
+        assert_eq!(paths, vec![PathBuf::new()], "empty PATH is captured output");
 
-        for script in [
-            "#!/bin/sh\nprintf 'incomplete shell output\\n'\nexit 1\n".to_owned(),
-            "#!/bin/sh\nprintf 'incomplete shell output\\n'\n".to_owned(),
-            format!(
-                "#!/bin/sh\nprintf '%s' '{}'\nexec /bin/sh -c \"$2\"\n",
-                "x".repeat(MAX_SHELL_PATH_BYTES as usize + 1)
+        for (name, script) in [
+            ("empty stdout", "#!/bin/sh\nexit 0\n".to_owned()),
+            (
+                "failed shell with incomplete output",
+                "#!/bin/sh\nprintf 'incomplete shell output\\n'\nexit 1\n".to_owned(),
+            ),
+            (
+                "missing markers",
+                "#!/bin/sh\nprintf 'incomplete shell output\\n'\n".to_owned(),
+            ),
+            (
+                "missing end marker",
+                "#!/bin/sh\n/bin/sh -c \"$2\" | /usr/bin/sed '$d'\n".to_owned(),
+            ),
+            (
+                "mismatched end marker",
+                "#!/bin/sh\n/bin/sh -c \"$2\" | /usr/bin/sed '$s/.*/__ROVAI_WRONG_END__/'\n"
+                    .to_owned(),
+            ),
+            (
+                "failed shell with complete output",
+                "#!/bin/sh\n/bin/sh -c \"$2\"\nexit 1\n".to_owned(),
+            ),
+            (
+                "output exceeds byte limit",
+                format!(
+                    "#!/bin/sh\nprintf '%s' '{}'\nexec /bin/sh -c \"$2\"\n",
+                    "x".repeat(MAX_SHELL_PATH_BYTES as usize + 1)
+                ),
             ),
         ] {
             executable(&shell, &script);
             let (status, _, paths) = capture_shell_path_from(&shell, Duration::from_secs(1));
-            assert_eq!(status, ShellPathStatus::Failed);
+            assert_eq!(status, ShellPathStatus::Failed, "{name}");
             assert!(
                 paths.is_empty(),
-                "failed capture leaves inherited/known PATH fallback intact"
+                "{name}: failed capture leaves inherited/known PATH fallback intact"
             );
         }
 
@@ -2310,6 +2384,11 @@ mod tests {
             assert!(started.elapsed() < Duration::from_secs(2));
         }
         fs::remove_dir_all(directory).unwrap();
+        assert!(
+            capture_failures.is_empty(),
+            "startup output must not break PATH capture:\n{}",
+            capture_failures.join("\n")
+        );
     }
 
     #[cfg(feature = "extended-tests")]
