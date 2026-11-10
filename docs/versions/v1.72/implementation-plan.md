@@ -8,6 +8,73 @@ last_updated: 2026-11-09
 
 # v1.72 实施与验收
 
+## 模型目录与强度共享加载修复（2026-11-09）
+
+Work item：目录轻量读取、共享加载与审查修订。Worktree：
+`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；Branch：`rovai/model-catalog-clean`；
+Base：`origin/main` / `a8a60a41ff245e713f87627f05a1f1fa2b1894d0`；Governance：none；Status：ready（待审阅，未合入）。
+该工作目录从干净 main 建立新分支，只移植目录修复；旧 `rovai/model-catalog-loading` 保留供对照，
+不继承其 PR #986 集成提交、Windows/聊天功能或迁移。Data Contract 保持 v1.72 / schema 172。
+`db.rs` 只改已有环境代次发布方法的事务，不增加字段、表或 Migration；接口和共享安装投影保持。
+整理期间 main 合入 #1054，保留其普通 UI 轻量版本检查、独立目录读取、目标安装发现、身份复核和原生错误反馈。
+本分支只补齐未覆盖的失效路径、共享 Renderer 生命周期与诊断目录提交，不恢复旧分支的重复解析或调度分支。
+
+当前语义由 [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实)、
+[Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#用户界面)、
+[队员配置](../../ui/components/member-identity.md)及[引导页](../../ui/components/first-run-onboarding.md)拥有。
+
+- 目录读取和提交不要求历史健康 Ready，也不回退完整检查；目录 pending 不投影机器检查。
+  同用途请求合并，排在完整检查后先复用它已经提交的有效目录。保存值原样保留，目录不改草稿和运行门槛。
+- 删除健康 `stale_at` 与目录时间的比较；同身份的认证/健康失败保留目录。
+  真正的程序/安装配置/有效环境变化，在原有事务里清空 `model_catalog_succeeded_at`，并继续拒绝旧身份写回。
+  同身份版本、静态快照和健康补写保留自己的成功目录，完整诊断后续失败不丢弃已经取得的目录。
+- Renderer 保持一个共享加载所有者；进入与打开列表时核对 `revalidateAfter`，同一观察的共享缓存状态优先，
+  过期重入可重新读取。普通健康元数据不重启读取，真实成功时间清空时结束旧请求作用域。
+  DSH 在 `cacheOnly` 返回后重新核对 pageActive、key 和 generation，再决定是否启动补读。
+  目标补读结束复用既有 `runtime.availability.updated` 安装投影，其他队员可收到目录更新，不建立健康检查状态。
+  引导页直接返回目录，安装投影独立刷新，投影失败不改写成功目录。
+- MiniMax 保留原遍历与临时 Session，RPC 错误保留 code/data。
+  本机官方 mcode 0.6.12 包的 `run-acp-command-MV4O4NBX.js` 静态源码确认：模型选择不在当前原生列表时
+  返回 `-32602 / Model selection is not advertised.`，无附加 data。只跳过这类明确响应；方法、内部、
+  其他参数错误、未知 data、断连和坏协议均使整轮失败并保留旧目录。没有运行该 CLI 或真实模型。
+
+验证扩展既有 Rust owner，不增加测试函数：
+
+- `health_failures_preserve_catalog_and_identity_changes_invalidate_it`（原 `failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale`）：
+  同身份认证失败仍可见，旧健康 stale 之后的新目录遇到配置变化仍失效，环境代次变化清空目录时间、同代次重发保留。
+- `discovered_entry_configures_and_freezes_without_health_evidence`、`fingerprint_change_revokes_ready_but_retains_lkg_and_hides_old_attempt`：
+  元数据穿插提交、当前程序替换与旧请求拒绝；保留历史 JSON 不等于有当前成功目录。
+- `codex_catalog_waiters_share_refresh_without_satisfying_full_validation`：用途隔离、排队后复用、schema 失败保留目录及身份 fencing。
+  同一 owner 继续验证目标补读通过既有安装事件发布、不创建健康证据。
+- `minimax_check_and_catalog_keep_their_intent_and_complete_options`：明确模型拒绝、`-32603`、`-32601`、一般 `-32602`、未知 data 与传输/协议失败。
+- `independent_checks_refresh_unchanged_inputs_and_join_same_target` 和
+  `saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_probe`：main 已将版本与目标同步请求统一为 `UserCheck`，本轮保持并补跑，
+  保留同用途合并与旧配置拒绝；目录隔离继续由目录 owner 覆盖。
+
+main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_current_full_acp_evidence` 与生产判断一起退役；
+主动完整检查的能力校验仍保留，由以上目录/事务 owner 负责新边界。Renderer 复用参数单元与隔离 Electron picker owner，
+覆盖 Fresh 已过期、同观察降为 Expired 后重入、健康元数据、真实失效、DSH 迟到缓存未命中；
+`runtime-check.test.ts` 执行生产引导回调，验证投影 pending/失败均不延迟或拒绝目录成功。
+
+基线更新后的验证：
+
+- `cargo test --workspace`：483 passed / 1 ignored；`agent_profile::slow_tests::`：32 passed。
+- `application::runtime_check_environment::tests::`：10 passed，包含上述两条旧同步 owner 和 MiniMax owner。
+  Codex 目录 owner（含目标安装事件）、Pi 独立观察 owner、MiniMax 错误矩阵和
+  `catalog_refresh_skips_version_and_help` 均定向通过，均为非零用例；没有以默认层替代 slow-tests。
+- `TZ=UTC pnpm test`：274 个 Vitest 文件，3,203 passed / 2 skipped；末组 Node 377 passed / 2 平台 skipped。
+  干净基线的 Product Contract Fingerprint 断言与 schema 172 一致，未修改其测试或 schema 常量。
+- 类型检查、隔离 Electron picker、Desktop/Web/只读执行页构建、macOS arm64 Core 三个 debug sidecar 构建通过。
+  通用文档单测与治理门禁使用上面的真实 main base；交付范围按相对该 main 的完整差异核对。
+
+相对该 main 只含一个修复提交、20 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
+`application.rs`、`db.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
+`MemberRuntimeParameters.tsx`、`RuntimeModelSearch.tsx`、`RuntimeParameterSelect.tsx`、`BusinessApp.tsx`、
+英文文案及两个现有单元测试；两个 picker fixture 文件；本文及四份既有架构／合同／界面文档。
+
+本轮验收使用临时数据库、受控原生协议夹具及独立 Electron userData，不修改日常 App 或叮叮目录；
+不将这些结果表述为真实账号、真实 Run 并发或 Windows/Linux 实机验收。
+
 ## Shell PATH 探测边界（2026-11-09）
 
 - Work item：Issue #1050 的 Shell 无换行启动输出解析缺陷。

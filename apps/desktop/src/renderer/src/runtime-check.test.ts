@@ -1,6 +1,36 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { createRuntimeRefresh, openRuntimeModelCatalog, requestProductRuntimeCheck, runtimeCheckFeedback } from './runtime-check'
 import type { ProductRuntimeAvailability } from '@contracts'
+
+describe('onboarding catalog completion', () => {
+  // Execute the production callback body; do not duplicate its async sequencing
+  // in a test helper or add another production catalog entry point.
+  const source = readFileSync(new URL('./BusinessApp.tsx', import.meta.url), 'utf8')
+  const body = source.match(/onOpenModelCatalog=\{async \(runtimeKind, target\) => \{([\s\S]*?)\n\s*\}\}/)?.[1]
+  if (!body) throw new Error('Onboarding catalog callback was not found')
+  const bind = new Function('openRuntimeModelCatalog', 'client', 'loadInstallations', `return async (runtimeKind, target) => {${body}}`)
+  it.each(['pending', 'failed'])('returns the catalog while the shared installation projection is %s', async status => {
+    const catalog = { runtimeKind: 'codex-cli', models: [{ id: 'saved-model' }], refreshStatus: 'completed' }
+    const open = vi.fn().mockResolvedValue(catalog)
+    let release!: () => void
+    const projection = status === 'failed' ? vi.fn().mockRejectedValue(new Error('projection failed'))
+      : vi.fn(() => new Promise<void>(resolve => { release = resolve }))
+    const callback = bind(open, { request: vi.fn() }, projection)
+    let result: unknown
+    const completion = callback('codex-cli', undefined).then((value: unknown) => { result = value })
+    try {
+      // Deterministic Promise turns; there is no elapsed-time requirement.
+      for (let turn = 0; turn < 5; turn++) await Promise.resolve()
+      expect(result).toBe(catalog)
+      expect(open).toHaveBeenCalledTimes(1)
+      expect(projection).toHaveBeenCalledTimes(1)
+    } finally {
+      release?.()
+      await completion
+    }
+  })
+})
 
 describe('Runtime check feedback ownership', () => {
   it.each(['runtime_version_failed', 'runtime_version_empty', 'runtime_version_output_truncated'])(

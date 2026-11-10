@@ -127,6 +127,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
           <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M4 12l8-8" /></svg>
         </button>}
       </div>
+      {loading && models.length > 0 && <div className="runtime-model-picker-notice" role="status"><UiText zh="正在读取可选项…" /></div>}
       {notice && <div className="runtime-model-picker-notice" role="status">
         <span>{notice}</span>
         <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}><UiText zh={"重试"} /></button>
@@ -159,7 +160,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
             <span className="runtime-model-specify-copy"><span><UiText zh="使用" /></span><code>{candidate}</code></span>
           </button>}
           {!filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
-            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在获取模型列表…") : failed ? uiAttribute("模型列表尚未核对。") : uiAttribute("当前没有可选的固定模型。")}
+            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在读取可选项…") : failed ? uiAttribute("可选项读取失败，已保留当前选择。") : uiAttribute("当前没有可选的固定模型。")}
           </p>}
         </div>
         <div className="runtime-picker-default">

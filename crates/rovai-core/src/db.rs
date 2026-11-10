@@ -31784,7 +31784,13 @@ impl Database {
     ) -> Result<()> {
         let generation =
             i64::try_from(generation).context("Runtime Search Environment generation overflow")?;
-        self.connection.execute(
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=NULL
+             WHERE NOT EXISTS(SELECT 1 FROM runtime_search_environment_state WHERE singleton=1 AND generation=?1)",
+            [generation],
+        )?;
+        transaction.execute(
             r#"
             INSERT INTO runtime_search_environment_state(
                 singleton, generation, captured_at
@@ -31795,6 +31801,7 @@ impl Database {
             "#,
             params![generation, captured_at],
         )?;
+        transaction.commit()?;
         Ok(())
     }
 

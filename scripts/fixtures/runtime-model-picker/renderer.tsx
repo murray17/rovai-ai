@@ -8,10 +8,12 @@ import '../../../apps/desktop/src/renderer/src/styles.css'
 import '../../../apps/desktop/src/renderer/src/member-editor.css'
 
 const observedAt = '2026-09-13T00:00:00Z'
+const freshUntil = new Date(Date.now() + 3600000).toISOString()
 function fixture(kind: AdapterKind, empty: boolean, generation: number, expired = false): AdapterInstallation {
   const installation = {
     id: `fixture-${kind}`, adapterKind: kind, generation, installationClass: 'managed_default', authScope: 'default',
-    modelCatalog: { status: empty ? 'unavailable' : expired ? 'expired' : 'fresh', observedAt, revalidateAfter: observedAt, expiresAt: observedAt },
+    modelCatalog: { status: empty ? 'unavailable' : expired ? 'expired' : 'fresh', observedAt,
+      revalidateAfter: expired ? observedAt : freshUntil, expiresAt: expired ? observedAt : freshUntil },
     snapshot: { probeStatus: 'ready', staleAt: null, models: empty ? [] : Array.from({ length: 24 }, (_, i) => ({ id: `vendor/model-${i}`, displayName: `${kind} 模型 ${i}`, description: i === 0 ? '模型说明' : undefined, hidden: false, deprecated: false, isDefault: i === 0,
       options: i === 2 ? [] : [{ key: kind === 'claude-code-cli' ? 'effort' : 'reasoning_effort', label: 'Effort', valueType: 'enum', values: [
         { value: 'low', label: 'Low' }, { value: 'high', label: 'High' }, ...(i === 0 ? [{ value: 'xhigh', label: 'Xhigh' }] : [])
@@ -39,19 +41,23 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
 function Fixture(): React.JSX.Element {
   const [kind, setKind] = useState<AdapterKind>('codex-cli')
   const [page, setPage] = useState('member')
+  const [visible, setVisible] = useState(true)
   const [mode, setMode] = useState('normal')
   const [generation, setGeneration] = useState(1)
   const [catalogExpired, setCatalogExpired] = useState(false)
   const [disabled, setDisabled] = useState(false)
-  const [visible, setVisible] = useState(true)
   const [dshReadMode, setDshReadMode] = useState('normal')
   const [observation, setObservation] = useState(0)
+  const [projection, setProjection] = useState<RuntimeModelCatalogView | null>(null)
   const installation = fixture(kind, mode === 'empty' || mode === 'pending', generation,
-    mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
+    mode === 'failed' || mode === 'failed-empty' || mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
-  if (mode === 'failed' || mode === 'failed-empty' || (kind === 'deepseek-harness' && state.holdDshCatalog)) installation.modelCatalog.status = 'stale'
-  if (state.expiredPublishedCatalog) installation.modelCatalog = { ...state.expiredPublishedCatalog, status: 'expired' }
+  if (projection?.runtimeKind === kind) {
+    installation.modelCatalog = projection.cache
+    installation.snapshot!.models = projection.models
+  }
+  if (state.healthStale) installation.snapshot!.staleAt = state.healthStale
   if (kind === 'pi' && state.piInvalidated) installation.modelCatalog.status = 'invalidated'
   const nativeDshModels = kind === 'deepseek-harness' ? fixture(kind, false, generation).snapshot!.models : []
   if (kind === 'deepseek-harness' && state.dshCacheShape) {
@@ -60,20 +66,24 @@ function Fixture(): React.JSX.Element {
   }
   if (kind === 'deepseek-harness' && observation) installation.modelCatalog.observedAt = `2026-09-${15 + observation}T00:00:00Z`
   Object.assign(window, { runtimeTest: Object.assign(state, {
-    draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled, setVisible,
+    draft, kind, generation, setVisible, catalogStatus: installation.modelCatalog.status, setDisabled,
     expireCatalog: () => setCatalogExpired(true),
-    expirePublishedCatalog: () => { state.expiredPublishedCatalog = state.lastCatalog?.cache; setObservation(value => value + 1) },
+    expireLive: () => { state.lastCatalog.cache.revalidateAfter = new Date(Date.now() - 1).toISOString(); setObservation(value => value + 1) },
+    publishExpired: () => setProjection({ ...state.lastCatalog, cache: { ...state.lastCatalog.cache, status: 'expired', revalidateAfter: new Date(Date.now() - 1).toISOString() } }),
+    publishFresh: () => setProjection({ ...state.lastCatalog, cache: { ...state.lastCatalog.cache, status: 'fresh', revalidateAfter: freshUntil } }),
+    publishHealthFailure: () => { state.healthStale = new Date().toISOString(); setObservation(value => value + 1) },
+    clearCatalogSuccess: () => setProjection({ ...state.lastCatalog, cache: { status: 'unavailable', observedAt: null, revalidateAfter: null, expiresAt: null } }),
     invalidatePiCatalog: () => { state.piInvalidated = true; setObservation(value => value + 1) },
     setDshReadMode,
     setDshCacheShape: (shape: string | null) => { state.dshCacheShape = shape; state.dshCache = {}; setObservation(value => value + 1) },
-    refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setObservation(value => value + 1) },
+    refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setGeneration(value => value + 1) },
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
     switchKind: (next: AdapterKind) => { setKind(next); setDraft(draftFromDefaults(fixture(next, false, generation).memberRuntimeDefaults!)) },
-    reset: (nextPage = 'member', nextMode = 'normal') => {
+    reset: (nextPage = 'member', nextMode = 'normal', nextVisible = true) => {
       state.changes = 0
-      state.expiredPublishedCatalog = null
+      state.lastCatalog = null; state.healthStale = null; state.holdDshCache = false; state.dshCacheReads = []; setProjection(null)
       state.piInvalidated = false; state.piCatalogModels = null; setObservation(0)
-      setPage(nextPage); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false); setVisible(true)
+      setPage(nextPage); setVisible(nextVisible); setMode(nextMode); setGeneration(value => value + 1); setCatalogExpired(false); setDisabled(false)
       const item = fixture('codex-cli', false, 1); setKind('codex-cli')
       setDraft({ model: onboardingRuntimeSelectionFor('codex-cli', [item]).model!, permissions: item.memberRuntimeDefaults!.permissions })
     },
@@ -82,8 +92,8 @@ function Fixture(): React.JSX.Element {
   const catalog = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
     state.calls++
     if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
-      cache: { ...installation.modelCatalog, status: 'fresh', observedAt: '2026-10-01T00:00:00Z' }, models: state.piCatalogModels,
-      refreshStatus: state.piCatalogModels.length ? 'completed' : 'failed', diagnosticCode: null })
+      cache: { ...installation.modelCatalog, observedAt: '2026-10-01T00:00:00Z' }, models: state.piCatalogModels,
+      refreshStatus: 'completed', diagnosticCode: null })
     if (kind === 'deepseek-harness' && target) {
       state.dshReads ??= []
       state.dshCache ??= {}
@@ -105,6 +115,9 @@ function Fixture(): React.JSX.Element {
         if (state.dshCacheShape) cachedView.models = state.dshCacheShape === 'empty' ? []
           : cachedView.models.filter(model => model.id !== target.modelId)
         if (state.dshWrongIdentity) cachedView.selectedModelId = 'wrong-target'
+        if (state.holdDshCache) return new Promise(resolve => {
+          state.dshCacheReads.push({ modelId: target.modelId, resolve: () => resolve(cachedView) })
+        })
         return Promise.resolve(cachedView)
       }
       if (fresh) return Promise.resolve(view('not_required'))
@@ -147,7 +160,7 @@ function Fixture(): React.JSX.Element {
     const result = mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired)
       ? {
           runtimeKind: kind,
-          cache: { ...installation.modelCatalog, status: 'fresh' as const, observedAt: '2026-09-14T00:00:00Z' },
+          cache: { ...installation.modelCatalog, status: 'fresh' as const, observedAt: '2026-09-14T00:00:00Z', revalidateAfter: new Date(Date.now() + 60000).toISOString() },
           models: modelsWithLowOnlyTarget,
           refreshStatus: 'completed' as const,
           diagnosticCode: null

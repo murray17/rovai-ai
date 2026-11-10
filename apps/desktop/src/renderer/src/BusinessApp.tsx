@@ -4355,7 +4355,7 @@ export function BusinessApp({
           onRefreshRuntime={() => void refreshOnboardingRuntime()}
           onOpenModelCatalog={async (runtimeKind, target) => {
             const catalog = await openRuntimeModelCatalog(runtimeKind, client.request, true, target)
-            await loadInstallations()
+            void loadInstallations().catch(() => undefined)
             return catalog
           }}
           onRuntimeSelectionChange={(selection: OnboardingRuntimeSelection | null) => {

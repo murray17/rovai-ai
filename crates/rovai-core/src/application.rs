@@ -5165,6 +5165,14 @@ impl Core {
         {
             return Ok(Some(RuntimeCheckOutcome::Superseded));
         }
+        // A preceding full diagnostic may have completed this queued request's
+        // directory. Reuse it after resolving and verifying the current identity.
+        if check_context.is_some()
+            && target.is_none()
+            && installation.model_catalog.status == RuntimeModelCatalogCacheStatus::Fresh
+        {
+            return Ok(Some(RuntimeCheckOutcome::Ready));
+        }
         eprintln!(
             "[model-catalog] probe runtime={} mode=catalog full_probe_count=0",
             kind.as_str()
@@ -5251,6 +5259,16 @@ impl Core {
                 &observed_at,
             )?
         };
+        eprintln!(
+            "[model-catalog] write runtime={} models={} committed={committed} reason={}",
+            kind.as_str(),
+            catalog.models.len(),
+            if committed {
+                "accepted"
+            } else {
+                "installation_or_program_changed"
+            }
+        );
         Ok(Some(if committed {
             RuntimeCheckOutcome::Ready
         } else {
@@ -5996,7 +6014,8 @@ impl Core {
                 AgentProfileService::default().commit_verified_managed_installation(
                     &mut database,
                     VerifiedManagedInstallation {
-                        model_catalog_complete: catalog_requested,
+                        model_catalog_complete: kind != AdapterKind::MinimaxCodeCli
+                            || catalog_requested,
                         executable_file_identity: Some(
                             final_entry.executable_file_identity().clone(),
                         ),
@@ -6110,6 +6129,26 @@ impl Core {
                     failure: failure.as_ref(),
                 },
             )?;
+            // A native directory obtained before a later diagnostic failure is
+            // still current evidence. Partial MiniMax observations are excluded.
+            if targets_current_installation
+                && kind != AdapterKind::Pi
+                && (kind != AdapterKind::MinimaxCodeCli || catalog_requested)
+                && rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
+                    &snapshot.models,
+                )
+            {
+                let service = AgentProfileService::default();
+                if let Some(current) = service.managed_installation(&database, kind, "default")? {
+                    service.commit_runtime_model_catalog(
+                        &mut database,
+                        &current,
+                        &candidate_fingerprint,
+                        &snapshot.models,
+                        &chrono::Utc::now().to_rfc3339(),
+                    )?;
+                }
+            }
             commit_target = runtime_installation_revision(&database, kind)?;
             note_product_runtime_diagnostic(
                 &mut unresolved_diagnostic,
@@ -28065,7 +28104,7 @@ async fn finalize_runtime_check(
     mut result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 ) {
-    if attempt.startup_preview.is_some() || attempt.model_target.is_some() {
+    if attempt.startup_preview.is_some() {
         for waiter in attempt.waiters {
             let _ = waiter.send(result.clone());
         }
@@ -28078,12 +28117,17 @@ async fn finalize_runtime_check(
         result = Ok(RuntimeCheckOutcome::Superseded);
     }
     eprintln!(
-        "[model-catalog] refresh runtime={} total_ms={} outcome={:?}",
+        "[model-catalog] refresh runtime={} trigger={:?} purpose={:?} total_ms={} outcome={:?}",
         attempt.runtime_kind.as_str(),
+        attempt.trigger,
+        attempt.purpose,
         attempt.started_at.elapsed().as_millis(),
         result
     );
-    if attempt.catalog_only || attempt.purpose == RuntimeLaunchPurpose::DiscoveryVersion {
+    if attempt.catalog_only
+        || attempt.model_target.is_some()
+        || attempt.purpose == RuntimeLaunchPurpose::DiscoveryVersion
+    {
         emit(
             &core.output,
             "runtime.availability.updated",
@@ -31265,6 +31309,10 @@ done
                 .unwrap()["refreshStatus"],
             "completed"
         );
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='pi')",
+            [(chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339()],
+        ).unwrap();
         let before_failure = core
             .runtime_model_catalog_payload(AdapterKind::Pi, "not_required")
             .await
@@ -31317,6 +31365,10 @@ done
         );
         std::fs::remove_file(root.join("provider-error")).unwrap();
         for changed_identity in ["installation", "environment", "executable"] {
+            core.database.lock().await.connection().execute(
+                "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='pi')",
+                [(chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339()],
+            ).unwrap();
             std::fs::remove_file(root.join("started")).unwrap();
             std::fs::remove_file(root.join("release")).unwrap();
             std::fs::write(
@@ -31424,11 +31476,15 @@ if [ "$1" = 'login' ]; then exit 0; fi
 if [ "$2" = 'generate-json-schema' ]; then
   /usr/bin/touch "$root/full-started"
   while [ ! -f "$root/full-release" ]; do /bin/sleep 0.01; done
+  if [ -f "$root/schema-error" ] && [ "$(cat "$root/schema-error")" = exit ]; then exit 1; fi
   while [ "$1" != '--out' ]; do shift; done
   shift; out="$1"; /bin/mkdir -p "$out/v2"
   for name in ClientRequest ServerNotification ServerRequest; do
     printf '%s\n' '["model/list","thread/start","thread/resume","runtimeWorkspaceRoots","turn/start","turn/interrupt","item/agentMessage/delta","turn/completed","item/commandExecution/requestApproval","item/fileChange/requestApproval"]' > "$out/$name.json"
   done
+  if [ -f "$root/schema-error" ]; then
+    for name in ClientRequest ServerNotification ServerRequest; do echo '[]' > "$out/$name.json"; done
+  fi
   for name in ThreadStartResponse TurnStartResponse ItemStartedNotification; do echo '{}' > "$out/v2/$name.json"; done
   echo '{"properties":{"serviceTierForTurn":{}}}' > "$out/v2/TurnStartParams.json"
   exit 0
@@ -31507,6 +31563,8 @@ done
                 )
                 .unwrap();
         }
+        let (output, mut catalog_events) = mpsc::unbounded_channel();
+        core.output = output;
         let core = Arc::new(core);
         let (_shutdown, shutdown) = oneshot::channel();
         let manager = tokio::spawn(process_runtime_check_manager(
@@ -31695,6 +31753,112 @@ done
                 .all(|line| line == "catalog-snapshot")
         );
 
+        // The reverse order also stays isolated. A catalog queued behind a full
+        // check reuses that check's committed directory without a second process.
+        std::fs::remove_file(root.join("full-started")).unwrap();
+        std::fs::remove_file(root.join("full-release")).unwrap();
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET capabilities_json='[]', model_catalog_succeeded_at=?1 WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')", [&old_time],
+        ).unwrap();
+        let full_first = tokio::spawn({
+            let core = core.clone();
+            async move {
+                core.await_runtime_check(
+                    AdapterKind::CodexCli,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck,
+                )
+                .await
+                .unwrap()
+            }
+        });
+        file_ready(root.join("full-started")).await;
+        let processes_before_queued = std::fs::read_to_string(root.join("calls"))
+            .unwrap()
+            .lines()
+            .filter(|line| *line == "app-server --listen stdio://")
+            .count();
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        let (completed, queued_catalog) = oneshot::channel();
+        core.runtime_check_requests
+            .send(
+                RuntimeCheckRequest {
+                    search: core.runtime_search_environment.read().await.clone(),
+                    startup_preview: None,
+                    model_target: None,
+                    runtime_kind: AdapterKind::CodexCli,
+                    purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                    trigger: RuntimeCheckTrigger::CatalogOpen,
+                    acknowledged,
+                    completion: Some(completed),
+                }
+                .into(),
+            )
+            .unwrap();
+        assert!(
+            acknowledgement.await.unwrap(),
+            "catalog must queue instead of joining the full diagnostic"
+        );
+        std::fs::write(root.join("full-release"), "").unwrap();
+        assert_eq!(full_first.await.unwrap(), RuntimeCheckOutcome::Ready);
+        assert_eq!(
+            queued_catalog.await.unwrap().unwrap(),
+            RuntimeCheckOutcome::Ready
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("calls"))
+                .unwrap()
+                .lines()
+                .filter(|line| *line == "app-server --listen stdio://")
+                .count(),
+            processes_before_queued
+        );
+
+        // Force the existing schema owner to inspect again instead of reusing
+        // known capabilities. Both transport failure and missing schema features
+        // retain the catalog without satisfying the failed diagnostic.
+        for schema_failure in ["exit", "missing"] {
+            core.database.lock().await.connection().execute(
+                "UPDATE adapter_capability_snapshot SET capabilities_json='[]' WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind='codex-cli')", [],
+            ).unwrap();
+            std::fs::write(root.join("schema-error"), schema_failure).unwrap();
+            std::fs::write(
+                root.join("catalog-result"),
+                r#"{"id":3,"result":{"data":[{"id":"schema-retained"}],"nextCursor":null}}"#,
+            )
+            .unwrap();
+            assert_eq!(
+                core.await_runtime_check(
+                    AdapterKind::CodexCli,
+                    RuntimeLaunchPurpose::AvailabilityCheck,
+                    RuntimeCheckTrigger::UserCheck
+                )
+                .await
+                .unwrap(),
+                RuntimeCheckOutcome::StableFailure
+            );
+            let retained = core
+                .runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+                .await
+                .unwrap();
+            assert_eq!(retained["models"][0]["id"], "schema-retained");
+            assert_eq!(retained["cache"]["status"], "fresh");
+            let health = AgentProfileService::default()
+                .managed_installation(
+                    &*core.database.lock().await,
+                    AdapterKind::CodexCli,
+                    "default",
+                )
+                .unwrap()
+                .unwrap();
+            assert!(health.last_probe_attempt.unwrap().status == "failed");
+            assert_eq!(
+                health.snapshot.unwrap().stale_at.is_some(),
+                schema_failure == "missing"
+            );
+            std::fs::remove_file(root.join("schema-error")).unwrap();
+        }
+
         // Installation identity and search/startup identity are independent
         // fences; late responses cannot overwrite either newer environment.
         for change_search in [false, true] {
@@ -31736,7 +31900,10 @@ done
                     .managed_installation(&database, AdapterKind::CodexCli, "default")
                     .unwrap()
                     .unwrap();
-                assert_eq!(installation.snapshot.unwrap().models[0].id, "new-model");
+                assert_eq!(
+                    installation.snapshot.unwrap().models[0].id,
+                    "schema-retained"
+                );
             }
         }
         // No health snapshot and an account-state rejection must not block the
@@ -31816,6 +31983,14 @@ done
             .unwrap();
         assert_eq!(before_error["cache"]["status"], "fresh");
         assert!(before_error["diagnosticCode"].is_null());
+        core.database.lock().await.connection().execute(
+            "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id=?2",
+            rusqlite::params![old_time, id],
+        ).unwrap();
+        let before_error = core
+            .runtime_model_catalog_payload(AdapterKind::CodexCli, "not_required")
+            .await
+            .unwrap();
         let previous_attempt = AgentProfileService::default()
             .managed_installation(
                 &*core.database.lock().await,
@@ -31857,6 +32032,48 @@ done
         assert_eq!(installation.id, id);
         assert_eq!(installation.last_probe_attempt, previous_attempt);
         drop(database);
+        // Target option completion uses the same installation projection event;
+        // it does not become a machine health check or create health evidence.
+        while catalog_events.try_recv().is_ok() {}
+        let search = core.runtime_search_environment.read().await.clone();
+        finalize_runtime_check(
+            &core,
+            RuntimeCheckAttempt {
+                installation_target: None,
+                search,
+                startup_preview: None,
+                model_target: Some(DshOptionsTarget {
+                    model_id: "fixture-model".into(),
+                    source: None,
+                    context: "fixture-context".into(),
+                }),
+                attempt_id: "target-projection".into(),
+                runtime_kind: AdapterKind::DeepseekHarness,
+                purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                trigger: RuntimeCheckTrigger::CatalogOpen,
+                catalog_only: false,
+                started_at: tokio::time::Instant::now(),
+                deadline: tokio::time::Instant::now(),
+                waiters: vec![],
+            },
+            Ok(RuntimeCheckOutcome::Ready),
+            RuntimeCheckFinalization::Product,
+        )
+        .await;
+        let published: Value = serde_json::from_str(&catalog_events.try_recv().unwrap()).unwrap();
+        assert_eq!(published["method"], "runtime.availability.updated");
+        assert_eq!(published["params"]["runtimeKind"], "deepseek-harness");
+        assert!(core.runtime_check_activity.read().await.is_empty());
+        assert!(
+            AgentProfileService::default()
+                .managed_installation(
+                    &*core.database.lock().await,
+                    AdapterKind::DeepseekHarness,
+                    "default"
+                )
+                .unwrap()
+                .is_none()
+        );
         manager.abort();
         let _ = manager.await;
         drop(core);

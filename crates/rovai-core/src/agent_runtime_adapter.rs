@@ -1578,15 +1578,12 @@ impl CodexCliAdapterPolicy {
         observation: CodexProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         let ready = observation.probe_status == "ready";
-        let models = if ready {
-            observation
-                .raw_model_catalog
-                .as_ref()
-                .and_then(|catalog| codex_models(catalog).ok())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        // A native catalog remains valid evidence even if a later schema check fails.
+        let models = observation
+            .raw_model_catalog
+            .as_ref()
+            .and_then(|catalog| codex_models(catalog).ok())
+            .unwrap_or_default();
         let mut capabilities = observation.capabilities;
         for capability in [
             "model.list",

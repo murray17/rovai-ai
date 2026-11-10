@@ -4349,5 +4349,7 @@
   "跳过": "Skip",
   "否": "No",
   "是": "Yes",
-  "提交": "Submit"
+  "提交": "Submit",
+  "可选项读取失败，已保留当前选择。": "Could not load options. Your selection is preserved.",
+  "正在读取可选项…": "Loading options…"
 }

@@ -2359,6 +2359,20 @@ for line in sys.stdin:
     elif method == 'session/new': result=session()
     elif method == 'session/set_config_option':
         assert request['params']['configId']=='model'
+        if request['params']['value']=='model-1' and (root/'fault').exists():
+            fault=(root/'fault').read_text()
+            if fault=='disconnect': sys.exit(1)
+            if fault=='malformed':
+                print('invalid-protocol',flush=True); continue
+            errors={
+                'reject': {'code':-32602,'message':'Model selection is not advertised.'},
+                'internal': {'code':-32603,'message':'Model selection is not advertised.'},
+                'method': {'code':-32601,'message':'Method not found'},
+                'invalid-params': {'code':-32602,'message':'model unavailable'},
+                'unknown-data': {'code':-32602,'message':'Model selection is not advertised.','data':{'sessionError':True}}}
+            if fault in errors:
+                print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':errors[fault]}),flush=True)
+                continue
         current=request['params']['value']; result=session()
     else: raise AssertionError(method)
     print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
@@ -2606,6 +2620,52 @@ for line in sys.stdin:
             .unwrap();
         assert_eq!(catalog["refreshStatus"], "completed");
         assert_eq!(catalog["cache"]["status"], "fresh");
+        if count == 2 {
+            // Only a proven model rejection is local to that model. Unknown
+            // native, transport and protocol failures must preserve the cache.
+            let old_time = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+            for fault in [
+                "disconnect",
+                "malformed",
+                "internal",
+                "method",
+                "invalid-params",
+                "unknown-data",
+                "reject",
+            ] {
+                fixture.core.database.lock().await.connection().execute(
+                    "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id=?2",
+                    rusqlite::params![old_time, latest.id],
+                ).unwrap();
+                let before = fixture
+                    .core
+                    .runtime_model_catalog_payload(kind, "not_required")
+                    .await
+                    .unwrap();
+                std::fs::write(fixture.root.join("fault"), fault).unwrap();
+                let result = fixture.core.open_runtime_model_catalog(kind, true).await;
+                if fault == "reject" {
+                    let result = result.unwrap();
+                    assert_eq!(result["refreshStatus"], "completed");
+                    assert!(
+                        result["models"][0]["options"]
+                            .as_array()
+                            .is_some_and(|options| !options.is_empty())
+                    );
+                    assert_eq!(result["models"][1]["options"], json!([]));
+                } else {
+                    assert!(result.is_err(), "{fault} must fail the refresh");
+                    let retained = fixture
+                        .core
+                        .runtime_model_catalog_payload(kind, "not_required")
+                        .await
+                        .unwrap();
+                    assert_eq!(retained["models"], before["models"]);
+                    assert_eq!(retained["cache"], before["cache"]);
+                }
+                std::fs::remove_file(fixture.root.join("fault")).unwrap();
+            }
+        }
         fixture.close().await;
     }
 }

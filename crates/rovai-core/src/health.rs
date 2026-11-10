@@ -40,6 +40,37 @@ use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
 const CODEX_RUNTIME_KIND: &str = "codex-cli";
 
+#[derive(Debug)]
+struct RpcRejection {
+    request_id: u64,
+    error: Value,
+}
+
+impl std::fmt::Display for RpcRejection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "RPC request {} was rejected: {}",
+            self.request_id, self.error
+        )
+    }
+}
+
+impl std::error::Error for RpcRejection {}
+
+fn minimax_model_unavailable(error: &anyhow::Error) -> bool {
+    // Official mcode 0.6.12 set_config_option(model) emits this exact rejection
+    // when the requested model/variant is absent from the Session's native list.
+    // Other invalid params, method/session/internal errors and unknown data fail.
+    error
+        .downcast_ref::<RpcRejection>()
+        .is_some_and(|rejection| {
+            rejection.error["code"].as_i64() == Some(-32602)
+                && rejection.error["message"].as_str() == Some("Model selection is not advertised.")
+                && rejection.error.get("data").is_none_or(Value::is_null)
+        })
+}
+
 struct ProbeRootCleanup(PathBuf);
 
 impl Drop for ProbeRootCleanup {
@@ -2348,29 +2379,36 @@ async fn run_acp_probe_with_scope(
                     // Native catalogs may include an unconfigured Provider or a
                     // variant that this release cannot select. Its unavailable
                     // options must not hide the working native default/catalog.
-                    let Ok(selected) = read_rpc_result(lines, id).await else {
-                        continue;
+                    let selected = match read_rpc_result(lines, id).await {
+                        Ok(selected) => selected,
+                        Err(error) if minimax_model_unavailable(&error) => {
+                            continue;
+                        }
+                        Err(error) => return Err(error),
                     };
-                    if crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
-                        .as_deref()
-                        != Some(model.id.as_str())
-                    {
-                        continue;
-                    }
-                    let Some(chosen) = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                    anyhow::ensure!(
+                        crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
+                            .as_deref()
+                            == Some(model.id.as_str()),
+                        "MiniMax model selection response did not match the requested model"
+                    );
+                    let chosen = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
                         kind, &selected,
-                    )
-                    .ok()
-                    .and_then(|models| models.into_iter().find(|entry| entry.id == model.id)) else {
-                        continue;
-                    };
+                    )?
+                    .into_iter()
+                    .find(|entry| entry.id == model.id)
+                    .context("MiniMax selected model was missing from its response")?;
                     options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
                 }
                 if let Some(original) = original {
                     let id = 1000 + models.len() as u64;
                     write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
                         "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
-                    let _ = read_rpc_result(lines, id).await;
+                    if let Err(error) = read_rpc_result(lines, id).await
+                        && !minimax_model_unavailable(&error)
+                    {
+                        return Err(error);
+                    }
                 }
                 session["_meta"]["rovaiMinimaxModelOptions"] = Value::Object(options);
             }
@@ -3304,7 +3342,11 @@ async fn read_rpc_result(
             continue;
         }
         if let Some(error) = message.get("error") {
-            bail!("RPC request {request_id} was rejected: {error}");
+            return Err(RpcRejection {
+                request_id,
+                error: error.clone(),
+            }
+            .into());
         }
         return message
             .get("result")
@@ -3406,7 +3448,7 @@ async fn codex_runtime_probe_uncached(
             Ok(result) => result,
             Err(error) => {
                 return CodexCapabilityProbe {
-                    raw_model_catalog: None,
+                    raw_model_catalog: Some(raw_model_catalog),
                     result: probe_result(
                         Some(path_text),
                         reported_version,
