@@ -13,7 +13,7 @@ last_updated: 2026-11-10
 - Work item：后加入强刷不能由缓存任务完成；DSH 模型按钮刷新完整目录并去掉强刷前的缓存预读。
   Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai`（复用干净主目录）；
   Branch：`rovai/model-refresh-followup`；Base：`origin/main` / `1efd3f7194236550e0d4e9c762120e7307990a74`；
-  Governance：none；Status：active。保留 #1058 的控件、文案、缓存身份及 Run 边界。
+  Governance：none；Status：ready（验收完成，交付结果以 PR／安装记录为准）。保留 #1058 的控件、文案、缓存身份及 Run 边界。
 - 先扩展原 Codex owner：以原提交锁及 Manager acknowledgement 确定普通 worker 已启动但尚未决定是否复用 Fresh，
   再发强刷及重复强刷。修复前第二个请求被合入普通任务、断言失败；修复后强刷排队且重复请求合并，最终仅一次原生 `model/list`。
   原 `runtime_check_activity_has_two_slots_and_one_terminal_owner` 同时覆盖目标进度归并时不能折入强刷，未增加 Rust 测试函数。
@@ -22,7 +22,12 @@ last_updated: 2026-11-10
 - 原 Electron picker 回归先确认 DSH 手动刷新仍有一次 `cacheOnly`，且没有读取完整目录。
   修复后先发送无 `modelId` 的目录强刷，再走原目标入口，前端预读为零；Core 自行复用有效目标缓存。
   已成功目录立即供候选使用，后续参数补读失败也保留目录与用户选择；页面／目标和最终结果校验继续沿用原归属检查。
-- 两条定向回归已完成失败到通过的验证；完整门禁与交付结果保存在本轮验收资料中。
+- 两条定向回归已完成失败到通过的验证；Codex 目录 owner 1 passed，原 Electron picker owner 1 passed，
+  其中新增断言覆盖 DSH 先读目录、无缓存预读、目录成功但后续参数失败仍保留候选。
+  类型检查、50 项相关单元、前端全量 3,251 passed / 2 skipped（275 文件）、Node 末组 377 passed / 2 平台 skipped、
+  默认 Rust workspace 483 passed / 1 ignored 及 Desktop/Web 构建通过。
+  主目录既有 ignored 原型含失效 Markdown 链接，因此同一通用文档门禁与 10 项文档单测在只含已提交文件的验证副本中通过，
+  没有移动这些原型、放宽 checker 或增加例外。完整日志与交付结果保存在本轮验收资料中。
 
 ## 应用标识与快速对话空状态（2026-11-10）
 
