@@ -55,8 +55,8 @@ function Fixture(): React.JSX.Element {
   const [dshReadMode, setDshReadMode] = useState('normal')
   const [observation, setObservation] = useState(0)
   const [projection, setProjection] = useState<RuntimeModelCatalogView | null>(null)
-  const installation = fixture(kind, mode === 'empty' || mode === 'pending', generation,
-    mode === 'failed' || mode === 'failed-empty' || mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
+  const installation = fixture(kind, ['empty', 'pending', 'failed-no-cache', 'deferred-empty'].includes(mode), generation,
+    mode.startsWith('failed') || mode.startsWith('deferred') || mode === 'expired-pending' || (mode === 'aging-pending' && catalogExpired))
   const [draft, setDraft] = useState<MemberRuntimeDraft>(() => draftFromDefaults(installation.memberRuntimeDefaults!))
   const state = (window as any).runtimeTest ?? { calls: 0, changes: 0, pending: [] }
   if (projection?.runtimeKind === kind) {
@@ -136,7 +136,7 @@ function Fixture(): React.JSX.Element {
       const values = state.dshValues?.[target.modelId] ?? (target.modelId.endsWith('-2') ? [] : ['high', 'xhigh'])
       const pending = new Promise<RuntimeModelCatalogView>((resolve, reject) => {
         const done = () => {
-          if (context !== (state.dshContext ?? 0)) { resolve(view('deferred')); return }
+          if (state.dshDeferredActual || context !== (state.dshContext ?? 0)) { resolve(view('deferred')); return }
           state.dshCache[target.modelId] = { ...model,
             runtimeMetadata: { dshSource: 'native', dshOptionsResolved: true, dshOptionsContext: String(context), dshOptionsObservedAt: new Date(Date.now()).toISOString() },
             options: values.length ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
@@ -146,8 +146,9 @@ function Fixture(): React.JSX.Element {
           if (state.dshMissingActual) state.dshPublished.models = state.dshPublished.models.filter((item: { id: string }) => item.id !== target.modelId)
           resolve(state.dshPublished)
         }
-        state.dshReads.push({ modelId: target.modelId, resolve: done, reject: () => reject(new Error('fixture unavailable')) })
-        if (dshReadMode === 'failed') reject(new Error('fixture unavailable'))
+        const failure = { code: 'runtime_model_catalog_refresh_failed', message: 'fixture unavailable', retryable: true, details: {} }
+        state.dshReads.push({ modelId: target.modelId, resolve: done, reject: () => reject(failure) })
+        if (dshReadMode === 'failed') reject(failure)
         else if (dshReadMode !== 'pending') done()
       })
       state.dshPending[pendingKey] = pending
@@ -161,7 +162,11 @@ function Fixture(): React.JSX.Element {
     }
     if (kind === 'deepseek-harness' && state.dshPublished) return Promise.resolve(state.dshPublished)
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))
+    if (mode === 'failed-object' || mode === 'failed-no-cache') return Promise.reject({ code: 'runtime_model_catalog_refresh_failed', message: 'fixture structured unavailable', retryable: true, details: {} })
+    if (mode === 'failed-opaque') return Promise.reject({ code: 'fixture_unavailable' })
     if (mode === 'failed-empty') return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog, ...cacheTimes(new Date(clockStartedAt + 3000).toISOString()) }, models: [], refreshStatus: 'failed', diagnosticCode: 'runtime_model_catalog_refresh_failed' })
+    if (mode.startsWith('deferred')) return Promise.resolve({ runtimeKind: kind, cache: installation.modelCatalog,
+      models: installation.snapshot!.models, refreshStatus: 'deferred', diagnosticCode: null })
     if (mode === 'clock-expiry') {
       const result: RuntimeModelCatalogView = { runtimeKind: kind, cache: { status: 'fresh', ...cacheTimes(new Date(Date.now()).toISOString()) },
         models: installation.snapshot!.models, refreshStatus: 'completed', diagnosticCode: null }

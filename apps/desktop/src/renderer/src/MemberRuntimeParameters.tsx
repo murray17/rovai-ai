@@ -15,6 +15,7 @@ import type {
   RuntimeModelCatalogView
 } from '@contracts'
 import { UiText, uiAttribute, useInterfaceLanguage } from './interface-language'
+import { readErrorMessage } from './error-message'
 
 export type MemberRuntimeDraft = {
   model: ModelSelection
@@ -470,8 +471,8 @@ function ModelFields({
   const [live, setLive] = useState<{ identity: string; catalog: RuntimeModelCatalogView } | null>(null)
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [failure, setFailure] = useState<string | null>(null)
-  const failed = failure !== null
+  const [feedback, setFeedback] = useState<{ status: 'failed' | 'deferred'; message?: string } | null>(null)
+  const failed = feedback?.status === 'failed'
   const generation = useRef(0)
   const attempted = useRef<{ key: string; startedAt: number } | null>(null)
   const pending = useRef<{ key: string; generation: number; promise: Promise<RuntimeModelCatalogView> } | null>(null)
@@ -501,20 +502,20 @@ function ModelFields({
       && (!opened || current.failed || !(due > attempted.current.startedAt && now >= due))) return
     if (!current.target && !retry && runtimeModelCatalogIsFresh(current.cache, now)) {
       setLoading(false)
-      setFailure(null)
+      setFeedback(null)
       return
     }
     attempted.current = { key: current.key, startedAt: now }
     const request = generation.current
     setLoading(true)
-    setFailure(null)
+    setFeedback(null)
     if (pending.current?.key !== current.key || pending.current.generation !== request) {
       const read = current.onOpenModelCatalog
       const promise = Promise.resolve().then(async () => {
         if (!current.target) return read()
         const cached = await read({ ...current.target, cacheOnly: true })
         if (request !== generation.current || current.key !== latest.current.key || !latest.current.pageActive) return cached
-        if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error('Model options identity changed')
+        if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
         const model = cached.models.find(model => model.id === current.target!.modelId) ?? null
         if (!retry && cached.refreshStatus === 'not_required' && dshModelOptionsResolved(model, current.target.dshSource)) return cached
         return read(current.target)
@@ -526,19 +527,21 @@ function ModelFields({
     void pending.current.promise.then(result => {
       if (request !== generation.current || current.key !== latest.current.key || !latest.current.pageActive) return
       if (result.runtimeKind !== adapterKind || (current.target && result.selectedModelId !== current.target.modelId)) {
-        throw new Error('Model catalog identity changed')
+        throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
       }
-      if (current.target && !dshModelOptionsResolved(result.models.find(model => model.id === current.target!.modelId) ?? null, current.target.dshSource)) {
-        throw new Error('Model options unavailable')
+      if (current.target && result.refreshStatus !== 'deferred'
+        && !dshModelOptionsResolved(result.models.find(model => model.id === current.target!.modelId) ?? null, current.target.dshSource)) {
+        throw new Error(uiAttribute('暂时无法读取该模型的可选项，请重试。'))
       }
       if (result.refreshStatus !== 'failed' || result.models.length > 0) {
         setLive(previous => previous?.identity === identity
           && !liveCatalogIsAtLeastAsRecent(result, previous.catalog.cache) ? previous : { identity, catalog: result })
       }
-      setFailure(result.refreshStatus !== 'completed' && result.refreshStatus !== 'not_required' ? '' : null)
+      setFeedback(result.refreshStatus === 'failed' || result.refreshStatus === 'deferred'
+        ? { status: result.refreshStatus } : null)
     }).catch((reason: unknown) => {
       if (request === generation.current && current.key === latest.current.key && latest.current.pageActive) {
-        setFailure(reason instanceof Error ? reason.message : String(reason))
+        setFeedback({ status: 'failed', message: readErrorMessage(reason, typeof reason === 'string' ? reason : '') })
       }
     }).finally(() => {
       if (request === generation.current && current.key === latest.current.key) setLoading(false)
@@ -551,7 +554,7 @@ function ModelFields({
     attempted.current = null
     setOpen(false)
     setLoading(false)
-    setFailure(null)
+    setFeedback(null)
     if (pageActive) ensure.current()
     return () => { generation.current += 1 }
   }, [pageActive, key])
@@ -581,7 +584,11 @@ function ModelFields({
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
     : isDsh ? !optionsKnown || option || optionValue : option || storedOptionValue
-  const notice = failed ? [uiAttribute('可选项读取失败，已保留当前选择。'), failure].filter(Boolean).join('\n') : null
+  const notice = failed
+    ? [uiAttribute('可选项读取失败，已保留当前选择。'), feedback.message].filter(Boolean).join('\n')
+    : feedback?.status === 'deferred' ? models.length > 0
+      ? uiAttribute('运行环境正在更新，继续显示上次成功结果')
+      : uiAttribute('运行环境正在更新，稍后重新获取') : null
   const loadingLabel = loading ? uiAttribute('正在读取可选项…') : undefined
 
   return <>

@@ -159,7 +159,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
             onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(candidate)} onClick={() => choose(candidate)}>
             <span className="runtime-model-specify-copy"><span><UiText zh="使用" /></span><code>{candidate}</code></span>
           </button>}
-          {!filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
+          {!notice && !filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
             {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在读取可选项…") : failed ? uiAttribute("可选项读取失败，已保留当前选择。") : uiAttribute("当前没有可选的固定模型。")}
           </p>}
         </div>

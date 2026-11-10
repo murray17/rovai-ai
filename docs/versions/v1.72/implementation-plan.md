@@ -77,7 +77,17 @@ main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_cu
 携带未保存路径和环境草稿，不发送 `runtime.startup.check` 或保存全局状态。
 通用文档门禁以当前真实 main base 执行；Core 源码相对原交付无变化，不重复声称执行了新一轮 Rust 全量测试。
 
-相对当前 main 保留目录修复提交与一次 main 同步合并，完整差异为 20 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
+候选错误展示复核：Main/Preload 的 `request` 明确拒绝可克隆的 failure 对象，Renderer 应读取其 `message`。
+原 main 的目录与 DSH 两个旧入口均使用 `instanceof Error / String(reason)`；共享加载收口后仍漏用已有
+`readErrorMessage`，普通 failure 对象因此成为 `[object Object]`。本轮直接复用该函数，未知对象无可读原因时
+只保留候选区域的通用失败文案，不修改全局错误读取函数或传输格式。空目录失败摘要去重；`deferred` 恢复为
+临时更新反馈，不作为失败；目录/目标身份不匹配及选项缺失的内部英文提示改为界面文案。
+扩展既有 Picker owner：普通 Error、可克隆 failure、无 message 对象、空目录、两个入口的 deferred，
+以及 DSH 的失败详情、未解析目标 deferred 和内部错误；所有更新继续保留保存值，不触发额外自动读取。
+修复前隔离用例在“可克隆 failure 保留 message”断言失败；修复后相关单元测试 3 文件 / 58 passed，
+类型检查与隔离 Picker 回归通过。没有重新打开日常参数页、点击重试、执行原生检查或修改日常目录。
+
+相对当前 main 保留原目录修复、展示修订与一次 main 同步合并，完整差异为 20 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
 `application.rs`、`db.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
 `MemberRuntimeParameters.tsx`、`RuntimeModelSearch.tsx`、`RuntimeParameterSelect.tsx`、`BusinessApp.tsx`、
 英文文案及两个现有单元测试；两个 picker fixture 文件；本文及四份既有架构／合同／界面文档。
