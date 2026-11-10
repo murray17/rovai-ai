@@ -26,6 +26,8 @@ macOS arm64 开放主动使用的 Preview，其他平台 NotQualified；完整 F
 成功 Steer 后的常规 Host 复用及文件/cwd 对照见[复用记录](kilo-steer-reuse.md)。
 前台子代理工具展示补全、7.5 KiB 输出实测、Skills 验收状态与版本/平台判断说明见[补全记录](kilo-subagent-display.md)。
 自动阈值/overflow 压缩、逐模型 effort 原生查询及进程复用比较修正见[专项核对](kilo-auto-compaction-and-options.md)。
+逐模型 effort 已沿 MiniMax 的共同非生成流程接通，包含完整目录／健康结果分离和两入口选择器；
+官方 Core 32 Run 的结果与权限直白解释见[接线记录](kilo-model-options.md)。
 
 ## 执行台自动打开偏好（2026-11-08）
 

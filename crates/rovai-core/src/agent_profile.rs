@@ -292,6 +292,16 @@ impl AdapterKind {
         }
     }
 
+    /// ACP effort options that describe only the selected model. Full catalogs
+    /// collect these by selecting models in their disposable probe Session.
+    pub const fn acp_selected_model_effort_key(self) -> Option<&'static str> {
+        match self {
+            Self::MinimaxCodeCli => Some("thinkingEffort"),
+            Self::KiloCli => Some("effort"),
+            _ => None,
+        }
+    }
+
     /// Freeze the public output boundary for each shipped adapter.
     ///
     /// Every shipped adapter requires an explicit `camp.message.send` call.
@@ -636,7 +646,9 @@ pub fn runtime_model_catalog_cache_view(
     runtime_model_catalog_cache_view_at(
         adapter_kind,
         snapshot,
-        (adapter_kind != AdapterKind::MinimaxCodeCli)
+        adapter_kind
+            .acp_selected_model_effort_key()
+            .is_none()
             .then(|| snapshot.and_then(|snapshot| snapshot.last_successful_probe_at.as_deref()))
             .flatten(),
         now,
@@ -1466,7 +1478,7 @@ impl AgentProfileService {
                        attempt.diagnostic_code, attempt.candidate_path,
                        attempt.executable_fingerprint, attempt.attempted_at,
                        attempt.retry_after, attempt.public_runtime_failure_json,
-                       CASE WHEN installation.adapter_kind = 'minimax-code-cli'
+                       CASE WHEN installation.adapter_kind IN ('minimax-code-cli', 'kilo-cli')
                             THEN snapshot.model_catalog_succeeded_at
                             ELSE COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at) END,
                        identity.executable_fingerprint,
@@ -1952,7 +1964,10 @@ impl AgentProfileService {
             let compatibility_changed =
                 identity_changed || locator_fingerprint.as_deref() != next_locator_fingerprint;
             if compatibility_changed {
-                if verified.adapter_kind == AdapterKind::MinimaxCodeCli
+                if verified
+                    .adapter_kind
+                    .acp_selected_model_effort_key()
+                    .is_some()
                     && !verified.model_catalog_complete
                 {
                     transaction.execute(
@@ -2022,7 +2037,11 @@ impl AgentProfileService {
             &transaction,
             &installation_id,
             &verified.snapshot,
-            verified.adapter_kind != AdapterKind::MinimaxCodeCli || verified.model_catalog_complete,
+            verified
+                .adapter_kind
+                .acp_selected_model_effort_key()
+                .is_none()
+                || verified.model_catalog_complete,
         )?;
         if let (Some(identity), Some(fingerprint)) = (
             executable_identity.as_ref(),
@@ -2373,7 +2392,7 @@ impl AgentProfileService {
                        snapshot.model_catalog_json,
                        snapshot.last_successful_probe_at,
                        locator.compatibility_fingerprint,
-                       CASE WHEN installation.adapter_kind = 'minimax-code-cli'
+                       CASE WHEN installation.adapter_kind IN ('minimax-code-cli', 'kilo-cli')
                             THEN snapshot.model_catalog_succeeded_at
                             ELSE COALESCE(snapshot.model_catalog_succeeded_at, snapshot.last_successful_probe_at) END,
                        snapshot.executable_fingerprint
@@ -3831,7 +3850,7 @@ impl AgentProfileService {
                     transaction,
                     &envelope.payload.installation_id,
                     snapshot,
-                    adapter_kind != AdapterKind::MinimaxCodeCli,
+                    adapter_kind.acp_selected_model_effort_key().is_none(),
                 )?;
                 if let (Some((executable_path, identity)), Some(executable_fingerprint)) = (
                     executable_identity.as_ref(),

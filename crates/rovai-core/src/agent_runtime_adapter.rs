@@ -2899,34 +2899,16 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
-    if adapter_kind == AdapterKind::KiloCli {
+    if let Some(effort_key) = adapter_kind.acp_selected_model_effort_key() {
         let current = acp_runtime_model_id_from_session(session_result);
         let effort = session_result["configOptions"]
             .as_array()
-            .and_then(|options| options.iter().find(|option| option["id"] == "effort"))
+            .and_then(|options| options.iter().find(|option| option["id"] == effort_key))
             .and_then(acp_model_option);
         for model in &mut models {
-            model.options = if current.as_deref() == Some(model.id.as_str()) {
-                effort.clone().into_iter().collect()
-            } else {
-                Vec::new()
-            };
-        }
-    }
-    if adapter_kind == AdapterKind::MinimaxCodeCli {
-        let current = acp_runtime_model_id_from_session(session_result);
-        let effort = session_result["configOptions"]
-            .as_array()
-            .and_then(|options| {
-                options
-                    .iter()
-                    .find(|option| option["id"] == "thinkingEffort")
-            })
-            .and_then(acp_model_option);
-        for model in &mut models {
-            // MiniMax advertises effort for the selected model only.
+            // These ACP agents advertise effort for the selected model only.
             model.options = if let Some(options) = session_result
-                .pointer("/_meta/rovaiMinimaxModelOptions")
+                .pointer("/_meta/rovaiModelOptions")
                 .and_then(|all| all.get(&model.id))
             {
                 options
@@ -4318,6 +4300,47 @@ mod tests {
             models[1].options.is_empty(),
             "Kilo effort is advertised only for its selected model"
         );
+        for (kind, mut session, key) in [
+            (AdapterKind::MinimaxCodeCli, mini, "thinkingEffort"),
+            (AdapterKind::KiloCli, kilo, "effort"),
+        ] {
+            let entries = session["configOptions"][0]["options"]
+                .as_array_mut()
+                .unwrap();
+            let other_id = entries[1]["value"].as_str().unwrap().to_owned();
+            entries.push(json!({"value":"plain-model","name":"Plain model"}));
+            entries.push(json!({"value":"unavailable-model","name":"Unavailable model"}));
+            session["_meta"]["rovaiModelOptions"] = json!({
+                other_id.clone(): [{"key":key,"label":"Effort","valueType":"enum",
+                    "values":[{"value":"medium","label":"Medium"},{"value":"max","label":"Max"}],
+                    "defaultValue":"medium","scope":"session"}],
+                "plain-model": []
+            });
+            let models = acp_model_catalog_for_adapter(kind, &session).unwrap();
+            let current = models.iter().find(|model| model.is_default).unwrap();
+            assert_eq!(current.options[0].default_value.as_deref(), Some("high"));
+            let other = models.iter().find(|model| model.id == other_id).unwrap();
+            assert_eq!(other.options[0].key, key);
+            assert_eq!(other.options[0].default_value.as_deref(), Some("medium"));
+            assert_eq!(
+                other.options[0]
+                    .values
+                    .iter()
+                    .map(|choice| choice.value.as_str())
+                    .collect::<Vec<_>>(),
+                ["medium", "max"]
+            );
+            for id in ["plain-model", "unavailable-model"] {
+                assert!(
+                    models
+                        .iter()
+                        .find(|model| model.id == id)
+                        .unwrap()
+                        .options
+                        .is_empty()
+                );
+            }
+        }
         let custom = json!({"models":{"currentModelId":"private-provider/custom-model","availableModels":[{"modelId":"builtin-model","name":"Builtin"}]}});
         let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();
         assert_eq!(command[0].id, "command-code-cli://runtime-default");

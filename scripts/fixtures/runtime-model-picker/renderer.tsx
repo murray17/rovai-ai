@@ -20,6 +20,10 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
     memberRuntimeDefaults: { adapterKind: kind, model: { mode: 'runtime_default' }, permissions: { adapterKind: kind, schemaVersion: 1, values: kind === 'codex-cli' ? { sandbox_mode: 'safe', approval_policy: 'never' } : { permission_mode: 'safe' } } },
     lastProbeAttempt: null
   } as AdapterInstallation
+  if (kind === 'kilo-cli') for (const [index, model] of installation.snapshot!.models.entries()) {
+    model.options = index === 2 ? [] : [{ key: 'effort', label: 'Effort', valueType: 'enum', scope: 'session', defaultValue: index === 0 ? 'high' : 'medium',
+      values: (index === 0 ? ['low', 'high'] : ['medium', 'max']).map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) })) }]
+  }
   if (kind === 'deepseek-harness') for (const model of installation.snapshot!.models) {
     model.runtimeMetadata = { dshSource: 'native', ...(model.isDefault ? { dshOptionsResolved: true } : {}) }
     model.options = model.isDefault ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', values: [{ value: 'max', label: 'max' }], scope: 'run', defaultValue: null }] : []

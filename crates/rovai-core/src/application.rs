@@ -2320,11 +2320,10 @@ impl RuntimeCheckAttempt {
             && self.startup_preview.is_none()
             && self.model_target == request.model_target
             && self.runtime_kind == request.runtime_kind
-            && (!matches!(
-                self.runtime_kind,
-                AdapterKind::Pi | AdapterKind::MinimaxCodeCli
-            ) || (self.trigger == RuntimeCheckTrigger::CatalogOpen)
-                == (request.trigger == RuntimeCheckTrigger::CatalogOpen))
+            && (!(self.runtime_kind == AdapterKind::Pi
+                || self.runtime_kind.acp_selected_model_effort_key().is_some())
+                || (self.trigger == RuntimeCheckTrigger::CatalogOpen)
+                    == (request.trigger == RuntimeCheckTrigger::CatalogOpen))
             && self.search.generation() == request.search.generation()
     }
 }

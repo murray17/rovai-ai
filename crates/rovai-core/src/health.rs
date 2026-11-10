@@ -1946,7 +1946,7 @@ async fn acp_probe_at(
         kind,
         include_session,
         purpose,
-        catalog_requested && kind == AdapterKind::MinimaxCodeCli,
+        catalog_requested && kind.acp_selected_model_effort_key().is_some(),
         None,
         reported_version.as_deref(),
     )
@@ -2301,7 +2301,7 @@ async fn run_acp_probe_with_scope(
                 session["_meta"]["rovaiDshOptionsObservedAt"] =
                     json!(chrono::Utc::now().to_rfc3339());
             }
-            if kind == AdapterKind::MinimaxCodeCli && catalog_only {
+            if kind.acp_selected_model_effort_key().is_some() && catalog_only {
                 // Only a complete catalog request traverses model-specific options.
                 // ACP advertises thinking effort only for the selected model. Probe
                 // each native ID in this disposable Session; no inference or global
@@ -2312,6 +2312,10 @@ async fn run_acp_probe_with_scope(
                     crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
                 let mut options = serde_json::Map::new();
                 for (index, model) in models.iter().enumerate() {
+                    if original.as_deref() == Some(model.id.as_str()) {
+                        options.insert(model.id.clone(), serde_json::to_value(&model.options)?);
+                        continue;
+                    }
                     let id = 1000 + index as u64;
                     write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
                         "params":{"sessionId":session["sessionId"], "configId":"model", "value":model.id}})).await?;
@@ -2342,7 +2346,7 @@ async fn run_acp_probe_with_scope(
                         "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
                     let _ = read_rpc_result(lines, id).await;
                 }
-                session["_meta"]["rovaiMinimaxModelOptions"] = Value::Object(options);
+                session["_meta"]["rovaiModelOptions"] = Value::Object(options);
             }
             let _session_id = session
                 .get("sessionId")

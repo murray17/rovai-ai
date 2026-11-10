@@ -79,7 +79,9 @@ Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共
 不补采独立子会话工具，遵循 [Surface v58](../contracts/run-process-detail-surface-v58.md)。
 不同 cwd 的 MCP 复用 bundled CLI 的私有 cwd 启动模式，不引入 PATH Node 依赖；取消使用共享绝对阶段期限。
 成功 Steer 在原请求与补充请求全部收口后沿普通 Fleet 复用 Host；失败/取消保持原清理。
-启动、权限、原生来源和数值口径见 [Runtime Launch v81](../contracts/runtime-launch-and-verification-v81.md)。
+模型完整目录复用 MiniMax 的临时 Session 逐模型非生成查询，收集各模型实际提供的 effort；
+普通健康检查不遍历模型，也不覆盖已有完整目录及其成功时间。没有新缓存、参数推断或选择器组件。
+启动、权限、原生来源和数值口径见 [Runtime Launch v82](../contracts/runtime-launch-and-verification-v82.md)。
 macOS arm64 当前为 Preview，其他平台 NotQualified；不由编译或原生握手宣称完整资格。
 理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
 

@@ -19,6 +19,8 @@ User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-ki
 下文保留实施前原生研究的范围和矩阵，不能将当时的 NotImplemented 当作当前实现状态。
 
 成功 Steer 后的常规 Host 复用与连续验证见[复用记录](../../versions/v1.72/kilo-steer-reuse.md)。
+逐模型 effort 的实际目录接线、共同选择器与官方 Core 32 Run 见[模型选项记录](../../versions/v1.72/kilo-model-options.md)和
+[白名单证据](model-options-7.8.27-macos-arm64.json)。
 前台 task 的共享工具展示、输出截断与当前版本判断见[补全记录](../../versions/v1.72/kilo-subagent-display.md)和
 [白名单证据](subagent-display-7.8.27-macos-arm64.json)。Skills 的 DocumentationOnly 仍只表示 Rovai 集成验收深度。
 最新边界修正及严格无 Node 的官方 Core 验收见[收尾记录](../../versions/v1.72/kilo-boundary-fixes.md)与

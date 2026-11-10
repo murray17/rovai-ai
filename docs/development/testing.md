@@ -204,6 +204,12 @@ Core smoke 使用三个连续 Steer/普通后继转换验证同 Host/Session 与
 最小命令为 `cargo test -p rovai-core --features extended-tests --lib trae_completed_run_enters_lru_and_reuses_the_same_host_session`。
 夹具、失败分工与证据范围见[专项核对](../versions/v1.72/kilo-auto-compaction-and-options.md)。
 
+逐模型 effort 接线扩展既有 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`
+及 `minimax_check_and_catalog_keep_their_intent_and_complete_options`：Kilo/MiniMax 各自的档位、
+初始默认保留、空选项、单模型不可选、普通检查不遍历和完整目录持久保留。没有新增 Rust 测试函数。
+原 Core smoke 增加两组不同 variants 与无 variants 模型，核对目录零生成、真实选中参数和冻结历史；
+原 `scripts/lib/runtime-model-picker.test.mjs` 覆盖队员及引导两个实际入口。结果见[模型选项记录](../versions/v1.72/kilo-model-options.md)。
+
 ## Rust 测试准入与退役门槛
 
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess
@@ -261,11 +267,11 @@ CodeBuddy 的逐模型/旧 Session 档位扩展 `grouped_acp_models_keep_opaque_
 `cargo test -p rovai-core --lib windows_command_shim_content_changes_compatibility_fingerprint`。
 
 `runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_complete_options`
-拥有 MiniMax 的新健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
+拥有 MiniMax/Kilo 的健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
 目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功
 写入，不能覆盖此回归，因此复用它的私有 Core/DB/Check Manager fixture 增加一个有真实协议进程的 owner；
 单纯测合并谓词无法证明第一次目录回退或持久化成功时间。表中 2／8 个模型分别执行检查先到／目录先到，
-不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
+Kilo 的 3 模型用例另含一个不可选候选；不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
 `cargo test -p rovai-core --features slow-tests --lib minimax_check_and_catalog`。
 
 其余扩展既有 health、Pi Host、ZCode transport、Adapter 和 Renderer 参数 owner。Grok 旧的“恢复必须执行

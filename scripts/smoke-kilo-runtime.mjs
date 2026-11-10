@@ -106,7 +106,7 @@ async function serve(req,res) {
       delta={role:'assistant',tool_calls:[{index:0,id:'call_sample_'+calls.length,type:'function',function:{name:'bash',arguments:JSON.stringify({command:'printf KILO_NATIVE_SAMPLE',description:'Keep numeric sampling independent of the first baseline'})}}]};finish='tool_calls'
     } else await new Promise(resolve=>setTimeout(resolve,8500))
   }
-  const base={id:'kilo-core-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
+  const base={id:'kilo-core-'+calls.length,object:'chat.completion.chunk',created:1,model:body.model}
   res.writeHead(200,{'content-type':'text/event-stream'})
   res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta,finish_reason:null}]})+'\n\n')
   const input=body.tools?.length&&content?.includes('CORE_AUTO_SEED')?110000:100
@@ -124,7 +124,11 @@ process.env.KILO_DB=':memory:'
 const config={permission:{bash:{'printf *':'allow','* KILO_INLINE_BLOCKED*':'deny'}},
   agent:{build:{permission:{bash:{'printf KILO_AGENT*':'allow','* KILO_AGENT_BLOCKED*':'deny'}}}},autoupdate:false,share:'disabled',enabled_providers:['local'],model:'local/local-model',small_model:'local/local-model',compaction:{auto:true,threshold_percent:50},
   provider:{local:{name:'Local smoke',npm:'@ai-sdk/openai-compatible',env:[],options:{apiKey:'fixture-key',baseURL:'http://127.0.0.1:'+provider.address().port+'/v1'},
-    models:{'local-model':{name:'Local model',tool_call:true,variants:{low:{temperature:0.1},high:{temperature:0.8}},cost:{input:1,output:2,cache_read:0.5,cache_write:1},limit:{context:200000,output:2048}}}}}}
+    models:{
+      'local-model':{name:'Local model',tool_call:true,variants:{low:{temperature:0.1},high:{temperature:0.8}},cost:{input:1,output:2,cache_read:0.5,cache_write:1},limit:{context:200000,output:2048}},
+      'local-other':{name:'Other model',tool_call:true,variants:{medium:{temperature:0.3},max:{temperature:0.9}},limit:{context:200000,output:2048}},
+      'local-plain':{name:'Plain model',tool_call:true,limit:{context:200000,output:2048}}
+    }}}}
 const noNodePath='/usr/bin:/bin:/usr/sbin:/sbin'
 const python=execFileSync('python3',['-c','import sys; print(sys.executable)'],{encoding:'utf8'}).trim()
 const environment={...isolatedKiloEnvironment(root),PATH:noNodePath,ROVAI_KILO_BIN:executable,
@@ -222,7 +226,19 @@ try{
   assert.equal(environment.KILO_CONFIG,undefined)
   assert.equal(environment.KILO_CONFIG_DIR,undefined)
   assert.equal(environment.KILO_DB,undefined)
-  await core.request('runtime.modelCatalog.open',{runtimeKind:'kilo-cli',waitForRefresh:true})
+  const catalogStarted=Date.now(),catalogCallOffset=calls.length
+  const catalog=await core.request('runtime.modelCatalog.open',{runtimeKind:'kilo-cli',waitForRefresh:true})
+  assert.equal(catalog.cache.status,'fresh')
+  const modelOptions=catalog.models.map(model=>({id:model.id,isDefault:model.isDefault,options:model.options}))
+  for(const [id,values] of [['local/local-model',['low','high']],['local/local-other',['medium','max']]]) {
+    const model=catalog.models.find(model=>model.id===id)
+    assert.equal(model.options[0].key,'effort')
+    assert.deepEqual(model.options[0].values.map(choice=>choice.value),values)
+  }
+  assert.equal(catalog.models.find(model=>model.isDefault)?.id,'local/local-model')
+  assert.deepEqual(catalog.models.find(model=>model.id==='local/local-plain').options,[])
+  assert.equal(calls.length,catalogCallOffset,'Catalog discovery must not generate model requests')
+  result.checks.modelCatalog={models:modelOptions,elapsedMs:Date.now()-catalogStarted,modelCalls:0}
   const installation=(await core.request('runtime.installations.list')).find(installation=>installation.adapterKind==='kilo-cli')
   assert.equal(installation.snapshot.authenticationStatus,'unknown','A non-generating ACP handshake does not validate credentials')
   assert(installation.snapshot.capabilities.includes('context.charter.managed_system_prompt'))
@@ -264,6 +280,31 @@ try{
     assert(variants.some(message=>message.variant==='high'),'Native Session must use the requested effort variant')
     result.checks.effort='high'
   } finally { metadata.close() }
+  const modelRuns=[]
+  for(const [modelId,options,temperature] of [['local/local-other',{effort:'max'},0.9],['local/local-plain',{},undefined]]) {
+    const member=await core.request('members.get',{agentId:'agent_2'})
+    const changed=await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{
+      agentId:'agent_2',expectedVersion:member.version,adapterKind:'kilo-cli',model:{mode:'explicit',modelId,options},permissions:member.runtimeConfiguration.permissions
+    }})
+    assert.equal(changed.status,'applied')
+    const offset=calls.length,done=await settle(await send('CORE_MODEL_OPTIONS_'+modelId.split('/')[1]))
+    const generated=calls.slice(offset).filter(call=>call.tools?.length)
+    assert(generated.length>0&&generated.every(call=>call.model===modelId.split('/')[1]))
+    if(temperature!==undefined)assert(generated.every(call=>call.temperature===temperature),'Selected native effort must reach the Provider')
+    assert.equal(done.run.runtimeModel.modelId,modelId)
+    assert.equal(done.run.runtimeModel.reasoningEffort,options.effort??null)
+    const native=new DatabaseSync(nativeDatabase,{readOnly:true})
+    try {
+      const actual=native.prepare("SELECT json_extract(data,'$.modelID') AS model, json_extract(data,'$.variant') AS variant FROM message WHERE session_id=? AND json_extract(data,'$.role')='assistant'").all(done.started.nativeThreadId)
+      assert(actual.some(message=>message.model===modelId.split('/')[1]&&(options.effort?message.variant===options.effort:message.variant===null)))
+    } finally {native.close()}
+    modelRuns.push({run:done.run.id,modelId,options,providerTemperature:temperature??null,nativeSelectionVerified:true})
+  }
+  const restoredModelMember=await core.request('members.get',{agentId:'agent_2'})
+  assert.equal((await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{
+    agentId:'agent_2',expectedVersion:restoredModelMember.version,adapterKind:'kilo-cli',model:{mode:'explicit',modelId:'local/local-model',options:{effort:'high'}},permissions:restoredModelMember.runtimeConfiguration.permissions
+  }})).status,'applied')
+  result.checks.modelOptionsExecution=modelRuns
   const foreground=[]
   for(const size of ['SHORT','LONG']) {
     const offset=calls.length, done=await settle(await send('CORE_TASK_'+size))

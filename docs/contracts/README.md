@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # 长期接口合同
@@ -177,7 +177,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v81（当前）](runtime-launch-and-verification-v81.md) | Kilo 成功 Steer 全部收口后沿普通 Fleet 复用 Host；失败、取消与未收口维持原清理 |
+| [Runtime Launch and Verification v82（当前）](runtime-launch-and-verification-v82.md) | Kilo 逐模型 effort 复用 MiniMax 非生成目录收集与健康／完整目录分离；不改执行或权限 |
+| [Runtime Launch and Verification v81（历史）](runtime-launch-and-verification-v81.md) | Kilo 成功 Steer 全部收口后沿普通 Fleet 复用 Host；失败、取消与未收口维持原清理 |
 | [Runtime Launch and Verification v80（历史）](runtime-launch-and-verification-v80.md) | Kilo 回调前提、无隐式 Node 的共享 MCP cwd、统一取消期限、路径/投影与 effort 展示 |
 | [Runtime Launch and Verification v79（历史）](runtime-launch-and-verification-v79.md) | Kilo 原生禁后台、同 Run Steer 多请求收口、write/edit/apply_patch 结果投影；B/P 不变 |
 | [Runtime Launch and Verification v78（历史）](runtime-launch-and-verification-v78.md) | Kilo 原生配置保序/最终默认权限、MCP cwd/退役、effort、DB/Skills 来源与认证投影 |

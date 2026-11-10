@@ -6,6 +6,16 @@ last_updated: 2026-11-10
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-10 Kilo 逐模型 effort 接线
+
+官方 **7.8.27**、macOS arm64、生产 Core/CLI 使用本地受控 Provider 完成 **32 个 Run（30 成功、2 主动取消）**。
+完整目录复用 MiniMax 的临时 Session 非生成查询，分别取得 low/high、medium/max 与空选项；
+目录产生零个 Provider 生成请求，选择其他模型的 max 实际进入原生模型、variant、Provider 参数及冻结历史。
+普通健康结果不遍历模型，也不覆盖完整目录和成功时间；不可选候选不丢弃其他结果。
+实际选择器的队员／引导两入口通过，原文件、权限、无 Node MCP、Steer、输出预算和自动压缩矩阵继续通过。
+没有付费模型或新的真实开发 App 人工验收；平台资格保持。
+[实施与边界](versions/v1.72/kilo-model-options.md)、[白名单证据](research/kilo-runtime/model-options-7.8.27-macos-arm64.json)。
+
 ## 2026-11-10 Kilo 自动压缩与逐模型选项
 
 官方 **7.8.27**、macOS arm64 原生及生产 Core/CLI 使用本地受控 Provider 完成原生自动阈值、
@@ -15,7 +25,7 @@ Core **30 个 Run：28 成功、2 主动取消**；阈值与 overflow 各产生�
 阈值配置和 Provider Token 数由夹具控制，不是付费模型自然耗尽窗口或摘要质量验收。
 
 原生临时会话切换两模型分别得到 low/high 与 medium/max，设置 max、恢复原模型均成功，零生成调用。
-Kilo 可以查询其他模型选项；当前 Rovai 目录尚未逐模型收集，不能把该缺口归为原生不支持。
+Kilo 可以查询其他模型选项；该轮 Rovai 目录尚未逐模型收集，后续接线见上节，不能把原缺口归为原生不支持。
 进程复用范围与 OpenCode/Codex 一致；本次另修共享 ACP 持 child 锁时 PID 读取丢失的竞态。
 权限、模型目录发现策略和平台资格不变，见[专项记录](versions/v1.72/kilo-auto-compaction-and-options.md)及
 [白名单证据](research/kilo-runtime/automatic-compaction-7.8.27-macos-arm64.json)。
