@@ -8,6 +8,130 @@ last_updated: 2026-11-09
 
 # v1.72 实施与验收
 
+## 模型选择器 v3 交互稿落地（2026-11-09）
+
+- Work item：固定模型刷新入口、首次加载与已有列表刷新、自定义 ID 操作及中英文交互稿还原。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；
+  Branch：`rovai/model-catalog-clean`；Base：`origin/main` / `33979e07f76b2beea61cafdc13e3f155f38a62e6`；
+  Governance：none；Status：ready（待 PR / 安装）。复用本节下方目录修复的干净分支，同步 #1056、#1057，
+  保留此前健康解耦、身份隔离及重启代次修复，不引入旧集成分支的其他功能或迁移。
+- 模型菜单搜索框右侧固定清除与刷新位置，刷新原位转动、阻止重复点击并保持键盘焦点；删除状态条和独占重试行。
+  首次无真实目录才显示中性加载占位，历史列表刷新保持搜索、选项和滚动；失败继续保留保存值、默认项和手工输入。
+  自定义 ID 操作固定在滚动区外、默认项上方，显示标题、等宽 ID 与箭头；保持完整 ID 去重、IME 和键盘选择语义。
+- 关联参数保留原下拉及加载指示，不加 DSH 参数刷新按钮；MiniMax 继续使用同款交互及既有逐模型补齐。
+  原 `runtime.modelCatalog.open` 增加可选 `forceRefresh`，显式刷新绕过接口、worker 和 DSH 的 Fresh 短路，
+  使用原请求队列与合并、身份校验、保存路径；`cacheOnly` 优先。标记只存在于请求生命周期，不增加持久字段或缓存。
+- Rust 扩展现有 Codex 进程/数据库 owner：普通 Fresh 访问零原生读取，强制刷新实际取得新目录且不要求健康 Ready；
+  前端原 picker owner 增补固定刷新、焦点、pending 去重与标记传递，并将旧重试操作迁到模型菜单。
+  `runtime-check.test.ts` 覆盖 Codex、DSH、MiniMax 的刷新意图透传。没有新增 Rust 测试函数。
+- `pnpm typecheck`、2 文件 / 50 项相关单元、隔离 Electron picker、Desktop/Web 构建及通用文档门禁通过。
+  UTC 前端全量：275 文件、3,251 passed / 2 skipped；Node 末组 377 passed / 2 平台 skipped。
+  默认 Rust workspace：483 passed / 1 ignored。正式生产组件及 CSS 的离线目录夹具复跑 v3 的 14 条交互路径，
+  英文首次加载、刷新失败和手工选择检查通过；五主题、三尺寸、缩放、DSH 迟到响应均由既有 owner 覆盖。
+- `--features slow-tests --lib catalog` 广筛为 45 passed / 4 failed / 1 ignored：Codex、Pi、MiniMax 目录 owners 通过；
+  Claude 用例因并发环境中的 PATH 缺失系统命令失败，独立重跑 1 passed。
+  其余为 v104/v105/v107 的旧迁移夹具分组 CHECK 约束失败；对照 main，该 DB 文件仅增加说明注释，
+  这些迁移与测试未改动。本轮记录该额外范围的失败，不修改迁移或测试准入。
+  未运行真实模型或使用日常数据验收；安装采用专用 daily 打包/验签门及独立 userData / Skill 目录启动验收。
+
+## 模型目录与强度共享加载修复（2026-11-09）
+
+Work item：目录轻量读取、共享加载与审查修订。Worktree：
+`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；Branch：`rovai/model-catalog-clean`；
+Base：`origin/main` / `1d6a56920b6fceb4feda7b48e074ad887c8036fc`；Governance：none；Status：ready（待审阅，未合入）。
+该工作目录从干净 main 建立新分支，只移植目录修复；旧 `rovai/model-catalog-loading` 保留供对照，
+不继承其 PR #986 集成提交、Windows/聊天功能或迁移。Data Contract 保持 v1.72 / schema 172。
+环境代次记录只记录数字，目录清理移回已确认实际输入变化的分支；不增加字段、表或 Migration，接口和共享安装投影保持。
+整理期间 main 合入 #1054，保留其普通 UI 轻量版本检查、独立目录读取、目标安装发现、身份复核和原生错误反馈。
+本分支只补齐未覆盖的失效路径、共享 Renderer 生命周期与诊断目录提交，不恢复旧分支的重复解析或调度分支。
+随后同步 #1055：启动设置页对未保存草稿使用 `runtime.startup.inspect` 的改动完整保留；
+上游 `revalidateAfter` 修复由现有共享 `ensureCatalog` / `runtimeModelCatalogIsFresh` 承接，不恢复旧 `RuntimeModelPicker`。
+保留上游受控时钟回归并合并原有共享加载、Pi、DSH 与隐藏页测试；文档同时保留原值展示规则。
+本次同步不修改 Core、数据库或协议，原目录修复提交 `1ed54025a` 保留，不改写已推送历史。
+
+当前语义由 [Runtime Catalog](../../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实)、
+[Runtime Launch v74](../../contracts/runtime-launch-and-verification-v74.md#用户界面)、
+[队员配置](../../ui/components/member-identity.md)及[引导页](../../ui/components/first-run-onboarding.md)拥有。
+
+- 目录读取和提交不要求历史健康 Ready，也不回退完整检查；目录 pending 不投影机器检查。
+  同用途请求合并，排在完整检查后先复用它已经提交的有效目录。保存值原样保留，目录不改草稿和运行门槛。
+- 删除健康 `stale_at` 与目录时间的比较；同身份的认证/健康失败保留目录。
+  真正的程序/安装配置/有效环境变化，在既有失效路径里清空 `model_catalog_succeeded_at`，并继续拒绝旧身份写回。
+  同身份版本、静态快照和健康补写保留自己的成功目录，完整诊断后续失败不丢弃已经取得的目录。
+- Renderer 保持一个共享加载所有者；进入与打开列表时核对 `revalidateAfter`，同一观察的共享缓存状态优先，
+  过期重入可重新读取。普通健康元数据不重启读取，真实成功时间清空时结束旧请求作用域。
+  DSH 在 `cacheOnly` 返回后重新核对 pageActive、key 和 generation，再决定是否启动补读。
+  目标补读结束复用既有 `runtime.availability.updated` 安装投影，其他队员可收到目录更新，不建立健康检查状态。
+  引导页直接返回目录，安装投影独立刷新，投影失败不改写成功目录。
+- MiniMax 保留原遍历与临时 Session，RPC 错误保留 code/data。
+  本机官方 mcode 0.6.12 包的 `run-acp-command-MV4O4NBX.js` 静态源码确认：模型选择不在当前原生列表时
+  返回 `-32602 / Model selection is not advertised.`，无附加 data。只跳过这类明确响应；方法、内部、
+  其他参数错误、未知 data、断连和坏协议均使整轮失败并保留旧目录。没有运行该 CLI 或真实模型。
+
+验证扩展既有 Rust owner，不增加测试函数：
+
+- `health_failures_preserve_catalog_and_identity_changes_invalidate_it`（原 `failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale`）：
+  同身份认证失败仍可见，旧健康 stale 之后的新目录遇到配置变化仍失效；修改 Claude 后重开测试库并重记代次 1，Codex 目录仍保留，Codex 自身设置变化仍失效。
+- `discovered_entry_configures_and_freezes_without_health_evidence`、`fingerprint_change_revokes_ready_but_retains_lkg_and_hides_old_attempt`：
+  元数据穿插提交、当前程序替换与旧请求拒绝；保留历史 JSON 不等于有当前成功目录。
+- `codex_catalog_waiters_share_refresh_without_satisfying_full_validation`：用途隔离、排队后复用、schema 失败保留目录及身份 fencing。
+  同一 owner 继续验证目标补读通过既有安装事件发布、不创建健康证据。
+- `minimax_check_and_catalog_keep_their_intent_and_complete_options`：明确模型拒绝、`-32603`、`-32601`、一般 `-32602`、未知 data 与传输/协议失败。
+- `independent_checks_refresh_unchanged_inputs_and_join_same_target` 和
+  `saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_probe`：main 已将版本与目标同步请求统一为 `UserCheck`，本轮保持并补跑，
+  保留同用途合并与旧配置拒绝；目录隔离继续由目录 owner 覆盖。
+
+main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_current_full_acp_evidence` 与生产判断一起退役；
+主动完整检查的能力校验仍保留，由以上目录/事务 owner 负责新边界。Renderer 复用参数单元与隔离 Electron picker owner，
+覆盖 Fresh 已过期、同观察降为 Expired 后重入、健康元数据、真实失效、DSH 迟到缓存未命中；
+`runtime-check.test.ts` 执行生产引导回调，验证投影 pending/失败均不延迟或拒绝目录成功。
+
+原交付基线 `a8a60a41f` 的验证（`1ed54025a`）：
+
+- `cargo test --workspace`：483 passed / 1 ignored；`agent_profile::slow_tests::`：32 passed。
+- `application::runtime_check_environment::tests::`：10 passed，包含上述两条旧同步 owner 和 MiniMax owner。
+  Codex 目录 owner（含目标安装事件）、Pi 独立观察 owner、MiniMax 错误矩阵和
+  `catalog_refresh_skips_version_and_help` 均定向通过，均为非零用例；没有以默认层替代 slow-tests。
+- `TZ=UTC pnpm test`：274 个 Vitest 文件，3,203 passed / 2 skipped；末组 Node 377 passed / 2 平台 skipped。
+  干净基线的 Product Contract Fingerprint 断言与 schema 172 一致，未修改其测试或 schema 常量。
+- 类型检查、隔离 Electron picker、Desktop/Web/只读执行页构建、macOS arm64 Core 三个 debug sidecar 构建通过。
+  通用文档单测与治理门禁使用当时的真实 main base `a8a60a41f`；交付范围按相对该 main 的完整差异核对。
+
+同步 #1055 后的定向回归：类型检查、参数与目录请求单元测试（2 文件 / 50 passed）、隔离 Picker（1 passed）及
+隔离 Settings Workspace（1 passed）通过。受控时钟覆盖截止前复用、到期但 Core 仍投影 Fresh 时主动读取、
+等待期间不重复、纯时间流逝与隐藏页不启动后台读取、过期后页面重入；启动检查只发送 `runtime.startup.inspect`，
+携带未保存路径和环境草稿，不发送 `runtime.startup.check` 或保存全局状态。
+通用文档门禁以当前真实 main base 执行；Core 源码相对原交付无变化，不重复声称执行了新一轮 Rust 全量测试。
+
+按用户最新要求，候选区静默降级：失败或 deferred 保留同身份已有列表，首次没有目录时只显示原生默认项、
+已保存模型/强度和手工模型 ID 输入，不显示目录错误、失败摘要或环境更新文字；保留原“重试”按钮，不新增入口。
+删除已被替代的错误详情状态和 props，不修改全局错误函数、协议或原生诊断日志，也不隐藏保存/运行自身的失败。
+扩展既有 Picker owner：普通 Error、可克隆 failure、无 message 对象、空目录、两个入口的 deferred 及 DSH 内部拒绝，
+均验证静默列表、保存值不变、手填可用、原生默认可选、无额外自动读取。相关单元测试 3 文件 / 58 passed、类型检查及隔离 Picker 通过。
+
+重启缓存回归修正：原 SQL 在 `generation 2 → 1` 时误清其他 Runtime 的目录，改动前已在既有
+`health_failures_preserve_catalog_and_identity_changes_invalidate_it` 中复现“Claude 编辑后重启仍保留 Codex”断言失败。
+`record_runtime_search_environment_generation` 恢复单纯记录；目录清理在 `refresh_runtime_check_environment` 的
+`changed = !current.same_inputs(&search)` 分支执行。程序身份与按 Runtime 保存配置的原有失效规则继续保留。
+同一 profile owner 覆盖重开数据库、代次回到 1、其他 Runtime 缓存保留及 Codex 自身配置变更失效；
+既有 `fresh_formal_and_draft_checks_preserve_program_selection_and_private_state` 覆盖相同输入保留、真实 PATH 输入变更失效且选中程序不变。
+新增回归均扩展既有 owner，Rust 测试函数净增 0。修复后的 profile 模块 32 passed，Renderer 58 项相关单元、
+隔离 Picker、真实 Electron bridge、类型检查及 UTC 前端全量通过；Runtime 环境模块、workspace 与最终打包安装结果记录在本轮任务验收附件中。
+本轮按用户要求安装到日常位置，采用非终止安装交接；当前会话进程保留，备份不删除，独立 userData/Skill 文件目录用于打包启动验收。
+
+加载文案继续收口：移除模型与强度菜单的“正在读取可选项…”及对应文案 prop，pending 只沿用现有布尔状态与 aria-busy。
+冷缓存等待期间直接保留原生默认项；有历史时继续展示历史，原值、选项、手工输入及读取生命周期保持。
+此轮不修改 Core，沿用参数/目录单元测试与隔离 Picker owner 验证冷/热等待均无加载说明且菜单仍可操作。
+类型检查、2 文件 / 50 项相关单元测试、隔离 Picker 与通用文档门禁通过；Core 与上一安装提交相同，不重复执行 Rust 全量回归。
+
+相对当前 main 保留原目录修复、展示修订与一次 main 同步合并，完整差异为 21 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
+`application.rs`、`db.rs`、`runtime_check_environment.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
+`MemberRuntimeParameters.tsx`、`RuntimeModelSearch.tsx`、`RuntimeParameterSelect.tsx`、`BusinessApp.tsx`、
+英文文案及两个现有单元测试；两个 picker fixture 文件；本文及四份既有架构／合同／界面文档。
+
+本轮验收使用临时数据库、受控原生协议夹具及独立 Electron userData，不修改日常 App 或叮叮目录；
+不将这些结果表述为真实账号、真实 Run 并发或 Windows/Linux 实机验收。
+
 ## 队员智能体名称搜索（2026-11-09）
 
 - Work item：队员 `@` 搜索的智能体产品名、别名、前缀与匹配优先级。

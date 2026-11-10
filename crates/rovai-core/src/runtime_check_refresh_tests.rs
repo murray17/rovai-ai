@@ -406,6 +406,46 @@ async fn fresh_formal_and_draft_checks_preserve_program_selection_and_private_st
     std::fs::write(fixture.root.join("probe-release"), b"release").unwrap();
     assert!(changing_preview.await.unwrap().is_err());
     assert_eq!(fixture.public_state().await, public_before);
+    // Republishing identical inputs preserves the directory; a real PATH
+    // change invalidates it even when the selected executable stays pinned.
+    fixture.seed_ready().await;
+    let service = rovai_core::agent_profile::AgentProfileService::default();
+    let before = service
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert!(before.model_catalog.observed_at.is_some());
+    let unchanged = fixture
+        .core
+        .refresh_runtime_check_environment()
+        .await
+        .unwrap();
+    let same = service
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        same.model_catalog.observed_at,
+        before.model_catalog.observed_at
+    );
+    fixture
+        .paths
+        .lock()
+        .unwrap()
+        .push(fixture.root.join("new-search-input"));
+    let changed = fixture
+        .core
+        .refresh_runtime_check_environment()
+        .await
+        .unwrap();
+    assert_eq!(changed.generation(), unchanged.generation() + 1);
+    let invalidated = service
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert_eq!(invalidated.id, before.id);
+    assert_eq!(invalidated.executable_path, before.executable_path);
+    assert!(invalidated.model_catalog.observed_at.is_none());
     std::fs::rename(&old, old.with_extension("moved")).unwrap();
     fixture.check().await;
     let missing = fixture.health().await;
@@ -754,6 +794,7 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                 .runtime_check_requests
                 .send(
                     crate::application::RuntimeCheckRequest {
+                        force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
                         model_target: None,
@@ -826,6 +867,7 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
             .runtime_check_requests
             .send(
                 crate::application::RuntimeCheckRequest {
+                    force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -979,6 +1021,7 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
             .runtime_check_requests
             .send(
                 crate::application::RuntimeCheckRequest {
+                    force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -1140,6 +1183,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                 let attempt_id = format!("timeout-{index}");
                 let (completed, completion) = oneshot::channel();
                 let mut attempt = RuntimeCheckAttempt {
+                    force_refresh: false,
                     installation_target,
                     search: search.clone(),
                     startup_preview: None,
@@ -1157,6 +1201,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     let mut committed_target = None;
                     let current = fixture.core.runtime_check_installation_target(KIND).await.unwrap().unwrap();
                     let _ack = crate::application::RuntimeCheckWorkerContext {
+                        force_refresh: false,
                         attempt_id: &attempt_id, installation_target: &mut committed_target,
                     }.publish_target(&fixture.core, KIND, current.clone()).unwrap();
                     assert_eq!(committed_target, Some(current));
@@ -2047,6 +2092,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         .runtime_check_requests
         .send(
             crate::application::RuntimeCheckRequest {
+                force_refresh: false,
                 search,
                 startup_preview: None,
                 model_target: None,
@@ -2070,6 +2116,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         .runtime_check_requests
         .send(
             crate::application::RuntimeCheckRequest {
+                force_refresh: false,
                 search: fixture.core.runtime_search_environment.read().await.clone(),
                 startup_preview: None,
                 model_target: None,
@@ -2359,6 +2406,20 @@ for line in sys.stdin:
     elif method == 'session/new': result=session()
     elif method == 'session/set_config_option':
         assert request['params']['configId']=='model'
+        if request['params']['value']=='model-1' and (root/'fault').exists():
+            fault=(root/'fault').read_text()
+            if fault=='disconnect': sys.exit(1)
+            if fault=='malformed':
+                print('invalid-protocol',flush=True); continue
+            errors={
+                'reject': {'code':-32602,'message':'Model selection is not advertised.'},
+                'internal': {'code':-32603,'message':'Model selection is not advertised.'},
+                'method': {'code':-32601,'message':'Method not found'},
+                'invalid-params': {'code':-32602,'message':'model unavailable'},
+                'unknown-data': {'code':-32602,'message':'Model selection is not advertised.','data':{'sessionError':True}}}
+            if fault in errors:
+                print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':errors[fault]}),flush=True)
+                continue
         current=request['params']['value']; result=session()
     else: raise AssertionError(method)
     print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
@@ -2448,6 +2509,7 @@ for line in sys.stdin:
                 .runtime_check_requests
                 .send(
                     crate::application::RuntimeCheckRequest {
+                        force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
                         model_target: None,
@@ -2601,11 +2663,60 @@ for line in sys.stdin:
         assert!(invalidated.model_catalog.observed_at.is_none());
         let catalog = fixture
             .core
-            .open_runtime_model_catalog(kind, true)
+            .open_runtime_model_catalog(kind, true, false)
             .await
             .unwrap();
         assert_eq!(catalog["refreshStatus"], "completed");
         assert_eq!(catalog["cache"]["status"], "fresh");
+        if count == 2 {
+            // Only a proven model rejection is local to that model. Unknown
+            // native, transport and protocol failures must preserve the cache.
+            let old_time = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+            for fault in [
+                "disconnect",
+                "malformed",
+                "internal",
+                "method",
+                "invalid-params",
+                "unknown-data",
+                "reject",
+            ] {
+                fixture.core.database.lock().await.connection().execute(
+                    "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id=?2",
+                    rusqlite::params![old_time, latest.id],
+                ).unwrap();
+                let before = fixture
+                    .core
+                    .runtime_model_catalog_payload(kind, "not_required")
+                    .await
+                    .unwrap();
+                std::fs::write(fixture.root.join("fault"), fault).unwrap();
+                let result = fixture
+                    .core
+                    .open_runtime_model_catalog(kind, true, false)
+                    .await;
+                if fault == "reject" {
+                    let result = result.unwrap();
+                    assert_eq!(result["refreshStatus"], "completed");
+                    assert!(
+                        result["models"][0]["options"]
+                            .as_array()
+                            .is_some_and(|options| !options.is_empty())
+                    );
+                    assert_eq!(result["models"][1]["options"], json!([]));
+                } else {
+                    assert!(result.is_err(), "{fault} must fail the refresh");
+                    let retained = fixture
+                        .core
+                        .runtime_model_catalog_payload(kind, "not_required")
+                        .await
+                        .unwrap();
+                    assert_eq!(retained["models"], before["models"]);
+                    assert_eq!(retained["cache"], before["cache"]);
+                }
+                std::fs::remove_file(fixture.root.join("fault")).unwrap();
+            }
+        }
         fixture.close().await;
     }
 }

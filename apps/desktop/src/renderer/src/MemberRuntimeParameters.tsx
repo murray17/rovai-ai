@@ -154,6 +154,7 @@ export function MemberRuntimeParameters({
 }
 
 export function MemberModelParameters({
+  active = true,
   adapterKind,
   installation,
   model,
@@ -161,6 +162,7 @@ export function MemberModelParameters({
   onOpenModelCatalog,
   onChange
 }: {
+  active?: boolean
   adapterKind: AdapterKind
   installation: AdapterInstallation | null
   model: ModelSelection | null
@@ -182,6 +184,7 @@ export function MemberModelParameters({
   return (
     <div className="runtime-parameter-form onboarding-model-parameter-form">
       {modelFieldsFor(adapterKind, {
+        active,
         adapterKind,
         installation,
         permissionOptions,
@@ -443,309 +446,165 @@ function modelFieldsFor(
 }
 
 function ModelFields({
-  active: pageActive = true,
-  adapterKind,
-  installation,
-  draft,
-  disabled,
-  onOpenModelCatalog,
-  onChange,
-  optionKey,
-  optionLabel
+  active: pageActive = true, adapterKind, installation, draft, disabled,
+  onOpenModelCatalog, onChange, optionKey, optionLabel
 }: ModelFieldsProps): React.JSX.Element {
-  const identity = catalogInstallationIdentity(installation)
-  const [live, setLive] = useState<{ identity: string; catalog: RuntimeModelCatalogView } | null>(null)
+  const installationIdentity = catalogInstallationIdentity(installation)
+  // Core clears its success time only for actual identity/configuration changes.
+  // Track that transition without treating health metadata or new observations
+  // as a new visit; no directory data is stored in this request fence.
+  const projection = useRef({ identity: installationIdentity, observedAt: installation.modelCatalog.observedAt, scope: 0 })
+  if (projection.current.identity !== installationIdentity) {
+    projection.current = { identity: installationIdentity, observedAt: installation.modelCatalog.observedAt, scope: 0 }
+  } else {
+    if (projection.current.observedAt !== null && installation.modelCatalog.observedAt === null) projection.current.scope += 1
+    projection.current.observedAt = installation.modelCatalog.observedAt
+  }
+  const identity = `${installationIdentity}:${projection.current.scope}`
   const explicit = draft.model.mode === 'explicit' ? draft.model : null
-  const initialModels = live?.identity === identity
-    && liveCatalogIsAtLeastAsRecent(live.catalog, installation.modelCatalog)
-    ? selectableModels(live.catalog.models)
-    : displayableInstallationModels(installation)
-  const selectedModel = explicit
-    ? initialModels.find((model) => model.id === explicit.modelId) ?? null
-    : null
   const isDsh = adapterKind === 'deepseek-harness'
   const isPi = adapterKind === 'pi'
+  const target = isDsh && explicit
+    ? { modelId: explicit.modelId, dshSource: explicit.dshSource } : undefined
+  const key = JSON.stringify([identity, target?.modelId, target?.dshSource])
+  const [live, setLive] = useState<{ identity: string; catalog: RuntimeModelCatalogView } | null>(null)
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [retryNeeded, setRetryNeeded] = useState(false)
+  const generation = useRef(0)
+  const attempted = useRef<{ key: string; startedAt: number } | null>(null)
+  const pending = useRef<{ key: string; generation: number; promise: Promise<RuntimeModelCatalogView> } | null>(null)
+  const catalog = live?.identity === identity && liveCatalogIsAtLeastAsRecent(live.catalog, installation.modelCatalog)
+    ? live.catalog : null
+  const models = catalog ? selectableModels(catalog.models) : displayableInstallationModels(installation)
+  const selectedModel = explicit ? models.find(model => model.id === explicit.modelId) ?? null : null
   const optionsKnown = isPi
-    ? selectedModel?.runtimeMetadata?.piThinkingSchemaVersion === 1
-      && selectedModel.runtimeMetadata.piThinkingState === 'known'
+    ? selectedModel?.runtimeMetadata?.piThinkingSchemaVersion === 1 && selectedModel.runtimeMetadata.piThinkingState === 'known'
     : !isDsh || dshModelOptionsResolved(selectedModel, explicit?.dshSource)
   const option = optionKey && selectedModel
-    ? selectedModel.options.find((candidate) => candidate.key === optionKey) ?? null
-    : null
-  const targetKey = dshOptionReadKey(identity, draft.model)
-  const [optionRead, setOptionRead] = useState<{ key: string; status: 'loading' | 'ready' | 'failed'; error?: string } | null>(null)
-  const [optionLoadingKey, setOptionLoadingKey] = useState<string | null>(null)
-  const [optionRetry, setOptionRetry] = useState(0)
-  const latest = useRef({ onOpenModelCatalog })
-  latest.current = { onOpenModelCatalog }
+    ? selectedModel.options.find(candidate => candidate.key === optionKey) ?? null : null
+  // A shared projection may age the same observation after this local response.
+  const cache = catalog && catalog.cache.observedAt !== installation.modelCatalog.observedAt
+    ? catalog.cache : installation.modelCatalog
+  const latest = useRef({ onOpenModelCatalog, cache, target, pageActive, key, retryNeeded })
+  latest.current = { onOpenModelCatalog, cache, target, pageActive, key, retryNeeded }
 
-  const updateCatalog = (catalog: RuntimeModelCatalogView): void => {
-    if (catalog.refreshStatus === 'failed' && catalog.models.length === 0) return
-    // The model menu and selected-model options read can finish out of order.
-    // A late catalog snapshot must not erase newer reasoning capabilities.
-    setLive(current => current?.identity === identity
-      && !liveCatalogIsAtLeastAsRecent(catalog, current.catalog.cache)
-      ? current : { identity, catalog })
-  }
-
-  useEffect(() => {
-    if (!isDsh || draft.model.mode !== 'explicit' || disabled || !pageActive) return
-    let active = true
-    let loadingTimer: ReturnType<typeof setTimeout> | undefined
-    setOptionLoadingKey(null)
-    const target = { modelId: draft.model.modelId, dshSource: draft.model.dshSource }
-    const accept = (): void => {
-      if (active) setOptionRead({ key: targetKey, status: 'ready' })
+  // Both controls subscribe to one in-flight read. Shared installation updates
+  // update presentation only; they are deliberately absent from the visit effect.
+  const ensureCatalog = (retry = false, opened = false): void => {
+    const current = latest.current
+    if (!current.pageActive || !current.onOpenModelCatalog) return
+    const now = Date.now()
+    const due = Date.parse(current.cache.revalidateAfter ?? '')
+    if (!retry && attempted.current?.key === current.key
+      && (!opened || current.retryNeeded || !(due > attempted.current.startedAt && now >= due))) return
+    if (!current.target && !retry && runtimeModelCatalogIsFresh(current.cache, now)) {
+      setLoading(false)
+      setRetryNeeded(false)
+      return
     }
-    setOptionRead({ key: targetKey, status: 'loading' })
-    const read = latest.current.onOpenModelCatalog
-    if (!read) {
-      setOptionRead({ key: targetKey, status: 'failed' })
-      return () => { active = false }
+    attempted.current = { key: current.key, startedAt: now }
+    const request = generation.current
+    setLoading(true)
+    setRetryNeeded(false)
+    if (pending.current?.key !== current.key || pending.current.generation !== request) {
+      const read = current.onOpenModelCatalog
+      const promise = Promise.resolve().then(async () => {
+        if (!current.target) return read(retry ? { forceRefresh: true } : undefined)
+        const cached = await read({ ...current.target, cacheOnly: true })
+        if (request !== generation.current || current.key !== latest.current.key || !latest.current.pageActive) return cached
+        if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
+        const model = cached.models.find(model => model.id === current.target!.modelId) ?? null
+        if (!retry && cached.refreshStatus === 'not_required' && dshModelOptionsResolved(model, current.target.dshSource)) return cached
+        return read({ ...current.target, forceRefresh: retry })
+      })
+      const owner = { key: current.key, generation: request, promise }
+      pending.current = owner
+      void promise.finally(() => { if (pending.current === owner) pending.current = null }).catch(() => undefined)
     }
-    const publish = (catalog: RuntimeModelCatalogView): ModelDescriptor | null => {
-      if (catalog.runtimeKind !== 'deepseek-harness' || catalog.selectedModelId !== target.modelId) {
-        throw new Error('Model options identity changed')
+    void pending.current.promise.then(result => {
+      if (request !== generation.current || current.key !== latest.current.key || !latest.current.pageActive) return
+      if (result.runtimeKind !== adapterKind || (current.target && result.selectedModelId !== current.target.modelId)) {
+        throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
       }
-      const model = catalog.models.find((candidate) => candidate.id === target.modelId) ?? null
-      // A cache miss is not evidence that the native target is unavailable.
-      if (active && model) updateCatalog(catalog)
-      return model
-    }
-    // Every visit checks local configuration, even inside the freshness window.
-    // Core owns persisted per-model timestamps, merging and in-flight deduplication.
-    void read({ ...target, cacheOnly: true }).then(async (cached) => {
-      if (!active) return
-      const cachedModel = publish(cached)
-      if (cachedModel && cached.refreshStatus === 'not_required' && dshModelOptionsResolved(cachedModel, target.dshSource)) {
-        accept()
-        return
+      if (current.target && result.refreshStatus !== 'deferred'
+        && !dshModelOptionsResolved(result.models.find(model => model.id === current.target!.modelId) ?? null, current.target.dshSource)) {
+        throw new Error(uiAttribute('暂时无法读取该模型的可选项，请重试。'))
       }
-      // Fast cache hits never flash a loading indicator; only the actual read can show one.
-      loadingTimer = setTimeout(() => { if (active) setOptionLoadingKey(targetKey) }, 240)
-      const catalog = await read(target)
-      if (!active) return
-      const model = publish(catalog)
-      if (!model || !['completed', 'not_required'].includes(catalog.refreshStatus)
-        || !dshModelOptionsResolved(model, target.dshSource)) throw new Error('Model options unavailable')
-      accept()
-    }).catch((reason: unknown) => {
-      if (active) setOptionRead({ key: targetKey, status: 'failed', error: reason instanceof Error ? reason.message : String(reason) })
+      const incomplete = result.refreshStatus === 'failed' || result.refreshStatus === 'deferred'
+      if (!incomplete || result.models.length > 0) {
+        setLive(previous => previous?.identity === identity
+          && !liveCatalogIsAtLeastAsRecent(result, previous.catalog.cache) ? previous : { identity, catalog: result })
+      }
+      setRetryNeeded(incomplete)
+    }).catch(() => {
+      if (request === generation.current && current.key === latest.current.key && latest.current.pageActive) {
+        setRetryNeeded(true)
+      }
     }).finally(() => {
-      clearTimeout(loadingTimer)
-      if (active) setOptionLoadingKey(null)
+      if (request === generation.current && current.key === latest.current.key) setLoading(false)
     })
-    return () => { active = false; clearTimeout(loadingTimer) }
-  }, [isDsh, targetKey, installation.modelCatalog.observedAt, optionRetry, disabled, pageActive])
-
+  }
+  const ensure = useRef(ensureCatalog)
+  ensure.current = ensureCatalog
   useEffect(() => {
-    if (!isDsh || !explicit || !pageActive) return
-    const revisit = (): void => setOptionRetry(value => value + 1)
-    window.addEventListener('focus', revisit)
-    return () => window.removeEventListener('focus', revisit)
-  }, [isDsh, targetKey, pageActive])
+    generation.current += 1
+    attempted.current = null
+    setOpen(false)
+    setLoading(false)
+    setRetryNeeded(false)
+    if (pageActive) ensure.current()
+    return () => { generation.current += 1 }
+  }, [pageActive, key])
 
-  const readStatus = optionRead?.key === targetKey ? optionRead.status : 'loading'
+  const selectModel = (value: string): void => {
+    if (value === (explicit?.modelId ?? 'runtime_default')) return
+    if (value === 'runtime_default') {
+      onChange({ ...draft, model: { mode: 'runtime_default' } })
+      return
+    }
+    const model = models.find(candidate => candidate.id === value)
+    onChange({ ...draft, model: model ? explicitSelection(model, draft.model)
+      : { mode: 'explicit', modelId: value, options: { ...explicit?.options } } })
+  }
   const setOption = (value: string): void => {
     if (!explicit || !optionKey) return
     const options = { ...explicit.options }
     if (value) options[optionKey] = value
     else delete options[optionKey]
-    onChange({
-      ...draft,
-      model: { ...explicit, options }
-    })
+    onChange({ ...draft, model: { ...explicit, options } })
   }
-
-  const storedOptionValue = explicit && optionKey
-    ? stringValue(explicit.options[optionKey])
-    : ''
-  const optionValue = adapterKind === 'hermes-cli' && (storedOptionValue === 'runtime_default' || storedOptionValue === 'default')
-    ? '' : storedOptionValue
+  const storedOptionValue = explicit && optionKey ? stringValue(explicit.options[optionKey]) : ''
+  const optionValue = adapterKind === 'hermes-cli' && ['runtime_default', 'default'].includes(storedOptionValue) ? '' : storedOptionValue
   const optionChoices = (option?.values ?? []).filter(choice => adapterKind !== 'hermes-cli'
     || (choice.value !== 'default' && choice.value !== 'runtime_default'))
-  const optionInvalid = optionValue
-    ? !optionChoices.some((candidate) => candidate.value === optionValue)
-    : false
+  const missing = optionValue && !optionChoices.some(choice => choice.value === optionValue)
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
     : isDsh ? !optionsKnown || option || optionValue : option || storedOptionValue
+  const refresh = onOpenModelCatalog ? () => ensureCatalog(true) : undefined
 
-  return (
-    <>
-      <RuntimeModelPicker
-        key={identity}
-        active={pageActive}
-        adapterKind={adapterKind}
-        installation={installation}
-        draft={draft}
-        disabled={disabled}
-        onOpenModelCatalog={onOpenModelCatalog}
-        onChange={onChange}
-        onCatalogChange={updateCatalog}
-      />
-
-      {explicit && optionKey && showOption && (
-        <RuntimeParameterSelect
-          label={optionLabel ?? option?.label ?? optionKey}
-          value={optionValue}
-          disabled={disabled}
-          onChange={setOption}
-          loadingLabel={isDsh && pageActive && !disabled && readStatus === 'loading' && optionLoadingKey === targetKey
-            ? uiAttribute('正在读取可选思考强度，当前选择仍可保存') : undefined}
-          defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
-            : isDsh ? uiAttribute('模型默认') : uiAttribute("跟随模型默认值") }}
-          choices={[
-            ...(optionInvalid ? [{ value: optionValue, label: uiAttribute('尚未核对 · {0}', optionValue) }] : []),
-            ...optionChoices.map(choice => ({
-              ...choice,
-              disabled: isDsh && !optionsKnown
-            }))
-          ]}
-        />
-      )}
-      {isDsh && explicit && !disabled && readStatus === 'failed' && (
-        <div className="runtime-parameter-unavailable" role="status">
-          <UiText zh="思考强度尚未核对，已保留当前选择。" />
-          {optionRead?.key === targetKey && optionRead.error && <span>{optionRead.error}</span>}
-          <button type="button" className="quiet-button" onClick={() => setOptionRetry((value) => value + 1)}><UiText zh="重试" /></button>
-        </div>
-      )}
-    </>
-  )
-}
-
-function RuntimeModelPicker({
-  active: pageActive,
-  adapterKind,
-  installation,
-  draft,
-  disabled,
-  onOpenModelCatalog,
-  onChange,
-  onCatalogChange
-}: {
-  active: boolean
-  adapterKind: AdapterKind
-  installation: AdapterInstallation
-  draft: MemberRuntimeDraft
-  disabled: boolean
-  onOpenModelCatalog?: (target?: RuntimeModelCatalogTarget) => Promise<RuntimeModelCatalogView>
-  onChange(draft: MemberRuntimeDraft): void
-  onCatalogChange(catalog: RuntimeModelCatalogView): void
-}): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [refreshError, setRefreshError] = useState<string | null>(null)
-  const [liveCatalog, setLiveCatalog] = useState<RuntimeModelCatalogView | null>(null)
-  const requestGeneration = useRef(0)
-  const initialCache = installation.modelCatalog
-  const initialModels = displayableInstallationModels(installation)
-  const activeLiveCatalog = liveCatalogIsAtLeastAsRecent(liveCatalog, initialCache)
-    ? liveCatalog
-    : null
-  const cache = activeLiveCatalog && activeLiveCatalog.cache.observedAt !== initialCache.observedAt
-    ? activeLiveCatalog.cache : initialCache
-  const models = activeLiveCatalog
-    ? selectableModels(activeLiveCatalog.models)
-    : initialModels
-  const explicit = draft.model.mode === 'explicit' ? draft.model : null
-  const selectedModel = explicit
-    ? models.find((model) => model.id === explicit.modelId) ?? null
-    : null
-  const selectedValue = explicit?.modelId ?? 'runtime_default'
-  const identity = catalogInstallationIdentity(installation)
-  const refreshFailed = refreshError !== null
-
-  useEffect(() => {
-    requestGeneration.current += 1
-    setOpen(false)
-    setLoading(false)
-    setRefreshError(null)
-    setLiveCatalog(null)
-    return () => { requestGeneration.current += 1 }
-  }, [adapterKind, identity])
-
-  const loadCatalog = (force = false): void => {
-    if (!onOpenModelCatalog || loading || !pageActive || disabled) return
-    const revalidateAfter = cache.revalidateAfter ? Date.parse(cache.revalidateAfter) : Number.NaN
-    if (!force && ((cache.status === 'fresh' && Date.now() < revalidateAfter) || refreshFailed)) return
-    const startedAt = performance.now()
-    const generation = ++requestGeneration.current
-    const recordFirstDisplay = (cached: boolean): void => {
-      requestAnimationFrame(() => {
-        if (generation === requestGeneration.current) console.info('[model-catalog] display', {
-          runtimeKind: adapterKind, cached, firstDisplayMs: Math.round(performance.now() - startedAt)
-        })
-      })
-    }
-    if (models.length > 0) recordFirstDisplay(true)
-    setLoading(true)
-    setRefreshError(null)
-    void onOpenModelCatalog()
-      .then((catalog) => {
-        if (generation !== requestGeneration.current || catalog.runtimeKind !== adapterKind) return
-        if (catalog.refreshStatus !== 'failed' || catalog.models.length > 0) setLiveCatalog(catalog)
-        onCatalogChange(catalog)
-        if (models.length === 0 && catalog.models.length > 0) recordFirstDisplay(false)
-        setRefreshError(catalog.refreshStatus === 'failed' ? uiAttribute('暂时无法获取模型目录') : null)
-      })
-      .catch((reason: unknown) => {
-        if (generation !== requestGeneration.current) return
-        setRefreshError(reason instanceof Error ? reason.message : String(reason))
-      })
-      .finally(() => {
-        if (generation === requestGeneration.current) setLoading(false)
-      })
-  }
-
-  useEffect(() => {
-    if (pageActive && !disabled) loadCatalog()
-  }, [pageActive, disabled, identity])
-
-  const selectModel = (value: string): void => {
-    if (value === selectedValue) return
-    if (value === 'runtime_default') {
-      onChange({ ...draft, model: { mode: 'runtime_default' } })
-      return
-    }
-    const model = models.find((candidate) => candidate.id === value)
-    if (model) onChange({ ...draft, model: explicitSelection(model, draft.model) })
-    else onChange({ ...draft, model: { mode: 'explicit', modelId: value, options: { ...explicit?.options } } })
-  }
-
-  const statusCopy = modelCatalogStatusCopy(cache, {
-    loading: loading && models.length === 0,
-    refreshFailed: !loading && refreshFailed,
-    servingCachedModels: models.length > 0,
-    refreshStatus: loading ? 'joined' : activeLiveCatalog?.refreshStatus ?? null
-  })
-  const triggerLabel = draft.model.mode === 'runtime_default'
-    ? uiAttribute('默认')
-    : selectedModel?.displayName ?? draft.model.modelId
-
-  return (
+  return <>
     <div className="field-label runtime-model-field">
-      <span><UiText zh={"模型"} /></span>
-      <RuntimeModelSearch
-        open={open}
-        onOpenChange={(nextOpen) => {
-          setOpen(nextOpen)
-          if (nextOpen) loadCatalog()
-        }}
-        models={models}
-        value={selectedValue}
-        label={triggerLabel}
-        disabled={disabled}
-        loading={loading}
-        failed={refreshFailed}
-        onSelect={selectModel}
-        notice={!loading && refreshFailed ? [statusCopy, refreshError].filter(Boolean).join('\n') : null}
-        onRetry={() => loadCatalog(true)}
-      />
-
+      <span><UiText zh="模型" /></span>
+      <RuntimeModelSearch key={identity} open={open}
+        onOpenChange={next => { setOpen(next); if (next) ensureCatalog(false, true) }}
+        models={models} value={explicit?.modelId ?? 'runtime_default'}
+        label={explicit ? selectedModel?.displayName ?? explicit.modelId : uiAttribute('默认')}
+        disabled={disabled} loading={loading}
+        onRefresh={refresh} onSelect={selectModel} />
     </div>
-  )
+    {explicit && optionKey && showOption && <RuntimeParameterSelect
+      label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
+      disabled={disabled} onChange={setOption}
+      onOpen={() => ensureCatalog(false, true)} loading={loading}
+      defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
+        : isDsh ? uiAttribute('模型默认') : uiAttribute('跟随模型默认值') }}
+      choices={[
+        ...(missing ? [{ value: optionValue, label: optionValue }] : []),
+        ...optionChoices.map(choice => ({ ...choice, disabled: isDsh && !optionsKnown }))
+      ]} />}
+  </>
 }
 
 function selectableModels(models: ModelDescriptor[]): ModelDescriptor[] {
@@ -760,15 +619,18 @@ function modelCatalogIsServiceable(cache: RuntimeModelCatalogCache): boolean {
   return cache.status === 'fresh' || cache.status === 'stale'
 }
 
+export function runtimeModelCatalogIsFresh(cache: RuntimeModelCatalogCache, now = Date.now()): boolean {
+  return cache.status === 'fresh' && now < Date.parse(cache.revalidateAfter ?? '')
+}
+
 function catalogInstallationIdentity(installation: AdapterInstallation): string {
-  const healthIdentity = [installation.id, installation.generation, installation.snapshot?.executableFingerprint,
-    installation.pathState, installation.modelCatalog.status === 'invalidated' || installation.modelCatalog.status === 'unavailable'].join(':')
-  if (installation.adapterKind !== 'pi') return healthIdentity
+  const installationIdentity = [installation.id, installation.generation, installation.snapshot?.executableFingerprint].join(':')
+  if (installation.adapterKind !== 'pi') return installationIdentity
   // Pi's catalog can be invalidated independently of the shared health fields.
   // A prior local response must not outlive Core's new ownership projection.
   const catalogIdentity = installation.snapshot?.models.find(model => model.id === 'pi://runtime-default')
     ?.runtimeMetadata?.piCatalogIdentity
-  return JSON.stringify([healthIdentity, installation.modelCatalog.status === 'invalidated', catalogIdentity])
+  return JSON.stringify([installationIdentity, installation.modelCatalog.status === 'invalidated', catalogIdentity])
 }
 
 // Display policy only. Never use this to approve a new saved model selection.
@@ -776,6 +638,7 @@ export function displayableInstallationModels(installation: AdapterInstallation)
   const cache = installation.modelCatalog
   const snapshot = installation.snapshot
   const sameEnvironmentHistory = cache.status === 'expired'
+    && Boolean(snapshot)
   return modelCatalogIsServiceable(cache) || sameEnvironmentHistory
     ? selectableModels(snapshot?.models ?? []) : []
 }
@@ -793,32 +656,6 @@ export function liveCatalogIsAtLeastAsRecent(
   return Date.parse(liveObservedAt) >= Date.parse(initialObservedAt)
 }
 
-export function modelCatalogStatusCopy(
-  cache: RuntimeModelCatalogCache,
-  state: {
-    loading: boolean
-    refreshFailed: boolean
-    servingCachedModels: boolean
-    refreshStatus: RuntimeModelCatalogView['refreshStatus'] | null
-  }
-): string {
-  if (state.loading) return uiAttribute("正在获取模型列表…")
-  if (state.refreshFailed) {
-    return state.servingCachedModels
-      ?uiAttribute("模型与参数尚未核对，已保留上次结果。")
-      :uiAttribute("模型与参数尚未核对，已保留当前选择。")
-  }
-  if (state.refreshStatus === 'scheduled' || state.refreshStatus === 'joined') {
-    return uiAttribute("正在更新模型列表…")
-  }
-  if (state.refreshStatus === 'deferred') {
-    return state.servingCachedModels
-      ?uiAttribute("运行环境正在更新，继续显示上次成功结果")
-      :uiAttribute("运行环境正在更新，稍后重新获取")
-  }
-  return ''
-}
-
 export function explicitSelection(
   model: ModelDescriptor,
   previous: ModelSelection
@@ -834,11 +671,6 @@ export function explicitSelection(
       ? { dshSource: model.runtimeMetadata.dshSource }
       : {})
   }
-}
-
-function dshOptionReadKey(identity: string, model: ModelSelection): string {
-  return JSON.stringify([identity, model.mode === 'explicit' ? model.modelId : null,
-    model.mode === 'explicit' ? model.dshSource ?? 'native' : null])
 }
 
 export function dshModelOptionsResolved(model: ModelDescriptor | null, source?: 'native' | 'web'): boolean {

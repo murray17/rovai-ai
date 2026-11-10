@@ -4349,5 +4349,15 @@
   "跳过": "Skip",
   "否": "No",
   "是": "Yes",
-  "提交": "Submit"
+  "提交": "Submit",
+  "可选项读取失败，已保留当前选择。": "Could not load options. Your selection is preserved.",
+  "读取结果与当前选择不一致，请重试。": "The result does not match your current selection. Please retry.",
+  "暂时无法读取该模型的可选项，请重试。": "Could not load options for this model. Please retry.",
+  "搜索模型 / 自定义 ID": "Search models / custom ID",
+  "搜索模型或输入自定义 ID": "Search models or enter a custom model ID",
+  "使用此模型 ID": "Use this model ID",
+  "使用此模型 ID：{0}": "Use this model ID: {0}",
+  "正在读取可选项…": "Loading options…",
+  "刷新模型列表": "Refresh model list",
+  "正在刷新模型列表": "Refreshing model list"
 }
