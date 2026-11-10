@@ -613,7 +613,7 @@ function ModelFields({
     {explicit && optionKey && showOption && <RuntimeParameterSelect
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
-      onOpen={() => ensureCatalog(false, true)} loading={loading}
+      onOpen={() => ensureCatalog(false, true)} loading={isDsh && loading}
       defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
         : isDsh ? uiAttribute('模型默认') : uiAttribute('跟随模型默认值') }}
       choices={[
