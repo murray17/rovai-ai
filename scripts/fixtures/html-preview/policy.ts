@@ -35,6 +35,7 @@ export async function policyAcceptance(window: BrowserWindow, userData: string, 
   cases.push({ name: 'real CSP denial is neutral, attempted once, and preserves author policy and interaction',
     ok: limited.document === 'loaded' && limited.channel === 'connected' && limited.resource === 'no-error-observed'
       && limited.diagnostics === 'unavailable' && limited.issues.length === 0 && limited.summary === '诊断详情'
+      && limited.text.includes('资源诊断：受页面策略限制')
       && limited.expanded === 'false' && !limited.warning && !limited.alert
       && retained.events.length === 1 && retained.events[0].trusted && retained.events[0].directive === 'connect-src'
       && retained.events[0].sourceFile.includes('/__rovai-preview/bridge/')

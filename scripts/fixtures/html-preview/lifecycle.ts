@@ -1,9 +1,9 @@
 import type { BrowserWindow } from 'electron'
-import { writeFile } from 'node:fs/promises'
+import { appendFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ServerResponse } from 'node:http'
 
-export async function lifecycleAcceptance(window: BrowserWindow, userData: string): Promise<{ name: string; ok: boolean; evidence: unknown }[]> {
+export async function lifecycleAcceptance(window: BrowserWindow, userData: string, root: string): Promise<{ name: string; ok: boolean; evidence: unknown }[]> {
   const run = (code: string) => window.webContents.executeJavaScript(code)
   const wait = async (code: string): Promise<void> => {
     for (let count = 0; count < 300; count++) {
@@ -76,6 +76,7 @@ export async function lifecycleAcceptance(window: BrowserWindow, userData: strin
     callback({ cancel: diagnostic })
   })
   try {
+    await appendFile(join(root, 'history.html'), '\n<!-- diagnostic candidate refresh fixture -->\n')
     await run('window.previewAcceptance.reload(window.previewAcceptance.activeTabId)')
     await wait(`window.previewAcceptance.activeTab?.content?.preview?.origin!==${JSON.stringify(origin)} && !window.previewAcceptance.activeTab?.candidate && !window.previewAcceptance.activeTab?.isRefreshing && ${stage}?.dataset.documentState==='loaded' && ${stage}?.dataset.serverDiagnosticsState==='unavailable'`)
     const candidate = await snapshot()

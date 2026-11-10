@@ -8,7 +8,7 @@ import { useHtmlFileFind } from './file-find-html'
 import { HtmlPreviewLoadState, type HtmlPreviewLoadSnapshot } from './file-preview-html-load'
 import { UiText, uiAttribute } from './interface-language'
 
-const labels = { script: '脚本错误', promise: '异步脚本错误', resource: '资源加载失败', policy: '浏览器策略阻止', document: '页面加载失败', channel: '诊断通道不可用' }
+const labels = { script: '脚本错误', promise: '异步脚本错误', resource: '资源加载失败', policy: '浏览器策略阻止', document: '页面加载失败', channel: '诊断通道不可用', layout: '浏览器布局提示' }
 
 export function HtmlViewer({ tab, pathControl, updateAction, downloadAction, hideToolbar = false }: {
   hideToolbar?: boolean
@@ -106,19 +106,20 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
   useEffect(() => { if (fragment) channel?.send('fragment', { fragment }) }, [channel, fragment])
   const safe = Boolean(preview && validPreviewOrigin(preview, window.location.origin))
   const currentDiagnostics = loadState.documentId ? diagnostics : []
+  const problemCount = currentDiagnostics.filter(item => item.kind !== 'layout').length
   const scriptFailed = currentDiagnostics.some(item => item.kind === 'script' || item.kind === 'promise')
   const resourceFailed = currentDiagnostics.some(item => item.kind === 'resource' || item.kind === 'policy')
   const documentFailed = documentState === 'failed' || !safe
-  const hasProblem = documentFailed || Boolean(tab.refreshError) || currentDiagnostics.length > 0
+  const hasProblem = documentFailed || Boolean(tab.refreshError) || problemCount > 0
     || channelState === 'unavailable' || documentState === 'unresponsive' || documentState === 'unconfirmed'
   const diagnosticsUnavailable = loadState.serverDiagnostics === 'unavailable'
-  const hasDetails = hasProblem || diagnosticsUnavailable
+  const hasDetails = hasProblem || currentDiagnostics.length > 0 || diagnosticsUnavailable
   useEffect(() => { if (!hasDetails) setDetailsOpen(false) }, [hasDetails])
   if (!preview || !tab.file) return null
   const status = tab.isRefreshing ? uiAttribute('重新加载中…') : documentFailed ? uiAttribute('加载失败') : tab.refreshError ? uiAttribute('重新加载失败')
     : documentState === 'unconfirmed' || channelState === 'unavailable' ? uiAttribute('状态未确认')
       : documentState === 'unresponsive' ? uiAttribute('加载未完成') : documentState === 'loading' ? uiAttribute('加载中…') : ''
-  const summary = [status, currentDiagnostics.length ? uiAttribute("{0} 项问题", String(currentDiagnostics.length)) : ''].filter(Boolean).join(' · ')
+  const summary = [status, problemCount ? uiAttribute("{0} 项问题", String(problemCount)) : ''].filter(Boolean).join(' · ')
   const expanded = hasDetails && detailsOpen
   const feedback = hasDetails ? <button type="button" className={`file-preview-html-feedback${hasProblem ? ' is-problem' : ''}`}
     aria-expanded={expanded} aria-controls={detailsId} onClick={() => setDetailsOpen(!detailsOpen)}>
@@ -143,9 +144,9 @@ function HtmlPageViewer({ tab, pathControl, updateAction, downloadAction, candid
       {tab.refreshError && <p role="alert"><UiText zh={"重新加载失败："} />{tab.refreshError}<UiText zh={"。已显示的内容会保留。"} /></p>}
       {loadState.notice && <p className="file-preview-html-notice">{loadState.notice}</p>}
       {diagnosticsUnavailable && <p className="file-preview-html-notice"><UiText zh={loadState.serverDiagnosticsReason === 'policy' ? "资源诊断受此页面策略限制，部分诊断信息不可用。" : "资源诊断连接中断，部分资源错误信息可能不完整"} /></p>}
-      <p><UiText zh={"文档："} />{documentState === 'loaded' ? uiAttribute("已加载") : documentState === 'failed' ? uiAttribute("加载失败") : documentState === 'unresponsive' ? uiAttribute("尚未完成加载") : documentState === 'unconfirmed' ? uiAttribute("无法确认") : uiAttribute("加载中")}<UiText zh={" · 脚本："} />{scriptFailed ? uiAttribute("已发现运行错误") : uiAttribute("尚未发现异常")}<UiText zh={" · 资源："} />{resourceFailed ? uiAttribute("部分资源失败") : uiAttribute("尚未发现失败")}<UiText zh={" · 页面通信："} />{channelState === 'connected' ? uiAttribute("已连接") : channelState === 'waiting' ? uiAttribute("尚未响应") : uiAttribute("不可用")}<UiText zh={" · 资源诊断："} />{loadState.serverDiagnostics === 'connected' ? uiAttribute("已连接") : loadState.serverDiagnostics === 'waiting' ? uiAttribute("连接中") : loadState.serverDiagnostics === 'not-applicable' ? uiAttribute("未启用") : uiAttribute("已中断")}</p>
+      <p><UiText zh={"文档："} />{documentState === 'loaded' ? uiAttribute("已加载") : documentState === 'failed' ? uiAttribute("加载失败") : documentState === 'unresponsive' ? uiAttribute("尚未完成加载") : documentState === 'unconfirmed' ? uiAttribute("无法确认") : uiAttribute("加载中")}<UiText zh={" · 脚本："} />{scriptFailed ? uiAttribute("已发现运行错误") : uiAttribute("尚未发现异常")}<UiText zh={" · 资源："} />{resourceFailed ? uiAttribute("部分资源失败") : uiAttribute("尚未发现失败")}<UiText zh={" · 页面通信："} />{channelState === 'connected' ? uiAttribute("已连接") : channelState === 'waiting' ? uiAttribute("尚未响应") : uiAttribute("不可用")}<UiText zh={" · 资源诊断："} />{loadState.serverDiagnostics === 'connected' ? uiAttribute("已连接") : loadState.serverDiagnostics === 'waiting' ? uiAttribute("连接中") : loadState.serverDiagnostics === 'not-applicable' ? uiAttribute("未启用") : loadState.serverDiagnosticsReason === 'policy' ? uiAttribute("受页面策略限制") : uiAttribute("已中断")}</p>
       {currentDiagnostics.length > 0 && <ol>{currentDiagnostics.map((item, index) => <li key={index}>
-        <strong>{labels[item.kind]}</strong>：{item.message}
+        <strong><UiText zh={labels[item.kind]} /></strong>：{item.message}
         {item.resourceUrl && <div>{item.resourceUrl}{item.line ? `:${item.line}${item.column ? `:${item.column}` : ''}` : uiAttribute("（位置未知）")}</div>}
         {item.stack && <pre>{item.stack}</pre>}
       </li>)}</ol>}

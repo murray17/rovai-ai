@@ -14,7 +14,7 @@ import electron from 'electron'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
-for (const scenario of ['basic', 'navigation', 'lifecycle', 'policy']) test(scenario === 'basic' ? 'production HTML preview runs History initialization and a query-addressed nested canvas independently' : scenario === 'navigation' ? 'production HTML preview isolates document navigation state and diagnostics' : scenario === 'policy' ? 'production HTML preview distinguishes internal CSP denial from author errors' : 'production HTML preview recovers diagnostic loss without replacing the page', { timeout: 90_000 }, async t => {
+for (const scenario of ['basic', 'navigation', 'lifecycle', 'policy', 'layout']) test(scenario === 'basic' ? 'production HTML preview runs History initialization and a query-addressed nested canvas independently' : scenario === 'navigation' ? 'production HTML preview isolates document navigation state and diagnostics' : scenario === 'policy' ? 'production HTML preview distinguishes internal CSP denial from author errors' : scenario === 'layout' ? 'production HTML preview distinguishes native layout notifications from business errors' : 'production HTML preview recovers diagnostic loss without replacing the page', { timeout: 90_000 }, async t => {
   if (!admitElectronIntegrationTest(t)) return
   const fixture = await mkdtemp(join(tmpdir(), 'rovai-html-site-'))
   const source = join(root, 'scripts/fixtures/html-preview')
@@ -23,7 +23,7 @@ for (const scenario of ['basic', 'navigation', 'lifecycle', 'policy']) test(scen
     const resources = join(fixture, 'resources')
     await cp(source, resources, {recursive:true})
     await copyFile(join(resources, 'history.html'), join(resources, 'attachment.html'))
-    for (const [key, name] of [['ROVAI_HTML_HISTORY_SAMPLE','original-history.html'],['ROVAI_HTML_CANVAS_SAMPLE','original-canvas.html']]) {
+    for (const [key, name] of [['ROVAI_HTML_HISTORY_SAMPLE','original-history.html'],['ROVAI_HTML_CANVAS_SAMPLE','original-canvas.html'],['ROVAI_HTML_MODEL_SELECTOR_SAMPLE','model-selector-v3-en.html']]) {
       if (process.env[key]) { await copyFile(process.env[key], join(resources,name)); console.log(`${name} sha256 ${createHash('sha256').update(await readFile(join(resources,name))).digest('hex')}`) }
     }
     network = createServer((request,response) => {
