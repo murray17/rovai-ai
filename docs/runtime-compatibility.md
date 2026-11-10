@@ -6,6 +6,20 @@ last_updated: 2026-11-10
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-10 Kilo 自动压缩与逐模型选项
+
+官方 **7.8.27**、macOS arm64 原生及生产 Core/CLI 使用本地受控 Provider 完成原生自动阈值、
+Provider context_length_exceeded 后自动压缩/重试及 Core 重启原 Session 恢复。
+Core **30 个 Run：28 成功、2 主动取消**；阈值与 overflow 各产生一个原生 auto summary，
+后续普通请求逐字保留完整 Bootstrap，摘要只留在原生历史，未作为公开正文发布。
+阈值配置和 Provider Token 数由夹具控制，不是付费模型自然耗尽窗口或摘要质量验收。
+
+原生临时会话切换两模型分别得到 low/high 与 medium/max，设置 max、恢复原模型均成功，零生成调用。
+Kilo 可以查询其他模型选项；当前 Rovai 目录尚未逐模型收集，不能把该缺口归为原生不支持。
+进程复用范围与 OpenCode/Codex 一致；本次另修共享 ACP 持 child 锁时 PID 读取丢失的竞态。
+权限、模型目录发现策略和平台资格不变，见[专项记录](versions/v1.72/kilo-auto-compaction-and-options.md)及
+[白名单证据](research/kilo-runtime/automatic-compaction-7.8.27-macos-arm64.json)。
+
 ## 2026-11-10 Kilo 前台 task 展示与输出预算
 
 官方 **7.8.27**、macOS arm64、生产 Core/CLI 与本地受控 Provider 完成 **26 个 Run（24 成功、2 主动取消）**。

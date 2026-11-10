@@ -7,6 +7,9 @@ last_updated: 2026-11-10
 
 # Kilo 原生 ACP 研究与实际探测
 
+自动阈值/overflow 压缩及逐模型 effort 查询的新验证见[专项核对](../../versions/v1.72/kilo-auto-compaction-and-options.md)。
+下方早期手动压缩记录不替代自动验收；模型目录当前实现范围与原生可查询能力分别记录。
+
 结论：采用官方 `kilo acp`，复用共享 ACP/Fleet；单 Binding Host 和原生 instructions 已用于产品实现，
 不增加压缩插件、独立进程池、配置镜像、二次审批或 SHA256 校验。
 当前 macOS arm64 为 Preview，其他平台 NotQualified，不宣称 First-Class。

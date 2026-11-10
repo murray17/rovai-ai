@@ -24,6 +24,7 @@ const bootstrap = join(root, 'bootstrap.txt')
 await writeFile(bootstrap, '[SESSION_CHARTER]\nBOOTSTRAP_A_92c1\n[/SESSION_CHARTER]\n')
 const calls = [], hosts = [], evidence = { platform:process.platform+'-'+process.arch, checks:{} }
 let enterSteer, releaseSteer
+let overflowInjected=false
 const steerEntered = new Promise(resolve => { enterSteer = resolve })
 const steerGate = new Promise(resolve => { releaseSteer = resolve })
 const provider = createServer(async (req,res)=>{
@@ -36,7 +37,14 @@ const provider = createServer(async (req,res)=>{
   const last=body.messages.at(-1)
   const user=[...body.messages].reverse().find(m=>m.role==='user')
   const content=typeof user?.content==='string'?user.content:JSON.stringify(user?.content)
+  if(body.tools?.length&&content?.includes('PROBE_AUTO_OVERFLOW')&&!overflowInjected){
+    overflowInjected=true
+    res.writeHead(400,{'content-type':'application/json'})
+    res.end(JSON.stringify({error:{message:"This model's maximum context length is 200000 tokens. However, you requested 200001 tokens.",type:'invalid_request_error',code:'context_length_exceeded',param:'messages'}}))
+    return
+  }
   let delta={role:'assistant',content:'KILO_FIXTURE_OK'},finish='stop'
+  if(!body.tools?.length&&JSON.stringify(body.messages).includes('PROBE_AUTO_'))delta.content='KILO_AUTOMATIC_SUMMARY'
   if(content?.includes('PROBE_FILES')&&body.tools?.length){
     const history=body.messages.slice(body.messages.findLastIndex(m=>m.role==='user')+1)
     const used=history.flatMap(m=>m.tool_calls?.map(t=>t.function.name)??[])
@@ -58,16 +66,20 @@ const provider = createServer(async (req,res)=>{
   const base={id:'chatcmpl-fixture-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
   res.writeHead(200,{'content-type':'text/event-stream'})
   res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta,finish_reason:null}]})+'\n\n')
-  res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:finish}],usage:{prompt_tokens:100,completion_tokens:20,total_tokens:120,prompt_tokens_details:{cached_tokens:25}}})+'\n\n')
+  const input=body.tools?.length&&content?.includes('PROBE_AUTO_SEED')?110000:100
+  res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:finish}],usage:{prompt_tokens:input,completion_tokens:20,total_tokens:input+20,prompt_tokens_details:{cached_tokens:25}}})+'\n\n')
   res.end('data: [DONE]\n\n')
 })
 await new Promise(r=>provider.listen(0,'127.0.0.1',r))
 const port=provider.address().port
 const config={
   autoupdate:false,share:'disabled',enabled_providers:['local'],
-  model:'local/local-model',small_model:'local/local-model',
+  model:'local/local-model',small_model:'local/local-model',compaction:{auto:true,threshold_percent:50},
   provider:{local:{name:'Local probe',npm:'@ai-sdk/openai-compatible',env:[],options:{apiKey:'fixture-key',baseURL:'http://127.0.0.1:'+port+'/v1'},
-    models:{'local-model':{name:'Local model',tool_call:true,limit:{context:32768,output:2048}}}}},
+    models:{
+      'local-model':{name:'Local model',tool_call:true,limit:{context:200000,output:2048},variants:{low:{temperature:0.1},high:{temperature:0.8}}},
+      'local-other':{name:'Other model',tool_call:true,limit:{context:200000,output:2048},variants:{medium:{temperature:0.3},max:{temperature:0.9}}}
+    }}},
   permission:{'*':'allow',question:'deny'},instructions:[bootstrap]
 }
 const environment=isolatedKiloEnvironment(root)
@@ -139,6 +151,20 @@ try{
   evidence.initialize=host.initialize
   const a=await host.rpc('session/new',{cwd:project,mcpServers:mcp})
   evidence.session=a
+  const catalog=await host.rpc('session/new',{cwd:project,mcpServers:[]})
+  const effort=result=>result.configOptions.find(option=>option.id==='effort')
+  const selected=result=>result.configOptions.find(option=>option.id==='model').currentValue
+  const beforeCatalog=calls.length
+  assert.deepEqual(effort(catalog).options.map(option=>option.value),['low','high'])
+  const other=await host.rpc('session/set_config_option',{sessionId:catalog.sessionId,configId:'model',value:'local/local-other'})
+  assert.equal(selected(other),'local/local-other')
+  assert.deepEqual(effort(other).options.map(option=>option.value),['medium','max'])
+  const maximum=await host.rpc('session/set_config_option',{sessionId:catalog.sessionId,configId:'effort',value:'max'})
+  assert.equal(effort(maximum).currentValue,'max')
+  const restored=await host.rpc('session/set_config_option',{sessionId:catalog.sessionId,configId:'model',value:'local/local-model'})
+  assert.deepEqual(effort(restored).options.map(option=>option.value),['low','high'])
+  assert.equal(calls.length,beforeCatalog,'Model option queries must not generate model requests')
+  evidence.checks.modelOptions={initial:effort(catalog),other:effort(other),selectedMaximum:effort(maximum).currentValue,restored:effort(restored),modelCalls:0}
   const first=await host.prompt(a.sessionId,'PROBE_BASH FIRST_DYNAMIC_MARKER')
   assert.equal(first.result.stopReason,'end_turn')
   assert(calls.length>=2,'Expected bash followed by a second model step')
@@ -161,17 +187,28 @@ try{
   assert(!system(calls[before]).includes('BOOTSTRAP_A_92c1'))
   assert((await readFile(join(root,'evidence','mcp-calls.txt'),'utf8')).includes('called'))
   evidence.checks.warmInstructionsAndMcp=true
-  before=calls.length
-  const compact=await host.prompt(a.sessionId,'/compact')
   const compactDatabase=new DatabaseSync(join(root,'data','kilo','kilo.db'),{readOnly:true})
-  let summaries
-  try { summaries=compactDatabase.prepare("SELECT count(*) AS count FROM message WHERE session_id=? AND json_extract(data,'$.summary')=1 AND json_extract(data,'$.role')='assistant'").get(a.sessionId).count } finally { compactDatabase.close() }
-  assert(summaries>0,'Compaction must create a native summary')
-  evidence.checks.manualCompact={result:compact.result,calls:calls.length-before,nativeSummaries:summaries}
-  before=calls.length
-  await host.prompt(a.sessionId,'AFTER_COMPACTION')
-  assert(system(calls[before]).includes('BOOTSTRAP_A_UPDATED_92c1'))
-  evidence.checks.instructionsAfterCompact=true
+  try {
+    const parts=()=>compactDatabase.prepare("SELECT json_extract(data,'$.auto') AS automatic,json_extract(data,'$.overflow') AS overflow FROM part WHERE session_id=? AND json_extract(data,'$.type')='compaction'").all(a.sessionId)
+    const summaries=()=>compactDatabase.prepare("SELECT count(*) AS n FROM message WHERE session_id=? AND json_extract(data,'$.summary')=1 AND json_extract(data,'$.role')='assistant'").get(a.sessionId).n
+    await host.prompt(a.sessionId,'PROBE_AUTO_SEED')
+    const baseline=summaries();before=calls.length
+    const automatic=await host.prompt(a.sessionId,'PROBE_AUTO_THRESHOLD')
+    assert.equal(automatic.result.stopReason,'end_turn')
+    const resumed=calls.slice(before).filter(request=>request.tools?.length)
+    assert(summaries()>baseline&&parts().some(part=>part.automatic===1&&part.overflow!==1),'Native threshold must create an automatic non-overflow compaction')
+    assert(resumed.length>0&&resumed.every(request=>system(request).includes('BOOTSTRAP_A_UPDATED_92c1')))
+    assert(resumed.some(request=>JSON.stringify(request.messages).includes('KILO_AUTOMATIC_SUMMARY')),'Normal generation must consume the actual summary')
+    evidence.checks.automaticThreshold={stopReason:automatic.result.stopReason,nativeSummaries:summaries()-baseline,reportedInput:110000,contextWindow:200000,thresholdPercent:50,systemPreserved:true,summaryConsumed:true}
+    const overflowBaseline=summaries();before=calls.length
+    const recovered=await host.prompt(a.sessionId,'PROBE_AUTO_OVERFLOW')
+    const retried=calls.slice(before).filter(request=>request.tools?.length)
+    assert.equal(recovered.result.stopReason,'end_turn')
+    assert(overflowInjected&&summaries()>overflowBaseline&&parts().some(part=>part.automatic===1&&part.overflow===1),'Provider overflow must trigger native automatic recovery')
+    assert(retried.length>=2&&retried.every(request=>system(request).includes('BOOTSTRAP_A_UPDATED_92c1')))
+    evidence.checks.automaticOverflow={stopReason:recovered.result.stopReason,nativeSummaries:summaries()-overflowBaseline,providerRejectedOnce:true,systemPreserved:true}
+    assert(parts().every(part=>part.automatic===1),'No manual compaction is part of this acceptance')
+  } finally {compactDatabase.close()}
   const b=await host.rpc('session/new',{cwd:project,mcpServers:[]})
   before=calls.length
   await host.prompt(b.sessionId,'NEIGHBOR_WITHOUT_MCP')
@@ -184,7 +221,7 @@ try{
   await host.prompt(a.sessionId,'COLD_RESUME_MARKER')
   assert(system(calls[before]).includes('BOOTSTRAP_A_UPDATED_92c1'))
   evidence.checks.coldResume={sessionId:a.sessionId,historyMessages:calls[before].messages.length,mcpToolsPresent:calls[before].tools.some(t=>t.function.name.includes('parity'))}
-  assert(JSON.stringify(calls[before].messages).includes('AFTER_COMPACTION'),'Cold resume must preserve prior native history')
+  assert(JSON.stringify(calls[before].messages).includes('KILO_AUTOMATIC_SUMMARY'),'Cold resume must preserve the native automatic summary')
   assert(!evidence.checks.coldResume.mcpToolsPresent,'Process-local MCP must disappear on a fresh Host')
   const steering=await host.rpc('session/new',{cwd:project,mcpServers:[]})
   const offset=hosts.at(-1).frames.length, callOffset=calls.length

@@ -35,6 +35,7 @@ const busyGate = new Promise(resolve=>{releaseBusy=resolve})
 const bootstrapChecks=[]
 const calls = [], events = [], result = { root, platform:process.platform+'-'+process.arch, checks:{} }
 let steerControl
+let overflowInjected=false
 function armSteer() {
   let enter, release
   const entered=new Promise(resolve=>{enter=resolve}), gate=new Promise(resolve=>{release=resolve})
@@ -57,6 +58,12 @@ async function serve(req,res) {
     bootstrapChecks.push({index:calls.length-1,bytes:Buffer.byteLength(frozen),verbatim:!!source&&nativeSystem.includes('Instructions from: '+source+'\n'+frozen)})
   }
   await writeFile(join(root,'evidence','model-requests.json'),JSON.stringify(calls,null,2))
+  if(body.tools?.length&&content?.includes('CORE_AUTO_OVERFLOW')&&!overflowInjected) {
+    overflowInjected=true
+    res.writeHead(400,{'content-type':'application/json'})
+    res.end(JSON.stringify({error:{message:"This model's maximum context length is 200000 tokens. However, you requested 200001 tokens.",type:'invalid_request_error',code:'context_length_exceeded',param:'messages'}}))
+    return
+  }
   if(content?.includes('CORE_STEER_')&&body.tools?.length&&steerControl&&!steerControl.held) {
     const control=steerControl; control.held=true
     const base={id:'kilo-steer-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
@@ -67,11 +74,12 @@ async function serve(req,res) {
     return
   }
   let delta={role:'assistant',content:child?childReports[child[1]]:'KILO_CORE_PUBLIC'},finish='stop'
-  if(body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_TASK_')) {
+  if(!body.tools?.length&&JSON.stringify(body.messages).includes('CORE_AUTO_'))delta.content='KILO_AUTOMATIC_SUMMARY'
+  if(body.tools?.length && body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_TASK_')) {
     assert(body.tools?.some(tool=>tool.function.name==='task'),'Native foreground task must remain available')
     const size=content.includes('CORE_TASK_LONG')?'LONG':'SHORT'
     delta={role:'assistant',tool_calls:[{index:0,id:'call_task_'+calls.length,type:'function',function:{name:'task',arguments:JSON.stringify({description:'Read native child report',subagent_type:'general',prompt:'KILO_CHILD_'+size})}}]};finish='tool_calls'
-  } else if(body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_MCP')) {
+  } else if(body.tools?.length && body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_MCP')) {
     const tool=body.tools?.find(tool=>tool.function.name.includes('kilo_review')&&tool.function.name.endsWith('echo'))
     assert(tool,'Assigned MCP tool must be visible')
     delta={role:'assistant',tool_calls:[{index:0,id:'call_mcp_'+calls.length,type:'function',function:{name:tool.function.name,arguments:'{"text":"CORE_MCP_MARKER"}'}}]};finish='tool_calls'
@@ -101,7 +109,8 @@ async function serve(req,res) {
   const base={id:'kilo-core-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
   res.writeHead(200,{'content-type':'text/event-stream'})
   res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta,finish_reason:null}]})+'\n\n')
-  res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:finish}],usage:{prompt_tokens:100,completion_tokens:20,total_tokens:120,prompt_tokens_details:{cached_tokens:25}}})+'\n\n')
+  const input=body.tools?.length&&content?.includes('CORE_AUTO_SEED')?110000:100
+  res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:finish}],usage:{prompt_tokens:input,completion_tokens:20,total_tokens:input+20,prompt_tokens_details:{cached_tokens:25}}})+'\n\n')
   res.end('data: [DONE]\n\n')
 }
 await new Promise(r=>provider.listen(0,'127.0.0.1',r))
@@ -113,9 +122,9 @@ process.env.KILO_CONFIG=join(root,'canary.json')
 process.env.KILO_CONFIG_DIR=join(root,'inherited-config')
 process.env.KILO_DB=':memory:'
 const config={permission:{bash:{'printf *':'allow','* KILO_INLINE_BLOCKED*':'deny'}},
-  agent:{build:{permission:{bash:{'printf KILO_AGENT*':'allow','* KILO_AGENT_BLOCKED*':'deny'}}}},autoupdate:false,share:'disabled',enabled_providers:['local'],model:'local/local-model',small_model:'local/local-model',
+  agent:{build:{permission:{bash:{'printf KILO_AGENT*':'allow','* KILO_AGENT_BLOCKED*':'deny'}}}},autoupdate:false,share:'disabled',enabled_providers:['local'],model:'local/local-model',small_model:'local/local-model',compaction:{auto:true,threshold_percent:50},
   provider:{local:{name:'Local smoke',npm:'@ai-sdk/openai-compatible',env:[],options:{apiKey:'fixture-key',baseURL:'http://127.0.0.1:'+provider.address().port+'/v1'},
-    models:{'local-model':{name:'Local model',tool_call:true,variants:{low:{temperature:0.1},high:{temperature:0.8}},cost:{input:1,output:2,cache_read:0.5,cache_write:1},limit:{context:32768,output:2048}}}}}}
+    models:{'local-model':{name:'Local model',tool_call:true,variants:{low:{temperature:0.1},high:{temperature:0.8}},cost:{input:1,output:2,cache_read:0.5,cache_write:1},limit:{context:200000,output:2048}}}}}}
 const noNodePath='/usr/bin:/bin:/usr/sbin:/sbin'
 const python=execFileSync('python3',['-c','import sys; print(sys.executable)'],{encoding:'utf8'}).trim()
 const environment={...isolatedKiloEnvironment(root),PATH:noNodePath,ROVAI_KILO_BIN:executable,
@@ -478,6 +487,37 @@ for line in sys.stdin:
     result.checks.steer.cancelledWithPending=true
     result.checks.steer.cancelledHostRetired=true
   } finally {steerControl?.release();ledger.close();native.close()}
+  const automaticDatabase=new DatabaseSync(nativeDatabase,{readOnly:true})
+  let autoSession, autoHost
+  try {
+    const seed=await settle(await send('CORE_AUTO_SEED'))
+    autoSession=seed.started.nativeThreadId;autoHost=seed.started.hostInstanceId
+    const summaries=()=>automaticDatabase.prepare("SELECT count(*) AS n FROM message WHERE session_id=? AND json_extract(data,'$.role')='assistant' AND json_extract(data,'$.summary')=1").get(autoSession).n
+    const parts=()=>automaticDatabase.prepare("SELECT json_extract(data,'$.auto') AS automatic,json_extract(data,'$.overflow') AS overflow FROM part WHERE session_id=? AND json_extract(data,'$.type')='compaction'").all(autoSession)
+    const baseline=summaries(), offset=calls.length
+    const threshold=await settle(await send('CORE_AUTO_THRESHOLD'))
+    assert(summaries()>baseline&&parts().some(part=>part.automatic===1&&part.overflow!==1),'Core input must trigger native automatic threshold compaction')
+    assert(calls.slice(offset).some(call=>call.tools?.length&&JSON.stringify(call.messages).includes('KILO_AUTOMATIC_SUMMARY')),'Normal model input must consume the actual native summary')
+    assert.equal(threshold.started.hostInstanceId,autoHost,'Automatic compaction must preserve the resident Host')
+    const messages=threshold.snapshot.messages.filter(message=>message.sourceAgentRunId===threshold.run.id)
+    assert.equal(messages.length,1);assert.equal(messages[0].body,'KILO_CORE_PUBLIC','Compaction summary must not become public agent prose')
+    result.checks.automaticThreshold={run:threshold.run.id,seedRun:seed.run.id,session:autoSession,host:autoHost,nativeSummaries:summaries()-baseline,reportedInput:110000,contextWindow:200000,thresholdPercent:50,summaryConsumed:true,summaryNotPublished:true}
+    const overflowBaseline=summaries(), overflowOffset=calls.length
+    const overflow=await settle(await send('CORE_AUTO_OVERFLOW'))
+    assert(overflowInjected&&summaries()>overflowBaseline&&parts().some(part=>part.automatic===1&&part.overflow===1),'Provider context error must recover through native automatic compaction')
+    assert(calls.slice(overflowOffset).filter(call=>call.tools?.length).length>=2,'Native overflow must retry ordinary generation')
+    assert.equal(overflow.started.hostInstanceId,autoHost)
+    const overflowMessages=overflow.snapshot.messages.filter(message=>message.sourceAgentRunId===overflow.run.id)
+    assert.equal(overflowMessages.length,1);assert.equal(overflowMessages[0].body,'KILO_CORE_PUBLIC')
+    assert(parts().every(part=>part.automatic===1),'No manual compaction belongs to this acceptance')
+    result.checks.automaticOverflow={run:overflow.run.id,nativeSummaries:summaries()-overflowBaseline,providerRejectedOnce:true,summaryNotPublished:true}
+  } finally {automaticDatabase.close()}
+  await core.close();core=await openCore();await core.request('health.check')
+  const afterAutomaticOffset=calls.length, afterAutomatic=await settle(await send('CORE_AFTER_AUTO_COLD'))
+  assert.equal(afterAutomatic.started.nativeThreadId,autoSession)
+  assert.notEqual(afterAutomatic.started.hostInstanceId,autoHost)
+  assert(calls.slice(afterAutomaticOffset).some(call=>call.tools?.length&&JSON.stringify(call.messages).includes('KILO_AUTOMATIC_SUMMARY')),'Cold resume must retain the native automatic summary')
+  result.checks.automaticColdResume={run:afterAutomatic.run.id,session:autoSession,newHost:afterAutomatic.started.hostInstanceId,summaryRetained:true}
   assert(calls.every(call=>!call.tools?.some(tool=>tool.function.name==='question')),'Native question must remain disabled through warm/cold and permission changes')
   assert(!JSON.stringify(calls).includes('INHERITED_KILO_CONFIG_CANARY'),'Parent native config must not enter fixture model input')
   assert(bootstrapChecks.length>=result.finishedRuns.length-1&&bootstrapChecks.every(check=>check.verbatim),'Every ordinary model request must receive its current Host Bootstrap verbatim')

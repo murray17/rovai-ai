@@ -68,6 +68,7 @@ Command Code 在 macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。�
 ## Kilo 官方 ACP
 
 Kilo 是独立的官方 ACP 产品身份，复用共享 Host/Fleet/Binding 与现有原生审批。
+进程复用范围与 OpenCode/Codex 一样按 Thread、成员、原生绑定及配置匹配，不跨这些归属共享进程。
 每个成员的 Native Binding 使用自己的 resident Host，MCP 实际更新在既有生命周期边界退役进程，
 原生会话仍以保存的精确 ID 恢复；不增加 Kilo 私有池、配置镜像或原生历史管理。
 Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共享冻结正文；

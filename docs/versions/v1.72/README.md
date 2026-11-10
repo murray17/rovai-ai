@@ -25,6 +25,7 @@ macOS arm64 开放主动使用的 Preview，其他平台 NotQualified；完整 F
 无 Node 的 MCP、pure 回调、取消期限与文件/effort 投影收尾见[边界自检](kilo-boundary-fixes.md)。
 成功 Steer 后的常规 Host 复用及文件/cwd 对照见[复用记录](kilo-steer-reuse.md)。
 前台子代理工具展示补全、7.5 KiB 输出实测、Skills 验收状态与版本/平台判断说明见[补全记录](kilo-subagent-display.md)。
+自动阈值/overflow 压缩、逐模型 effort 原生查询及进程复用比较修正见[专项核对](kilo-auto-compaction-and-options.md)。
 
 ## 执行台自动打开偏好（2026-11-08）
 

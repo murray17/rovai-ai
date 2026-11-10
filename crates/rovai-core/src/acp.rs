@@ -1463,6 +1463,7 @@ pub(crate) struct AcpHost {
     client_terminal_mode: AcpClientTerminalMode,
     client_terminal_bridge: Option<AcpClientTerminalBridge>,
     host_instance_id: String,
+    root_pid: u32,
     child: Mutex<ManagedProcess>,
     stdin: Mutex<Box<dyn AsyncWrite + Unpin + Send>>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
@@ -2000,6 +2001,7 @@ impl AcpHost {
         }
         startup.child = Some(child);
         let child = startup.child.as_mut().expect("startup owns child");
+        let root_pid = child.id().context("ACP process has no root PID")?;
         #[cfg(target_os = "macos")]
         child.track_descendants(&private_runtime_dir.join("owned-processes"))?;
         let stdin = child.take_stdin().context("ACP stdin was unavailable")?;
@@ -2055,6 +2057,7 @@ impl AcpHost {
             native_usage_data_dir,
             client_terminal_bridge,
             host_instance_id,
+            root_pid,
             child: Mutex::new(startup.child.take().expect("Host takes startup child")),
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
@@ -4086,7 +4089,9 @@ impl AcpHost {
     }
 
     pub(crate) fn pid(&self) -> Option<u32> {
-        self.child.try_lock().ok().and_then(|child| child.id())
+        // Process identity is fixed at spawn. Watcher/cleanup lock contention
+        // must not make Fleet ownership registration lose a live root PID.
+        Some(self.root_pid)
     }
 
     pub(crate) fn executable_path(&self) -> &Path {
@@ -15283,6 +15288,15 @@ while IFS= read -r ignored; do :; done
             .await
             .unwrap();
         let first_host = first.host_instance_id().to_string();
+        let root_pid = first.host.pid().unwrap();
+        {
+            let _child = first.host.child.lock().await;
+            assert_eq!(
+                first.host.pid(),
+                Some(root_pid),
+                "process ownership must retain the root PID while the watcher holds the child lock"
+            );
+        }
         let session_id = first
             .start_or_resume_session(
                 None,

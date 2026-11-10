@@ -198,6 +198,12 @@ Core smoke 使用三个连续 Steer/普通后继转换验证同 Host/Session 与
 原 Core smoke 增加短/超预算 task 报告、超预算命令与重开后永久截断，并确认模型仍收到完整报告。
 共享 Renderer 继续运行 `node --test scripts/lib/command-view.test.mjs`，实际范围见[补全记录](../versions/v1.72/kilo-subagent-display.md)。
 
+自动压缩改用原生 `auto=true`、真实 summary 和压缩后普通请求的完整 Bootstrap 验收，不用 `/compact` 代替。
+原 probe 另用非生成模型切换核对不同模型的 effort；Core smoke 覆盖 threshold、Provider overflow 与冷恢复。
+原 TRAE warm/Fleet owner 增加 child 锁持有时根 PID 不丢失的反例，新增 Rust 测试函数为零；
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib trae_completed_run_enters_lru_and_reuses_the_same_host_session`。
+夹具、失败分工与证据范围见[专项核对](../versions/v1.72/kilo-auto-compaction-and-options.md)。
+
 ## Rust 测试准入与退役门槛
 
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess
