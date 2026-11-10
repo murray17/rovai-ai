@@ -71,6 +71,7 @@ async function serve(req,res) {
   } else if(body.messages.at(-1)?.role!=='tool' && body.tools?.some(t=>t.function.name==='bash')) {
     let command
     if(content?.includes('CORE_FIRST_CLI')) command="printf KILO_CORE_STDOUT; rovai send --public-only --body KILO_CORE_CLI"
+    else if(content?.includes('CORE_AFTER_STEER_CLI_')) command='rovai send --public-only --body KILO_WARM_CLI_'+content.match(/CORE_AFTER_STEER_CLI_(\d+)/)[1]
     else if(content?.includes('CORE_PERMISSION_')) {
       const label=content.match(/CORE_PERMISSION_(FILE|INLINE|AGENT)/)[1]
       command='printf KILO_'+label+'_BLOCKED > '+quote(join(project,label.toLowerCase()+'-blocked.txt'))
@@ -389,17 +390,31 @@ for line in sys.stdin:
   }
   const steer=async(run,body)=>core.request('thread.messages.send',{commandId:crypto.randomUUID(),threadId,content:composerDocumentForAddress({mode:'explicit',agentIds:['agent_2']},body),sourceAttachments:[],quotes:[],replyToThreadMessageId:null,deliveryMode:'steer',steerTargets:[{agentRunId:run.id,executionEpoch:run.executionEpoch}],execution:{taskId:null,purpose:'Kilo active input',completionRole:'required'}})
   try {
-    const control=armSteer(), first=await send('CORE_STEER_FIRST')
-    await Promise.race([control.entered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Steer provider entry deadline')),30000))]);const run=await activeSteerRun()
-    const receipt=await steer(run,'CORE_STEER_CORRECTION_ONE');assert.equal(receipt.commandResult.status,'accepted')
-    await until(()=>native.prepare("SELECT count(*) AS n FROM part WHERE json_extract(data,'$.text') LIKE '%CORE_STEER_CORRECTION_%'").get().n>=1)
-    assert.equal((await core.request('camps.snapshot',{threadId})).agentRuns.find(r=>r.id===run.id).status,'running')
-    control.release();await settle(first)
-    await until(()=>ledger.prepare("SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=? AND input_kind='steer' AND status='accepted'").get(run.id).n===1)
-    assert(calls.some(call=>JSON.stringify(call.messages).includes('CORE_STEER_CORRECTION_ONE')))
-    result.checks.steer={run:run.id,accepted:1,sameRun:true,heldUntilAllRequests:true}
-    steerControl=null
-    await settle(await send('CORE_AFTER_STEER'))
+    const warmCycles=[]
+    let previousHost=afterCancel.started.hostInstanceId
+    // Three transitions exercise a Host that already survived prior Steer and lease replacement.
+    for(const cycle of [1,2,3]) {
+      const correction='CORE_STEER_CORRECTION_'+cycle
+      const control=armSteer(), first=await send('CORE_STEER_FIRST_'+cycle)
+      await Promise.race([control.entered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Steer provider entry deadline')),30000))]);const run=await activeSteerRun()
+      const receipt=await steer(run,correction);assert.equal(receipt.commandResult.status,'accepted')
+      await until(()=>native.prepare("SELECT count(*) AS n FROM part WHERE json_extract(data,'$.text') LIKE ?").get('%'+correction+'%').n>=1)
+      assert.equal((await core.request('camps.snapshot',{threadId})).agentRuns.find(r=>r.id===run.id).status,'running')
+      control.release();const completed=await settle(first)
+      await until(()=>ledger.prepare("SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=? AND input_kind='steer' AND status='accepted'").get(run.id).n===1)
+      assert(calls.some(call=>JSON.stringify(call.messages).includes(correction)))
+      assert.equal(completed.started.hostInstanceId,previousHost,'Each successful cycle must start on the already warm Host')
+      steerControl=null
+      const next=await settle(await send('CORE_AFTER_STEER_CLI_'+cycle))
+      assert.equal(next.started.hostInstanceId,completed.started.hostInstanceId,'Successful Kilo Steer must not force a Host restart')
+      assert.equal(next.started.nativeThreadId,completed.started.nativeThreadId,'Warm successor must retain the exact Session')
+      const messages=next.snapshot.messages.filter(message=>message.sourceAgentRunId===next.run.id)
+      assert.equal(messages.length,1,'Each successor must use its own CLI lease without a duplicate final')
+      assert(messages[0].body.includes('KILO_WARM_CLI_'+cycle))
+      warmCycles.push({cycle,run:run.id,nextRun:next.run.id,host:next.started.hostInstanceId,session:next.started.nativeThreadId,cliMessageCommitted:true})
+      previousHost=next.started.hostInstanceId
+    }
+    result.checks.steer={run:warmCycles[0].run,accepted:warmCycles.length,sameRun:true,heldUntilAllRequests:true,warmReuseCycles:warmCycles}
     const cancellation=armSteer(), cancelFirst=await send('CORE_STEER_CANCEL_FIRST')
     await Promise.race([cancellation.entered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Steer cancel provider deadline')),30000))]);const target=await activeSteerRun()
     assert.equal((await steer(target,'CORE_STEER_CANCEL_CORRECTION')).commandResult.status,'accepted')
@@ -409,8 +424,10 @@ for line in sys.stdin:
     cancellation.release();steerControl=null
     const cancelled=await waitForRun(threadId,(cancelFirst.commandResult??cancelFirst).payload.threadMessageId)
     assert.equal(cancelled.run.status,'cancelled');result.finishedRuns.push(cancelled.run.id)
-    await settle(await send('CORE_AFTER_STEER_CANCEL'))
+    const afterSteerCancel=await settle(await send('CORE_AFTER_STEER_CANCEL'))
+    assert.notEqual(afterSteerCancel.started.hostInstanceId,events.find(event=>event.method==='agent_run.started'&&event.params?.agentRunId===cancelled.run.id)?.params.hostInstanceId,'Cancelled pending Steer must still stop its Host')
     result.checks.steer.cancelledWithPending=true
+    result.checks.steer.cancelledHostRetired=true
   } finally {steerControl?.release();ledger.close();native.close()}
   assert(calls.every(call=>!call.tools?.some(tool=>tool.function.name==='question')),'Native question must remain disabled through warm/cold and permission changes')
   assert(!JSON.stringify(calls).includes('INHERITED_KILO_CONFIG_CANARY'),'Parent native config must not enter fixture model input')

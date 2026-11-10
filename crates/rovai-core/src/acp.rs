@@ -2783,6 +2783,13 @@ impl AcpHost {
                     self.complete_single_pending(id, pending, message).await;
                 }
                 if let Some((id, message)) = terminal {
+                    if self.adapter_kind == AdapterKind::KiloCli
+                        && message["result"]["stopReason"] == "end_turn"
+                    {
+                        // Normal aggregate completion permits the shared
+                        // detach and Fleet quiescence checks to reuse this Host.
+                        self.retire_after_steer.store(false, Ordering::Release);
+                    }
                     self.complete_single_pending(
                         id,
                         PendingRpc::Prompt {
@@ -6035,9 +6042,8 @@ impl AcpRuntime {
                 }),
             },
         );
-        // Some transports cannot atomically bind to a native turn. Do not reuse
-        // this ACP Host after steering. Concurrent prompts additionally drain
-        // above; closing Hermes's client does not stop its shared Gateway.
+        // Keep unknown and failed Steer on the existing retirement path. Kilo
+        // clears this only after its complete successful aggregate terminal.
         self.host.retire_after_steer.store(true, Ordering::Release);
         timeout(
             Duration::from_secs(10),
@@ -13729,9 +13735,9 @@ while IFS= read -r ignored; do :; done
                 );
                 assert_eq!(
                     host.retire_after_steer.load(Ordering::Acquire),
-                    kind != AdapterKind::QwenCode
+                    !matches!(kind, AdapterKind::QwenCode | AdapterKind::KiloCli)
                 );
-                if kind != AdapterKind::QwenCode {
+                if !matches!(kind, AdapterKind::QwenCode | AdapterKind::KiloCli) {
                     assert!(
                         !runtime.preserve_zcode_host_after_cancel(),
                         "a retired Host cannot wait for the reusable-Host cancellation fence"
@@ -13983,6 +13989,13 @@ while IFS= read -r ignored; do :; done
                                 break message;
                             }
                         };
+                        if kind == AdapterKind::KiloCli {
+                            assert_eq!(
+                                host.retire_after_steer.load(Ordering::Acquire),
+                                !rejected && reply["result"]["stopReason"] != "end_turn",
+                                "only successful aggregate completion permits warm Kilo reuse"
+                            );
+                        }
                         if rejected || reply["result"]["stopReason"] == "end_turn" {
                             assert_eq!(final_message["params"]["result"]["stopReason"], "end_turn");
                         } else if reply.get("error").is_some() {

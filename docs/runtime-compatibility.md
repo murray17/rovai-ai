@@ -6,6 +6,14 @@ last_updated: 2026-11-09
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-09 Kilo 成功 Steer 后常规复用
+
+Kilo 普通 `session/prompt` 的原请求与已提交补充请求共同收口为正常 end_turn 后，解除 Steer 退役标记，
+沿现有 Fleet 兼容/空闲检查复用 Host 与原 Session。失败、取消、未知和未收口不获得该成功解除。
+文件元数据映射与不同 cwd 的 MCP launcher 保持，问卷双入口按 User sequence 25 保持。
+原版本首轮成功插话的后继进程改变已有失败对照；连续三轮复用、CLI lease、取消后继的实际结果及范围
+见[验证记录](versions/v1.72/kilo-steer-reuse.md)。仍为 macOS arm64 Preview，不扩大版本或平台资格。
+
 ## 2026-11-09 Kilo 依赖与边界自检
 
 官方 Kilo **7.8.27**、macOS arm64，生产 Core/CLI 在 PATH 无 Node、继承 `KILO_PURE=true` 的隔离环境

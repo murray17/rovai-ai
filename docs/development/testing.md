@@ -189,6 +189,10 @@ Core smoke 增加同 Run 更正、待回执取消及普通后继。终态汇合�
 模型 metadata/Renderer 原 owners 覆盖 Kilo、Command Code 与 MiniMax effort；新增 Rust 测试函数仍为零。
 结果见[边界收尾](../versions/v1.72/kilo-boundary-fixes.md)。
 
+成功 Steer 复用继续扩展原 active-input owner，核对正常汇合解除退役、错误/取消不解除及两种 RPC 终态顺序；
+Core smoke 使用三个连续 Steer/普通后继转换验证同 Host/Session 与后继 CLI lease，每轮实际发送无重复 final。
+原待回执取消仍须退役 Host 并运行普通后继；不新增 Rust 测试函数或并行验收入口。见[复用记录](../versions/v1.72/kilo-steer-reuse.md)。
+
 ## Rust 测试准入与退役门槛
 
 Hermes 入口/逻辑 Session、Ready、接受账本、compaction 禁用、lease、CLI 单次派发与 ManagedProcess

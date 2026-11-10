@@ -8,6 +8,21 @@ last_updated: 2026-11-09
 
 # v1.72 版本决定
 
+<a id="v1-72-d80"></a>
+## V1.72-D80：Kilo 成功 Steer 后沿常规 Fleet 复用
+
+- 状态：accepted
+- 日期：2026-11-09
+- 授权：User sequence 25 质疑常规 Steer 后额外退役，要求简洁接入；问卷双入口明确保持。
+- 当前权威：[Launch v81](../../contracts/runtime-launch-and-verification-v81.md)。
+
+现有原请求/补充请求汇合已经明确全部 RPC 的成功终态；没有证据证明 Kilo 在此时仍必须重启。
+选择只在该汇合正常成功后解除 Steer 退役标记，沿现有 detach、兼容性与 Fleet quiescence 复用。
+失败、未知、取消和未收口保持原清理；不新增策略类型、字段、队列或等待。
+拒绝用保守性能成本替代可运行的复用验证，也不为成功场景重写其他 Runtime 的退役策略。
+文件转换继续复用共享 Diff，MCP cwd 只在不同目录时保留用户配置；问卷关闭策略不调整。
+实际失败对照、连续复用与边界见[实施记录](kilo-steer-reuse.md)。
+
 <a id="v1-72-d79"></a>
 ## V1.72-D79：Kilo 边界修复收回共享入口
 
