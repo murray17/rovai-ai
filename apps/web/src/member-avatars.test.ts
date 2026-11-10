@@ -35,8 +35,12 @@ it('retries only read capacity failures with a bounded backoff', async () => {
   avatar.mockReset().mockRejectedValue(new HttpRequestError(429, 'resource_capacity'))
   const failed = api.read('avatar', 'portrait').catch(error => error)
   await vi.runAllTimersAsync()
-  expect(await failed).toMatchObject({ code: 'resource_capacity' })
+  expect(await failed).toMatchObject({ code: 'resource_capacity', retryable: true })
   expect(avatar).toHaveBeenCalledTimes(3)
+
+  avatar.mockReset().mockRejectedValue(new HttpRequestError(503, 'avatar_unavailable'))
+  await expect(api.read('avatar', 'icon')).rejects.toMatchObject({ code: 'avatar_unavailable', retryable: true })
+  expect(avatar).toHaveBeenCalledTimes(1)
 })
 
 it('releases the read queue after a failure and never retries an avatar save', async () => {

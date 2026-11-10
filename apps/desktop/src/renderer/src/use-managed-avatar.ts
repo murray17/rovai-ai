@@ -40,11 +40,26 @@ export function useManagedAvatarUrl(
   useEffect(() => {
     if (!key || !avatarRef || !read || !connected) return undefined
     let ignore = false
-    void managedAvatarImage(avatarRef, rendition, read).then((image) => {
-      if (!ignore) setState({ key, read, settled: true, image })
-    })
+    let retryDelay = 1_000
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    const load = (): void => {
+      void managedAvatarImage(avatarRef, rendition, read).then((image) => {
+        if (!ignore) setState({ key, read, settled: true, image })
+      }, (error: unknown) => {
+        if (ignore) return
+        setState({ key, read, settled: true, image: null })
+        // Only transient resource failures opt in. A confirmed missing image
+        // or a permanent error stays settled without background requests.
+        if (error && typeof error === 'object' && 'retryable' in error && error.retryable === true) {
+          retryTimer = setTimeout(load, retryDelay)
+          retryDelay = Math.min(retryDelay * 2, 30_000)
+        }
+      })
+    }
+    load()
     return () => {
       ignore = true
+      clearTimeout(retryTimer)
     }
   }, [avatarRef, key, rendition, read, connected])
 

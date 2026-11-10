@@ -54,13 +54,13 @@ export function managedAvatarImage(
       }
       return { url: objectUrl, width: result.width, height: result.height, displayCrop: result.displayCrop }
     })
-    .catch(() => {
+    .catch((error: unknown) => {
       // A transport/capacity failure says nothing about whether this avatar
-      // exists. Let a remount or connection recovery read it again.
+      // exists. Evict it and preserve the error so mounted consumers can retry.
       if (managedAvatarCache.get(key)?.token === token) managedAvatarCache.delete(key)
-      return null
+      throw error
     })
-  managedAvatarCache.set(key, { token, promise, urlPromise: promise.then(image => image?.url ?? null) })
+  managedAvatarCache.set(key, { token, promise, urlPromise: promise.then(image => image?.url ?? null).catch(() => null) })
   return promise
 }
 
@@ -90,9 +90,9 @@ export async function invalidateManagedAvatarObjectUrl(
     managedAvatarCache.delete(key)
     return entry ? [entry] : []
   })
-  const objectUrls = await Promise.all(entries.map((entry) => entry.promise))
+  const objectUrls = await Promise.all(entries.map((entry) => entry.urlPromise))
   for (const objectUrl of objectUrls) {
-    if (objectUrl) URL.revokeObjectURL(objectUrl.url)
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
   }
 }
 
@@ -100,8 +100,8 @@ export async function clearManagedAvatarObjectUrlCache(): Promise<void> {
   const entries = [...managedAvatarCaches.values()].flatMap((cache) => [...cache.values()])
   for (const cache of managedAvatarCaches.values()) cache.clear()
   managedAvatarCaches.clear()
-  const objectUrls = await Promise.all(entries.map((entry) => entry.promise))
+  const objectUrls = await Promise.all(entries.map((entry) => entry.urlPromise))
   for (const objectUrl of objectUrls) {
-    if (objectUrl) URL.revokeObjectURL(objectUrl.url)
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
   }
 }

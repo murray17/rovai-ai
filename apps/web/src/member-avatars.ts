@@ -65,7 +65,8 @@ export function browserMemberAvatars(transport: ConsoleClient): MemberAvatarsApi
           } catch (error) {
             // Another browser/upload may occupy the shared slots. Reads are
             // safe to retry; saves must retain their existing failure behavior.
-            if (!(error instanceof HttpRequestError) || error.code !== 'resource_capacity' || attempt >= 2) throw error
+            if (!(error instanceof HttpRequestError) || !['resource_capacity', 'avatar_unavailable'].includes(error.code)) throw error
+            if (error.code === 'avatar_unavailable' || attempt >= 2) throw Object.assign(error, { retryable: true })
             await new Promise(resolve => setTimeout(resolve, 100 * 2 ** attempt))
           }
         }

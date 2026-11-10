@@ -4,6 +4,7 @@ import type { ManagedAvatarRead } from './managed-avatar-cache'
 import {
   clearManagedAvatarObjectUrlCache,
   invalidateManagedAvatarObjectUrl,
+  managedAvatarImage,
   managedAvatarObjectUrl
 } from './managed-avatar-cache'
 
@@ -95,6 +96,18 @@ describe('managed avatar object URL cache', () => {
     await expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', read)).resolves.toBe('blob:managed-avatar')
     expect(read).toHaveBeenCalledTimes(2)
     await expect(managedAvatarObjectUrl(AVATAR_REF, 'icon', read)).resolves.toBe('blob:managed-avatar')
+    expect(read).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves a retryable failure for mounted consumers while URL callers receive null', async () => {
+    const error = Object.assign(new Error('resource temporarily unavailable'), { retryable: true })
+    const read = vi.fn<ManagedAvatarRead>().mockRejectedValueOnce(error).mockResolvedValue(null)
+    const image = managedAvatarImage(AVATAR_REF, 'icon', read)
+    const url = managedAvatarObjectUrl(AVATAR_REF, 'icon', read)
+    await expect(image).rejects.toBe(error)
+    await expect(url).resolves.toBeNull()
+    expect(read).toHaveBeenCalledTimes(1)
+    await expect(managedAvatarImage(AVATAR_REF, 'icon', read)).resolves.toBeNull()
     expect(read).toHaveBeenCalledTimes(2)
   })
 

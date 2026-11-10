@@ -27,6 +27,7 @@ test('Web disconnect recovery blocks portals and shortcuts, preserves drafts and
     let online = true, loss = null, rejectRetry = false, holdProbe = false, holdEvents = false, releaseProbe
     let activeAvatarReads = 0, failAvatarRef = null
     const avatarReads = [], avatarStatuses = []
+    const avatarFaults = new Map()
     const png = await readFile(join(root, 'apps/desktop/src/renderer/src/assets/characters/muwa/icon-192.png'))
     const dispatches = [], receipts = new Map()
     const identity = { protocolVersion: 7, token: 'a'.repeat(64), clientId: 'b'.repeat(64), editorProof: 'c'.repeat(64), ownerId: 'fixture' }
@@ -55,6 +56,12 @@ test('Web disconnect recovery blocks portals and shortcuts, preserves drafts and
       if (path.endsWith('/avatars')) {
         assert.equal(body.action, 'read')
         avatarReads.push(body.request.avatarRef)
+        const fault = avatarFaults.get(body.request.avatarRef)
+        if (fault && fault.remaining-- > 0) {
+          const status = fault.code === 'resource_capacity' ? 429 : 503
+          avatarStatuses.push(status)
+          return json({ error: { code: fault.code } }, status)
+        }
         if (body.request.avatarRef === failAvatarRef) {
           failAvatarRef = null; holdEvents = true
           for (const stream of streams) stream.end()
@@ -230,9 +237,34 @@ test('Web disconnect recovery blocks portals and shortcuts, preserves drafts and
     assert.equal(avatarReads.length, 26)
     assert.equal(await browser.evaluate('connectionFixture.observations.mounts'), mounts)
     await browser.capture(join(output, 'avatars-recovered.png'))
+
+    // Capacity/resource recovery must not depend on a disconnect, a new avatar
+    // reference or a remount. Exhaust the quick retries while SSE stays live.
+    const connectionMark = await browser.evaluate('connectionFixture.observations.connections.length')
+    const visibleRefs = [...refs, failedRef]
+    for (const [code, failures, suffix] of [['resource_capacity', 3, '098'], ['avatar_unavailable', 1, '097']]) {
+      const ref = `rovai://member-avatar/managed/00000000-0000-4000-8000-000000000${suffix}`
+      avatarFaults.set(ref, { code, remaining: failures })
+      visibleRefs.push(ref)
+      await browser.evaluate(`showRecoveryAvatars(${JSON.stringify(visibleRefs)})`)
+      await browser.wait(`document.querySelectorAll('#avatars > .member-avatar').length === ${visibleRefs.length}`)
+      await browser.evaluate(`window.onlineRecoveryAvatar = document.querySelector('#avatars > :last-child'); true`)
+      const deadline = Date.now() + 3_000
+      while (avatarReads.filter(value => value === ref).length < failures && Date.now() < deadline) await pause(10)
+      assert.equal(avatarReads.filter(value => value === ref).length, failures)
+      assert.equal(await browser.evaluate('connectionFixture.transport.connectionState'), 'live')
+      assert.equal(await browser.evaluate(`Boolean(document.querySelector('#avatars > :last-child img'))`), false, 'the transient failures reached the mounted avatar')
+      await browser.wait(`document.querySelector('#avatars > :last-child img')?.naturalWidth > 0`, 5_000)
+      assert.equal(await browser.evaluate(`onlineRecoveryAvatar === document.querySelector('#avatars > :last-child')`), true, 'resource recovery keeps the same avatar mounted')
+      assert.equal(avatarReads.filter(value => value === ref).length, failures + 1, 'the delayed retry loads the avatar after the Host resource recovers')
+    }
+    assert.ok((await browser.evaluate(`connectionFixture.observations.connections.slice(${connectionMark})`)).every(state => state === 'live'), 'neither resource error changes the live connection')
+    assert.equal(avatarReads.length, 32, 'successful avatars are not reread during online recovery')
+    assert.equal(await browser.evaluate('connectionFixture.observations.mounts'), mounts)
+    await browser.capture(join(output, 'avatars-online-recovered.png'))
     assert.deepEqual(browser.errors, [])
     await writeFile(join(output, 'verification.json'), JSON.stringify({ fixture: 'fault-injection HTTP + production ConsoleClient/WebConnectionRecovery/AppDialog', coreExecutionVerified: false,
-      checks: ['SSE disconnect', 'failed reconnect', 'portal preservation', 'capture shortcut blocking', 'focus containment', 'busy focus containment', 'reduced motion', 'neutral day/night colors', 'mobile fit', 'keyboard recovery', 'unsent draft preservation', 'unknown exact retry', 'recorded no resend', 'definitive rejection releases lock', 'no remount', 'subsequent send', 'full roster avatar capacity', 'avatar regroup cache reuse', 'mounted avatar reconnect recovery'], dispatches: dispatches.length, avatarReads: avatarReads.length }, null, 2))
+      checks: ['SSE disconnect', 'failed reconnect', 'portal preservation', 'capture shortcut blocking', 'focus containment', 'busy focus containment', 'reduced motion', 'neutral day/night colors', 'mobile fit', 'keyboard recovery', 'unsent draft preservation', 'unknown exact retry', 'recorded no resend', 'definitive rejection releases lock', 'no remount', 'subsequent send', 'full roster avatar capacity', 'avatar regroup cache reuse', 'mounted avatar reconnect recovery', 'online capacity recovery after quick retries exhaust', 'online avatar_unavailable recovery'], dispatches: dispatches.length, avatarReads: avatarReads.length }, null, 2))
     console.log(`Recovery UI evidence: ${output}`)
   } finally {
     await browser?.close()

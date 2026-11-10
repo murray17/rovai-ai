@@ -24,7 +24,7 @@ const avatarClient = {
   connection: { subscribe: (listener: () => void) => transport.onConnectionChanged(listener), getSnapshot: () => transport.connectionState === 'live' },
   request: async () => ({ enabled: false, headsUpAfterSequence: 0, observedThroughChangeSequence: 0 })
 } as unknown as ThreadClient
-const observations = { mounts: 0, shortcuts: 0, results: [] as unknown[] }
+const observations = { mounts: 0, shortcuts: 0, results: [] as unknown[], connections: [] as string[] }
 Object.assign(window, { connectionFixture: { transport, observations,
   language: (language: 'en' | 'zh-CN') => changeInterfaceLanguage(languageTestApi as GeneralPreferencesApi, language)
 } })
@@ -74,7 +74,7 @@ function Fixture() {
   useEffect(() => { void login.then(() => setEnabled(true)) }, [])
   useEffect(() => {
     if (!enabled) return
-    return transport.subscribe(() => undefined, () => undefined)
+    return transport.subscribe(() => undefined, state => observations.connections.push(state))
   }, [enabled])
   return <WebConnectionRecovery transport={transport} enabled={enabled} onNotice={setNotice}>
     {enabled && <ThreadClientProvider client={avatarClient}><Form /></ThreadClientProvider>}{notice && <p role="alert">{notice}</p>}
