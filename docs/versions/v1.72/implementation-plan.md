@@ -93,6 +93,11 @@ main 已将原 Ready 前置条件的 `health::tests::catalog_refresh_requires_cu
 隔离 Picker、真实 Electron bridge、类型检查及 UTC 前端全量通过；Runtime 环境模块、workspace 与最终打包安装结果记录在本轮任务验收附件中。
 本轮按用户要求安装到日常位置，采用非终止安装交接；当前会话进程保留，备份不删除，独立 userData/Skill 文件目录用于打包启动验收。
 
+加载文案继续收口：移除模型与强度菜单的“正在读取可选项…”及对应文案 prop，pending 只沿用现有布尔状态与 aria-busy。
+冷缓存等待期间直接保留原生默认项；有历史时继续展示历史，原值、选项、手工输入及读取生命周期保持。
+此轮不修改 Core，沿用参数/目录单元测试与隔离 Picker owner 验证冷/热等待均无加载说明且菜单仍可操作。
+类型检查、2 文件 / 50 项相关单元测试、隔离 Picker 与通用文档门禁通过；Core 与上一安装提交相同，不重复执行 Rust 全量回归。
+
 相对当前 main 保留原目录修复、展示修订与一次 main 同步合并，完整差异为 21 个文件：Core 的 `agent_profile.rs`、`agent_runtime_adapter.rs`、
 `application.rs`、`db.rs`、`runtime_check_environment.rs`、`health.rs` 与现有 `runtime_check_refresh_tests.rs`；Renderer 的
 `MemberRuntimeParameters.tsx`、`RuntimeModelSearch.tsx`、`RuntimeParameterSelect.tsx`、`BusinessApp.tsx`、

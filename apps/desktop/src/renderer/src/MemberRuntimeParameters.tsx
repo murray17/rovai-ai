@@ -582,7 +582,6 @@ function ModelFields({
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
     : isDsh ? !optionsKnown || option || optionValue : option || storedOptionValue
-  const loadingLabel = loading ? uiAttribute('正在读取可选项…') : undefined
   const retry = retryNeeded && !loading ? () => ensureCatalog(true) : undefined
 
   return <>
@@ -598,7 +597,7 @@ function ModelFields({
     {explicit && optionKey && showOption && <RuntimeParameterSelect
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
-      onOpen={() => ensureCatalog(false, true)} loadingLabel={loadingLabel}
+      onOpen={() => ensureCatalog(false, true)} loading={loading}
       onRetry={retry}
       defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
         : isDsh ? uiAttribute('模型默认') : uiAttribute('跟随模型默认值') }}

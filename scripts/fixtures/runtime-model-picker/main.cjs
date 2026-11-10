@@ -23,7 +23,7 @@ app.whenReady().then(async () => {
   const capture = async name => writeFileSync(join(dirname(userData), `${name}.png`), (await window.webContents.capturePage(undefined, { stayHidden: true })).toPNG())
   const quietCandidates = async selector => {
     const text = await run(`document.querySelector(${JSON.stringify(selector)}).textContent`)
-    assert.doesNotMatch(text, /尚未核对|可选项读取失败|运行环境正在更新|fixture.*unavailable|\[object Object\]|读取结果与当前选择不一致|暂时无法读取该模型的可选项|当前没有可选的固定模型/)
+    assert.doesNotMatch(text, /正在读取可选项|正在获取模型|正在更新模型|尚未核对|可选项读取失败|运行环境正在更新|fixture.*unavailable|\[object Object\]|读取结果与当前选择不一致|暂时无法读取该模型的可选项|当前没有可选的固定模型/)
   }
   const modelTrigger = '.runtime-model-field .runtime-model-picker-trigger'
   const busyTrigger = '.runtime-model-picker-trigger[aria-busy="true"]'
@@ -302,7 +302,9 @@ app.whenReady().then(async () => {
     assert.equal(await run('document.querySelector(".runtime-picker-default [role=option]").disabled'), false)
     await click('.runtime-picker-default [role=option]')
     await run('window.runtimeTest.reset("member", "pending")'); await settle(); await click(modelTrigger)
-    assert.equal(await run('document.querySelector(".runtime-model-picker-empty").textContent'), '正在读取可选项…')
+    await quietCandidates('.runtime-model-search-menu')
+    assert.equal(await run('document.querySelectorAll(".runtime-model-search-menu [role=option]").length'), 1, 'A cold pending read keeps only the native default')
+    assert.equal(await run('document.querySelector("[role=listbox]").getAttribute("aria-busy")'), 'true')
     await click('.runtime-picker-default [role=option]')
     const beforeSwitch = await run('window.runtimeTest.calls')
     await run('window.runtimeTest.switchKind("claude-code-cli")'); await settle()
@@ -409,10 +411,11 @@ app.whenReady().then(async () => {
     assert.equal(await run('document.body.textContent.includes("正在读取思考强度")'), false)
     await waitForBusy()
     assert.equal(await run(`document.querySelector(${JSON.stringify(busyTrigger)}).disabled`), false, 'Loading does not disable the parameter')
-    assert.equal(await run(`document.querySelector(${JSON.stringify(busyTrigger)}).getAttribute('aria-description').includes('正在读取可选项')`), true)
+    assert.equal(await run(`document.querySelector(${JSON.stringify(busyTrigger)}).getAttribute('aria-description')`), null)
     await capture('dsh-options-loading-night')
     await run('document.documentElement.dataset.theme="day"'); await settle(); await capture('dsh-options-loading-day')
     await click(busyTrigger)
+    await quietCandidates('[role=menu]')
     assert.equal(await run('document.querySelector(".runtime-picker-default [role=menuitemradio]").hasAttribute("data-disabled")'), false, 'Model default stays selectable during loading')
     await key('Escape')
     window.webContents.debugger.attach('1.3')

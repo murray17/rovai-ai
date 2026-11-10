@@ -125,11 +125,10 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
           <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M4 12l8-8" /></svg>
         </button>}
       </div>
-      {loading && models.length > 0 && <div className="runtime-model-picker-notice" role="status"><UiText zh="正在读取可选项…" /></div>}
       {onRetry && <div className="runtime-model-picker-notice">
         <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}><UiText zh={"重试"} /></button>
       </div>}
-      <div id={`${id}-list`} role="listbox" aria-label={uiAttribute("模型")} className="runtime-picker-options">
+      <div id={`${id}-list`} role="listbox" aria-label={uiAttribute("模型")} aria-busy={loading || undefined} className="runtime-picker-options">
         <div ref={scroll} className="runtime-picker-scroll">
           {showManual && <button type="button" tabIndex={-1} role="option" aria-selected="true"
             id={`${id}-option-0`} data-option-index={0} data-manual-current
@@ -156,8 +155,8 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
             onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(candidate)} onClick={() => choose(candidate)}>
             <span className="runtime-model-specify-copy"><span><UiText zh="使用" /></span><code>{candidate}</code></span>
           </button>}
-          {(query || loading) && !filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
-            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : uiAttribute("正在读取可选项…")}
+          {query && !filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
+            {uiAttribute("没有匹配的模型，请尝试其他名称或 ID。")}
           </p>}
         </div>
         <div className="runtime-picker-default">

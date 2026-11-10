@@ -4351,7 +4351,6 @@
   "是": "Yes",
   "提交": "Submit",
   "可选项读取失败，已保留当前选择。": "Could not load options. Your selection is preserved.",
-  "正在读取可选项…": "Loading options…",
   "读取结果与当前选择不一致，请重试。": "The result does not match your current selection. Please retry.",
   "暂时无法读取该模型的可选项，请重试。": "Could not load options for this model. Please retry."
 }

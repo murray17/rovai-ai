@@ -18,7 +18,7 @@ export function RuntimePickerChevron(): React.JSX.Element {
 }
 
 /** Short Runtime enums share the model picker surface; only model catalogs need search. */
-export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loadingLabel, onRetry, onOpen }: {
+export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loading, onRetry, onOpen }: {
   label: string
   value: string
   choices: RuntimeParameterChoice[]
@@ -26,7 +26,7 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
   disabled: boolean
   recommendedValue?: string
   menuGuidance?: string
-  loadingLabel?: string
+  loading?: boolean
   onRetry?(): void
   onOpen?(): void
   onChange(value: string): void
@@ -43,15 +43,13 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
       <Menu.Trigger asChild>
         <button id={id} type="button" className="runtime-model-picker-trigger" disabled={disabled}
           aria-label={[label, selected?.label ?? value, selected?.description, selected && recommendation(selected)].filter(Boolean).join('，')}
-          aria-busy={loadingLabel ? true : undefined}
-          aria-description={loadingLabel}
+          aria-busy={loading || undefined}
           title={[selected?.label ?? value, selected?.description].filter(Boolean).join('\n')}>
           <span><strong>{selected?.label ?? value}</strong>{selected?.description && <small>{selected.description}</small>}</span><RuntimePickerChevron />
         </button>
       </Menu.Trigger>
       <Menu.Portal><Menu.Content className="runtime-model-picker-menu runtime-parameter-picker-menu"
         align="start" sideOffset={5} collisionPadding={10} loop>
-        {loadingLabel && <div className="runtime-model-picker-notice" role="status">{loadingLabel}</div>}
         {onRetry && <div className="runtime-model-picker-notice">
           <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}>{t('重试')}</button>
         </div>}
