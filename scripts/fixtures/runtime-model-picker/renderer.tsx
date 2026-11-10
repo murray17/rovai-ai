@@ -99,10 +99,12 @@ function Fixture(): React.JSX.Element {
   }) })
   const catalog = (target?: RuntimeModelCatalogTarget): Promise<RuntimeModelCatalogView> => {
     state.calls++
+    state.catalogRequests ??= []
+    state.catalogRequests.push({ kind, ...target })
     if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
       cache: { status: 'fresh', ...cacheTimes(new Date(clockStartedAt + 2000).toISOString()) }, models: state.piCatalogModels,
       refreshStatus: 'completed', diagnosticCode: null })
-    if (kind === 'deepseek-harness' && target) {
+    if (kind === 'deepseek-harness' && target?.modelId) {
       state.dshReads ??= []
       state.dshCache ??= {}
       const context = state.dshContext ?? 0
@@ -128,7 +130,7 @@ function Fixture(): React.JSX.Element {
         })
         return Promise.resolve(cachedView)
       }
-      if (fresh) return Promise.resolve(view('not_required'))
+      if (fresh && !target.forceRefresh) return Promise.resolve(view('not_required'))
       state.dshPending ??= {}
       const pendingKey = JSON.stringify([target.modelId, context])
       if (state.dshPending[pendingKey]) return state.dshPending[pendingKey]

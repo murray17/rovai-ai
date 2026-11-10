@@ -510,13 +510,13 @@ function ModelFields({
     if (pending.current?.key !== current.key || pending.current.generation !== request) {
       const read = current.onOpenModelCatalog
       const promise = Promise.resolve().then(async () => {
-        if (!current.target) return read()
+        if (!current.target) return read(retry ? { forceRefresh: true } : undefined)
         const cached = await read({ ...current.target, cacheOnly: true })
         if (request !== generation.current || current.key !== latest.current.key || !latest.current.pageActive) return cached
         if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
         const model = cached.models.find(model => model.id === current.target!.modelId) ?? null
         if (!retry && cached.refreshStatus === 'not_required' && dshModelOptionsResolved(model, current.target.dshSource)) return cached
-        return read(current.target)
+        return read({ ...current.target, forceRefresh: retry })
       })
       const owner = { key: current.key, generation: request, promise }
       pending.current = owner
@@ -582,7 +582,7 @@ function ModelFields({
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
     : isDsh ? !optionsKnown || option || optionValue : option || storedOptionValue
-  const retry = retryNeeded && !loading ? () => ensureCatalog(true) : undefined
+  const refresh = onOpenModelCatalog ? () => ensureCatalog(true) : undefined
 
   return <>
     <div className="field-label runtime-model-field">
@@ -592,13 +592,12 @@ function ModelFields({
         models={models} value={explicit?.modelId ?? 'runtime_default'}
         label={explicit ? selectedModel?.displayName ?? explicit.modelId : uiAttribute('默认')}
         disabled={disabled} loading={loading}
-        onRetry={retry} onSelect={selectModel} />
+        onRefresh={refresh} onSelect={selectModel} />
     </div>
     {explicit && optionKey && showOption && <RuntimeParameterSelect
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
       onOpen={() => ensureCatalog(false, true)} loading={loading}
-      onRetry={retry}
       defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
         : isDsh ? uiAttribute('模型默认') : uiAttribute('跟随模型默认值') }}
       choices={[

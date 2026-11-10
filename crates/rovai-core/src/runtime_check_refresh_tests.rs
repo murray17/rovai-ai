@@ -794,6 +794,7 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                 .runtime_check_requests
                 .send(
                     crate::application::RuntimeCheckRequest {
+                        force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
                         model_target: None,
@@ -866,6 +867,7 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
             .runtime_check_requests
             .send(
                 crate::application::RuntimeCheckRequest {
+                    force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -1019,6 +1021,7 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
             .runtime_check_requests
             .send(
                 crate::application::RuntimeCheckRequest {
+                    force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -1180,6 +1183,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                 let attempt_id = format!("timeout-{index}");
                 let (completed, completion) = oneshot::channel();
                 let mut attempt = RuntimeCheckAttempt {
+                    force_refresh: false,
                     installation_target,
                     search: search.clone(),
                     startup_preview: None,
@@ -1197,6 +1201,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     let mut committed_target = None;
                     let current = fixture.core.runtime_check_installation_target(KIND).await.unwrap().unwrap();
                     let _ack = crate::application::RuntimeCheckWorkerContext {
+                        force_refresh: false,
                         attempt_id: &attempt_id, installation_target: &mut committed_target,
                     }.publish_target(&fixture.core, KIND, current.clone()).unwrap();
                     assert_eq!(committed_target, Some(current));
@@ -2087,6 +2092,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         .runtime_check_requests
         .send(
             crate::application::RuntimeCheckRequest {
+                force_refresh: false,
                 search,
                 startup_preview: None,
                 model_target: None,
@@ -2110,6 +2116,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         .runtime_check_requests
         .send(
             crate::application::RuntimeCheckRequest {
+                force_refresh: false,
                 search: fixture.core.runtime_search_environment.read().await.clone(),
                 startup_preview: None,
                 model_target: None,
@@ -2502,6 +2509,7 @@ for line in sys.stdin:
                 .runtime_check_requests
                 .send(
                     crate::application::RuntimeCheckRequest {
+                        force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
                         model_target: None,
@@ -2655,7 +2663,7 @@ for line in sys.stdin:
         assert!(invalidated.model_catalog.observed_at.is_none());
         let catalog = fixture
             .core
-            .open_runtime_model_catalog(kind, true)
+            .open_runtime_model_catalog(kind, true, false)
             .await
             .unwrap();
         assert_eq!(catalog["refreshStatus"], "completed");
@@ -2683,7 +2691,10 @@ for line in sys.stdin:
                     .await
                     .unwrap();
                 std::fs::write(fixture.root.join("fault"), fault).unwrap();
-                let result = fixture.core.open_runtime_model_catalog(kind, true).await;
+                let result = fixture
+                    .core
+                    .open_runtime_model_catalog(kind, true, false)
+                    .await;
                 if fault == "reject" {
                     let result = result.unwrap();
                     assert_eq!(result["refreshStatus"], "completed");

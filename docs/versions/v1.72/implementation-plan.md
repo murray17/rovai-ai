@@ -8,6 +8,32 @@ last_updated: 2026-11-09
 
 # v1.72 实施与验收
 
+## 模型选择器 v3 交互稿落地（2026-11-09）
+
+- Work item：固定模型刷新入口、首次加载与已有列表刷新、自定义 ID 操作及中英文交互稿还原。
+  Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-model-catalog`；
+  Branch：`rovai/model-catalog-clean`；Base：`origin/main` / `33979e07f76b2beea61cafdc13e3f155f38a62e6`；
+  Governance：none；Status：ready（待 PR / 安装）。复用本节下方目录修复的干净分支，同步 #1056、#1057，
+  保留此前健康解耦、身份隔离及重启代次修复，不引入旧集成分支的其他功能或迁移。
+- 模型菜单搜索框右侧固定清除与刷新位置，刷新原位转动、阻止重复点击并保持键盘焦点；删除状态条和独占重试行。
+  首次无真实目录才显示中性加载占位，历史列表刷新保持搜索、选项和滚动；失败继续保留保存值、默认项和手工输入。
+  自定义 ID 操作固定在滚动区外、默认项上方，显示标题、等宽 ID 与箭头；保持完整 ID 去重、IME 和键盘选择语义。
+- 关联参数保留原下拉及加载指示，不加 DSH 参数刷新按钮；MiniMax 继续使用同款交互及既有逐模型补齐。
+  原 `runtime.modelCatalog.open` 增加可选 `forceRefresh`，显式刷新绕过接口、worker 和 DSH 的 Fresh 短路，
+  使用原请求队列与合并、身份校验、保存路径；`cacheOnly` 优先。标记只存在于请求生命周期，不增加持久字段或缓存。
+- Rust 扩展现有 Codex 进程/数据库 owner：普通 Fresh 访问零原生读取，强制刷新实际取得新目录且不要求健康 Ready；
+  前端原 picker owner 增补固定刷新、焦点、pending 去重与标记传递，并将旧重试操作迁到模型菜单。
+  `runtime-check.test.ts` 覆盖 Codex、DSH、MiniMax 的刷新意图透传。没有新增 Rust 测试函数。
+- `pnpm typecheck`、2 文件 / 50 项相关单元、隔离 Electron picker、Desktop/Web 构建及通用文档门禁通过。
+  UTC 前端全量：275 文件、3,251 passed / 2 skipped；Node 末组 377 passed / 2 平台 skipped。
+  默认 Rust workspace：483 passed / 1 ignored。正式生产组件及 CSS 的离线目录夹具复跑 v3 的 14 条交互路径，
+  英文首次加载、刷新失败和手工选择检查通过；五主题、三尺寸、缩放、DSH 迟到响应均由既有 owner 覆盖。
+- `--features slow-tests --lib catalog` 广筛为 45 passed / 4 failed / 1 ignored：Codex、Pi、MiniMax 目录 owners 通过；
+  Claude 用例因并发环境中的 PATH 缺失系统命令失败，独立重跑 1 passed。
+  其余为 v104/v105/v107 的旧迁移夹具分组 CHECK 约束失败；对照 main，该 DB 文件仅增加说明注释，
+  这些迁移与测试未改动。本轮记录该额外范围的失败，不修改迁移或测试准入。
+  未运行真实模型或使用日常数据验收；安装采用专用 daily 打包/验签门及独立 userData / Skill 目录启动验收。
+
 ## 模型目录与强度共享加载修复（2026-11-09）
 
 Work item：目录轻量读取、共享加载与审查修订。Worktree：

@@ -96,6 +96,19 @@ describe('explicit Runtime check targeting', () => {
     expect(request).toHaveBeenCalledWith('runtime.modelCatalog.open', {
       runtimeKind: 'copilot-cli'
     })
+    for (const runtimeKind of ['codex-cli', 'deepseek-harness', 'minimax-code-cli'] as const) {
+      await openRuntimeModelCatalog(runtimeKind, request, true, { forceRefresh: true })
+      expect(request).toHaveBeenLastCalledWith('runtime.modelCatalog.open', {
+        runtimeKind, waitForRefresh: true, forceRefresh: true
+      })
+    }
+    await openRuntimeModelCatalog('deepseek-harness', request, true, {
+      modelId: 'fixture-target', dshSource: 'web', cacheOnly: true, forceRefresh: true
+    })
+    expect(request).toHaveBeenLastCalledWith('runtime.modelCatalog.open', {
+      runtimeKind: 'deepseek-harness', waitForRefresh: true,
+      modelId: 'fixture-target', dshSource: 'web', cacheOnly: true, forceRefresh: true
+    })
   })
 
   it('waits for the backend-owned check and preserves its failure outcome without a separate rescan', async () => {

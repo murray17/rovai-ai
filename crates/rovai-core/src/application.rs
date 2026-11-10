@@ -2051,6 +2051,8 @@ struct CheckProductRuntimeParams {
     runtime_kind: rovai_core::agent_profile::AdapterKind,
     #[serde(default)]
     wait_for_refresh: bool,
+    #[serde(default)]
+    force_refresh: bool,
     model_id: Option<String>,
     #[serde(default)]
     cache_only: bool,
@@ -2242,6 +2244,7 @@ struct DshOptionsTarget {
 }
 
 struct RuntimeCheckRequest {
+    force_refresh: bool,
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
     model_target: Option<DshOptionsTarget>,
@@ -2322,6 +2325,7 @@ fn runtime_check_target_in_database(
 }
 
 struct RuntimeCheckWorkerContext<'a> {
+    force_refresh: bool,
     attempt_id: &'a str,
     installation_target: &'a mut Option<RuntimeCheckInstallationTarget>,
 }
@@ -2363,6 +2367,7 @@ impl RuntimeCheckWorkerContext<'_> {
 }
 
 struct RuntimeCheckAttempt {
+    force_refresh: bool,
     installation_target: Option<RuntimeCheckInstallationTarget>,
     search: Arc<RuntimeSearchEnvironment>,
     startup_preview: Option<Arc<startup_settings::StartupPreview>>,
@@ -4218,6 +4223,7 @@ impl Core {
         &self,
         kind: AdapterKind,
         wait_for_refresh: bool,
+        force_refresh: bool,
     ) -> Result<Value> {
         let initial = {
             let database = self.database.lock().await;
@@ -4228,12 +4234,13 @@ impl Core {
             .map(|installation| installation.model_catalog.status)
             .unwrap_or(RuntimeModelCatalogCacheStatus::Unavailable);
         let refresh_status = match cache_status {
-            RuntimeModelCatalogCacheStatus::Fresh => "not_required",
+            RuntimeModelCatalogCacheStatus::Fresh if !force_refresh => "not_required",
             // Pi keeps cached entries visible in the picker while this request
             // awaits the shared observation. Its outcome needs no health event
             // or persisted health diagnostic to reach every waiting picker.
             _ if kind != AdapterKind::Pi
                 && !wait_for_refresh
+                && !force_refresh
                 && initial.as_ref().is_some_and(|installation| {
                     installation.model_catalog_can_display()
                         && installation
@@ -4255,15 +4262,18 @@ impl Core {
                     "joined"
                 }
             }
-            RuntimeModelCatalogCacheStatus::Stale
+            RuntimeModelCatalogCacheStatus::Fresh
+            | RuntimeModelCatalogCacheStatus::Stale
             | RuntimeModelCatalogCacheStatus::Expired
             | RuntimeModelCatalogCacheStatus::Unavailable
             | RuntimeModelCatalogCacheStatus::Invalidated => {
                 match self
-                    .await_runtime_check(
+                    .await_runtime_check_target(
                         kind,
                         RuntimeLaunchPurpose::AvailabilityCheck,
                         RuntimeCheckTrigger::CatalogOpen,
+                        None,
+                        force_refresh,
                     )
                     .await?
                 {
@@ -4389,6 +4399,7 @@ impl Core {
         model_id: &str,
         source: Option<crate::agent_profile::DshModelSource>,
         cache_only: bool,
+        force_refresh: bool,
     ) -> Result<Value> {
         let kind = AdapterKind::DeepseekHarness;
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
@@ -4399,7 +4410,7 @@ impl Core {
             "DSH target model must not be empty"
         );
         let (cached, context, fresh) = self.dsh_model_options_payload(model_id, source).await?;
-        if fresh || cache_only {
+        if cache_only || (fresh && !force_refresh) {
             return Ok(cached);
         }
         let result = self
@@ -4412,6 +4423,7 @@ impl Core {
                     source,
                     context,
                 }),
+                force_refresh,
             )
             .await?;
         let (mut payload, _, _) = self.dsh_model_options_payload(model_id, source).await?;
@@ -4575,6 +4587,7 @@ impl Core {
         self.runtime_check_requests
             .send(
                 RuntimeCheckRequest {
+                    force_refresh: false,
                     search: self.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -4599,7 +4612,7 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
     ) -> Result<RuntimeCheckOutcome> {
-        self.await_runtime_check_target(kind, purpose, trigger, None)
+        self.await_runtime_check_target(kind, purpose, trigger, None, false)
             .await
     }
 
@@ -4609,6 +4622,7 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
         model_target: Option<DshOptionsTarget>,
+        force_refresh: bool,
     ) -> Result<RuntimeCheckOutcome> {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
@@ -4623,6 +4637,7 @@ impl Core {
         self.runtime_check_requests
             .send(
                 RuntimeCheckRequest {
+                    force_refresh,
                     search,
                     startup_preview: None,
                     model_target,
@@ -5167,7 +5182,9 @@ impl Core {
         }
         // A preceding full diagnostic may have completed this queued request's
         // directory. Reuse it after resolving and verifying the current identity.
-        if check_context.is_some()
+        if check_context
+            .as_ref()
+            .is_some_and(|context| !context.force_refresh)
             && target.is_none()
             && installation.model_catalog.status == RuntimeModelCatalogCacheStatus::Fresh
         {
@@ -12966,11 +12983,20 @@ impl Core {
                         params.runtime_kind == AdapterKind::DeepseekHarness,
                         "Target-model option discovery is only supported for DSH"
                     );
-                    self.open_dsh_model_options(&model_id, params.dsh_source, params.cache_only)
-                        .await
+                    self.open_dsh_model_options(
+                        &model_id,
+                        params.dsh_source,
+                        params.cache_only,
+                        params.force_refresh,
+                    )
+                    .await
                 } else {
-                    self.open_runtime_model_catalog(params.runtime_kind, params.wait_for_refresh)
-                        .await
+                    self.open_runtime_model_catalog(
+                        params.runtime_kind,
+                        params.wait_for_refresh,
+                        params.force_refresh,
+                    )
+                    .await
                 }
             }
             "health.check" => {
@@ -27802,6 +27828,7 @@ async fn process_runtime_check_manager(
                     .iter_mut()
                     .find(|attempt| attempt.accepts(&request, &installation_target))
                 {
+                    existing.force_refresh |= request.force_refresh;
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
                         existing.purpose = request.purpose;
@@ -27816,6 +27843,7 @@ async fn process_runtime_check_manager(
                     .values_mut()
                     .find(|attempt| attempt.accepts(&request, &installation_target))
                 {
+                    existing.force_refresh |= request.force_refresh;
                     if request.trigger > existing.trigger {
                         existing.trigger = request.trigger;
                     }
@@ -27838,6 +27866,7 @@ async fn process_runtime_check_manager(
                 }
                 let is_private_check = request.startup_preview.is_some() || request.model_target.is_some();
                 let attempt = RuntimeCheckAttempt {
+                    force_refresh: request.force_refresh,
                     installation_target,
                     search: request.search,
                     startup_preview: request.startup_preview,
@@ -27976,6 +28005,7 @@ async fn process_runtime_check_manager(
             let worker_startup_preview = attempt.startup_preview.clone();
             let worker_search = attempt.search.clone();
             let worker_catalog_only = attempt.catalog_only;
+            let worker_force_refresh = attempt.force_refresh;
             let worker_model_target = attempt.model_target.clone();
             let mut worker_installation_target = attempt.installation_target.clone();
             let abort_handle = checks.spawn(async move {
@@ -28023,6 +28053,7 @@ async fn process_runtime_check_manager(
                                     worker_search.clone(),
                                     None,
                                     Some(RuntimeCheckWorkerContext {
+                                        force_refresh: worker_force_refresh,
                                         attempt_id: &worker_attempt_id,
                                         installation_target: &mut worker_installation_target,
                                     }),
@@ -28040,6 +28071,7 @@ async fn process_runtime_check_manager(
                                 worker_search,
                                 worker_catalog_only,
                                 Some(RuntimeCheckWorkerContext {
+                                    force_refresh: worker_force_refresh,
                                     attempt_id: &worker_attempt_id,
                                     installation_target: &mut worker_installation_target,
                                 }),
@@ -28244,6 +28276,7 @@ async fn merge_runtime_check_pending(
         }
         let mut duplicate = pending.swap_remove(index);
         active.trigger = active.trigger.max(duplicate.trigger);
+        active.force_refresh |= duplicate.force_refresh;
         active.waiters.append(&mut duplicate.waiters);
         // A request can be admitted between the DB commit and its progress
         // message. Fold it into this same round with the existing merge rules.
@@ -29469,6 +29502,7 @@ mod tests {
                         locator: None,
                     });
                     let attempt = RuntimeCheckAttempt {
+                        force_refresh: false,
                         installation_target: target.clone(),
                         search: search.clone(),
                         startup_preview: None,
@@ -29488,6 +29522,7 @@ mod tests {
                     };
                     let (acknowledged, _) = oneshot::channel();
                     let mut request = RuntimeCheckRequest {
+                        force_refresh: false,
                         search,
                         startup_preview: None,
                         model_target: None,
@@ -31201,6 +31236,7 @@ done
         core.runtime_check_requests
             .send(
                 RuntimeCheckRequest {
+                    force_refresh: false,
                     search: core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -31220,7 +31256,7 @@ done
         std::fs::write(root.join("release"), "").unwrap();
         assert_eq!(waiter.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
         let payload = core
-            .open_runtime_model_catalog(AdapterKind::Pi, true)
+            .open_runtime_model_catalog(AdapterKind::Pi, true, false)
             .await
             .unwrap();
         assert_eq!(payload["refreshStatus"], "not_required");
@@ -31258,13 +31294,13 @@ done
         )
         .unwrap();
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+            core.open_runtime_model_catalog(AdapterKind::Pi, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "completed"
         );
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+            core.open_runtime_model_catalog(AdapterKind::Pi, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "not_required"
@@ -31304,7 +31340,7 @@ done
             "invalidated"
         );
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::Pi, true)
+            core.open_runtime_model_catalog(AdapterKind::Pi, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "completed"
@@ -31583,7 +31619,7 @@ done
         }
         let display_started = Instant::now();
         let displayed = core
-            .open_runtime_model_catalog(AdapterKind::CodexCli, false)
+            .open_runtime_model_catalog(AdapterKind::CodexCli, false, false)
             .await
             .unwrap();
         eprintln!(
@@ -31598,6 +31634,7 @@ done
         core.runtime_check_requests
             .send(
                 RuntimeCheckRequest {
+                    force_refresh: false,
                     search: core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -31631,6 +31668,7 @@ done
         core.runtime_check_requests
             .send(
                 RuntimeCheckRequest {
+                    force_refresh: false,
                     search: core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -31690,7 +31728,7 @@ done
         std::fs::write(root.join("full-release"), "").unwrap();
         assert_eq!(full.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
         assert_eq!(
-            core.open_runtime_model_catalog(AdapterKind::CodexCli, true)
+            core.open_runtime_model_catalog(AdapterKind::CodexCli, true, false)
                 .await
                 .unwrap()["refreshStatus"],
             "not_required"
@@ -31783,6 +31821,7 @@ done
         core.runtime_check_requests
             .send(
                 RuntimeCheckRequest {
+                    force_refresh: false,
                     search: core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
                     model_target: None,
@@ -31931,11 +31970,36 @@ done
         )
         .unwrap();
         let catalog = core
-            .open_runtime_model_catalog(AdapterKind::CodexCli, true)
+            .open_runtime_model_catalog(AdapterKind::CodexCli, true, false)
             .await
             .unwrap();
         assert_eq!(catalog["models"][0]["id"], "without-health");
         assert_eq!(catalog["cache"]["status"], "fresh");
+        // A normal visit reuses Fresh. An explicit refresh must reach model/list,
+        // including the manager's internal cache gate, without clearing history.
+        std::fs::write(root.join("requests"), "").unwrap();
+        assert_eq!(
+            core.open_runtime_model_catalog(AdapterKind::CodexCli, true, false)
+                .await
+                .unwrap()["refreshStatus"],
+            "not_required"
+        );
+        assert!(
+            std::fs::read_to_string(root.join("requests"))
+                .unwrap()
+                .is_empty()
+        );
+        std::fs::write(
+            root.join("catalog-result"),
+            r#"{"id":3,"result":{"data":[{"id":"manual-refresh"}],"nextCursor":null}}"#,
+        )
+        .unwrap();
+        let refreshed = core
+            .open_runtime_model_catalog(AdapterKind::CodexCli, true, true)
+            .await
+            .unwrap();
+        assert_eq!(refreshed["refreshStatus"], "completed");
+        assert_eq!(refreshed["models"][0]["id"], "manual-refresh");
         let requests = std::fs::read_to_string(root.join("requests")).unwrap();
         assert!(requests.contains("model/list"));
         assert!(
@@ -32039,6 +32103,7 @@ done
         finalize_runtime_check(
             &core,
             RuntimeCheckAttempt {
+                force_refresh: false,
                 installation_target: None,
                 search,
                 startup_preview: None,
