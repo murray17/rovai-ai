@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::context::serialized_batch_run_input_len;
 
 use crate::{
-    agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
+    agent_profile::{AdapterKind, FrozenAgentRuntimeConfig, resolve_frozen_runtime},
     camp_content::StructuredThreadMessageContent,
     collaboration::build_effective_config,
     context::{
@@ -564,6 +564,17 @@ pub fn claim_waiting_delivery_batches_with_workspaces(
                 build_effective_config(&transaction, &conversation_id, &agent_id, &runtime)?;
             if mission_exists && prepared_workspace.is_none() {
                 continue;
+            }
+            // Cleanup gates above protect effects. Rotate a persistent OpenCode
+            // inbox independently, including after ordinary Run success/restart.
+            if runtime.adapter_kind == AdapterKind::OpencodeCli
+                && crate::steer::opencode_session_requires_rotation(&transaction, &conversation_id)?
+            {
+                crate::run_continuation::clear_native_session(
+                    &transaction,
+                    &conversation_id,
+                    &chrono::Utc::now().to_rfc3339(),
+                )?;
             }
             if let Some(source_id) = waiting[0].continuation_source_run_id.as_deref() {
                 let source =
@@ -2978,6 +2989,7 @@ mod tests {
                         | crate::agent_profile::AdapterKind::KiroCli
                         | crate::agent_profile::AdapterKind::ZcodeApp
                         | crate::agent_profile::AdapterKind::TraeCnCli
+                        | crate::agent_profile::AdapterKind::OpencodeCli
                 )
             );
         }
@@ -4022,7 +4034,12 @@ mod tests {
             ("minimax-code-cli", Some("0.6.12"), "acp-v1", None),
             ("hermes-cli", Some("0.22.4"), "acp-v1", None),
             ("hermes-cli", Some("0.23.0"), "acp-v1", None),
-            ("hermes-cli", Some("1.0.0"), "acp-v1", None),
+            (
+                "hermes-cli",
+                Some("1.0.0"),
+                "acp-v1",
+                Some(R::VersionUnverified),
+            ),
             (
                 "hermes-cli",
                 Some("0.22.3"),
@@ -4108,7 +4125,75 @@ mod tests {
                 "opencode-cli",
                 Some("1.0.0"),
                 "acp-v1",
-                Some(R::RuntimeUnsupported),
+                Some(R::VersionUnverified),
+            ),
+            (
+                "opencode-cli",
+                Some("2.2.6"),
+                "acp-v1",
+                Some(R::VersionIncompatible),
+            ),
+            ("opencode-cli", Some("2.2.7"), "acp-v1", None),
+            (
+                "opencode-cli",
+                Some("opencode v2.2.7+build.1"),
+                "acp-v1",
+                None,
+            ),
+            ("opencode-cli", Some("2.3.0"), "acp-v1", None),
+            (
+                "opencode-cli",
+                Some("3.0.0"),
+                "acp-v1",
+                Some(R::VersionUnverified),
+            ),
+            (
+                "opencode-cli",
+                Some("2.2.7-beta.1"),
+                "acp-v1",
+                Some(R::VersionUnverified),
+            ),
+            (
+                "opencode-cli",
+                None,
+                "acp-v1",
+                Some(R::RuntimeIdentityUnknown),
+            ),
+            (
+                "opencode-cli",
+                Some("2.2.7preview"),
+                "acp-v1",
+                Some(R::RuntimeIdentityUnknown),
+            ),
+            (
+                "opencode-cli",
+                Some("2.2.7_custom"),
+                "acp-v1",
+                Some(R::RuntimeIdentityUnknown),
+            ),
+            (
+                "opencode-cli",
+                Some("2.02.7"),
+                "acp-v1",
+                Some(R::RuntimeIdentityUnknown),
+            ),
+            (
+                "opencode-cli",
+                Some("2.2.7+"),
+                "acp-v1",
+                Some(R::RuntimeIdentityUnknown),
+            ),
+            (
+                "opencode-cli",
+                Some("2.2.7.1"),
+                "acp-v1",
+                Some(R::RuntimeIdentityUnknown),
+            ),
+            (
+                "opencode-cli",
+                Some("2.2.7"),
+                "other",
+                Some(R::ProtocolIncompatible),
             ),
         ];
         for (index, (adapter, version, protocol, reason)) in cases.iter().enumerate() {
@@ -4404,7 +4489,7 @@ mod tests {
                             |r| r.get::<_, String>(0)
                         )
                         .unwrap(),
-                    "start"
+                    "steer"
                 );
             }
             if !submitted {
@@ -4545,6 +4630,346 @@ mod tests {
                     )
                     .unwrap(),
                 "successor-turn"
+            );
+        }
+
+        // OpenCode's native inbox survives both a successful original Prompt
+        // and Core restart. Reuse this transaction owner for admission, exact
+        // Session identity and ordinary FIFO rotation; no new persistent state.
+        for outcome in ["unsent", "dispatching", "accepted", "unknown", "rejected"] {
+            let mut f = Fixture::new();
+            f.database.connection().execute_batch(r#"
+                UPDATE adapter_installation SET adapter_kind='opencode-cli' WHERE id='adapter-test-codex';
+                UPDATE adapter_capability_snapshot SET reported_version='2.2.7' WHERE installation_id='adapter-test-codex';
+                INSERT OR REPLACE INTO runtime_executable_identity(
+                    installation_id,executable_path,executable_fingerprint,byte_size,modified_at_unix_nanos,verified_at
+                ) SELECT installation.id,installation.executable_path,snapshot.executable_fingerprint,0,0,datetime('now')
+                  FROM adapter_installation AS installation JOIN adapter_capability_snapshot AS snapshot
+                    ON snapshot.installation_id=installation.id WHERE installation.id='adapter-test-codex';
+                UPDATE agent_profile SET selected_runtime_adapter_kind='opencode-cli',
+                    default_permission_config_json='{"adapterKind":"opencode-cli","schemaVersion":1,"values":{"permission":"allow"}}'
+                    WHERE id='agent_1';
+            "#).unwrap();
+            f.enqueue("opencode-original", "original work");
+            let run = claim_waiting_delivery_batches(&mut f.database, 1)
+                .unwrap()
+                .remove(0);
+            let initial = f.materialize_run(&run);
+            let service = crate::runtime::ExecutionRuntimeService::default();
+            let execution = service
+                .load_agent_run_execution(&f.database, &run, 1)
+                .unwrap()
+                .unwrap();
+            let binding_id: String = f
+                .database
+                .connection()
+                .query_row(
+                    "SELECT native_binding_id FROM conversation WHERE id=?1",
+                    [&execution.conversation_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let bound = service
+                .bind_native_session(
+                    &mut f.database,
+                    &CommandEnvelope {
+                        command_id: Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "runtime-adapter:opencode-cli".into(),
+                        },
+                        camp_id: Some(f.camp_id.clone()),
+                        expected_versions: vec![],
+                        execution_epoch: None,
+                        payload: crate::runtime::BindNativeSessionCommand {
+                            conversation_id: execution.conversation_id.clone(),
+                            agent_run_id: run.clone(),
+                            expected_conversation_version: execution.conversation_version,
+                            expected_execution_epoch: 1,
+                            previous_adapter_installation_id: execution
+                                .native_adapter_installation_id
+                                .clone(),
+                            previous_native_session_id: execution.native_session_id.clone(),
+                            previous_binding_compatibility_digest: execution
+                                .native_binding_compatibility_digest
+                                .clone(),
+                            proposed_binding_id: Some(binding_id),
+                            adapter_installation_id: execution.runtime.installation_id.clone(),
+                            native_session_id: "opencode-protected-session".into(),
+                            binding_compatibility_digest: execution
+                                .runtime
+                                .binding_compatibility_digest
+                                .clone(),
+                        },
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                bound.result.status,
+                crate::command::CommandResultStatus::Applied
+            );
+            let first = ContextService
+                .prepare_input_delivery_for_context(&mut f.database, &run, 1, &initial)
+                .unwrap();
+            ContextService
+                .acknowledge_input_delivery(&mut f.database, &first.id, "original-prompt")
+                .unwrap();
+            let source = f.enqueue(
+                "opencode-correction",
+                "must never replay an admitted correction",
+            );
+            let availability =
+                crate::steer::active_input_availability(f.database.connection(), &run, 1).unwrap();
+            assert!(
+                availability.ready,
+                "OpenCode fixture must have a frozen ready target: {availability:?} {:?}",
+                execution.runtime
+            );
+            let tx = f.database.connection_mut().transaction().unwrap();
+            crate::steer::route_user_message(&tx, "opencode-correction", None).unwrap();
+            tx.commit().unwrap();
+            let ContextMaterialization::Ready(context) = ContextService
+                .materialize_message_delivery(
+                    &mut f.database,
+                    &crate::managed_blob::ManagedBlobStore::new(&f._directory),
+                    &source,
+                    &[],
+                    &MaterializeContextRequest {
+                        agent_run_id: &run,
+                        execution_epoch: 1,
+                        charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                        max_payload_bytes: 96 * 1024,
+                    },
+                )
+                .unwrap()
+            else {
+                panic!("ready")
+            };
+            let input = ContextService
+                .prepare_input_delivery_for_context(&mut f.database, &run, 1, &context)
+                .unwrap();
+            assert!(
+                !crate::steer::opencode_session_requires_rotation(
+                    f.database.connection(),
+                    &execution.conversation_id
+                )
+                .unwrap()
+            );
+            if outcome != "unsent" {
+                assert!(
+                    ContextService
+                        .begin_runtime_input_dispatch(&mut f.database, &input.id, &run, 1)
+                        .unwrap()
+                );
+                assert!(
+                    crate::steer::opencode_session_requires_rotation(
+                        f.database.connection(),
+                        &execution.conversation_id
+                    )
+                    .unwrap(),
+                    "protection starts at send admission"
+                );
+            }
+            match outcome {
+                "accepted" => {
+                    ContextService
+                        .acknowledge_input_delivery(&mut f.database, &input.id, "steer-rpc")
+                        .unwrap();
+                }
+                "unknown" => ContextService
+                    .mark_input_delivery_unknown(&mut f.database, &input.id, "lost response")
+                    .unwrap(),
+                "rejected" => ContextService
+                    .mark_input_delivery_not_accepted(&mut f.database, &input.id, "noRunningTurn")
+                    .unwrap(),
+                _ => {}
+            }
+            let protected = !matches!(outcome, "unsent" | "rejected");
+            assert_eq!(
+                crate::steer::opencode_session_requires_rotation(
+                    f.database.connection(),
+                    &execution.conversation_id
+                )
+                .unwrap(),
+                protected,
+                "{outcome}"
+            );
+            if outcome == "accepted" {
+                let later = f.enqueue(
+                    "opencode-rejected-later",
+                    "explicitly rejected later correction",
+                );
+                let tx = f.database.connection_mut().transaction().unwrap();
+                crate::steer::route_user_message(&tx, "opencode-rejected-later", None).unwrap();
+                tx.commit().unwrap();
+                let ContextMaterialization::Ready(context) = ContextService
+                    .materialize_message_delivery(
+                        &mut f.database,
+                        &crate::managed_blob::ManagedBlobStore::new(&f._directory),
+                        &later,
+                        &[],
+                        &MaterializeContextRequest {
+                            agent_run_id: &run,
+                            execution_epoch: 1,
+                            charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                            max_payload_bytes: 96 * 1024,
+                        },
+                    )
+                    .unwrap()
+                else {
+                    panic!("ready")
+                };
+                let rejected = ContextService
+                    .prepare_input_delivery_for_context(&mut f.database, &run, 1, &context)
+                    .unwrap();
+                assert!(
+                    ContextService
+                        .begin_runtime_input_dispatch(&mut f.database, &rejected.id, &run, 1)
+                        .unwrap()
+                );
+                ContextService
+                    .mark_input_delivery_not_accepted(
+                        &mut f.database,
+                        &rejected.id,
+                        "noRunningTurn",
+                    )
+                    .unwrap();
+                assert!(
+                    crate::steer::opencode_session_requires_rotation(
+                        f.database.connection(),
+                        &execution.conversation_id
+                    )
+                    .unwrap(),
+                    "rejecting one input cannot erase another's risk"
+                );
+            }
+            if protected {
+                let tx = f.database.connection_mut().transaction().unwrap();
+                // Host/rebinding changes cannot make the same persistent inbox safe.
+                tx.execute("UPDATE conversation SET native_binding_id='replacement-binding',native_binding_generation=native_binding_generation+1 WHERE id=?1", [&execution.conversation_id]).unwrap();
+                assert!(
+                    crate::steer::opencode_session_requires_rotation(
+                        &tx,
+                        &execution.conversation_id
+                    )
+                    .unwrap()
+                );
+                tx.execute(
+                    "UPDATE conversation SET native_session_id='different-session' WHERE id=?1",
+                    [&execution.conversation_id],
+                )
+                .unwrap();
+                assert!(
+                    !crate::steer::opencode_session_requires_rotation(
+                        &tx,
+                        &execution.conversation_id
+                    )
+                    .unwrap()
+                );
+                tx.rollback().unwrap();
+            }
+            let execution = service
+                .load_agent_run_execution(&f.database, &run, 1)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                service
+                    .prepare_native_session_resume(&mut f.database, &execution)
+                    .unwrap(),
+                if protected {
+                    crate::runtime::NativeSessionResumeDisposition::New
+                } else {
+                    crate::runtime::NativeSessionResumeDisposition::Compatible
+                }
+            );
+            let tx = f.database.connection_mut().transaction().unwrap();
+            tx.execute(
+                "UPDATE agent_run SET status='succeeded',ended_at=datetime('now') WHERE id=?1",
+                [&run],
+            )
+            .unwrap();
+            settle_run_deliveries(
+                &tx,
+                &run,
+                "succeeded",
+                None,
+                &chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            f.database = Database::open_verified_test_clone(
+                &f._directory,
+                crate::db::TestDatabaseOpenMode::FastIsolated,
+            )
+            .unwrap();
+            f.database.prepare_v2_recovery().unwrap();
+            assert_eq!(
+                crate::steer::opencode_session_requires_rotation(
+                    f.database.connection(),
+                    &execution.conversation_id
+                )
+                .unwrap(),
+                protected,
+                "success and restart cannot clear the risk"
+            );
+            f.enqueue("opencode-successor", "new ordinary work");
+            if protected {
+                f.database.connection().execute("UPDATE agent_run SET cancel_requested_at=datetime('now'),cancel_reason_code='accepted_input_outcome_unknown',cancel_acknowledged_at=NULL WHERE id=?1", [&run]).unwrap();
+                assert!(
+                    claim_waiting_delivery_batches_with_workspaces(
+                        &mut f.database,
+                        1,
+                        &Default::default(),
+                        &[ActiveExecutionKey::new(&run, 1)]
+                    )
+                    .unwrap()
+                    .is_empty()
+                );
+                assert_eq!(
+                    f.database
+                        .connection()
+                        .query_row(
+                            "SELECT native_session_id FROM conversation WHERE id=?1",
+                            [&execution.conversation_id],
+                            |r| r.get::<_, String>(0)
+                        )
+                        .unwrap(),
+                    "opencode-protected-session",
+                    "Session rotation must wait for existing cleanup"
+                );
+                f.database.connection().execute("UPDATE agent_run SET cancel_acknowledged_at=cancel_requested_at WHERE id=?1", [&run]).unwrap();
+            }
+            let next = claim_waiting_delivery_batches(&mut f.database, 1)
+                .unwrap()
+                .remove(0);
+            assert_ne!(next, run);
+            let native: Option<String> = f
+                .database
+                .connection()
+                .query_row(
+                    "SELECT native_session_id FROM conversation WHERE id=?1",
+                    [&execution.conversation_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(native.is_none(), protected);
+            let next_context = f.materialize_run(&next);
+            assert_eq!(
+                next_context
+                    .rendered_payload
+                    .contains("must never replay an admitted correction"),
+                !protected,
+                "{outcome}"
+            );
+            assert_eq!(
+                ContextService
+                    .runtime_input_delivery_status(&f.database, &input.id)
+                    .unwrap()
+                    .unwrap(),
+                match outcome {
+                    "unsent" | "rejected" => "not_accepted",
+                    "accepted" => "accepted",
+                    _ => "delivery_unknown",
+                }
             );
         }
     }

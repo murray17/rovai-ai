@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-native-turn-and-isolation-boundaries
-last_updated: 2026-10-29
+last_updated: 2026-11-10
 ---
 
 # AgentRun Recovery
@@ -81,6 +81,10 @@ Run 可以先进入失败或取消终态；当前 Core 仍精确持有该 Run/ep
 有匹配的 Run/epoch，且业务终态、请求过清理、ACK 缺失。重启后的旧 ACK 缺失、文件不可读或身份未知本身不是活跃冲突，
 不能阻止原会话、原成员或原 Runtime 的新任务。历史进程只做启动后一次有界维护；异常记录和旧 ACK 原样保留，
 不进入当前任务清理重试，不因放行新任务而宣称旧执行已停止，也不自动重投旧输入。
+
+OpenCode 的持久原生 inbox 另受 [Message Delivery v19](../contracts/message-delivery-v19.md#持久化原生-inbox-的复用保护)
+约束。Steer 自发送准入起从既有投递账本与精确 Session 身份派生复用保护，原 Run 成功和进程清理不证明其已消费。
+完成上述 cleanup 后，后继普通输入沿现有新 Session 分支继续；不阻塞整个会话或重放旧输入。
 
 ## 5. 精确 Stop
 

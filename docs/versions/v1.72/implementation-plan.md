@@ -8,6 +8,36 @@ last_updated: 2026-11-10
 
 # v1.72 实施与验收
 
+## OpenCode Steer 局部接入（2026-11-10）
+
+- 分支 `rovai/opencode-steer`，基线 `13a4b8f96c71bc7866c749da5321a026d8f876b9`，独立 worktree
+  `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-opencode-steer`；治理无需先行独立合入，本项不改变模型输入结构或版本轴。
+- `steer.rs` 在既有冻结资格中加入 OpenCode 2.2.7／2.x；格式补强只影响 OpenCode Steer，普通启动及其他 Runtime 保持。
+- `acp.rs` 沿当前连接发送 `_session/steering`，严格读取 Host initialize 顶层能力；共享 reader 只对精确
+  promptRequired/noRunningTurn 保留明确拒绝，迟到 injected、未知回包和运输失败不重发。
+  受资格约束的 OpenCode 复用当前 Prompt 模型／工具活动的初始接收证据，避免 ready 永远等到原 Prompt 终态。
+- 自然收尾先关闭新准入，仅等待在途 RPC 的原有响应期限；Stop 直接取消并唤醒等待。超时后不保留长期回执追踪。
+- 原生 Session 保护从原账本的 dispatch_started_at 与精确 Native Binding／Session／存储身份派生；
+  accepted、unknown 和已准入 prepared 均保留风险，not_accepted 仅排除对应条目，Run 成功不清除。
+  `delivery_queue.rs` 在原有 cleanup 门禁后轮换受保护恢复绑定，`runtime.rs` 对已有 queued Run 的 Session 选择再次复查；
+  普通 FIFO 沿原新 Session 分支继续，不复制旧输入、不清理原生历史，无 Migration。
+- 复用三项既有 Rust owners，无新增函数或平行 fixture。版本矩阵包含 2.2.6、2.2.7、预发布、未知、非法后缀和 3.x；
+  SQL owner 包含准入即保护、明确拒绝、不同绑定恢复同 Session、成功及重开后保护、新 FIFO 与不重放；
+  ACP owner 包含能力拒绝、请求形状、精确 noRunningTurn、迟到 injected、reader 两种顺序、有界收尾和 Stop。
+- `smoke-steer.mjs` 的忙碌 OpenCode 路线按 Core 资格断言，`probe-steer-version.mjs` 增加隔离 OpenCode 入口。
+  官方 2.2.6／2.2.7 真实模型验收尚未执行；受控协议夹具仅证明应用和运输行为。
+- `cargo test -p rovai-core --features extended-tests --lib active_input` 三项通过；冻结准入和故障恢复两个 owner
+  分别定向通过，共五项。自然收尾、Stop 及 SQL cleanup-before-rotation 均在原夹具内验证。
+  共享矩阵同时修正两条落后于既有策略的断言：Hermes 1.x 保守关闭、补充 unknown 不阻止新来源 Steer；生产策略未改。
+- `cargo check --workspace`、`pnpm typecheck`、`pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check`、
+  Steer race outcome 测试和两个验收入口的 Node 语法检查通过。
+  兼容性台账字节变化同步既有 macOS evidence revision 摘要，不扩大平台资格。
+- 最终 `cargo test --workspace` 为 484 passed／1 ignored；有明确 base SHA 的通用文档 CI 门禁作为提交前最终检查。
+- `pnpm test` 的 Vitest 阶段为 274 files／3262 tests passed、2 skipped；AboutUpdatesSettings 两项发布日期格式断言失败。
+  在未修改的 `13a4b8f96` 主 checkout 定向复现相同两项失败。额外尝试的 legacy Steer migration owner
+  也在本分支和未修改主线均失败于 `db_steer.rs` 的既有行保留断言；本项不修改这些 UI 或 Migration 实现。
+- 历史合同正文保留，新语义归 [Message Delivery v19](../../contracts/message-delivery-v19.md)。
+
 ## User Automation 成员代发与回执兼容（2026-11-10）
 
 - 工作分支 `rovai/pr-1020-fix` 从原 PR head `52c3b668` 建立并合入 `origin/main` 基线 `c9522f15`，

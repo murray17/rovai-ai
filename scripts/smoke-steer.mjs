@@ -10,7 +10,7 @@ import { startQualificationCore } from './lib/qualification-core.mjs'
 import { composerDocumentForAddress } from './lib/create-configured-camp.mjs'
 const [fixture, executable, targetAdapter = 'codex-cli', scenario = 'full', nativeExecutable] = process.argv.slice(2)
 assert.ok(['full','cancel-only','steer-only','mixed-only'].includes(scenario))
-assert.ok(['codex-cli','claude-code-cli','pi','codebuddy-cli','qwen-code','grok-build','kiro-cli','zcode-app','trae-cn-cli','minimax-code-cli'].includes(targetAdapter))
+assert.ok(['codex-cli','claude-code-cli','pi','codebuddy-cli','qwen-code','grok-build','kiro-cli','zcode-app','trae-cn-cli','minimax-code-cli','opencode-cli'].includes(targetAdapter))
 assert.ok(isAbsolute(fixture) && isAbsolute(executable))
 assert.ok(!nativeExecutable || isAbsolute(nativeExecutable))
 await access(join(dirname(executable), process.platform === 'win32' ? 'rovai.exe' : 'rovai'))
@@ -59,7 +59,7 @@ if(nativeSpec) {
     process.env.ZCODE_SESSION_DB_PATH=join(native,'sessions.sqlite')
   }
 }
-// The unsupported busy peer is a real OpenCode Runtime too. Copy only its
+// The busy peer (and optional target) is a real OpenCode Runtime. Copy only its
 // authentication/configuration/selection, never daily Sessions or databases.
 for(const [key,directory,files] of [
   ['XDG_CONFIG_HOME','.config',['opencode/opencode.json','opencode/opencode.jsonc','opencode/config.json']],
@@ -137,6 +137,7 @@ try {
   const codexRun=runs().find(r=>r.agent_id==='agent_1').id
   await wait(()=>inputs(codexRun)[0]?.status==='accepted','initial native input accepted',60_000)
   const initial=inputs(codexRun);assert.equal(initial.length,1)
+  const steeredSession=targetAdapter==='opencode-cli'?db.prepare('SELECT native_session_id FROM conversation WHERE camp_id=? AND agent_id=?').get(threadId,'agent_1')?.native_session_id:null
   const ordinary=scenario==='steer-only' ? null : await send(['agent_1'],'请把 ORDINARY_QUEUE 写入 ordinary.txt，然后用 rovai send --public-only 报告。')
   const text=await send(['agent_1'],'补充要求：工具结束后把 STEER_TEXT_成功 写入 text-result.txt。保留后续附件要求。','steer')
   await wait(()=>inputs(codexRun).find(i=>i.source_delivery_id===deliveries(text)[0].id&&i.dispatch_started_at),'text dispatch prepared',60_000)
@@ -163,6 +164,10 @@ try {
   await wait(()=>runs().filter(r=>r.agent_id==='agent_1').length===2&&runs().every(r=>!['queued','running','waiting'].includes(r.status)),'ordinary completion')
   assert.equal((await readFile(join(project,'ordinary.txt'),'utf8')).trim(),'ORDINARY_QUEUE')
   assert.equal(runs().filter(r=>r.agent_id==='agent_1').length,2)
+  if(targetAdapter==='opencode-cli') {
+    const nextSession=db.prepare('SELECT native_session_id FROM conversation WHERE camp_id=? AND agent_id=?').get(threadId,'agent_1')?.native_session_id
+    assert.ok(steeredSession&&nextSession);assert.notEqual(nextSession,steeredSession,'successful original Run does not clear persistent inbox risk')
+  }
   report.cases.push({name:'ordinary queue separation',status:'passed'})
   }
   }
@@ -173,16 +178,19 @@ try {
   await wait(()=>exists('mixed-codex.ready'),'mixed Codex boundary');await wait(()=>exists('mixed-opencode.ready'),'mixed OpenCode boundary')
   const mixedTarget=runs().find(r=>r.agent_id==='agent_1'&&r.status==='running')
   await wait(()=>inputs(mixedTarget.id)[0]?.status==='accepted','mixed initial input accepted',60_000)
+  const mixedSnapshot=await core.request('camps.open',{threadId,traceId:randomUUID()})
+  const busyPeer=mixedSnapshot.agentRuns.find(r=>r.agentId==='agent_2'&&r.status==='running')
+  assert.ok(busyPeer,'mixed OpenCode peer must still be running')
   const multi=await send(['agent_1','agent_2','agent_3'],'隔离多队员要求：每人把文本 MIXED_成功 原样写入自己的文件。agent_1 的文件是 mixed-codex.txt；agent_2 是 mixed-opencode.txt；agent_3 是 mixed-idle.txt。文件正文只包含 MIXED_成功，不写姓名或说明。各自只写自己的文件，用 rovai send --public-only 报告，并在最终回复中再次输出 MIXED_成功。','steer')
   await wait(()=>inputs(runs().find(r=>r.agent_id==='agent_1'&&r.status==='running').id).some(i=>i.input_kind==='steer'&&i.dispatch_started_at),'mixed steer dispatched')
   const route=deliveries(multi)
-  assert.equal(route[0].requested_mode,'steer');assert.equal(route[1].requested_mode,'start');assert.equal(route[1].status,'waiting');assert.equal(route[2].requested_mode,'start')
+  assert.equal(route[0].requested_mode,'steer');assert.equal(route[1].requested_mode,busyPeer.canSteer?'steer':'start');assert.equal(route[1].status,busyPeer.canSteer?'claimed':'waiting');assert.equal(route[2].requested_mode,'start')
   await wait(()=>exists('mixed-idle.txt'),'idle independent start')
   await writeFile(join(project,'mixed-codex.release'),'release');await writeFile(join(project,'mixed-opencode.release'),'release')
   for(const name of ['mixed-codex.txt','mixed-opencode.txt'])await wait(()=>exists(name),name)
-  await wait(()=>runs().length===runsBeforeMixed+4&&runs().every(r=>!['queued','running','waiting'].includes(r.status)),'mixed terminal')
+  await wait(()=>runs().length===runsBeforeMixed+(busyPeer.canSteer?3:4)&&runs().every(r=>!['queued','running','waiting'].includes(r.status)),'mixed terminal')
   for(const name of ['mixed-codex.txt','mixed-opencode.txt','mixed-idle.txt'])assert.ok((await readFile(join(project,name),'utf8')).includes('MIXED_成功'))
-  report.cases.push({name:'one public multi-mention: capable busy / unsupported busy / idle',status:'passed',routes:route})
+  report.cases.push({name:'one public multi-mention: capable busy / version-gated busy / idle',status:'passed',busyPeerCanSteer:busyPeer.canSteer,routes:route})
   }
   report.runs=runs();report.status='passed'
 } catch(error) {report.status='failed';report.error=error.stack;process.exitCode=1}

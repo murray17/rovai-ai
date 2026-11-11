@@ -24,6 +24,7 @@ const specs = {
   'codebuddy-cli': ['ROVAI_CODEBUDDY_BIN', 'CODEBUDDY_CONFIG_DIR', '.codebuddy', ['settings.json', 'user-state.json']],
   'trae-cn-cli': ['ROVAI_TRAE_CN_BIN', 'TRAE_HOME', '.trae', ['traecli.toml', 'cli/auth.json']],
   'zcode-app': ['ROVAI_ZCODE_BIN', 'ZCODE_DATA_BASE_DIR', '', ['.zcode/v2/provider_config.json']],
+  'opencode-cli': ['ROVAI_OPENCODE_BIN', null, null, []],
 }
 assert.ok(specs[adapter], `unsupported Adapter ${adapter}`)
 await access(join(dirname(executable), 'rovai'))
@@ -31,13 +32,34 @@ await mkdir(root, { mode: 0o700 })
 const data = join(root, 'core'), project = join(root, 'project'), native = join(root, 'native')
 for (const path of [data, project, native]) await mkdir(path, { mode: 0o700 })
 const [overrideKey, nativeKey, nativeDirectory, files] = specs[adapter]
-const source = process.env[nativeKey] ?? join(homedir(), nativeDirectory)
-for (const file of files) {
-  try { await access(join(source, file)) } catch { continue }
-  await cp(join(source, file), join(native, file), { recursive: true })
-}
 process.env[overrideKey] = nativeExecutable
-process.env[nativeKey] = native
+if (adapter === 'opencode-cli') {
+  // Preserve credentials/configuration only; native Sessions and the database
+  // must belong to this acceptance fixture, including historical V1 probes.
+  for (const [key, directory, files] of [
+    ['XDG_CONFIG_HOME', '.config', ['opencode/opencode.json', 'opencode/opencode.jsonc', 'opencode/config.json']],
+    ['XDG_DATA_HOME', '.local/share', ['opencode/auth.json']],
+    ['XDG_STATE_HOME', '.local/state', ['opencode/model.json']],
+    ['XDG_CACHE_HOME', '.cache', []],
+  ]) {
+    const source = process.env[key] ?? join(homedir(), directory)
+    const destination = join(native, key.toLowerCase())
+    await mkdir(destination, { recursive: true, mode: 0o700 })
+    for (const file of files) {
+      try { await access(join(source, file)) } catch { continue }
+      await cp(join(source, file), join(destination, file), { recursive: true })
+    }
+    process.env[key] = destination
+  }
+  delete process.env.OPENCODE_DB
+} else {
+  const source = process.env[nativeKey] ?? join(homedir(), nativeDirectory)
+  for (const file of files) {
+    try { await access(join(source, file)) } catch { continue }
+    await cp(join(source, file), join(native, file), { recursive: true })
+  }
+  process.env[nativeKey] = native
+}
 if (adapter === 'qwen-code') process.env.QWEN_RUNTIME_DIR = native
 if (adapter === 'zcode-app') {
   process.env.ZCODE_STORAGE_DIR = join(native, 'storage')
@@ -168,7 +190,8 @@ try {
         const snapshot = await core.request('camps.open', { threadId, traceId: randomUUID() })
         const active = snapshot.agentRuns.find(r => r.id === target.id)
         assert.equal(active.canSteer, false)
-        assert.equal(active.steerUnavailableReason, 'version_incompatible')
+        if (adapter === 'opencode-cli') assert.ok(['version_incompatible', 'version_unverified'].includes(active.steerUnavailableReason))
+        else assert.equal(active.steerUnavailableReason, 'version_incompatible')
         result.availability = { canSteer: active.canSteer, reason: active.steerUnavailableReason }
         const message = await send('普通后继要求：把 QUEUED_OLD_VERSION 写入 queued-old.txt。', 'steer', { agentRunId: target.id, executionEpoch: target.execution_epoch })
         assert.equal(deliveries(message)[0].requested_mode, 'start')
@@ -235,15 +258,16 @@ try {
         }
         const b = await send(`工具完成后把 STALE_SIDE_EFFECT 写入 ${id}-forbidden.txt。`, 'steer')
         await wait(() => inputs(target.id).some(i => i.source_delivery_id === deliveries(b)[0].id && i.dispatch_started_at), 'pending input dispatched')
-        if (['pi', 'kiro-cli', 'zcode-app'].includes(adapter)) {
+        if (['pi', 'kiro-cli', 'zcode-app', 'opencode-cli'].includes(adapter)) {
           await wait(() => inputs(target.id).some(i => i.source_delivery_id === deliveries(b)[0].id && i.status === 'accepted'), 'queued input acknowledged before stop')
           assert.equal(await exists(`${id}-${partial ? 'second' : 'first'}.finished`), false)
         }
         result.atStop = inputs(target.id)
+        if (adapter === 'opencode-cli') result.sessionBeforeStop = capture().conversations[0]
         result.processesAtStop = await ownedProcesses()
         await cancel(target)
         result.processesAfterStop = await ownedProcesses()
-        if (['codebuddy-cli','grok-build','trae-cn-cli'].includes(adapter)) {
+        if (['codebuddy-cli','grok-build','trae-cn-cli','opencode-cli'].includes(adapter)) {
           const byPid = new Map(result.processesAtStop.map(p => [p.pid, p]))
           const retired = [...new Map(result.processesAtStop.filter(p => p.command.includes(`hold.mjs ${id}-`)).map(p => {
             while (byPid.has(p.ppid)) p = byPid.get(p.ppid)
@@ -261,6 +285,11 @@ try {
         assert.equal(await exists(`${id}-forbidden.txt`), false, 'stopped input must not cause later side effects')
         assert.equal((await readFile(join(project, `${id}-clean.txt`), 'utf8')).trim(), `CLEAN_${id}`)
         assert.notEqual(deliveries(b)[0].status, 'waiting')
+        if (adapter === 'opencode-cli') {
+          result.sessionAfterStop = capture().conversations[0]
+          assert.ok(result.sessionBeforeStop.native_session_id && result.sessionAfterStop.native_session_id)
+          assert.notEqual(result.sessionAfterStop.native_session_id, result.sessionBeforeStop.native_session_id, 'persistent native inbox must not reach the successor')
+        }
         result.stoppedMessage = b; result.delivery = deliveries(b)
       })
       await runCase('completion boundary and expired target', async result => {

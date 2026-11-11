@@ -1,10 +1,22 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-11-04
+last_updated: 2026-11-10
 ---
 
 # Agent Runtime 兼容性清单
+
+## 2026-11-10 OpenCode Steer 资格与原生 Session 边界
+
+OpenCode 官方 [v2.2.7 ACP](https://github.com/anomalyco/opencode/blob/v2.2.7/packages/cli/src/acp/turn.ts#L406-L423)
+提供 `_session/steering`，initialize 顶层 `_meta.steering.supported` 声明能力。
+产品资格限定稳定 `2.2.7 <= version < 3.0.0`；2.2.6 及 1.x 继续原有普通运行／排队，不以 Steer 下限拒绝启动。
+未知、非法、预发布和其他 major 不自动放开 Steer；以目标 Run 冻结版本为准。
+`injected` 只说明接收；精确 `promptRequired/noRunningTurn` 为未接收，运输或归属不明不重发。
+原生 inbox 持久化，可能残留输入的 Session 在 cleanup 后由后继 FIFO 轮换，不以成功终态或进程回收宣称已清空。
+规范见 [Message Delivery v19](contracts/message-delivery-v19.md)，代码／受控夹具范围见
+[本版记录](versions/v1.72/implementation-plan.md#opencode-steer-局部接入2026-11-10)。
+官方 Runtime／真实模型的 2.2.6、2.2.7 端到端验收未执行，不把策略范围写成全区间实测通过。
 
 ## 2026-11-04 DSH 原生 MCP 生命周期接口兼容
 
