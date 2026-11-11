@@ -197,6 +197,7 @@ pub(crate) struct FakeRuntimeProcessHost {
     reaped: std::sync::atomic::AtomicBool,
     shutdown_calls: std::sync::atomic::AtomicUsize,
     zcode_background: AtomicBool,
+    quiescent: AtomicBool,
     version_baseline: Option<(RuntimeVersionTarget, String)>,
 }
 
@@ -209,6 +210,7 @@ pub(crate) fn fake_runtime_process_host(process_id: impl Into<String>) -> Runtim
         reaped: std::sync::atomic::AtomicBool::new(false),
         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
         zcode_background: AtomicBool::new(false),
+        quiescent: AtomicBool::new(true),
         version_baseline: None,
     }))
 }
@@ -288,7 +290,10 @@ impl RuntimeProcessHost {
             Self::Acp(host) => host.is_quiescent().await,
             Self::Pi(host) => host.is_quiescent().await,
             #[cfg(all(test, feature = "extended-tests"))]
-            Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
+            Self::Fake(host) => {
+                host.quiescent.load(Ordering::Acquire)
+                    && !host.reaped.load(std::sync::atomic::Ordering::Acquire)
+            }
         }
     }
 
@@ -545,7 +550,10 @@ impl FleetStopWait {
 enum FleetAcquirePlan {
     Ready(FleetLease),
     Wait(Arc<FleetStartupOperation>),
-    WaitForRetirement(Arc<FleetStopCompletion>),
+    WaitForRetirement {
+        completion: Arc<FleetStopCompletion>,
+        idle_host: Option<(String, RuntimeProcessHost)>,
+    },
     Blocked(String),
     Spawn {
         reservation_id: String,
@@ -814,15 +822,38 @@ impl FleetState {
             );
         }
 
-        if let Some(retirement) = self.processes.values().find_map(|entry| {
-            (entry.retire_after_version_change
-                && entry.state == FleetProcessState::Stopping
+        if let Some(entry) = self.processes.values().find(|entry| {
+            entry.retire_after_version_change
                 && entry.adapter_kind == request.adapter_kind
-                && entry.compatibility.reuse_scope == request.compatibility.reuse_scope)
-                .then(|| entry.retirement.clone())
-                .flatten()
+                && entry.compatibility.reuse_scope == request.compatibility.reuse_scope
         }) {
-            return FleetAcquirePlan::WaitForRetirement(retirement);
+            // Fence cold resume from the soft mark, including the lock-free
+            // quiescence check before plan_stop. The current Run was handled
+            // above; another Run must not take over its native Session.
+            if !matches!(
+                entry.state,
+                FleetProcessState::IdleWarm | FleetProcessState::Stopping
+            ) {
+                return FleetAcquirePlan::Blocked(
+                    "Runtime Native Session still has active work".to_string(),
+                );
+            }
+            let Some(completion) = entry.retirement.clone() else {
+                return FleetAcquirePlan::Blocked(
+                    "Runtime Host could not release its native Session lock".to_string(),
+                );
+            };
+            return FleetAcquirePlan::WaitForRetirement {
+                completion,
+                idle_host: (entry.state == FleetProcessState::IdleWarm)
+                    .then(|| {
+                        entry
+                            .host
+                            .clone()
+                            .map(|host| (entry.process_id.clone(), host))
+                    })
+                    .flatten(),
+            };
         }
 
         // Hermes permits one active ACP owner per binding. Reserve that
@@ -1686,8 +1717,38 @@ impl AgentRuntimeFleetManager {
                 let _operation = self.operations.lock().await;
                 self.state.lock().await.plan_acquire(&self.config, &request)
             };
-            if let FleetAcquirePlan::WaitForRetirement(retirement) = plan {
-                if !retirement.wait().await {
+            if let FleetAcquirePlan::WaitForRetirement {
+                completion,
+                idle_host,
+            } = plan
+            {
+                if let Some((process_id, host)) = idle_host {
+                    let quiescent = !host.has_zcode_background_tasks() && host.is_quiescent().await;
+                    // Native background work can outlive the Run. Report its
+                    // occupancy rather than wait indefinitely or start a rival
+                    // owner. A concurrent Stop/removal requires a fresh plan.
+                    let stop = {
+                        let _operation = self.operations.lock().await;
+                        let mut state = self.state.lock().await;
+                        if !state.processes.get(&process_id).is_some_and(|entry| {
+                            entry.state == FleetProcessState::IdleWarm
+                                && entry
+                                    .retirement
+                                    .as_ref()
+                                    .is_some_and(|current| Arc::ptr_eq(current, &completion))
+                        }) {
+                            continue;
+                        }
+                        if !quiescent {
+                            bail!("Runtime Native Session still has active work");
+                        }
+                        state.plan_stop(&process_id)
+                    };
+                    // Use the existing bounded stop operation, including when
+                    // the original mark's quiescence check is still suspended.
+                    self.dispatch_stop_plan(stop);
+                }
+                if !completion.wait().await {
                     bail!("Runtime Host could not release its native Session lock");
                 }
                 continue;
@@ -1716,7 +1777,9 @@ impl AgentRuntimeFleetManager {
                 return Ok(lease);
             }
             FleetAcquirePlan::Wait(completion) => return completion.wait().await,
-            FleetAcquirePlan::WaitForRetirement(_) => unreachable!("retirement was awaited above"),
+            FleetAcquirePlan::WaitForRetirement { .. } => {
+                unreachable!("retirement was awaited above")
+            }
             FleetAcquirePlan::Blocked(message) => bail!(message),
             FleetAcquirePlan::Spawn {
                 reservation_id,
@@ -2785,6 +2848,7 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
+            quiescent: AtomicBool::new(true),
             version_baseline: None,
         });
         let mut state = fleet.state.lock().await;
@@ -3232,6 +3296,7 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
+            quiescent: AtomicBool::new(true),
             version_baseline: None,
         });
         let acquire = {
@@ -3349,6 +3414,7 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
+            quiescent: AtomicBool::new(true),
             version_baseline: None,
         });
         let acquire = {
@@ -3421,6 +3487,7 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
+            quiescent: AtomicBool::new(true),
             version_baseline: None,
         });
         let acquire = {
@@ -3564,6 +3631,7 @@ mod tests {
                         reaped: std::sync::atomic::AtomicBool::new(false),
                         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
                         zcode_background: AtomicBool::new(false),
+                        quiescent: AtomicBool::new(true),
                         version_baseline: None,
                     }))
                 });
@@ -3768,6 +3836,7 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
+            quiescent: AtomicBool::new(true),
             version_baseline: None,
         });
         fleet
@@ -3996,7 +4065,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor() {
         let fleet = AgentRuntimeFleetManager::new(Default::default());
         let request = |run| {
@@ -4036,13 +4105,123 @@ mod tests {
         assert!(next.host.is_healthy());
         fleet.shutdown_all().await;
 
-        for (idle, background, kind) in [(true, false), (false, false), (true, true), (false, true)]
+        // Freeze the real mark -> quiescence -> plan_stop gap without relying
+        // on scheduler timing. The reap gate then owns the native-lock boundary.
+        for (kind, reaped) in [AdapterKind::CodexCli, AdapterKind::OpencodeCli]
             .into_iter()
-            .flat_map(|(idle, background)| {
-                [AdapterKind::TraeCnCli, AdapterKind::OpencodeCli]
-                    .map(|kind| (idle, background, kind))
-            })
+            .flat_map(|kind| [true, false].map(|reaped| (kind, reaped)))
         {
+            let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
+            let request = |run| {
+                let mut value = acquire_request(run, "version-window");
+                value.adapter_kind = kind;
+                value.compatibility = RuntimeCompatibilityKey::member_session(
+                    "version-window",
+                    "agent-a",
+                    Some("native-session-a"),
+                    "same-installation",
+                );
+                value
+            };
+            let (old, stop_entered, stop_release) =
+                fake_runtime_process_host_with_reap_gate("version-window-old");
+            let lease = fleet
+                .acquire(request("old"), {
+                    let old = old.clone();
+                    || async move { Ok(old) }
+                })
+                .await
+                .unwrap();
+            fleet
+                .release("old", 1, FleetReleaseDisposition::Reusable)
+                .await;
+            {
+                let mut state = fleet.state.lock().await;
+                let entry = state.processes.get_mut(&lease.process_id).unwrap();
+                entry.retire_after_version_change = true;
+                entry.retirement = Some(Arc::new(FleetStopCompletion::new()));
+                assert_eq!(entry.state, FleetProcessState::IdleWarm);
+                assert!(
+                    matches!(
+                        state.plan_acquire(&fleet.config, &request("next")),
+                        FleetAcquirePlan::WaitForRetirement { .. }
+                    ),
+                    "a marked idle Host must fence cold resume before Stopping"
+                );
+            }
+            let spawn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let mut next = Box::pin(fleet.acquire(request("next"), {
+                let old = old.clone();
+                let spawn_count = spawn_count.clone();
+                move || async move {
+                    assert!(
+                        !old.is_healthy(),
+                        "native writer must be reaped before resume"
+                    );
+                    spawn_count.fetch_add(1, Ordering::SeqCst);
+                    Ok(fake_host("version-window-new"))
+                }
+            }));
+            std::future::poll_fn(|cx| {
+                assert!(next.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
+
+            let mut unrelated = request("unrelated-session");
+            unrelated.compatibility.reuse_scope.session_id = Some("native-session-b".into());
+            fleet
+                .acquire(unrelated, || async { Ok(fake_host("unrelated-session")) })
+                .await
+                .unwrap();
+            let mut unrelated = acquire_request("unrelated-installation", "other-camp");
+            unrelated.adapter_kind = kind;
+            fleet
+                .acquire(unrelated, || async {
+                    Ok(fake_host("unrelated-installation"))
+                })
+                .await
+                .unwrap();
+
+            let stop = fleet.state.lock().await.plan_stop(&lease.process_id);
+            let stop = fleet.dispatch_stop_plan(stop);
+            stop_entered.notified().await;
+            std::future::poll_fn(|cx| {
+                assert!(next.as_mut().poll(cx).is_pending());
+                std::task::Poll::Ready(())
+            })
+            .await;
+            assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
+            if reaped {
+                stop_release.add_permits(1);
+            }
+            assert_eq!(stop.wait().await, reaped);
+            if reaped {
+                assert_eq!(next.await.unwrap().host.process_id(), "version-window-new");
+                assert_eq!(spawn_count.load(Ordering::SeqCst), 1);
+            } else {
+                assert_eq!(
+                    next.await.err().unwrap().to_string(),
+                    "Runtime Host could not release its native Session lock"
+                );
+                assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
+                assert!(old.is_healthy());
+                stop_release.add_permits(1);
+            }
+            fleet.shutdown_all().await;
+        }
+
+        for (idle, background, quiescent, kind) in [true, false].into_iter().flat_map(|idle| {
+            // Cover both explicit background tracking and native quiescence
+            // (e.g. ACP child Sessions) without inventing a retirement deadline.
+            [(false, true), (true, true), (false, false)]
+                .into_iter()
+                .flat_map(move |(background, quiescent)| {
+                    [AdapterKind::TraeCnCli, AdapterKind::OpencodeCli]
+                        .map(|kind| (idle, background, quiescent, kind))
+                })
+        }) {
             let fleet = AgentRuntimeFleetManager::new(Default::default());
             let target = RuntimeVersionTarget {
                 kind,
@@ -4075,6 +4254,9 @@ mod tests {
                         .release("version-current", 1, FleetReleaseDisposition::Reusable)
                         .await
                 );
+            }
+            if let RuntimeProcessHost::Fake(host) = &old {
+                host.quiescent.store(quiescent, Ordering::Release);
             }
             let baselines = fleet.version_baselines(&target).await;
             assert_eq!(baselines.len(), 1);
@@ -4135,6 +4317,20 @@ mod tests {
             .unwrap();
             if !idle {
                 assert!(old.is_healthy());
+                let occupied = tokio::time::timeout(
+                    Duration::from_millis(100),
+                    fleet.acquire(request("version-premature", "version-camp"), || async {
+                        panic!("another Run cannot take over an active native Session")
+                    }),
+                )
+                .await
+                .unwrap()
+                .err()
+                .expect("active Session must reject another owner");
+                assert_eq!(
+                    occupied.to_string(),
+                    "Runtime Native Session still has active work"
+                );
                 let retained = fleet
                     .acquire(current, || async { panic!("current Run keeps its Host") })
                     .await
@@ -4145,20 +4341,39 @@ mod tests {
                     .await;
                 assert_eq!(
                     outcome,
-                    if background {
+                    if background || !quiescent {
                         FleetReleaseOutcome::Reusable
                     } else {
                         FleetReleaseOutcome::Reaped
                     }
                 );
             }
-            if background {
+            if background || !quiescent {
                 assert!(old.is_healthy());
                 fleet.sweep_idle().await;
                 assert!(
                     old.is_healthy(),
                     "version retirement must preserve native background work"
                 );
+                let occupied = tokio::time::timeout(
+                    Duration::from_millis(100),
+                    fleet.acquire(request("version-occupied", "version-camp"), || async {
+                        panic!("native background work cannot gain a rival owner")
+                    }),
+                )
+                .await
+                .unwrap()
+                .err()
+                .expect("native work must not cause an indefinite retirement wait");
+                assert_eq!(
+                    occupied.to_string(),
+                    "Runtime Native Session still has active work"
+                );
+                if let RuntimeProcessHost::Fake(host) = &old {
+                    host.zcode_background.store(false, Ordering::Release);
+                    host.quiescent.store(true, Ordering::Release);
+                }
+                fleet.sweep_idle().await;
             }
             let replaced = fleet
                 .acquire(request("version-next", "version-camp"), || async {

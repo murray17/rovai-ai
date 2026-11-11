@@ -5050,7 +5050,8 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
   不重读配置来推测旧 Host 的环境，不新加同步版本查询。
 - Fleet 仅对读取开始时捕获的精确目标与 Host 实例设置独立温和标志，拒绝未来普通领取，保留当前启动与 Run。
   已知原生工作未结束时不关闭、不作为 LRU 牺牲对象；复用已有 quiescence、释放和 Sweeper，不新建监控或期限。
-  已在关闭的同 Session 范围复用 Stop completion，防止后继冷恢复争用原生锁；原强制停止、删除与 shutdown 语义保留。
+  同 Session 范围从温和标记开始约束后继；可关闭的旧 Host 复用有界 Stop 与 retirement completion，
+  防止尚未进入 Stopping 时并行冷恢复。原生工作仍占用时返回请求错误，不无限等待或强杀；原强制停止、删除与 shutdown 语义保留。
 - 路径/指纹变化不单独触发本功能换代；OpenCode 存储代际冲突、未知基线与无现成恢复路径均不自动退役。
   Hermes 每轮关闭 ACP Client，共享 Gateway 不属于本项管理范围。安装版本不回写执行中 Run/Host 的旧版本。
 
@@ -5121,6 +5122,20 @@ Qwen/TRAE 首轮分别出现协议消息迟到超时、冷接续随机码丢失�
 未将其归因于本功能或宣称已修复。Antigravity 同版本对照确认只复制配置未带入原生登录上下文，
 复用终端原生 Home 后真实模型四阶段通过；隔离失败不能外推为用户终端未登录。
 本轮未安装/重启日常 App，未合并 PR，未重复整套扩展回归。
+
+### 温和标记至关闭的后继获取窗口（2026-11-11）
+
+PR `f4143b0` 的源码审查指出：IdleWarm 被温和标记后、进入 Stopping 前，后继会跳过旧 Host 并创建新进程。
+这是同一原生会话的资源竞争窗口；没有把它归因为上节 Qwen/TRAE 的偶发异常，也未声称测得真实发生概率。
+
+局部修正只收紧 Fleet 获取规则。可关闭的同范围旧 Host 沿现有 Stop 关闭，后继等待既有 retirement completion；
+当前 Run 与已接纳启动保留原租约。尚有原生后台工作或活动租约时，其他请求返回占用错误，
+不增加无限等待、队列、锁、退役状态或恢复路径。其他会话和无关安装继续正常获取。
+
+继续扩展既有 `failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor` owner：
+直接冻结标记后的 IdleWarm 状态，修前失败；既有 Fake reap gate 与虚拟时钟覆盖关闭前后获取、
+关闭超时不创建后继、不同 Session/范围不阻塞，原空闲/忙碌矩阵另覆盖显式后台任务及 native quiescence。
+无需 SQLite、真实进程或新 Rust 测试函数。此确定性 Fleet 证据不冒充重新执行上节 19 种真实模型验收。
 
 
 ## MiniMax 参数按需读取（2026-11-10）
