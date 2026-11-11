@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import * as Popover from '@radix-ui/react-popover'
 import { RuntimeModelSearch } from './RuntimeModelSearch'
 import { RuntimeParameterSelect } from './RuntimeParameterSelect'
 import { runtimeEffortOption } from './runtime-model-presentation'
@@ -208,7 +209,13 @@ function runtimeParametersFor(
     case 'pi':
       return <PiRuntimeParameters {...props} />
     case 'kilo-cli':
-      return <div className="runtime-parameter-form">{modelFieldsFor('kilo-cli', props)}<p className="runtime-parameter-empty"><UiText zh="沿用 Kilo 原生权限" /></p></div>
+      return <div className="runtime-parameter-form">
+        {modelFieldsFor('kilo-cli', props)}
+        <div className="runtime-native-permission">
+          <RuntimeParameterSelect label={uiAttribute('权限')} value="native" choices={[{ value: 'native', label: uiAttribute('原生规则') }]}
+            disabled onChange={() => undefined} labelAction={<KiloPermissionHelp />} />
+        </div>
+      </div>
     case 'opencode-cli':
       return <OpenCodeRuntimeParameters {...props} />
     case 'copilot-cli':
@@ -252,6 +259,23 @@ function runtimeParametersFor(
     case 'antigravity-app':
       return <AntigravityRuntimeParameters {...props} />
   }
+}
+
+function KiloPermissionHelp(): React.JSX.Element {
+  return <Popover.Root>
+    <Popover.Trigger asChild>
+      <button type="button" className="runtime-permission-help" aria-label={uiAttribute('Kilo 权限设置说明')}>
+        <svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.75" /><path d="M8 4.75v3.5M8 10.75h.01" /></svg>
+      </button>
+    </Popover.Trigger>
+    <Popover.Portal><Popover.Content className="runtime-model-picker-menu runtime-permission-help-popover"
+      aria-label={uiAttribute('Kilo 权限设置说明')} align="start" sideOffset={6} collisionPadding={12}
+      onOpenAutoFocus={event => event.preventDefault()}>
+      <p><UiText zh="运行 kilo debug paths 查看配置目录，编辑其中的 kilo.jsonc。" /></p>
+      <code>{'"permission": "ask"'}</code>
+      <p><UiText zh="allow 自动允许，ask 询问，deny 拒绝；也可按工具配置。修改后重新启动 Kilo 会话。" /></p>
+    </Popover.Content></Popover.Portal>
+  </Popover.Root>
 }
 
 function DeepseekHarnessRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {

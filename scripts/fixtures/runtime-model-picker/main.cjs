@@ -617,6 +617,45 @@ app.whenReady().then(async () => {
     for (const page of ['member', 'onboarding']) {
       await run(`window.runtimeTest.reset(${JSON.stringify(page)}, 'normal')`); await settle()
       await run('window.runtimeTest.switchKind("kilo-cli")'); await settle()
+      if (page === 'member') {
+        const permission = '.runtime-native-permission .runtime-model-picker-trigger'
+        const help = '.runtime-permission-help'
+        const initial = await draft(), changes = await run('window.runtimeTest.changes')
+        assert.equal(await run(`document.querySelector('${permission}').disabled`), true)
+        assert.equal(await run(`document.querySelector('${permission}').textContent`), '原生规则')
+        await click(permission)
+        assert.equal(await run('Boolean(document.querySelector("[role=menu]"))'), false)
+        for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
+          await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`); await settle()
+          await run(`document.querySelector('${help}').focus()`)
+          if (theme === 'day') {
+            // Native buttons need Enter's char event; menu items handle keyDown directly.
+            for (const event of [{ type: 'keyDown', keyCode: 'Enter' }, { type: 'char', keyCode: '\r' }, { type: 'keyUp', keyCode: 'Enter' }]) window.webContents.sendInputEvent(event)
+            await settle()
+          } else await key('Space')
+          assert.equal(await run('document.querySelector(".runtime-permission-help-popover").textContent.includes("kilo debug paths")'), true)
+          assert.equal(await run('document.querySelector(".runtime-permission-help-popover").textContent.includes("permission")'), true)
+          await capture(`kilo-permission-${theme}`)
+          await key('Escape')
+          assert.equal(await run('Boolean(document.querySelector(".runtime-permission-help-popover"))'), false)
+          assert.equal(await run(`document.activeElement.matches('${help}')`), true)
+        }
+        await run('document.documentElement.dataset.theme="day"'); await settle()
+        window.setContentSize(432, 800); await settle()
+        await click(help)
+        assert.equal(await run('(() => {const r=document.querySelector(".runtime-permission-help-popover").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth})()'), true)
+        await capture('kilo-permission-narrow')
+        await key('Escape')
+        window.setContentSize(1440, 920); await settle()
+        await click(help)
+        await click(modelTrigger)
+        assert.equal(await run('Boolean(document.querySelector(".runtime-permission-help-popover"))'), false, 'clicking outside dismisses the explanation')
+        await key('Escape')
+        assert.deepEqual(await draft(), initial)
+        assert.equal(await run('window.runtimeTest.changes'), changes, 'help and read-only controls cannot change permission drafts')
+      } else {
+        assert.equal(await run('Boolean(document.querySelector(".runtime-native-permission"))'), false)
+      }
       await click(modelTrigger); await search('vendor/model-0'); await key('Enter')
       await click('button[aria-label^="推理强度，"]')
       assert.deepEqual(await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).map(item=>item.textContent)'), ['Low', 'High', '跟随模型默认值'])

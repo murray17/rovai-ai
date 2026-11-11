@@ -167,6 +167,48 @@ TypeScript、Renderer **3269 passed / 2 skipped**、Node **377 passed / 2 skippe
 沿同一分支提交/推送。官方 Core 夹具已导出并清理，没有引用其路径的残留进程。
 本轮局部可逆目录来源调整不新增 Version Decision。
 
+## User sequence 80：权限只读控件与官网说明
+
+权限区移除常驻“沿用 Kilo 原生权限”提示，复用现有枚举控件显示只读“原生规则”。
+标签旁的叹号按钮打开简短配置说明，给出 `kilo debug paths`、`kilo.jsonc.permission` 和 ask 示例；
+不恢复旧成员的产品 permission 值，不修改草稿或增加查询。精确 UI 行为归
+[队员配置](../../ui/components/member-identity.md#队员配置页)。
+
+官方 7.8.27 的 `debug config` 已在独立 HOME/XDG/workspace 实测：
+
+| 配置 | 原生返回 |
+| --- | --- |
+| `permission: "ask"` | `permission: {"*":"ask"}` |
+| 默认 allow、read ask、bash deny，reviewer Agent 的 edit deny | 四条规则分别保留；没有统一权限档位 |
+
+ACP 的官方 configOptions 仅提供 model、effort、mode，也没有全局等级。
+因此可以读取原生配置规则，但不能将其冒充某个 Run 的统一 allow/ask/deny；本次不为展示另加配置读取进程、
+权限快照、后端接口或规则求值器。执行和原生审批转交均保持。
+
+官网的中英文 `agent-setup` 页面补充 Kilo 章节及安装入口，沿其他智能体的写法，给出原生文件位置、
+Sub2API 等已配置模型的四档局部片段、默认值和刷新方式，并简述原生权限配置。
+没有改下载版本或直接部署；页面随该分支合入后的既有网站发布流程更新。
+
+本阶段为 Renderer/网站文案变更，无 Runtime 执行逻辑、Schema、上下文投递或平台资格变更；
+开始前已正常 merge `origin/main` 的中文斜体修复（主线 `92ff101a7`），没有重写分支历史。
+已通过 TypeScript、Renderer 3269/2 skipped、Node 377/2 skipped、Desktop build、
+网站 build/check（82 页及链接/锚点）和真实 Electron 的 Runtime picker owner。
+权限控件验证覆盖只读禁止展开/改值、Enter 与空格打开说明、Escape 焦点返回、外部点击关闭、
+五套配色和 432px 窄窗口不越界；Day/Night/窄窗口截图已目视检查并导出到本 Thread 附件目录。
+
+真实输入首次揭示共享菜单仅在子按钮设置 disabled 时仍能展开；将同一 disabled 传给 Radix Trigger 后，
+原失败断言通过。原生按钮的 Enter 输入另补齐 Electron char 事件，保留 Enter/空格和指针三种验证，
+不在生产组件增加自定义键盘触发或另一套控件。所有原模型选择器断言保留。
+本阶段自有的原生 CLI、UI 及诊断夹具均已结束并清理。
+
+提交门禁的首轮 Rust workspace 为 437 passed / 1 failed / 1 ignored；唯一失败是既有
+`platform_evidence_revisions_bind_their_frozen_source_bytes`。定位到上一阶段 `b837160a2` 更新了兼容性清单，
+但漏同步原有 `MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION`。本阶段补齐该既有引用，
+不新增校验、修改测试或晋升平台资格。修正后完整 `pnpm test:rust:pr` 为 484 passed / 1 existing ignored，
+`cargo fmt --all -- --check` 和通用 `docs:check:ci` 均通过；没有删除原失败断言。
+本阶段未运行新的付费模型生成、修改日常 App 或直接部署网站。worktree 状态为 `ready`，
+继续保留本独立分支供后续 review/合入。
+
 ## 官方依据
 
 - [CLI Command Reference](https://kilo.ai/docs/code-with-ai/platforms/cli-reference)：官方 `models --verbose` 入口。

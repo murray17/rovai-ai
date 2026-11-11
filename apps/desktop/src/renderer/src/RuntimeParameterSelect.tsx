@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { useId, type ReactNode } from 'react'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useUiText } from './interface-language'
 
@@ -18,8 +18,9 @@ export function RuntimePickerChevron(): React.JSX.Element {
 }
 
 /** Short Runtime enums share the model picker surface; only model catalogs need search. */
-export function RuntimeParameterSelect({ label, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loading, onOpen }: {
+export function RuntimeParameterSelect({ label, labelAction, value, choices, defaultChoice, disabled, onChange, recommendedValue, menuGuidance, loading, onOpen }: {
   label: string
+  labelAction?: ReactNode
   value: string
   choices: RuntimeParameterChoice[]
   defaultChoice?: RuntimeParameterChoice
@@ -37,9 +38,9 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
   const recommendation = (choice: RuntimeParameterChoice): string | undefined =>
     hasRecommendation && choice.value === recommendedValue ? t('推荐') : undefined
   return <div className="field-label">
-    <label htmlFor={id}>{label}</label>
+    {labelAction ? <div className="runtime-parameter-label-row"><label htmlFor={id}>{label}</label>{labelAction}</div> : <label htmlFor={id}>{label}</label>}
     <Menu.Root onOpenChange={open => { if (open) onOpen?.() }}>
-      <Menu.Trigger asChild>
+      <Menu.Trigger asChild disabled={disabled}>
         <button id={id} type="button" className="runtime-model-picker-trigger" disabled={disabled}
           aria-label={[label, selected?.label ?? value, selected?.description, selected && recommendation(selected)].filter(Boolean).join('，')}
           aria-busy={loading || undefined}

@@ -400,16 +400,25 @@ describe('member runtime parameters', () => {
     }
   })
 
-  it('does not present an approval mode for native Pi tool execution', () => {
+  it('keeps Kilo permission rules read-only and does not present a Pi approval mode', () => {
     const kilo = runtimeInstallation('kilo-cli')
     for (const values of [{}, { permission: 'deny' }]) {
+      vi.mocked(RuntimeParameterSelect).mockClear()
       const draft = draftFromDefaults(kilo.memberRuntimeDefaults!)
       draft.permissions.values = values
+      const onChange = vi.fn()
       const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
-        adapterKind: 'kilo-cli', installation: kilo, draft, disabled: false, onChange: () => undefined
+        adapterKind: 'kilo-cli', installation: kilo, draft, disabled: false, onChange
       }))
-      expect(markup).toContain('沿用 Kilo 原生权限')
-      expect(markup).not.toContain('aria-label="权限模式')
+      expect(markup).toContain('原生规则')
+      expect(markup).toContain('aria-label="Kilo 权限设置说明"')
+      expect(markup).not.toContain('沿用 Kilo 原生权限')
+      const [field] = vi.mocked(RuntimeParameterSelect).mock.calls.at(-1)!
+      expect(field.label).toBe('权限')
+      expect(field.disabled).toBe(true)
+      expect(field.choices).toEqual([{value:'native', label:'原生规则'}])
+      field.onChange('deny')
+      expect(onChange).not.toHaveBeenCalled()
       expect(draft.permissions.values).toEqual(values)
     }
     const installation = runtimeInstallation('pi')
