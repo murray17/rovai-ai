@@ -2242,7 +2242,9 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         adapter_kind: KIND,
         installation_id: installation.id.clone(),
         installation_generation: installation.version,
-        search_environment_generation: search.generation() as i64,
+        // Another Runtime's settings can advance the global search generation
+        // without changing this Host's actual entry or environment.
+        search_environment_generation: search.generation().saturating_sub(1) as i64,
         executable_path: installation.executable_path.clone(),
         auth_scope: "default".into(),
         reported_version: Some("codex-cli 1.0.0".into()),
@@ -2578,6 +2580,56 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
             .lines()
             .all(|line| line == "--version")
     );
+    // An unavailable selected entry is an actual failed automatic attempt,
+    // not a cache hit. It must not restart the same work on every later Run.
+    let before_missing = fixture.public_state().await;
+    let prior = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let read = state.version_reads.get_mut(&target).unwrap();
+        read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        read.next
+    };
+    let temporarily_missing = program.with_file_name("codex-held");
+    std::fs::rename(&program, &temporarily_missing).unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "missing-entry");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads[&target]
+            .next
+            == prior
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "missing-entry-again");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(
+        fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads[&target]
+            .next,
+        prior + 1
+    );
+    assert_eq!(
+        count(),
+        initial_calls + 4,
+        "a failed entry read cannot execute or retry a command"
+    );
+    assert_eq!(fixture.public_state().await, before_missing);
+    std::fs::rename(&temporarily_missing, &program).unwrap();
     fixture.core.runtime_fleet.shutdown_all().await;
     fixture.close().await;
 }

@@ -28032,9 +28032,8 @@ async fn process_runtime_check_manager(
                 };
                 if request.purpose == RuntimeLaunchPurpose::DiscoveryVersion {
                     if let Some(runtime) = &request.version_refresh
-                        && (installation_target.as_ref().is_none_or(|target|
+                        && installation_target.as_ref().is_none_or(|target|
                             target.id != runtime.installation_id || target.executable_path != runtime.executable_path)
-                            || runtime.search_environment_generation != request.search.generation() as i64)
                     {
                         let _ = request.acknowledged.send(false);
                         continue;

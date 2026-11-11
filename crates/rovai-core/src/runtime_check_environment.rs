@@ -372,20 +372,6 @@ impl Core {
             )?;
             (installation, locator, identity)
         };
-        let path = runtime.executable_path.clone();
-        let source = installation.source;
-        let verified = tokio::task::spawn_blocking(move || {
-            crate::agent_profile::VerifiedDiscoveredRuntimeEntry::discover(
-                kind,
-                path,
-                source,
-                locator,
-                identity
-                    .as_ref()
-                    .map(|(fingerprint, identity)| (fingerprint.as_str(), identity)),
-            )
-        })
-        .await??;
         let target = version_target(
             kind,
             &runtime.installation_id,
@@ -410,6 +396,23 @@ impl Core {
             None,
         )
         .await?;
+        // Once admitted, this is an actual fixed-entry attempt, including
+        // failure to inspect/open that entry. A cached/skipped request above
+        // must not move the clock; an unavailable entry must not retry per Run.
+        let path = runtime.executable_path.clone();
+        let source = installation.source;
+        let verified = tokio::task::spawn_blocking(move || {
+            crate::agent_profile::VerifiedDiscoveredRuntimeEntry::discover(
+                kind,
+                path,
+                source,
+                locator,
+                identity
+                    .as_ref()
+                    .map(|(fingerprint, identity)| (fingerprint.as_str(), identity)),
+            )
+        })
+        .await??;
         let mut observation = self
             .runtime_discovery
             .read()
