@@ -2271,7 +2271,6 @@ struct RuntimeVersionReadAttempt {
     target: rovai_core::runtime_discovery::RuntimeVersionTarget,
     scope_id: uuid::Uuid,
     sequence: u64,
-    baselines: Vec<runtime_fleet::RuntimeHostVersionBaseline>,
     publish_failure: bool,
 }
 
@@ -3781,7 +3780,6 @@ impl Core {
             let search = search.clone();
             let saved = managed.get(&kind).cloned();
             let version_state = self.runtime_check_activity.clone();
-            let fleet = self.runtime_fleet.clone();
             let version_database = self.database.clone();
             let handle = tasks.spawn(async move {
                 let worker_search = search.clone();
@@ -3919,7 +3917,6 @@ impl Core {
                         version_attempt = Some(
                             runtime_check_environment::begin_version_read(
                                 &version_state,
-                                &fleet,
                                 &version_database,
                                 target,
                                 search.generation(),
@@ -4165,14 +4162,6 @@ impl Core {
         let (changed, target, publish) = result?;
         if !publish {
             return Ok(target);
-        }
-        if observation.version_probe_succeeded == Some(true)
-            && let (Some(attempt), Some(version)) =
-                (&version_attempt, observation.reported_version.as_deref())
-        {
-            self.runtime_fleet
-                .retire_changed_versions(&attempt.target, &attempt.baselines, version)
-                .await;
         }
         match changed {
             true => {
@@ -5815,7 +5804,6 @@ impl Core {
                         .await?;
                         let mut version_attempt = runtime_check_environment::begin_version_read(
                             &self.runtime_check_activity,
-                            &self.runtime_fleet,
                             &self.database,
                             version_target,
                             search.generation(),
@@ -5911,15 +5899,6 @@ impl Core {
                             drop(database);
                             drop(version_state);
                             if selected_candidate {
-                                if let Ok(version) = &version_read {
-                                    self.runtime_fleet
-                                        .retire_changed_versions(
-                                            &version_attempt.target,
-                                            &version_attempt.baselines,
-                                            version,
-                                        )
-                                        .await;
-                                }
                                 self.publish_verified_runtime_discovery(observation.clone())
                                     .await;
                                 selected_entry_published = true;
@@ -30185,7 +30164,6 @@ mod tests {
                         target: target.clone(),
                         scope_id,
                         sequence,
-                        baselines: vec![],
                         publish_failure: true,
                     }),
                     accepted
@@ -30214,7 +30192,6 @@ mod tests {
             target: provisional.clone(),
             scope_id,
             sequence: 2,
-            baselines: vec![],
             publish_failure: true,
         };
         state.rebind_version_read(&mut attempt, &target.installation_id);
@@ -30225,7 +30202,6 @@ mod tests {
             target: target.clone(),
             scope_id,
             sequence: 1,
-            baselines: vec![],
             publish_failure: true,
         }));
 

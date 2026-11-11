@@ -4138,38 +4138,6 @@ impl AcpHost {
         self.alive.load(Ordering::Acquire)
     }
 
-    pub(crate) async fn version_baseline(
-        &self,
-    ) -> Option<(crate::runtime_discovery::RuntimeVersionTarget, String)> {
-        // OpenCode already ties initialize's agent version to the CLI program
-        // generation. Other ACP entries may report a bridge/SDK version; that
-        // is not sufficient evidence about the installed program.
-        if self.adapter_kind != AdapterKind::OpencodeCli {
-            return None;
-        }
-        let initialize = self.initialize_result.read().await;
-        let initialize = initialize.as_ref()?;
-        let resumes = initialize
-            .pointer("/agentCapabilities/sessionCapabilities/resume")
-            .is_some_and(Value::is_object);
-        let loads = self.adapter_kind != AdapterKind::GrokBuild
-            && initialize
-                .pointer("/agentCapabilities/loadSession")
-                .and_then(Value::as_bool)
-                == Some(true);
-        if !resumes && !loads {
-            return None;
-        }
-        let version = crate::runtime_discovery::comparable_runtime_version(
-            self.adapter_kind,
-            initialize.pointer("/agentInfo/version")?.as_str()?,
-        )?;
-        Some((
-            crate::runtime_discovery::RuntimeVersionTarget::for_launch(&self.launch_runtime)?,
-            version.to_owned(),
-        ))
-    }
-
     pub(crate) fn opencode_version_for_program(&self, identity: &str) -> Option<String> {
         (self.is_alive()
             && !self.protocol_violated.load(Ordering::Acquire)
@@ -11321,7 +11289,7 @@ while IFS= read -r ignored; do :; done
 if [ "$1" = "--version" ]; then printf 'opencode v2.0.26\n'; exit 0; fi
 IFS= read -r request || exit 1
 printf '%s\n' "$request" > '{}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentInfo":{{"name":"OpenCode","version":"{advertised}"}},"agentCapabilities":{{"loadSession":true}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentInfo":{{"name":"OpenCode","version":"{advertised}"}}}}}}'
 while IFS= read -r request; do printf '%s\n' "$request" >> '{}'; done
 "#,
                     log.display(),
@@ -11331,10 +11299,6 @@ while IFS= read -r request; do printf '%s\n' "$request" >> '{}'; done
             let mut frozen = frozen_trae_runtime(&executable);
             frozen.adapter_kind = AdapterKind::OpencodeCli;
             frozen.permissions.adapter_kind = AdapterKind::OpencodeCli;
-            frozen.environment = Some(rovai_core::member_environment::LaunchEnvironment {
-                values: Some(rovai_core::runtime_discovery::capture_host_runtime_environment()),
-                overlay: None,
-            });
             frozen.permissions.values = json!({"permission":"deny"});
             frozen.reported_version =
                 Some(health::read_opencode_version(&executable).await.unwrap());
@@ -11357,48 +11321,6 @@ while IFS= read -r request; do printf '%s\n' "$request" >> '{}'; done
             .await;
             if advertised.starts_with('2') || advertised == "dev" {
                 let host = host.unwrap();
-                let proof = host.version_baseline().await;
-                assert_eq!(
-                    proof.as_ref().map(|(_, version)| version.as_str()),
-                    if advertised == "dev" {
-                        None
-                    } else {
-                        Some(advertised)
-                    }
-                );
-                let initialization = host.initialize_result.read().await.clone().unwrap();
-                host.initialize_result.write().await.as_mut().unwrap()["agentCapabilities"]["loadSession"] =
-                    json!(false);
-                assert!(
-                    host.version_baseline().await.is_none(),
-                    "automatic replacement requires an existing cold continuation"
-                );
-                *host.initialize_result.write().await = Some(initialization);
-                let fleet = AgentRuntimeFleetManager::new(Default::default());
-                let target = crate::runtime_discovery::RuntimeVersionTarget::for_launch(
-                    &host.launch_runtime,
-                )
-                .unwrap();
-                if proof.is_some() {
-                    let process = RuntimeProcessHost::Acp(host.clone());
-                    fleet
-                        .acquire(
-                            FleetAcquireRequest {
-                                agent_run_id: "opencode-version-run".into(),
-                                execution_epoch: 1,
-                                adapter_kind: AdapterKind::OpencodeCli,
-                                compatibility: RuntimeCompatibilityKey::member(
-                                    "opencode-version",
-                                    "member",
-                                    "same",
-                                ),
-                            },
-                            || async { Ok(process) },
-                        )
-                        .await
-                        .unwrap();
-                }
-                let baselines = fleet.version_baselines(&target).await;
                 assert!(
                     host.detector_config_root.is_none(),
                     "V2 must never generate the V1 plugin"
@@ -11419,26 +11341,6 @@ while IFS= read -r request; do printf '%s\n' "$request" >> '{}'; done
                     !host.is_quiescent().await,
                     "live native children forbid warm reuse"
                 );
-                if proof.is_some() {
-                    fleet
-                        .retire_changed_versions(&target, &baselines, "2.98.0")
-                        .await;
-                    assert_eq!(
-                        fleet
-                            .release_with_outcome(
-                                "opencode-version-run",
-                                1,
-                                FleetReleaseDisposition::Reusable
-                            )
-                            .await,
-                        crate::runtime_fleet::FleetReleaseOutcome::Reusable
-                    );
-                    fleet.sweep_idle().await;
-                    assert!(
-                        host.is_alive(),
-                        "native children survive graceful version retirement"
-                    );
-                }
                 child["params"]["type"] = json!("update");
                 child["params"]["update"] = json!({"sessionUpdate":"agent_message_chunk", "content":{"type":"text","text":"child output"}});
                 let projected = host.project_opencode_child_update(&child).await.unwrap();
@@ -11452,13 +11354,6 @@ while IFS= read -r request; do printf '%s\n' "$request" >> '{}'; done
                     host.is_quiescent().await,
                     "settled native children permit warm reuse"
                 );
-                if proof.is_some() {
-                    fleet.sweep_idle().await;
-                    assert!(
-                        !host.is_alive(),
-                        "the existing sweep closes the retired Host after native work settles"
-                    );
-                }
                 host.shutdown().await;
                 assert_eq!(host.opencode_version_for_program(&identity), None);
             } else {

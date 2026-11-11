@@ -5032,116 +5032,67 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 本次未运行真实模型/Pi 或 Windows 原生验收，不把受控 Runtime 元数据与 Electron 夹具当作此类证据。
 
 
-## 安装版本按需刷新与 Host 温和换代（2026-11-10）
+## 安装版本按需刷新与 Host 生命周期解耦（2026-11-11）
 
-实现边界见 [Runtime Launch v85](../../contracts/runtime-launch-and-verification-v85.md)。从 `f19b2ddc` 的独立
-`rovai/runtime-on-demand-version` worktree 实施；不安装或重启日常 App，不修改用户认证、SIMPLE、Token 或原生配置。
-本项为可逆的进程内读取记录与 Fleet 复用规则，不涉及持久模型、协议迁移或新的调度权威，不新增 Version Decision。
+User seq79 确认最终范围：保留实际目标的按需版本刷新，撤下 PR #1073 中所有版本驱动退役，不增加配置开关或 Pi 特例。
+合同为继承 v84 的 [Runtime Launch v85](../../contracts/runtime-launch-and-verification-v85.md)。
 
-- `runtime_check_environment.rs` 在现有检查状态锁中保存每个实际目标的尝试时间、读取顺序与临时 Run 读取事实。
-  十分钟间隔只限制自动尝试；命令失败和实际入口读取失败也计时，缓存命中不计时。Run hook 非等待提交；已有启动实际读过则不追加。
-  正式入口替换和程序路径保存清理旧入口记录；注册时复核既有安装修订与已发布搜索代次，防止旧 Worker 重建废弃记录。
-  记录实例标识隔离 A→B→A 的迟到提交；活跃 Run 的实际读取事实独立保留到原有收尾，不新增锁、任务、表或缓存服务。
-- `application.rs` 保留整体并行重扫和原有正式启动版本调用，在实际读取前后登记；版本提交与 Fleet 标记同在原有
-  search/安装提交围栏内完成。晚到旧读取与被动缓存均不能覆盖同身份已接纳的新版本。自动 Worker 沿现有完成通道返回结果；
-  只有存在手动等待者时才投影失败，纯自动失败保持原公开状态和健康记录。
-- Codex 使用已有 initialize userAgent 的 server build，OpenCode 使用已有 initialize agentInfo.version 且有正常冷接续；
-  显示用 reportedVersion 不作为可信进程基线，其他未知来源保留。Codex/Pi Host 携带真正创建进程时已捕获的环境，
-  不重读配置来推测旧 Host 的环境，不新加同步版本查询。
-- Fleet 仅对读取开始时捕获的精确目标与 Host 实例设置独立温和标志，拒绝未来普通领取，保留当前启动与 Run。
-  已知原生工作未结束时不关闭、不作为 LRU 牺牲对象；复用已有 quiescence、释放和 Sweeper，不新建监控或期限。
-  同 Session 范围从温和标记开始约束后继；可关闭的旧 Host 复用有界 Stop 与 retirement completion，
-  防止尚未进入 Stopping 时并行冷恢复。原生工作仍占用时返回请求错误，不无限等待或强杀；原强制停止、删除与 shutdown 语义保留。
-- 路径/指纹变化不单独触发本功能换代；OpenCode 存储代际冲突、未知基线与无现成恢复路径均不自动退役。
-  Hermes 每轮关闭 ACP Client，共享 Gateway 不属于本项管理范围。安装版本不回写执行中 Run/Host 的旧版本。
+- Core 保留原有 Check Manager、十分钟实际尝试间隔、手动共享与顺序围栏，成功和失败都计时；静态缓存不冒充实际读取。
+  入口替换清理旧入口范围，切回相同路径也拒收原选择期间的迟到结果；不同有效环境保持各自归属。
+- 本轮已有正式版本读取不追加自动查询。版本命令不作为 Run 的额外前置条件，自动失败不投影为不可用，草稿仍独立。
+- 移除 `retire_changed_versions` 调用、仅供退役的 Host 版本基线/比较，以及获取、释放、清扫里的温和版本标志与后继等待/拒绝。
+  Codex/Pi 真正启动时捕获的有效环境继续保存，以准确执行后续版本命令；现有最低版本和协议代际校验保留。
+- 版本写回只更新安装信息，原有 Host 健康、取消、插话后关闭、故障清理、配置变化、TTL/LRU 与 Session 接续独立运行。
+  安装版本不作为进程复用/Native Session 身份，不自动改变当前 Host/Run 的实际版本；原有完整配置审计 digest 不变。
 
 ### 验证归属
 
-不新增 Rust 测试函数或平行夹具，扩展既有 owners：
+不新增 Rust 测试函数。原 `manual_rescan_reads_versions_and_discards_replaced_version_responses` owner 保留
+版本保存、599/600 秒边界、迟到结果、环境/安装归属、失败静默和手动反馈、草稿隔离与入口替换/切回矩阵，
+改验手动/后台版本发布后原健康 Host 仍可获取和释放，并由原 Sweep 独立处理。
+原 Codex warm/cold 环境 owner 验证实际捕获环境继续保留。
 
-- `runtime_check_activity_has_two_slots_and_one_terminal_owner`：读取顺序、599/600 秒边界、安装/环境隔离、首次安装重绑定及入口替换/切回的记录隔离。
-- `manual_rescan_reads_versions_and_discards_replaced_version_responses`：私有 Core/DB、现有 Manager 和不可变受控 CLI，
-  覆盖 V1 晚于 V2 提交、被动旧缓存、自动失败及入口不可读的限频/静默、手动共享失败、已有启动失败不追加、草稿隔离及自动成功保存。
-  另覆盖保存新路径后立即清理旧记录、旧 Worker 不得重建、切回后迟到结果不写入，以及清理不导致同一 Run 追加版本命令。
-- `failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor` 与
-  `shutdown_retires_an_inflight_start_before_it_can_commit`：保留原硬退役断言，增加温和空闲/忙碌/原生后台矩阵、
-  降级、相同/未知版本、新 Host 排除及已接纳 Starting 不取消。
-- `warm_host_ignores_unreadable_environment_and_new_process_loads_latest`：真实受控 pipe/process，
-  空自报不会相信显示版本，可信构建自报独立于缓存，warm 环境不重读，cold 使用实际新环境。
-- `opencode_host_keeps_prepared_generation_and_stops_conflicting_handshakes`：保留原代际校验，
-  增加自报/恢复能力来源及真实原生 child 存活时不关闭、结束后由原 sweep 关闭。
+仅与已删除版本退役机制有关的空闲/忙碌基线、软标志、关闭 gate 和比较矩阵随生产路径撤下；
+这些用例没有独立当前合同。原 Fleet hard retirement、inflight shutdown、取消/回收确认、配置失效、原生后台与 LRU owners
+完整保留；OpenCode 原代际/Steer 收尾 owners 保留，不能删除原有关闭条件来掩盖旧方案交互。
 
-最小命令：
+最小相关命令：
 
 ```sh
-cargo test -p rovai-core --features slow-tests --lib -- runtime_check_environment:: runtime_fleet:: runtime_check_activity_has_two_slots launch_version_uses_the_frozen_program runtime_discovery:: startup_settings:: warm_host_ignores_unreadable_environment opencode_host_keeps_prepared_generation --quiet
+cargo test -p rovai-core --features slow-tests,extended-tests --lib -- runtime_fleet:: manual_rescan_reads_versions_and_discards_replaced_version_responses runtime_check_activity_has_two_slots runtime_discovery:: startup_settings:: warm_host_ignores_unreadable_environment opencode_host_keeps_prepared_generation active_input_receipts_preserve_the_original_prompt --quiet
+cargo test --workspace
 ```
 
-最终同步主线 `3568dc1f8`（Kilo 接入）后，保留共享 Fleet cleanup outcome 与新 Runtime 分支，合同改为继承 v84 的 v85。
-相关 48 项通过；关键边界修改后还单独补跑了其中 2 项，覆盖实际目标、失败限频和精确启动环境。`cargo test --workspace`
-再次为 484 passed、1 ignored；`TZ=UTC pnpm test` 的 Vitest 为 3269 passed、2 skipped，Node 矩阵通过。
-`pnpm typecheck`、`pnpm build:desktop`、Core/CLI 构建、`cargo check --workspace`、格式与三项文档门禁通过。
+### Pi 真实原地升级
 
-入口记录清理补充后，相关 11 项通过，最终启动记录校验调整后重点 2 项复验通过；默认 workspace 再次
-484 passed、1 ignored。新增 Rust 测试函数为零，格式与三项文档门禁通过。此次未重跑前端、隔离 Core smoke
-或整套扩展回归，上述前端与 smoke 结果属于补充前的同一 PR；完整扩展层的已知失败仍按下文记账。
+自动验收通道使用独立 Core/data/Skills/MCP、工作区、原生配置副本与 npm 安装目录。
+固定选定入口和安装目录，使用官方 Pi 1.1.0→1.5.2；分别在空闲 Warm 和活动 Run 执行期间完成真实 npm 原地升级。
+验收必须记录 Host ID/PID、Session、工具与上下文，并确认升级后仍使用旧进程，再经原有关闭和新版冷接续。
+两组最终验收共 9 个真实模型 AgentRun 成功，旧进程在升级后继续完成 read、bash 搜索与文件追加，Host ID/PID 不变，
+上下文标签和 Native Session 均保留。空闲组旧 PID 50617、忙碌组 50618；正常 Core 关闭后新版冷接续分别使用 51045、51220，
+仍为原 Native Session。安装行已是 1.5.2 时，旧进程的 Run 仍准确记录 runtimeVersion 1.1.0，冷启动后才为 1.5.2。
+实际替换的是同一 npm prefix 下的官方包；外层 cli.js/选定入口不变，真正 cli-runtime.js 的 SHA-256 已变。
+忙碌组在真实 Bash 工具阻塞期间完成 npm 升级和轻量版本发布，再正常释放工具；没有提前切换新进程。
 
-同步 Kilo 后再次运行独立隔离 Core，使用不可变受控 Hermes 脚本，五个场景通过：单项实际读取、较旧整体重扫晚返回不覆盖 V2、
-草稿不写正式版本、手动失败保留历史且反馈一致、整体重扫恢复后清除旧版本错误。
-Hermes 共执行六次 `--version`，脚本 hash/mtime 不变，完整检查及目录读取均为零，Core 正常退出。
-首轮验收夹具因占位路径不存在被 Core 拒绝；改为有效受控入口后重测通过，未绕过产品路径校验。
-此进程级验收只覆盖版本发布；自动刷新、原生后台保留与温和退役由上述 Rust owners 覆盖，不把 Hermes 当作 Warm 换代证据。
+本次未观察到可归因于升级的功能故障，Pi 不增加退役特例。模型为现有 sub2api/gpt-6.1-sol，Core/Skills/MCP/原生 Home/安装均隔离。
+两次初步尝试保留：一组模型未按要求复述标签；另一组脚本错误地要求稳定外层 shim 的内容变化。
+澄清提示、改为核对实际模块后，使用新 Core/Session 独立重跑；不将这两次脚本判定归为升级故障或隐藏记录。
+精确身份、工具证据、官方包来源与边界见[脱敏 Pi 证据](../../research/pi-in-place-upgrade-2026-11-11.evidence.json)。
+正常关闭后六个已知测试 PID 均不存在，16 个复制配置文件已清理，未改全局安装/登录或日常 App。
 
-合入 Kilo 前，在基线 `cb1c027e4` 上执行的 `pnpm test:rust:extended` Core target 为
-1023 passed、12 failed、8 ignored，不能记作全绿。12 项分别属于数据库准入/历史迁移（9）、legacy Steer 升级（1）和队员工具（2）。
-在该干净主线的临时 detached worktree 中逐项执行同一失败列表，12 项均同样失败；当时相关 db、test_support、
-delivery_queue、team_tool 源码 blob 与该基线一致。本次不改这些逻辑，也不通过跳过测试消除失败。
-该基线的两个准入 owner 仍按 migration 220 断言，实际状态已有 221/222；其他历史夹具也有既有约束/快照不一致。
-主线对照只运行这 12 项，不冒充全量主线回归；同步 Kilo 后执行上述相关回归与默认 workspace，没有再运行整套扩展回归。
+相关 Rust owners 39 项通过，默认 workspace 484 passed、1 ignored；默认回归发生在本节兼容证据摘要同步之前，
+随后单独运行准入证据 owner 验证摘要，准入标记和执行行为没有改变。两轴静态复核均无新增可操作发现。
+本轮不重跑此前 19 种真实模型矩阵或整套扩展回归。
 
-上述受控脚本与单元证据本身不等于真实付费模型、全平台或所有 Runtime 的自动换代资格；真实验收另列于下节。
-不保证升级后第一条 Run 已用新版。
-无可信基线继续保留旧进程，不能通过事后磁盘查询补齐；外部原地升级和新版本自身故障仍按实际结果处理。
+### 前期证据的适用范围
 
-### 真实 Runtime 验收与 OpenCode 版本格式补修（2026-11-11）
+`f4143b0` / `cd96c777f` 的前期 19 种真实模型、79 次最终成功 AgentRun 与 4 组原生旧新版本证据保留在
+[兼容记录](../../runtime-compatibility.md#2026-11-11-按需版本刷新与真实模型验收)及[脱敏证据](../../research/runtime-on-demand-version-2026-11-11.evidence.json)。
+这些构建含已撤下的版本退役路径，不将其计作当前方案的换代资格或本轮重跑。
+Qwen/TRAE 的首轮异常与补跑均保留，没有确认由版本刷新引起，也没有宣称根因已修复。
 
-按 User seq66 授权使用真实模型，21 项目录中 19 种已开放 Runtime 完成 79 个最终验收成功 Run；
-Cline/Cursor 按现有准入保持阻断。逐项版本、79 项计数口径、失败保留、配置隔离与适用范围见
-[兼容性记录](../../runtime-compatibility.md#2026-11-11-按需版本刷新与真实模型验收)与
-[脱敏证据](../../research/runtime-on-demand-version-2026-11-11.evidence.json)。
-
-真实执行复现 OpenCode 2.2.6→2.2.7 的版本已保存但旧 Warm Host 未退出复用：比较器未处理 `opencode v` 前缀。
-只补对应已知前缀，沿用等值、顺序、基线及关闭规则；原 Fleet owner 增加 OpenCode 前缀与同代际变化矩阵，
-修前失败、修后通过，新增 Rust 测试函数为零。相关 12 项通过，默认 workspace 484 passed、1 ignored。
-固定修正后 Core 的真实后台读取在旧进程仍执行工具时读到新版，当前工作继续完成，下一 Run 启动新进程，
-同一原生 Session 与随机上下文码在换代、版本读取失败和 Core 冷启动后均保留。
-
-Codex 0.166.0→0.167.0 同样完成真实自动换代；Qoder 1.1.76→1.1.81、Command Code 1.88.0→1.88.5
-完成版本更新和新进程冷接续，其基线未获本功能资格，未据此强退 Warm。Hermes 不作为共享 Gateway 换代证据。
-Qwen/TRAE 首轮分别出现协议消息迟到超时、冷接续随机码丢失；对照及原场景补跑通过，原失败仍保留，
-未将其归因于本功能或宣称已修复。Antigravity 同版本对照确认只复制配置未带入原生登录上下文，
-复用终端原生 Home 后真实模型四阶段通过；隔离失败不能外推为用户终端未登录。
-本轮未安装/重启日常 App，未合并 PR，未重复整套扩展回归。
-
-### 温和标记至关闭的后继获取窗口（2026-11-11）
-
-PR `f4143b0` 的源码审查指出：IdleWarm 被温和标记后、进入 Stopping 前，后继会跳过旧 Host 并创建新进程。
-这是同一原生会话的资源竞争窗口；没有把它归因为上节 Qwen/TRAE 的偶发异常，也未声称测得真实发生概率。
-
-局部修正只收紧 Fleet 获取规则。可关闭的同范围旧 Host 沿现有 Stop 关闭，后继等待既有 retirement completion；
-当前 Run 与已接纳启动保留原租约。尚有原生后台工作或活动租约时，其他请求返回占用错误，
-不增加无限等待、队列、锁、退役状态或恢复路径。其他会话和无关安装继续正常获取。
-
-继续扩展既有 `failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor` owner：
-直接冻结标记后的 IdleWarm 状态，修前失败；既有 Fake reap gate 与虚拟时钟覆盖关闭前后获取、
-关闭超时不创建后继、不同 Session/范围不阻塞，原空闲/忙碌矩阵另覆盖显式后台任务及 native quiescence。
-无需 SQLite、真实进程或新 Rust 测试函数。此确定性 Fleet 证据不冒充重新执行上节 19 种真实模型验收。
-
-`ad70be0cf` 新增的获取分支另有不健康 IdleWarm 被误报活动占用的遗漏；原 `is_quiescent()` 要求进程存活的语义不变。
-仅在该分支区分健康状态，不健康时仍完成原有有界清理与回收确认，失败不创建后继。
-同一 Fleet owner 的 gate/虚拟时钟矩阵增加“连接已失效但资源未确认回收”，覆盖无/残留后台标记及清理成功/失败；
-Fake 的连接健康与确认回收分开表达，避免用死亡伪造清理成功。不新增 Rust owner，不重跑真实模型矩阵。
-
+合入 Kilo 前，基线 `cb1c027e4` 的整套扩展 Core target 为 1023 passed、12 failed、8 ignored；
+12 项数据库/准入、legacy Steer 和队员工具失败已在干净主线逐项复现。本轮不修改或跳过它们，也不冒充重跑全套扩展。
 
 ## MiniMax 参数按需读取（2026-11-10）
 

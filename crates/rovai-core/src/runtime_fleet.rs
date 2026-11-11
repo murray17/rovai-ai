@@ -25,16 +25,7 @@ use crate::{
     builtin_tool_runtime::{BuiltinToolLeaseRegistry, BuiltinToolProcessConfig},
     codex::CodexHost,
     pi::PiHost,
-    runtime_discovery::{RuntimeVersionTarget, comparable_runtime_version},
 };
-
-#[derive(Debug, Clone)]
-pub(crate) struct RuntimeHostVersionBaseline {
-    process_id: String,
-    host_instance_id: String,
-    target: RuntimeVersionTarget,
-    version: String,
-}
 
 pub(crate) const DEFAULT_MAX_RESIDENT_PROCESSES_PER_MEMBER: usize = 20;
 pub(crate) const DEFAULT_MAX_RESIDENT_PROCESSES_GLOBAL: usize = 200;
@@ -197,9 +188,6 @@ pub(crate) struct FakeRuntimeProcessHost {
     reaped: std::sync::atomic::AtomicBool,
     shutdown_calls: std::sync::atomic::AtomicUsize,
     zcode_background: AtomicBool,
-    quiescent: AtomicBool,
-    healthy: AtomicBool,
-    version_baseline: Option<(RuntimeVersionTarget, String)>,
 }
 
 #[cfg(all(test, feature = "extended-tests"))]
@@ -211,9 +199,6 @@ pub(crate) fn fake_runtime_process_host(process_id: impl Into<String>) -> Runtim
         reaped: std::sync::atomic::AtomicBool::new(false),
         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
         zcode_background: AtomicBool::new(false),
-        quiescent: AtomicBool::new(true),
-        healthy: AtomicBool::new(true),
-        version_baseline: None,
     }))
 }
 
@@ -235,28 +220,6 @@ pub(crate) fn fake_runtime_process_host_with_reap_gate(
 }
 
 impl RuntimeProcessHost {
-    #[cfg(all(test, feature = "extended-tests"))]
-    pub(crate) fn with_version_baseline(
-        mut self,
-        target: RuntimeVersionTarget,
-        version: &str,
-    ) -> Self {
-        if let Self::Fake(host) = &mut self {
-            Arc::get_mut(host).unwrap().version_baseline = Some((target, version.to_owned()));
-        }
-        self
-    }
-
-    async fn version_baseline(&self) -> Option<(RuntimeVersionTarget, String)> {
-        match self {
-            Self::Codex(host) => host.version_baseline(),
-            Self::Acp(host) => host.version_baseline().await,
-            Self::Pi(_) => None,
-            #[cfg(all(test, feature = "extended-tests"))]
-            Self::Fake(host) => host.version_baseline.clone(),
-        }
-    }
-
     fn process_id(&self) -> &str {
         match self {
             Self::Codex(host) => host.host_instance_id(),
@@ -273,10 +236,7 @@ impl RuntimeProcessHost {
             Self::Acp(host) => host.is_alive(),
             Self::Pi(host) => host.is_alive(),
             #[cfg(all(test, feature = "extended-tests"))]
-            Self::Fake(host) => {
-                host.healthy.load(Ordering::Acquire)
-                    && !host.reaped.load(std::sync::atomic::Ordering::Acquire)
-            }
+            Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
     }
 
@@ -295,11 +255,7 @@ impl RuntimeProcessHost {
             Self::Acp(host) => host.is_quiescent().await,
             Self::Pi(host) => host.is_quiescent().await,
             #[cfg(all(test, feature = "extended-tests"))]
-            Self::Fake(host) => {
-                host.healthy.load(Ordering::Acquire)
-                    && host.quiescent.load(Ordering::Acquire)
-                    && !host.reaped.load(std::sync::atomic::Ordering::Acquire)
-            }
+            Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
         }
     }
 
@@ -556,10 +512,6 @@ impl FleetStopWait {
 enum FleetAcquirePlan {
     Ready(FleetLease),
     Wait(Arc<FleetStartupOperation>),
-    WaitForRetirement {
-        completion: Arc<FleetStopCompletion>,
-        idle_host: Option<(String, RuntimeProcessHost)>,
-    },
     Blocked(String),
     Spawn {
         reservation_id: String,
@@ -583,8 +535,6 @@ struct ProcessEntry {
     idle_since: Option<Instant>,
     last_used_sequence: u64,
     retire_after_run: bool,
-    // Unlike invalidation, this must not cancel an accepted startup or native work.
-    retire_after_version_change: bool,
     retirement: Option<Arc<FleetStopCompletion>>,
 }
 
@@ -701,7 +651,6 @@ impl FleetState {
     fn reserve_idle_eviction(&mut self, process_id: &str) -> Option<FleetStopLaunch> {
         let entry = self.processes.get_mut(process_id)?;
         if entry.state != FleetProcessState::IdleWarm
-            || entry.retire_after_version_change
             || entry
                 .host
                 .as_ref()
@@ -760,7 +709,6 @@ impl FleetState {
                 .get(process_id)
                 .filter(|entry| {
                     entry.state == FleetProcessState::IdleWarm
-                        && !entry.retire_after_version_change
                         && entry.compatibility.residency_bucket == residency_bucket
                         && !entry
                             .host
@@ -777,7 +725,6 @@ impl FleetState {
                 .get(process_id)
                 .filter(|entry| {
                     entry.state == FleetProcessState::IdleWarm
-                        && !entry.retire_after_version_change
                         && !entry
                             .host
                             .as_ref()
@@ -828,40 +775,6 @@ impl FleetState {
             );
         }
 
-        if let Some(entry) = self.processes.values().find(|entry| {
-            entry.retire_after_version_change
-                && entry.adapter_kind == request.adapter_kind
-                && entry.compatibility.reuse_scope == request.compatibility.reuse_scope
-        }) {
-            // Fence cold resume from the soft mark, including the lock-free
-            // quiescence check before plan_stop. The current Run was handled
-            // above; another Run must not take over its native Session.
-            if !matches!(
-                entry.state,
-                FleetProcessState::IdleWarm | FleetProcessState::Stopping
-            ) {
-                return FleetAcquirePlan::Blocked(
-                    "Runtime Native Session still has active work".to_string(),
-                );
-            }
-            let Some(completion) = entry.retirement.clone() else {
-                return FleetAcquirePlan::Blocked(
-                    "Runtime Host could not release its native Session lock".to_string(),
-                );
-            };
-            return FleetAcquirePlan::WaitForRetirement {
-                completion,
-                idle_host: (entry.state == FleetProcessState::IdleWarm)
-                    .then(|| {
-                        entry
-                            .host
-                            .clone()
-                            .map(|host| (entry.process_id.clone(), host))
-                    })
-                    .flatten(),
-            };
-        }
-
         // Hermes permits one active ACP owner per binding. Reserve that
         // actual shared resource while spawning, executing and stopping; an
         // unrelated binding never waits on the other Host's I/O.
@@ -896,7 +809,6 @@ impl FleetState {
                     .get(process_id)
                     .filter(|entry| {
                         entry.state == FleetProcessState::IdleWarm
-                            && !entry.retire_after_version_change
                             && (!background_first
                                 || entry
                                     .host
@@ -994,7 +906,6 @@ impl FleetState {
             idle_since: None,
             last_used_sequence: sequence,
             retire_after_run: false,
-            retire_after_version_change: false,
             retirement: None,
         });
         self.process_by_run
@@ -1567,129 +1478,6 @@ impl AgentRuntimeFleetManager {
         }
     }
 
-    pub(crate) async fn version_baselines(
-        &self,
-        target: &RuntimeVersionTarget,
-    ) -> Vec<RuntimeHostVersionBaseline> {
-        let hosts = self
-            .state
-            .lock()
-            .await
-            .processes
-            .values()
-            .filter(|entry| {
-                entry.adapter_kind == target.kind
-                    && !entry.retire_after_run
-                    && !entry.retire_after_version_change
-            })
-            .filter_map(|entry| {
-                entry
-                    .host
-                    .clone()
-                    .map(|host| (entry.process_id.clone(), host))
-            })
-            .collect::<Vec<_>>();
-        let mut baselines = Vec::new();
-        for (process_id, host) in hosts {
-            if let Some((observed_target, version)) = host.version_baseline().await
-                && &observed_target == target
-            {
-                baselines.push(RuntimeHostVersionBaseline {
-                    process_id,
-                    host_instance_id: host.process_id().to_owned(),
-                    target: observed_target,
-                    version,
-                });
-            }
-        }
-        baselines
-    }
-
-    /// Only a previously captured, confirmed process baseline can be retired.
-    /// Dispatch existing stop operations without waiting for their completion.
-    pub(crate) async fn retire_changed_versions(
-        &self,
-        target: &RuntimeVersionTarget,
-        baselines: &[RuntimeHostVersionBaseline],
-        version: &str,
-    ) {
-        let Some(version) = comparable_runtime_version(target.kind, version) else {
-            return;
-        };
-        let idle = {
-            let _operation = self.operations.lock().await;
-            let mut state = self.state.lock().await;
-            let mut idle = Vec::new();
-            for baseline in baselines {
-                if &baseline.target != target || baseline.version == version {
-                    continue;
-                }
-                if target.kind == AdapterKind::OpencodeCli
-                    && crate::opencode_compat::Generation::from_version(Some(&baseline.version))
-                        != crate::opencode_compat::Generation::from_version(Some(version))
-                {
-                    // A known storage-generation change has no normal exact
-                    // cold continuation. Leave that process to its owner.
-                    continue;
-                }
-                let Some(entry) = state.processes.get_mut(&baseline.process_id) else {
-                    continue;
-                };
-                if entry
-                    .host
-                    .as_ref()
-                    .is_none_or(|host| host.process_id() != baseline.host_instance_id)
-                {
-                    continue;
-                }
-                if entry.retire_after_run
-                    || entry.retire_after_version_change
-                    || entry.state == FleetProcessState::Stopping
-                {
-                    continue;
-                }
-                // Starting reservations retain their accepted Run. This flag is
-                // deliberately absent from startup's cancellation conditions.
-                entry.retire_after_version_change = true;
-                entry
-                    .retirement
-                    .get_or_insert_with(|| Arc::new(FleetStopCompletion::new()));
-                if entry.state == FleetProcessState::IdleWarm
-                    && let Some(host) = &entry.host
-                {
-                    idle.push((baseline.process_id.clone(), host.clone()));
-                }
-            }
-            idle
-        };
-        // Existing native-work observations may need their own short locks;
-        // never hold Fleet's lock while reading them or closing a process.
-        for (process_id, host) in idle {
-            if host.has_zcode_background_tasks() || !host.is_quiescent().await {
-                continue;
-            }
-            let plan = {
-                let _operation = self.operations.lock().await;
-                let mut state = self.state.lock().await;
-                state
-                    .processes
-                    .get(&process_id)
-                    .is_some_and(|entry| {
-                        entry.state == FleetProcessState::IdleWarm
-                            && entry.retire_after_version_change
-                            && entry
-                                .host
-                                .as_ref()
-                                .is_some_and(|current| current.process_id() == host.process_id())
-                    })
-                    .then(|| state.plan_stop(&process_id))
-            };
-            if let Some(plan) = plan {
-                self.dispatch_stop_plan(plan);
-            }
-        }
-    }
-
     pub(crate) async fn opencode_version_for_program(&self, identity: &str) -> Option<String> {
         self.state
             .lock()
@@ -1697,7 +1485,7 @@ impl AgentRuntimeFleetManager {
             .processes
             .values()
             .find_map(|entry| {
-                if entry.retire_after_run || entry.retire_after_version_change {
+                if entry.retire_after_run {
                     return None;
                 }
                 match &entry.host {
@@ -1718,50 +1506,9 @@ impl AgentRuntimeFleetManager {
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Result<RuntimeProcessHost>> + Send + 'static,
     {
-        let plan = loop {
-            let plan = {
-                let _operation = self.operations.lock().await;
-                self.state.lock().await.plan_acquire(&self.config, &request)
-            };
-            if let FleetAcquirePlan::WaitForRetirement {
-                completion,
-                idle_host,
-            } = plan
-            {
-                if let Some((process_id, host)) = idle_host {
-                    let quiescent = !host.has_zcode_background_tasks() && host.is_quiescent().await;
-                    // Native background work can outlive the Run. Report its
-                    // occupancy rather than wait indefinitely or start a rival
-                    // owner. A concurrent Stop/removal requires a fresh plan.
-                    let stop = {
-                        let _operation = self.operations.lock().await;
-                        let mut state = self.state.lock().await;
-                        if !state.processes.get(&process_id).is_some_and(|entry| {
-                            entry.state == FleetProcessState::IdleWarm
-                                && entry
-                                    .retirement
-                                    .as_ref()
-                                    .is_some_and(|current| Arc::ptr_eq(current, &completion))
-                        }) {
-                            continue;
-                        }
-                        // Quiescence also requires a live transport. A dead
-                        // Host needs confirmed cleanup, not an occupancy error.
-                        if !quiescent && host.is_healthy() {
-                            bail!("Runtime Native Session still has active work");
-                        }
-                        state.plan_stop(&process_id)
-                    };
-                    // Use the existing bounded stop operation, including when
-                    // the original mark's quiescence check is still suspended.
-                    self.dispatch_stop_plan(stop);
-                }
-                if !completion.wait().await {
-                    bail!("Runtime Host could not release its native Session lock");
-                }
-                continue;
-            }
-            break plan;
+        let plan = {
+            let _operation = self.operations.lock().await;
+            self.state.lock().await.plan_acquire(&self.config, &request)
         };
         let (reservation_id, run_lease, residency, completion, eviction) = match plan {
             FleetAcquirePlan::Ready(lease) => {
@@ -1785,9 +1532,6 @@ impl AgentRuntimeFleetManager {
                 return Ok(lease);
             }
             FleetAcquirePlan::Wait(completion) => return completion.wait().await,
-            FleetAcquirePlan::WaitForRetirement { .. } => {
-                unreachable!("retirement was awaited above")
-            }
             FleetAcquirePlan::Blocked(message) => bail!(message),
             FleetAcquirePlan::Spawn {
                 reservation_id,
@@ -2231,11 +1975,10 @@ impl AgentRuntimeFleetManager {
             let should_stop = disposition == FleetReleaseDisposition::Stop
                 || (entry.state != FleetProcessState::BusyResident
                     && !(entry.state == FleetProcessState::BusyBurst
-                        && (entry.retire_after_version_change
-                            || entry
-                                .host
-                                .as_ref()
-                                .is_some_and(RuntimeProcessHost::has_zcode_background_tasks))))
+                        && entry
+                            .host
+                            .as_ref()
+                            .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)))
                 || entry.retire_after_run
                 || entry.host.is_none();
             if should_stop {
@@ -2272,17 +2015,13 @@ impl AgentRuntimeFleetManager {
                     .copied()
                     .unwrap_or(FleetReleaseOutcome::NoMatchingLease);
             }
-            let reusable = state.process_by_run.get(&run_lease) == Some(&process_id)
+            let reusable = quiescent
+                && state.process_by_run.get(&run_lease) == Some(&process_id)
                 && state.processes.get(&process_id).is_some_and(|entry| {
                     matches!(
                         entry.state,
                         FleetProcessState::BusyResident | FleetProcessState::BusyBurst
                     ) && !entry.retire_after_run
-                        && (if entry.retire_after_version_change {
-                            !quiescent || host.has_zcode_background_tasks()
-                        } else {
-                            quiescent
-                        })
                         && entry.run_lease.as_ref() == Some(&run_lease)
                         && entry.host.as_ref().is_some_and(|current| {
                             current.process_id() == host.process_id() && current.is_healthy()
@@ -2624,28 +2363,6 @@ impl AgentRuntimeFleetManager {
 
     pub(crate) async fn sweep_idle(&self) {
         let now = Instant::now();
-        let retiring = self
-            .state
-            .lock()
-            .await
-            .processes
-            .values()
-            .filter(|entry| {
-                entry.state == FleetProcessState::IdleWarm && entry.retire_after_version_change
-            })
-            .filter_map(|entry| {
-                entry
-                    .host
-                    .clone()
-                    .map(|host| (entry.process_id.clone(), host))
-            })
-            .collect::<Vec<_>>();
-        let mut settled = HashMap::new();
-        for (id, host) in retiring {
-            if !host.has_zcode_background_tasks() && host.is_quiescent().await {
-                settled.insert(id, host.process_id().to_owned());
-            }
-        }
         let plans = {
             let _operation = self.operations.lock().await;
             let mut state = self.state.lock().await;
@@ -2655,21 +2372,13 @@ impl AgentRuntimeFleetManager {
                 .filter_map(|(process_id, entry)| {
                     ((entry.state == FleetProcessState::IdleWarm
                         && (entry.idle_since.is_some_and(|idle_since| {
-                            !entry.retire_after_version_change
-                                && now.duration_since(idle_since) >= self.config.idle_ttl
+                            now.duration_since(idle_since) >= self.config.idle_ttl
                                 && !entry
                                     .host
                                     .as_ref()
                                     .is_some_and(RuntimeProcessHost::has_zcode_background_tasks)
                         }) || entry.host.as_ref().is_none_or(|host| !host.is_healthy())
                             || entry.retire_after_run))
-                        || (entry.state == FleetProcessState::IdleWarm
-                            && entry.retire_after_version_change
-                            && entry.host.as_ref().is_some_and(|host| {
-                                settled
-                                    .get(process_id)
-                                    .is_some_and(|id| id == host.process_id())
-                            }))
                         || entry.state == FleetProcessState::Stopping)
                         .then_some(process_id.clone())
                 })
@@ -2856,9 +2565,6 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
-            quiescent: AtomicBool::new(true),
-            healthy: AtomicBool::new(true),
-            version_baseline: None,
         });
         let mut state = fleet.state.lock().await;
         state
@@ -2883,7 +2589,6 @@ mod tests {
                 idle_since: None,
                 last_used_sequence: 0,
                 retire_after_run: false,
-                retire_after_version_change: false,
                 retirement: None,
             },
         );
@@ -3305,9 +3010,6 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
-            quiescent: AtomicBool::new(true),
-            healthy: AtomicBool::new(true),
-            version_baseline: None,
         });
         let acquire = {
             let fleet = fleet.clone();
@@ -3363,51 +3065,6 @@ mod tests {
             .expect("Fleet must remain closed after shutdown")
             .to_string();
         assert_eq!(rejected, "Runtime Fleet is shutting down");
-
-        // A soft version mark must not inherit shutdown's startup rejection.
-        let fleet = Arc::new(AgentRuntimeFleetManager::new(test_config(
-            Duration::from_secs(1),
-        )));
-        let started = Arc::new(Notify::new());
-        let release = Arc::new(Notify::new());
-        let acquire = {
-            let fleet = fleet.clone();
-            let started = started.clone();
-            let release = release.clone();
-            tokio::spawn(async move {
-                fleet
-                    .acquire(
-                        acquire_request("soft-starting", "camp-a"),
-                        move || async move {
-                            started.notify_one();
-                            release.notified().await;
-                            Ok(fake_host("soft-starting-host"))
-                        },
-                    )
-                    .await
-            })
-        };
-        started.notified().await;
-        {
-            let mut state = fleet.state.lock().await;
-            let entry = state.processes.values_mut().next().unwrap();
-            assert_eq!(entry.state, FleetProcessState::Starting);
-            assert!(!entry.retire_after_run);
-            entry.retire_after_version_change = true;
-        }
-        release.notify_one();
-        let lease = acquire
-            .await
-            .unwrap()
-            .expect("a soft mark cannot reject an accepted startup");
-        assert!(lease.host.is_healthy());
-        assert_eq!(
-            fleet
-                .release_with_outcome("soft-starting", 1, FleetReleaseDisposition::Reusable)
-                .await,
-            FleetReleaseOutcome::Reaped
-        );
-        assert!(fleet.state.lock().await.processes.is_empty());
     }
 
     #[tokio::test]
@@ -3424,9 +3081,6 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
-            quiescent: AtomicBool::new(true),
-            healthy: AtomicBool::new(true),
-            version_baseline: None,
         });
         let acquire = {
             let fleet = fleet.clone();
@@ -3498,9 +3152,6 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
-            quiescent: AtomicBool::new(true),
-            healthy: AtomicBool::new(true),
-            version_baseline: None,
         });
         let acquire = {
             let fleet = fleet.clone();
@@ -3643,9 +3294,6 @@ mod tests {
                         reaped: std::sync::atomic::AtomicBool::new(false),
                         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
                         zcode_background: AtomicBool::new(false),
-                        quiescent: AtomicBool::new(true),
-                        healthy: AtomicBool::new(true),
-                        version_baseline: None,
                     }))
                 });
                 let residency = if process_state == FleetProcessState::BusyBurst {
@@ -3671,7 +3319,6 @@ mod tests {
                     idle_since: (process_state == FleetProcessState::IdleWarm).then(Instant::now),
                     last_used_sequence: 1,
                     retire_after_run: false,
-                    retire_after_version_change: false,
                     retirement: None,
                 });
                 if process_state == FleetProcessState::IdleWarm {
@@ -3849,9 +3496,6 @@ mod tests {
             reaped: std::sync::atomic::AtomicBool::new(false),
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
-            quiescent: AtomicBool::new(true),
-            healthy: AtomicBool::new(true),
-            version_baseline: None,
         });
         fleet
             .acquire(active.clone(), {
@@ -4079,7 +3723,7 @@ mod tests {
         }
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor() {
         let fleet = AgentRuntimeFleetManager::new(Default::default());
         let request = |run| {
@@ -4118,317 +3762,6 @@ mod tests {
         );
         assert!(next.host.is_healthy());
         fleet.shutdown_all().await;
-
-        // Freeze the real mark -> quiescence -> plan_stop gap without relying
-        // on scheduler timing. The reap gate then owns the native-lock boundary.
-        for (kind, reaped, healthy, background) in [AdapterKind::CodexCli, AdapterKind::OpencodeCli]
-            .into_iter()
-            .flat_map(|kind| {
-                [true, false].into_iter().flat_map(move |reaped| {
-                    // A dead transport may still own descendants or stale background
-                    // bookkeeping. Liveness must not stand in for confirmed cleanup.
-                    [(true, false), (false, false), (false, true)]
-                        .map(move |(healthy, background)| (kind, reaped, healthy, background))
-                })
-            })
-        {
-            let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
-            let request = |run| {
-                let mut value = acquire_request(run, "version-window");
-                value.adapter_kind = kind;
-                value.compatibility = RuntimeCompatibilityKey::member_session(
-                    "version-window",
-                    "agent-a",
-                    Some("native-session-a"),
-                    "same-installation",
-                );
-                value
-            };
-            let (old, stop_entered, stop_release) =
-                fake_runtime_process_host_with_reap_gate("version-window-old");
-            let lease = fleet
-                .acquire(request("old"), {
-                    let old = old.clone();
-                    || async move { Ok(old) }
-                })
-                .await
-                .unwrap();
-            fleet
-                .release("old", 1, FleetReleaseDisposition::Reusable)
-                .await;
-            if let RuntimeProcessHost::Fake(host) = &old {
-                host.healthy.store(healthy, Ordering::Release);
-                host.zcode_background.store(background, Ordering::Release);
-            }
-            {
-                let mut state = fleet.state.lock().await;
-                let entry = state.processes.get_mut(&lease.process_id).unwrap();
-                entry.retire_after_version_change = true;
-                entry.retirement = Some(Arc::new(FleetStopCompletion::new()));
-                assert_eq!(entry.state, FleetProcessState::IdleWarm);
-                assert!(
-                    matches!(
-                        state.plan_acquire(&fleet.config, &request("next")),
-                        FleetAcquirePlan::WaitForRetirement { .. }
-                    ),
-                    "a marked idle Host must fence cold resume before Stopping"
-                );
-            }
-            let spawn_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let mut next = Box::pin(fleet.acquire(request("next"), {
-                let old = old.clone();
-                let spawn_count = spawn_count.clone();
-                move || async move {
-                    if let RuntimeProcessHost::Fake(host) = &old {
-                        assert!(
-                            host.reaped.load(Ordering::Acquire),
-                            "even a dead native writer must finish cleanup before resume"
-                        );
-                    }
-                    spawn_count.fetch_add(1, Ordering::SeqCst);
-                    Ok(fake_host("version-window-new"))
-                }
-            }));
-            std::future::poll_fn(|cx| {
-                assert!(
-                    next.as_mut().poll(cx).is_pending(),
-                    "marked Host must enter cleanup (healthy={healthy}, background={background})"
-                );
-                std::task::Poll::Ready(())
-            })
-            .await;
-            assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
-            tokio::time::timeout(Duration::from_millis(100), stop_entered.notified())
-                .await
-                .expect("acquire must start cleanup without waiting for a sweep");
-
-            let mut unrelated = request("unrelated-session");
-            unrelated.compatibility.reuse_scope.session_id = Some("native-session-b".into());
-            fleet
-                .acquire(unrelated, || async { Ok(fake_host("unrelated-session")) })
-                .await
-                .unwrap();
-            let mut unrelated = acquire_request("unrelated-installation", "other-camp");
-            unrelated.adapter_kind = kind;
-            fleet
-                .acquire(unrelated, || async {
-                    Ok(fake_host("unrelated-installation"))
-                })
-                .await
-                .unwrap();
-
-            let stop = fleet.state.lock().await.plan_stop(&lease.process_id);
-            let stop = fleet.dispatch_stop_plan(stop);
-            std::future::poll_fn(|cx| {
-                assert!(next.as_mut().poll(cx).is_pending());
-                std::task::Poll::Ready(())
-            })
-            .await;
-            assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
-            if reaped {
-                stop_release.add_permits(1);
-            }
-            assert_eq!(stop.wait().await, reaped);
-            if reaped {
-                assert_eq!(next.await.unwrap().host.process_id(), "version-window-new");
-                assert_eq!(spawn_count.load(Ordering::SeqCst), 1);
-            } else {
-                assert_eq!(
-                    next.await.err().unwrap().to_string(),
-                    "Runtime Host could not release its native Session lock"
-                );
-                assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
-                if let RuntimeProcessHost::Fake(host) = &old {
-                    assert!(
-                        !host.reaped.load(Ordering::Acquire),
-                        "failed cleanup must retain ownership even for a dead transport"
-                    );
-                }
-                stop_release.add_permits(1);
-            }
-            fleet.shutdown_all().await;
-        }
-
-        for (idle, background, quiescent, kind) in [true, false].into_iter().flat_map(|idle| {
-            // Cover both explicit background tracking and native quiescence
-            // (e.g. ACP child Sessions) without inventing a retirement deadline.
-            [(false, true), (true, true), (false, false)]
-                .into_iter()
-                .flat_map(move |(background, quiescent)| {
-                    [AdapterKind::TraeCnCli, AdapterKind::OpencodeCli]
-                        .map(|kind| (idle, background, quiescent, kind))
-                })
-        }) {
-            let fleet = AgentRuntimeFleetManager::new(Default::default());
-            let target = RuntimeVersionTarget {
-                kind,
-                installation_id: "installation-a".into(),
-                executable_path: "/fixture/codex".into(),
-                environment_digest: "environment-a".into(),
-            };
-            let request = |run, camp| {
-                let mut value = acquire_request(run, camp);
-                value.adapter_kind = kind;
-                value
-            };
-            let mut old = fake_host("version-old");
-            if let RuntimeProcessHost::Fake(host) = &mut old {
-                Arc::get_mut(host).unwrap().version_baseline =
-                    Some((target.clone(), "2.0.0".into()));
-                host.zcode_background.store(background, Ordering::Release);
-            }
-            let current = request("version-current", "version-camp");
-            fleet
-                .acquire(current.clone(), {
-                    let old = old.clone();
-                    || async move { Ok(old) }
-                })
-                .await
-                .unwrap();
-            if idle {
-                assert!(
-                    fleet
-                        .release("version-current", 1, FleetReleaseDisposition::Reusable)
-                        .await
-                );
-            }
-            if let RuntimeProcessHost::Fake(host) = &old {
-                host.quiescent.store(quiescent, Ordering::Release);
-            }
-            let baselines = fleet.version_baselines(&target).await;
-            assert_eq!(baselines.len(), 1);
-
-            // A later Host must survive even when its version differs from the
-            // late response. Unknown process versions are never inferred.
-            let mut successor = fake_host("version-new");
-            if let RuntimeProcessHost::Fake(host) = &mut successor {
-                Arc::get_mut(host).unwrap().version_baseline =
-                    Some((target.clone(), "3.0.0".into()));
-            }
-            fleet
-                .acquire(request("version-successor", "other-camp"), {
-                    let successor = successor.clone();
-                    || async move { Ok(successor) }
-                })
-                .await
-                .unwrap();
-            let unknown = fake_host("version-unknown");
-            fleet
-                .acquire(request("version-unknown", "unknown-camp"), {
-                    let unknown = unknown.clone();
-                    || async move { Ok(unknown) }
-                })
-                .await
-                .unwrap();
-
-            for same_or_unknown in ["2.0.0", "opencode v2.0.0", "", "version unavailable"] {
-                fleet
-                    .retire_changed_versions(&target, &baselines, same_or_unknown)
-                    .await;
-                assert!(old.is_healthy());
-                assert!(
-                    fleet
-                        .state
-                        .lock()
-                        .await
-                        .processes
-                        .values()
-                        .all(|entry| !entry.retire_after_version_change)
-                );
-            }
-            // Known banners must not hide a change; downgrade is a change too.
-            // Marking never waits for this Run.
-            tokio::time::timeout(
-                Duration::from_millis(100),
-                fleet.retire_changed_versions(
-                    &target,
-                    &baselines,
-                    if kind == AdapterKind::OpencodeCli {
-                        "opencode v2.0.1"
-                    } else {
-                        "1.0.0"
-                    },
-                ),
-            )
-            .await
-            .unwrap();
-            if !idle {
-                assert!(old.is_healthy());
-                let occupied = tokio::time::timeout(
-                    Duration::from_millis(100),
-                    fleet.acquire(request("version-premature", "version-camp"), || async {
-                        panic!("another Run cannot take over an active native Session")
-                    }),
-                )
-                .await
-                .unwrap()
-                .err()
-                .expect("active Session must reject another owner");
-                assert_eq!(
-                    occupied.to_string(),
-                    "Runtime Native Session still has active work"
-                );
-                let retained = fleet
-                    .acquire(current, || async { panic!("current Run keeps its Host") })
-                    .await
-                    .unwrap();
-                assert_eq!(retained.host.process_id(), "version-old");
-                let outcome = fleet
-                    .release_with_outcome("version-current", 1, FleetReleaseDisposition::Reusable)
-                    .await;
-                assert_eq!(
-                    outcome,
-                    if background || !quiescent {
-                        FleetReleaseOutcome::Reusable
-                    } else {
-                        FleetReleaseOutcome::Reaped
-                    }
-                );
-            }
-            if background || !quiescent {
-                assert!(old.is_healthy());
-                fleet.sweep_idle().await;
-                assert!(
-                    old.is_healthy(),
-                    "version retirement must preserve native background work"
-                );
-                let occupied = tokio::time::timeout(
-                    Duration::from_millis(100),
-                    fleet.acquire(request("version-occupied", "version-camp"), || async {
-                        panic!("native background work cannot gain a rival owner")
-                    }),
-                )
-                .await
-                .unwrap()
-                .err()
-                .expect("native work must not cause an indefinite retirement wait");
-                assert_eq!(
-                    occupied.to_string(),
-                    "Runtime Native Session still has active work"
-                );
-                if let RuntimeProcessHost::Fake(host) = &old {
-                    host.zcode_background.store(false, Ordering::Release);
-                    host.quiescent.store(true, Ordering::Release);
-                }
-                fleet.sweep_idle().await;
-            }
-            let replaced = fleet
-                .acquire(request("version-next", "version-camp"), || async {
-                    Ok(fake_host("version-replacement"))
-                })
-                .await
-                .unwrap();
-            assert_eq!(replaced.host.process_id(), "version-replacement");
-            if let RuntimeProcessHost::Fake(host) = &old {
-                host.zcode_background.store(false, Ordering::Release);
-            }
-            fleet.sweep_idle().await;
-            assert!(!old.is_healthy());
-            assert!(successor.is_healthy());
-            assert!(unknown.is_healthy());
-            assert!(replaced.host.is_healthy());
-            fleet.shutdown_all().await;
-        }
     }
 
     #[tokio::test]

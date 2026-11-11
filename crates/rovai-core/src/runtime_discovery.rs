@@ -96,23 +96,6 @@ impl RuntimeVersionTarget {
     }
 }
 
-/// Equality only, with the existing Codex/OpenCode CLI banners removed. Unknown or
-/// differently formatted information cannot establish a process replacement.
-pub(crate) fn comparable_runtime_version(kind: AdapterKind, value: &str) -> Option<&str> {
-    let value = value.trim();
-    let value = match kind {
-        AdapterKind::CodexCli => value.strip_prefix("codex-cli ").unwrap_or(value),
-        AdapterKind::OpencodeCli => value.strip_prefix("opencode ").unwrap_or(value),
-        _ => value,
-    };
-    let value = value.strip_prefix('v').unwrap_or(value);
-    (value.len() <= 256
-        && value.as_bytes().first().is_some_and(u8::is_ascii_digit)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b".-+_".contains(&byte)))
-    .then_some(value)
-}
 #[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;

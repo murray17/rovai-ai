@@ -28,7 +28,7 @@ impl RuntimeCheckState {
     }
 
     /// Called under the existing installation commit guard, together with the
-    /// version write and Fleet mark. Starting a later read alone is not success.
+    /// version write. Starting a later read alone is not success.
     pub(super) fn accept_version_read(&mut self, attempt: &RuntimeVersionReadAttempt) -> bool {
         let Some(read) = self.version_reads.get_mut(&attempt.target) else {
             return false;
@@ -125,7 +125,6 @@ pub(super) async fn version_target(
 
 pub(super) async fn begin_version_read(
     state: &RwLock<RuntimeCheckState>,
-    fleet: &crate::runtime_fleet::AgentRuntimeFleetManager,
     database: &tokio::sync::Mutex<super::Database>,
     target: RuntimeVersionTarget,
     search_generation: u64,
@@ -147,12 +146,10 @@ pub(super) async fn begin_version_read(
         read.attempted_at = Some(tokio::time::Instant::now());
         (read.scope_id, read.next)
     };
-    let baselines = fleet.version_baselines(&target).await;
     Ok(RuntimeVersionReadAttempt {
         target,
         scope_id,
         sequence,
-        baselines,
         publish_failure: true,
     })
 }
@@ -248,7 +245,6 @@ impl Core {
             };
             begin_version_read(
                 &self.runtime_check_activity,
-                &self.runtime_fleet,
                 &self.database,
                 target,
                 search.generation(),
@@ -330,9 +326,6 @@ impl Core {
                 if saved.unwrap_or(false)
                     && let Ok(version) = &result
                 {
-                    self.runtime_fleet
-                        .retire_changed_versions(&attempt.target, &attempt.baselines, version)
-                        .await;
                     let observation = self
                         .runtime_discovery
                         .read()
@@ -456,7 +449,6 @@ impl Core {
         }
         let attempt = begin_version_read(
             &self.runtime_check_activity,
-            &self.runtime_fleet,
             &self.database,
             target,
             search.generation(),

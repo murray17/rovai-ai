@@ -2307,8 +2307,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         adapter_kind: KIND,
         compatibility: RuntimeCompatibilityKey::member("ordered", member, "same"),
     };
-    let old_host =
-        fake_runtime_process_host("old-v1").with_version_baseline(target.clone(), "1.0.0");
+    let old_host = fake_runtime_process_host("old-v1");
     let old = fixture
         .core
         .runtime_fleet
@@ -2346,8 +2345,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
             .unwrap(),
         RuntimeCheckOutcome::Ready
     );
-    let new_host =
-        fake_runtime_process_host("new-v2").with_version_baseline(target.clone(), "2.0.0");
+    let new_host = fake_runtime_process_host("new-v2");
     let new = fixture
         .core
         .runtime_fleet
@@ -2366,7 +2364,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
             .runtime_fleet
             .release_with_outcome("old-run", 1, FleetReleaseDisposition::Reusable)
             .await,
-        FleetReleaseOutcome::Reaped
+        FleetReleaseOutcome::Reusable
     );
     assert_eq!(
         fixture
@@ -2569,7 +2567,7 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         "the only extra command was the explicit draft check"
     );
     // A later due successful read updates the installation without claiming a
-    // full health check, and excludes the old idle Host before returning it.
+    // full health check or changing the old Host's reuse/lifecycle decisions.
     std::fs::write(&version, "codex-cli 3.0.0").unwrap();
     fixture
         .core
@@ -2581,13 +2579,27 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     })
     .await
     .unwrap();
-    assert!(
+    fixture.core.runtime_fleet.sweep_idle().await;
+    let retained = fixture
+        .core
+        .runtime_fleet
+        .acquire(request("after-version-refresh", "old"), || async {
+            panic!("version publication must not replace a healthy Warm Host")
+        })
+        .await
+        .unwrap();
+    assert_eq!(retained.process_id, old.process_id);
+    assert_eq!(
         fixture
             .core
             .runtime_fleet
-            .version_baselines(&target)
-            .await
-            .is_empty()
+            .release_with_outcome(
+                "after-version-refresh",
+                1,
+                FleetReleaseDisposition::Reusable,
+            )
+            .await,
+        FleetReleaseOutcome::Reusable
     );
     let saved = AgentProfileService::default()
         .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
@@ -2709,7 +2721,6 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     assert!(
         begin_version_read(
             &fixture.core.runtime_check_activity,
-            &fixture.core.runtime_fleet,
             &fixture.core.database,
             target.clone(),
             old_search.generation(),
