@@ -5069,6 +5069,14 @@ Hermes 共执行六次 `--version`，脚本 hash/mtime 不变，完整检查及�
 首轮验收夹具因占位路径不存在被 Core 拒绝；改为有效受控入口后重测通过，未绕过产品路径校验。
 此进程级验收只覆盖版本发布；自动刷新、原生后台保留与温和退役由上述 Rust owners 覆盖，不把 Hermes 当作 Warm 换代证据。
 
+`pnpm build:desktop` 通过。`pnpm test:rust:extended` 已完整执行其 Core target：1023 passed、12 failed、8 ignored，不能记作全绿。
+12 项失败分别属于数据库准入/历史迁移（9）、legacy Steer 升级（1）和队员工具（2）。在干净主线 `cb1c027e4`
+的临时 detached worktree 中逐项执行同一失败列表，12 项均同样失败；相关 db、test_support、delivery_queue、team_tool
+源码 blob 与本分支一致。本次不改这些数据库、投递与队员逻辑，也不通过跳过测试消除失败。
+其中两个准入 owner 仍按 migration 220 断言，而当前状态已有 221/222；其他历史夹具也有既有约束/快照不一致。
+主线对照只运行这 12 项，不冒充全量主线回归。功能相关 48 项与最新实际目标/失败限频/环境边界的 2 项均通过；
+默认 workspace 再跑仍为 484 passed、1 ignored。原生进程与控制面验证仍不等同真实模型调用。
+
 这些证据不等于真实付费模型、全平台或所有 Runtime 的自动换代资格；不保证升级后第一条 Run 已用新版。
 无可信基线继续保留旧进程，不能通过事后磁盘查询补齐；外部原地升级和新版本自身故障仍按实际结果处理。
 
