@@ -75,6 +75,8 @@ pub(super) fn project_model(
         "effort"
     } else if adapter_kind == "pi" {
         "thinking_level"
+    } else if adapter_kind == "minimax-code-cli" {
+        "thinkingEffort"
     } else if adapter_kind == "codebuddy-cli" {
         "thought_level"
     } else {
@@ -130,6 +132,27 @@ mod tests {
                 None,
                 Some("codebuddy-model"),
                 Some("high"),
+            ),
+            (
+                "minimax-code-cli",
+                json!({"source":"explicit","modelId":"minimax-model","options":{"thinkingEffort":"high","reasoning_effort":"wrong-option"}}),
+                None,
+                Some("minimax-model"),
+                Some("high"),
+            ),
+            (
+                "minimax-code-cli",
+                json!({"source":"explicit","modelId":"minimax-model","options":{"thinkingEffort":"future"}}),
+                None,
+                Some("minimax-model"),
+                Some("future"),
+            ),
+            (
+                "minimax-code-cli",
+                json!({"source":"explicit","modelId":"minimax-model","options":{"reasoning_effort":"wrong-option"}}),
+                None,
+                Some("minimax-model"),
+                None,
             ),
             (
                 "codex-cli",

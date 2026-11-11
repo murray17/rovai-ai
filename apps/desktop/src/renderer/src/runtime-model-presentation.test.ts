@@ -19,30 +19,44 @@ describe('message model identity', () => {
     expect(modelSummary(fallback)).toBe('old-model · high')
   })
 
-  it('uses CodeBuddy thought_level in member summaries and the existing message effort field', () => {
-    const codebuddy: AdapterInstallation = {
+  it.each([
+    ['codebuddy-cli', 'thought_level', '推理强度'],
+    ['minimax-code-cli', 'thinkingEffort', '思考强度']
+  ] as const)('uses native effort in member summaries and the existing message effort field (%s)', (adapterKind, effortKey, label) => {
+    const native: AdapterInstallation = {
       ...installation,
-      adapterKind: 'codebuddy-cli',
+      adapterKind,
       snapshot: {
         ...installation.snapshot!,
         models: [{
           ...installation.snapshot!.models[0],
-          options: [{ ...installation.snapshot!.models[0].options[0], key: 'thought_level' }]
+          options: [{ ...installation.snapshot!.models[0].options[0], key: effortKey }]
         }]
       }
     }
     const configuration: Parameters<typeof memberRuntimeConfigurationPresentation>[0] = {
-      adapterKind: 'codebuddy-cli',
+      adapterKind,
       model: {
         mode: 'explicit', modelId: 'old-model',
-        options: { thought_level: 'high', reasoning_effort: 'wrong' }
+        options: { [effortKey]: 'high', reasoning_effort: 'wrong' }
       },
-      permissions: { adapterKind: 'codebuddy-cli', schemaVersion: 1, values: {} }
+      permissions: { adapterKind, schemaVersion: 1, values: {} }
     }
-    expect(memberRuntimeConfigurationPresentation(configuration, codebuddy).effort)
-      .toEqual({ label: '推理强度', value: 'High' })
-    expect(messageRuntimeModelPresentation({ ...record, adapterKind: 'codebuddy-cli' }, codebuddy)?.effort)
-      .toEqual({ label: '推理强度', value: 'High' })
+    expect(memberRuntimeConfigurationPresentation(configuration, native).effort)
+      .toEqual({ label, value: 'High' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind }, native)?.effort)
+      .toEqual({ label, value: 'High' })
+    const unlisted = { ...configuration, model: {
+      mode: 'explicit' as const, modelId: 'unlisted-model', options: { [effortKey]: 'future' }
+    } }
+    expect(memberRuntimeConfigurationPresentation(unlisted, null).effort)
+      .toEqual({ label, value: 'future' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind, reasoningEffort: 'future' }, null)?.effort)
+      .toEqual({ label, value: 'future' })
+    expect(memberRuntimeConfigurationPresentation({
+      ...configuration, model: { mode: 'explicit', modelId: 'old-model', options: {} }
+    }, native).effort).toEqual({ label, value: '跟随模型默认值' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind, reasoningEffort: null }, native)?.effort).toBeNull()
   })
 
   it('uses the common default label in member summaries and Hermes history', () => {
