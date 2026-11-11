@@ -2268,6 +2268,29 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         config_digest: "fixture".into(),
     };
     let target = RuntimeVersionTarget::for_launch(&runtime).unwrap();
+    let empty = std::collections::BTreeMap::new();
+    assert_eq!(
+        version_target(
+            KIND,
+            &runtime.installation_id,
+            &runtime.executable_path,
+            &search,
+            Some(crate::member_environment::LaunchEnvironment {
+                values: Some(empty.clone()),
+                overlay: None
+            })
+        )
+        .await
+        .unwrap(),
+        RuntimeVersionTarget::new(
+            KIND,
+            &runtime.installation_id,
+            &runtime.executable_path,
+            &empty
+        )
+        .unwrap(),
+        "a captured environment cannot regain variables from the current Host environment"
+    );
     assert!(
         fixture
             .core

@@ -70,6 +70,12 @@ pub(super) async fn version_target(
     search: &RuntimeSearchEnvironment,
     environment: Option<crate::member_environment::LaunchEnvironment>,
 ) -> Result<RuntimeVersionTarget> {
+    if let Some(values) = environment
+        .as_ref()
+        .and_then(|environment| environment.values.as_ref())
+    {
+        return RuntimeVersionTarget::new(kind, installation_id, path, values);
+    }
     crate::runtime_discovery::with_runtime_configuration(
         kind,
         search,
