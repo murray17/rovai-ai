@@ -223,7 +223,7 @@ User sequence 84 给出进程环境方案，sequence 86 明确要求实施并不
 
 该固定值覆盖继承的同名变量。具体权限仍由 Kilo 对配置和 Agent 规则原生合并、求值；
 Core 继续转交原生审批，不按默认值自动批准。问卷/后台任务开关、用户插件、pure、Bootstrap 和旧字段窄兼容保持。
-当前执行合同为 [Launch v86](../../contracts/runtime-launch-and-verification-v86.md)，v85 保留原文；
+该阶段执行合同为 [Launch v86](../../contracts/runtime-launch-and-verification-v86.md)，v85 保留原文；
 该局部可逆默认策略不增加 Version Decision，没有 Schema、上下文/证据或平台资格变更。
 
 现有只读“原生规则”和点击说明保留，文案说明进程默认 allow，改用具体 edit ask 示例，
@@ -261,6 +261,23 @@ Node `os.tmpdir()` 的规范化系统临时根，故最终记录为 failed，只
 65 个普通模型请求逐字保留完整 Bootstrap，问卷工具在 warm/cold 与权限变化后仍缺席。
 本机为 macOS arm64，不将本轮受控 Provider 结果扩展成付费模型或新平台资格。
 所有配置/组件/Core 夹具结束后清理；工作树继续保留在本独立分支，最终状态为 `ready`。
+
+## User sequence 88：移除权限只读行
+
+按 User 要求，Kilo 的运行设置仅保留模型及模型参数，删除只读“原生规则”和旁边的权限帮助。
+一并移除无其他调用方的 `labelAction` 插槽、专用样式与四条翻译；共享菜单的 disabled 修复保留。
+旧成员的退役 permission 字段仍不展示或改写，模型与思考强度的选择、编辑保持。
+原组件 owner 改为断言权限行/帮助缺席，保留两入口及逐模型选项验证；已退役控件的交互断言随控件删除。
+
+当前合同为 [Launch v87](../../contracts/runtime-launch-and-verification-v87.md)，将展示细节留给 UI owner；
+v86 的进程默认 allow、原生审批、Bootstrap 和全部执行逻辑保持。官网与 Rust 实现均无改动。
+这是局部可逆 UI 删除，不新增 Version Decision 或模型上下文说明。
+
+基线为 `c3b754fb7c3cf8f795520ca2530893bb4fbd2b2f`，复用原分支/worktree；
+状态 `ready`。TypeScript、Renderer 3269/2 skipped、Node 377/2 skipped、Desktop build、
+真实 Electron 的完整 Runtime picker owner 与文档门禁均通过；模型/强度编辑、两入口无权限行断言保留。
+Day/Night 和 432px 截图已目视检查并导出，隔离组件夹具已清理。
+没有 Rust/运行依赖差异，沿用前一阶段 484 项 workspace 与 40 Run Core 的后端证据，不重复模型调用或后台全量验收。
 
 ## 官方依据
 

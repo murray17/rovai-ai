@@ -617,48 +617,8 @@ app.whenReady().then(async () => {
     for (const page of ['member', 'onboarding']) {
       await run(`window.runtimeTest.reset(${JSON.stringify(page)}, 'normal')`); await settle()
       await run('window.runtimeTest.switchKind("kilo-cli")'); await settle()
-      if (page === 'member') {
-        const permission = '.runtime-native-permission .runtime-model-picker-trigger'
-        const help = '.runtime-permission-help'
-        const initial = await draft(), changes = await run('window.runtimeTest.changes')
-        assert.equal(await run(`document.querySelector('${permission}').disabled`), true)
-        assert.equal(await run(`document.querySelector('${permission}').textContent`), '原生规则')
-        await click(permission)
-        assert.equal(await run('Boolean(document.querySelector("[role=menu]"))'), false)
-        for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
-          await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`); await settle()
-          await run(`document.querySelector('${help}').focus()`)
-          if (theme === 'day') {
-            // Native buttons need Enter's char event; menu items handle keyDown directly.
-            for (const event of [{ type: 'keyDown', keyCode: 'Enter' }, { type: 'char', keyCode: '\r' }, { type: 'keyUp', keyCode: 'Enter' }]) window.webContents.sendInputEvent(event)
-            await settle()
-          } else await key('Space')
-          assert.equal(await run('document.querySelector(".runtime-permission-help-popover").textContent.includes("kilo debug paths")'), true)
-          assert.equal(await run('document.querySelector(".runtime-permission-help-popover").textContent.includes("permission")'), true)
-          assert.equal(await run('document.querySelector(".runtime-permission-help-popover").textContent.includes("默认设置 allow")'), true)
-          assert.equal(await run('document.querySelector(".runtime-permission-help-popover code").textContent'), '"permission": {"*":"allow","edit":"ask"}')
-          await capture(`kilo-permission-${theme}`)
-          await key('Escape')
-          assert.equal(await run('Boolean(document.querySelector(".runtime-permission-help-popover"))'), false)
-          assert.equal(await run(`document.activeElement.matches('${help}')`), true)
-        }
-        await run('document.documentElement.dataset.theme="day"'); await settle()
-        window.setContentSize(432, 800); await settle()
-        await click(help)
-        assert.equal(await run('(() => {const r=document.querySelector(".runtime-permission-help-popover").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth})()'), true)
-        assert.equal(await run('(() => {const c=document.querySelector(".runtime-permission-help-popover");return c.scrollWidth<=c.clientWidth})()'), true, 'permission instructions fit the narrow popover')
-        await capture('kilo-permission-narrow')
-        await key('Escape')
-        window.setContentSize(1440, 920); await settle()
-        await click(help)
-        await click(modelTrigger)
-        assert.equal(await run('Boolean(document.querySelector(".runtime-permission-help-popover"))'), false, 'clicking outside dismisses the explanation')
-        await key('Escape')
-        assert.deepEqual(await draft(), initial)
-        assert.equal(await run('window.runtimeTest.changes'), changes, 'help and read-only controls cannot change permission drafts')
-      } else {
-        assert.equal(await run('Boolean(document.querySelector(".runtime-native-permission"))'), false)
-      }
+      assert.equal(await run('Boolean(document.querySelector(".runtime-native-permission"))'), false)
+      assert.equal(await run('Boolean(document.querySelector(".runtime-permission-help"))'), false)
       await click(modelTrigger); await search('vendor/model-0'); await key('Enter')
       await click('button[aria-label^="推理强度，"]')
       assert.deepEqual(await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).map(item=>item.textContent)'), ['Low', 'High', '跟随模型默认值'])
@@ -669,6 +629,17 @@ app.whenReady().then(async () => {
       await key('Home'); await key('Down'); await key('Enter')
       assert.deepEqual((await draft()).model, { mode: 'explicit', modelId: 'vendor/model-1', options: { effort: 'max' } })
       await capture(`kilo-${page}-model-options`)
+      if (page === 'member') {
+        for (const theme of ['day', 'night']) {
+          await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`); await settle()
+          await capture(`kilo-models-only-${theme}`)
+        }
+        await run('document.documentElement.dataset.theme="day"'); await settle()
+        window.setContentSize(432, 800); await settle()
+        assert.equal(await run('document.documentElement.scrollWidth<=innerWidth'), true)
+        await capture('kilo-models-only-narrow')
+        window.setContentSize(1440, 920); await settle()
+      }
       await click(modelTrigger); await click('.runtime-picker-default [role=option]')
       await click(modelTrigger); await search('vendor/model-2'); await key('Enter')
       assert.deepEqual((await draft()).model.options, {})

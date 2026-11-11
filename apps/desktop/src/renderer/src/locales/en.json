@@ -4360,9 +4360,5 @@
   "使用此模型 ID：{0}": "Use this model ID: {0}",
   "正在读取可选项…": "Loading options…",
   "刷新模型列表": "Refresh model list",
-  "正在刷新模型列表": "Refreshing model list",
-  "原生规则": "Native rules",
-  "Kilo 权限设置说明": "Kilo permission settings",
-  "Rovai 启动 Kilo 时默认设置 allow，具体权限由 Kilo 原生规则决定。": "Rovai starts Kilo with allow as the default. Kilo's native rules decide individual permissions.",
-  "运行 kilo debug paths 找到 kilo.jsonc，可按工具或 Agent 调整规则。修改后重新启动 Kilo 会话。": "Run kilo debug paths to find kilo.jsonc and configure tool or Agent rules. Restart the Kilo session after editing."
+  "正在刷新模型列表": "Refreshing model list"
 }

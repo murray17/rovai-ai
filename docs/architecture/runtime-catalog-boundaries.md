@@ -88,7 +88,7 @@ Kilo 完整目录只用官方 `models --verbose` 一次读取模型与各自的 
 不复刻 ACP 路由独有的隐藏过滤；CLI 未报告的默认模型/effort 不推断，实际 Run 继续由 ACP 设置和观察。
 普通健康检查既不读取 CLI 目录也不遍历模型，不覆盖已有完整目录及其成功时间。
 没有新缓存、参数推断或选择器组件；失败继续共享 LKG，不回退扫描。
-启动、权限、原生来源和数值口径见 [Runtime Launch v86](../contracts/runtime-launch-and-verification-v86.md)。
+启动、权限、原生来源和数值口径见 [Runtime Launch v87](../contracts/runtime-launch-and-verification-v87.md)。
 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 Qualified。开放范围见
 [macOS 准入](../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)和
 [Linux 准入](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)及
