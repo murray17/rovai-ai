@@ -40,6 +40,9 @@ MCP 保存下一轮生效、移除产品权限/Hook、普通取消确认后共�
 [批量目录记录](kilo-bulk-models-probe.md)，当前合同为 [Launch v85](../../contracts/runtime-launch-and-verification-v85.md)。
 移除逐模型扫描，只投影原生名称、ID 和档位；保留健康／完整目录分离、共享缓存和 ACP 执行，不改变平台资格。
 
+Kilo/OpenCode V1 共用 SQLite 用量 reader 的历史重复读取及身份预算收口见
+[增量读取记录](native-sqlite-usage-incremental.md)；OpenCode V2 的终态数值路径保持。
+
 ## OpenCode Steer 局部接入（2026-11-10）
 
 按 User 确认接通 OpenCode 稳定 2.x 自 2.2.7 起的官方 ACP Steer，旧版继续普通排队。

@@ -159,7 +159,10 @@ Kilo 扩展现有 Adapter 默认值/闭集、Context 投递、平台准入、原
 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 同时覆盖 migration 223/schema 172→173
 七个闭集表、触发器、行保留与事务失败回滚；旧 fixture 的 downgrade/upgrade 链延伸到当前 marker。
 `opencode_detector_plugin_is_additive_to_runtime_config` 增加 Kilo 原生 JSON5 保序、权限/plugin/pure 保留及 instructions 追加与去重，不再生成权限回调；
-`opencode_metadata_excludes_old_pending_child_and_repeated_calls` 增加 Kilo 消息计费与重复 poll 去重。
+`opencode_metadata_excludes_old_pending_child_and_repeated_calls` 同时拥有 Kilo/OpenCode V1 的 SQLite
+物理 cursor、32,768 条历史、延迟完成/重试、冷 baseline、只读查询工作量、候选预算及 Kilo 计费去重；
+Session/cwd、子会话、稀疏数值与原生格式 witnesses 保留。大历史与真实索引必须使用 SQLite fixture，
+不以纯 JSON parser 或 wall-clock 耗时断言替代；本项不新增 Rust 测试函数。
 最小定向入口为：
 
 ```sh
