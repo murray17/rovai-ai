@@ -11,7 +11,7 @@ import electron from 'electron'
 import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 test('Thread fork uses production menus, leave guards and foreground recovery', {timeout:180_000},async t=>{
-  if(!admitElectronIntegrationTest(t))return
+  if (!admitElectronIntegrationTest(t)) return
   const root=resolve(import.meta.dirname,'../..'),source=join(root,'scripts/fixtures/thread-fork')
   const fixture=await mkdtemp(join(tmpdir(),'rovai-thread-fork-')),userData=join(fixture,'user-data'),output=join(fixture,'evidence')
   await mkdir(join(userData,'managed-skill-library'),{recursive:true})
