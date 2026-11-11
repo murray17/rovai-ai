@@ -5080,8 +5080,10 @@ cargo test --workspace
 精确身份、工具证据、官方包来源与边界见[脱敏 Pi 证据](../../research/pi-in-place-upgrade-2026-11-11.evidence.json)。
 正常关闭后六个已知测试 PID 均不存在，16 个复制配置文件已清理，未改全局安装/登录或日常 App。
 
-相关 Rust owners 39 项通过，默认 workspace 484 passed、1 ignored；默认回归发生在本节兼容证据摘要同步之前，
-随后单独运行准入证据 owner 验证摘要，准入标记和执行行为没有改变。两轴静态复核均无新增可操作发现。
+相关 Rust owners 39 项及默认 workspace 首轮 484 passed、1 ignored；摘要同步后的 5 项准入证据 owner 通过，准入标记不变。
+随后同步 main `a8391a5e8` 的 Kilo/usage 与 CJK 改动，将合同顺延为继承 v87 的 v88，保留主线 v85–v87 正文。
+最终集成相关 owners 39 项、默认 workspace 484 passed、1 ignored，格式与三项文档门禁通过；两轴复核无新增问题。
+Pi/Codex/Fleet 与真实验收候选执行代码相同；新增主线 Kilo/usage 分支未改变 Pi 接续路径，原生证据仍标识其冻结二进制。
 本轮不重跑此前 19 种真实模型矩阵或整套扩展回归。
 
 ### 前期证据的适用范围

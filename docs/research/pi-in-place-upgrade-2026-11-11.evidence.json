@@ -218,5 +218,22 @@
     "copiedCredentialFilesPurged": 16,
     "knownTestPidsAbsent": 6,
     "normalCoreShutdownConfirmed": true
+  },
+  "postAcceptanceIntegration": {
+    "main": "a8391a5e874cf8c7ca30d69f48e05341da22bd3c",
+    "contract": "v88 inherits main v87",
+    "unchangedExecutionPaths": [
+      "crates/rovai-core/src/pi/host.rs",
+      "crates/rovai-core/src/codex.rs",
+      "crates/rovai-core/src/runtime_fleet.rs"
+    ],
+    "notes": "Main Kilo/catalog/usage and CJK work preserved; Pi execution/continuation code unchanged. Original frozen Core/CLI hashes above identify the live-test candidate.",
+    "relatedOwnersPassed": 39,
+    "workspace": {
+      "passed": 484,
+      "failed": 0,
+      "ignored": 1
+    },
+    "newRustTestFunctions": 0
   }
 }
