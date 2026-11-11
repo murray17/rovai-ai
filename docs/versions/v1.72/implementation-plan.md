@@ -5021,7 +5021,7 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 
 ## 安装版本按需刷新与 Host 温和换代（2026-11-10）
 
-实现边界见 [Runtime Launch v78](../../contracts/runtime-launch-and-verification-v78.md)。从 `f19b2ddc` 的独立
+实现边界见 [Runtime Launch v85](../../contracts/runtime-launch-and-verification-v85.md)。从 `f19b2ddc` 的独立
 `rovai/runtime-on-demand-version` worktree 实施；不安装或重启日常 App，不修改用户认证、SIMPLE、Token 或原生配置。
 本项为可逆的进程内读取记录与 Fleet 复用规则，不涉及持久模型、协议迁移或新的调度权威，不新增 Version Decision。
 

@@ -1586,7 +1586,7 @@ User 已确认目录与文件共用候选及发送链路，模型只获得目录
 
 Run 正常执行后对实际安装按需、十分钟限频读取版本；旧结果不能覆盖新结果。可靠版本基线变化只禁止对应旧 Host
 后续复用，保留当前启动、Run 与已知原生后台工作，后继沿既有冷启动接续。未知基线及 Hermes 共享 Gateway 不自动换代。
-合同见 [Runtime Launch v78](../../contracts/runtime-launch-and-verification-v78.md)，
+合同见 [Runtime Launch v85](../../contracts/runtime-launch-and-verification-v85.md)，
 代码归属与验证边界见[实施记录](implementation-plan.md#安装版本按需刷新与-host-温和换代2026-11-10)。
 
 
