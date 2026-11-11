@@ -3,10 +3,37 @@ document_type: implementation-plan
 version: v1.72
 authority: version-implementation-and-acceptance
 status: in_progress
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # v1.72 实施与验收
+
+## Thread 分叉（2026-11-11）
+
+- Work item：Thread 分叉；Branch：`rovai/thread-fork`；Checkout：仓库主 checkout 的任务分支。
+- Base：`origin/main@3568dc1f8831eafadf937159f4cc61e146fe621d`；Governance：同一 PR 更新当前合同与 UI，无主线先行要求。
+- Status：实施与隔离验收完成，文档门禁与 PR 收口中。
+- Core：`camp_fork.rs` 专用 immediate transaction，应用作用域回执、发布事实去重、白名单复制、引用重映射、
+  历史附件转 Source Ref、关系初始化与提交后读取失效。普通创建准入未放宽；不产生投递、通知、未读或渠道外发。
+- Renderer：BusinessApp 共享前台状态；原请求与目标 ID 按现有 Profile/Host/Owner scope 保存；刷新读取回执。
+  页面访问序号隔离 A→B→A，异步离开保护后再次核对；保存／打开失败只重试导航。两处入口与现有导出同菜单。
+- Rust 测试准入：三个 `extended-tests` owners 各自拥有复制/后继发送、准入、回滚/并发/删除后重放的独立失败语义；
+  原创建/发送/网关 owner 不经过新事务路径，纯函数不能证明跨表回滚和 INSERT producer 无副作用。
+- 已通过：`pnpm typecheck`；`TZ=UTC pnpm exec vitest run`（276 文件，3274 passed / 2 skipped）；
+  `cargo test -p rovai-core --features extended-tests --lib camp_fork::`（3 项）；`pnpm test:rust:pr`（workspace 484 passed / 1 ignored）；
+  `pnpm build:desktop`；`pnpm test:navigation-shell`；`pnpm test:message-export-ui`（3 项，含完整历史/移动端/HTML/PNG/Markdown）；
+  `node --test scripts/lib/host-web.test.mjs`（2 项真实独立 Host/Core seam，包含分叉、原请求重放与回执读取）。
+- `pnpm test:thread-fork`：生产 BusinessApp／Composer／Radix／AppToast 的独立 Electron userData，受控传输，不启动 Runtime。
+  覆盖复制期间编辑、空副本输入框、源草稿保留、A→B／A→B→A、异步附件保存后的新导航、保存/打开失败只重试导航、
+  目标被删、丢失响应与刷新回执、重复入口禁用；原读取和导出没有换成 HTML 原型实现。
+- 视觉证据对应生产提交 `3a6cdb120a435376f00501471cf57f4f0babcecd`：中英文 × 五套主题 × 三种实际内容尺寸
+  `1040×700 / 1440×920 / 2560×1440`，30 组几何/菜单检查、62 张截图；消息菜单中文宽 113.27px、英文 163.36px，
+  图标 16px、文字与图标中心差 0px。200%（英文绯夜）额外验证键盘菜单，触屏点击与 reduced motion 另验；
+  顶部 loading 在侧栏折叠和窗口变化后继续按 App 居中。公开附件目录为 Thread-Fork-Acceptance（report.json 与五张代表截图）。
+- 正在执行：仅含提交文件的隔离源代码副本中的完整 Node/文档门禁及按实际 base 的 docs:check:ci。
+- 本机 `docs:check` 发现被 Git 忽略的既有 `docs/prototypes/` 草稿链接问题；保留这些并行素材，最终文档门禁将在仅含提交文件的隔离源代码副本执行，不改通用检查器或添加例外。
+- 未覆盖：真实 LLM/Runtime 调用、Windows 原生客户端与辅助技术。复制后普通 Context/投递由 Core fixture 验证，不引入分叉专用历史注入。
+
 
 ## Kilo 官方 ACP（2026-11-08，Preview 实施）
 

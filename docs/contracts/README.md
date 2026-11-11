@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # 长期接口合同
@@ -24,6 +24,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 - [Native Session Bootstrap v6](native-session-bootstrap-v6.md)：唯一可选 TEAM_GUIDANCE、冻结文本和恢复边界。
 
 ## 会话 Task 能力（当前）
+
+- [Thread Fork v1](thread-fork-v1.md)：公开历史的原子副本、应用作用域回执与前台导航恢复；后继读取和执行复用普通 Thread。
 
 - [Durable Task v6](durable-task-v6.md)
 - [Built-in Tool Transport v45](builtin-tool-transport-v45.md)：引用输出统一为 kind/text；继承 [v44（历史）](builtin-tool-transport-v44.md) 的 Thread read 正向分页、Send 输入来源与 Task 发现边界。

@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # 测试与 Smoke Test
@@ -514,6 +514,13 @@ cargo test --workspace -- --list
 ```
 
 ### Rust 执行层级与默认预算
+
+Thread Fork 的三个新 `camp_fork::tests` owners 分别拥有：公开快照／引用与后继普通发送；特殊成员与源／锚点准入；
+晚期回滚、并发幂等及双端删除后回执。普通创建、发送或网关测试不能证明专用批量复制路径及其跨表无副作用。
+矩阵放入同一 owner，不重复建立独立 happy-path 测试；SQLite 是验证事务与 INSERT producer 边界的最低可行层。
+全部属于 `extended-tests`，最小命令为 `cargo test -p rovai-core --features extended-tests --lib camp_fork::`；
+默认 workspace 回归仍须通过。生产 Renderer 的请求恢复、访问序号由现有 Vitest owner 与
+`node --test scripts/lib/thread-fork.test.mjs` 的独立 Electron `userData` fixture 验证；后者不启动 Core 或模型。
 
 Rust owner 分成四个可执行层级；feature gating 只改变日常路由，不表示合同或测试被删除：
 

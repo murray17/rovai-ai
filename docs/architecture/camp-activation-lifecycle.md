@@ -2,7 +2,7 @@
 document_type: architecture
 authority: camp-activation-component-boundary
 status: accepted
-last_updated: 2026-10-21
+last_updated: 2026-11-11
 ---
 
 # Thread Activation Lifecycle
@@ -51,6 +51,10 @@ blocks leave. Core stores no Composer content. Migration 183/schema 133 adds onl
 activation trigger; the trigger's deletion rolls back with a failed first-send transaction.
 
 ## Invariants
+
+- [Thread Fork](../contracts/thread-fork-v1.md) has a dedicated gateway transaction for copying published history into
+  a new Active Thread. It reuses ordinary storage/read/execution boundaries without Pending activation or relaxed
+  ordinary creation admission. It carries no execution state or parent/child relationship.
 
 - A Pending Thread cannot have an accepted public message; its first accepted public send activates it atomically.
 - Active never transitions back to Pending.
