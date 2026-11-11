@@ -42,6 +42,22 @@ app.whenReady().then(async () => {
     await run('forkQA.release()');await wait('document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId.startsWith("copy-")')
     assert.equal(await run('document.querySelector("[contenteditable=true]").textContent'),'')
     assert.equal(await run('!!document.querySelector(".is-top-center")'),false)
+    // Exercise the real ThreadWorkspace locator with the normalized API shape:
+    // one copied source is navigable; the omitted source retains text and author.
+    const quotedCopy=await active()
+    const copiedQuoteTarget=await run(`forkQA.threads.get(${JSON.stringify(quotedCopy)}).messages[0].id`)
+    await click('document.querySelector(".message-quotes-trigger")');await wait('!!document.querySelector(".message-quotes-popover")')
+    assert.deepEqual(await run('[...document.querySelectorAll(".message-quote-jump")].map(e=>e.getAttribute("aria-disabled"))'),['false','true'])
+    assert((await run('document.querySelector(".message-quotes-popover").textContent')).includes('引用作者快照'))
+    await click('document.querySelectorAll(".message-quote-jump")[1]')
+    assert.equal(await active(),quotedCopy)
+    assert((await run('document.querySelector(".message-quotes-popover").textContent')).includes('范围外仍保留的选文'))
+    assert.equal(await run('!!document.querySelector(".message-quotes-popover-footer [role=alert]")'),false)
+    await mkdir(output,{recursive:true});await writeFile(join(output,'quotes-after-fork.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('quotes-after-fork.png')
+    await click('document.querySelectorAll(".message-quote-jump")[0]')
+    await wait(`document.activeElement?.getAttribute('data-message-quote-body')===${JSON.stringify(copiedQuoteTarget)}`)
+    assert.equal(await run('document.activeElement.getAttribute("data-quote-owner")'),`thread:${quotedCopy}`)
+    assert.equal(await run('!!document.querySelector(".message-quote-error")'),false);await key('Escape')
     await row('source');await wait('document.querySelector("[contenteditable=true]")?.textContent==="保留源草稿"')
     const initialRequests=await count()
     await fork();await row('other');await run('forkQA.release()');await wait('!!document.querySelector(".is-top-center .app-toast-action")')
@@ -125,7 +141,7 @@ app.whenReady().then(async () => {
     await writeFile(join(output,'loading-reduced-motion.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('loading-reduced-motion.png')
     await run('forkQA.release()');await pause(100)
     assert.deepEqual(await run('forkQA.errors'),[]);assert.deepEqual(errors,[])
-    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,screenshots,verified:['editing during fork','empty copy Composer','source draft preserved','A→B','A→B→A','cached target full-open failure preserves source and recovery','current cached preview retries full open','open-only retry','deleted target remains opening failure','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion']}
+    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,screenshots,verified:['editing during fork','empty copy Composer','copied quote locates the current Thread message','source-less quote retains text and captured author','source draft preserved','A→B','A→B→A','cached target full-open failure preserves source and recovery','current cached preview retries full open','open-only retry','deleted target remains opening failure','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion']}
     await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({ok:true,output,verified:report.verified}));app.exit(0)
   }catch(error){console.error(error.stack??error);console.error(await run('JSON.stringify(forkQA.calls.slice(-12))').catch(()=>''));app.exit(1)}
 })

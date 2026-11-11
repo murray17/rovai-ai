@@ -77,6 +77,23 @@ last_updated: 2026-11-11
 | `team_tool::tests::member_profile_reads_and_patches_preserve_scope_atomicity_and_replay` | 旧资料更新拒绝断言 |
 
 
+### 复制白名单收窄（2026-11-11）
+
+- 从 `02a0c51a4e819adee5797d0eb8baa1a1c9b7a168` 继续，目标 base 仍为 `origin/main@92ff101a7`。
+  修改范围限定为专用复制模块、原测试 owner／生产组件 fixture 和当前合同。
+- 引用经现有解析器规范化，剔除退役 digest／locator；同源公开、已复制且未撤回的定位映射到副本。
+  其余来源移除可选 source，选文、捕获作者／时间和 quote ID 保留。模型投影仍只有既有的 kind／text。
+- 两列 presentation 保留目标默认值；源可见性筛选保留。只出现在引用作者快照中的身份不补成员关系；
+  实际作者、提及、addressed／effective 收件人仍按原白名单保留。
+- 引用／提及索引仅复制原有记录，撤回占位不生成索引；SQLite／FTS 沿用现有触发器。
+  新副本采用收窄规则，不增加历史数据迁移或文件复制。
+- 扩展原 `fork_copies_published_snapshot_and_ordinary_sends_continue_its_history`，不新增 Rust 测试函数或数据库 fixture。
+  修复前同源引用仍指向旧 Thread 的断言失败；修复后 Core 3 项通过，覆盖集合内外、私聊／其他 Thread、
+  删除／未发布／撤回来源、副本再次分叉、仅引用作者、原记录不改写、列默认值、撤回索引和历史 mentions。
+- 生产 BusinessApp／ThreadWorkspace 的隔离 Electron 验收通过：实际选文定位聚焦副本消息，无来源选文保留文字与作者。
+  复用原主题／尺寸和导航恢复矩阵，增加一张引用气泡截图；传输为受控 fixture，Core 数据边界由上述事务 owner 验证。
+  类型检查通过；真实模型和 Windows 原生验收边界保持原记录。
+
 ## Kilo 官方 ACP（2026-11-08，Preview 实施）
 
 分支 `rovai/kilo-acp`，worktree `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，

@@ -67,8 +67,6 @@ struct Message {
     recipients: String,
     effective_recipients: String,
     reply: Option<String>,
-    presentation: Option<String>,
-    recipient_presentation: String,
     quotes: String,
     recall: String,
     created_at: String,
@@ -160,7 +158,7 @@ fn fork_in_tx(
     let mut messages = tx.prepare(
         "SELECT id, sequence, author_type, author_id, body, structured_content_json,
             content_digest, address_mode, addressed_agent_ids_json, effective_recipient_ids_json, reply_to_camp_message_id,
-            presentation_json, recipient_presentation_json, quotes_json, recall_state, created_at, updated_at
+            quotes_json, recall_state, created_at, updated_at
          FROM camp_message m WHERE camp_id=?1 AND tombstoned_at IS NULL
             AND (?2 IS NULL OR sequence<=?2)
             AND COALESCE(json_extract(presentation_json,'$.kind'),'') NOT IN ('a2a_event','task_event')
@@ -172,9 +170,8 @@ fn fork_in_tx(
     )?.query_map(params![source_id, cutoff], |r| Ok(Message {
         id:r.get(0)?, sequence:r.get(1)?, author_type:r.get(2)?, author_id:r.get(3)?,
         body:r.get(4)?, content:r.get(5)?, digest:r.get(6)?, address_mode:r.get(7)?,
-        recipients:r.get(8)?, effective_recipients:r.get(9)?, reply:r.get(10)?, presentation:r.get(11)?,
-        recipient_presentation:r.get(12)?, quotes:r.get(13)?, recall:r.get(14)?,
-        created_at:r.get(15)?, updated_at:r.get(16)?, sources:Vec::new(),
+        recipients:r.get(8)?, effective_recipients:r.get(9)?, reply:r.get(10)?,
+        quotes:r.get(11)?, recall:r.get(12)?, created_at:r.get(13)?, updated_at:r.get(14)?, sources:Vec::new(),
     }))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let members = tx
         .prepare(
@@ -205,15 +202,6 @@ fn fork_in_tx(
         historical_members.extend(member_mention_ids(&serde_json::from_str::<
             StructuredThreadMessageContent,
         >(&message.content)?));
-        for quote in serde_json::from_str::<Vec<crate::message_quote::MessageQuoteSnapshot>>(
-            &message.quotes,
-        )? {
-            if let Some(crate::message_quote::MessageQuoteAuthor::Agent { agent_id, .. }) =
-                quote.author_at_capture
-            {
-                historical_members.insert(agent_id);
-            }
-        }
     }
     for message in &mut messages {
         message.sources = crate::local_attachment_source::message_sources_for_fork(
@@ -263,6 +251,11 @@ fn fork_in_tx(
         .iter()
         .map(|m| (m.id.clone(), Uuid::new_v4().to_string()))
         .collect();
+    let withdrawn: BTreeSet<_> = messages
+        .iter()
+        .filter(|message| message.recall == "withdrawn")
+        .map(|message| message.id.as_str())
+        .collect();
     // INSERT triggers can create notifications. Insert inert display content for
     // every message first, then restore the whitelist and internal reply edges.
     for message in &messages {
@@ -294,31 +287,50 @@ fn fork_in_tx(
     }
     for message in &messages {
         let id = &ids[&message.id];
+        // Use the existing reader's snapshot shape to drop retired fields. Only
+        // a copied, non-withdrawn public source can locate inside this Thread.
+        let mut quotes = crate::message_quote::parse_quotes(&message.quotes)?;
+        for quote in &mut quotes {
+            quote.source = quote.source.take().and_then(|mut source| {
+                if source.scope != "camp"
+                    || source.camp_id != *source_id
+                    || source.conversation_id.is_some()
+                    || withdrawn.contains(source.message_id.as_str())
+                {
+                    return None;
+                }
+                let message_id = ids.get(&source.message_id)?;
+                source.camp_id = target_id.to_string();
+                source.message_id = message_id.clone();
+                Some(source)
+            });
+        }
         tx.execute(
             "UPDATE camp_message SET structured_content_json=?2,reply_to_camp_message_id=?3,
-                presentation_json=?4,recipient_presentation_json=?5,quotes_json=?6,source_attachments_json=?7
+                quotes_json=?4,source_attachments_json=?5
              WHERE id=?1",
-            params![id,message.content,message.reply.as_ref().and_then(|old| ids.get(old)),message.presentation,
-                message.recipient_presentation,message.quotes,crate::local_attachment_source::serialize_source_attachments(&message.sources)?],
-        )?;
-        crate::context_index::index_camp_message(
-            tx,
-            id,
-            target_id.as_str(),
-            &message.body,
-            &message.recipients,
+            params![
+                id,
+                message.content,
+                message.reply.as_ref().and_then(|old| ids.get(old)),
+                serde_json::to_string(&quotes)?,
+                crate::local_attachment_source::serialize_source_attachments(&message.sources)?
+            ],
         )?;
         // Preserve saved explicit references, including references into other Threads.
-        tx.execute(
-            "INSERT OR IGNORE INTO camp_message_reference(camp_message_id,kind,value)
+        // A withdrawn placeholder must not recreate indexes cleared on recall.
+        if message.recall != "withdrawn" {
+            tx.execute(
+                "INSERT OR IGNORE INTO camp_message_reference(camp_message_id,kind,value)
             SELECT ?1,kind,value FROM camp_message_reference WHERE camp_message_id=?2",
-            params![id, message.id],
-        )?;
-        tx.execute(
-            "INSERT OR IGNORE INTO camp_message_mention(camp_message_id,agent_id)
+                params![id, message.id],
+            )?;
+            tx.execute(
+                "INSERT OR IGNORE INTO camp_message_mention(camp_message_id,agent_id)
             SELECT ?1,agent_id FROM camp_message_mention WHERE camp_message_id=?2",
-            params![id, message.id],
-        )?;
+                params![id, message.id],
+            )?;
+        }
         append_domain_event(
             tx,
             "camp_message.sent",

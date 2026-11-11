@@ -33,6 +33,10 @@ function seed(id: string, title: string) {
   value.messages[1].authorId=agents[1].agentId
   value.messages[2].authorId=agents[1].agentId
   for(const item of value.messages.slice(1)) Object.assign(item,{threadTurnId:'fixture-turn',sourceAgentRunId:'fixture-run'})
+  value.messages[1].quotes=[
+    {version:1,quoteId:'inside-quote',source:{scope:'camp',campId:id,messageId:value.messages[0].id},authorAtCapture:{type:'agent',agentId:'quote-only-author',displayName:'引用作者快照'},text:'保留在副本中的选文',format:'plain_text',capturedAt:now},
+    {version:1,quoteId:'outside-quote',source:{scope:'camp',campId:id,messageId:value.messages[2].id},authorAtCapture:{type:'agent',agentId:'quote-only-author',displayName:'引用作者快照'},text:'范围外仍保留的选文',format:'plain_text',capturedAt:now}
+  ]
   value.members[1].membershipStatus='left'
   threads.set(id,value)
 }
@@ -59,7 +63,13 @@ const client = {...model.client,composerAttachments:{...model.client.composerAtt
       const source=threads.get(params.sourceThreadId),target=structuredClone(source),id=`copy-${++sequence}`
       target.thread.id=id;target.thread.title=source.thread.title+' 副本'
       const anchor=params.sourceMessageId?source.messages.find((m:any)=>m.id===params.sourceMessageId)?.sequence:Infinity
-      target.messages=target.messages.filter((m:any)=>m.sequence<=anchor).map((m:any)=>({...m,id:crypto.randomUUID()}))
+      const copied=target.messages.filter((m:any)=>m.sequence<=anchor)
+      const ids=new Map<string,string>(copied.map((m:any)=>[m.id,crypto.randomUUID()]))
+      // Controlled API projections for the production UI consumer. The Rust
+      // transaction owner separately verifies normalization and copy boundaries.
+      target.messages=copied.map((m:any)=>({...m,id:ids.get(m.id),presentation:m.authorType==='agent'?{}:null,
+        quotes:(m.quotes??[]).map((q:any)=>({...q,source:q.source?.scope==='camp'&&q.source.campId===params.sourceThreadId&&ids.has(q.source.messageId)
+          ?{...q.source,campId:id,messageId:ids.get(q.source.messageId)}:undefined}))}))
       threads.set(id,target);const result=applied({threadId:id});receipts.set(params.commandId,result);checkpoint()
       events.forEach(fn=>fn({method:'navigation.invalidated',params:{scope:'group',threadId:id,groupKeys:['quick-chat']}}))
       if(dropTarget) {dropTarget=false;threads.delete(id);checkpoint()}

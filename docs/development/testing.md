@@ -515,7 +515,8 @@ cargo test --workspace -- --list
 
 ### Rust 执行层级与默认预算
 
-Thread Fork 的三个新 `camp_fork::tests` owners 分别拥有：公开快照／引用、冻结收件人历史 mentions 与后继普通发送；
+Thread Fork 的三个新 `camp_fork::tests` owners 分别拥有：公开快照／引用规范化和副本内来源、复制白名单与撤回索引、
+冻结收件人历史 mentions 与后继普通发送；
 特殊成员、定时任务系统指令及内部事件可见性与源／锚点准入；
 晚期回滚、并发幂等及双端删除后回执。普通创建、发送或网关测试不能证明专用批量复制路径及其跨表无副作用。
 矩阵放入同一 owner，不重复建立独立 happy-path 测试；SQLite 是验证事务与 INSERT producer 边界的最低可行层。

@@ -48,19 +48,28 @@ irrelevant. Later publications remain only in the source.
 - New Thread/message IDs; source project binding and directory; title truncated to 80 Unicode scalar values after
   reserving ` 副本`. The target is Active, Peer, and has an empty Composer. Ordinary creation admission is unchanged.
 - Published public messages, including User, Agent, external-principal and visible System messages such as scheduled
-  instructions; historical display times, sequence order, body, independent structured display/presentation, saved
+  instructions; historical display times, sequence order, body, structured content, saved
   quotes and attachment display metadata. Public visibility excludes `a2a_event` / `task_event` presentations and
   legacy System messages authored by `approval`, in addition to deleted/unpublished rows. Hidden messages cannot be
   anchors. Withdrawn placeholders retain only their stored cleared content.
+- `presentation_json` and `recipient_presentation_json` retain the target defaults (`NULL` and `{}`). Source
+  presentation kinds still participate in public-message eligibility before copying; structured content retains
+  the message's text, mentions and explicit references.
 - Addressed and frozen effective recipients are preserved independently. Existing history reads derive `mentions`
   from `effective_recipient_ids_json`, never from today's roster or by re-resolving the message. These publication
   facts do not create new Delivery records.
-- Ordinary reply IDs map only inside the copied set. Explicit body links, Thread/Mission/file/task references and
-  quote source snapshots keep their original targets. No recursive JSON ID substitution is permitted.
+- Ordinary reply IDs map only inside the copied set. Explicit body links and Thread/Mission/file/task references
+  keep their original targets. No recursive JSON ID substitution is permitted.
+- Quotes use the existing `MessageQuoteSnapshot` parser and serializer, retaining text, captured author, capture
+  time, format and quote ID while removing retired digest/locator fields. A public source owned by the source
+  Thread maps to the new Thread/message IDs only when its message is copied and not withdrawn. Uncopied, withdrawn,
+  private or other-Thread sources become absent; the excerpt remains usable without navigation metadata. A source
+  carrying a private Conversation locator does not become a public locator. Quote text/model projection is unchanged.
 - Effective active relations retain capability limits, including globally Away profiles. Leaving/Left or removed
-  profiles do not become active. Only historical authors, mentions, recipients and quote authors actually referenced
+  profiles do not become active. Only historical message authors, mentions and recipients actually referenced
   in copied content receive additional Left rows. Relation version and timestamps initialize as new relationships.
   A null Lead stays null; a non-null Lead outside the effective set rejects the command.
+- A captured quote author alone does not require a member relation; its frozen display name is self-contained.
 - Current Source Refs retain original sources. Legacy and managed attachment associations become Source Refs using
   saved paths/metadata, without filesystem existence checks or copied ownership rows. The two Threads share original
   directories/files. Existing open-time unavailable feedback applies; no retention, refcount or deletion guard is added.
@@ -75,7 +84,9 @@ the target Owner's read watermark, so copying does not manufacture unread replie
 
 The gateway transaction loads receipt, validates source/directory/anchor, captures messages/members, inserts the
 ordinary target, and inserts all messages with empty structured content before filling content and reply links.
-It then establishes indexes and new publication facts with new event IDs, timestamps and global sequences, and
+It copies existing reference/mention indexes for non-withdrawn messages without re-deriving them from message text
+or recipient IDs. Withdrawn placeholders have no copied reference/mention indexes. Ordinary SQLite/FTS triggers
+maintain their existing indexes. It then establishes new publication facts with new event IDs, timestamps and global sequences, and
 stores the command result. Any late SQL or receipt failure rolls everything back. Do not loop over ordinary sends.
 
 Empty content during INSERT avoids the existing mention notification producer; null source Runs avoid round probes.

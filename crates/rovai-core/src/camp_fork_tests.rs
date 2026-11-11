@@ -194,21 +194,61 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
         .unwrap();
     let source_ref = json!([{"id":Uuid::new_v4().to_string(),"sourcePath":root.join("missing.txt"),"displayName":"missing.txt","kind":"file","mediaType":"text/plain","observedByteSize":12,"pastedTextPreview":"kept preview"}]).to_string();
     let content = json!([{"kind":"text","text":format!("[original]({first})")},{"kind":"current_user_mention","userId":"local_user"},{"kind":"member_mention","agentId":"agent_2"},{"kind":"thread_reference","threadId":source,"titleAtSend":"original"}]).to_string();
-    db.connection().execute("UPDATE camp_message SET structured_content_json=?2,body='snapshot',source_attachments_json=?3,reply_to_camp_message_id=?4,presentation_json='{}',recipient_presentation_json='{}',source_operation_id='old-operation',addressed_agent_ids_json='[\"agent_2\"]',effective_recipient_ids_json='[\"agent_2\",\"agent_3\"]' WHERE id=?1",params![anchor,content,source_ref,first]).unwrap();
+    db.connection().execute("UPDATE camp_message SET structured_content_json=?2,body='snapshot',source_attachments_json=?3,reply_to_camp_message_id=?4,presentation_json='{\"legacyDisplay\":true}',recipient_presentation_json='{\"inlineOrder\":[],\"inlineOccurrences\":[],\"explicitOrder\":[\"agent_2\"],\"footerRecipients\":[\"agent_3\"]}',source_operation_id='old-operation',addressed_agent_ids_json='[\"agent_2\"]',effective_recipient_ids_json='[\"agent_2\",\"agent_3\"]' WHERE id=?1",params![anchor,content,source_ref,first]).unwrap();
     db.connection()
         .execute(
             "UPDATE camp_message SET reply_to_camp_message_id=?2 WHERE id=?1",
             params![former, outside],
         )
         .unwrap();
-    db.connection().execute("UPDATE camp_message SET recall_state='withdrawn',body='',structured_content_json='[]' WHERE id=?1",[&withdrawn]).unwrap();
+    db.connection().execute("UPDATE camp_message SET recall_state='withdrawn',body='',structured_content_json='[]',addressed_agent_ids_json='[\"agent_2\"]',effective_recipient_ids_json='[\"agent_2\"]' WHERE id=?1",[&withdrawn]).unwrap();
     db.connection()
         .execute(
             "UPDATE camp_message SET tombstoned_at='2020-02-01' WHERE id=?1",
             [&deleted],
         )
         .unwrap();
-    let quote=json!([{"version":1,"quoteId":Uuid::new_v4().to_string(),"authorAtCapture":{"type":"agent","agentId":"agent_3","displayName":"历史作者"},"source":{"scope":"camp","campId":source,"messageId":outside},"text":"saved excerpt","format":"plain_text","capturedAt":"2020-01-01T00:00:00Z"}]).to_string();
+    let excerpt = |text: &str, quote_source: serde_json::Value| {
+        json!({
+            "version":1,"quoteId":Uuid::new_v4().to_string(),
+            "authorAtCapture":{"type":"agent","agentId":"agent_3","displayName":"历史作者"},
+            "source":quote_source,"text":text,"format":"plain_text","capturedAt":"2020-01-01T00:00:00Z"
+        })
+    };
+    let mut quote_value = json!([
+        excerpt(
+            "saved excerpt",
+            json!({"scope":"camp","campId":source,"messageId":first})
+        ),
+        excerpt(
+            "outside excerpt",
+            json!({"scope":"camp","campId":source,"messageId":outside})
+        ),
+        excerpt(
+            "withdrawn excerpt",
+            json!({"scope":"camp","campId":source,"messageId":withdrawn})
+        ),
+        excerpt(
+            "deleted excerpt",
+            json!({"scope":"camp","campId":source,"messageId":deleted})
+        ),
+        excerpt(
+            "unpublished excerpt",
+            json!({"scope":"camp","campId":source,"messageId":unpublished})
+        ),
+        excerpt(
+            "other Thread excerpt",
+            json!({"scope":"camp","campId":ThreadId::new(),"messageId":first})
+        ),
+        excerpt(
+            "private excerpt",
+            json!({"scope":"single_chat","campId":source,"conversationId":Uuid::new_v4().to_string(),"messageId":first})
+        )
+    ]);
+    quote_value[0]["sourceContentDigest"] = json!("retired-source-proof");
+    quote_value[0]["snapshotDigest"] = json!("retired-snapshot-proof");
+    quote_value[0]["locator"] = json!({"projectionVersion":1,"startScalar":0,"endScalar":3});
+    let quote = quote_value.to_string();
     db.connection()
         .execute(
             "UPDATE camp_message SET quotes_json=?2 WHERE id=?1",
@@ -220,6 +260,12 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
     db.connection().execute("INSERT INTO managed_attachment(camp_id,id,kind,root_relative_payload_path,media_type,byte_size,file_count,directory_count,node_count,content_digest,preview_kind,origin,state,available_revision,created_by_type,created_by_id,created_at) VALUES(?1,?2,'file',?3,'text/plain',5,1,0,1,'digest','none','composer','available',1,'user','local_user','2020-01-01')",params![source,attachment,format!("camps/{source}/attachments/.managed-v2/{attachment}/payload/managed.txt")]).unwrap();
     db.connection().execute("INSERT INTO camp_message_attachment_ref(camp_id,camp_message_id,ordinal,attachment_id,display_name_snapshot,created_at) VALUES(?1,?2,0,?3,'managed.txt','2020-01-01')",params![source,anchor,attachment]).unwrap();
     let tx = db.connection_mut().transaction().unwrap();
+    tx.execute("INSERT INTO camp_message_reference(camp_message_id,kind,value) VALUES(?1,'issue','issue-42')",[&anchor]).unwrap();
+    tx.execute(
+        "INSERT INTO camp_message_mention(camp_message_id,agent_id) VALUES(?1,'agent_2')",
+        [&anchor],
+    )
+    .unwrap();
     append_domain_event(
         &tx,
         "camp_message.public_a2a_sent",
@@ -285,6 +331,60 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
         vec!["missing.txt", "legacy.txt", "managed.txt"]
     );
     assert_eq!(copy.quotes[0].text, "saved excerpt");
+    let quote_source = copy.quotes[0].source.as_ref().unwrap();
+    assert_eq!(quote_source.camp_id, target);
+    assert_eq!(quote_source.message_id, snapshot.messages[0].id);
+    assert!(copy.quotes[1..].iter().all(|q| q.source.is_none()));
+    assert_eq!(
+        crate::message_quote::model_quotes(&copy.quotes),
+        crate::message_quote::model_quotes(&crate::message_quote::parse_quotes(&quote).unwrap())
+    );
+    let stored: (Option<String>, String, String) = db.connection().query_row(
+        "SELECT presentation_json,recipient_presentation_json,quotes_json FROM camp_message WHERE id=?1",
+        [&copy.id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))
+    ).unwrap();
+    assert_eq!((stored.0, stored.1), (None, "{}".into()));
+    for retired in ["sourceContentDigest", "snapshotDigest", "locator"] {
+        assert!(!stored.2.contains(retired));
+    }
+    assert_eq!(
+        db.connection()
+            .query_row(
+                "SELECT quotes_json FROM camp_message WHERE id=?1",
+                [&anchor],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        quote
+    );
+    assert_eq!(
+        db.connection()
+            .query_row(
+                "SELECT presentation_json FROM camp_message WHERE id=?1",
+                [&anchor],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "{\"legacyDisplay\":true}"
+    );
+    let reference: (String, String) = db
+        .connection()
+        .query_row(
+            "SELECT kind,value FROM camp_message_reference WHERE camp_message_id=?1",
+            [&copy.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(reference, ("issue".into(), "issue-42".into()));
+    let mention: String = db
+        .connection()
+        .query_row(
+            "SELECT agent_id FROM camp_message_mention WHERE camp_message_id=?1",
+            [&copy.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mention, "agent_2");
     assert_eq!(
         db.connection()
             .query_row(
@@ -342,6 +442,44 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
     );
     let second = fork(&mut db, &root, "again", &target, Some(&copy.id));
     assert_eq!(second.result.status, CommandResultStatus::Applied);
+    let second_id = second.result.payload["threadId"].as_str().unwrap();
+    let second_snapshot = crate::read_model::ReadModelService
+        .camp_snapshot(&mut db, second_id)
+        .unwrap();
+    let second_source = second_snapshot.messages[2].quotes[0]
+        .source
+        .as_ref()
+        .unwrap();
+    assert_eq!(second_source.camp_id, second_id);
+    assert_eq!(second_source.message_id, second_snapshot.messages[0].id);
+    // Agent 3 remains needed by frozen recipients above. Once it occurs only in
+    // captured quote authors, its frozen name is sufficient without a Left row.
+    db.connection()
+        .execute(
+            "UPDATE camp_message SET effective_recipient_ids_json='[\"agent_2\"]' WHERE id=?1",
+            [&second_snapshot.messages[2].id],
+        )
+        .unwrap();
+    let quote_only = fork(&mut db, &root, "quote-author-only", second_id, None);
+    let quote_only_id = quote_only.result.payload["threadId"].as_str().unwrap();
+    assert_eq!(
+        db.connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_member WHERE camp_id=?1 AND agent_id='agent_3'",
+                [quote_only_id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    let quote_only_snapshot = crate::read_model::ReadModelService
+        .camp_snapshot(&mut db, quote_only_id)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&quote_only_snapshot.messages[2].quotes[0]).unwrap()["authorAtCapture"]
+            ["displayName"],
+        "历史作者"
+    );
     let full = fork(&mut db, &root, "full", &source, None);
     let full_id = full.result.payload["threadId"].as_str().unwrap();
     let full_snapshot = crate::read_model::ReadModelService
@@ -355,6 +493,26 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
             .iter()
             .any(|m| m.withdrawn && m.body.is_empty())
     );
+    let full_quote = &full_snapshot
+        .messages
+        .iter()
+        .find(|m| m.sequence == 3)
+        .unwrap()
+        .quotes;
+    let outside_copy = full_snapshot
+        .messages
+        .iter()
+        .find(|m| m.sequence == 7)
+        .unwrap();
+    assert_eq!(
+        full_quote[1].source.as_ref().unwrap().message_id,
+        outside_copy.id
+    );
+    assert!(full_quote[2..].iter().all(|q| q.source.is_none()));
+    let withdrawn_copy = full_snapshot.messages.iter().find(|m| m.withdrawn).unwrap();
+    for id in [&withdrawn, &withdrawn_copy.id] {
+        assert_eq!(db.connection().query_row("SELECT (SELECT COUNT(*) FROM camp_message_reference WHERE camp_message_id=?1)+(SELECT COUNT(*) FROM camp_message_mention WHERE camp_message_id=?1)",[id],|r|r.get::<_,i64>(0)).unwrap(),0);
+    }
     assert!(db.connection().query_row("SELECT c.navigation_completion_sequence<=v.last_seen_global_sequence FROM camp c JOIN camp_view_state v ON v.camp_id=c.id WHERE c.id=?1",[&target],|r|r.get::<_,bool>(0)).unwrap());
     // The copy is immediately readable through the existing context/history SQL;
     // restore Presence, then use the ordinary one-shot public send and Delivery path.
