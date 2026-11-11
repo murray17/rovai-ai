@@ -208,7 +208,7 @@ function runtimeParametersFor(
     case 'pi':
       return <PiRuntimeParameters {...props} />
     case 'kilo-cli':
-      return <div className="runtime-parameter-form">{modelFieldsFor('kilo-cli', props)}<p className="runtime-parameter-empty"><UiText zh="沿用 Kilo 原生权限" /></p></div>
+      return <div className="runtime-parameter-form">{modelFieldsFor('kilo-cli', props)}</div>
     case 'opencode-cli':
       return <OpenCodeRuntimeParameters {...props} />
     case 'copilot-cli':

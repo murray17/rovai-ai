@@ -18,6 +18,9 @@ import { createTableClipboardData } from '../../../apps/desktop/src/renderer/src
 import { readMessageQuoteText } from '../../../apps/desktop/src/renderer/src/message-quote-selection'
 import { createFileFindDomIndex } from '../../../apps/desktop/src/renderer/src/file-find-dom'
 import { changeInterfaceLanguage } from '../../../apps/desktop/src/renderer/src/interface-language'
+import { applyAppearanceSnapshot } from '../../../apps/desktop/src/renderer/src/theme'
+import { DEFAULT_APPEARANCE, THEME_MODES } from '../../../apps/desktop/src/shared/appearance'
+import type { ThemeId } from '@contracts'
 import '../../../apps/desktop/src/renderer/src/styles.css'
 import './fixture.css'
 
@@ -69,6 +72,9 @@ function TableCases() {
   const [documentSource, setDocumentSource] = useState('| 项目 | 说明 |\n| --- | --- |\n| **行列与格式** | 一<br>二，带有 "引号" |\n| `代码` 与链接 | [参考文档](https://example.com/reference) |')
   const [visible, setVisible] = useState(true)
   Object.assign(window, { __tableCopy: { setSource, setDocumentSource, setVisible, createTableClipboardData,
+    setTheme: (preference: ThemeId) => applyAppearanceSnapshot(document.documentElement, {
+      ...DEFAULT_APPEARANCE, preference, resolvedTheme: THEME_MODES[preference]
+    }),
     quote: () => readMessageQuoteText(document.querySelector('.table-message .safe-markdown') as HTMLElement),
     find: () => createFileFindDomIndex(document.querySelector('.table-document .safe-markdown') as HTMLElement).text,
     language: (language: string) => changeInterfaceLanguage(languageTestApi, language as any)

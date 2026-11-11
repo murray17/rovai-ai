@@ -467,6 +467,32 @@ pub async fn refresh_model_catalog_for_selection(
         AdapterKind::Pi => rovai_core::agent_runtime_adapter::pi_models(Some(
             &crate::pi::model_catalog_probe(path).await?,
         )),
+        AdapterKind::KiloCli => {
+            let root = env::temp_dir().join(format!("rovai-kilo-catalog-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root)?;
+            let _cleanup = ProbeRootCleanup(root.clone());
+            let mut command = runtime_command(path, Some(kind));
+            crate::kilo::configure_environment(&mut command);
+            command.args(["models", "--verbose"]).current_dir(&root);
+            let output = run_bounded_command(
+                &mut command,
+                ProbeCommandLimits {
+                    stdout_bytes: crate::runtime_probe_process::protocol_frame_bytes()?,
+                    ..ProbeCommandLimits::new(Duration::from_secs(30))
+                },
+            )
+            .await?;
+            anyhow::ensure!(
+                output.status.success(),
+                "Kilo model discovery failed ({})",
+                output.status
+            );
+            anyhow::ensure!(
+                !output.stdout.truncated,
+                "Kilo model catalog output was truncated"
+            );
+            crate::kilo::model_catalog(&output.stdout.bytes)
+        }
         AdapterKind::AntigravityApp => {
             let output = antigravity_model_output(path).await?;
             if !output.status.success() {
@@ -2373,56 +2399,6 @@ async fn run_acp_probe_with_scope(
                         bail!("dsh_model_configuration_changed_during_preparation");
                     }
                 }
-            }
-            if kind == AdapterKind::KiloCli && catalog_only {
-                // Only a complete catalog request traverses model-specific options.
-                // ACP advertises thinking effort only for the selected model. Probe
-                // each native ID in this disposable Session; no inference or global
-                // provider change is involved. Restore its initial selection afterward.
-                let models =
-                    crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
-                let original =
-                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
-                let mut options = serde_json::Map::new();
-                let mut attempted_other_model = false;
-                for (index, model) in models.iter().enumerate() {
-                    if original.as_deref() == Some(model.id.as_str()) {
-                        options.insert(model.id.clone(), serde_json::to_value(&model.options)?);
-                        continue;
-                    }
-                    // A failed setter may already have changed native state.
-                    attempted_other_model = true;
-                    let id = 1000 + index as u64;
-                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
-                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":model.id}})).await?;
-                    // Native catalogs may include an unconfigured Provider or a
-                    // variant that this release cannot select. Its unavailable
-                    // options must not hide the working native default/catalog.
-                    let Ok(selected) = read_rpc_result(lines, id).await else {
-                        continue;
-                    };
-                    if crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
-                        .as_deref()
-                        != Some(model.id.as_str())
-                    {
-                        continue;
-                    }
-                    let Some(chosen) = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
-                        kind, &selected,
-                    )
-                    .ok()
-                    .and_then(|models| models.into_iter().find(|entry| entry.id == model.id)) else {
-                        continue;
-                    };
-                    options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
-                }
-                if attempted_other_model && let Some(original) = original {
-                    let id = 1000 + models.len() as u64;
-                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
-                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
-                    let _ = read_rpc_result(lines, id).await;
-                }
-                session["_meta"]["rovaiModelOptions"] = Value::Object(options);
             }
             if let Some(context) = options_context {
                 anyhow::ensure!(

@@ -16,6 +16,7 @@ After configuring the agent’s account and models, find it in Settings → Agen
 | [MiniMax Code](https://agent.minimax.io/docs/cli/quick-start) ([v0.4.13+](#minimax-code)) | `mcode` |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` |
+| [Kilo CLI](https://kilo.ai/docs/code-with-ai/platforms/cli) | `kilo` |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | `copilot` |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | `kiro-cli` |
 | [Qoder CLI](https://docs.qoder.com/cli/quick-start) | `qodercli` |
@@ -153,6 +154,32 @@ Official models use their native capabilities; they do not need a copy under `cu
 | `M3.1-Flash-Preview · thinking` | `default / low / medium / high / xhigh / max` |
 
 Thinking support does not necessarily include effort selection. The official catalog can change; use the options reported by the selected entry, and do not invent levels for models without that capability. [Official model catalog definitions](https://github.com/MiniMax-AI/minimax-code/blob/main/packages/config/src/minimax-model-catalog.ts)
+
+## Kilo: models and reasoning effort {#kilo}
+
+This example uses Kilo CLI **7.8.27**. In Rovai, use a version that offers Kilo in the Agent picker.
+Configure the provider and model in Kilo first. Run `kilo debug paths` to find its config directory,
+then edit `kilo.jsonc` there (usually `~/.config/kilo/kilo.jsonc`).
+
+For a custom service such as Sub2API, merge these fields into the existing `provider.<provider-key>.models.<model-id>` entry. Keep the connection settings and other model fields:
+
+```json
+{
+  "options": { "reasoningEffort": "high" },
+  "variants": {
+    "low": { "reasoningEffort": "low" },
+    "medium": { "reasoningEffort": "medium" },
+    "high": { "reasoningEffort": "high" },
+    "xhigh": { "reasoningEffort": "xhigh" }
+  }
+}
+```
+
+`options.reasoningEffort` sets the model default. The `variants` keys are selectable levels; their contents supply the native parameters.
+Declare only levels supported by the model and API. Models that already advertise variants need no duplicate configuration.
+Save the file, refresh Rovai's model list, select the specific model and reasoning level, then save. Following the model default adds no effort override.
+
+[Kilo custom models](https://kilo.ai/docs/code-with-ai/agents/custom-models)
 
 ## Adding a new agent {#adding-agents}
 

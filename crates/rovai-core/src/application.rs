@@ -6243,7 +6243,7 @@ impl Core {
                     &mut database,
                     VerifiedManagedInstallation {
                         model_catalog_complete: kind.acp_selected_model_effort_key().is_none()
-                            || catalog_requested,
+                            || (catalog_requested && kind != AdapterKind::KiloCli),
                         executable_file_identity: Some(
                             final_entry.executable_file_identity().clone(),
                         ),
@@ -6361,7 +6361,8 @@ impl Core {
             // still current evidence. Partial model-specific ACP observations are excluded.
             if targets_current_installation
                 && kind != AdapterKind::Pi
-                && (kind.acp_selected_model_effort_key().is_none() || catalog_requested)
+                && (kind.acp_selected_model_effort_key().is_none()
+                    || (catalog_requested && kind != AdapterKind::KiloCli))
                 && rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
                     &snapshot.models,
                 )
