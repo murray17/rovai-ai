@@ -34,7 +34,12 @@ export type MemberRuntimeConfigurationPresentation = {
   summary: string
 }
 
-function runtimeEffortOption(adapterKind: string): { key: string; label: string } {
+type RuntimeEffortOption = {
+  key: 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
+  label: string
+}
+
+export function runtimeEffortOption(adapterKind: string): RuntimeEffortOption {
   const [key, label] = ({
     'claude-code-cli': ['effort', '思考强度'],
     'command-code-cli': ['effort', '思考强度'],
@@ -42,7 +47,7 @@ function runtimeEffortOption(adapterKind: string): { key: string; label: string 
     'minimax-code-cli': ['thinkingEffort', '思考强度'],
     pi: ['thinking_level', '思考强度'],
     'codebuddy-cli': ['thought_level', '推理强度']
-  } as Record<string, [string, string]>)[adapterKind] ?? ['reasoning_effort', '推理强度']
+  } as Record<string, [RuntimeEffortOption['key'], string]>)[adapterKind] ?? ['reasoning_effort', '推理强度']
   return { key, label: uiAttribute(label) }
 }
 

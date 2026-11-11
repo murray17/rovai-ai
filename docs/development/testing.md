@@ -286,6 +286,7 @@ CodeBuddy 的逐模型/旧 Session 档位扩展 `grouped_acp_models_keep_opaque_
 目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功
 写入，不能覆盖此回归，因此复用它的私有 Core/DB/Check Manager fixture 增加一个有真实协议进程的 owner；
 单纯测合并谓词无法证明第一次目录回退或持久化成功时间。表中 2／8 个模型分别执行检查先到／目录先到，
+MiniMax/Kilo 的单模型用例验证未尝试切换时零 setter；Kilo 的双模型用例验证原生先改状态再报错，仍须恢复初始模型。
 Kilo 的 3 模型用例另含一个不可选候选；不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
 `cargo test -p rovai-core --features slow-tests --lib minimax_check_and_catalog`。
 

@@ -103,3 +103,29 @@ Core fixture `rovai-kilo-simplify-accept-41u1t04g` 完成 **40 个 Run：37 succ
 
 代码、合同与证据在同一新增提交交付到 `rovai/kilo-acp`；确切 SHA 随 Thread 交付消息发布。
 不自动创建 PR，不把当前 Preview 或平台资格提升。
+
+## 后续维护（User sequence 50）
+
+以 `11cf6d326e05b2bace832ee1623f209cecec6acf` 为基线，继续收拢三个小范围维护项：
+
+- 表单直接复用 `runtime-model-presentation.ts` 的 `runtimeEffortOption()`；键、文案及类型只维护一份。
+  哪些 Runtime 不显示 effort 控件仍由原表单分支决定，模型选项与冻结历史的语义保持。
+- Kilo/MiniMax 的共享目录收集器只在尝试选择其他模型后恢复初始模型；只有初始模型、未尝试切换时零 setter。
+  尝试标记在写请求前设置，原生 setter 即使先改变状态再返回错误，也仍会恢复。
+- Checklist 3.10 明确无产品权限覆盖时继承原生有效配置；3.13 及阻塞条件区分失管/未隔离执行与合法 IdleWarm。
+  Probe timeout、App shutdown 等必须停止的场景仍要求回收。
+
+验证扩展原表单/摘要及 `minimax_check_and_catalog_keep_their_intent_and_complete_options` owners：
+保留原 MiniMax 2/8 与 Kilo 3 模型场景，增加两者单模型和 Kilo 全部其他模型选择失败的场景。
+没有新增 Rust 测试函数、配置字段、能力生成框架或模型输入变更。当前契约和平台资格保持。
+
+六组受控 Core/ACP 目录场景、44 项表单/摘要定向测试、实际 Electron 两入口、类型检查、桌面构建和通用文档门禁通过；
+全量前端 3,195 passed/2 skipped、Node 377 passed/2 skipped。本轮没有重新运行官方 CLI 或付费模型。
+首次默认 Rust 回归为 437 passed/1 failed/1 ignored：未改动的
+`runtime_probe_process::tests::successful_leader_with_stdio_holding_descendant_finishes_bounded`
+报 `runtime_probe_stdout_cleanup_timed_out`；该模块独立复跑 5 项通过，原 500 ms 清理期限与所有断言保持。
+第二轮默认并行仍为 437 passed/1 failed/1 ignored，但失败换为未改动的
+`managed_process::tests::cancellation_reaps_captured_detached_children_after_parent_exit` 的 3 秒退出确认超时；
+该模块独立复跑 5 项通过。两处实现/测试相对本轮基线均无改动，未据此认定根因或调整生产行为、断言和期限。
+随后使用 `cargo test --workspace -- --test-threads=4` 完整复跑，484 passed/1 ignored，前述两项均通过。
+该结果保留实际运行参数，不将此前默认并行失败改记为通过。

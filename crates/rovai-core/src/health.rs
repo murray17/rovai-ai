@@ -2311,11 +2311,14 @@ async fn run_acp_probe_with_scope(
                 let original =
                     crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
                 let mut options = serde_json::Map::new();
+                let mut attempted_other_model = false;
                 for (index, model) in models.iter().enumerate() {
                     if original.as_deref() == Some(model.id.as_str()) {
                         options.insert(model.id.clone(), serde_json::to_value(&model.options)?);
                         continue;
                     }
+                    // A failed setter may already have changed native state.
+                    attempted_other_model = true;
                     let id = 1000 + index as u64;
                     write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
                         "params":{"sessionId":session["sessionId"], "configId":"model", "value":model.id}})).await?;
@@ -2340,7 +2343,7 @@ async fn run_acp_probe_with_scope(
                     };
                     options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
                 }
-                if let Some(original) = original {
+                if attempted_other_model && let Some(original) = original {
                     let id = 1000 + models.len() as u64;
                     write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
                         "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;

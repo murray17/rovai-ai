@@ -1425,6 +1425,13 @@ async fn minimax_check_and_catalog_keep_their_intent_and_complete_options() {
             RuntimeCheckTrigger::CatalogOpen,
         ),
         (AdapterKind::KiloCli, 3, RuntimeCheckTrigger::UserCheck),
+        (
+            AdapterKind::MinimaxCodeCli,
+            1,
+            RuntimeCheckTrigger::UserCheck,
+        ),
+        (AdapterKind::KiloCli, 1, RuntimeCheckTrigger::CatalogOpen),
+        (AdapterKind::KiloCli, 2, RuntimeCheckTrigger::CatalogOpen),
     ] {
         let fixture = Fixture::new();
         let program = fixture.root.join(if kind == AdapterKind::KiloCli {
@@ -1450,7 +1457,7 @@ def session():
          'options':[{'value':value,'name':value.title()} for value in values]}]}
 for line in sys.stdin:
     request=json.loads(line); method=request['method']
-    with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method, 'value':request.get('params',{}).get('value')})+'\n')
+    with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method, 'value':request.get('params',{}).get('value'), 'current':current})+'\n')
     if method == 'initialize':
         if (root / 'gate').exists():
             (root / 'started').touch()
@@ -1459,7 +1466,8 @@ for line in sys.stdin:
     elif method == 'session/new': result=session()
     elif method == 'session/set_config_option':
         assert request['params']['configId']=='model'
-        if kilo and request['params']['value']=='model-2':
+        if kilo and (request['params']['value']=='model-2' or (count==2 and request['params']['value']=='model-1')):
+            current=request['params']['value']
             print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32602,'message':'Provider unavailable'}}),flush=True)
             continue
         current=request['params']['value']; result=session()
@@ -1585,6 +1593,7 @@ for line in sys.stdin:
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .collect::<Vec<_>>();
+        let expected_setters = if count == 1 { 0 } else { count };
         assert_eq!(
             methods
                 .iter()
@@ -1597,7 +1606,7 @@ for line in sys.stdin:
                 .iter()
                 .filter(|m| m["method"] == "session/set_config_option")
                 .count(),
-            count
+            expected_setters
         );
         let mut settings_by_process = std::collections::BTreeMap::new();
         for method in &methods {
@@ -1612,18 +1621,32 @@ for line in sys.stdin:
         settings.sort();
         assert_eq!(
             settings,
-            vec![0, count],
+            vec![0, expected_setters],
             "only the full catalog traverses models"
         );
-        assert_eq!(
-            methods
-                .iter()
-                .filter(|m| m["method"] == "session/set_config_option")
-                .next_back()
-                .unwrap()["value"],
-            "model-0",
-            "the disposable Session restores its initial model"
-        );
+        let restore = methods
+            .iter()
+            .filter(|m| m["method"] == "session/set_config_option")
+            .next_back();
+        if count == 1 {
+            assert!(
+                restore.is_none(),
+                "an unchanged single model needs no restore RPC"
+            );
+        } else {
+            assert_eq!(
+                restore.unwrap()["value"],
+                "model-0",
+                "the disposable Session restores its initial model"
+            );
+            if kind == AdapterKind::KiloCli && count == 2 {
+                assert_eq!(
+                    restore.unwrap()["current"],
+                    "model-1",
+                    "a failed selection may have changed native state and still needs restoration"
+                );
+            }
+        }
         assert!(!methods.iter().any(|m| m["method"] == "session/prompt"));
         let complete = AgentProfileService::default()
             .managed_installation(&*fixture.core.database.lock().await, kind, "default")
@@ -1634,7 +1657,9 @@ for line in sys.stdin:
             RuntimeModelCatalogCacheStatus::Fresh
         );
         for model in &complete.snapshot.as_ref().unwrap().models {
-            if kind == AdapterKind::KiloCli && model.id == "model-2" {
+            if kind == AdapterKind::KiloCli
+                && (model.id == "model-2" || (count == 2 && model.id == "model-1"))
+            {
                 assert!(
                     model.options.is_empty(),
                     "one unavailable model must not hide the catalog"

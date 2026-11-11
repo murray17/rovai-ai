@@ -336,19 +336,24 @@ describe('member runtime parameters', () => {
     expect(markup).toContain(`aria-label="${label}，${value}，推荐"`)
   })
 
-  it('renders CodeBuddy native thought levels and preserves a saved value when options are unavailable', () => {
-    const installation = runtimeInstallation('codebuddy-cli')
+  it.each([
+    ['codebuddy-cli', 'thought_level', '推理强度'],
+    ['kilo-cli', 'effort', '推理强度'],
+    ['minimax-code-cli', 'thinkingEffort', '思考强度']
+  ] as const)('renders %s native effort and preserves a saved value when options are unavailable', (kind, key, label) => {
+    const installation = runtimeInstallation(kind)
+    installation.snapshot!.models[0].options[0].key = key
     const draft = {
       ...draftFromDefaults(installation.memberRuntimeDefaults!),
-      model: { mode: 'explicit' as const, modelId: 'runtime/model', options: { thought_level: 'high' } }
+      model: { mode: 'explicit' as const, modelId: 'runtime/model', options: { [key]: 'high' } }
     }
     const render = () => renderToStaticMarkup(createElement(MemberRuntimeParameters, {
-      adapterKind: 'codebuddy-cli', installation, draft, disabled: false, onChange: () => undefined
+      adapterKind: kind, installation, draft, disabled: false, onChange: () => undefined
     }))
-    expect(render()).toContain('aria-label="推理强度，High"')
+    expect(render()).toContain(`aria-label="${label}，High"`)
     installation.snapshot!.models[0].options = []
     expect(render()).toContain('尚未核对 · high')
-    expect(draft.model.options).toEqual({ thought_level: 'high' })
+    expect(draft.model.options).toEqual({ [key]: 'high' })
   })
 
   it('does not present an approval mode for native Pi tool execution', () => {
