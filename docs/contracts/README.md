@@ -177,7 +177,14 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v77（当前）](runtime-launch-and-verification-v77.md) | MiniMax 目录零选模、目标参数读取与逐模型观测；复用现有缓存和界面请求 |
+| [Runtime Launch and Verification v84（当前）](runtime-launch-and-verification-v84.md) | Kilo MCP 下一 Run 生效、原生权限继承及共享取消 Warm／回收；原输入与平台资格保持 |
+| [Runtime Launch and Verification v83（历史）](runtime-launch-and-verification-v83.md) | Kilo 逐模型 effort 复用 MiniMax 非生成目录收集与健康／完整目录分离；不改执行或权限 |
+| [Runtime Launch and Verification v82（历史）](runtime-launch-and-verification-v82.md) | Kilo 成功 Steer 全部收口后沿普通 Fleet 复用 Host；失败、取消与未收口维持原清理 |
+| [Runtime Launch and Verification v81（历史）](runtime-launch-and-verification-v81.md) | Kilo 回调前提、无隐式 Node 的共享 MCP cwd、统一取消期限、路径/投影与 effort 展示 |
+| [Runtime Launch and Verification v80（历史）](runtime-launch-and-verification-v80.md) | Kilo 原生禁后台、同 Run Steer 多请求收口、write/edit/apply_patch 结果投影；B/P 不变 |
+| [Runtime Launch and Verification v79（历史）](runtime-launch-and-verification-v79.md) | Kilo 原生配置保序/最终默认权限、MCP cwd/退役、effort、DB/Skills 来源与认证投影 |
+| [Runtime Launch and Verification v78（历史）](runtime-launch-and-verification-v78.md) | Kilo 独立官方 ACP、单 Binding Host、原生 instructions、逐消息数值观察与 macOS arm64 Preview |
+| [Runtime Launch and Verification v77（历史）](runtime-launch-and-verification-v77.md) | MiniMax 目录零选模、目标参数读取与逐模型观测；复用现有缓存和界面请求 |
 | [Runtime Launch and Verification v76（历史）](runtime-launch-and-verification-v76.md) | CodeBuddy refusal 原生错误详情解析，复用共享脱敏、公开 failure 与 RunCard 展示 |
 | [Runtime Launch and Verification v75（历史）](runtime-launch-and-verification-v75.md) | 全 Runtime 按有效原生成功完成，允许空最终文字；局部问卷取消不覆盖后续成功 |
 | [Runtime Launch and Verification v74（历史）](runtime-launch-and-verification-v74.md) | 共享模型目录归一化、失败保留配置与缓存、原生 Runtime 接受显式配置；继承 PATH 与环境规则 |
@@ -434,7 +441,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [User Automation v1（历史）](user-automation-v1.md) | 普通用户 `rovai app` 的独立本机 IPC、Runtime OS 隔离、原子 Camp/Run 自动化、真实 shell exit、双 cursor Diagnostic Trial、安全投影与私有 bundle |
 | [Network Interruption Recovery v2（当前）](network-interruption-recovery-v2.md) | v1 分类/退避/wake 不变；同 Run 恢复不再依赖 CampTurn 或协作预算 |
 | [Network Interruption Recovery v1（历史）](network-interruption-recovery-v1.md) | App/Core 持续运行期间的严格网络分类、Core 内存固定退避、ACP terminal 接管与 CampTurn 时期准入 |
-| [Accepted Input Recovery v8（当前）](accepted-input-recovery-v8.md) | 保留输入不重放与隔离门禁；续做自动选择会话并允许投递前一次降级 |
+| [Accepted Input Recovery v9（当前）](accepted-input-recovery-v9.md) | 常驻 ACP 普通取消确认收尾后共用 Fleet Warm；Reusable 隔离证明与 Reaped 回收证明分开，原输入与所有权限制保持 |
+| [Accepted Input Recovery v8（历史）](accepted-input-recovery-v8.md) | 保留输入不重放与隔离门禁；续做自动选择会话并允许投递前一次降级 |
 | [Accepted Input Recovery v7（历史）](accepted-input-recovery-v7.md) | 保留冻结投递与隔离边界，增加 User 显式授权的独立续做 |
 | [Accepted Input Recovery v6（历史）](accepted-input-recovery-v6.md) | accepted/unknown 自动失败且不重放；旧执行隔离确认独立门禁后继 Delivery |
 | [Accepted Input Recovery v5（历史）](accepted-input-recovery-v5.md) | v4 发送边界不变；普通恢复失败与业务取消终态分离 |

@@ -1,0 +1,88 @@
+{
+  "status": "passed",
+  "platform": "darwin-arm64",
+  "runtime": {
+    "kind": "kilo-cli",
+    "version": "7.8.27",
+    "launch": "kilo acp"
+  },
+  "integration": {
+    "featureBaseline": "02a8aeb736e936dc8a417ae46725d39a1df100cf",
+    "mainBaseline": "cb1c027e4a94e5eee1b457428ef7ccbdfb8ba69a"
+  },
+  "provider": "controlled loopback OpenAI-compatible fixture",
+  "runs": {
+    "cancelled": 3,
+    "succeeded": 37
+  },
+  "bootstrap": {
+    "ordinaryRequests": 65,
+    "allVerbatim": true,
+    "bytes": 2819,
+    "nativeSystemVerbatim": true,
+    "userDynamicOnly": true
+  },
+  "catalog": {
+    "modelIds": [
+      "local/local-model",
+      "local/local-other",
+      "local/local-plain"
+    ],
+    "modelCalls": 0
+  },
+  "mcp": {
+    "literalArgsPreserved": true,
+    "nodeAbsentInChild": true,
+    "savesKeepIdleHost": true,
+    "saveABAReusesOriginal": true,
+    "disabledAndDeletedToolsAbsent": true
+  },
+  "permissions": {
+    "purePreserved": true,
+    "userPluginInvoked": true,
+    "noRovaiPermissionHook": true
+  },
+  "cancel": {
+    "cleanupDisposition": "reusable",
+    "leaseCases": 3
+  },
+  "steer": {
+    "sameRun": true,
+    "heldUntilAllRequests": true,
+    "cancelledHostReused": true
+  },
+  "checkedScenarios": [
+    "nodeAbsentFromPath",
+    "inheritedPureMode",
+    "modelCatalog",
+    "authentication",
+    "commandOutput",
+    "bootstrap",
+    "firstAndWarm",
+    "legacyPermission",
+    "effort",
+    "modelOptionsExecution",
+    "foregroundSubagents",
+    "commandOutputBudget",
+    "permissionFILE",
+    "permissionINLINE",
+    "permissionAGENT",
+    "outputBudgetSurvivesReopen",
+    "cold",
+    "mcp",
+    "relativeWriteDiff",
+    "approval",
+    "savedDeny",
+    "nativePermissions",
+    "cancel",
+    "steer",
+    "cancellationLeases",
+    "automaticThreshold",
+    "automaticOverflow",
+    "automaticColdResume",
+    "inheritedConfigExcluded",
+    "runtimeFilesCleaned"
+  ],
+  "runtimeFilesCleaned": true,
+  "scope": "macOS arm64 integration regression with the official CLI and controlled Provider; existing Linux/Windows real-model evidence remains scoped to its original target-host records."
+}

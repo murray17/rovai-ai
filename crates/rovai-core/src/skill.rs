@@ -2625,6 +2625,7 @@ fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
         SkillDeliveryGroupKey::Codex => "Codex",
         SkillDeliveryGroupKey::Pi => "Pi Coding Agent",
         SkillDeliveryGroupKey::Opencode => "OpenCode",
+        SkillDeliveryGroupKey::Kilo => "Kilo",
         SkillDeliveryGroupKey::Copilot => "Copilot",
         SkillDeliveryGroupKey::ClaudeCompatible => "Claude 兼容",
         SkillDeliveryGroupKey::Antigravity => "Antigravity",

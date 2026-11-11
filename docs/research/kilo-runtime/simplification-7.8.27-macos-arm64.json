@@ -1,0 +1,355 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-production-core-controlled-provider",
+  "recordedAt": "2026-11-11T04:24:02.204Z",
+  "baseline": "83a853ee8f854ae19e70559c12e5297b09218a7b",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "platform": "darwin-arm64",
+  "status": "passed",
+  "provider": "local-controlled",
+  "paidModelRerun": false,
+  "qualificationUnchanged": "macos-arm64-preview",
+  "core": {
+    "fixture": "rovai-kilo-simplify-accept-41u1t04g",
+    "runCount": 40,
+    "runs": [
+      {
+        "status": "cancelled",
+        "count": 3
+      },
+      {
+        "status": "succeeded",
+        "count": 37
+      }
+    ],
+    "inputs": [
+      {
+        "input_kind": "start",
+        "status": "accepted",
+        "count": 40
+      },
+      {
+        "input_kind": "steer",
+        "status": "accepted",
+        "count": 3
+      },
+      {
+        "input_kind": "steer",
+        "status": "delivery_unknown",
+        "count": 2
+      }
+    ],
+    "mcp": {
+      "savesKeepIdleHost": true,
+      "saveABAReusesOriginal": true,
+      "disabledAndDeletedToolsAbsent": true,
+      "literalArgsPreserved": true,
+      "nodeAbsentInChild": true,
+      "busyRun": "23522492-2a51-4914-8f30-028b33706a26",
+      "firstHost": "08d69881-10ef-4ad0-b924-02ab2491ce60",
+      "secondHost": "3939898b-b968-4408-9151-f2c1d4c78940",
+      "restoredHost": "7a752ebd-16fb-4978-90e1-af794d8ae0b3",
+      "idleRetiredPid": 71721,
+      "busyRetiredPid": 71768,
+      "sameAndDifferentCwd": true,
+      "exactSessionPreserved": true
+    },
+    "nativePermissions": {
+      "allowRun": "0d48cbf3-5a05-471b-858a-5686f9b66ad9",
+      "askAllowRun": "005cca63-afb2-4b32-b9f3-8e0e4fcb05cb",
+      "askDenyRun": "567ebc8f-17fa-4e06-aced-008f08b2b0c5",
+      "nativeDenyRun": "19967c0e-afd5-4550-87cb-ccd4361e4ec8",
+      "pureRun": "4c5d2767-12be-4e50-9f55-eb374808710a",
+      "userPluginInvoked": true,
+      "purePreserved": true,
+      "noRovaiPermissionHook": true
+    },
+    "legacyPermission": {
+      "stored": "deny",
+      "firstRunSucceeded": true,
+      "nativeDefaultAllowedCli": true,
+      "allNewFrozenValuesEmpty": true,
+      "otherKeysStillValidated": true
+    },
+    "cancel": {
+      "run": "59ef196c-271a-4fad-b566-6511c0a27a0d",
+      "status": "cancelled",
+      "nextRun": "05a8321b-d547-49e4-b121-ee94c51c247e",
+      "host": "babbec08-04f6-4965-9ec3-3bbbd4be8c3b",
+      "pid": 72112,
+      "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+      "oldEpoch": 1,
+      "newRunEpoch": 1,
+      "cleanupDisposition": "reusable",
+      "elapsedThroughSuccessorMs": 6091
+    },
+    "steer": {
+      "run": "3f27f16e-33d6-4a06-9c99-ac2140f4ec11",
+      "accepted": 3,
+      "sameRun": true,
+      "heldUntilAllRequests": true,
+      "warmReuseCycles": [
+        {
+          "cycle": 1,
+          "run": "3f27f16e-33d6-4a06-9c99-ac2140f4ec11",
+          "nextRun": "88035d80-15ae-4e30-832b-735b9ab59050",
+          "host": "babbec08-04f6-4965-9ec3-3bbbd4be8c3b",
+          "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+          "cliMessageCommitted": true
+        },
+        {
+          "cycle": 2,
+          "run": "966a5664-600e-458a-921d-3f93e2d323ed",
+          "nextRun": "67cc95f8-609e-4a04-a976-b99b68c4fe33",
+          "host": "babbec08-04f6-4965-9ec3-3bbbd4be8c3b",
+          "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+          "cliMessageCommitted": true
+        },
+        {
+          "cycle": 3,
+          "run": "ec148167-338d-4699-80de-8a294bf1e61f",
+          "nextRun": "7503babc-65ea-4529-a665-8497f7e1e1be",
+          "host": "babbec08-04f6-4965-9ec3-3bbbd4be8c3b",
+          "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+          "cliMessageCommitted": true
+        }
+      ],
+      "cancelledWithPending": true,
+      "cancelledHostReused": true,
+      "cancelledWarmCycles": [
+        {
+          "supplements": 1,
+          "submittedNativeSupplements": 1,
+          "queuedBeforeCancel": 0,
+          "sourceReceiptsSettled": 1,
+          "run": "ad3d5bae-2b09-4741-830e-2d05a50d0a87",
+          "nextRun": "70097e1b-3391-4f3b-9d50-47133a533784",
+          "host": "babbec08-04f6-4965-9ec3-3bbbd4be8c3b",
+          "pid": 72112,
+          "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+          "oldEpoch": 1,
+          "newRunEpoch": 1,
+          "cleanupDisposition": "reusable",
+          "successorCliCommitted": true
+        },
+        {
+          "supplements": 3,
+          "submittedNativeSupplements": 1,
+          "queuedBeforeCancel": 2,
+          "sourceReceiptsSettled": 3,
+          "run": "0bce8c65-3348-4d2e-9df4-8dee1133d5f9",
+          "nextRun": "1ab4fb42-9c1a-4033-a0d2-a7f81dc1a76a",
+          "host": "babbec08-04f6-4965-9ec3-3bbbd4be8c3b",
+          "pid": 72112,
+          "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+          "oldEpoch": 1,
+          "newRunEpoch": 1,
+          "cleanupDisposition": "reusable",
+          "successorCliCommitted": true
+        }
+      ]
+    },
+    "cancellationLeases": [
+      {
+        "marker": "CORE_AFTER_STOP",
+        "oldGeneration": 2,
+        "newGeneration": 3,
+        "oldLeaseRejected": true,
+        "rejectionCode": "builtin_tool.run_not_bound"
+      },
+      {
+        "marker": "CORE_AFTER_STEER_CANCEL_1",
+        "oldGeneration": 10,
+        "newGeneration": 11,
+        "oldLeaseRejected": true,
+        "rejectionCode": "builtin_tool.run_not_bound"
+      },
+      {
+        "marker": "CORE_AFTER_STEER_CANCEL_3",
+        "oldGeneration": 12,
+        "newGeneration": 13,
+        "oldLeaseRejected": true,
+        "rejectionCode": "builtin_tool.run_not_bound"
+      }
+    ],
+    "cleanupAcks": [
+      {
+        "run": "59ef196c-271a-4fad-b566-6511c0a27a0d",
+        "epoch": 1,
+        "cleanupAckMs": 60
+      },
+      {
+        "run": "ad3d5bae-2b09-4741-830e-2d05a50d0a87",
+        "epoch": 1,
+        "cleanupAckMs": 57
+      },
+      {
+        "run": "0bce8c65-3348-4d2e-9df4-8dee1133d5f9",
+        "epoch": 1,
+        "cleanupAckMs": 71
+      }
+    ],
+    "bootstrap": {
+      "bytes": 2830,
+      "nativeSystemVerbatim": true,
+      "userDynamicOnly": true,
+      "ordinaryRequests": 65,
+      "allOrdinaryRequestsVerbatim": true,
+      "successorOwnRunEpoch": true
+    },
+    "questionToolAbsent": true,
+    "nodeAbsentFromPath": true,
+    "relativeWriteDiff": {
+      "run": "005cca63-afb2-4b32-b9f3-8e0e4fcb05cb",
+      "path": "allowed.txt",
+      "additions": 1,
+      "deletions": 0
+    },
+    "automaticThreshold": {
+      "run": "88211268-9c8d-4121-9abe-e29c086dd78f",
+      "seedRun": "41f7853f-53ef-4070-8dd3-6c2a28ec324e",
+      "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+      "host": "babbec08-04f6-4965-9ec3-3bbbd4be8c3b",
+      "nativeSummaries": 1,
+      "reportedInput": 110000,
+      "contextWindow": 200000,
+      "thresholdPercent": 50,
+      "summaryConsumed": true,
+      "summaryNotPublished": true
+    },
+    "automaticOverflow": {
+      "run": "d29f5b01-732f-4d10-a3a4-85aa1796fdef",
+      "nativeSummaries": 1,
+      "providerRejectedOnce": true,
+      "summaryNotPublished": true
+    },
+    "automaticColdResume": {
+      "run": "4c88eb8d-526a-4b1d-a4b6-c00eb509a84e",
+      "session": "ses_e372965ceffeykfnvC6Cb0R5em",
+      "newHost": "8b231223-c7e2-4d36-885d-6d9b29c77292",
+      "summaryRetained": true
+    },
+    "effort": "high",
+    "modelCatalog": {
+      "modelCount": 3,
+      "modelCalls": 0
+    },
+    "commandOutputBudget": {
+      "bytes": 7679,
+      "outputTruncated": true
+    },
+    "foregroundSubagents": {
+      "stableOperation": true,
+      "parametersRetained": true,
+      "childReportInToolOnly": true,
+      "nativeModelReceivesFullReport": true,
+      "reports": [
+        {
+          "bytes": 115,
+          "outputTruncated": false
+        },
+        {
+          "bytes": 7680,
+          "outputTruncated": true
+        }
+      ]
+    },
+    "runtimeFilesCleaned": true
+  },
+  "nativeProbe": {
+    "fixture": "rovai-kilo-simplify-native-b20007ho",
+    "status": "passed",
+    "cancelledMultiplePrompts": {
+      "sessionId": "ses_e37299f38ffeYBUINelQ9QkHe9",
+      "pid": 71104,
+      "submittedSupplements": 3,
+      "settledRequests": 4,
+      "stopReasons": [
+        "cancelled",
+        "cancelled",
+        "cancelled",
+        "cancelled"
+      ],
+      "elapsedMs": 14,
+      "sameHostSuccessor": true
+    },
+    "backgroundPolicy": {
+      "taskVisible": true,
+      "backgroundParameterAbsent": true,
+      "explicitBackgroundRejected": true,
+      "foregroundChildSessions": 1
+    },
+    "allHostsClosed": true
+  },
+  "sharedControlled": {
+    "owner": "cancellation_covers_launch_without_a_handle_and_has_one_total_deadline",
+    "adapters": [
+      "kilo-cli",
+      "opencode-cli"
+    ],
+    "cases": [
+      "fast",
+      "1.75s-native-terminal",
+      "2.2s-late-terminal",
+      "no-response",
+      "disconnect",
+      "native-error",
+      "unknown-terminal",
+      "explicit-stop"
+    ],
+    "sameHostPidAndEpoch2AfterConfirmedCancel": true,
+    "oldEpochCleanupCannotStopSuccessor": true,
+    "correlatedTerminalCallbackDoesNotDetachCancelledRun": true,
+    "noHandleRequiresProof": true,
+    "absoluteBudgetsMs": {
+      "interrupt": 2000,
+      "flush": 2500,
+      "totalNonWindows": 3000,
+      "totalWindows": 5000
+    },
+    "multipleSubmittedRpcOwner": "active_input_receipts_preserve_the_original_prompt_and_fence_late_sources",
+    "cancelledCannotMaskLaterError": true,
+    "caseCount": 16,
+    "explicitStopRemainsReaped": true
+  },
+  "ui": {
+    "fixture": "rovai-runtime-picker-kilo-simplify-i5w4a1de",
+    "runtimeModelPickerPassed": true,
+    "nativePermissionText": true,
+    "noPermissionSelectorForLegacyOrNewKilo": true
+  },
+  "failureComparisons": [
+    {
+      "fixture": "rovai-kilo-simplify-core-bplr59qn",
+      "kind": "fixture-environment-edit-assumed-warm-reload",
+      "resolution": "Use the existing cold-spawn environment semantics; production environment behavior unchanged."
+    },
+    {
+      "fixtures": [
+        "rovai-kilo-simplify-verified-6ai9g3y8",
+        "rovai-kilo-simplify-final-j2fd6l7k"
+      ],
+      "kind": "fixture-expected-private-auth-code-in-public-cli",
+      "resolution": "Keep CLI rejection and verify the exact run_not_bound response at the owned Core IPC boundary."
+    },
+    {
+      "fixture": "rovai-kilo-simplify-core-final-o829jolp",
+      "kind": "production-terminal-callback-detached-before-cancellation-observed-result",
+      "observedCleanupDisposition": "reaped",
+      "resolution": "Already cancelled business Runs leave native terminal release to the existing cleanup owner."
+    },
+    {
+      "fixture": "rovai-kilo-simplify-warm-qlj0n5kt",
+      "kind": "fixture-assumed-three-parallel-public-steer-dispatches",
+      "resolution": "Preserve shared serial dispatch; Core covers one submitted plus two queued sources, native probe independently covers three submitted supplements."
+    }
+  ],
+  "limitations": [
+    "No new paid model acceptance.",
+    "No Windows or Linux execution qualification.",
+    "Public Core Steer dispatch remains serial; three simultaneous native supplements are covered by the native probe and shared ACP owner, not claimed as three concurrent public Core dispatches.",
+    "Different Runs may both use epoch 1; isolation identity is the Run/epoch pair and renewed CLI lease.",
+    "Skills depth and First-Class qualification unchanged."
+  ]
+}

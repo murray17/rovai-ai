@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "runtimeVersion": "7.8.27",
+  "platform": "darwin-arm64",
+  "provider": "loopback fixture, generated token",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "coreSteerEnabled": false,
+  "checks": {
+    "sessionId": "ses_e40407841ffepaAg9fkrrrmqlA",
+    "acceptedWhileFirstModelPending": true,
+    "outcomes": [
+      {
+        "status": "fulfilled",
+        "result": {
+          "stopReason": "end_turn",
+          "usage": {
+            "inputTokens": 75,
+            "outputTokens": 20,
+            "totalTokens": 120,
+            "cachedReadTokens": 25
+          },
+          "_meta": {}
+        }
+      },
+      {
+        "status": "fulfilled",
+        "result": {
+          "stopReason": "end_turn",
+          "usage": {
+            "inputTokens": 75,
+            "outputTokens": 20,
+            "totalTokens": 120,
+            "cachedReadTokens": 25
+          },
+          "_meta": {}
+        }
+      }
+    ],
+    "modelCalls": 3,
+    "correctionReachedModel": true,
+    "frames": [
+      {
+        "method": "session/update",
+        "sessionId": "ses_e40407841ffepaAg9fkrrrmqlA",
+        "update": "available_commands_update"
+      },
+      {
+        "method": "session/update",
+        "sessionId": "ses_e40407841ffepaAg9fkrrrmqlA",
+        "update": "agent_message_chunk"
+      },
+      {
+        "method": "session/update",
+        "sessionId": "ses_e40407841ffepaAg9fkrrrmqlA",
+        "update": "usage_update"
+      },
+      {
+        "id": 5,
+        "stopReason": "end_turn"
+      },
+      {
+        "method": "session/update",
+        "sessionId": "ses_e40407841ffepaAg9fkrrrmqlA",
+        "update": "agent_message_chunk"
+      },
+      {
+        "method": "session/update",
+        "sessionId": "ses_e40407841ffepaAg9fkrrrmqlA",
+        "update": "usage_update"
+      },
+      {
+        "id": 6,
+        "stopReason": "end_turn"
+      }
+    ]
+  },
+  "cleanup": [
+    {
+      "status": "fulfilled",
+      "value": {
+        "closed": true
+      }
+    },
+    {
+      "status": "fulfilled",
+      "value": {
+        "closed": true
+      }
+    }
+  ],
+  "limitations": [
+    "No Core Steer Run/epoch/lease verification",
+    "Concurrent cancellation and end-of-turn races need dedicated validation",
+    "Not a token-level insertion guarantee"
+  ]
+}

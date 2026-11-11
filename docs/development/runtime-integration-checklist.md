@@ -2,7 +2,7 @@
 document_type: development-checklist
 authority: development-procedure
 status: proposed
-last_updated: 2026-10-20
+last_updated: 2026-11-10
 ---
 
 # Agent Runtime 一等接入与准入 Checklist
@@ -177,7 +177,7 @@ Compaction 的目标是保持 Context 合同，不是机械地监听某个事件
 
 ### 3.10 Permission、Approval 与 Workspace
 
-- [ ] Product default 使用该 Runtime 已验证的原生最高权限；若 Runtime 自己拥有 sandbox/read-only 配置，UI、持久化和 Host 必须传递原名原值，不能由 Workspace access 静默改写。
+- [ ] 提供产品权限档位的 Runtime，其 Product default 使用已验证的原生最高权限；不提供产品权限覆盖的 Runtime 继承原生有效配置。若 Runtime 自己拥有 sandbox/read-only 配置，UI、持久化和 Host 必须传递原名原值，不能由 Workspace access 静默改写。
 - [ ] 每个 Runtime 明确唯一审批权威：Runtime-native 请求只由 Core 承载和原样返回；Core-managed Runtime 才由 Core 决策，不能叠加两层安全判断。
 - [ ] Runtime 实际提供 allow-once/deny/cancel 时，分别验证一次副作用和零副作用；不能因上游没有发出 Approval 而合成选项或伪造通过。
 - [ ] Workspace、Attachment、Skill resource 和临时目录边界真实限制 Runtime Tool，不只记录在 digest 中。
@@ -205,7 +205,7 @@ Compaction 的目标是保持 Context 合同，不是机械地监听某个事件
 - [ ] 自动 retry 不重复用户输入或副作用；旧 Run 和迟到事件不能进入下一 Run。
 - [ ] Host 回到 LRU 前 pending command、steer/follow-up queue、Approval 和 Tool 均已清空或终结。
 - [ ] cancel 严格收敛为 `cancelled`，并在 grace window 后仍无延迟文件、命令、网络或 MCP 副作用。
-- [ ] completion、failure、cancel、Probe timeout 和 App shutdown 后均无残留进程。
+- [ ] completion、failure、cancel 完成清理确认后，无失管进程和仍可产生效果的旧 Run 执行；合法受管的 IdleWarm Host 可以保留。Probe timeout、App shutdown 等必须停止的场景，确认应退役进程树完成回收。
 
 ### 3.14 Ready、Version 与 Platform
 
@@ -256,7 +256,7 @@ ACP、自定义 extension、history replay 和 Runtime-specific message shape �
 - [ ] Approval deny、read-only 或 cancel 后仍发生副作用。
 - [ ] Retry、queue、replay 或迟到事件进入错误 AgentRun。
 - [ ] 上游提供结构化 Usage，但 Rovai 仍错误归属、重复累计或用零值伪装未知。
-- [ ] Probe、Run、MCP Server 或 shutdown 后存在残留进程。
+- [ ] Probe、Run、MCP Server 或 shutdown 后存在失管进程、未隔离的旧 Run 执行，或应退役进程未回收；合法受管的 IdleWarm Host 不属于残留。
 - [ ] 只有文档、Fixture、`initialize` 或一次普通回复，没有完整 Golden Flow 证据。
 - [ ] 任一核心能力轴仍是 `NotImplemented`、`Disabled`、`Blocked`、`DocumentationOnly` 或 `NotObserved`，却进入正式 Runtime Catalog。
 

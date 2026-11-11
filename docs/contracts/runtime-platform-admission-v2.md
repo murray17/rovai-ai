@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-10-28
+last_updated: 2026-11-11
 ---
 
 # Runtime Platform Admission v2
@@ -176,3 +176,31 @@ ARM64、Windows、子代理或未来版本；Preview 不冒充完整平台资格
 Gateway 的受控验收、此前实现的真实 LLM 证据和未完成矩阵；不由一次 Ready 探测推断完整平台资格。
 初始准入理由见 [V1.72-D62](../versions/v1.72/decisions.md#v1-72-d62)，当前接入边界见
 [V1.72-D67](../versions/v1.72/decisions.md#v1-72-d67)。
+
+## Kilo macOS Preview
+
+2026-11-10，User sequence 61 要求 Apple Intel 也开放。`kilo-cli × macos-x64` 与原有
+`kilo-cli × macos-arm64` 同为 `preview / reasonCode=runtime_platform.qualification_evidence_missing`，
+`evidenceRevision=null`，沿既有 Core Admission 允许发现、检查、安装配置、成员选择和普通执行。
+Renderer 不增加平台白名单或实验标签，机器安装、原生认证、版本、模型、Session 和能力检查仍照常生效。
+
+这项维护者授权的开放不声明 Intel 完整资格，也不把 arm64 的实跑证据转记为 Intel 验收。
+范围、验证和理由见 [Kilo 平台跟进](../versions/v1.72/kilo-simplification.md#apple-intel-开放user-sequence-61)与
+[V1.72-D83](../versions/v1.72/decisions.md#v1-72-d83)。Linux x64 的范围见 [Kilo Linux Preview](#kilo-linux-preview)。
+
+## Kilo Linux Preview
+
+2026-11-10，维护者在 Linux x64 实测后确认开放。`kilo-cli × linux-x64` 为
+`preview / reasonCode=runtime_platform.qualification_evidence_missing`，`evidenceRevision=null`。
+Core 允许发现、检查、安装配置、成员选择和普通执行，并执行常规的安装、认证、版本、模型和能力检查。
+实测范围和决定见 [Linux x64 验收](../research/kilo-runtime/README.md#linux-x64-目标机验收)
+与 [V1.72-D84](../versions/v1.72/decisions.md#v1-72-d84)。
+
+## Kilo Windows x64 qualification
+
+2026-11-11，维护者授权通过 Sub2API 完成真实模型测试并在验收通过后提交 Windows 资格。
+`kilo-cli × windows-x64` 为 `qualified / reasonCode=null`，`evidenceRevision` 绑定独立的
+[Windows x64 验收记录](../../qualification/runtime-platform/windows-x64-kilo-v1.json)的 SHA-256。
+Core 允许常规发现、检查、安装配置、成员选择和执行，并执行现有的机器安装、原生认证、版本、模型和能力检查。
+目标机与用量采样范围见 [Windows x64 验收](../research/kilo-runtime/README.md#windows-x64-目标机验收)与
+[V1.72-D85](../versions/v1.72/decisions.md#v1-72-d85)。

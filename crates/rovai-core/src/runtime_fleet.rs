@@ -544,9 +544,9 @@ struct FleetState {
     deleting_camps: HashSet<String>,
     processes: HashMap<String, ProcessEntry>,
     process_by_run: HashMap<RunLeaseKey, String>,
-    // Retain only Codex cleanup receipts until Core durably acknowledges them.
-    // These are stop-operation evidence, not another process state machine.
-    reaped_leases: HashSet<RunLeaseKey>,
+    // Retain release facts until Core durably acknowledges the old Run.
+    // Reusable proves isolation; only Reaped proves process termination.
+    cleanup_outcomes: HashMap<RunLeaseKey, FleetReleaseOutcome>,
     resident_processes: HashSet<String>,
     resident_processes_by_bucket: HashMap<String, HashSet<String>>,
     idle_lru: BTreeSet<(u64, String)>,
@@ -1735,10 +1735,12 @@ impl AgentRuntimeFleetManager {
             entry.state = FleetProcessState::Stopping;
             entry.retire_after_run = true;
             if reaped {
-                if entry.adapter_kind == AdapterKind::CodexCli
+                if entry.adapter_kind != AdapterKind::Pi
                     && let Some(key) = entry.run_lease.clone()
                 {
-                    state.reaped_leases.insert(key);
+                    state
+                        .cleanup_outcomes
+                        .insert(key, FleetReleaseOutcome::Reaped);
                 }
                 state.remove_process(reservation_id);
                 if let Some(records) = records {
@@ -1768,7 +1770,9 @@ impl AgentRuntimeFleetManager {
                 && entry.adapter_kind == AdapterKind::CodexCli
                 && let Some(key) = entry.run_lease.clone()
             {
-                state.reaped_leases.insert(key);
+                state
+                    .cleanup_outcomes
+                    .insert(key, FleetReleaseOutcome::Reaped);
             }
             state.remove_process(reservation_id);
         }
@@ -1826,10 +1830,12 @@ impl AgentRuntimeFleetManager {
                             .as_ref()
                             .is_some_and(|current| Arc::ptr_eq(current, &launch.completion)) =>
                 {
-                    if entry.adapter_kind == AdapterKind::CodexCli
+                    if entry.adapter_kind != AdapterKind::Pi
                         && let Some(key) = entry.run_lease.clone()
                     {
-                        state.reaped_leases.insert(key);
+                        state
+                            .cleanup_outcomes
+                            .insert(key, FleetReleaseOutcome::Reaped);
                     }
                     state.remove_process(&launch.process_id);
                     (true, None)
@@ -1916,7 +1922,8 @@ impl AgentRuntimeFleetManager {
 
     async fn stop_outcome(&self, key: &RunLeaseKey, stopped: bool) -> FleetReleaseOutcome {
         let state = self.state.lock().await;
-        if state.reaped_leases.contains(key) || (stopped && !state.process_by_run.contains_key(key))
+        if state.cleanup_outcomes.get(key) == Some(&FleetReleaseOutcome::Reaped)
+            || (stopped && !state.process_by_run.contains_key(key))
         {
             FleetReleaseOutcome::Reaped
         } else {
@@ -1929,7 +1936,7 @@ impl AgentRuntimeFleetManager {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
         };
-        self.state.lock().await.reaped_leases.remove(&key);
+        self.state.lock().await.cleanup_outcomes.remove(&key);
         if let Some(records) = &self.owner_records {
             records.acknowledge_cleanup(&key);
         }
@@ -1956,11 +1963,11 @@ impl AgentRuntimeFleetManager {
             let _operation = self.operations.lock().await;
             let mut state = self.state.lock().await;
             let Some(process_id) = state.process_by_run.get(&run_lease).cloned() else {
-                return if state.reaped_leases.contains(&run_lease) {
-                    FleetReleaseOutcome::Reaped
-                } else {
-                    FleetReleaseOutcome::NoMatchingLease
-                };
+                return state
+                    .cleanup_outcomes
+                    .get(&run_lease)
+                    .copied()
+                    .unwrap_or(FleetReleaseOutcome::NoMatchingLease);
             };
             let Some(entry) = state.processes.get_mut(&process_id) else {
                 return FleetReleaseOutcome::NoMatchingLease;
@@ -2002,11 +2009,11 @@ impl AgentRuntimeFleetManager {
             // A concurrent completion may already have released this lease.
             // Never stop a successor that acquired the same Host in the meantime.
             if state.process_by_run.get(&run_lease) != Some(&process_id) {
-                return if state.reaped_leases.contains(&run_lease) {
-                    FleetReleaseOutcome::Reaped
-                } else {
-                    FleetReleaseOutcome::NoMatchingLease
-                };
+                return state
+                    .cleanup_outcomes
+                    .get(&run_lease)
+                    .copied()
+                    .unwrap_or(FleetReleaseOutcome::NoMatchingLease);
             }
             let reusable = quiescent
                 && state.process_by_run.get(&run_lease) == Some(&process_id)
@@ -2031,6 +2038,11 @@ impl AgentRuntimeFleetManager {
                 entry.state = FleetProcessState::IdleWarm;
                 entry.idle_since = Some(Instant::now());
                 entry.last_used_sequence = sequence;
+                if entry.adapter_kind != AdapterKind::Pi {
+                    state
+                        .cleanup_outcomes
+                        .insert(run_lease.clone(), FleetReleaseOutcome::Reusable);
+                }
                 state.idle_lru.insert((sequence, process_id.clone()));
                 None
             } else {
@@ -2074,14 +2086,15 @@ impl AgentRuntimeFleetManager {
             };
             let mut state = self.state.lock().await;
             let Some(id) = state.process_by_run.get(&key).cloned() else {
-                let reaped = state.reaped_leases.contains(&key);
+                let released = state.cleanup_outcomes.get(&key).copied();
                 drop(state);
                 drop(_operation);
-                return if reaped
-                    || self
-                        .owner_records
-                        .as_ref()
-                        .is_some_and(|records| records.confirmed_stop(&key))
+                return if let Some(outcome) = released {
+                    outcome
+                } else if self
+                    .owner_records
+                    .as_ref()
+                    .is_some_and(|records| records.confirmed_stop(&key))
                 {
                     FleetReleaseOutcome::Reaped
                 } else {
@@ -3356,7 +3369,11 @@ mod tests {
 
     #[tokio::test]
     async fn warm_hosts_never_cross_camp_compatibility_keys() {
-        for adapter_kind in [AdapterKind::CodexCli, AdapterKind::DeepseekHarness] {
+        for adapter_kind in [
+            AdapterKind::CodexCli,
+            AdapterKind::DeepseekHarness,
+            AdapterKind::KiloCli,
+        ] {
             let request = |run: &str, camp: &str, agent: &str| {
                 let mut request = acquire_request(run, camp);
                 request.adapter_kind = adapter_kind;

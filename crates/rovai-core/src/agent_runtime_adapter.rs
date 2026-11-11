@@ -31,10 +31,11 @@ use crate::{
         DSH_LINUX_X64_EVIDENCE_REVISION, DSH_MACOS_ARM64_EVIDENCE_REVISION,
         DSH_MACOS_X64_EVIDENCE_REVISION, DSH_WINDOWS_X64_EVIDENCE_REVISION,
         GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
-        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-        MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION, MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION,
-        MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION, PI_MACOS_ARM64_EVIDENCE_REVISION,
-        PI_MACOS_X64_EVIDENCE_REVISION, PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
+        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, KILO_WINDOWS_X64_EVIDENCE_REVISION,
+        MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION, MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION,
+        MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION, MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION,
+        PI_MACOS_ARM64_EVIDENCE_REVISION, PI_MACOS_X64_EVIDENCE_REVISION,
+        PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
         RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
         ZCODE_MACOS_ARM64_EVIDENCE_REVISION, ZCODE_WINDOWS_X64_EVIDENCE_REVISION,
     },
@@ -420,6 +421,7 @@ pub enum SkillDeliveryGroupKey {
     Codex,
     Pi,
     Opencode,
+    Kilo,
     Copilot,
     ClaudeCompatible,
     Antigravity,
@@ -440,10 +442,11 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Codex,
         Self::Pi,
         Self::Opencode,
+        Self::Kilo,
         Self::Copilot,
         Self::ClaudeCompatible,
         Self::Antigravity,
@@ -468,6 +471,7 @@ impl SkillDeliveryGroupKey {
             Self::Codex => "codex",
             Self::Pi => "pi",
             Self::Opencode => "opencode",
+            Self::Kilo => "kilo",
             Self::Copilot => "copilot",
             Self::ClaudeCompatible => "claude_compatible",
             Self::Antigravity => "antigravity",
@@ -493,6 +497,7 @@ impl SkillDeliveryGroupKey {
             Self::Codex => Path::new(".codex/skills"),
             Self::Pi => Path::new(".pi/skills"),
             Self::Opencode => Path::new(".opencode/skills"),
+            Self::Kilo => Path::new(".kilo/skills"),
             Self::Copilot => Path::new(".github/skills"),
             Self::ClaudeCompatible => Path::new(".claude/skills"),
             Self::Antigravity => Path::new(".agent/skills"),
@@ -522,6 +527,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "codex" => Ok(Self::Codex),
             "pi" => Ok(Self::Pi),
             "opencode" => Ok(Self::Opencode),
+            "kilo" => Ok(Self::Kilo),
             "copilot" => Ok(Self::Copilot),
             "claude_compatible" => Ok(Self::ClaudeCompatible),
             "antigravity" => Ok(Self::Antigravity),
@@ -818,6 +824,22 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             )
         };
+        if kind == AdapterKind::KiloCli {
+            return match platform {
+                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    KILO_WINDOWS_X64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::MacosArm64
+                | HostPlatformKey::MacosX64
+                | HostPlatformKey::LinuxX64 => RuntimePlatformAdmission::preview(
+                    kind,
+                    platform,
+                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                ),
+            };
+        }
         if kind == AdapterKind::HermesCli {
             return RuntimePlatformAdmission::enabled(kind, platform);
         }
@@ -986,7 +1008,7 @@ impl AgentRuntimeAdapterRegistry {
                 "sandbox_mode": "danger-full-access",
                 "approval_policy": "never",
             }),
-            AdapterKind::Pi => json!({}),
+            AdapterKind::Pi | AdapterKind::KiloCli => json!({}),
             AdapterKind::ZcodeApp => json!({"permission_mode": "yolo"}),
             AdapterKind::ClineCli => json!({"mode":"act", "auto_approve":"true"}),
             AdapterKind::CommandCodeCli => json!({"permission_mode":"bypass"}),
@@ -1064,7 +1086,7 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::ZcodeApp
             | AdapterKind::DeepseekHarness
             | AdapterKind::CommandCodeCli => resolve_acp_runtime(kind, input),
-            AdapterKind::ClineCli => resolve_acp_runtime(kind, input),
+            AdapterKind::ClineCli | AdapterKind::KiloCli => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -1090,6 +1112,13 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::Pi => native_skill_discovery(
                 [SkillDeliveryGroupKey::Pi],
                 SkillDiscoveryVerification::Verified,
+            ),
+            AdapterKind::KiloCli => native_skill_discovery(
+                [
+                    SkillDeliveryGroupKey::Kilo,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
             ),
             AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
@@ -1142,6 +1171,7 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
             AdapterKind::Pi => unsupported_external_mcp_projection(),
+            AdapterKind::KiloCli => additive_native_mcp_projection(McpSameNamePolicy::RovaiWins),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -1193,6 +1223,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
             }
+            AdapterKind::KiloCli => acp_capability_snapshot(observation, Vec::new()),
             AdapterKind::OpencodeCli => self.opencode_cli.capability_snapshot(observation),
             AdapterKind::CopilotCli => self.copilot_cli.capability_snapshot(observation),
             AdapterKind::QoderCli => {
@@ -1242,6 +1273,7 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => codex_permission_options(),
             AdapterKind::Pi => pi_permission_options(),
+            AdapterKind::KiloCli => Vec::new(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
@@ -2576,7 +2608,10 @@ fn acp_capability_snapshot(
             ]
         } else if matches!(
             adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+            AdapterKind::DeepseekHarness
+                | AdapterKind::CommandCodeCli
+                | AdapterKind::ClineCli
+                | AdapterKind::KiloCli
         ) {
             &[
                 "acp.initialize",
@@ -2867,6 +2902,31 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
+    if adapter_kind == AdapterKind::KiloCli {
+        let current = acp_runtime_model_id_from_session(session_result);
+        let effort = session_result["configOptions"]
+            .as_array()
+            .and_then(|options| options.iter().find(|option| option["id"] == "effort"))
+            .and_then(acp_model_option);
+        for model in &mut models {
+            // These ACP agents advertise effort for the selected model only.
+            model.options = if let Some(options) = session_result
+                .pointer("/_meta/rovaiModelOptions")
+                .and_then(|all| all.get(&model.id))
+            {
+                options
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|option| serde_json::from_value(option.clone()).ok())
+                    .collect()
+            } else if current.as_deref() == Some(model.id.as_str()) {
+                effort.clone().into_iter().collect()
+            } else {
+                Vec::new()
+            };
+        }
+    }
     if adapter_kind == AdapterKind::HermesCli {
         for option in models.iter_mut().flat_map(|model| &mut model.options) {
             option.scope = RuntimeOptionScope::Session;
@@ -4093,6 +4153,7 @@ mod tests {
             ),
             (AdapterKind::Pi, json!({})),
             (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
+            (AdapterKind::KiloCli, json!({})),
             (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
             (
                 AdapterKind::ClaudeCodeCli,
@@ -4402,6 +4463,54 @@ mod tests {
                 |model| model.runtime_metadata.as_ref().unwrap()["modelOptionsResolved"] != true
             )
         );
+        let kilo = json!({"configOptions":[
+            {"id":"model","type":"select","currentValue":"local/variant-model","options":[{"value":"local/variant-model","name":"Variant model"},{"value":"local/plain","name":"Plain"}]},
+            {"id":"effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
+        ]});
+        let models = acp_model_catalog_for_adapter(AdapterKind::KiloCli, &kilo).unwrap();
+        assert_eq!(models[0].options[0].key, "effort");
+        assert!(
+            models[1].options.is_empty(),
+            "Kilo effort is advertised only for its selected model"
+        );
+        for (kind, mut session, key) in [(AdapterKind::KiloCli, kilo, "effort")] {
+            let entries = session["configOptions"][0]["options"]
+                .as_array_mut()
+                .unwrap();
+            let other_id = entries[1]["value"].as_str().unwrap().to_owned();
+            entries.push(json!({"value":"plain-model","name":"Plain model"}));
+            entries.push(json!({"value":"unavailable-model","name":"Unavailable model"}));
+            session["_meta"]["rovaiModelOptions"] = json!({
+                other_id.clone(): [{"key":key,"label":"Effort","valueType":"enum",
+                    "values":[{"value":"medium","label":"Medium"},{"value":"max","label":"Max"}],
+                    "defaultValue":"medium","scope":"session"}],
+                "plain-model": []
+            });
+            let models = acp_model_catalog_for_adapter(kind, &session).unwrap();
+            let current = models.iter().find(|model| model.is_default).unwrap();
+            assert_eq!(current.options[0].default_value.as_deref(), Some("high"));
+            let other = models.iter().find(|model| model.id == other_id).unwrap();
+            assert_eq!(other.options[0].key, key);
+            assert_eq!(other.options[0].default_value.as_deref(), Some("medium"));
+            assert_eq!(
+                other.options[0]
+                    .values
+                    .iter()
+                    .map(|choice| choice.value.as_str())
+                    .collect::<Vec<_>>(),
+                ["medium", "max"]
+            );
+            for id in ["plain-model", "unavailable-model"] {
+                assert!(
+                    models
+                        .iter()
+                        .find(|model| model.id == id)
+                        .unwrap()
+                        .options
+                        .is_empty()
+                );
+            }
+        }
         let custom = json!({"models":{"currentModelId":"private-provider/custom-model","availableModels":[{"modelId":"builtin-model","name":"Builtin"}]}});
         let command = acp_model_catalog_for_adapter(AdapterKind::CommandCodeCli, &custom).unwrap();
         assert_eq!(command[0].id, "command-code-cli://runtime-default");
@@ -5806,6 +5915,14 @@ mod tests {
             &[SkillDeliveryGroupKey],
             SkillDiscoveryVerification,
         )] = &[
+            (
+                AdapterKind::KiloCli,
+                &[
+                    SkillDeliveryGroupKey::Kilo,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
             (
                 AdapterKind::HermesCli,
                 &[SkillDeliveryGroupKey::Hermes],

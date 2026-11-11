@@ -68,6 +68,7 @@ pub(super) fn migrate(database: &mut Database) -> Result<()> {
 
 #[cfg(test)]
 pub(super) fn downgrade_for_test(c: &Connection) {
+    super::kilo::downgrade_for_test(c);
     // Retire both additive reference receipts before rebuilding the older source.
     c.execute_batch("DELETE FROM schema_migration WHERE version IN (221,222); UPDATE rovai_data_contract SET projection_schema_version=170 WHERE projection_schema_version IN (171,172);").unwrap();
     let applied = c
@@ -156,6 +157,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
     assert_eq!(indexes(database.connection()), before_indexes);
     database.migrate_project_file_references().unwrap();
     database.migrate_project_directory_references().unwrap();
+    super::kilo::migrate(database).unwrap();
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),
         DatabaseContractClassification::Current(_)

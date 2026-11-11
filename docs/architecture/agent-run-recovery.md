@@ -8,7 +8,7 @@ last_updated: 2026-11-10
 # AgentRun Recovery
 
 本文描述 App/Core 持续运行期间的运输恢复、Core 重启后的执行收口，以及 AgentRun 终态与旧执行隔离之间的边界。
-当前字段和行为由 [Accepted Input Recovery v8](../contracts/accepted-input-recovery-v8.md)、
+当前字段和行为由 [Accepted Input Recovery v9](../contracts/accepted-input-recovery-v9.md)、
 [Message Delivery v11](../contracts/message-delivery-v11.md)、
 [Network Interruption Recovery v2](../contracts/network-interruption-recovery-v2.md) 和
 [Planned Shutdown v8](../contracts/planned-shutdown-v8.md)拥有。
@@ -70,6 +70,12 @@ Rovai 只管理 ACP 连接，不通过共享 Gateway 的退出或强杀宣称原
 
 Run 可以先进入失败或取消终态；当前 Core 仍精确持有该 Run/epoch 且隔离未确认时，
 `(ThreadId, AgentId)` lane 的后继输入保持 Delivery，等待 Adapter 确认后再 claim。
+
+常驻 ACP 的普通取消在公共期限内确认全部原始／补充请求、客户端终端与 ingress 已收尾后，
+复用既有 Fleet release。Reusable 证明旧 Run 已隔离并解除租约，Reaped 才证明受管进程回收；
+现有清理回执保留该结果直到 durable ACK，重试不得误停已经复用 Host 的后继。
+超时或未知仍停止，缺少对应证明保持未确认。ZCode 专用 fence 与 Hermes Gateway 所有权例外保持，
+精确范围见 [v9](../contracts/accepted-input-recovery-v9.md)。
 
 共享 execution root 的保护只在故障窗口生效：当前 Core 仍精确持有的执行未清理时，暂缓同 root 的新 dispatch；正常执行之间不因
 共享 root 建立日常互斥。没有输出、撤销 Core 写权限、用户确认或新 Session 都不是清理证明。cleanup 完成后，Scheduler

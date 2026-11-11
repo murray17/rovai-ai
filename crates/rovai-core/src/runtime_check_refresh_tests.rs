@@ -2361,7 +2361,7 @@ async fn failed_environment_reader_cannot_prevent_a_local_save() {
     std::fs::remove_dir_all(fixture.root).unwrap();
 }
 
-// Owns the MiniMax health/catalog boundary through the production manager and DB.
+// Owns the MiniMax/Kilo health/catalog boundary through the production manager and DB.
 // A pure merge test cannot prove first-use fallback or preserve catalog timestamps.
 #[cfg(unix)]
 #[tokio::test]
@@ -2374,32 +2374,48 @@ async fn minimax_check_and_catalog_keep_their_intent_and_target_options() {
         .unwrap();
     assert!(python.status.success());
     let python = String::from_utf8(python.stdout).unwrap();
-    let kind = AdapterKind::MinimaxCodeCli;
-    for (count, first_trigger) in [
-        (3, RuntimeCheckTrigger::UserCheck),
-        (8, RuntimeCheckTrigger::CatalogOpen),
+    for (kind, count, first_trigger) in [
+        (
+            AdapterKind::MinimaxCodeCli,
+            3,
+            RuntimeCheckTrigger::UserCheck,
+        ),
+        (
+            AdapterKind::MinimaxCodeCli,
+            8,
+            RuntimeCheckTrigger::CatalogOpen,
+        ),
+        (AdapterKind::KiloCli, 3, RuntimeCheckTrigger::UserCheck),
+        (AdapterKind::KiloCli, 1, RuntimeCheckTrigger::CatalogOpen),
+        (AdapterKind::KiloCli, 2, RuntimeCheckTrigger::CatalogOpen),
     ] {
         let fixture = Fixture::new();
-        let program = fixture.root.join("mcode");
+        let program = fixture.root.join(if kind == AdapterKind::KiloCli {
+            "kilo"
+        } else {
+            "mcode"
+        });
         std::fs::write(&program, format!("#!{}\n{}", python.trim(), r#"
 import json, os, pathlib, sys, time
 root = pathlib.Path(__file__).parent
+kilo = pathlib.Path(__file__).name == 'kilo'
 with (root / 'launches').open('a') as f: f.write(json.dumps(sys.argv[1:]) + '\n')
 if '--version' in sys.argv:
-    print('0.6.12'); sys.exit(0)
+    print('7.8.27' if kilo else '0.6.12'); sys.exit(0)
 count = int((root / 'count').read_text())
 current = 'model-0'
 def session():
+    values = ['low','high'] if current == 'model-0' else (['medium','max'] if kilo else ['xhigh','max'])
     result = {'sessionId':'fixture-session', 'configOptions':[
         {'id':'model','name':'Model','category':'model','type':'select','currentValue':current,
          'options':[{'value':f'model-{i}','name':f'Model {i}'} for i in range(count)]},
-        {'id':'thinkingEffort','name':'Thinking','type':'select','currentValue':'high',
-         'options':[{'value':v,'name':v} for v in (['low','high'] if current=='model-0' else ['xhigh','max'])]}]}
-    if current=='model-2': result['configOptions'].pop()
+        {'id':'effort' if kilo else 'thinkingEffort','name':'Thinking','type':'select','currentValue':values[-1] if kilo else 'high',
+         'options':[{'value':value,'name':value.title()} for value in values]}]}
+    if not kilo and current=='model-2': result['configOptions'].pop()
     return result
 for line in sys.stdin:
     request=json.loads(line); method=request['method']
-    with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method})+'\n')
+    with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method, 'value':request.get('params',{}).get('value'), 'current':current})+'\n')
     if method == 'initialize':
         if (root / 'gate').exists():
             (root / 'started').touch()
@@ -2408,6 +2424,10 @@ for line in sys.stdin:
     elif method == 'session/new': result=session()
     elif method == 'session/set_config_option':
         assert request['params']['configId']=='model'
+        if kilo and (request['params']['value']=='model-2' or (count==2 and request['params']['value']=='model-1')):
+            current=request['params']['value']
+            print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':{'code':-32602,'message':'Provider unavailable'}}),flush=True)
+            continue
         if request['params']['value']=='model-1' and (root/'fault').exists():
             fault=(root/'fault').read_text()
             if fault=='timeout': time.sleep(31)
@@ -2536,7 +2556,7 @@ for line in sys.stdin:
             assert_eq!(
                 ack.await.unwrap(),
                 queued,
-                "active and pending must merge only equal MiniMax intents"
+                "active and pending must merge only equal catalog/check intents"
             );
             waiters.push(done);
         }
@@ -2558,6 +2578,11 @@ for line in sys.stdin:
             .lines()
             .map(|line| serde_json::from_str::<Value>(line).unwrap())
             .collect::<Vec<_>>();
+        let expected_setters = if kind == AdapterKind::KiloCli && count > 1 {
+            count
+        } else {
+            0
+        };
         assert_eq!(
             methods
                 .iter()
@@ -2570,7 +2595,7 @@ for line in sys.stdin:
                 .iter()
                 .filter(|m| m["method"] == "session/set_config_option")
                 .count(),
-            0
+            expected_setters
         );
         let mut settings_by_process = std::collections::BTreeMap::new();
         for method in &methods {
@@ -2585,9 +2610,32 @@ for line in sys.stdin:
         settings.sort();
         assert_eq!(
             settings,
-            vec![0, 0],
-            "directory size never adds model-selection RPCs"
+            vec![0, expected_setters],
+            "only the Kilo full catalog traverses models"
         );
+        let restore = methods
+            .iter()
+            .filter(|m| m["method"] == "session/set_config_option")
+            .next_back();
+        if expected_setters == 0 {
+            assert!(
+                restore.is_none(),
+                "a directory that does not switch models needs no restore RPC"
+            );
+        } else {
+            assert_eq!(
+                restore.unwrap()["value"],
+                "model-0",
+                "the disposable Session restores its initial model"
+            );
+            if kind == AdapterKind::KiloCli && count == 2 {
+                assert_eq!(
+                    restore.unwrap()["current"],
+                    "model-1",
+                    "a failed selection may have changed native state and still needs restoration"
+                );
+            }
+        }
         assert!(!methods.iter().any(|m| m["method"] == "session/prompt"));
         let complete = AgentProfileService::default()
             .managed_installation(&*fixture.core.database.lock().await, kind, "default")
@@ -2597,17 +2645,54 @@ for line in sys.stdin:
             complete.model_catalog.status,
             RuntimeModelCatalogCacheStatus::Fresh
         );
-        assert!(
-            complete
-                .snapshot
-                .as_ref()
-                .unwrap()
-                .models
-                .iter()
-                .filter(|model| !model.options.is_empty())
-                .count()
-                == 1
-        );
+        if kind == AdapterKind::KiloCli {
+            for model in &complete.snapshot.as_ref().unwrap().models {
+                if kind == AdapterKind::KiloCli
+                    && (model.id == "model-2" || (count == 2 && model.id == "model-1"))
+                {
+                    assert!(
+                        model.options.is_empty(),
+                        "one unavailable model must not hide the catalog"
+                    );
+                    continue;
+                }
+                let option = &model.options[0];
+                assert_eq!(
+                    option.key,
+                    if kind == AdapterKind::KiloCli {
+                        "effort"
+                    } else {
+                        "thinkingEffort"
+                    }
+                );
+                let values = if model.id == "model-0" {
+                    ["low", "high"]
+                } else {
+                    ["medium", "max"]
+                };
+                assert_eq!(
+                    option
+                        .values
+                        .iter()
+                        .map(|choice| choice.value.as_str())
+                        .collect::<Vec<_>>(),
+                    values
+                );
+                assert_eq!(option.default_value.as_deref(), Some(values[1]));
+            }
+        } else {
+            assert!(
+                complete
+                    .snapshot
+                    .as_ref()
+                    .unwrap()
+                    .models
+                    .iter()
+                    .filter(|model| !model.options.is_empty())
+                    .count()
+                    == 1
+            );
+        }
         // A later health result cannot erase options or advance the complete catalog's clock.
         assert_eq!(
             fixture
@@ -2681,6 +2766,10 @@ for line in sys.stdin:
             .unwrap();
         assert_eq!(catalog["refreshStatus"], "completed");
         assert_eq!(catalog["cache"]["status"], "fresh");
+        if kind == AdapterKind::KiloCli {
+            fixture.close().await;
+            continue;
+        }
         // Initial current model is already confirmed by the directory read.
         std::fs::write(fixture.root.join("methods"), "").unwrap();
         let cached = fixture

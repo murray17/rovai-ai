@@ -7968,7 +7968,7 @@ describe('task event projections', () => {
       onOpenRuntimeSettings: () => undefined
     }))
 
-    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'hermes-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi'])
+    expect(VISIBLE_PRODUCT_RUNTIMES).toEqual(['claude-code-cli', 'codex-cli', 'copilot-cli', 'opencode-cli', 'kilo-cli', 'kiro-cli', 'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli', 'kimi-code-cli', 'minimax-code-cli', 'hermes-cli', 'grok-build', 'deepseek-harness', 'command-code-cli', 'zcode-app', 'antigravity-app', 'pi'])
     for (const platform of ['macos-arm64', 'macos-x64', 'windows-x64', 'linux-x64'] as const) {
       const admissions: HealthStatus['runtimePlatformAdmission'] = [{
         runtimeKind: 'hermes-cli', platform, status: 'enabled',
@@ -8492,7 +8492,7 @@ function runtimeAdmissionRows(
   const runtimeKinds: HealthStatus['runtimePlatformAdmission'][number]['runtimeKind'][] = [
     'codex-cli',
     'pi',
-    'opencode-cli',
+    'opencode-cli', 'kilo-cli',
     'copilot-cli',
     'claude-code-cli',
     'kiro-cli',

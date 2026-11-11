@@ -21,8 +21,10 @@ describe('message model identity', () => {
 
   it.each([
     ['codebuddy-cli', 'thought_level', '推理强度'],
+    ['kilo-cli', 'effort', '推理强度'],
+    ['command-code-cli', 'effort', '思考强度'],
     ['minimax-code-cli', 'thinkingEffort', '思考强度']
-  ] as const)('uses native effort in member summaries and the existing message effort field (%s)', (adapterKind, effortKey, label) => {
+  ] as const)('uses %s native effort in member summaries and frozen message labels', (adapterKind, effortKey, label) => {
     const native: AdapterInstallation = {
       ...installation,
       adapterKind,

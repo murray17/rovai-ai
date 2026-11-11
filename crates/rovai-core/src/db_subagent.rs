@@ -114,6 +114,7 @@ pub(super) fn assert_upgrade(database: &mut Database) {
         .execute_batch("DROP TRIGGER reject_directory_reference_marker;")
         .unwrap();
     database.migrate_project_directory_references().unwrap();
+    super::kilo::migrate(database).unwrap();
     assert_eq!(snapshot(database.connection()), before);
     assert!(matches!(
         classify_startup_contract(database.connection()).unwrap(),

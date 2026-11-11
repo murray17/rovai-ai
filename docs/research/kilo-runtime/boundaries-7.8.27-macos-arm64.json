@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-production-core-with-controlled-provider",
+  "recordedAt": "2026-11-10T04:43:16.255933+00:00",
+  "baseline": "2e8abb455a4e8d4f79fcfc30a74b8c6c53e2b4ad",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "platform": "darwin-arm64",
+  "status": "passed",
+  "fixture": "rovai-kilo-boundary 空格-_ny85zj1",
+  "provider": "local-controlled",
+  "paidModelRerun": false,
+  "core": {
+    "runCount": 19,
+    "succeeded": 17,
+    "intentionallyCancelled": 2,
+    "nodeAbsentFromRuntimePath": true,
+    "inheritedPureTrue": true,
+    "mcp": {
+      "literalArgsPreserved": true,
+      "nodeAbsentInChild": true,
+      "idleRetiredPid": 8054,
+      "busyRetiredPid": 8249,
+      "busyRun": "133f3c1b-82db-4aca-a6cb-0a3eb04b5f29",
+      "firstHost": "0f0bb37c-6343-4087-b34a-b739f5b3d92f",
+      "secondHost": "ac92dd29-797a-450f-839e-49561d2a2526",
+      "restoredHost": "6bdfbca4-e3b6-4dab-b71c-6cee08d90598"
+    },
+    "mcpWorkingDirectories": [
+      "different from session",
+      "same as session"
+    ],
+    "permissionRuns": {
+      "permissionFILE": "6d07f042-1a19-4edb-93fe-52b2a9a3f512",
+      "permissionINLINE": "219e3b2e-186d-4012-ac15-56dad5f048d1",
+      "permissionAGENT": "ac3ead75-fcf8-43ba-a805-d0f2697a1981",
+      "approval": {
+        "allowRun": "c6435805-cc63-453d-8e4f-289527f5bcc8",
+        "denyRun": "17f49bd5-a548-49a7-b5f3-33537ae529f3"
+      },
+      "savedDeny": "b980a0a6-26a8-4985-b2f4-eb8ba968a9df"
+    },
+    "relativeWriteDiff": {
+      "run": "c6435805-cc63-453d-8e4f-289527f5bcc8",
+      "path": "allowed.txt",
+      "additions": 1,
+      "deletions": 0
+    },
+    "frozenRunEffort": "high",
+    "cancel": {
+      "run": "820cf7b5-2711-4eec-8402-78c185b644af",
+      "status": "cancelled",
+      "nextRun": "5674fb33-8ea5-40eb-8de9-ee018236331e"
+    },
+    "steer": {
+      "run": "77eaf0be-68e8-46dd-80ee-4b19fc27157e",
+      "accepted": 1,
+      "sameRun": true,
+      "heldUntilAllRequests": true,
+      "cancelledWithPending": true
+    },
+    "runtimeFilesCleaned": true,
+    "runIds": [
+      "667240e7-3391-41b4-9845-022352fcd72a",
+      "29252abd-08af-4cc1-a229-517429c76268",
+      "6d07f042-1a19-4edb-93fe-52b2a9a3f512",
+      "219e3b2e-186d-4012-ac15-56dad5f048d1",
+      "ac3ead75-fcf8-43ba-a805-d0f2697a1981",
+      "63d091c8-0263-4ffd-bd9b-0863a8102815",
+      "a92eed8c-a14d-49fa-88c5-1f8483543d2e",
+      "bbde5404-574a-44d3-ae95-fe849ebdabb1",
+      "133f3c1b-82db-4aca-a6cb-0a3eb04b5f29",
+      "e3e83052-c9e5-4c18-a111-ede4c6cb4df8",
+      "c6435805-cc63-453d-8e4f-289527f5bcc8",
+      "17f49bd5-a548-49a7-b5f3-33537ae529f3",
+      "b980a0a6-26a8-4985-b2f4-eb8ba968a9df",
+      "820cf7b5-2711-4eec-8402-78c185b644af",
+      "5674fb33-8ea5-40eb-8de9-ee018236331e",
+      "77eaf0be-68e8-46dd-80ee-4b19fc27157e",
+      "817c5482-0c73-46f9-a94e-a08e2fc823da",
+      "96c39a39-fdc0-4bc2-a196-aee058443873",
+      "db96819b-c114-4702-ba72-0e152d0e118f"
+    ]
+  },
+  "failureComparisons": {
+    "noNodeFixture": "rovai-kilo-core-wbcX8W",
+    "ordinaryRunsBeforeMcpFailure": 7,
+    "delayedCancellationOwner": "cancellation_covers_launch_without_a_handle_and_has_one_total_deadline",
+    "controlledTerminalDelayMs": 1750,
+    "oldCleanupTruncatedFinalizer": true,
+    "fixedCleanupSawSettledMarker": true,
+    "fixedCleanupWithinUnchangedNonWindowsTotalMs": 3000
+  },
+  "scope": {
+    "admission": "macos-arm64-preview",
+    "windowsLauncherActuallyRun": false,
+    "realCommandCodeActuallyRun": false,
+    "allCancellationRacesProven": false,
+    "newRustTestFunctions": 0,
+    "newHashValidation": false,
+    "duplicateFileOperationWasDiskWrite": false
+  },
+  "nativeLauncher": {
+    "status": "passed",
+    "fixture": "rovai-mcp-cli 边界-n5uqs3eg",
+    "relativeExecutable": true,
+    "literalArgv": true,
+    "stdinStdoutStderr": true,
+    "exitCode": 7,
+    "invalidCwdStderrOnly": true,
+    "missingArgsStderrOnly": true
+  },
+  "developmentDesktop": {
+    "fixture": "rovai-kilo-dev-kfa734zr",
+    "launch": "pnpm dev",
+    "restagedWithBoundaryFixes": true,
+    "persistedDiff": {
+      "files": 3,
+      "additions": 5,
+      "deletions": 3,
+      "expandedPath": "待编辑.txt"
+    },
+    "draftPreserved": true,
+    "newModelRequest": false
+  },
+  "gates": {
+    "cargoWorkspace": {
+      "passed": 484,
+      "ignored": 1
+    },
+    "extendedOwners": "passed",
+    "delayedCleanupSlowOwner": "passed",
+    "frontend": {
+      "passed": 3193,
+      "skipped": 2
+    },
+    "node": {
+      "passed": 377,
+      "skipped": 2
+    },
+    "typecheck": "passed",
+    "desktopBuild": "passed",
+    "developmentLaunchAndPersistedDiff": "passed",
+    "documentationTests": {
+      "passed": 10
+    },
+    "documentationCheck": "passed",
+    "documentationCiBase": "958784f6e17fc32d8b2753d7f14fd6122dceea9d",
+    "cargoFmt": "passed",
+    "nodeSyntax": "passed",
+    "gitDiffCheck": "passed"
+  }
+}

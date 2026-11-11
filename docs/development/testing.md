@@ -153,6 +153,79 @@ cargo test -p rovai-core --lib --features extended-tests native_
 cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts
 ```
 
+## Kilo 官方 ACP 验证归属
+
+Kilo 扩展现有 Adapter 默认值/闭集、Context 投递、平台准入、原生配置及数值 owners，不新增 Rust 测试函数。
+`runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 同时覆盖 migration 223/schema 172→173
+七个闭集表、触发器、行保留与事务失败回滚；旧 fixture 的 downgrade/upgrade 链延伸到当前 marker。
+`opencode_detector_plugin_is_additive_to_runtime_config` 增加 Kilo 原生 JSON5 保序、权限/plugin/pure 保留及 instructions 追加与去重，不再生成权限回调；
+`opencode_metadata_excludes_old_pending_child_and_repeated_calls` 增加 Kilo 消息计费与重复 poll 去重。
+最小定向入口为：
+
+```sh
+cargo test -p rovai-core --features extended-tests --lib runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts
+cargo test -p rovai-core --features extended-tests --lib opencode_detector_plugin_is_additive_to_runtime_config
+cargo test -p rovai-core --features extended-tests --lib opencode_metadata_excludes_old_pending_child_and_repeated_calls
+```
+
+默认 workspace、TypeScript/Renderer/Node 和跨边界 Desktop build 仍须通过。
+真实官方 CLI 的独立原生探针为 `node scripts/probe-kilo-runtime.mjs`，生产 Core 入口为
+`node scripts/smoke-kilo-runtime.mjs`；均须显式 `ROVAI_KILO_BIN`，不注册到默认测试。
+Core smoke 使用系统临时根的独立 data/Skills/MCP、成员专属 XDG data 与 loopback Provider，
+分别验证首次/warm/cold、原生审批、取消后继与共享部分采样；不使用日常配置或账户。
+当前矩阵与真实证据见[实施记录](../versions/v1.72/kilo-acp-implementation.md)。
+
+复核扩展同一配置 owner 验证全局/Agent 嵌套规则保序及 KILO_DB 的缺省/绝对/相对/:memory: 路径；
+共享 cwd、模型目录、目录来源及 Fleet owners 分别扩展 Kilo，不新增 Rust 测试函数。
+完整门禁和原生权限、MCP A → B → A、Steer 研究的实际边界见[复核记录](../versions/v1.72/kilo-acp-review-fixes.md)。
+
+后续文件/Steer smoke 仍扩展上述两个脚本，不新建并行入口。原生探针增加 write/read/edit 与后台拒绝/前台 task；
+Core smoke 增加同 Run 更正、待回执取消及普通后继。终态汇合和取消等待复用既有 active-input receipt owner，
+文件元数据、exists 与 patch 共用事件归一化和 native patch owners。真实 sub2api 开发 App 与受控 Provider 分开记账，
+结果和范围见[文件与 Steer 实施记录](../versions/v1.72/kilo-files-steer-verification.md)。
+
+边界自检沿原 smoke 限制 Runtime PATH 无 Node，Python MCP 分别使用相同/不同 cwd，
+验证 bundled CLI 的中文/空格路径和逐项 argv，继承 pure=true 的真实权限及相对 write 的持久 Diff。
+共享 MCP wire owner 验证 Kilo/Command Code 的同一原生 launcher；cleanup 原 owner 用 1.75 秒终态验证正式阶段预算。
+模型 metadata/Renderer 原 owners 覆盖 Kilo、Command Code 与 MiniMax effort；新增 Rust 测试函数仍为零。
+结果见[边界收尾](../versions/v1.72/kilo-boundary-fixes.md)。
+
+成功 Steer 复用继续扩展原 active-input owner，核对正常汇合解除退役、错误/未知不解除及两种 RPC 终态顺序；
+Core smoke 使用三个连续 Steer/普通后继转换验证同 Host/Session 与后继 CLI lease，每轮实际发送无重复 final。
+该阶段待回执取消的退役记录保留；当前确认取消后的 Warm 范围由下述简化验收覆盖。
+不新增 Rust 测试函数或并行验收入口。见[复用记录](../versions/v1.72/kilo-steer-reuse.md)。
+
+前台 task 展示扩展原 Prompt-local provenance 与 ACP 公开归一化 owners，包含固定函数标签、运行改名、
+稀疏终态、参数保留、稳定调用 ID 和未知反例；不新增 Rust 测试函数或 classifier。
+原 Core smoke 增加短/超预算 task 报告、超预算命令与重开后永久截断，并确认模型仍收到完整报告。
+共享 Renderer 继续运行 `node --test scripts/lib/command-view.test.mjs`，实际范围见[补全记录](../versions/v1.72/kilo-subagent-display.md)。
+
+自动压缩改用原生 `auto=true`、真实 summary 和压缩后普通请求的完整 Bootstrap 验收，不用 `/compact` 代替。
+原 probe 另用非生成模型切换核对不同模型的 effort；Core smoke 覆盖 threshold、Provider overflow 与冷恢复。
+原 TRAE warm/Fleet owner 增加 child 锁持有时根 PID 不丢失的反例，新增 Rust 测试函数为零；
+最小命令为 `cargo test -p rovai-core --features extended-tests --lib trae_completed_run_enters_lru_and_reuses_the_same_host_session`。
+夹具、失败分工与证据范围见[专项核对](../versions/v1.72/kilo-auto-compaction-and-options.md)。
+
+逐模型 effort 接线扩展既有 `grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs`
+及 `minimax_check_and_catalog_keep_their_intent_and_complete_options`：Kilo/MiniMax 各自的档位、
+初始默认保留、空选项、单模型不可选、普通检查不遍历和完整目录持久保留。没有新增 Rust 测试函数。
+原 Core smoke 增加两组不同 variants 与无 variants 模型，核对目录零生成、真实选中参数和冻结历史；
+原 `scripts/lib/runtime-model-picker.test.mjs` 覆盖队员及引导两个实际入口。结果见[模型选项记录](../versions/v1.72/kilo-model-options.md)。
+
+MCP/原生权限/取消简化继续扩展这些既有 owners：
+
+- `runtime_configuration_writes_preserve_startups_and_retire_changed_command_hosts` 保留 Command Code 主动退役断言，增加受影响 Kilo 成员保存后不退役。
+- `model_options_preserve_native_intent_across_catalog_refresh` 覆盖旧 Kilo permission 的窄兼容和其他未知键/错误容器仍拒绝。
+- `active_input_receipts_preserve_the_original_prompt_and_fence_late_sources` 覆盖全部补充请求收口、已确认取消可解除退役及真实错误不能被 cancelled 掩盖。
+- `cancellation_covers_launch_without_a_handle_and_has_one_total_deadline` 保留原无 handle/迟到启动和 1.75 秒终态断言，增加 Kilo/OpenCode 快速、1.75 秒、超时、不回包、断连、错误、未知、显式停止和旧 cleanup 不杀 epoch 2；原生终态回调不抢先释放已取消 Run。
+- `runtime_cancellation_terminates_and_releases_client_terminals` 保留终端回收与迟到 create 被拒断言；无原生终态只确认终端处理，不可宣称完整取消已确认。
+- 原 Fleet 取消/失败退役/持久回执 owners、ZCode 与 Hermes 专有边界继续回归；新增 Rust 测试函数为零。
+
+官方 Core smoke 覆盖 MCP A→B→A、忙时保存、禁用/删除、精确 Session；原生 allow/ask/deny、用户插件、pure、无 question；
+普通取消与 1/3 条用户 Steer 的同 Host/PID/Session 后继、新 CLI lease、旧租约拒绝、完整冻结 Bootstrap。
+三条用户输入中一条已提交、两条按既有共享调度排队；原生 probe 另验证三条已提交补充，不能混记。
+环境切换验收遵循 cold-spawn，不把 Warm 的环境快照误判为权限覆盖。结果及失败对照见[简化记录](../versions/v1.72/kilo-simplification.md)。
+
 ## Rust 测试准入与退役门槛
 
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
@@ -278,11 +351,12 @@ CodeBuddy 的逐模型/旧 Session 档位扩展 `grouped_acp_models_keep_opaque_
 `cargo test -p rovai-core --lib windows_command_shim_content_changes_compatibility_fingerprint`。
 
 `runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_complete_options`
-拥有 MiniMax 的新健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
+拥有 MiniMax/Kilo 的健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
 目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功
 写入，不能覆盖此回归，因此复用它的私有 Core/DB/Check Manager fixture 增加一个有真实协议进程的 owner；
 单纯测合并谓词无法证明第一次目录回退或持久化成功时间。表中 2／8 个模型分别执行检查先到／目录先到，
-不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
+MiniMax/Kilo 的单模型用例验证未尝试切换时零 setter；Kilo 的双模型用例验证原生先改状态再报错，仍须恢复初始模型。
+Kilo 的 3 模型用例另含一个不可选候选；不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
 `cargo test -p rovai-core --features slow-tests --lib minimax_check_and_catalog`。
 
 其余扩展既有 health、Pi Host、ZCode transport、Adapter 和 Renderer 参数 owner。Grok 旧的“恢复必须执行

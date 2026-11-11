@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v5
-last_updated: 2026-11-01
+last_updated: 2026-11-10
 ---
 
 # Runtime Activity Mapping Registry
@@ -15,6 +15,7 @@ last_updated: 2026-11-01
 | `cline-cli` | Cline | `acp-v1` | `run_level` | 共享 ACP tool 配对；run_commands 原生失败与成功 apply_patch/editor reported_mutation | 共享 ACP、Diff/file-operation/recovery owner | macOS arm64 Preview；[当前 ACP 验收](../research/cline-runtime/acp-retirement-2026-10-08.md)，Hub 证据退役 |
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；Core v3 不生成 commandActions 标题，但非空、全 read、唯一 path 的 `commandActions` 可形成 typed read；Renderer 从公开 command 生成去 wrapper、保留完整序列并脱敏的 Shell 标题；只有 `item.type=webSearch` 可把 `item.query` 投影为 Search Operation | structured read 正反例、Renderer 跨 Runtime 命令/脱敏/详情、typed query 与普通 query 排除回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；`0.147.0` WebSearch wire 实证通过；[`0.153.4` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
 | `pi` | Pi | Pi JSONL RPC v1 | `fine_grained` | 只消费 `tool_execution_start/update/end` 的稳定 `toolCallId`、结构化 name/input/result；同一 ToolCall 的 start/update 精确 `read/write/edit + args.path` 与成功 terminal 可形成 typed read/write；成功 `edit` 的 `result.details.patch` 只有在 old/new header 都与同 ToolCall path 完全一致且包含 hunk 时形成 unified diff；`write` 保持 path-only；update 作为累计预览，唯一 terminal 结算 Action；所有 Built-in/Extension Tool 按 Pi 原生语义执行，Rovai 不审批或阻断 | Tool started→terminal、结束事件省略参数、read/write/edit、edit patch 正例、header mismatch、write/失败 edit 反例、累计输出、重放去重和未知 Tool shape fixture 已建立；Pi 无 Rovai Approval、sandbox 或 MCP proxy | 本机 `0.84.4` + `minimax-cn/MiniMax-M3` 已通过官方配置直连；[v1.52 read/write 真实结果](../versions/v1.52/runtime-acceptance.md)已通过；`0.84.4` native session 的 edit patch wire 已核验，本次 post-fix 模型 smoke 未执行 |
+| `kilo-cli` | Kilo | ACP v1 | `run_level` | 共用 ACP kind/ToolCall identity 和 snapshot 输出；成功终态 filediff/files 的原生 patch 复用共享 Diff 与 execution-root 路径核对；write Boolean exists 区分 add/update，共同 file-operation 不重复构造，delete 仅形成 Diff；不把 edit 替换片段当完整文件；task 以原生函数标签/结构化签名进入共享子代理展示，其余 title 仅作提示 | 扩展 ACP 配置、结果归一化、write exists、native patch、Steer、子代理 provenance 与 numeric reader owners | 7.8.27 macOS arm64 的受控 write/read/edit、后台拒绝/前台子代理与既有场景通过；sub2api/gpt-6.1-sol 真实 write/read/apply_patch、同 Run Steer 已运行，见[开发版与 Core 验证](../versions/v1.72/kilo-files-steer-verification.md)；后续无 Node/相对路径与取消预算见[边界自检](../versions/v1.72/kilo-boundary-fixes.md)，前台 task 的持久化与输出预算见[补全记录](../versions/v1.72/kilo-subagent-display.md)；完整资格未取得 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text`；`1.18.20` write metadata 的 Boolean `exists` 只在同 ToolCall 路径对齐后区分 add/update | 受控 fixture、固定 `printf` 与 metadata 正反例断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；[`1.18.20` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；`1.0.79 kind=search + query-only rawInput` 可投影 Web 搜索，`kind=read + pattern` 文件搜索不得准入；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | query-only positive、文件搜索 negative、固定 `printf` fixture 已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 Web/file search 与 command-output wire 已核验 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；`2.18.1 kind=search + query-only rawInput` 可投影 Web 搜索，`{path,pattern}` 内容搜索与 pattern-only glob 不得准入；成功 Edit/Write 的唯一标准 location 可独立命名文件操作；单 entry Diff 的 rooted-relative path 只在与同 ToolCall location 完全对应时纠正；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验；[subagent 名称与报告](#native-subagent-command)只按原生 metadata 归一化 | Search Operation positive/negative、path-only、标准 Diff、精确路径对齐与 mismatch fail-closed fixture；subagent 正例、标题反例与同调用稀疏终态通过 | ACP session + Skill turn + MCP projection 通过；[`2.21.1` 文件操作矩阵](../versions/v1.52/runtime-acceptance.md)及[登录后 subagent 补验](../versions/v1.72/subagent-flat-execution.md#开发-app-问题补验)通过，独立 child Session 工具边界保留 |
@@ -373,6 +374,7 @@ Core normalizer 的 `runtimeToolType=agent` 进入 `tool / tool.agent`，Rendere
 | Grok Build | `_meta["x.ai/tool"].name`，`spawn_subagent` 为 agent；共享 `get_command_or_subagent_output` 保留普通工具类型与真实 task_ids 参数，不从名称推断其目标全是子代理 |
 | ACP 原生函数标签 | Kimi 的 Agent/TaskOutput/TaskStop，Command Code 的 agent，DSH 的 subagent 精确函数标签；Hermes 的固定 delegate_task 原生标签格式；不按任意标题文字推断 |
 | Copilot ACP | `kind=other + rawInput.agent_type + rawInput.prompt` 的 task 结构；read_agent 的固定原生函数标签、read kind 与 agent_id 入参；仅标题不准入 |
+| Kilo ACP | 固定 `title=task + kind=think` 函数标签，或 `kind=think + rawInput.description/subagent_type/prompt` 字符串结构；标题改名与稀疏终态复用同调用缓存；仅任意标题不准入 |
 | Qwen lifecycle | `_meta.source=background_task_completed/background_notification` 且 backgroundTask.kind=agent，独立通知不进入正文 |
 | TRAE lifecycle | 原生 `subagent:*:lifecycle:*` ID 且 rawOutput.type=subagent_completion 是通知，不作为调用 |
 
@@ -381,5 +383,7 @@ Core normalizer 的 `runtimeToolType=agent` 进入 `tool / tool.agent`，Rendere
 Kiro 的名称来自结构化 metadata，`Spawning agent crew` 标题本身不准入；同调用 terminal 省略 metadata 时沿用已观察名称。
 `rawOutput.items[].Text` 报告保留在普通 command 的结构化返回中。独立 child Session 的工具不补采，独立通知不覆盖该调用。
 这次补齐原生归一化输入，不改变 activity-v5 对 `runtimeToolType=agent` 的分类规则；不重分类或回填修补前的 Kiro Evidence。
+Kilo 同样补齐现有 typed normalizer，不升级分类器或回填旧 Evidence；报告留在 task 返回中，结果 metadata 的目标 Session 不作为作者。
+官方 7.8.27 的生产 Core 短/长 task、同调用更新与重开后输出预算通过，见[补全记录](../versions/v1.72/kilo-subagent-display.md)。
 来源配对和匿名并发回退由 Prompt-local owner 覆盖；既有 ACP、Codex、Evidence、正文和 Renderer owners 覆盖生命周期与展示。
 实测及限制记录在[实施记录](../versions/v1.72/subagent-flat-execution.md)。

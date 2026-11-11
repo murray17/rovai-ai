@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-production-core-controlled-provider",
+  "recordedAt": "2026-11-10T10:00:56.920Z",
+  "baseline": "929cde03ecbfb6d1247450771b9155368609c534",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "platform": "darwin-arm64",
+  "fixture": "rovai-kilo-task-51mwawvw",
+  "status": "passed",
+  "provider": "local-controlled",
+  "paidModelRerun": false,
+  "runCount": 26,
+  "runs": [
+    {
+      "status": "cancelled",
+      "count": 2
+    },
+    {
+      "status": "succeeded",
+      "count": 24
+    }
+  ],
+  "inputs": [
+    {
+      "input_kind": "start",
+      "status": "accepted",
+      "count": 26
+    },
+    {
+      "input_kind": "steer",
+      "status": "accepted",
+      "count": 3
+    },
+    {
+      "input_kind": "steer",
+      "status": "delivery_unknown",
+      "count": 1
+    }
+  ],
+  "foregroundSubagents": {
+    "rows": [
+      {
+        "run": "803f346a-20d7-4874-821f-c4dc5bd46624",
+        "evidence": "7fd8b857-5a7f-4ff6-9655-b9e3b5881a41",
+        "bytes": 115,
+        "outputTruncated": false
+      },
+      {
+        "run": "32126e07-aaa0-4e88-8a74-2ddeeeb60caa",
+        "evidence": "b17266e1-5af5-4eda-97af-1f1816970ad3",
+        "bytes": 7680,
+        "outputTruncated": true
+      }
+    ],
+    "stableOperation": true,
+    "parametersRetained": true,
+    "childReportInToolOnly": true,
+    "nativeModelReceivesFullReport": true
+  },
+  "commandOutputBudget": {
+    "run": "5a78eac5-58bc-45a3-8ce5-bdaf7d91015e",
+    "evidence": "d4a019fd-1376-48ca-8732-5ba2ef7e8f5f",
+    "bytes": 7679,
+    "outputTruncated": true
+  },
+  "outputBudgetSurvivesReopen": true,
+  "steer": {
+    "run": "d2b08c1a-a30c-414c-86f4-e4467d9da9bb",
+    "accepted": 3,
+    "sameRun": true,
+    "heldUntilAllRequests": true,
+    "warmReuseCycles": [
+      {
+        "cycle": 1,
+        "run": "d2b08c1a-a30c-414c-86f4-e4467d9da9bb",
+        "nextRun": "980a647b-b5c6-4441-ad49-0db6c83f3035",
+        "host": "7ded833d-f164-49e9-be37-578daefb73de",
+        "session": "ses_e3b1acd4effepqxxmUDEF6s2f8",
+        "cliMessageCommitted": true
+      },
+      {
+        "cycle": 2,
+        "run": "8ab2c1c1-7ffb-4d00-bbaf-65cadb6ad738",
+        "nextRun": "f40fd582-c659-4a10-960e-7386250faf9b",
+        "host": "7ded833d-f164-49e9-be37-578daefb73de",
+        "session": "ses_e3b1acd4effepqxxmUDEF6s2f8",
+        "cliMessageCommitted": true
+      },
+      {
+        "cycle": 3,
+        "run": "95a54fbf-b3b4-4d90-9168-fdd4e202335f",
+        "nextRun": "9a853498-1bdd-4575-af8d-0290e1124e53",
+        "host": "7ded833d-f164-49e9-be37-578daefb73de",
+        "session": "ses_e3b1acd4effepqxxmUDEF6s2f8",
+        "cliMessageCommitted": true
+      }
+    ],
+    "cancelledWithPending": true,
+    "cancelledHostRetired": true
+  },
+  "nodeAbsentFromPath": true,
+  "inheritedPureTrue": true,
+  "runtimeFilesCleaned": true,
+  "scope": {
+    "admission": "macos-arm64-preview",
+    "newRustTestFunctions": 0,
+    "newRuntimeQueuesOrChildScheduler": false,
+    "childSessionsProactivelyRead": false,
+    "backgroundSubagentPolicyChanged": false,
+    "skillsVerificationChanged": false,
+    "versionPolicyChanged": false,
+    "newRendererComponent": false
+  }
+}

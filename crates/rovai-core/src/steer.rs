@@ -33,6 +33,7 @@ pub fn supports_active_input(adapter: &str) -> bool {
             | "zcode-app"
             | "trae-cn-cli"
             | "hermes-cli"
+            | "kilo-cli"
             | "opencode-cli"
     )
 }
@@ -113,6 +114,7 @@ pub fn protocol_unavailable(
         "zcode-app" => ([0, 16, 5], 0),
         "trae-cn-cli" => ([0, 207, 1], 0),
         "hermes-cli" => ([0, 22, 4], 0),
+        "kilo-cli" => ([7, 8, 27], 7),
         "opencode-cli" => ([2, 2, 7], 2),
         // The unresolved 2.132.0 business outcome is not an established ABI break.
         // CodeBuddy uses a minimum-only version policy; observed release results

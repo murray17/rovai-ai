@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-local-provider-core",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "recordedAt": "2026-11-09T08:16:34.518447+00:00",
+  "provider": "loopback OpenAI-compatible fixture, generated token",
+  "paidModel": false,
+  "rendererVerified": false,
+  "platformAdmission": "preview",
+  "limitations": [
+    "Partial shared background sampling; short runs may have unknown usage",
+    "No threshold or overflow compaction verification",
+    "No full Core Skill/MCP assignment mutation matrix",
+    "No paid model, real auth, crash/timeout or other-platform qualification"
+  ],
+  "root": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-l9p6vx",
+  "platform": "darwin-arm64",
+  "checks": {
+    "bootstrap": {
+      "bytes": 2817,
+      "nativeSystemVerbatim": true,
+      "userDynamicOnly": true
+    },
+    "firstAndWarm": {
+      "firstRun": "3b4acd2d-73bb-4fb7-befe-b153545a3f14",
+      "warmRun": "fce55815-c32d-4542-8d40-988a56c87fca",
+      "host": "10e31740-a05a-478a-b753-9b59dd39e9d2",
+      "session": "ses_e40a0b292ffefv5gZhVQc0B0kP"
+    },
+    "metrics": {
+      "runs": [
+        {
+          "agentRunId": "3b4acd2d-73bb-4fb7-befe-b153545a3f14",
+          "cacheReadTokens": 25,
+          "cacheWriteTokens": 0,
+          "executionEpoch": 1,
+          "finalizedAt": null,
+          "inputOutputComplete": false,
+          "lastObservedAt": "2026-11-09T08:14:16.653+00:00",
+          "outputTokens": 20,
+          "promptInputTotalTokens": 100
+        },
+        {
+          "agentRunId": "fce55815-c32d-4542-8d40-988a56c87fca",
+          "cacheReadTokens": null,
+          "cacheWriteTokens": null,
+          "executionEpoch": 1,
+          "finalizedAt": null,
+          "inputOutputComplete": false,
+          "lastObservedAt": null,
+          "outputTokens": null,
+          "promptInputTotalTokens": null
+        }
+      ],
+      "schemaVersion": 1,
+      "sessions": [
+        {
+          "agentId": "agent_2",
+          "conversationId": "d36e9da2-aeb2-4e97-a1ac-c790de3e19be",
+          "dialectId": "kilo-native-call-context-v1",
+          "modelKey": "local/local-model",
+          "nativeRatio": null,
+          "observedAt": "2026-11-09T08:14:16.653+00:00",
+          "runtimeKind": "kilo-cli",
+          "sessionGeneration": 1,
+          "source": "runtime_private_extension",
+          "usedTokens": 100,
+          "windowTokens": null
+        }
+      ]
+    },
+    "nativeUsageDataDirectory": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-l9p6vx/member-data/kilo",
+    "cold": {
+      "run": "89f972aa-1c90-48b2-919e-102f5bd1dee0",
+      "host": "6361cd7d-d4e3-406a-b9e5-58ab5951e9a2",
+      "session": "ses_e40a0b292ffefv5gZhVQc0B0kP"
+    },
+    "approval": {
+      "allowRun": "840f9617-cebc-4849-b28f-04b75cddaa1c",
+      "denyRun": "d6a101da-5a29-4b2c-b201-ab3474f913df"
+    },
+    "cancel": {
+      "run": "88a9628a-962f-4f06-94fe-844511b62fd5",
+      "status": "cancelled",
+      "nextRun": "c0e28892-49ab-4358-bbfc-81011376c8c6"
+    },
+    "runtimeFilesCleaned": true,
+    "remainingOwnedProcesses": [],
+    "commandOutput": {
+      "source": "runtime.action.payload.output",
+      "markerOccurrences": 1
+    }
+  },
+  "finishedRuns": [
+    "3b4acd2d-73bb-4fb7-befe-b153545a3f14",
+    "fce55815-c32d-4542-8d40-988a56c87fca",
+    "89f972aa-1c90-48b2-919e-102f5bd1dee0",
+    "840f9617-cebc-4849-b28f-04b75cddaa1c",
+    "d6a101da-5a29-4b2c-b201-ab3474f913df",
+    "88a9628a-962f-4f06-94fe-844511b62fd5",
+    "c0e28892-49ab-4358-bbfc-81011376c8c6"
+  ],
+  "status": "passed"
+}

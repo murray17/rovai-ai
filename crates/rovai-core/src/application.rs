@@ -344,6 +344,7 @@ const MISSION_GIT_READ_CONCURRENCY_LIMIT: usize = 2;
 enum RuntimeCancellationIngressFence {
     Flushed,
     Reaped,
+    Reusable,
     Unproven,
 }
 
@@ -2634,6 +2635,7 @@ struct Core {
     codex_cli: CodexCliRuntimeAdapter,
     pi: PiRpcRuntimeAdapter,
     opencode_cli: AcpCliRuntimeAdapter,
+    kilo_cli: AcpCliRuntimeAdapter,
     copilot_cli: AcpCliRuntimeAdapter,
     kiro_cli: AcpCliRuntimeAdapter,
     qoder_cli: AcpCliRuntimeAdapter,
@@ -2992,6 +2994,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::CodexCli => "Codex CLI",
         AdapterKind::Pi => "Pi",
         AdapterKind::OpencodeCli => "OpenCode",
+        AdapterKind::KiloCli => "Kilo",
         AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",
         AdapterKind::KiroCli => "Kiro CLI",
@@ -3035,11 +3038,11 @@ impl AgentRunRuntime {
         }
     }
 
-    async fn cancel(&self) -> Result<()> {
+    async fn cancel_until(&self, deadline: tokio::time::Instant) -> Result<()> {
         match self {
             Self::Codex(runtime) => runtime.interrupt().await,
             Self::Pi(runtime) => runtime.cancel().await,
-            Self::Acp(runtime) => runtime.cancel().await,
+            Self::Acp(runtime) => runtime.cancel_until(deadline).await,
             Self::Claude {
                 adapter,
                 run_id,
@@ -3347,6 +3350,7 @@ impl Core {
                             &target.agent_run_id,
                             target.execution_epoch,
                             target.adapter_kind.as_str(),
+                            FleetReleaseDisposition::Stop,
                         )
                         .await;
                     (target, fence)
@@ -6045,7 +6049,7 @@ impl Core {
                 AgentProfileService::default().commit_verified_managed_installation(
                     &mut database,
                     VerifiedManagedInstallation {
-                        model_catalog_complete: kind != AdapterKind::MinimaxCodeCli
+                        model_catalog_complete: kind.acp_selected_model_effort_key().is_none()
                             || catalog_requested,
                         executable_file_identity: Some(
                             final_entry.executable_file_identity().clone(),
@@ -6161,10 +6165,10 @@ impl Core {
                 },
             )?;
             // A native directory obtained before a later diagnostic failure is
-            // still current evidence. Partial MiniMax observations are excluded.
+            // still current evidence. Partial model-specific ACP observations are excluded.
             if targets_current_installation
                 && kind != AdapterKind::Pi
-                && (kind != AdapterKind::MinimaxCodeCli || catalog_requested)
+                && (kind.acp_selected_model_effort_key().is_none() || catalog_requested)
                 && rovai_core::agent_runtime_adapter::model_catalog_has_usable_entries(
                     &snapshot.models,
                 )
@@ -6322,6 +6326,13 @@ impl Core {
             return Some(AgentRunRuntime::Pi(runtime));
         }
         if let Some(runtime) = self
+            .kilo_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
             .opencode_cli
             .get_agent_run(agent_run_id, execution_epoch)
             .await
@@ -6473,18 +6484,14 @@ impl Core {
                 {
                     return false;
                 }
-                match run_with_cancellation_deadline(
-                    RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT,
-                    runtime.cancel(),
-                )
-                .await
-                {
-                    Some(Ok(())) => {}
-                    Some(Err(error)) => eprintln!(
+                let deadline = tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT;
+                match tokio::time::timeout_at(deadline, runtime.cancel_until(deadline)).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => eprintln!(
                         "planned stop failed for AgentRun {}: {error:#}",
                         execution.key.agent_run_id
                     ),
-                    None => eprintln!(
+                    Err(_) => eprintln!(
                         "planned stop timed out for AgentRun {}",
                         execution.key.agent_run_id
                     ),
@@ -6534,6 +6541,7 @@ impl Core {
             self.pi.shutdown_all(),
             self.cline_cli.shutdown_all(),
             self.opencode_cli.shutdown_all(),
+            self.kilo_cli.shutdown_all(),
             self.copilot_cli.shutdown_all(),
             self.kiro_cli.shutdown_all(),
             self.qoder_cli.shutdown_all(),
@@ -6561,6 +6569,7 @@ impl Core {
                 self.pi.shutdown_all(),
                 self.cline_cli.shutdown_all(),
                 self.opencode_cli.shutdown_all(),
+                self.kilo_cli.shutdown_all(),
                 self.copilot_cli.shutdown_all(),
                 self.kiro_cli.shutdown_all(),
                 self.qoder_cli.shutdown_all(),
@@ -6591,6 +6600,7 @@ impl Core {
     ) -> Option<&AcpCliRuntimeAdapter> {
         match kind {
             rovai_core::agent_profile::AdapterKind::OpencodeCli => Some(&self.opencode_cli),
+            AdapterKind::KiloCli => Some(&self.kilo_cli),
             rovai_core::agent_profile::AdapterKind::CopilotCli => Some(&self.copilot_cli),
             rovai_core::agent_profile::AdapterKind::KiroCli => Some(&self.kiro_cli),
             rovai_core::agent_profile::AdapterKind::QoderCli => Some(&self.qoder_cli),
@@ -13401,6 +13411,7 @@ impl Core {
                 )
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -13430,7 +13441,11 @@ impl Core {
                         adapter_kind: kind,
                         reported_version: probe.result.reported_version,
                         executable_fingerprint: probe.result.executable_fingerprint,
-                        authentication_status: if kind == AdapterKind::ClineCli {
+                        authentication_status: if kind == AdapterKind::ClineCli
+                            || (kind == AdapterKind::KiloCli
+                                && probe.result.status
+                                    != health::AgentRuntimeProbeStatus::AuthenticationRequired)
+                        {
                             "unknown".to_string()
                         } else {
                             probe_authentication_status(probe.result.status).to_string()
@@ -15257,6 +15272,17 @@ impl Core {
                 &candidate.agent_run_id,
                 candidate.execution_epoch,
                 &candidate.adapter_kind,
+                if candidate.status == "cancelled"
+                    && !self.planned_shutdown.shutdown_started()
+                    && matches!(
+                        candidate.cancel_reason_code.as_deref(),
+                        Some("user_requested_agent_run_stop" | "camp_turn_cancelled")
+                    )
+                {
+                    FleetReleaseDisposition::Reusable
+                } else {
+                    FleetReleaseDisposition::Stop
+                },
             )
             .await;
         if fence == RuntimeCancellationIngressFence::Unproven {
@@ -15300,6 +15326,7 @@ impl Core {
             json!({
                 "threadId": candidate.camp_id, "agentRunId": candidate.agent_run_id,
                 "executionEpoch": candidate.execution_epoch,
+                "hostDisposition": if fence == RuntimeCancellationIngressFence::Reusable { "reusable" } else { "reaped" },
             }),
         );
         // Git and projection work do not extend the Runtime cleanup budget.
@@ -15307,7 +15334,11 @@ impl Core {
         self.agent_run_tasks.lock().await.spawn(async move {
             core.reconcile_skill_projection_after_run_terminal(&candidate.execution_root)
                 .await;
-            if fence == RuntimeCancellationIngressFence::Flushed {
+            if matches!(
+                fence,
+                RuntimeCancellationIngressFence::Flushed
+                    | RuntimeCancellationIngressFence::Reusable
+            ) {
                 core.project_agent_run_file_changes_after_terminal(
                     &candidate.agent_run_id,
                     candidate.execution_epoch,
@@ -15322,7 +15353,7 @@ impl Core {
         true
     }
 
-    async fn finish_codex_terminal_host(
+    async fn finish_fleet_terminal_host(
         &self,
         agent_run_id: &str,
         execution_epoch: i64,
@@ -15338,7 +15369,7 @@ impl Core {
                 agent_run_id,
                 execution_epoch,
             ) {
-                eprintln!("failed to acknowledge Codex release: {error:#}");
+                eprintln!("failed to acknowledge Runtime release: {error:#}");
                 return;
             }
             self.runtime_fleet
@@ -15400,15 +15431,17 @@ impl Core {
         agent_run_id: &str,
         execution_epoch: i64,
         adapter_kind: &str,
+        disposition: FleetReleaseDisposition,
     ) -> RuntimeCancellationIngressFence {
         let started = tokio::time::Instant::now();
         let deadline = started + RUNTIME_CANCELLATION_TOTAL_TIMEOUT;
         tokio::time::timeout_at(deadline, async {
-            let interrupt_deadline = started + Duration::from_secs(1);
-            let flush_deadline = started + Duration::from_millis(1500);
+            let interrupt_deadline = started + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT;
+            let flush_deadline = interrupt_deadline + Duration::from_millis(500);
             let key = ActiveExecutionKey::new(agent_run_id, execution_epoch);
             self.planned_shutdown.cancel_active(&key).await;
             let mut flushed = false;
+            let mut interrupted = false;
             let one_shot = matches!(adapter_kind, "antigravity-app" | "claude-code-cli");
             loop {
                 if one_shot {
@@ -15424,11 +15457,54 @@ impl Core {
                 } else if let Some(runtime) =
                     self.agent_run_runtime(agent_run_id, execution_epoch).await
                 {
-                    let _ = tokio::time::timeout_at(interrupt_deadline, runtime.cancel()).await;
+                    if let AgentRunRuntime::Acp(runtime) = &runtime
+                        && disposition == FleetReleaseDisposition::Stop
+                        && runtime.adapter_kind() != AdapterKind::ZcodeApp
+                    {
+                        self.runtime_fleet
+                            .retire_agent_run_on_host(
+                                agent_run_id,
+                                execution_epoch,
+                                runtime.host_instance_id(),
+                            )
+                            .await;
+                    }
+                    interrupted = matches!(
+                        tokio::time::timeout_at(
+                            interrupt_deadline,
+                            runtime.cancel_until(interrupt_deadline),
+                        )
+                        .await,
+                        Ok(Ok(()))
+                    );
+                    if !interrupted
+                        && let AgentRunRuntime::Acp(runtime) = &runtime
+                        && runtime.adapter_kind() != AdapterKind::ZcodeApp
+                    {
+                        self.runtime_fleet
+                            .retire_agent_run_on_host(
+                                agent_run_id,
+                                execution_epoch,
+                                runtime.host_instance_id(),
+                            )
+                            .await;
+                    }
                     flushed =
                         tokio::time::timeout_at(flush_deadline, runtime.detach_and_flush_ingress())
                             .await
                             == Ok(true);
+                    if !flushed
+                        && let AgentRunRuntime::Acp(runtime) = &runtime
+                        && runtime.adapter_kind() != AdapterKind::ZcodeApp
+                    {
+                        self.runtime_fleet
+                            .retire_agent_run_on_host(
+                                agent_run_id,
+                                execution_epoch,
+                                runtime.host_instance_id(),
+                            )
+                            .await;
+                    }
                     break;
                 }
                 if !self.planned_shutdown.launch_in_progress(&key).await
@@ -15449,10 +15525,34 @@ impl Core {
                 }
                 // The cancelled Run's lease is revoked normally. Older native
                 // tasks remain on their original Session's managed Host.
-                adapter
+                return match adapter
                     .complete_agent_run(agent_run_id, execution_epoch)
-                    .await;
-                return RuntimeCancellationIngressFence::Flushed;
+                    .await
+                {
+                    FleetReleaseOutcome::Reusable => RuntimeCancellationIngressFence::Reusable,
+                    FleetReleaseOutcome::Reaped => RuntimeCancellationIngressFence::Flushed,
+                    _ => RuntimeCancellationIngressFence::Unproven,
+                };
+            }
+            if disposition == FleetReleaseDisposition::Reusable
+                && interrupted
+                && flushed
+                && !self.planned_shutdown.shutdown_started()
+                && !self.planned_shutdown.launch_in_progress(&key).await
+                && let Ok(kind) = adapter_kind.parse::<AdapterKind>()
+                && !matches!(kind, AdapterKind::ZcodeApp | AdapterKind::HermesCli)
+                && let Some(adapter) = self.acp_adapter(kind)
+            {
+                // The existing Fleet release revokes this CLI lease and checks
+                // health/quiescence/retirement. Return before any generic stop.
+                return match adapter
+                    .complete_agent_run(agent_run_id, execution_epoch)
+                    .await
+                {
+                    FleetReleaseOutcome::Reusable => RuntimeCancellationIngressFence::Reusable,
+                    FleetReleaseOutcome::Reaped => RuntimeCancellationIngressFence::Flushed,
+                    _ => RuntimeCancellationIngressFence::Unproven,
+                };
             }
             loop {
                 let launching_before_stop = self.planned_shutdown.launch_in_progress(&key).await;
@@ -15467,13 +15567,16 @@ impl Core {
                             .wait_for_agent_run_quiescence(agent_run_id, execution_epoch, remaining)
                             .await
                     }
-                } else if adapter_kind == "codex-cli" {
+                } else if adapter_kind != "pi" {
                     match self
                         .runtime_fleet
                         .stop_agent_run_until_with_outcome(agent_run_id, execution_epoch, deadline)
                         .await
                     {
                         FleetReleaseOutcome::Reaped => true,
+                        FleetReleaseOutcome::Reusable => {
+                            return RuntimeCancellationIngressFence::Reusable;
+                        }
                         FleetReleaseOutcome::NoMatchingLease => {
                             // A launch that never bound a route plus Fleet's
                             // retained ownership/stop evidence permits cleanup.
@@ -19870,7 +19973,10 @@ impl Core {
             .context("failed to bind ACP Native Session")?;
         if matches!(
             execution.runtime.adapter_kind,
-            AdapterKind::DeepseekHarness | AdapterKind::CommandCodeCli | AdapterKind::ClineCli
+            AdapterKind::DeepseekHarness
+                | AdapterKind::CommandCodeCli
+                | AdapterKind::ClineCli
+                | AdapterKind::KiloCli
         ) {
             if bootstrap.native_binding_id != binding_credential.native_binding_id
                 || bootstrap.native_binding_generation
@@ -20137,6 +20243,17 @@ impl Core {
             )
             .await;
         if failure_persisted {
+            if let Some(adapter) = self.acp_adapter(execution.runtime.adapter_kind) {
+                let released = adapter
+                    .complete_agent_run(&execution.agent_run_id, execution.execution_epoch)
+                    .await;
+                self.finish_fleet_terminal_host(
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    Some(released),
+                )
+                .await;
+            }
             emit_agent_run_terminal(
                 output,
                 Some(&execution.camp_id),
@@ -20284,6 +20401,7 @@ impl Core {
                     .await;
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
             | rovai_core::agent_profile::AdapterKind::KiroCli
             | rovai_core::agent_profile::AdapterKind::QoderCli
@@ -21212,6 +21330,13 @@ async fn run_core(
         mcp_projection,
         codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
         pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
+        kilo_cli: AcpCliRuntimeAdapter::deferred(
+            AdapterKind::KiloCli,
+            acp_tx.clone(),
+            data_dir.join("runtime/kilo"),
+            runtime_fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        ),
         opencode_cli: AcpCliRuntimeAdapter::deferred(
             rovai_core::agent_profile::AdapterKind::OpencodeCli,
             acp_tx.clone(),
@@ -23785,7 +23910,9 @@ async fn process_acp_input_accepted(
                 "failed to mark mismatched ACP input evidence unknown for AgentRun {agent_run_id}: {mark_error:#}"
             );
         }
-        let _ = runtime.cancel().await;
+        let _ = runtime
+            .cancel_until(tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT)
+            .await;
         return;
     }
     match core
@@ -23800,7 +23927,9 @@ async fn process_acp_input_accepted(
             eprintln!(
                 "failed to persist ACP input acceptance for AgentRun {agent_run_id}: {error:#}"
             );
-            let _ = runtime.cancel().await;
+            let _ = runtime
+                .cancel_until(tokio::time::Instant::now() + RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT)
+                .await;
         }
     }
 }
@@ -24610,6 +24739,22 @@ fn normalize_acp_event_with_completion(
                 payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
                     "sourceEventKind":"session/update.tool_call_update.completed", "semanticKind":"minimax_file_patch",
                     "entries":[{"path":path,"changeKind":"update","diff":patch}]});
+            }
+            if adapter_kind == AdapterKind::KiloCli
+                && public_status == "completed"
+                && completion.is_some_and(|value| value.native_kind == "edit")
+                && let Some(entries) = crate::kilo::file_diff_entries(&update)
+            {
+                payload["runtimeDiff"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                    "sourceEventKind":"session/update.tool_call_update.completed", "semanticKind":"kilo_file_patch","entries":entries});
+                if payload.get("runtimeFileOperation").is_none()
+                    && entries.as_array().is_some_and(|entries| entries.len() == 1)
+                    && matches!(entries[0]["changeKind"].as_str(), Some("add" | "update"))
+                {
+                    payload["runtimeFileOperation"] = json!({"adapterKind":adapter_kind.as_str(),"protocolFamily":"acp-v1",
+                        "sourceEventKind":"session/update.tool_call_update.completed","operationKind":"write",
+                        "path":entries[0]["path"],"changeKind":entries[0]["changeKind"]});
+                }
             }
             if adapter_kind == AdapterKind::CommandCodeCli
                 && public_status == "completed"
@@ -25665,6 +25810,17 @@ async fn persist_acp_prompt_completion(
     params: &Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) -> Result<()> {
+    if !core.planned_shutdown.shutdown_started() {
+        let database = core.database.lock().await;
+        if ExecutionRuntimeService::default()
+            .load_agent_run_execution(&database, agent_run_id, execution_epoch)?
+            .is_none()
+        {
+            // Business cancellation already handed this Run to cleanup. Do not
+            // detach its terminal route before cancel_until confirms the result.
+            return Ok(());
+        }
+    }
     let prompt_id = params
         .get("promptId")
         .and_then(Value::as_str)
@@ -25929,8 +26085,10 @@ async fn persist_acp_prompt_completion(
                 .await;
         }
         if let Some(adapter) = core.acp_adapter(adapter_kind) {
-            adapter
+            let released = adapter
                 .complete_agent_run(agent_run_id, execution_epoch)
+                .await;
+            core.finish_fleet_terminal_host(agent_run_id, execution_epoch, Some(released))
                 .await;
         }
         core.delivery_batch_scheduler_notify.notify_one();
@@ -26035,8 +26193,10 @@ async fn persist_acp_prompt_completion(
                 )
                 .await;
                 if let Some(adapter) = core.acp_adapter(adapter_kind) {
-                    adapter
+                    let released = adapter
                         .complete_agent_run(agent_run_id, execution_epoch)
+                        .await;
+                    core.finish_fleet_terminal_host(agent_run_id, execution_epoch, Some(released))
                         .await;
                 }
                 core.delivery_batch_scheduler_notify.notify_one();
@@ -26203,6 +26363,7 @@ async fn flush_runtime_usage(
         AdapterKind::KimiCodeCli,
         AdapterKind::MinimaxCodeCli,
         AdapterKind::OpencodeCli,
+        AdapterKind::KiloCli,
         AdapterKind::QoderCli,
         AdapterKind::TraeCnCli,
     ] {
@@ -27044,7 +27205,7 @@ async fn process_agent_run_codex_message(
                         .await;
                 }
                 runtime.clear_turn(Some(&completed.turn_id)).await;
-                core.finish_codex_terminal_host(agent_run_id, execution_epoch, released)
+                core.finish_fleet_terminal_host(agent_run_id, execution_epoch, released)
                     .await;
                 core.delivery_batch_scheduler_notify.notify_one();
                 core.execution_wake.runs.notify_one();
@@ -27203,7 +27364,7 @@ async fn process_agent_run_codex_message(
             .await;
     }
     runtime.clear_turn(Some(&completed.turn_id)).await;
-    core.finish_codex_terminal_host(agent_run_id, execution_epoch, released)
+    core.finish_fleet_terminal_host(agent_run_id, execution_epoch, released)
         .await;
     core.delivery_batch_scheduler_notify.notify_one();
     core.execution_wake.runs.notify_one();
@@ -29768,6 +29929,13 @@ mod tests {
             mcp_projection,
             codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
             pi: PiRpcRuntimeAdapter::deferred(&data_dir, pi_tx, runtime_fleet.clone()),
+            kilo_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::KiloCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/kilo"),
+                runtime_fleet.clone(),
+                CompactionDetectorPolicy::Disabled,
+            )?,
             opencode_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::OpencodeCli,
                 acp_tx.clone(),
@@ -31015,6 +31183,8 @@ mod tests {
             (AdapterKind::CommandCodeCli, other_agent_id.as_str()),
             (AdapterKind::CommandCodeCli, "unrelated-member"),
             (AdapterKind::CodexCli, agent_id.as_str()),
+            (AdapterKind::KiloCli, agent_id.as_str()),
+            (AdapterKind::KiloCli, other_agent_id.as_str()),
         ];
         let mut previous_processes = vec![None; owners.len()];
         for (index, (method, mut params, expected_status, retired)) in cases.into_iter().enumerate()
@@ -38157,7 +38327,7 @@ for line in sys.stdin:
         }
         // No lease, no launch barrier, no cleanup receipt: never claim a reap.
         assert_eq!(
-            core.cleanup_agent_run_runtime("absent", 1, "codex-cli")
+            core.cleanup_agent_run_runtime("absent", 1, "codex-cli", FleetReleaseDisposition::Stop)
                 .await,
             RuntimeCancellationIngressFence::Unproven
         );
@@ -38344,7 +38514,7 @@ for line in sys.stdin:
         assert_eq!(RUNTIME_CANCELLATION_TOTAL_TIMEOUT, Duration::from_secs(3));
         let root =
             std::env::temp_dir().join(format!("rovai-cleanup-launch-{}", uuid::Uuid::new_v4()));
-        let core = runtime_resolution_test_core(&root).unwrap();
+        let mut core = runtime_resolution_test_core(&root).unwrap();
         let permit = core.planned_shutdown.enter_launch().await.unwrap();
         let key = ActiveExecutionKey::new("launching", 1);
         assert!(
@@ -38354,7 +38524,12 @@ for line in sys.stdin:
         );
         let fence = tokio::time::timeout(
             Duration::from_secs(5),
-            core.cleanup_agent_run_runtime("launching", 1, "codex-cli"),
+            core.cleanup_agent_run_runtime(
+                "launching",
+                1,
+                "codex-cli",
+                FleetReleaseDisposition::Stop,
+            ),
         )
         .await
         .unwrap();
@@ -38363,8 +38538,13 @@ for line in sys.stdin:
         assert_eq!(core.planned_shutdown.active_snapshots().await.len(), 1);
         drop(permit);
         assert_ne!(
-            core.cleanup_agent_run_runtime("launching", 1, "codex-cli")
-                .await,
+            core.cleanup_agent_run_runtime(
+                "launching",
+                1,
+                "codex-cli",
+                FleetReleaseDisposition::Stop
+            )
+            .await,
             RuntimeCancellationIngressFence::Unproven
         );
         core.planned_shutdown.cleanup_completed(&key).await;
@@ -38445,20 +38625,309 @@ for line in sys.stdin:
             runtime
         };
         let (fence, runtime) = tokio::join!(
-            core.cleanup_agent_run_runtime("late-host", 1, "codex-cli"),
+            core.cleanup_agent_run_runtime(
+                "late-host",
+                1,
+                "codex-cli",
+                FleetReleaseDisposition::Stop
+            ),
             late_launch,
         );
         let falsely_confirmed = fence != RuntimeCancellationIngressFence::Unproven
             && runtime.process_id().await.is_some();
         // Reap even when the assertion fails, leaving no fixture process behind.
         let retry = core
-            .cleanup_agent_run_runtime("late-host", 1, "codex-cli")
+            .cleanup_agent_run_runtime("late-host", 1, "codex-cli", FleetReleaseDisposition::Stop)
             .await;
         assert!(!falsely_confirmed, "cleanup missed the late-created Host");
         assert_ne!(retry, RuntimeCancellationIngressFence::Unproven);
         assert!(runtime.process_id().await.is_none());
         core.planned_shutdown.cleanup_completed(&late_key).await;
         drop(runtime);
+
+        let (incoming, mut events) = mpsc::unbounded_channel();
+        core.kilo_cli = AcpCliRuntimeAdapter::new(
+            AdapterKind::KiloCli,
+            incoming.clone(),
+            root.join("kilo-hosts"),
+            core.runtime_fleet.clone(),
+            core.compaction_detector_policies
+                .policy_for(AdapterKind::KiloCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        )
+        .unwrap();
+        core.opencode_cli = AcpCliRuntimeAdapter::new(
+            AdapterKind::OpencodeCli,
+            incoming,
+            root.join("opencode-hosts"),
+            core.runtime_fleet.clone(),
+            core.compaction_detector_policies
+                .policy_for(AdapterKind::OpencodeCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        )
+        .unwrap();
+        let core = Arc::new(core);
+        let ingress_core = core.clone();
+        let callbacks = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let ingress_callbacks = callbacks.clone();
+        let ingress = tokio::spawn(async move {
+            let (output, _output) = mpsc::unbounded_channel();
+            while let Some(event) = events.recv().await {
+                match event {
+                    AcpIncoming::IngressBarrier { completion } => {
+                        let _ = completion.send(());
+                    }
+                    AcpIncoming::Message {
+                        adapter_kind,
+                        agent_run_id,
+                        execution_epoch,
+                        message,
+                        ..
+                    } if message["method"] == "rovai/acp_prompt_completed" => {
+                        if let Some(runtime) = ingress_core
+                            .acp_adapter(adapter_kind)
+                            .unwrap()
+                            .get_agent_run(&agent_run_id, execution_epoch)
+                            .await
+                        {
+                            let mut permit = ingress_core
+                                .planned_shutdown
+                                .enter_runtime_route()
+                                .await
+                                .unwrap();
+                            // These synthetic Runs are absent from the eligible
+                            // execution read, just as a committed cancellation is.
+                            // Its native callback must leave release to cleanup.
+                            persist_acp_prompt_completion(
+                                &ingress_core,
+                                &output,
+                                adapter_kind,
+                                &runtime,
+                                &agent_run_id,
+                                execution_epoch,
+                                &message["params"],
+                                &mut permit,
+                            )
+                            .await
+                            .unwrap();
+                            ingress_callbacks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        });
+        for kind in [AdapterKind::KiloCli, AdapterKind::OpencodeCli] {
+            for (case, delay, warm) in [
+                ("fast", "0", true),
+                ("delayed", "1.75", true),
+                ("late", "2.2", false),
+                ("missing", "None", false),
+                ("disconnect", "'disconnect'", false),
+                ("error", "'error'", false),
+                ("unknown", "'unknown'", false),
+                ("explicit-stop", "0", false),
+            ] {
+                let executable = root.join(format!("{}-{case}", kind.as_str()));
+                write_runtime_resolution_executable(&executable, &r#"#!/usr/bin/python3
+import json, os, pathlib, sys, time
+path = pathlib.Path(__file__)
+path.with_suffix('.pid').write_text(str(os.getpid()))
+prompts = []
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get('method')
+    if method == 'session/prompt':
+        prompts.append(request['id'])
+        continue
+    if method == 'session/cancel':
+        delay = __DELAY__
+        if delay == 'disconnect': sys.exit(0)
+        if delay is None: continue
+        if delay == 'error':
+            print(json.dumps({'jsonrpc':'2.0','id':prompts[0],'error':{'code':-32000,'message':'native cancellation error'}}),flush=True)
+            continue
+        if delay == 'unknown':
+            print(json.dumps({'jsonrpc':'2.0','id':prompts[0],'result':{'stopReason':'unknown'}}),flush=True)
+            continue
+        time.sleep(delay)
+        path.with_suffix('.settled').write_text('settled')
+        for prompt in prompts:
+            print(json.dumps({'jsonrpc':'2.0','id':prompt,'result':{'stopReason':'cancelled'}}), flush=True)
+        prompts = []
+        continue
+    if method == 'initialize':
+        result = {'protocolVersion':1,'agentCapabilities':{}}
+    elif method == 'session/new':
+        result = {'sessionId':'delayed-cancel-session','configOptions':[]}
+    else:
+        result = {}
+    if 'id' in request:
+        print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}), flush=True)
+"#.replace("__DELAY__", delay));
+                let mut config = runtime_config.clone();
+                config.adapter_kind = kind;
+                config.executable_path = executable.to_string_lossy().into_owned();
+                config.executable_fingerprint = fingerprint_executable(&executable).unwrap();
+                config.reported_version = Some(
+                    if kind == AdapterKind::KiloCli {
+                        "7.8.27"
+                    } else {
+                        "1.2.0"
+                    }
+                    .into(),
+                );
+                config.protocol_version = "acp-v1".into();
+                config.permissions = rovai_core::agent_profile::AdapterPermissionConfig {
+                    adapter_kind: kind,
+                    schema_version: 1,
+                    values: AgentRuntimeAdapterRegistry::default().member_permission_defaults(kind),
+                };
+                let workspace =
+                    AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into_owned());
+                let adapter = core.acp_adapter(kind).unwrap();
+                let run = format!("{}-{case}", kind.as_str());
+                let runtime = adapter
+                    .ensure_agent_run_runtime(
+                        &run,
+                        1,
+                        "cleanup-camp",
+                        "cleanup-agent",
+                        &run,
+                        &workspace,
+                        PermissionSemantics::RuntimeManagedV2,
+                        &config,
+                        &builtin_tools,
+                        &BTreeMap::new(),
+                        "mcp",
+                        &root,
+                        &Some(run.clone()),
+                        Some("TEST_BOOTSTRAP"),
+                        |runtime| async move { Ok(runtime) },
+                    )
+                    .await
+                    .unwrap();
+                runtime
+                    .start_or_resume_session_with_native_rules(
+                        None,
+                        acp::AcpSessionCapabilities::default(),
+                        "runtime_default",
+                        "runtime_default",
+                        &json!({}),
+                        &BTreeMap::new(),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                runtime.start_prompt("cancel-input", "run").await.unwrap();
+                let host = runtime.host_instance_id().to_owned();
+                let pid = fs::read_to_string(executable.with_extension("pid")).unwrap();
+                let started = tokio::time::Instant::now();
+                let fence = core
+                    .cleanup_agent_run_runtime(
+                        &run,
+                        1,
+                        kind.as_str(),
+                        if case == "explicit-stop" {
+                            FleetReleaseDisposition::Stop
+                        } else {
+                            FleetReleaseDisposition::Reusable
+                        },
+                    )
+                    .await;
+                assert_ne!(
+                    fence,
+                    RuntimeCancellationIngressFence::Unproven,
+                    "{kind:?}/{case}"
+                );
+                assert_eq!(
+                    fence == RuntimeCancellationIngressFence::Reusable,
+                    warm,
+                    "{kind:?}/{case}"
+                );
+                assert!(started.elapsed() < RUNTIME_CANCELLATION_TOTAL_TIMEOUT);
+                if case == "delayed" {
+                    assert!(
+                        executable.with_extension("settled").exists(),
+                        "cleanup truncated the native cancellation finalizer"
+                    );
+                    assert!(started.elapsed() >= Duration::from_millis(1750));
+                } else if case == "fast" {
+                    assert!(
+                        started.elapsed() < Duration::from_secs(1),
+                        "fast cancellation must not wait out the budget"
+                    );
+                }
+                assert!(adapter.get_agent_run(&run, 1).await.is_none());
+                if warm {
+                    let successor = adapter
+                        .ensure_agent_run_runtime(
+                            &run,
+                            2,
+                            "cleanup-camp",
+                            "cleanup-agent",
+                            &run,
+                            &workspace,
+                            PermissionSemantics::RuntimeManagedV2,
+                            &config,
+                            &builtin_tools,
+                            &BTreeMap::new(),
+                            "mcp",
+                            &root,
+                            &Some(run.clone()),
+                            Some("TEST_BOOTSTRAP"),
+                            |runtime| async move { Ok(runtime) },
+                        )
+                        .await
+                        .unwrap();
+                    assert_eq!(successor.host_instance_id(), host);
+                    assert_eq!(successor.execution_epoch(), 2);
+                    assert_eq!(
+                        fs::read_to_string(executable.with_extension("pid")).unwrap(),
+                        pid
+                    );
+                    // A repeated old cleanup consumes its retained release proof,
+                    // without stopping the successor that already owns this Host.
+                    assert_eq!(
+                        core.cleanup_agent_run_runtime(
+                            &run,
+                            1,
+                            kind.as_str(),
+                            FleetReleaseDisposition::Reusable
+                        )
+                        .await,
+                        RuntimeCancellationIngressFence::Reusable
+                    );
+                    assert_eq!(
+                        adapter
+                            .get_agent_run(&run, 2)
+                            .await
+                            .unwrap()
+                            .host_instance_id(),
+                        host
+                    );
+                    core.runtime_fleet.acknowledge_cleanup(&run, 1).await;
+                    adapter.forget_agent_run(&run, 2).await;
+                } else {
+                    assert_eq!(
+                        core.runtime_fleet
+                            .stop_agent_run_until_with_outcome(
+                                &run,
+                                1,
+                                tokio::time::Instant::now() + Duration::from_secs(1)
+                            )
+                            .await,
+                        FleetReleaseOutcome::Reaped
+                    );
+                }
+                core.runtime_fleet.acknowledge_cleanup(&run, 1).await;
+                core.runtime_fleet.acknowledge_cleanup(&run, 2).await;
+            }
+        }
+        assert!(callbacks.load(std::sync::atomic::Ordering::SeqCst) >= 4);
+        core.runtime_fleet.shutdown_all().await;
+        ingress.abort();
+        let _ = ingress.await;
         drop(builtin_tools);
         drop(core);
         std::fs::remove_dir_all(root).unwrap();
@@ -38472,6 +38941,7 @@ for line in sys.stdin:
             (AdapterKind::KimiCodeCli, "TaskOutput"),
             (AdapterKind::HermesCli, "delegate_task"),
             (AdapterKind::KiroCli, "subagent"),
+            (AdapterKind::KiloCli, "task"),
         ] {
             let input =
                 json!({"prompt":"Read the fixture","mode":"background","agent_id":"native-child"});
@@ -38527,6 +38997,30 @@ for line in sys.stdin:
             serde_json::from_str::<Value>(payload["output"].as_str().unwrap()).unwrap(),
             report
         );
+        // Kilo changes its task title and drops input/kind at completion. The
+        // shared display cache supplies task parameters; native content owns
+        // the report, without exposing private result metadata.
+        let input = json!({"description":"Read fixture","subagent_type":"general","prompt":"Read the fixture"});
+        let started = display.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-call",
+                "title":"Read fixture","kind":"think","status":"in_progress","rawInput":input}
+        })).unwrap();
+        let completed = display.observe(AdapterKind::KiloCli, "kilo-prompt", &json!({
+            "sessionId":"kilo-session","update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-call",
+                "status":"completed","content":[{"type":"content","content":{"type":"text","text":"KILO_CHILD_REPORT"}}],
+                "rawOutput":{"output":"KILO_CHILD_REPORT","metadata":{"sessionId":"child-session","private":"KILO_PRIVATE"}}}
+        })).unwrap();
+        let (_, payload) = normalize_acp_event(AdapterKind::KiloCli, "session/update", &completed);
+        assert_eq!(payload["operationId"], started["update"]["operationId"]);
+        assert_eq!(payload["toolName"], "task");
+        assert_eq!(payload["runtimeToolType"], "agent");
+        assert_eq!(
+            serde_json::from_str::<Value>(payload["input"].as_str().unwrap()).unwrap(),
+            input
+        );
+        assert_eq!(payload["output"], "KILO_CHILD_REPORT");
+        assert_eq!(payload["runtimeRootOutput"], true);
+        assert!(!payload.to_string().contains("KILO_PRIVATE"));
         for (status, name, omitted, has_patch) in [
             ("completed", "edit", false, true),
             ("completed", "write", false, true),
@@ -38553,6 +39047,96 @@ for line in sys.stdin:
                 assert_eq!(payload["runtimeDiff"]["semanticKind"], "minimax_file_patch");
             }
             assert!(!payload.to_string().contains("MINI_PRIVATE_DETAILS"));
+        }
+        for (shape, status, truncated, operation_path, change_kind, has_diff) in [
+            ("write", "completed", false, "/repo/src/a.txt", "add", true),
+            ("write", "completed", false, "src/a.txt", "add", true),
+            ("write", "completed", false, "src/../src/a.txt", "add", true),
+            ("patch", "completed", false, "", "add", true),
+            ("patch", "completed", false, "", "delete", true),
+            ("write", "failed", false, "/repo/src/a.txt", "add", false),
+            ("patch", "in_progress", false, "", "add", false),
+            ("write", "completed", true, "/repo/src/a.txt", "add", false),
+        ] {
+            let patch = if change_kind == "delete" {
+                "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -1 +0,0 @@\n-old\n"
+            } else {
+                "Index: /repo/src/a.txt\n===================================================================\n--- /repo/src/a.txt\n+++ /repo/src/a.txt\n@@ -0,0 +1 @@\n+new\n"
+            };
+            let mut metadata = if shape == "write" {
+                json!({"filepath":"/repo/src/a.txt","exists":false,"filediff":{"file":"/repo/src/a.txt","patch":patch}})
+            } else {
+                json!({"files":[{"filePath":"/repo/src/a.txt","type":change_kind,"patch":patch}]})
+            };
+            metadata["truncated"] = json!(truncated);
+            metadata["private"] = json!("KILO_PRIVATE_METADATA");
+            let locations = if operation_path.is_empty() {
+                json!([])
+            } else {
+                json!([{"path":operation_path}])
+            };
+            let params = json!({"update":{"sessionUpdate":"tool_call_update","toolCallId":"kilo-file","kind":"edit","status":status,
+                "locations":locations,"rawOutput":{"metadata":metadata}}});
+            let completion = acp::completed_action(AdapterKind::KiloCli, &params).unwrap();
+            let (_, payload) = normalize_acp_event_with_completion(
+                AdapterKind::KiloCli,
+                "session/update",
+                &params,
+                completion.as_ref(),
+            );
+            assert_eq!(
+                !payload["runtimeDiff"].is_null(),
+                has_diff,
+                "{shape} {status} {operation_path}"
+            );
+            if has_diff {
+                let admitted =
+                    rovai_core::runtime_diff::admit_runtime_diff_with_file_operation_path(
+                        &payload,
+                        Path::new("/repo"),
+                        Some("kilo-cli"),
+                        payload
+                            .pointer("/runtimeFileOperation/path")
+                            .and_then(Value::as_str),
+                    )
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    (admitted.entries[0].additions, admitted.entries[0].deletions),
+                    if change_kind == "delete" {
+                        (0, 1)
+                    } else {
+                        (1, 0)
+                    }
+                );
+                assert_eq!(admitted.entries[0].change_kind, change_kind);
+                if change_kind == "delete" {
+                    assert!(
+                        payload.get("runtimeFileOperation").is_none(),
+                        "deletion belongs to Diff, never a write operation"
+                    );
+                } else {
+                    let expected_path = if shape == "write" {
+                        operation_path
+                    } else {
+                        "/repo/src/a.txt"
+                    };
+                    assert_eq!(
+                        payload["runtimeFileOperation"]["path"], expected_path,
+                        "preserve the common operation instead of rebuilding it"
+                    );
+                    assert!(
+                        rovai_core::runtime_file_operation::admit_runtime_file_operation(
+                            &payload,
+                            Path::new("/repo"),
+                            Some("kilo-cli")
+                        )
+                        .unwrap()
+                        .is_ok()
+                    );
+                }
+            }
+            assert!(!payload.to_string().contains("KILO_PRIVATE_METADATA"));
         }
         let (_, payload) = normalize_acp_event(
             AdapterKind::OpencodeCli,

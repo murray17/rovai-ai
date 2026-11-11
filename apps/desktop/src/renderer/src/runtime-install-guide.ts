@@ -35,6 +35,7 @@ const GUIDES: Partial<Record<AdapterKind, RuntimeInstallGuide>> = {
     command: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh', launch: 'codex',
     alternatives: [brew('brew install --cask codex'), npm('npm install -g @openai/codex')]
   },
+  'kilo-cli': { docs: 'https://kilo.ai/docs/code-with-ai/platforms/cli', command: 'npm install -g @kilocode/cli', launch: 'kilo auth login', connectModel: true },
   'opencode-cli': {
     docs: 'https://opencode.ai/docs/',
     command: 'curl -fsSL https://opencode.ai/install | bash', launch: 'opencode', connectModel: true,

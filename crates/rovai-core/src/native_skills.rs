@@ -668,6 +668,23 @@ fn user_roots(
             );
             paths.push(agents);
         }
+        AdapterKind::KiloCli => {
+            let xdg = configured_root("XDG_CONFIG_HOME", home.join(".config"), configuration);
+            let mut directories =
+                vec![xdg.join("kilo"), home.join(".kilo"), home.join(".kilocode")];
+            if let Some(extra) = runtime_variable(configuration, "KILO_CONFIG_DIR")
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+            {
+                directories.push(extra);
+            }
+            for directory in directories {
+                paths.push(directory.join("skills"));
+                paths.push(directory.join("skill"));
+            }
+            paths.push(agents);
+            paths.push(claude);
+        }
         AdapterKind::OpencodeCli => {
             let xdg = configured_root("XDG_CONFIG_HOME", home.join(".config"), configuration);
             paths.push(xdg.join("opencode/skills"));
@@ -779,6 +796,7 @@ fn project_roots(adapter: AdapterKind, project: &Path) -> Vec<(&'static str, Pat
             | AdapterKind::ClaudeCodeCli
             | AdapterKind::Pi
             | AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | AdapterKind::MinimaxCodeCli
     );
     let mut directories = vec![project.to_path_buf()];
@@ -800,6 +818,14 @@ fn project_roots(adapter: AdapterKind, project: &Path) -> Vec<(&'static str, Pat
         AdapterKind::ClaudeCodeCli => &[".claude/skills"],
         AdapterKind::Pi => &[".pi/skills", ".agents/skills"],
         AdapterKind::OpencodeCli => &[".opencode/skills", ".agents/skills", ".claude/skills"],
+        AdapterKind::KiloCli => &[
+            ".kilo/skills",
+            ".kilo/skill",
+            ".kilocode/skills",
+            ".kilocode/skill",
+            ".agents/skills",
+            ".claude/skills",
+        ],
         AdapterKind::CopilotCli => &[".github/skills", ".agents/skills", ".claude/skills"],
         AdapterKind::HermesCli => &[".hermes/skills", ".agents/skills"],
         AdapterKind::KiroCli => &[".kiro/skills"],
@@ -1406,6 +1432,56 @@ mod tests {
                 assert!(scan.skills.iter().all(|skill| skill.source_scope == "user"));
             }
         }
+        for (directory, name) in [
+            (home.join(".config/kilo/skill"), "kilo-singular"),
+            (home.join(".config/kilo/skills"), "kilo-default"),
+            (home.join(".kilo/skills"), "kilo-home"),
+            (home.join(".kilocode/skill"), "kilo-legacy"),
+            (second.join("skill"), "kilo-override"),
+        ] {
+            let directory = directory.join(name);
+            fs::create_dir_all(&directory).unwrap();
+            fs::write(
+                directory.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: Kilo native\n---\n"),
+            )
+            .unwrap();
+        }
+        let mut configuration = RuntimeStartupConfiguration::default();
+        for (name, value) in [
+            (
+                if cfg!(windows) { "USERPROFILE" } else { "HOME" },
+                home.clone(),
+            ),
+            ("XDG_CONFIG_HOME", home.join(".config")),
+            ("KILO_CONFIG_DIR", second.clone()),
+        ] {
+            configuration.environment.push(RuntimeEnvironmentVariable {
+                name: name.into(),
+                value: value.to_string_lossy().into_owned(),
+            });
+        }
+        let scan = NativeSkillDiscovery::default()
+            .discover(AdapterKind::KiloCli, None, true, false, &configuration)
+            .unwrap();
+        let mut names = scan
+            .skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                "kilo-default",
+                "kilo-home",
+                "kilo-legacy",
+                "kilo-override",
+                "kilo-singular",
+                "shared",
+                "two"
+            ]
+        );
         let native_home = home.join(".hermes");
         fs::rename(&first, &native_home).unwrap();
         let first = native_home;
