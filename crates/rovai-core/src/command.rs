@@ -306,7 +306,9 @@ impl DomainCommandGateway {
         if stored_result.status != CommandResultStatus::Rejected {
             database.execution_wake.command_committed(C::TYPE);
         }
-        crate::execution_text::request_settlement(database);
+        if C::TYPE != "camp.fork" {
+            crate::execution_text::request_settlement(database);
+        }
 
         crate::thread_compat::project_command_result(C::TYPE, &mut stored_result.payload)?;
 

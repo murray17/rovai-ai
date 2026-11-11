@@ -24,6 +24,10 @@ impl ExecutionWake {
     }
 
     pub fn command_committed(&self, command: &str) {
+        if command == "camp.fork" {
+            // Imported publication facts carry history only, never executable input.
+            return;
+        }
         if command.starts_with("automation.") || command == "channel_delivery.settle" {
             self.automation.notify_one();
         } else if command.starts_with("action.")
