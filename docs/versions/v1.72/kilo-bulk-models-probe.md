@@ -106,7 +106,7 @@ node scripts/probe-kilo-models-bulk.mjs /absolute/official/kilo
 
 User sequence 73 指出批量读取无需混合，sequence 75 明确要求直接替换。前一阶段把“与 ACP 目录集合
 完全一致”当成前提，混合建议过于保守；当前选择官方 CLI 作为唯一目录来源，不保留双来源目录或逐模型回退。
-当前合同为 [Launch v85](../../contracts/runtime-launch-and-verification-v85.md)。
+该阶段合同为 [Launch v85](../../contracts/runtime-launch-and-verification-v85.md)；当前权限启动策略见下述 User sequence 86。
 
 `health::refresh_model_catalog_for_selection` 的 Kilo 分支一次调用 `models --verbose`，复用原环境、
 受管命令、超时/回收和目录缓存。stdout 使用既有协议容量，避免把实际约 497 KB 的目录按 64 KiB
@@ -208,6 +208,59 @@ Sub2API 等已配置模型的四档局部片段、默认值和刷新方式，并
 `cargo fmt --all -- --check` 和通用 `docs:check:ci` 均通过；没有删除原失败断言。
 本阶段未运行新的付费模型生成、修改日常 App 或直接部署网站。worktree 状态为 `ready`，
 继续保留本独立分支供后续 review/合入。
+
+## User sequence 86：执行进程默认 allow
+
+User sequence 84 给出进程环境方案，sequence 86 明确要求实施并不加官网权限说明。
+基线为 `01c8c2518495e23034e5338b20f634051e8d52fe`，复用原 worktree/分支，状态 `ready`。
+主线仍为 `92ff101a7de0485bb4e74750946eea4b3949f0b7`，未改主 checkout。
+
+正式运行代码只在 `kilo::configure_execution()` 末尾增加
+`command.env("KILO_PERMISSION", r#"{"*":"allow"}"#);`。
+调用顺序是通用/成员环境及 Built-in 环境合并、Kilo 正式执行配置、受管 spec 捕获、创建进程；
+同一 Host 处理的普通请求和 Steer 共用此环境，不新增配置 RPC、请求分支或 Host 失效标记。
+健康/目录共用的 `configure_environment()` 保持原样，不写用户文件或全局环境。
+
+该固定值覆盖继承的同名变量。具体权限仍由 Kilo 对配置和 Agent 规则原生合并、求值；
+Core 继续转交原生审批，不按默认值自动批准。问卷/后台任务开关、用户插件、pure、Bootstrap 和旧字段窄兼容保持。
+当前执行合同为 [Launch v86](../../contracts/runtime-launch-and-verification-v86.md)，v85 保留原文；
+该局部可逆默认策略不增加 Version Decision，没有 Schema、上下文/证据或平台资格变更。
+
+现有只读“原生规则”和点击说明保留，文案说明进程默认 allow，改用具体 edit ask 示例，
+不再给出会被覆盖的全局 ask 示例。官网按要求移除 User sequence 80 尚未发布的权限段落和权限链接，
+Kilo 模型/思考强度说明保留，不新增本策略说明或部署网站。
+
+扩展既有 `opencode_detector_plugin_is_additive_to_runtime_config`：先断言共用协议入口保留继承值，
+再验证正式执行覆盖为默认 allow；pure true/false、原生规则顺序、插件、无 Hook、完整 instructions 与旧权限不自动审批断言保留。
+Renderer 继续由现有 Runtime picker owner 验证只读、帮助、键盘、五套主题与窄窗口，新增文案及无横向溢出断言。
+没有新增 Rust 测试函数。配置、TypeScript/Renderer/Node、Desktop build、官网删除后的 build/check、
+真实 Electron、默认 Rust workspace 与通用文档门禁均已通过：Renderer 3269/2 skipped、Node 377/2 skipped、
+默认 Rust 484/1 existing ignored；官网检查 82 页。五套主题及 432px 无溢出通过，Day/Night/窄窗口截图已目视检查并导出。
+
+官方 Kilo 7.8.27 / macOS arm64 的 `debug config` 在独立 HOME/XDG/workspace 实跑，
+仅输出白名单权限字段，没有新模型 prompt：
+
+| 继承配置 | `KILO_PURE` | 执行环境默认应用后的原生配置 |
+| --- | --- | --- |
+| 全局 ask | true / false | 全局 allow，custom Agent 的 edit deny 保留 |
+| 全局 deny、edit ask、bash deny | true / false | 全局 allow，edit ask、bash deny 及 custom Agent edit deny 保留 |
+
+现有 Core smoke 的审批矩阵原先通过成员 `KILO_PERMISSION` 改 edit 档位。
+该变量现在固定，因此将工具规则改放原生 `KILO_CONFIG_CONTENT.permission`，保留所有允许、拒绝、
+工具缺席、pure、用户插件及 Session 连续性断言；首轮故意继承全局/编辑 deny，验证正式默认覆盖。
+新 Core/bundled CLI + 官方 Kilo 的既有受控 Provider 矩阵完成 40 Run；本阶段不调用新的付费模型。
+
+首轮 Core 的 40 个业务用例均通过，但实施者将夹具放在 `/tmp`，而共享清理器要求位于
+Node `os.tmpdir()` 的规范化系统临时根，故最终记录为 failed，只有 cleanupError、没有业务 error。
+保留最小失败记录，按现有 helper 的显式临时根参数清理自有旧目录，再在系统临时根完整重跑；
+没有修改清理器、业务断言或等待期限。
+
+正确系统临时根的完整重跑为 passed，Runtime Files Root 清理确认成功。首轮 deny 环境已被覆盖，
+实际 CLI 调用成功；原生 edit ask 的允许/拒绝、edit deny 工具缺席、FILE/INLINE/AGENT 顺序、
+用户插件/pure、Warm/冷恢复、MCP cwd、Steer/取消后继、文件结果、输出预算和自动压缩断言全部保留并通过。
+65 个普通模型请求逐字保留完整 Bootstrap，问卷工具在 warm/cold 与权限变化后仍缺席。
+本机为 macOS arm64，不将本轮受控 Provider 结果扩展成付费模型或新平台资格。
+所有配置/组件/Core 夹具结束后清理；工作树继续保留在本独立分支，最终状态为 `ready`。
 
 ## 官方依据
 

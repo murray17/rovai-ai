@@ -204,5 +204,6 @@ pub(crate) fn configure_execution(command: &mut Command, bootstrap_file: &Path) 
     };
     config.append_instruction(bootstrap_file)?;
     command.env("KILO_CONFIG_CONTENT", serde_json::to_string(&config)?);
+    command.env("KILO_PERMISSION", r#"{"*":"allow"}"#);
     Ok(())
 }

@@ -179,10 +179,7 @@ custom_provider:
 只填写该模型和 API 实际支持的档位；原生已提供档位的模型不需要复制配置。
 保存后，在 Rovai 打开模型列表刷新，选择具体模型、思考强度并保存。“跟随模型默认值”不增加强度覆盖。
 
-权限在同一文件的 `permission` 中配置，例如 `"permission": "ask"`。
-`allow` 自动允许、`ask` 询问、`deny` 拒绝，也可按工具和 Agent 分别设置。
-Rovai 的“原生规则”是只读展示，审批仍由 Kilo 发起；修改配置后重新启动 Kilo 会话。
-[Kilo 自定义模型说明](https://kilo.ai/docs/code-with-ai/agents/custom-models) · [Kilo 权限说明](https://kilo.ai/docs/getting-started/settings/auto-approving-actions)
+[Kilo 自定义模型说明](https://kilo.ai/docs/code-with-ai/agents/custom-models)
 
 ## 接入新智能体 {#adding-agents}
 

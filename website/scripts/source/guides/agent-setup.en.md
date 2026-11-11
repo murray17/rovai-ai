@@ -179,10 +179,7 @@ For a custom service such as Sub2API, merge these fields into the existing `prov
 Declare only levels supported by the model and API. Models that already advertise variants need no duplicate configuration.
 Save the file, refresh Rovai's model list, select the specific model and reasoning level, then save. Following the model default adds no effort override.
 
-Configure permissions in the same file under `permission`, for example `"permission": "ask"`.
-`allow` runs automatically, `ask` requests approval, and `deny` blocks execution. Rules can differ by tool and Agent.
-Rovai shows a read-only **Native rules** field and forwards Kilo's approval requests. Restart the Kilo session after editing.
-[Kilo custom models](https://kilo.ai/docs/code-with-ai/agents/custom-models) · [Kilo permissions](https://kilo.ai/docs/getting-started/settings/auto-approving-actions)
+[Kilo custom models](https://kilo.ai/docs/code-with-ai/agents/custom-models)
 
 ## Adding a new agent {#adding-agents}
 

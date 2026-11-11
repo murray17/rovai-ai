@@ -74,7 +74,8 @@ Kilo 是独立的官方 ACP 产品身份，复用共享 Host/Fleet/Binding 与�
 原生会话仍以保存的精确 ID 恢复；不增加 Kilo 私有池、配置镜像或原生历史管理。
 Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共享冻结正文；
 无需压缩插件或校验握手。监控复用逐消息 numeric reader，原生配置、认证和数据继续归 Kilo 自己拥有。
-权限完全继承 Kilo 原生配置；Rovai 不提供产品档位或权限 Hook，共享 Approval 只转交原生请求与用户选择。
+正式执行进程启动时由 Rovai 固定 `KILO_PERMISSION={"*":"allow"}`，作为进程级默认；具体权限仍由 Kilo 原生合并和裁决。
+Rovai 不提供产品档位或权限 Hook，共享 Approval 只转交原生请求与用户选择；健康与目录入口不强制此变量。
 instructions 的局部有序追加不重排原生规则；用户插件与 pure 模式保留。
 原生环境关闭后台子代理，前台保留；Steer 复用共享多请求收口；文件结果进入既有 Diff 投影。
 前台 task 通过共享 normalizer 进入既有子代理工具展示，参数与真实报告沿普通详情和输出预算；
@@ -87,7 +88,7 @@ Kilo 完整目录只用官方 `models --verbose` 一次读取模型与各自的 
 不复刻 ACP 路由独有的隐藏过滤；CLI 未报告的默认模型/effort 不推断，实际 Run 继续由 ACP 设置和观察。
 普通健康检查既不读取 CLI 目录也不遍历模型，不覆盖已有完整目录及其成功时间。
 没有新缓存、参数推断或选择器组件；失败继续共享 LKG，不回退扫描。
-启动、权限、原生来源和数值口径见 [Runtime Launch v85](../contracts/runtime-launch-and-verification-v85.md)。
+启动、权限、原生来源和数值口径见 [Runtime Launch v86](../contracts/runtime-launch-and-verification-v86.md)。
 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 Qualified。开放范围见
 [macOS 准入](../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)和
 [Linux 准入](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)及

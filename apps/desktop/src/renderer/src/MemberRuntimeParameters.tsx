@@ -271,9 +271,9 @@ function KiloPermissionHelp(): React.JSX.Element {
     <Popover.Portal><Popover.Content className="runtime-model-picker-menu runtime-permission-help-popover"
       aria-label={uiAttribute('Kilo 权限设置说明')} align="start" sideOffset={6} collisionPadding={12}
       onOpenAutoFocus={event => event.preventDefault()}>
-      <p><UiText zh="运行 kilo debug paths 查看配置目录，编辑其中的 kilo.jsonc。" /></p>
-      <code>{'"permission": "ask"'}</code>
-      <p><UiText zh="allow 自动允许，ask 询问，deny 拒绝；也可按工具配置。修改后重新启动 Kilo 会话。" /></p>
+      <p><UiText zh="Rovai 启动 Kilo 时默认设置 allow，具体权限由 Kilo 原生规则决定。" /></p>
+      <code>{'"permission": {"*":"allow","edit":"ask"}'}</code>
+      <p><UiText zh="运行 kilo debug paths 找到 kilo.jsonc，可按工具或 Agent 调整规则。修改后重新启动 Kilo 会话。" /></p>
     </Popover.Content></Popover.Portal>
   </Popover.Root>
 }

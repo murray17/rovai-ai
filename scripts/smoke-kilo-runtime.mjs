@@ -268,7 +268,7 @@ try{
   const configured = await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{
     agentId:'agent_2',expectedVersion:profile.version,adapterKind:'kilo-cli',
     model:{mode:'explicit',modelId:'local/local-model',options:{effort:'high'}},permissions:{...profile.runtimeConfiguration.permissions,values:{permission:'deny'}},
-    environment:{expectedRevision:0,json:JSON.stringify({XDG_DATA_HOME:join(root,'member-data'),KILO_DB:'custom.db',KILO_PERMISSION:JSON.stringify({'*':'allow'})})}
+    environment:{expectedRevision:0,json:JSON.stringify({XDG_DATA_HOME:join(root,'member-data'),KILO_DB:'custom.db',KILO_PERMISSION:JSON.stringify({'*':'deny',edit:'deny'})})}
   }})
   assert.equal(configured.status,'applied',JSON.stringify(configured))
   assert.equal(environment.KILO_CONFIG,undefined)
@@ -323,7 +323,7 @@ try{
   result.checks.firstAndWarm={firstRun:a.run.id,warmRun:b.run.id,host:a.started.hostInstanceId,session:a.started.nativeThreadId}
   const legacyMember=await core.request('members.get',{agentId:'agent_2'})
   assert.equal(legacyMember.runtimeConfiguration.permissions.values.permission,'deny','Legacy member field remains readable')
-  result.checks.legacyPermission={stored:'deny',firstRunSucceeded:true,nativeDefaultAllowedCli:true}
+  result.checks.legacyPermission={stored:'deny',firstRunSucceeded:true,nativeDefaultAllowedCli:true,inheritedPermissionOverridden:true}
   result.checks.metrics=await core.request('monitoring.execution',{campId:threadId,agentRunIds:[a.run.id,b.run.id]})
   const sampled=result.checks.metrics.runs.find(r=>r.agentRunId===a.run.id)
   assert(sampled?.promptInputTotalTokens>0&&sampled.outputTokens>0,'The shared sampler must observe native per-call counters')
@@ -507,8 +507,9 @@ for line in sys.stdin:
     await core.close();core=await openCore();await core.request('health.check')
   }
   const setNativePermission=async(edit)=>{
-    const saved=await core.request('member.runtimeEnvironment.get',{memberId:'agent_2',adapterKind:'kilo-cli'})
-    await setNativeEnvironment({KILO_PERMISSION:JSON.stringify({...JSON.parse(saved.environment.KILO_PERMISSION),edit})})
+    // Rovai fixes KILO_PERMISSION at spawn. Tool-specific native rules still
+    // come from Kilo's configuration and must exercise the shared Approval.
+    await setNativeEnvironment({KILO_CONFIG_CONTENT:JSON.stringify({...config,permission:{'*':'allow',...config.permission,edit}})})
   }
   await setNativePermission('ask')
   approvalDecision='allow_once'

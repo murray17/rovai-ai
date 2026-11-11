@@ -84,10 +84,11 @@ GIF 保持动画；各 `MemberAvatar` 用同一取景区域显示原动画。旧
 平台冻结状态仍来自 Core。视觉排序不改变初始选择：默认模型不写入显式模型 ID，选择固定模型也不自动填入
 推理强度；选择“跟随模型默认值”删除对应 override。
 
-Kilo 的权限完全由原生配置决定。权限行复用下拉框外观、保持只读，值为“原生规则 / Native rules”，
+Kilo 正式执行由 Rovai 设置进程级默认 allow，具体权限仍由原生规则裁决。权限行复用下拉框外观、保持只读，值为“原生规则 / Native rules”，
 不把默认、工具、Agent 和项目规则推断成统一的 allow/ask/deny 档位，也不显示最高权限推荐。
-标签旁的中性叹号按钮可点击或用键盘打开简短说明：运行 `kilo debug paths` 找到配置目录，
-编辑 `kilo.jsonc.permission`；allow 自动允许、ask 询问、deny 拒绝，也支持按工具配置，修改后重新启动 Kilo 会话。
+标签旁的中性叹号按钮可点击或用键盘打开简短说明：先说明进程默认 allow，再给出
+`"permission": {"*":"allow","edit":"ask"}` 的工具规则示例；运行 `kilo debug paths` 找到 `kilo.jsonc`，
+可按工具或 Agent 调整规则，修改后重新启动 Kilo 会话。不再用全局 `permission: "ask"` 作为调整 Rovai 执行的示例。
 说明默认关闭，使用既有浮层；Escape 关闭后焦点回到触发器，外部点击关闭并继续实际点击的操作。
 打开和关闭不修改草稿或查询 Runtime。
 旧成员保存的 permission 字段不作为控件恢复，模型与其他字段仍可修改；实际审批保留共享原生请求转交。

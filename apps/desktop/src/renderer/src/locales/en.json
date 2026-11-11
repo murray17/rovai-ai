@@ -4363,6 +4363,6 @@
   "正在刷新模型列表": "Refreshing model list",
   "原生规则": "Native rules",
   "Kilo 权限设置说明": "Kilo permission settings",
-  "运行 kilo debug paths 查看配置目录，编辑其中的 kilo.jsonc。": "Run kilo debug paths to find the config directory, then edit kilo.jsonc there.",
-  "allow 自动允许，ask 询问，deny 拒绝；也可按工具配置。修改后重新启动 Kilo 会话。": "allow runs automatically, ask requests approval, and deny blocks execution. You can also configure individual tools. Restart the Kilo session after editing."
+  "Rovai 启动 Kilo 时默认设置 allow，具体权限由 Kilo 原生规则决定。": "Rovai starts Kilo with allow as the default. Kilo's native rules decide individual permissions.",
+  "运行 kilo debug paths 找到 kilo.jsonc，可按工具或 Agent 调整规则。修改后重新启动 Kilo 会话。": "Run kilo debug paths to find kilo.jsonc and configure tool or Agent rules. Restart the Kilo session after editing."
 }
