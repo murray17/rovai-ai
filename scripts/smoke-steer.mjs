@@ -166,7 +166,7 @@ try {
   assert.equal(runs().filter(r=>r.agent_id==='agent_1').length,2)
   if(targetAdapter==='opencode-cli') {
     const nextSession=db.prepare('SELECT native_session_id FROM conversation WHERE camp_id=? AND agent_id=?').get(threadId,'agent_1')?.native_session_id
-    assert.ok(steeredSession&&nextSession);assert.notEqual(nextSession,steeredSession,'successful original Run does not clear persistent inbox risk')
+    assert.ok(steeredSession&&nextSession);assert.equal(nextSession,steeredSession,'normal Steer must preserve the compatible native Session')
   }
   report.cases.push({name:'ordinary queue separation',status:'passed'})
   }

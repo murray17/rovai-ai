@@ -179,9 +179,9 @@ Kiro 以当前 Prompt 的逐请求 queued 回执确认，ZCode 以原 Turn 的�
 原 Prompt 仍拥有终态，使用过插话的 Host 回收。
 
 OpenCode 稳定 2.x 自 2.2.7 起以官方 ACP `_session/steering` 接入同一路径，Host 还须声明能力。
-原生 inbox 持久化，Core 从既有发送准入账本和精确 Session 绑定派生复用保护；Run 成功或进程回收不解除风险。
-完成既有 cleanup 后，普通 FIFO 沿现有新 Session 分支继续，不重投旧插话、不阻塞整个会话。
-自然结束仅在在途请求原有期限内收尾；Stop 不等待 ACK。版本下限、明确拒绝和迟到结果见当前 Delivery 合同。
+Host 收尾回收与 Session 恢复分开；正常插话后的后继 Run 按既有兼容性尽可能继续原 Native Session。
+原生已接收输入可能留给同 Session 的后续执行消费，不承诺严格原生同轮；Rovai 保留回执且不重发 accepted／unknown 输入。
+自然结束仅在在途请求原有期限内收尾；Stop 不等待 ACK。精确回执与连续性边界见当前 Delivery 合同。
 
 Claude 复用 Stream JSON 和既有输入编号关联回显，允许确认跨越内部 result；接收不承诺原生同轮。
 回执不决定 Run 生命周期，可靠结束后未确认输入单独保持未知，不重发、不阻塞收尾。

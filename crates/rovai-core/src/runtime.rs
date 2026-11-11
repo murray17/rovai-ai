@@ -1069,14 +1069,7 @@ impl ExecutionRuntimeService {
     ) -> Result<NativeSessionResumeDisposition> {
         // Run/epoch, input-delivery and native writer-lock fences remain the
         // execution authority. Historical configuration attempts are audit only.
-        if execution.runtime.adapter_kind == AdapterKind::OpencodeCli
-            && crate::steer::opencode_session_requires_rotation(
-                database.connection(),
-                &execution.conversation_id,
-            )?
-        {
-            return Ok(NativeSessionResumeDisposition::New);
-        }
+        let _ = database;
         Ok(execution.native_session_resume_disposition())
     }
 

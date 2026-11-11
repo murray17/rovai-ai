@@ -158,8 +158,10 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 OpenCode Steer 扩展既有 `steer_admission_uses_the_frozen_run_and_rejects_stale_or_unknown_capability`、
 `steer_fault_recovery_never_replays_ambiguous_input_or_updates_a_successor` 和
 `active_input_receipts_preserve_the_original_prompt_and_fence_late_sources` owners，不新增 Rust 测试函数。
-原 SQL／ACP 进程夹具分别覆盖严格 2.2.7／2.x 冻结资格、发送准入后的 Session 保护与重开、单条拒绝不解除
-其他风险、新 Session FIFO、不重投、Host 能力、精确拒绝、两种 reader 顺序和原期限内收尾／及时停止。
+原 SQL／ACP 进程夹具分别覆盖严格 2.2.7／2.x 冻结资格、Steer 后成功及重开保留 Session／Binding、
+既有 cleanup 后同 Session FIFO、明确未接收回队列及 accepted／unknown 不重发，另覆盖 Host 能力、精确拒绝、
+两种 reader 顺序和原期限内收尾／及时停止。Host 回收不要求 Session 轮换。
+OpenCode 停止探针验证旧 Host 回收及 Rovai 不重投；原生已接收输入可在同 Session 恢复后消费，单独记录原生后续效果。
 最小命令分别是 `cargo test -p rovai-core --features extended-tests --lib <owner名称>`，再运行默认 workspace。
 复用版本探针的 OpenCode 入口必须分别指定官方 2.2.6（`ineligible`）和 2.2.7（`receipts`／`boundaries`）绝对程序路径，
 XDG config/data/state/cache 均隔离，取消继承 `OPENCODE_DB`；不复制原生日常 Session 或数据库。

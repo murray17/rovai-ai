@@ -16754,6 +16754,22 @@ while IFS= read -r ignored; do :; done
             can_resume: true,
             can_load_history: true,
         };
+        // A retired OpenCode Host does not retire its Native Session. A cold
+        // successor uses the existing restore capability with that exact ID.
+        for (capabilities, expected) in [
+            (resume_and_load, AcpSessionContinuation::Resume),
+            (load_only, AcpSessionContinuation::HistoryRestore),
+        ] {
+            assert_eq!(
+                select_acp_session_continuation(
+                    AdapterKind::OpencodeCli,
+                    false,
+                    Some("opencode-steered-session"),
+                    capabilities,
+                ),
+                expected
+            );
+        }
 
         assert_eq!(
             select_acp_session_continuation(

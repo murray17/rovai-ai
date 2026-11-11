@@ -169,37 +169,6 @@ fn opencode_steer_version_format(value: &str) -> bool {
     }) && components.next().is_none()
 }
 
-/// OpenCode persists its inbox across process death. A dispatched supplement
-/// protects the exact native Session until that input is proven not accepted;
-/// a successful original Prompt is not evidence that the inbox was consumed.
-pub(crate) fn opencode_session_requires_rotation(
-    connection: &Connection,
-    conversation_id: &str,
-) -> Result<bool> {
-    Ok(connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM runtime_input_delivery AS input
-         JOIN agent_run AS run ON run.id=input.agent_run_id
-         JOIN conversation AS current ON current.id=run.conversation_id
-         WHERE current.id=?1 AND current.native_session_id IS NOT NULL
-           AND run.runtime_adapter_kind='opencode-cli' AND input.input_kind='steer'
-           AND input.dispatch_started_at IS NOT NULL AND input.status<>'not_accepted'
-           AND (
-             (input.native_binding_id=current.native_binding_id
-               AND input.native_binding_generation=current.native_binding_generation)
-             OR EXISTS(SELECT 1 FROM event_log AS binding
-               WHERE binding.event_type='conversation.native_session_bound'
-                 AND binding.entity_type='conversation' AND binding.entity_id=current.id
-                 AND json_extract(binding.payload_json,'$.nativeBindingId')=input.native_binding_id
-                 AND json_extract(binding.payload_json,'$.nativeBindingGeneration')=input.native_binding_generation
-                 AND json_extract(binding.payload_json,'$.nativeSessionId')=current.native_session_id
-                 AND json_extract(binding.payload_json,'$.nativeSessionCompatibilityKey') IS current.native_session_compatibility_key
-             )
-           ))",
-        [conversation_id],
-        |row| row.get(0),
-    )?)
-}
-
 /// All callers use the target Run's frozen executable identity and protocol.
 /// Neither member edits nor a replacement binary on disk can retarget a live Host.
 pub fn active_input_availability(

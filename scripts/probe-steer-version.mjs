@@ -282,13 +282,20 @@ try {
         await send(`新的普通任务：把 CLEAN_${id} 写入 ${id}-clean.txt，回复 CLEAN_${id}。`)
         await wait(() => runs().some(r => r.id !== target.id && r.status === 'succeeded'), 'ordinary task after stop', 180000, true)
         assert.equal(runs().length, 2)
-        assert.equal(await exists(`${id}-forbidden.txt`), false, 'stopped input must not cause later side effects')
+        if (adapter === 'opencode-cli') {
+          // Cancellation stops the owned execution. A previously accepted
+          // native inbox item can still be consumed on the resumed Session.
+          result.nativePendingInputObservedAfterResume = await exists(`${id}-forbidden.txt`)
+          assert.equal(db.prepare('SELECT count(*) AS count FROM runtime_input_delivery i JOIN context_manifest m ON m.id=i.context_manifest_id WHERE m.source_delivery_id=? AND i.agent_run_id<>?').get(deliveries(b)[0].id, target.id).count, 0, 'Rovai must not resend an accepted input')
+        } else {
+          assert.equal(await exists(`${id}-forbidden.txt`), false, 'stopped input must not cause later side effects')
+        }
         assert.equal((await readFile(join(project, `${id}-clean.txt`), 'utf8')).trim(), `CLEAN_${id}`)
         assert.notEqual(deliveries(b)[0].status, 'waiting')
         if (adapter === 'opencode-cli') {
           result.sessionAfterStop = capture().conversations[0]
           assert.ok(result.sessionBeforeStop.native_session_id && result.sessionAfterStop.native_session_id)
-          assert.notEqual(result.sessionAfterStop.native_session_id, result.sessionBeforeStop.native_session_id, 'persistent native inbox must not reach the successor')
+          result.sessionReused = result.sessionAfterStop.native_session_id === result.sessionBeforeStop.native_session_id
         }
         result.stoppedMessage = b; result.delivery = deliveries(b)
       })

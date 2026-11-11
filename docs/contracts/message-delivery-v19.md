@@ -51,23 +51,25 @@ Run／epoch／Host／Session／原 Prompt 的归属校验保持；独立 RPC ID 
 Stop 继续原有取消流程，不等待 ACK；取消 fence 唤醒自然收尾等待。
 超时后移除本期在途关联并保留 unknown，不增加长期迟到回执追踪或自动核对服务。
 
-## 持久化原生 inbox 的复用保护
+## Native Session 连续性与原生消费边界
 
-OpenCode 的 `resume: false` 只关闭唤醒；输入仍先持久化。活跃检查与入队之间可能发生结束，
-`injected` 不能证明输入已由原轮消费，停止或回收进程也不能证明 inbox 已清空。
-上游依据为 [v2.2.7 Steer 实现](https://github.com/anomalyco/opencode/blob/v2.2.7/packages/cli/src/acp/turn.ts#L406-L423)
+可用性与会话连续性沿用现有 Runtime 原则。正常插话后的后继 Run 在兼容且可恢复时继续原 Native Session；
+accepted、delivery_unknown 或已开始发送的 Steer 账本条目本身不清空绑定、不强制新建 Session。
+Session 恢复仍遵守既有兼容性、恢复失败和通用输入未知处理，不增加 OpenCode 专属的 Session 风险准入。
+
+Host 生命周期与 Native Session 连续性分别处理：使用过插话的 Host 按共享 ACP／Fleet 规则收尾回收，
+保留 Conversation 的原生 Session ID 和 Binding，后续可由新的 Host 恢复同一 Native Session。
+现有执行 cleanup 仍负责停止旧执行及其进程效果；其完成不作为清空原生 inbox 的证明。
+
+OpenCode 的 `resume: false` 只关闭唤醒，输入仍先持久化。活跃检查与入队之间可能发生结束，
+原生已接收输入可能留在 inbox，并在同 Session 的后续执行中消费；本接入接受这一原生语义，
+不承诺严格由原生同一轮消费。上游依据为
+[v2.2.7 Steer 实现](https://github.com/anomalyco/opencode/blob/v2.2.7/packages/cli/src/acp/turn.ts#L406-L423)
 和 [Session 合同](https://github.com/anomalyco/opencode/blob/v2.2.7/specs/v2/session.md)。
 
-保护从既有 `begin_runtime_input_dispatch` 准入事务的 `dispatch_started_at` 开始派生：
-同一精确原生 Session 中，存在已准入且尚未明确 not_accepted 的 Steer 输入，就不能自动用于后继 Run。
-身份沿用投递账本的 Native Binding／generation，以及既有 `conversation.native_session_bound` 事件中的
-Session ID 与存储兼容身份；更换 Host、程序升级、重绑相同 Session 或 Core 重启均不解除风险。
-明确未接收只排除对应输入；原 Run 成功、另一条拒绝或后续可信终态不清除其他输入的 inbox 风险。
+Rovai 的逐条接收事实仍属于发送时的 Run／epoch；accepted 与 unknown 输入不由 Rovai 自动重发或复制到普通队列。
+明确未接收才按既有回队列规则处理。原生在恢复后的同 Session 消费已有输入，与 Rovai 再投一次该输入是两个事实。
+不为结束边界增加专属隔离、自动核对、逐项 inbox 撤销、历史搬运或空 Prompt 排空机制。
 
-本期不新增逐项原生消费／清理接口。存在上述风险时，完成原有执行 cleanup 后，普通 FIFO 领取清除
-当前恢复绑定并沿现有新 Session 分支启动；已有 queued Run 的恢复选择也复查该保护。
-不持续阻塞整个 Conversation，不自动重投旧输入，不删除原消息、回执或原生历史，也不发送空 Prompt 消耗 inbox。
-Session 轮换隔离后续输入；旧执行产生效果的能力仍由原有 cleanup 门禁负责。
-
-以上直接复用原投递账本、绑定事件、新 Session 分支和 Fleet；无 Schema 迁移、专属队列、
-专属输入状态、持久化能力目录或额外模型输入。
+以上继续复用现有 Delivery、Context、ACP、Native Binding 与 Session 恢复路径；
+无 Schema 迁移、专属队列、专属输入状态、持久化能力目录或额外模型输入。

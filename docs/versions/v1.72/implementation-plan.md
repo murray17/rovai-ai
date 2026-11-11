@@ -17,22 +17,22 @@ last_updated: 2026-11-10
   promptRequired/noRunningTurn 保留明确拒绝，迟到 injected、未知回包和运输失败不重发。
   受资格约束的 OpenCode 复用当前 Prompt 模型／工具活动的初始接收证据，避免 ready 永远等到原 Prompt 终态。
 - 自然收尾先关闭新准入，仅等待在途 RPC 的原有响应期限；Stop 直接取消并唤醒等待。超时后不保留长期回执追踪。
-- 原生 Session 保护从原账本的 dispatch_started_at 与精确 Native Binding／Session／存储身份派生；
-  accepted、unknown 和已准入 prepared 均保留风险，not_accepted 仅排除对应条目，Run 成功不清除。
-  `delivery_queue.rs` 在原有 cleanup 门禁后轮换受保护恢复绑定，`runtime.rs` 对已有 queued Run 的 Session 选择再次复查；
-  普通 FIFO 沿原新 Session 分支继续，不复制旧输入、不清理原生历史，无 Migration。
-- 复用三项既有 Rust owners，无新增函数或平行 fixture。版本矩阵包含 2.2.6、2.2.7、预发布、未知、非法后缀和 3.x；
-  SQL owner 包含准入即保护、明确拒绝、不同绑定恢复同 Session、成功及重开后保护、新 FIFO 与不重放；
-  ACP owner 包含能力拒绝、请求形状、精确 noRunningTurn、迟到 injected、reader 两种顺序、有界收尾和 Stop。
-- `smoke-steer.mjs` 的忙碌 OpenCode 路线按 Core 资格断言，`probe-steer-version.mjs` 增加隔离 OpenCode 入口。
-  官方 2.2.6／2.2.7 真实模型验收尚未执行；受控协议夹具仅证明应用和运输行为。
-- `cargo test -p rovai-core --features extended-tests --lib active_input` 三项通过；冻结准入和故障恢复两个 owner
-  分别定向通过，共五项。自然收尾、Stop 及 SQL cleanup-before-rotation 均在原夹具内验证。
-  共享矩阵同时修正两条落后于既有策略的断言：Hermes 1.x 保守关闭、补充 unknown 不阻止新来源 Steer；生产策略未改。
-- `cargo check --workspace`、`pnpm typecheck`、`pnpm build:desktop`、`pnpm docs:test`、`pnpm docs:check`、
-  Steer race outcome 测试和两个验收入口的 Node 语法检查通过。
-  兼容性台账字节变化同步既有 macOS evidence revision 摘要，不扩大平台资格。
-- 最终 `cargo test --workspace` 为 484 passed／1 ignored；有明确 base SHA 的通用文档 CI 门禁作为提交前最终检查。
+- Session 连续性沿用既有恢复路径。删除 OpenCode 专属账本风险查询、FIFO 领取清空绑定及恢复入口强制 New 的逻辑；
+  正常结束后保留原 Session／Binding，Host 回收不使原生会话失效。原生已接收输入可能在同 Session 后续执行消费，
+  不承诺严格原生同轮，不增加隔离、核对、历史搬运或 Migration；Rovai 仍不重发 accepted／unknown。
+- 扩展既有冻结准入、故障恢复、ACP 回执及恢复选择 owners，无新 Rust 测试函数或平行 fixture。
+  版本矩阵包含 2.2.6、2.2.7、预发布、未知、非法后缀和 3.x；SQL 覆盖各投递状态经成功及重开保留绑定、
+  cleanup 后原 Session FIFO、明确拒绝回队列及不重发；ACP 覆盖能力、精确拒绝、reader 顺序、有界收尾／Stop，
+  并确认冷 Host 按已有 capability 恢复同一 Session。
+- `smoke-steer.mjs` 的忙碌 OpenCode 路线按 Core 资格断言，普通后继验证原 Session 连续性；
+  `probe-steer-version.mjs` 增加隔离 OpenCode 入口。停止探针断言旧 Host 回收及 Rovai 不重投，
+  单独记录原生 pending input 在恢复后产生的效果。官方 2.2.6／2.2.7 真实模型验收尚未执行。
+- 本轮连续性修正验证：相关 extended Rust owners 共 6 项、默认 Rust workspace（484 passed／1 ignored）、
+  `cargo check --workspace`、10 项文档单测、通用文档门禁及指定真实基线 `f19b2ddc3` 的 CI 文档门禁通过；
+  两个探针的 Node 语法检查、1 项 race outcome 单测、Rust 格式与差异检查通过。
+  初版 `5ddc07b53` 的类型检查和桌面构建已通过，本轮未改前端。
+  兼容性台账变化同步既有 macOS evidence revision 摘要，不扩大平台资格；共享矩阵两条旧断言按既有策略保持修正，
+  未改变 Hermes 或其他 Runtime 的生产资格。
 - `pnpm test` 的 Vitest 阶段为 274 files／3262 tests passed、2 skipped；AboutUpdatesSettings 两项发布日期格式断言失败。
   在未修改的 `13a4b8f96` 主 checkout 定向复现相同两项失败。额外尝试的 legacy Steer migration owner
   也在本分支和未修改主线均失败于 `db_steer.rs` 的既有行保留断言；本项不修改这些 UI 或 Migration 实现。
