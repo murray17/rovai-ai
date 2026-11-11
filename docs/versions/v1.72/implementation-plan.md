@@ -4987,3 +4987,33 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 本机 HST 下两个既有更新日期测试依赖 UTC 日期；以显式 `TZ=UTC` 完成全量测试，未改动它们。
 隔离 UI 覆盖混合队列、独立请求、原单聊定位、日夜蓝点、到期/处理撤下及刷新静默。
 本次未运行真实模型/Pi 或 Windows 原生验收，不把受控 Runtime 元数据与 Electron 夹具当作此类证据。
+
+
+## MiniMax 参数按需读取（2026-11-10）
+
+基线 main@6d51b19f2；工作分支 rovai/minimax-model-options-on-demand。实现与本机验收完成。
+
+- 后端：health 的临时目标选择；Adapter 严格配置观测；application 共用目标队列；agent_profile 共用事务合并。
+- 前端：MemberRuntimeParameters 复用 ensureCatalog，runtime-check 透传 MiniMax 目标，来源仍只属于 DSH。
+- 原生边界：`node scripts/probe-minimax-model-options.mjs /absolute/path/to/mcode` 使用独立原生数据目录，
+  先初始化、再确认临时选模不改配置与后继 Session 默认值；无业务 Prompt。追加 `--core /absolute/path/to/rovai-core`
+  可通过生产 Core 验证目录、目标、缓存、默认标记和逐模型时间。macOS arm64 的 MiniMax Code 0.6.12／生产 Core 组合已通过。
+  原生初始化可能更新的目录下载缓存不属于配置身份；实际配置、认证、程序与有效环境仍在探测前后复核。
+- Rust 测试准入：扩展既有目录/解析/事务 owners，保留 DSH 矩阵；原扫描故障输入改为目标故障输入。
+  新增 native_inputs owner 仅验证新身份输入的独立失效边界，Session 写入不使配置摘要失效，parser/DB 无法证明这点。
+  最小命令：`cargo test -p rovai-core --lib runtime_model_options`。
+
+验证结果：
+
+- 生产 Manager／私有 DB／协议子进程 owner `minimax_check_and_catalog_keep_their_intent_and_target_options`：
+  3／8 模型目录均零选模、零 Prompt；非初始目标一次选模；缓存与确认空复用、故障保留、并发去重、逐目标合并、
+  配置在探测中变化后拒绝旧身份发布均通过。
+- `target_catalog_updates_accumulate_capabilities_without_reviving_removed_routes`：DSH 与 MiniMax 共用矩阵通过；
+  grouped ACP 解析 owner、原生身份输入 owner 与六项 DSH 原 owner 通过。原扫描 owner 改为目标 owner，
+  旧分类、断线、协议异常与超时输入保留为目标失败矩阵；仅新增一项独立身份 seam 测试。
+- `pnpm test:runtime-model-picker`：真实隔离 Electron；队员／引导页 MiniMax、DSH 原竞态矩阵、共享请求、
+  迟到 A 不覆盖 B、确认空、失败草稿保留及目录新鲜但目标过期后的访问校验通过。
+- `pnpm typecheck`、`pnpm build:desktop`、`pnpm test:rust:pr` 通过；Rust workspace 为 484 passed、1 ignored。
+- `TZ=UTC pnpm test`：Vitest 3264 passed／2 skipped，后续 Node 矩阵通过。本机 Honolulu 时区运行时，
+  未改动的 AboutUpdatesSettings 两个既有发布日期断言会落到前一天；本次没有修改该日期逻辑。
+- `pnpm docs:check` 通过；文档单测随 `pnpm test` 通过。当前合同为 Runtime Launch v77，取舍为 V1.72-D76。

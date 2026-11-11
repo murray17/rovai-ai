@@ -131,10 +131,11 @@ export interface RuntimeModelCatalogCache {
 }
 
 export interface RuntimeModelCatalogTarget {
-  /** DSH-only target; omitted for a shared catalog refresh. */
+  /** DSH/MiniMax target; omitted for a shared catalog refresh. */
   modelId?: string
+  /** Only DSH has native/web model sources. */
   dshSource?: 'native' | 'web'
-  /** Validate cached DSH capability context without starting a Runtime. */
+  /** Validate cached target capability context without starting a Runtime. */
   cacheOnly?: boolean
   /** Read natively even when the same identity's cached catalog is fresh. */
   forceRefresh?: boolean

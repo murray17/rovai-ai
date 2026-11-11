@@ -58,19 +58,6 @@ impl std::fmt::Display for RpcRejection {
 
 impl std::error::Error for RpcRejection {}
 
-fn minimax_model_unavailable(error: &anyhow::Error) -> bool {
-    // Official mcode 0.6.12 set_config_option(model) emits this exact rejection
-    // when the requested model/variant is absent from the Session's native list.
-    // Other invalid params, method/session/internal errors and unknown data fail.
-    error
-        .downcast_ref::<RpcRejection>()
-        .is_some_and(|rejection| {
-            rejection.error["code"].as_i64() == Some(-32602)
-                && rejection.error["message"].as_str() == Some("Model selection is not advertised.")
-                && rejection.error.get("data").is_none_or(Value::is_null)
-        })
-}
-
 struct ProbeRootCleanup(PathBuf);
 
 impl Drop for ProbeRootCleanup {
@@ -2205,8 +2192,9 @@ async fn run_acp_probe_with_scope(
             } else {
                 None
             };
-            let dsh_options_context = (kind == AdapterKind::DeepseekHarness)
-                .then(|| crate::dsh::model_options_context(path))
+            let options_context = crate::runtime_model_options::metadata_keys(kind)
+                .filter(|_| kind != AdapterKind::MinimaxCodeCli || catalog_only)
+                .map(|_| crate::runtime_model_options::context(kind, path))
                 .transpose()?;
             write_json_line(
                 stdin,
@@ -2326,91 +2314,81 @@ async fn run_acp_probe_with_scope(
                 crate::dsh::annotate_session(&mut session, preparation);
             }
             if let Some((model_id, source)) = target {
-                if kind != AdapterKind::DeepseekHarness {
-                    bail!("Target-model option discovery is only supported for DSH");
-                }
-                let preparation = model_preparation
-                    .as_ref()
-                    .context("DSH model preparation missing")?;
-                if !crate::dsh::selected_route_available(preparation, model_id, source) {
-                    bail!("所选 DSH 模型来源不可用；未切换到同名的其他来源");
-                }
-                let default_model =
-                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
-                write_json_line(stdin, &json!({
+                if kind == AdapterKind::MinimaxCodeCli {
+                    anyhow::ensure!(
+                        source.is_none(),
+                        "MiniMax target options do not have a DSH source"
+                    );
+                    let original =
+                        crate::agent_runtime_adapter::minimax_model_id_from_session(&session)?;
+                    if original != model_id {
+                        write_json_line(stdin, &json!({
+                            "jsonrpc": "2.0", "id": session_request_id + 1,
+                            "method": "session/set_config_option",
+                            "params": {"sessionId": session["sessionId"], "configId": "model", "value": model_id}
+                        })).await?;
+                        let selected = read_rpc_result(lines, session_request_id + 1).await?;
+                        session =
+                            crate::agent_runtime_adapter::minimax_model_config_after_selection(
+                                &session, &selected, model_id,
+                            )?;
+                    } else {
+                        let (current, _) =
+                            crate::agent_runtime_adapter::minimax_model_options_from_session(
+                                &session,
+                            )?;
+                        anyhow::ensure!(
+                            current == model_id,
+                            "MiniMax did not confirm the requested model"
+                        );
+                    }
+                    session["_meta"]["rovaiCatalogDefaultModel"] = json!(original);
+                } else {
+                    anyhow::ensure!(
+                        kind == AdapterKind::DeepseekHarness,
+                        "Runtime does not support target-model options"
+                    );
+                    let preparation = model_preparation
+                        .as_ref()
+                        .context("DSH model preparation missing")?;
+                    if !crate::dsh::selected_route_available(preparation, model_id, source) {
+                        bail!("所选 DSH 模型来源不可用；未切换到同名的其他来源");
+                    }
+                    let default_model =
+                        crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
+                    write_json_line(stdin, &json!({
                     "jsonrpc": "2.0", "id": session_request_id + 1,
                     "method": "session/set_config_option",
                     "params": {"sessionId": session["sessionId"], "configId": "model", "value": model_id}
                 })).await?;
-                let selected = read_rpc_result(lines, session_request_id + 1).await?;
-                session = crate::agent_runtime_adapter::dsh_model_config_after_selection(
-                    &session, &selected, model_id,
-                )?;
-                if let Some(default_model) = default_model {
-                    session["_meta"]["rovaiDshDefaultModel"] = json!(default_model);
-                }
-                if !crate::dsh::model_inputs_unchanged(preparation) {
-                    bail!("dsh_model_configuration_changed_during_preparation");
-                }
-            }
-            if let Some(context) = dsh_options_context {
-                anyhow::ensure!(
-                    crate::dsh::model_options_context(path)? == context,
-                    "dsh_model_configuration_changed_during_preparation"
-                );
-                session["_meta"]["rovaiDshOptionsContext"] = json!(context);
-                session["_meta"]["rovaiDshOptionsObservedAt"] =
-                    json!(chrono::Utc::now().to_rfc3339());
-            }
-            if kind == AdapterKind::MinimaxCodeCli && catalog_only {
-                // Only a complete catalog request traverses model-specific options.
-                // ACP advertises thinking effort only for the selected model. Probe
-                // each native ID in this disposable Session; no inference or global
-                // provider change is involved. Restore its initial selection afterward.
-                let models =
-                    crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
-                let original =
-                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
-                let mut options = serde_json::Map::new();
-                for (index, model) in models.iter().enumerate() {
-                    let id = 1000 + index as u64;
-                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
-                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":model.id}})).await?;
-                    // Native catalogs may include an unconfigured Provider or a
-                    // variant that this release cannot select. Its unavailable
-                    // options must not hide the working native default/catalog.
-                    let selected = match read_rpc_result(lines, id).await {
-                        Ok(selected) => selected,
-                        Err(error) if minimax_model_unavailable(&error) => {
-                            continue;
-                        }
-                        Err(error) => return Err(error),
-                    };
-                    anyhow::ensure!(
-                        crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
-                            .as_deref()
-                            == Some(model.id.as_str()),
-                        "MiniMax model selection response did not match the requested model"
-                    );
-                    let chosen = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
-                        kind, &selected,
-                    )?
-                    .into_iter()
-                    .find(|entry| entry.id == model.id)
-                    .context("MiniMax selected model was missing from its response")?;
-                    options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
-                }
-                if let Some(original) = original {
-                    let id = 1000 + models.len() as u64;
-                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
-                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
-                    if let Err(error) = read_rpc_result(lines, id).await
-                        && !minimax_model_unavailable(&error)
-                    {
-                        return Err(error);
+                    let selected = read_rpc_result(lines, session_request_id + 1).await?;
+                    session = crate::agent_runtime_adapter::dsh_model_config_after_selection(
+                        &session, &selected, model_id,
+                    )?;
+                    if let Some(default_model) = default_model {
+                        session["_meta"]["rovaiDshDefaultModel"] = json!(default_model);
+                    }
+                    if !crate::dsh::model_inputs_unchanged(preparation) {
+                        bail!("dsh_model_configuration_changed_during_preparation");
                     }
                 }
-                session["_meta"]["rovaiMinimaxModelOptions"] = Value::Object(options);
+            }
+            if let Some(context) = options_context {
+                anyhow::ensure!(
+                    crate::runtime_model_options::context(kind, path)? == context,
+                    if kind == AdapterKind::DeepseekHarness {
+                        "dsh_model_configuration_changed_during_preparation"
+                    } else {
+                        "model_options_configuration_changed_during_probe"
+                    }
+                );
+                let (context_key, observed_key) = if kind == AdapterKind::DeepseekHarness {
+                    ("rovaiDshOptionsContext", "rovaiDshOptionsObservedAt")
+                } else {
+                    ("rovaiModelOptionsContext", "rovaiModelOptionsObservedAt")
+                };
+                session["_meta"][context_key] = json!(context);
+                session["_meta"][observed_key] = json!(chrono::Utc::now().to_rfc3339());
             }
             let _session_id = session
                 .get("sessionId")

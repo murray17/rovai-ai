@@ -52,6 +52,10 @@ User 命名与旧 Session 恢复：当前规范为 [User Naming v1](../contracts
 及[目录边界](../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实)；实施和验证见
 [当前版本记录](../versions/v1.72/implementation-plan.md#模型目录兼容与原生执行2026-10-29)。
 
+MiniMax 按需参数读取：[Runtime Launch v77](../contracts/runtime-launch-and-verification-v77.md)、
+[目录边界](../architecture/runtime-catalog-boundaries.md#minimax-按目标参数发现)；取舍见
+[V1.72-D76](../versions/v1.72/decisions.md#v1-72-d76)。
+
 CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contracts/runtime-launch-and-verification-v76.md)、
 [公开 Runtime failure](../architecture/runtime-catalog-boundaries.md#内部诊断与公开-runtime-failure)。
 

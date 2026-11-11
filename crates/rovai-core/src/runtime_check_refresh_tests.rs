@@ -2365,7 +2365,7 @@ async fn failed_environment_reader_cannot_prevent_a_local_save() {
 // A pure merge test cannot prove first-use fallback or preserve catalog timestamps.
 #[cfg(unix)]
 #[tokio::test]
-async fn minimax_check_and_catalog_keep_their_intent_and_complete_options() {
+async fn minimax_check_and_catalog_keep_their_intent_and_target_options() {
     use rovai_core::agent_profile::{AgentProfileService, RuntimeModelCatalogCacheStatus};
     use std::os::unix::fs::PermissionsExt;
     let python = std::process::Command::new("python3")
@@ -2376,7 +2376,7 @@ async fn minimax_check_and_catalog_keep_their_intent_and_complete_options() {
     let python = String::from_utf8(python.stdout).unwrap();
     let kind = AdapterKind::MinimaxCodeCli;
     for (count, first_trigger) in [
-        (2, RuntimeCheckTrigger::UserCheck),
+        (3, RuntimeCheckTrigger::UserCheck),
         (8, RuntimeCheckTrigger::CatalogOpen),
     ] {
         let fixture = Fixture::new();
@@ -2390,11 +2390,13 @@ if '--version' in sys.argv:
 count = int((root / 'count').read_text())
 current = 'model-0'
 def session():
-    return {'sessionId':'fixture-session', 'configOptions':[
+    result = {'sessionId':'fixture-session', 'configOptions':[
         {'id':'model','name':'Model','category':'model','type':'select','currentValue':current,
          'options':[{'value':f'model-{i}','name':f'Model {i}'} for i in range(count)]},
         {'id':'thinkingEffort','name':'Thinking','type':'select','currentValue':'high',
-         'options':[{'value':'low','name':'Low'},{'value':'high','name':'High'}]}]}
+         'options':[{'value':v,'name':v} for v in (['low','high'] if current=='model-0' else ['xhigh','max'])]}]}
+    if current=='model-2': result['configOptions'].pop()
+    return result
 for line in sys.stdin:
     request=json.loads(line); method=request['method']
     with (root / 'methods').open('a') as f: f.write(json.dumps({'pid':os.getpid(), 'method':method})+'\n')
@@ -2408,9 +2410,10 @@ for line in sys.stdin:
         assert request['params']['configId']=='model'
         if request['params']['value']=='model-1' and (root/'fault').exists():
             fault=(root/'fault').read_text()
+            if fault=='timeout': time.sleep(31)
             if fault=='disconnect': sys.exit(1)
             if fault=='malformed':
-                print('invalid-protocol',flush=True); continue
+                print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':{'configOptions':'broken'}}),flush=True); continue
             errors={
                 'reject': {'code':-32602,'message':'Model selection is not advertised.'},
                 'internal': {'code':-32603,'message':'Model selection is not advertised.'},
@@ -2421,13 +2424,21 @@ for line in sys.stdin:
                 print(json.dumps({'jsonrpc':'2.0','id':request['id'],'error':errors[fault]}),flush=True)
                 continue
         current=request['params']['value']; result=session()
+        if current=='model-1' and (root/'fault').exists():
+            fault=(root/'fault').read_text()
+            if fault=='mismatch': result['configOptions'][0]['currentValue']='model-0'
+            if fault=='conflict': result['models']={'currentModelId':'model-0'}
+            if fault=='effort': result['configOptions'][1]['options']=[{'value':123}]
+            if fault=='missing': result.pop('configOptions')
     else: raise AssertionError(method)
     print(json.dumps({'jsonrpc':'2.0','id':request['id'],'result':result}),flush=True)
 "#)).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(fixture.root.join("count"), count.to_string()).unwrap();
         fixture.core.handle_runtime_startup("runtime.startup.save", json!({
-            "runtimeKind":kind,"expectedRevision":0,"configuration":configuration(Some(&program)),
+            "runtimeKind":kind,"expectedRevision":0,
+            "edits":[{"path":["programPath"],"before":null,"after":program,"label":"Program"}],
+            "commonEnvironment":{"expectedRevision":0,"json":json!({"MINIMAX_DATA_DIR":fixture.root}).to_string()},
         })).await.unwrap();
         fixture.core.run_runtime_discovery().await;
         if first_trigger == RuntimeCheckTrigger::UserCheck {
@@ -2559,7 +2570,7 @@ for line in sys.stdin:
                 .iter()
                 .filter(|m| m["method"] == "session/set_config_option")
                 .count(),
-            count + 1
+            0
         );
         let mut settings_by_process = std::collections::BTreeMap::new();
         for method in &methods {
@@ -2574,8 +2585,8 @@ for line in sys.stdin:
         settings.sort();
         assert_eq!(
             settings,
-            vec![0, count + 1],
-            "only the full catalog traverses models"
+            vec![0, 0],
+            "directory size never adds model-selection RPCs"
         );
         assert!(!methods.iter().any(|m| m["method"] == "session/prompt"));
         let complete = AgentProfileService::default()
@@ -2593,7 +2604,9 @@ for line in sys.stdin:
                 .unwrap()
                 .models
                 .iter()
-                .all(|model| !model.options.is_empty())
+                .filter(|model| !model.options.is_empty())
+                .count()
+                == 1
         );
         // A later health result cannot erase options or advance the complete catalog's clock.
         assert_eq!(
@@ -2668,10 +2681,83 @@ for line in sys.stdin:
             .unwrap();
         assert_eq!(catalog["refreshStatus"], "completed");
         assert_eq!(catalog["cache"]["status"], "fresh");
-        if count == 2 {
-            // Only a proven model rejection is local to that model. Unknown
-            // native, transport and protocol failures must preserve the cache.
-            let old_time = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+        // Initial current model is already confirmed by the directory read.
+        std::fs::write(fixture.root.join("methods"), "").unwrap();
+        let cached = fixture
+            .core
+            .open_target_model_options(kind, "model-0", None, true, false)
+            .await
+            .unwrap();
+        assert_eq!(cached["refreshStatus"], "not_required");
+        let initial_at = cached["models"][0]["runtimeMetadata"]["modelOptionsObservedAt"].clone();
+        let b = fixture
+            .core
+            .open_target_model_options(kind, "model-1", None, false, false)
+            .await
+            .unwrap();
+        assert_eq!(b["selectedModelId"], "model-1");
+        assert_eq!(
+            b["models"][0]["runtimeMetadata"]["modelOptionsObservedAt"],
+            initial_at
+        );
+        assert!(b["models"][0]["isDefault"] == true);
+        let chosen = b["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == "model-1")
+            .unwrap();
+        assert_eq!(chosen["isDefault"], false);
+        assert_eq!(chosen["options"][0]["values"][0]["value"], "xhigh");
+        let after_b = std::fs::read_to_string(fixture.root.join("methods")).unwrap();
+        assert_eq!(after_b.matches("session/set_config_option").count(), 1);
+        fixture
+            .core
+            .open_target_model_options(kind, "model-1", None, false, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("methods")).unwrap(),
+            after_b,
+            "fresh target starts no probe"
+        );
+        let c = fixture
+            .core
+            .open_target_model_options(kind, "model-2", None, false, false)
+            .await
+            .unwrap();
+        let chosen = c["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == "model-2")
+            .unwrap();
+        assert_eq!(chosen["runtimeMetadata"]["modelOptionsResolved"], true);
+        assert_eq!(chosen["options"], json!([]));
+        let after_c = std::fs::read_to_string(fixture.root.join("methods")).unwrap();
+        fixture
+            .core
+            .open_target_model_options(kind, "model-2", None, false, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("methods")).unwrap(),
+            after_c
+        );
+        // A forced read of the initial current model does not select it again.
+        fixture
+            .core
+            .open_target_model_options(kind, "model-0", None, false, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(fixture.root.join("methods"))
+                .unwrap()
+                .matches("session/set_config_option")
+                .count(),
+            2
+        );
+        if count == 3 {
             for fault in [
                 "disconnect",
                 "malformed",
@@ -2680,11 +2766,14 @@ for line in sys.stdin:
                 "invalid-params",
                 "unknown-data",
                 "reject",
+                "mismatch",
+                "conflict",
+                "effort",
+                "missing",
+                "timeout",
             ] {
-                fixture.core.database.lock().await.connection().execute(
-                    "UPDATE adapter_capability_snapshot SET model_catalog_succeeded_at=?1 WHERE installation_id=?2",
-                    rusqlite::params![old_time, latest.id],
-                ).unwrap();
+                let availability_before =
+                    fixture.core.current_runtime_availability_status(kind).await;
                 let before = fixture
                     .core
                     .runtime_model_catalog_payload(kind, "not_required")
@@ -2693,29 +2782,176 @@ for line in sys.stdin:
                 std::fs::write(fixture.root.join("fault"), fault).unwrap();
                 let result = fixture
                     .core
-                    .open_runtime_model_catalog(kind, true, false)
+                    .open_target_model_options(kind, "model-1", None, false, true)
                     .await;
-                if fault == "reject" {
-                    let result = result.unwrap();
-                    assert_eq!(result["refreshStatus"], "completed");
-                    assert!(
-                        result["models"][0]["options"]
-                            .as_array()
-                            .is_some_and(|options| !options.is_empty())
-                    );
-                    assert_eq!(result["models"][1]["options"], json!([]));
-                } else {
-                    assert!(result.is_err(), "{fault} must fail the refresh");
-                    let retained = fixture
-                        .core
-                        .runtime_model_catalog_payload(kind, "not_required")
-                        .await
-                        .unwrap();
-                    assert_eq!(retained["models"], before["models"]);
-                    assert_eq!(retained["cache"], before["cache"]);
-                }
+                assert!(result.is_err(), "{fault} must fail the target read");
+                let retained = fixture
+                    .core
+                    .runtime_model_catalog_payload(kind, "not_required")
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    retained["models"], before["models"],
+                    "{fault} preserves capabilities"
+                );
+                assert_eq!(
+                    retained["cache"], before["cache"],
+                    "{fault} does not advance success"
+                );
+                assert_eq!(
+                    fixture.core.current_runtime_availability_status(kind).await,
+                    availability_before
+                );
                 std::fs::remove_file(fixture.root.join("fault")).unwrap();
             }
+            // Two concurrent callers of B share one native read; A has a separate queued read.
+            std::fs::write(fixture.root.join("methods"), "").unwrap();
+            std::fs::write(fixture.root.join("gate"), "").unwrap();
+            std::fs::remove_file(fixture.root.join("started")).unwrap();
+            let b1 = tokio::spawn({
+                let core = fixture.core.clone();
+                async move {
+                    core.open_target_model_options(kind, "model-1", None, false, true)
+                        .await
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !fixture.root.join("started").exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let mut joined = Vec::new();
+            for model_id in ["model-1", "model-0"] {
+                let (_, context, _) = fixture
+                    .core
+                    .target_model_options_payload(kind, model_id, None)
+                    .await
+                    .unwrap();
+                let (acknowledged, ack) = oneshot::channel();
+                let (completion, done) = oneshot::channel();
+                fixture
+                    .core
+                    .runtime_check_requests
+                    .send(
+                        crate::application::RuntimeCheckRequest {
+                            force_refresh: true,
+                            search: fixture.core.runtime_search_environment.read().await.clone(),
+                            startup_preview: None,
+                            model_target: Some(crate::application::ModelOptionsTarget {
+                                model_id: model_id.into(),
+                                source: None,
+                                context,
+                            }),
+                            runtime_kind: kind,
+                            purpose: RuntimeLaunchPurpose::AvailabilityCheck,
+                            trigger: RuntimeCheckTrigger::CatalogOpen,
+                            acknowledged,
+                            completion: Some(completion),
+                        }
+                        .into(),
+                    )
+                    .unwrap();
+                assert_eq!(ack.await.unwrap(), model_id == "model-0");
+                joined.push(done);
+            }
+            std::fs::remove_file(fixture.root.join("gate")).unwrap();
+            b1.await.unwrap().unwrap();
+            for done in joined {
+                assert_eq!(done.await.unwrap().unwrap(), RuntimeCheckOutcome::Ready);
+            }
+            let methods = std::fs::read_to_string(fixture.root.join("methods")).unwrap();
+            assert_eq!(methods.matches("session/new").count(), 2);
+            assert_eq!(methods.matches("session/set_config_option").count(), 1);
+            let merged = fixture
+                .core
+                .runtime_model_catalog_payload(kind, "not_required")
+                .await
+                .unwrap();
+            assert!(
+                merged["models"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|model| model["runtimeMetadata"]["modelOptionsResolved"] == true)
+            );
+            let b_at = merged["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["id"] == "model-1")
+                .unwrap()["runtimeMetadata"]["modelOptionsObservedAt"]
+                .clone();
+            let refreshed = fixture
+                .core
+                .open_runtime_model_catalog(kind, true, true)
+                .await
+                .unwrap();
+            assert_eq!(
+                refreshed["models"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|m| m["id"] == "model-1")
+                    .unwrap()["runtimeMetadata"]["modelOptionsObservedAt"],
+                b_at
+            );
+            // Editing configuration while a probe is live cannot publish old-identity success.
+            let before_change = fixture
+                .core
+                .runtime_model_catalog_payload(kind, "not_required")
+                .await
+                .unwrap();
+            std::fs::write(fixture.root.join("gate"), "").unwrap();
+            std::fs::remove_file(fixture.root.join("started")).unwrap();
+            let changing = tokio::spawn({
+                let core = fixture.core.clone();
+                async move {
+                    core.open_target_model_options(kind, "model-1", None, false, true)
+                        .await
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !fixture.root.join("started").exists() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            std::fs::write(
+                fixture.root.join("config.yaml"),
+                "defaultModel: changed/config\n",
+            )
+            .unwrap();
+            std::fs::remove_file(fixture.root.join("gate")).unwrap();
+            assert!(changing.await.unwrap().is_err());
+            let after_change = fixture
+                .core
+                .runtime_model_catalog_payload(kind, "not_required")
+                .await
+                .unwrap();
+            assert_eq!(after_change["models"], before_change["models"]);
+            assert_eq!(after_change["cache"], before_change["cache"]);
+            // The cache-only read detects this mismatch without starting a process.
+            let methods_before = std::fs::read_to_string(fixture.root.join("methods")).unwrap();
+            let invalid = fixture
+                .core
+                .open_target_model_options(kind, "model-1", None, true, false)
+                .await
+                .unwrap();
+            assert_eq!(invalid["refreshStatus"], "deferred");
+            assert!(
+                invalid["models"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|m| m["runtimeMetadata"]["modelOptionsResolved"] != true)
+            );
+            assert_eq!(
+                std::fs::read_to_string(fixture.root.join("methods")).unwrap(),
+                methods_before
+            );
         }
         fixture.close().await;
     }

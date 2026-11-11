@@ -1565,3 +1565,11 @@ User 已确认目录与文件共用候选及发送链路，模型只获得目录
 
 引用正文精简按 [R1](model-context-change-reference-projection-simplification.md)收敛：文件／目录只投影名称，完整 URI 和身份保持；
 链接标签采用必要转义，详情按类型与状态精简。按 User 明确的未上线范围，不升级格式号、不增加迁移或兼容分支。
+
+
+## MiniMax 参数按需读取（2026-11-10）
+
+按 User 批复，将完整目录的全模型扫描改为具体模型按需读取；复用 Core 目录、Check Manager、
+逐模型事务合并与现有 Renderer 请求代次。保留 MiniMax thinkingEffort 与正式执行边界。
+合同见 [Runtime Launch v77](../../contracts/runtime-launch-and-verification-v77.md)，
+取舍见 [V1.72-D76](decisions.md#v1-72-d76)，验证见[实施记录](implementation-plan.md#minimax-参数按需读取2026-11-10)。

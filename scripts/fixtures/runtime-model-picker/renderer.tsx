@@ -28,9 +28,11 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
     memberRuntimeDefaults: { adapterKind: kind, model: { mode: 'runtime_default' }, permissions: { adapterKind: kind, schemaVersion: 1, values: kind === 'codex-cli' ? { sandbox_mode: 'safe', approval_policy: 'never' } : { permission_mode: 'safe' } } },
     lastProbeAttempt: null
   } as AdapterInstallation
-  if (kind === 'deepseek-harness') for (const model of installation.snapshot!.models) {
-    model.runtimeMetadata = { dshSource: 'native', ...(model.isDefault ? { dshOptionsResolved: true } : {}) }
-    model.options = model.isDefault ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', values: [{ value: 'max', label: 'max' }], scope: 'run', defaultValue: null }] : []
+  if (kind === 'deepseek-harness' || kind === 'minimax-code-cli') for (const model of installation.snapshot!.models) {
+    model.runtimeMetadata = kind === 'deepseek-harness'
+      ? { dshSource: 'native', ...(model.isDefault ? { dshOptionsResolved: true } : {}) }
+      : { modelOptionsResolved: model.isDefault }
+    model.options = model.isDefault ? [{ key: kind === 'deepseek-harness' ? 'reasoning_effort' : 'thinkingEffort', label: 'Effort', valueType: 'enum', values: [{ value: 'max', label: 'max' }], scope: 'run', defaultValue: null }] : []
   }
   if (kind === 'pi') for (const [index, model] of installation.snapshot!.models.entries()) {
     model.runtimeMetadata = { piThinkingSchemaVersion: 1, piThinkingState: index === 3 ? 'unknown' : 'known' }
@@ -65,12 +67,16 @@ function Fixture(): React.JSX.Element {
   }
   if (state.healthStale) installation.snapshot!.staleAt = state.healthStale
   if (kind === 'pi' && state.piInvalidated) installation.modelCatalog.status = 'invalidated'
-  const nativeDshModels = kind === 'deepseek-harness' ? fixture(kind, false, generation).snapshot!.models : []
-  if (kind === 'deepseek-harness' && state.dshCacheShape) {
+  const supportsTargetOptions = kind === 'deepseek-harness' || kind === 'minimax-code-cli'
+  const resolvedKey = kind === 'deepseek-harness' ? 'dshOptionsResolved' : 'modelOptionsResolved'
+  const contextKey = kind === 'deepseek-harness' ? 'dshOptionsContext' : 'modelOptionsContext'
+  const observedKey = kind === 'deepseek-harness' ? 'dshOptionsObservedAt' : 'modelOptionsObservedAt'
+  const nativeDshModels = supportsTargetOptions ? fixture(kind, false, generation).snapshot!.models : []
+  if (supportsTargetOptions && state.dshCacheShape) {
     installation.snapshot!.models = state.dshCacheShape === 'empty' ? []
       : nativeDshModels.filter(model => model.id !== 'vendor/model-1')
   }
-  if (kind === 'deepseek-harness' && observation) installation.modelCatalog.observedAt = new Date(clockStartedAt + (observation + 2) * 1000).toISOString()
+  if (supportsTargetOptions && observation) installation.modelCatalog.observedAt = new Date(clockStartedAt + (observation + 2) * 1000).toISOString()
   Object.assign(window, { runtimeTest: Object.assign(state, {
     draft, kind, generation, catalogStatus: installation.modelCatalog.status, setDisabled, setVisible,
     advanceClock: (milliseconds: number) => { clockNow += milliseconds },
@@ -82,6 +88,8 @@ function Fixture(): React.JSX.Element {
     clearCatalogSuccess: () => setProjection({ ...state.lastCatalog, cache: { status: 'unavailable', observedAt: null, revalidateAfter: null, expiresAt: null } }),
     invalidatePiCatalog: () => { state.piInvalidated = true; setObservation(value => value + 1) },
     setDshReadMode,
+    publishFreshTargetDirectory: () => setProjection({ ...state.dshPublished,
+      cache: { status: 'fresh', ...cacheTimes(new Date(Date.now()).toISOString()) } }),
     setDshCacheShape: (shape: string | null) => { state.dshCacheShape = shape; state.dshCache = {}; setObservation(value => value + 1) },
     refreshDshCatalog: () => { state.dshContext = (state.dshContext ?? 0) + 1; setGeneration(value => value + 1) },
     setModel: (model: MemberRuntimeDraft['model']) => setDraft(previous => ({ ...previous, model })),
@@ -104,28 +112,28 @@ function Fixture(): React.JSX.Element {
     if (kind === 'pi' && state.piCatalogModels) return Promise.resolve({ runtimeKind: kind,
       cache: { status: 'fresh', ...cacheTimes(new Date(clockStartedAt + 2000).toISOString()) }, models: state.piCatalogModels,
       refreshStatus: 'completed', diagnosticCode: null })
-    if (kind === 'deepseek-harness' && target?.forceRefresh && !target.modelId) {
+    if (supportsTargetOptions && target?.forceRefresh && !target.modelId) {
       // A directory result is independent of an earlier target's outcome.
       return Promise.resolve({ runtimeKind: kind, cache: { ...installation.modelCatalog },
         models: state.dshDirectoryModels ?? state.dshPublished?.models ?? nativeDshModels,
         refreshStatus: 'completed', diagnosticCode: null })
     }
-    if (kind === 'deepseek-harness' && target?.modelId) {
+    if (supportsTargetOptions && target?.modelId) {
       state.dshReads ??= []
       state.dshCache ??= {}
       const context = state.dshContext ?? 0
       const cachedModels = () => nativeDshModels.map(item => {
         const cached = state.dshCache[item.id]
         return cached ? { ...cached, runtimeMetadata: { ...cached.runtimeMetadata,
-          dshOptionsResolved: cached.runtimeMetadata.dshOptionsContext === String(state.dshContext ?? 0) } } : item
+          [resolvedKey]: cached.runtimeMetadata[contextKey] === String(state.dshContext ?? 0) } } : item
       })
       const view = (refreshStatus: RuntimeModelCatalogView['refreshStatus']): RuntimeModelCatalogView => ({
         runtimeKind: kind, selectedModelId: target.modelId, cache: { ...installation.modelCatalog },
         models: cachedModels(), refreshStatus, diagnosticCode: null
       })
       const cached = cachedModels().find(item => item.id === target.modelId)!
-      const fresh = cached.runtimeMetadata?.dshOptionsResolved === true
-        && Date.now() - Date.parse(String(cached.runtimeMetadata.dshOptionsObservedAt)) < 60000
+      const fresh = cached.runtimeMetadata?.[resolvedKey] === true
+        && Date.now() - Date.parse(String(cached.runtimeMetadata[observedKey])) < 60000
       if (target.cacheOnly) {
         const cachedView = view(fresh ? 'not_required' : 'deferred')
         if (state.dshCacheShape) cachedView.models = state.dshCacheShape === 'empty' ? []
@@ -146,8 +154,8 @@ function Fixture(): React.JSX.Element {
         const done = () => {
           if (state.dshDeferredActual || context !== (state.dshContext ?? 0)) { resolve(view('deferred')); return }
           state.dshCache[target.modelId] = { ...model,
-            runtimeMetadata: { dshSource: 'native', dshOptionsResolved: true, dshOptionsContext: String(context), dshOptionsObservedAt: new Date(Date.now()).toISOString() },
-            options: values.length ? [{ key: 'reasoning_effort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
+            runtimeMetadata: { ...(kind === 'deepseek-harness' ? { dshSource: 'native' } : {}), [resolvedKey]: true, [contextKey]: String(context), [observedKey]: new Date(Date.now()).toISOString() },
+            options: values.length ? [{ key: kind === 'deepseek-harness' ? 'reasoning_effort' : 'thinkingEffort', label: 'Effort', valueType: 'enum', scope: 'run', defaultValue: null,
               values: values.map((value: string) => ({ value, label: value })) }] : [] }
           state.dshPublished = view('completed')
           if (state.dshNextObservation) state.dshPublished.cache.observedAt = state.dshNextObservation
@@ -163,12 +171,12 @@ function Fixture(): React.JSX.Element {
       void pending.then(() => { delete state.dshPending[pendingKey] }, () => { delete state.dshPending[pendingKey] })
       return pending
     }
-    if (kind === 'deepseek-harness' && state.holdDshCatalog) {
+    if (supportsTargetOptions && state.holdDshCatalog) {
       const captured = { runtimeKind: kind, cache: { ...installation.modelCatalog },
         models: installation.snapshot!.models, refreshStatus: 'not_required' as const, diagnosticCode: null }
       return new Promise(resolve => { state.resolveDshCatalog = () => resolve(captured) })
     }
-    if (kind === 'deepseek-harness' && state.dshPublished) return Promise.resolve(state.dshPublished)
+    if (supportsTargetOptions && state.dshPublished) return Promise.resolve(state.dshPublished)
     if (mode === 'failed') return Promise.reject(new Error('fixture unavailable'))
     if (mode === 'failed-object' || mode === 'failed-no-cache') return Promise.reject({ code: 'runtime_model_catalog_refresh_failed', message: 'fixture structured unavailable', retryable: true, details: {} })
     if (mode === 'failed-opaque') return Promise.reject({ code: 'fixture_unavailable' })

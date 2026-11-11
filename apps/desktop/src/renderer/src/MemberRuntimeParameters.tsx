@@ -463,9 +463,10 @@ function ModelFields({
   const identity = `${installationIdentity}:${projection.current.scope}`
   const explicit = draft.model.mode === 'explicit' ? draft.model : null
   const isDsh = adapterKind === 'deepseek-harness'
+  const supportsTargetOptions = isDsh || adapterKind === 'minimax-code-cli'
   const isPi = adapterKind === 'pi'
-  const target = isDsh && explicit
-    ? { modelId: explicit.modelId, dshSource: explicit.dshSource } : undefined
+  const target = supportsTargetOptions && explicit
+    ? { modelId: explicit.modelId, ...(isDsh ? { dshSource: explicit.dshSource } : {}) } : undefined
   const key = JSON.stringify([identity, target?.modelId, target?.dshSource])
   const [live, setLive] = useState<{ identity: string; catalog: RuntimeModelCatalogView } | null>(null)
   const [open, setOpen] = useState(false)
@@ -480,7 +481,7 @@ function ModelFields({
   const selectedModel = explicit ? models.find(model => model.id === explicit.modelId) ?? null : null
   const optionsKnown = isPi
     ? selectedModel?.runtimeMetadata?.piThinkingSchemaVersion === 1 && selectedModel.runtimeMetadata.piThinkingState === 'known'
-    : !isDsh || dshModelOptionsResolved(selectedModel, explicit?.dshSource)
+    : !supportsTargetOptions || targetModelOptionsResolved(adapterKind, selectedModel, explicit?.dshSource)
   const option = optionKey && selectedModel
     ? selectedModel.options.find(candidate => candidate.key === optionKey) ?? null : null
   // A shared projection may age the same observation after this local response.
@@ -496,7 +497,10 @@ function ModelFields({
     if (!current.pageActive || !current.onOpenModelCatalog) return
     const now = Date.now()
     const due = Date.parse(current.cache.revalidateAfter ?? '')
-    if (!retry && attempted.current?.key === current.key
+    // An explicit target has its own success time. Directory freshness cannot
+    // postpone its revalidation; on user access Core decides target freshness.
+    const targetAccess = opened && current.target && !current.retryNeeded
+    if (!retry && !targetAccess && attempted.current?.key === current.key
       && (!opened || current.retryNeeded || !(due > attempted.current.startedAt && now >= due))) return
     if (!current.target && !retry && runtimeModelCatalogIsFresh(current.cache, now)) {
       setLoading(false)
@@ -516,7 +520,7 @@ function ModelFields({
       const ownsRequest = () => request === generation.current && current.key === latest.current.key && latest.current.pageActive
       const promise = Promise.resolve().then(async () => {
         if (retry) {
-          // The model-menu button always refreshes the directory. DSH may
+          // The model-menu button always refreshes the directory. Target options may
           // then need its existing selected-model read; Core owns that cache.
           const catalog = await read({ forceRefresh: true })
           if (!current.target || !ownsRequest()) return catalog
@@ -532,7 +536,7 @@ function ModelFields({
         if (!ownsRequest()) return cached
         if (cached.runtimeKind !== adapterKind || cached.selectedModelId !== current.target.modelId) throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
         const model = cached.models.find(model => model.id === current.target!.modelId) ?? null
-        if (cached.refreshStatus === 'not_required' && dshModelOptionsResolved(model, current.target.dshSource)) return cached
+        if (cached.refreshStatus === 'not_required' && targetModelOptionsResolved(adapterKind, model, current.target.dshSource)) return cached
         return read(current.target)
       })
       const owner = { key: current.key, generation: request, promise }
@@ -545,7 +549,7 @@ function ModelFields({
         throw new Error(uiAttribute('读取结果与当前选择不一致，请重试。'))
       }
       if (current.target && result.refreshStatus !== 'deferred'
-        && !dshModelOptionsResolved(result.models.find(model => model.id === current.target!.modelId) ?? null, current.target.dshSource)) {
+        && !targetModelOptionsResolved(adapterKind, result.models.find(model => model.id === current.target!.modelId) ?? null, current.target.dshSource)) {
         throw new Error(uiAttribute('暂时无法读取该模型的可选项，请重试。'))
       }
       const incomplete = result.refreshStatus === 'failed' || result.refreshStatus === 'deferred'
@@ -597,7 +601,7 @@ function ModelFields({
   const missing = optionValue && !optionChoices.some(choice => choice.value === optionValue)
   const showOption = isPi
     ? optionValue || (optionsKnown && option?.values.some(choice => choice.value !== 'off'))
-    : isDsh ? !optionsKnown || option || optionValue : option || storedOptionValue
+    : supportsTargetOptions ? !optionsKnown || option || optionValue : option || storedOptionValue
   const refresh = onOpenModelCatalog ? () => ensureCatalog(true) : undefined
 
   return <>
@@ -613,12 +617,12 @@ function ModelFields({
     {explicit && optionKey && showOption && <RuntimeParameterSelect
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
-      onOpen={() => ensureCatalog(false, true)} loading={isDsh && loading}
+      onOpen={() => ensureCatalog(false, true)} loading={supportsTargetOptions && loading}
       defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
         : isDsh ? uiAttribute('模型默认') : uiAttribute('跟随模型默认值') }}
       choices={[
         ...(missing ? [{ value: optionValue, label: optionValue }] : []),
-        ...optionChoices.map(choice => ({ ...choice, disabled: isDsh && !optionsKnown }))
+        ...optionChoices.map(choice => ({ ...choice, disabled: supportsTargetOptions && !optionsKnown }))
       ]} />}
   </>
 }
@@ -687,6 +691,11 @@ export function explicitSelection(
       ? { dshSource: model.runtimeMetadata.dshSource }
       : {})
   }
+}
+
+export function targetModelOptionsResolved(kind: AdapterKind, model: ModelDescriptor | null, source?: 'native' | 'web'): boolean {
+  return kind === 'minimax-code-cli' ? model?.runtimeMetadata?.modelOptionsResolved === true
+    : kind === 'deepseek-harness' && dshModelOptionsResolved(model, source)
 }
 
 export function dshModelOptionsResolved(model: ModelDescriptor | null, source?: 'native' | 'web'): boolean {

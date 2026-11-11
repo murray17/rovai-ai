@@ -39,7 +39,10 @@ export function openRuntimeModelCatalog(runtimeKind: AdapterKind, request: Rovai
     runtimeKind,
     ...(waitForRefresh ? { waitForRefresh: true } : {}),
     ...(target?.forceRefresh ? { forceRefresh: true } : {}),
-    ...(runtimeKind === 'deepseek-harness' && target ? target : {})
+    ...((runtimeKind === 'deepseek-harness' || runtimeKind === 'minimax-code-cli') && target
+      ? { ...(target.modelId !== undefined ? { modelId: target.modelId } : {}),
+        ...(target.cacheOnly !== undefined ? { cacheOnly: target.cacheOnly } : {}),
+        ...(runtimeKind === 'deepseek-harness' && target.dshSource ? { dshSource: target.dshSource } : {}) } : {})
   })
 }
 
