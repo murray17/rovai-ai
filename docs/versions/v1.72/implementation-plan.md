@@ -8,6 +8,36 @@ last_updated: 2026-11-10
 
 # v1.72 实施与验收
 
+## OpenCode Steer 局部接入（2026-11-10）
+
+- 分支 `rovai/opencode-steer`，基线 `13a4b8f96c71bc7866c749da5321a026d8f876b9`，独立 worktree
+  `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-opencode-steer`；治理无需先行独立合入，本项不改变模型输入结构或版本轴。
+- `steer.rs` 在既有冻结资格中加入 OpenCode 2.2.7／2.x；格式补强只影响 OpenCode Steer，普通启动及其他 Runtime 保持。
+- `acp.rs` 沿当前连接发送 `_session/steering`，严格读取 Host initialize 顶层能力；共享 reader 只对精确
+  promptRequired/noRunningTurn 保留明确拒绝，迟到 injected、未知回包和运输失败不重发。
+  受资格约束的 OpenCode 复用当前 Prompt 模型／工具活动的初始接收证据，避免 ready 永远等到原 Prompt 终态。
+- 自然收尾先关闭新准入，仅等待在途 RPC 的原有响应期限；Stop 直接取消并唤醒等待。超时后不保留长期回执追踪。
+- Session 连续性沿用既有恢复路径。删除 OpenCode 专属账本风险查询、FIFO 领取清空绑定及恢复入口强制 New 的逻辑；
+  正常结束后保留原 Session／Binding，Host 回收不使原生会话失效。原生已接收输入可能在同 Session 后续执行消费，
+  不承诺严格原生同轮，不增加隔离、核对、历史搬运或 Migration；Rovai 仍不重发 accepted／unknown。
+- 扩展既有冻结准入、故障恢复、ACP 回执及恢复选择 owners，无新 Rust 测试函数或平行 fixture。
+  版本矩阵包含 2.2.6、2.2.7、预发布、未知、非法后缀和 3.x；SQL 覆盖各投递状态经成功及重开保留绑定、
+  cleanup 后原 Session FIFO、明确拒绝回队列及不重发；ACP 覆盖能力、精确拒绝、reader 顺序、有界收尾／Stop，
+  并确认冷 Host 按已有 capability 恢复同一 Session。
+- `smoke-steer.mjs` 的忙碌 OpenCode 路线按 Core 资格断言，普通后继验证原 Session 连续性；
+  `probe-steer-version.mjs` 增加隔离 OpenCode 入口。停止探针断言旧 Host 回收及 Rovai 不重投，
+  单独记录原生 pending input 在恢复后产生的效果。官方 2.2.6／2.2.7 真实模型验收尚未执行。
+- 本轮连续性修正验证：相关 extended Rust owners 共 6 项、默认 Rust workspace（484 passed／1 ignored）、
+  `cargo check --workspace`、10 项文档单测、通用文档门禁及指定真实基线 `f19b2ddc3` 的 CI 文档门禁通过；
+  两个探针的 Node 语法检查、1 项 race outcome 单测、Rust 格式与差异检查通过。
+  初版 `5ddc07b53` 的类型检查和桌面构建已通过，本轮未改前端。
+  兼容性台账变化同步既有 macOS evidence revision 摘要，不扩大平台资格；共享矩阵两条旧断言按既有策略保持修正，
+  未改变 Hermes 或其他 Runtime 的生产资格。
+- `pnpm test` 的 Vitest 阶段为 274 files／3262 tests passed、2 skipped；AboutUpdatesSettings 两项发布日期格式断言失败。
+  在未修改的 `13a4b8f96` 主 checkout 定向复现相同两项失败。额外尝试的 legacy Steer migration owner
+  也在本分支和未修改主线均失败于 `db_steer.rs` 的既有行保留断言；本项不修改这些 UI 或 Migration 实现。
+- 历史合同正文保留，新语义归 [Message Delivery v19](../../contracts/message-delivery-v19.md)。
+
 ## User Automation 成员代发与回执兼容（2026-11-10）
 
 - 工作分支 `rovai/pr-1020-fix` 从原 PR head `52c3b668` 建立并合入 `origin/main` 基线 `c9522f15`，
