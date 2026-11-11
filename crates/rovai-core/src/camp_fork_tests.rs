@@ -3,6 +3,7 @@ use crate::{
     collaboration::{
         CollaborationService, CreateThreadCommand, ProjectBindingKind,
         SendUserThreadMessageCommand, ThreadActivationState, ThreadCollaborationMode,
+        WithdrawThreadMessageCommand,
     },
     command::CommandResultStatus,
     test_support::{OwnedTestDatabase, fresh_schema_database_fast_owned},
@@ -376,15 +377,18 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
         )
         .unwrap();
     assert_eq!(reference, ("issue".into(), "issue-42".into()));
-    let mention: String = db
-        .connection()
-        .query_row(
-            "SELECT agent_id FROM camp_message_mention WHERE camp_message_id=?1",
-            [&copy.id],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(mention, "agent_2");
+    for (id, expected) in [(&anchor, 1), (&copy.id, 0)] {
+        assert_eq!(
+            db.connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_message_mention WHERE camp_message_id=?1",
+                    [id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap(),
+            expected
+        );
+    }
     assert_eq!(
         db.connection()
             .query_row(
@@ -510,6 +514,19 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
     );
     assert!(full_quote[2..].iter().all(|q| q.source.is_none()));
     let withdrawn_copy = full_snapshot.messages.iter().find(|m| m.withdrawn).unwrap();
+    for (id, expected) in [
+        (&withdrawn, ("default", "[\"agent_2\"]", "[\"agent_2\"]")),
+        (&withdrawn_copy.id, ("default", "[]", "[]")),
+    ] {
+        let addressing: (String, String, String) = db.connection().query_row(
+            "SELECT address_mode,addressed_agent_ids_json,effective_recipient_ids_json FROM camp_message WHERE id=?1",
+            [id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+        ).unwrap();
+        assert_eq!(
+            addressing,
+            (expected.0.into(), expected.1.into(), expected.2.into())
+        );
+    }
     for id in [&withdrawn, &withdrawn_copy.id] {
         assert_eq!(db.connection().query_row("SELECT (SELECT COUNT(*) FROM camp_message_reference WHERE camp_message_id=?1)+(SELECT COUNT(*) FROM camp_message_mention WHERE camp_message_id=?1)",[id],|r|r.get::<_,i64>(0)).unwrap(),0);
     }
@@ -634,6 +651,24 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
         vec!["agent_2", "agent_3", "user"]
     );
     assert_eq!(&history["items"][0]["mentions"], mentions);
+    let search = crate::camp_history::ThreadHistoryService
+        .search_camp(
+            &mut db,
+            &crate::team_tool::AuthenticatedTeamToolRun {
+                camp_id: target.clone(),
+                agent_id: "agent_1".into(),
+                agent_run_id: runs[0].clone(),
+                execution_epoch: epoch,
+            },
+            &crate::camp_history::ThreadSearchInput {
+                camp_id: Some(target.clone()),
+                query: "issue-42".into(),
+                limit: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(search["results"].as_array().unwrap().len(), 1);
+    assert_eq!(search["results"][0]["messageId"], copy.id);
     assert_ne!(
         sent.result.status,
         CommandResultStatus::Rejected,
@@ -789,6 +824,72 @@ fn fork_admission_preserves_empty_membership_and_rejects_unavailable_anchors() {
             )
             .unwrap();
     }
+    // Use the ordinary send/withdraw path before the sole recipient leaves.
+    // No other retained message references agent_2, so its stale addressing
+    // must neither survive the placeholder nor manufacture a Left relation.
+    let mut send = envelope(
+        "withdraw-only-recipient-send",
+        SendUserThreadMessageCommand {
+            delivery_mode: Default::default(),
+            steer_targets: None,
+            camp_id: source.clone(),
+            content: crate::camp_content::composer_document_from_content(&vec![
+                crate::camp_content::StructuredThreadMessageSegment::MemberMention {
+                    agent_id: "agent_2".into(),
+                },
+                crate::camp_content::StructuredThreadMessageSegment::Text {
+                    text: "withdraw before recognition".into(),
+                },
+            ])
+            .unwrap(),
+            source_attachments: vec![],
+            quotes: vec![],
+            reply_to_camp_message_id: None,
+            execution: Some(crate::collaboration::ExecutionRequest {
+                task_id: None,
+                purpose: "withdraw before recognition".into(),
+                completion_role: "required".into(),
+                budget: None,
+            }),
+        },
+    );
+    send.camp_id = Some(source.clone());
+    let sent = CollaborationService::default()
+        .send_user_camp_message(&mut db, &send)
+        .unwrap();
+    assert_eq!(
+        sent.result.status,
+        CommandResultStatus::Accepted,
+        "{:?}",
+        sent.result
+    );
+    let withdrawn_id = sent.result.payload["threadMessageId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mut withdrawal = envelope(
+        "withdraw-only-recipient",
+        WithdrawThreadMessageCommand {
+            camp_id: source.clone(),
+            message_id: withdrawn_id.clone(),
+            expected_version: 1,
+        },
+    );
+    withdrawal.camp_id = Some(source.clone());
+    assert_eq!(
+        CollaborationService::default()
+            .withdraw_camp_message(&mut db, &withdrawal)
+            .unwrap()
+            .result
+            .code,
+        "message.withdrawn"
+    );
+    let source_addressing: (String, String, String) = db.connection().query_row(
+        "SELECT address_mode,addressed_agent_ids_json,effective_recipient_ids_json FROM camp_message WHERE id=?1",
+        [&withdrawn_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    ).unwrap();
+    assert_eq!(source_addressing.0, "explicit");
+    assert_eq!(source_addressing.1, "[\"agent_2\"]");
     db.connection().execute("UPDATE camp_member SET leave_requested_at='2020-01-01',leave_request_command_id='leaving' WHERE camp_id=?1 AND agent_id='agent_1'",[&source]).unwrap();
     assert_eq!(
         fork(&mut db, &root, "lead-left", &source, None).result.code,
@@ -808,6 +909,30 @@ fn fork_admission_preserves_empty_membership_and_rejects_unavailable_anchors() {
         .unwrap();
     let empty = fork(&mut db, &root, "zero", &source, None);
     assert_eq!(empty.result.status, CommandResultStatus::Applied);
+    let empty_id = empty.result.payload["threadId"].as_str().unwrap();
+    let copied_addressing: (String, String, String) = db.connection().query_row(
+        "SELECT address_mode,addressed_agent_ids_json,effective_recipient_ids_json FROM camp_message WHERE camp_id=?1 AND recall_state='withdrawn'",
+        [empty_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    ).unwrap();
+    assert_eq!(
+        copied_addressing,
+        ("default".into(), "[]".into(), "[]".into())
+    );
+    let members = db
+        .connection()
+        .prepare("SELECT agent_id,status FROM camp_member WHERE camp_id=?1 ORDER BY agent_id")
+        .unwrap()
+        .query_map([empty_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(members, vec![("agent_1".into(), "left".into())]);
+    assert_eq!(db.connection().query_row(
+        "SELECT address_mode,addressed_agent_ids_json,effective_recipient_ids_json FROM camp_message WHERE id=?1",
+        [&withdrawn_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)),
+    ).unwrap(), source_addressing);
     assert!(
         db.connection()
             .query_row(

@@ -55,9 +55,10 @@ irrelevant. Later publications remain only in the source.
 - `presentation_json` and `recipient_presentation_json` retain the target defaults (`NULL` and `{}`). Source
   presentation kinds still participate in public-message eligibility before copying; structured content retains
   the message's text, mentions and explicit references.
-- Addressed and frozen effective recipients are preserved independently. Existing history reads derive `mentions`
+- Normal messages preserve addressed and frozen effective recipients independently. Existing history reads derive `mentions`
   from `effective_recipient_ids_json`, never from today's roster or by re-resolving the message. These publication
-  facts do not create new Delivery records.
+  facts do not create new Delivery records. Withdrawn placeholders use `address_mode=default` and empty addressed/effective
+  recipient arrays before historical members are collected, so stale recipients do not create Left relations.
 - Ordinary reply IDs map only inside the copied set. Explicit body links and Thread/Mission/file/task references
   keep their original targets. No recursive JSON ID substitution is permitted.
 - Quotes use the existing `MessageQuoteSnapshot` parser and serializer, retaining text, captured author, capture
@@ -84,8 +85,9 @@ the target Owner's read watermark, so copying does not manufacture unread replie
 
 The gateway transaction loads receipt, validates source/directory/anchor, captures messages/members, inserts the
 ordinary target, and inserts all messages with empty structured content before filling content and reply links.
-It copies existing reference/mention indexes for non-withdrawn messages without re-deriving them from message text
-or recipient IDs. Withdrawn placeholders have no copied reference/mention indexes. Ordinary SQLite/FTS triggers
+It copies existing reference indexes for non-withdrawn messages without re-deriving them from message text
+or recipient IDs. Withdrawn placeholders have no copied reference indexes. Fork does not populate `camp_message_mention`;
+history `mentions` retain their existing frozen-recipient source. Ordinary mention writers/schema and SQLite/FTS triggers
 maintain their existing indexes. It then establishes new publication facts with new event IDs, timestamps and global sequences, and
 stores the command result. Any late SQL or receipt failure rolls everything back. Do not loop over ordinary sends.
 

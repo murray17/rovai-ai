@@ -173,6 +173,15 @@ fn fork_in_tx(
         recipients:r.get(8)?, effective_recipients:r.get(9)?, reply:r.get(10)?,
         quotes:r.get(11)?, recall:r.get(12)?, created_at:r.get(13)?, updated_at:r.get(14)?, sources:Vec::new(),
     }))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    // Withdrawn placeholders no longer address anyone. Normalize only the
+    // copied rows before collecting historical members from their recipients.
+    for message in &mut messages {
+        if message.recall == "withdrawn" {
+            message.address_mode = "default".into();
+            message.recipients = "[]".into();
+            message.effective_recipients = "[]".into();
+        }
+    }
     let members = tx
         .prepare(
             "SELECT m.agent_id, m.capability_overrides_json FROM camp_member m
@@ -323,11 +332,6 @@ fn fork_in_tx(
             tx.execute(
                 "INSERT OR IGNORE INTO camp_message_reference(camp_message_id,kind,value)
             SELECT ?1,kind,value FROM camp_message_reference WHERE camp_message_id=?2",
-                params![id, message.id],
-            )?;
-            tx.execute(
-                "INSERT OR IGNORE INTO camp_message_mention(camp_message_id,agent_id)
-            SELECT ?1,agent_id FROM camp_message_mention WHERE camp_message_id=?2",
                 params![id, message.id],
             )?;
         }

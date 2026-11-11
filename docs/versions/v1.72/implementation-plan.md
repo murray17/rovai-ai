@@ -101,6 +101,25 @@ last_updated: 2026-11-11
 - 本轮完整扩展回归为 Core lib 1026 passed / 12 failed / 8 ignored，分叉 3 项均通过；失败名称集合与前述
   已在 `main@92ff101a7` 隔离复现的 12 项完全一致。Core lib 失败后未继续其余 workspace 扩展 target。
 
+### 复制白名单最终收口（2026-11-11）
+
+- 在 `989882aff7badcde773170961046674c5c9ed8df` 上同步 `origin/main@a8391a5e8`，仅补两处复制精简。
+- 撤回占位在历史成员汇总前，把副本的寻址方式设为 `default`、addressed／effective 收件人设为空数组。
+  仅因这些已撤回收件人存在的历史成员不再补建；作者、序号、时间和撤回状态保留，源记录不改写。
+- 分叉停止填充 `camp_message_mention`，正常消息继续保留两类收件人事实和已有 reference 索引。
+  普通发送、表结构、索引维护和历史 mentions 读取不变；不迁移已有副本或继续删减普通消息字段。
+- 扩展既有公开快照和准入 owner，不新增 Rust 测试函数或数据库 fixture。真实普通发送→撤回→收件人离队
+  复现修复前残留寻址信息与多余历史关系；无 mention 索引时继续验证历史 mentions 一致、reference 搜索命中。
+  修复前两条定向断言失败，分别定位残留收件人和 mention 索引复制。
+- 本轮 Core 分叉 3 项、`pnpm typecheck`、默认 Rust workspace（484 passed / 1 ignored）、格式检查通过。
+  完整 `TZ=UTC pnpm test` 通过：3274 Vitest passed / 2 skipped、377 Node passed / 2 skipped；
+  文档／Skills 门禁随同通过。干净源码副本按 `a8391a5e8` 的 `docs:check:ci` 通过，未修改被 Git 忽略的本地原型。
+- 在最新 `main@a8391a5e8` 的独立源码和数据库 fixture 上重新定向运行先前 12 个失败 owner，12 项均复现。
+  本次没有 Renderer／Main 接线变更，不重复桌面构建或截图矩阵；原生产组件验收的覆盖边界保持前述记录。
+- 完整 `pnpm test:rust:extended` 为 Core lib 1026 passed / 12 failed / 8 ignored；分叉 3 项均通过，失败名单
+  与本轮 `main@a8391a5e8` 对照完全一致，无新增失败。Core lib 失败后未执行其余 workspace 扩展 target。
+  Thread 附件目录 `Thread-Fork-Final-Trim` 保存定向修复前后、默认／扩展回归及最新主线对照的验证记录。
+
 ## Kilo 官方 ACP（2026-11-08，Preview 实施）
 
 分支 `rovai/kilo-acp`，worktree `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
