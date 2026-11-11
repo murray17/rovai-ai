@@ -617,6 +617,8 @@ app.whenReady().then(async () => {
     for (const page of ['member', 'onboarding']) {
       await run(`window.runtimeTest.reset(${JSON.stringify(page)}, 'normal')`); await settle()
       await run('window.runtimeTest.switchKind("kilo-cli")'); await settle()
+      assert.equal(await run('Boolean(document.querySelector(".runtime-native-permission"))'), false)
+      assert.equal(await run('Boolean(document.querySelector(".runtime-permission-help"))'), false)
       await click(modelTrigger); await search('vendor/model-0'); await key('Enter')
       await click('button[aria-label^="推理强度，"]')
       assert.deepEqual(await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).map(item=>item.textContent)'), ['Low', 'High', '跟随模型默认值'])
@@ -627,6 +629,17 @@ app.whenReady().then(async () => {
       await key('Home'); await key('Down'); await key('Enter')
       assert.deepEqual((await draft()).model, { mode: 'explicit', modelId: 'vendor/model-1', options: { effort: 'max' } })
       await capture(`kilo-${page}-model-options`)
+      if (page === 'member') {
+        for (const theme of ['day', 'night']) {
+          await run(`document.documentElement.dataset.theme=${JSON.stringify(theme)}`); await settle()
+          await capture(`kilo-models-only-${theme}`)
+        }
+        await run('document.documentElement.dataset.theme="day"'); await settle()
+        window.setContentSize(432, 800); await settle()
+        assert.equal(await run('document.documentElement.scrollWidth<=innerWidth'), true)
+        await capture('kilo-models-only-narrow')
+        window.setContentSize(1440, 920); await settle()
+      }
       await click(modelTrigger); await click('.runtime-picker-default [role=option]')
       await click(modelTrigger); await search('vendor/model-2'); await key('Enter')
       assert.deepEqual((await draft()).model.options, {})

@@ -39,7 +39,7 @@ export function RuntimeParameterSelect({ label, value, choices, defaultChoice, d
   return <div className="field-label">
     <label htmlFor={id}>{label}</label>
     <Menu.Root onOpenChange={open => { if (open) onOpen?.() }}>
-      <Menu.Trigger asChild>
+      <Menu.Trigger asChild disabled={disabled}>
         <button id={id} type="button" className="runtime-model-picker-trigger" disabled={disabled}
           aria-label={[label, selected?.label ?? value, selected?.description, selected && recommendation(selected)].filter(Boolean).join('，')}
           aria-busy={loading || undefined}

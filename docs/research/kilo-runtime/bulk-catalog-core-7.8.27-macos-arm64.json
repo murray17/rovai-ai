@@ -1,0 +1,301 @@
+{
+  "recordedDate": "2026-11-11",
+  "authority": "non-normative-runtime-evidence",
+  "runtimeKind": "kilo-cli",
+  "officialVersion": "7.8.27",
+  "platform": "darwin-arm64",
+  "baseline": "3568dc1f8831eafadf937159f4cc61e146fe621d",
+  "previousProbeCommit": "d41a940446771d7de70e625d7633fc8d9103a48b",
+  "branch": "rovai/kilo-models-bulk-probe",
+  "status": "passed",
+  "scope": {
+    "productionCoreAndBundledCli": true,
+    "officialRuntime": true,
+    "provider": "local deterministic fixture",
+    "realAccountGeneration": false,
+    "desktopStarted": false,
+    "otherPlatformsRetested": false,
+    "catalogSource": "official models --verbose; ACP retained for execution",
+    "catalogDoesNotReportCurrentDefaults": true
+  },
+  "runs": {
+    "counts": {
+      "cancelled": 3,
+      "succeeded": 37
+    },
+    "total": 40,
+    "ids": [
+      "43f79c96-d10b-4a0b-99d6-59d96a4ed113",
+      "6b3645eb-5b8b-4337-b09d-b91488cbd151",
+      "5a7bf345-8863-44c1-b461-0dfae5eb74bc",
+      "7bea15c9-54e0-41f1-bcaf-9d363f1ffce8",
+      "2964eed5-1c31-4ffd-9369-7cd43650b079",
+      "f228a177-a2d8-4ab9-9953-5133d75e6455",
+      "550b9ef5-951a-4bc3-b021-bfe1f8f428b4",
+      "b8d3db5e-09e1-4e8d-8c3c-c2c45bac0790",
+      "0315c9bb-d6c4-4a58-9682-6776d8322759",
+      "b91019c6-5db4-47ab-83e0-4fa630b00a54",
+      "a841c9f1-6125-42c1-8e05-489338769d98",
+      "b735af4d-d1fa-4557-bbcb-7c26c20c3443",
+      "0dc10618-0251-49d0-86cf-89a129046271",
+      "556d4c54-473d-451d-afec-8e3db3f01b67",
+      "1069d288-2322-4c2f-ba1e-69da828cb13b",
+      "90c0a1d0-2888-4b06-9ea0-3a49d5a8dca7",
+      "ed164df1-1c14-446d-ada4-76b1132b1e38",
+      "8e9515f8-bcca-4e0d-847c-6794f1f1be76",
+      "04de2251-e579-4bd4-a799-0b54d3bc0ca7",
+      "8ce86b15-b120-4d3c-bf10-bb0fcea03ebd",
+      "e36a90bf-2db1-44a7-90c5-154830cff161",
+      "1d9d4cb8-a14b-464d-9af9-0f50fd804040",
+      "33476545-7cce-44da-9199-56d7574ec883",
+      "aa37bf8a-7a4a-4034-8b18-026c4a5caa33",
+      "70532442-2a34-41cb-b3c2-160a2e637d42",
+      "6c1f73a3-3b76-4b86-9148-ecfef440e581",
+      "2b75b7ee-5bb5-47d3-9e20-ce6d173282cd",
+      "f938c418-5dc2-4d4d-8bee-9d1ef4f45ce7",
+      "101162d5-8bc6-4067-9b4c-31ec9fa1b98d",
+      "5d3347e6-246e-466c-952d-419a228df310",
+      "3daf5267-2e0a-41f7-b0eb-975183a6ab24",
+      "c330011b-8b24-446d-a562-7166aa871ea4",
+      "8af7be6a-74ea-41f4-bb2f-bbdc1e631f36",
+      "bba3683d-1464-417d-9ad0-1bc7087d4f82",
+      "dc325c9b-c16a-494b-8d45-735e9020f49f",
+      "7fa0c5d0-6883-4cef-8312-15f0120cad65",
+      "2349c761-fab5-43a6-adf6-166383a901a0",
+      "fcd1c55a-670d-46fb-853f-5991bd62a80a",
+      "195e7c6c-6c93-48eb-9601-d43e4ba33d18",
+      "36d2ccf4-8055-4960-b161-55d1b21fdb7a"
+    ]
+  },
+  "bootstrap": {
+    "ordinaryRequests": 65,
+    "allVerbatim": true
+  },
+  "checks": {
+    "nodeAbsentFromPath": true,
+    "inheritedPureMode": true,
+    "modelCatalog": {
+      "models": [
+        {
+          "id": "local/local-model",
+          "isDefault": false,
+          "options": [
+            {
+              "defaultValue": null,
+              "key": "effort",
+              "label": "Effort",
+              "scope": "run",
+              "valueType": "enum",
+              "values": [
+                {
+                  "label": "low",
+                  "value": "low"
+                },
+                {
+                  "label": "high",
+                  "value": "high"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "local/local-other",
+          "isDefault": false,
+          "options": [
+            {
+              "defaultValue": null,
+              "key": "effort",
+              "label": "Effort",
+              "scope": "run",
+              "valueType": "enum",
+              "values": [
+                {
+                  "label": "medium",
+                  "value": "medium"
+                },
+                {
+                  "label": "max",
+                  "value": "max"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "local/local-plain",
+          "isDefault": false,
+          "options": []
+        }
+      ],
+      "elapsedMs": 2482,
+      "modelCalls": 0
+    },
+    "authentication": "unknown",
+    "firstAndWarm": {
+      "firstRun": "43f79c96-d10b-4a0b-99d6-59d96a4ed113",
+      "warmRun": "6b3645eb-5b8b-4337-b09d-b91488cbd151",
+      "host": "362e2714-af91-4c06-a906-5f1c1d4dea2e",
+      "session": "ses_e35855de3ffehuJTYb3i6drFLC"
+    },
+    "effort": "high",
+    "modelOptionsExecution": [
+      {
+        "run": "5a7bf345-8863-44c1-b461-0dfae5eb74bc",
+        "modelId": "local/local-other",
+        "options": {
+          "effort": "max"
+        },
+        "providerTemperature": 0.9,
+        "nativeSelectionVerified": true
+      },
+      {
+        "run": "7bea15c9-54e0-41f1-bcaf-9d363f1ffce8",
+        "modelId": "local/local-plain",
+        "options": {},
+        "providerTemperature": null,
+        "nativeSelectionVerified": true
+      }
+    ],
+    "cold": {
+      "run": "a841c9f1-6125-42c1-8e05-489338769d98",
+      "host": "e6487b91-b1b9-402f-bffd-3dfd9e28ae5b",
+      "session": "ses_e35855de3ffehuJTYb3i6drFLC"
+    },
+    "mcp": {
+      "cwd": "<owned-fixture>/service",
+      "sameCwd": "<owned-fixture>/project",
+      "literalArgsPreserved": true,
+      "nodeAbsentInChild": true,
+      "savesKeepIdleHost": true,
+      "saveABAReusesOriginal": true,
+      "disabledAndDeletedToolsAbsent": true,
+      "idleRetiredPid": 9539,
+      "busyRetiredPid": 9595,
+      "busyRun": "1069d288-2322-4c2f-ba1e-69da828cb13b",
+      "firstHost": "84fb394d-0dd9-4894-9753-f1cef5b4f683",
+      "secondHost": "ec3a9953-4de0-477c-bdcf-cb5d3a5ec4ee",
+      "restoredHost": "5e4aa508-75b4-40e3-88c0-7af9f496463c"
+    },
+    "relativeWriteDiff": {
+      "run": "8ce86b15-b120-4d3c-bf10-bb0fcea03ebd",
+      "path": "allowed.txt",
+      "additions": 1,
+      "deletions": 0
+    },
+    "nativePermissions": {
+      "allowRun": "33476545-7cce-44da-9199-56d7574ec883",
+      "askAllowRun": "8ce86b15-b120-4d3c-bf10-bb0fcea03ebd",
+      "askDenyRun": "e36a90bf-2db1-44a7-90c5-154830cff161",
+      "nativeDenyRun": "1d9d4cb8-a14b-464d-9af9-0f50fd804040",
+      "pureRun": "aa37bf8a-7a4a-4034-8b18-026c4a5caa33",
+      "userPluginInvoked": true,
+      "purePreserved": true,
+      "noRovaiPermissionHook": true
+    },
+    "cancel": {
+      "run": "70532442-2a34-41cb-b3c2-160a2e637d42",
+      "status": "cancelled",
+      "nextRun": "6c1f73a3-3b76-4b86-9148-ecfef440e581",
+      "host": "67c599a1-9e7c-48fb-b74f-54261b79b2b9",
+      "pid": 10062,
+      "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+      "oldEpoch": 1,
+      "newRunEpoch": 1,
+      "cleanupDisposition": "reusable",
+      "elapsedThroughSuccessorMs": 6058
+    },
+    "steer": {
+      "run": "2b75b7ee-5bb5-47d3-9e20-ce6d173282cd",
+      "accepted": 3,
+      "sameRun": true,
+      "heldUntilAllRequests": true,
+      "warmReuseCycles": [
+        {
+          "cycle": 1,
+          "run": "2b75b7ee-5bb5-47d3-9e20-ce6d173282cd",
+          "nextRun": "f938c418-5dc2-4d4d-8bee-9d1ef4f45ce7",
+          "host": "67c599a1-9e7c-48fb-b74f-54261b79b2b9",
+          "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+          "cliMessageCommitted": true
+        },
+        {
+          "cycle": 2,
+          "run": "101162d5-8bc6-4067-9b4c-31ec9fa1b98d",
+          "nextRun": "5d3347e6-246e-466c-952d-419a228df310",
+          "host": "67c599a1-9e7c-48fb-b74f-54261b79b2b9",
+          "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+          "cliMessageCommitted": true
+        },
+        {
+          "cycle": 3,
+          "run": "3daf5267-2e0a-41f7-b0eb-975183a6ab24",
+          "nextRun": "c330011b-8b24-446d-a562-7166aa871ea4",
+          "host": "67c599a1-9e7c-48fb-b74f-54261b79b2b9",
+          "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+          "cliMessageCommitted": true
+        }
+      ],
+      "cancelledWithPending": true,
+      "cancelledHostReused": true,
+      "cancelledWarmCycles": [
+        {
+          "supplements": 1,
+          "submittedNativeSupplements": 1,
+          "queuedBeforeCancel": 0,
+          "sourceReceiptsSettled": 1,
+          "run": "8af7be6a-74ea-41f4-bb2f-bbdc1e631f36",
+          "nextRun": "bba3683d-1464-417d-9ad0-1bc7087d4f82",
+          "host": "67c599a1-9e7c-48fb-b74f-54261b79b2b9",
+          "pid": 10062,
+          "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+          "oldEpoch": 1,
+          "newRunEpoch": 1,
+          "cleanupDisposition": "reusable",
+          "successorCliCommitted": true
+        },
+        {
+          "supplements": 3,
+          "submittedNativeSupplements": 1,
+          "queuedBeforeCancel": 2,
+          "sourceReceiptsSettled": 3,
+          "run": "dc325c9b-c16a-494b-8d45-735e9020f49f",
+          "nextRun": "7fa0c5d0-6883-4cef-8312-15f0120cad65",
+          "host": "67c599a1-9e7c-48fb-b74f-54261b79b2b9",
+          "pid": 10062,
+          "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+          "oldEpoch": 1,
+          "newRunEpoch": 1,
+          "cleanupDisposition": "reusable",
+          "successorCliCommitted": true
+        }
+      ]
+    },
+    "automaticThreshold": {
+      "run": "fcd1c55a-670d-46fb-853f-5991bd62a80a",
+      "seedRun": "2349c761-fab5-43a6-adf6-166383a901a0",
+      "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+      "host": "67c599a1-9e7c-48fb-b74f-54261b79b2b9",
+      "nativeSummaries": 1,
+      "reportedInput": 110000,
+      "contextWindow": 200000,
+      "thresholdPercent": 50,
+      "summaryConsumed": true,
+      "summaryNotPublished": true
+    },
+    "automaticOverflow": {
+      "run": "195e7c6c-6c93-48eb-9601-d43e4ba33d18",
+      "nativeSummaries": 1,
+      "providerRejectedOnce": true,
+      "summaryNotPublished": true
+    },
+    "automaticColdResume": {
+      "run": "36d2ccf4-8055-4960-b161-55d1b21fdb7a",
+      "session": "ses_e35855de3ffehuJTYb3i6drFLC",
+      "newHost": "c9a9b792-9dc1-4b49-8937-d8039696d840",
+      "summaryRetained": true
+    },
+    "inheritedConfigExcluded": true,
+    "runtimeFilesCleaned": true
+  }
+}
