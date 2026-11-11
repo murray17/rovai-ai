@@ -797,6 +797,8 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                         force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
+                        version_refresh: None,
+                        version_target: None,
                         model_target: None,
                         runtime_kind: KIND,
                         purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -870,6 +872,8 @@ async fn independent_checks_refresh_unchanged_inputs_and_join_same_target() {
                     force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
+                    version_refresh: None,
+                    version_target: None,
                     model_target: None,
                     runtime_kind: KIND,
                     purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -1024,6 +1028,8 @@ async fn saved_configuration_and_new_check_cannot_join_or_be_overwritten_by_old_
                     force_refresh: false,
                     search: fixture.core.runtime_search_environment.read().await.clone(),
                     startup_preview: None,
+                    version_refresh: None,
+                    version_target: None,
                     model_target: None,
                     runtime_kind: KIND,
                     purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -1187,6 +1193,8 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     installation_target,
                     search: search.clone(),
                     startup_preview: None,
+                    version_refresh: None,
+                    version_target: None,
                     model_target: None,
                     attempt_id: attempt_id.clone(),
                     runtime_kind: KIND,
@@ -1209,7 +1217,7 @@ fn supervisor_failure_belongs_only_to_the_captured_installation() {
                     // if its total deadline expires before the Manager's ack.
                     attempt.installation_target = committed_target;
                 }
-                fixture.core.runtime_check_activity.write().await.insert(
+                fixture.core.runtime_check_activity.write().await.activity.insert(
                     KIND,
                     RuntimeCheckActivity {
                         attempt_id,
@@ -2095,6 +2103,8 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
                 force_refresh: false,
                 search,
                 startup_preview: None,
+                version_refresh: None,
+                version_target: None,
                 model_target: None,
                 runtime_kind: KIND,
                 purpose: RuntimeLaunchPurpose::DiscoveryVersion,
@@ -2119,6 +2129,8 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
                 force_refresh: false,
                 search: fixture.core.runtime_search_environment.read().await.clone(),
                 startup_preview: None,
+                version_refresh: None,
+                version_target: None,
                 model_target: None,
                 runtime_kind: KIND,
                 purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -2157,6 +2169,416 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     );
     assert!(catalog.await.unwrap().unwrap_err().contains("模型目录"));
     assert_eq!(std::fs::read_to_string(version_calls).unwrap(), "v");
+    fixture.close().await;
+
+    // Unchanged wrapper, two independent reads: a late old result cannot write
+    // over the newer accepted result or retire a Host started with that result.
+    use crate::agent_profile::{
+        AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
+    };
+    use crate::runtime_fleet::{
+        FleetAcquireRequest, FleetReleaseDisposition, FleetReleaseOutcome, RuntimeCompatibilityKey,
+        fake_runtime_process_host,
+    };
+    let fixture = Fixture::new();
+    let program = fixture.program("ordered", "1.0.0", false);
+    let version = fixture.root.join("version");
+    let calls = fixture.root.join("version-calls");
+    let hold = fixture.root.join("hold-next");
+    let started = fixture.root.join("version-started");
+    let release = fixture.root.join("version-release");
+    std::fs::write(&version, "codex-cli 1.0.0").unwrap();
+    std::fs::write(&program, format!(
+        "#!/bin/sh\n[ \"$1\" = '--version' ] || exit 79\nprintf '%s' \"$VERSION_SCOPE_FIXTURE\" > \"$0.env\"\nprintf '%s\\n' \"$*\" >> '{}'\nversion=$(/bin/cat '{}')\nif [ -f '{}' ]; then /bin/mv '{}' '{}'; while [ ! -f '{}' ]; do /bin/sleep 0.01; done; fi\nprintf '%s\\n' \"$version\"\n",
+        calls.display(), version.display(), hold.display(), hold.display(), started.display(), release.display(),
+    )).unwrap();
+    let saved_configuration = configuration(Some(&program));
+    fixture.save(0, &saved_configuration).await;
+    fixture.core.handle_runtime_startup("runtime.startup.save", json!({
+        "runtimeKind":KIND, "edits":[], "commonEnvironment":{
+            "expectedRevision":0, "json":json!({"VERSION_SCOPE_FIXTURE":"formal"}).to_string(),
+        },
+    })).await.unwrap();
+    assert_eq!(
+        fixture
+            .core
+            .await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck
+            )
+            .await
+            .unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    let search = fixture.core.runtime_search_environment.read().await.clone();
+    let installation = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    let environment =
+        rovai_core::runtime_discovery::with_runtime_configuration(KIND, &search, async {
+            let mut values = rovai_core::runtime_discovery::capture_host_runtime_environment();
+            let mut command = tokio::process::Command::new(&program);
+            rovai_core::runtime_discovery::configure_runtime_command(KIND, &mut command);
+            for (name, value) in command.as_std().get_envs() {
+                if let Some(value) = value {
+                    values.insert(
+                        name.to_string_lossy().into_owned(),
+                        value.to_string_lossy().into_owned(),
+                    );
+                }
+            }
+            crate::member_environment::LaunchEnvironment {
+                values: Some(values),
+                overlay: None,
+            }
+        })
+        .await;
+    let runtime = FrozenAgentRuntimeConfig {
+        environment: Some(environment),
+        custom_api: None,
+        camp_fast: None,
+        adapter_kind: KIND,
+        installation_id: installation.id.clone(),
+        installation_generation: installation.version,
+        search_environment_generation: search.generation() as i64,
+        executable_path: installation.executable_path.clone(),
+        auth_scope: "default".into(),
+        reported_version: Some("codex-cli 1.0.0".into()),
+        executable_fingerprint: fingerprint_executable(&program).unwrap(),
+        capabilities: vec![],
+        protocol_version: "app-server".into(),
+        model: ResolvedModelSelection {
+            source: "runtime_default".into(),
+            model_id: "default".into(),
+            options: json!({}),
+            dsh_source: None,
+        },
+        permissions: AdapterPermissionConfig {
+            adapter_kind: KIND,
+            schema_version: 1,
+            values: json!({}),
+        },
+        native_session_compatibility_key: None,
+        binding_compatibility_digest: None,
+        host_config_digest: None,
+        config_digest: "fixture".into(),
+    };
+    let target = RuntimeVersionTarget::for_launch(&runtime).unwrap();
+    assert!(
+        fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads
+            .contains_key(&target),
+        "manual and actual-launch scopes share equivalent effective environments"
+    );
+    let request = |run: &str, member: &str| FleetAcquireRequest {
+        agent_run_id: run.into(),
+        execution_epoch: 1,
+        adapter_kind: KIND,
+        compatibility: RuntimeCompatibilityKey::member("ordered", member, "same"),
+    };
+    let old_host =
+        fake_runtime_process_host("old-v1").with_version_baseline(target.clone(), "1.0.0");
+    let old = fixture
+        .core
+        .runtime_fleet
+        .acquire(request("old-run", "old"), || async { Ok(old_host) })
+        .await
+        .unwrap();
+    let mut passive = fixture.core.runtime_discovery.read().await[&KIND].clone();
+    passive.version_probe_succeeded = None;
+    std::fs::write(&hold, "").unwrap();
+    let older = tokio::spawn({
+        let core = fixture.core.clone();
+        let search = search.clone();
+        async move {
+            core.discover_runtime_installations_for(true, Some(KIND), search)
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !started.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    std::fs::write(&version, "codex-cli 2.0.0").unwrap();
+    assert_eq!(
+        fixture
+            .core
+            .await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck
+            )
+            .await
+            .unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    let new_host =
+        fake_runtime_process_host("new-v2").with_version_baseline(target.clone(), "2.0.0");
+    let new = fixture
+        .core
+        .runtime_fleet
+        .acquire(request("new-run", "new"), || async { Ok(new_host) })
+        .await
+        .unwrap();
+    std::fs::write(&release, "").unwrap();
+    assert!(
+        older.await.unwrap().is_none(),
+        "a late discovery cannot publish a terminal result"
+    );
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 2.0.0");
+    assert_eq!(
+        fixture
+            .core
+            .runtime_fleet
+            .release_with_outcome("old-run", 1, FleetReleaseDisposition::Reusable)
+            .await,
+        FleetReleaseOutcome::Reaped
+    );
+    assert_eq!(
+        fixture
+            .core
+            .runtime_fleet
+            .release_with_outcome("new-run", 1, FleetReleaseDisposition::Reusable)
+            .await,
+        FleetReleaseOutcome::Reusable
+    );
+    assert_ne!(old.process_id, new.process_id);
+    let verified = fixture
+        .core
+        .verify_runtime_entry(&passive, None)
+        .await
+        .unwrap();
+    fixture
+        .core
+        .publish_runtime_discovery(
+            passive,
+            Some(verified),
+            Some((installation.id.clone(), installation.version)),
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture.health().await["reportedVersion"],
+        "codex-cli 2.0.0",
+        "passive cache publication also cannot overwrite an accepted actual read"
+    );
+
+    // Automatic failures consume the interval but do not change public state.
+    let count = || std::fs::read_to_string(&calls).unwrap().lines().count();
+    let initial_calls = count();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "fresh-run");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(count(), initial_calls);
+    let previous_sequence = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let read = state.version_reads.get_mut(&target).unwrap();
+        read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        read.accepted
+    };
+    std::fs::write(&version, "").unwrap();
+    let before = fixture.public_state().await;
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-one");
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-two");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if fixture
+                .core
+                .runtime_check_activity
+                .read()
+                .await
+                .version_reads[&target]
+                .accepted
+                > previous_sequence
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(count(), initial_calls + 1);
+    assert_eq!(fixture.public_state().await, before);
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-after-failure");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(count(), initial_calls + 1);
+
+    // A manual waiter joining that same background command still receives and
+    // publishes the concrete failure. It must not silently start another read.
+    fixture
+        .core
+        .runtime_check_activity
+        .write()
+        .await
+        .version_reads
+        .get_mut(&target)
+        .unwrap()
+        .attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+    std::fs::remove_file(&started).unwrap();
+    std::fs::remove_file(&release).unwrap();
+    std::fs::write(&hold, "").unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-with-waiter");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !started.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let (acknowledged, acknowledgement) = oneshot::channel();
+    let (completion, completed) = oneshot::channel();
+    fixture
+        .core
+        .runtime_check_requests
+        .send(
+            crate::application::RuntimeCheckRequest {
+                force_refresh: false,
+                search: search.clone(),
+                startup_preview: None,
+                version_refresh: None,
+                version_target: None,
+                model_target: None,
+                runtime_kind: KIND,
+                purpose: RuntimeLaunchPurpose::DiscoveryVersion,
+                trigger: RuntimeCheckTrigger::UserCheck,
+                acknowledged,
+                completion: Some(completion),
+            }
+            .into(),
+        )
+        .unwrap();
+    assert!(
+        !acknowledgement.await.unwrap(),
+        "manual request joins the actual in-flight read"
+    );
+    std::fs::write(&release, "").unwrap();
+    assert_eq!(
+        completed.await.unwrap().unwrap(),
+        RuntimeCheckOutcome::StableFailure
+    );
+    let failed = fixture.health().await;
+    assert_eq!(failed["discovery"]["versionProbeSucceeded"], false);
+    assert_eq!(failed["diagnosticCode"], "runtime_version_empty");
+    assert_eq!(failed["failure"]["code"], failed["diagnosticCode"]);
+    assert_eq!(failed["reportedVersion"], "codex-cli 2.0.0");
+    assert_eq!(count(), initial_calls + 2);
+
+    // An actual launch failure counts; a cached nonempty display string alone
+    // does not. Consuming this Run's receipt never retries its failed command.
+    let failed_read = fixture
+        .core
+        .observe_launch_version(&runtime, &search, Some("launch-read"), async {
+            anyhow::bail!("synthetic launch read failed")
+        })
+        .await;
+    assert!(failed_read.is_err());
+    let state_before = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let read = state.version_reads.get_mut(&target).unwrap();
+        read.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        (read.next, read.accepted, read.attempted_at)
+    };
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "launch-read");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    {
+        let state = fixture.core.runtime_check_activity.read().await;
+        let read = &state.version_reads[&target];
+        assert_eq!((read.next, read.accepted, read.attempted_at), state_before);
+        assert!(!read.read_by_runs.contains("launch-read"));
+    }
+    std::fs::write(&version, "codex-cli 2.0.0").unwrap();
+    let draft = saved_configuration.clone();
+    fixture
+        .core
+        .handle_runtime_startup(
+            "runtime.startup.inspect",
+            json!({
+                "runtimeKind": KIND, "configuration": draft,
+                "commonEnvironment":{"expectedRevision":1, "json":json!({"VERSION_SCOPE_FIXTURE":"draft-private"}).to_string()},
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(program.with_file_name("codex.env")).unwrap(),
+        "draft-private"
+    );
+    let state = fixture.core.runtime_check_activity.read().await;
+    let read = &state.version_reads[&target];
+    assert_eq!(
+        (read.next, read.accepted, read.attempted_at),
+        state_before,
+        "unsaved draft reads cannot update the formal target's clock or ordering"
+    );
+    drop(state);
+    assert_eq!(
+        count(),
+        initial_calls + 3,
+        "the only extra command was the explicit draft check"
+    );
+    // A later due successful read updates the installation without claiming a
+    // full health check, and excludes the old idle Host before returning it.
+    std::fs::write(&version, "codex-cli 3.0.0").unwrap();
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "auto-success");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while fixture.health().await["reportedVersion"] != "codex-cli 3.0.0" {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        fixture
+            .core
+            .runtime_fleet
+            .version_baselines(&target)
+            .await
+            .is_empty()
+    );
+    let saved = AgentProfileService::default()
+        .managed_installation(&*fixture.core.database.lock().await, KIND, "default")
+        .unwrap()
+        .unwrap();
+    assert!(saved.last_probe_attempt.is_none());
+    let snapshot = saved.snapshot.unwrap();
+    assert_eq!(snapshot.authentication_status, "unknown");
+    assert!(snapshot.last_successful_probe_at.is_none());
+    assert_eq!(count(), initial_calls + 4);
+    assert_eq!(
+        std::fs::read_to_string(program.with_file_name("codex.env")).unwrap(),
+        "formal"
+    );
+    assert!(
+        std::fs::read_to_string(&calls)
+            .unwrap()
+            .lines()
+            .all(|line| line == "--version")
+    );
+    fixture.core.runtime_fleet.shutdown_all().await;
     fixture.close().await;
 }
 
@@ -2523,6 +2945,8 @@ for line in sys.stdin:
                         force_refresh: false,
                         search: fixture.core.runtime_search_environment.read().await.clone(),
                         startup_preview: None,
+                        version_refresh: None,
+                        version_target: None,
                         model_target: None,
                         runtime_kind: kind,
                         purpose: RuntimeLaunchPurpose::AvailabilityCheck,
@@ -2839,6 +3263,8 @@ for line in sys.stdin:
                             force_refresh: true,
                             search: fixture.core.runtime_search_environment.read().await.clone(),
                             startup_preview: None,
+                            version_refresh: None,
+                            version_target: None,
                             model_target: Some(crate::application::ModelOptionsTarget {
                                 model_id: model_id.into(),
                                 source: None,

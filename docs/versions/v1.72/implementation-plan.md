@@ -4989,6 +4989,54 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 本次未运行真实模型/Pi 或 Windows 原生验收，不把受控 Runtime 元数据与 Electron 夹具当作此类证据。
 
 
+## 安装版本按需刷新与 Host 温和换代（2026-11-10）
+
+实现边界见 [Runtime Launch v78](../../contracts/runtime-launch-and-verification-v78.md)。从 `f19b2ddc` 的独立
+`rovai/runtime-on-demand-version` worktree 实施；不安装或重启日常 App，不修改用户认证、SIMPLE、Token 或原生配置。
+本项为可逆的进程内读取记录与 Fleet 复用规则，不涉及持久模型、协议迁移或新的调度权威，不新增 Version Decision。
+
+- `runtime_check_environment.rs` 在现有检查状态锁中保存每个实际目标的尝试时间、读取顺序与临时 Run 读取事实。
+  十分钟间隔只限制自动尝试；失败也计时，缓存命中不计时。Run hook 非等待提交；已有启动实际读过则不追加。
+- `application.rs` 保留整体并行重扫和原有正式启动版本调用，在实际读取前后登记；版本提交与 Fleet 标记同在原有
+  search/安装提交围栏内完成。晚到旧读取与被动缓存均不能覆盖同身份已接纳的新版本。自动 Worker 沿现有完成通道返回结果；
+  只有存在手动等待者时才投影失败，纯自动失败保持原公开状态和健康记录。
+- Codex 使用已有 initialize userAgent 的 server build，OpenCode 使用已有 initialize agentInfo.version 且有正常冷接续；
+  显示用 reportedVersion 不作为可信进程基线，其他未知来源保留。Codex/Pi Host 携带真正创建进程时已捕获的环境，
+  不重读配置来推测旧 Host 的环境，不新加同步版本查询。
+- Fleet 仅对读取开始时捕获的精确目标与 Host 实例设置独立温和标志，拒绝未来普通领取，保留当前启动与 Run。
+  已知原生工作未结束时不关闭、不作为 LRU 牺牲对象；复用已有 quiescence、释放和 Sweeper，不新建监控或期限。
+  已在关闭的同 Session 范围复用 Stop completion，防止后继冷恢复争用原生锁；原强制停止、删除与 shutdown 语义保留。
+- 路径/指纹变化不单独触发本功能换代；OpenCode 存储代际冲突、未知基线与无现成恢复路径均不自动退役。
+  Hermes 每轮关闭 ACP Client，共享 Gateway 不属于本项管理范围。安装版本不回写执行中 Run/Host 的旧版本。
+
+### 验证归属
+
+不新增 Rust 测试函数或平行夹具，扩展既有 owners：
+
+- `runtime_check_activity_has_two_slots_and_one_terminal_owner`：读取顺序、599/600 秒边界、安装/环境隔离及首次安装重绑定。
+- `manual_rescan_reads_versions_and_discards_replaced_version_responses`：私有 Core/DB、现有 Manager 和不可变受控 CLI，
+  覆盖 V1 晚于 V2 提交、被动旧缓存、自动失败限频/静默、手动共享失败、已有启动失败不追加、草稿隔离及自动成功保存。
+- `failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor` 与
+  `shutdown_retires_an_inflight_start_before_it_can_commit`：保留原硬退役断言，增加温和空闲/忙碌/原生后台矩阵、
+  降级、相同/未知版本、新 Host 排除及已接纳 Starting 不取消。
+- `warm_host_ignores_unreadable_environment_and_new_process_loads_latest`：真实受控 pipe/process，
+  空自报不会相信显示版本，可信构建自报独立于缓存，warm 环境不重读，cold 使用实际新环境。
+- `opencode_host_keeps_prepared_generation_and_stops_conflicting_handshakes`：保留原代际校验，
+  增加自报/恢复能力来源及真实原生 child 存活时不关闭、结束后由原 sweep 关闭。
+
+最小命令：
+
+```sh
+cargo test -p rovai-core --features slow-tests --lib -- runtime_check_environment:: runtime_fleet:: runtime_check_activity_has_two_slots launch_version_uses_the_frozen_program runtime_discovery:: startup_settings:: warm_host_ignores_unreadable_environment opencode_host_keeps_prepared_generation --quiet
+```
+
+定向 48 项通过；自动成功投影调整后补跑相关 2 项通过。`TZ=UTC pnpm test` 的 Vitest 为 3265 通过、2 skipped，后续 Node 矩阵通过；`pnpm typecheck` 通过。
+全 workspace、文档门禁和独立受控 Core 的最终结果在提交前补齐。
+
+这些证据不等于真实付费模型、全平台或所有 Runtime 的自动换代资格；不保证升级后第一条 Run 已用新版。
+无可信基线继续保留旧进程，不能通过事后磁盘查询补齐；外部原地升级和新版本自身故障仍按实际结果处理。
+
+
 ## MiniMax 参数按需读取（2026-11-10）
 
 基线 main@6d51b19f2；工作分支 rovai/minimax-model-options-on-demand。实现与本机验收完成。

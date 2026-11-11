@@ -14,7 +14,7 @@ last_updated: 2026-11-10
 [Runtime Platform Admission v2](../contracts/runtime-platform-admission-v2.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v65](../contracts/runtime-launch-and-verification-v65.md)。实测版本和能力只由
+[Runtime Launch and Verification v78](../contracts/runtime-launch-and-verification-v78.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 原生提问边界
@@ -259,7 +259,13 @@ Windows 标准 npm/pnpm 包装入口的目标包身份由既有入口模块统�
 
 配置冻结保存精确模型/权限意图，Scheduler 检查工作区、平台与目标；已有驻留能力的 Adapter 由 Fleet
 实际取得健康且兼容的 Host，磁盘文件身份只在创建进程分支检查。取得的 Host 启动身份在首次输入前进入本轮，
-磁盘升级不改写执行中 Run，也不单独退役健康 Host；精确边界见当前 Runtime 启动合同。
+磁盘升级不改写执行中 Run。实际目标版本刷新在 Run 正常执行后按需提交，十分钟限频且不阻塞输入；
+现有检查状态保存实际尝试时间与结果顺序，静态缓存命中不算读取。可靠的新版本观测只能标记读取开始时捕获的
+对应旧 Host，迟到结果不能写版本或退役新进程。无可信旧基线时保留 Host，路径/指纹变化单独走原有完整性处理。
+Fleet 用独立的温和标志禁止后续复用，保留当前启动、Run 与原生后台工作；空闲且原生静默后走原有关闭流程，
+后继冷启动沿用原 Session 接续。只处理有既有冷接续的自有进程，不关闭 Hermes 共享 Gateway。
+自动失败只记日志，手动等待同一读取仍收到具体错误。精确来源、顺序及失败边界见
+[Runtime Launch v78](../contracts/runtime-launch-and-verification-v78.md)。
 真实初始化先确认必要协议、认证、显式模型/选项与权限，再在同一 Host 发送正文。
 默认模型不为 Picker 等待完整模型目录。输入接收未知不重放；已有 Fleet 复用、Session 兼容与隔离保持。
 运行中的初始化/错误属于当前 Run；修复环境后的新任务重新尝试，不必手动解除历史健康状态。

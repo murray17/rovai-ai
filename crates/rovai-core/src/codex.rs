@@ -134,7 +134,7 @@ impl CodexRuntimeOwner {
 }
 
 pub(crate) struct CodexHost {
-    initialized: tokio::sync::OnceCell<()>,
+    initialized: tokio::sync::OnceCell<Option<String>>,
     credential_redactor: Option<rovai_core::runtime_custom_api::CredentialRedactor>,
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
@@ -488,15 +488,32 @@ impl CodexHost {
 
     async fn initialize(&self) -> Result<()> {
         self.initialized.get_or_try_init(|| async {
-            self.rpc("initialize", json!({
+            let result = self.rpc("initialize", json!({
                 "clientInfo": {"name": "rovai", "title": "Rovai-ai", "version": env!("CARGO_PKG_VERSION")},
                 "capabilities": {"experimentalApi": true}
             })).await.context("Codex app-server initialize failed")?;
             self.notify("initialized", json!({})).await
                 .context("Codex app-server initialized notification failed")?;
-            Ok::<_, anyhow::Error>(())
+            // The first user-agent token is originator/server-build-version;
+            // its suffix contains client/platform data, not another version.
+            let version = result.get("userAgent").and_then(Value::as_str)
+                .and_then(|agent| agent.split_whitespace().next())
+                .and_then(|token| token.split_once('/').map(|(_, version)| version))
+                .and_then(|version| crate::runtime_discovery::comparable_runtime_version(
+                    AdapterKind::CodexCli, version))
+                .map(str::to_owned);
+            Ok::<_, anyhow::Error>(version)
         }).await?;
         Ok(())
+    }
+
+    pub(crate) fn version_baseline(
+        &self,
+    ) -> Option<(crate::runtime_discovery::RuntimeVersionTarget, String)> {
+        Some((
+            crate::runtime_discovery::RuntimeVersionTarget::for_launch(self.launch_runtime.get()?)?,
+            self.initialized.get()?.clone()?,
+        ))
     }
 
     fn spawn_stdout_reader(host: Arc<Self>, stdout: ManagedChildStdout) {
@@ -1602,13 +1619,14 @@ impl CodexCliRuntimeAdapter {
                     compatibility,
                 },
                 move || async move {
-                    let spawn_runtime = prepare_cold(spawn_runtime).await?;
+                    let mut spawn_runtime = prepare_cold(spawn_runtime).await?;
                     let spawn_executable = PathBuf::from(&spawn_runtime.executable_path);
                     let spawn_environment = rovai_core::member_environment::resolve_for_launch(
                         spawn_environment_source,
                         spawn_runtime.environment.clone(),
                     )
                     .await?;
+                    spawn_runtime.environment = spawn_environment.clone();
                     let mut spawn_custom_api = spawn_runtime.custom_api.clone();
                     if spawn_environment
                         .as_ref()
@@ -2954,7 +2972,7 @@ for line in sys.stdin:
         let executable = root.join("codex");
         make_test_executable(
             &executable,
-            "#!/bin/sh\nprintf '%s\\n' \"$LAUNCH_VALUE\" >> \"$0.env\"\nIFS= read -r initialize || exit 1\nprintf '%s\\n' '{\"id\":1,\"result\":{}}'\nIFS= read -r initialized || exit 1\nwhile IFS= read -r ignored; do :; done\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$LAUNCH_VALUE\" >> \"$0.env\"\nIFS= read -r initialize || exit 1\nif [ -f \"$0.build\" ]; then /bin/cat \"$0.build\"; else printf '%s\\n' '{\"id\":1,\"result\":{}}'; fi\nIFS= read -r initialized || exit 1\nwhile IFS= read -r ignored; do :; done\n",
         );
         let source = LaunchEnvironmentSource {
             database: Arc::new(Mutex::new(database)),
@@ -2988,6 +3006,15 @@ for line in sys.stdin:
             }),
         )
         .await
+        .unwrap();
+        assert!(
+            first.host.version_baseline().is_none(),
+            "a cached display version without process proof is not a baseline"
+        );
+        std::fs::write(
+            root.join("codex.build"),
+            "{\"id\":1,\"result\":{\"userAgent\":\"rovai/2.1.0 (fixture) client/99\"}}\n",
+        )
         .unwrap();
         adapter
             .complete_agent_run("run-a", 1, FleetReleaseDisposition::Reusable)
@@ -3057,6 +3084,12 @@ for line in sys.stdin:
         save(&source, 2, "C").await;
         fleet.invalidate_member("agent_1").await;
         let next = pending.await.unwrap();
+        assert_eq!(next.host.version_baseline().unwrap().1, "2.1.0");
+        assert_ne!(
+            next.launch_runtime().reported_version.as_deref(),
+            Some("2.1.0"),
+            "the running program's proof never comes from its cached display version"
+        );
         assert_ne!(next.host_instance_id(), first.host_instance_id());
         assert_eq!(
             std::fs::read_to_string(root.join("codex.env")).unwrap(),

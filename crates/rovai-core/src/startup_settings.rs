@@ -392,6 +392,8 @@ impl Core {
                     model_target: None,
                     search: self.runtime_search_environment.read().await.clone(),
                     startup_preview: Some(preview.clone()),
+                    version_refresh: None,
+                    version_target: None,
                     runtime_kind: kind,
                     purpose: RuntimeLaunchPurpose::AvailabilityCheck,
                     trigger: RuntimeCheckTrigger::UserCheck,

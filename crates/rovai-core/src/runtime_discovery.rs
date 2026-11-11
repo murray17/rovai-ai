@@ -55,6 +55,64 @@ use crate::{
 #[cfg(unix)]
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
 pub const RUNTIME_VERSION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Logical query scope. File contents are checked separately: replacing a
+/// program must not turn the same installation/environment into another scope.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct RuntimeVersionTarget {
+    pub kind: AdapterKind,
+    pub installation_id: String,
+    pub executable_path: String,
+    pub environment_digest: String,
+}
+
+impl RuntimeVersionTarget {
+    pub(crate) fn new(
+        kind: AdapterKind,
+        installation_id: &str,
+        executable_path: &str,
+        environment: &BTreeMap<String, String>,
+    ) -> Result<Self> {
+        Ok(Self {
+            kind,
+            installation_id: installation_id.to_owned(),
+            executable_path: executable_path.to_owned(),
+            environment_digest: crate::command::canonical_json_digest(&serde_json::to_value(
+                environment,
+            )?)?,
+        })
+    }
+
+    pub(crate) fn for_launch(
+        runtime: &crate::agent_profile::FrozenAgentRuntimeConfig,
+    ) -> Option<Self> {
+        Self::new(
+            runtime.adapter_kind,
+            &runtime.installation_id,
+            &runtime.executable_path,
+            runtime.environment.as_ref()?.values.as_ref()?,
+        )
+        .ok()
+    }
+}
+
+/// Equality only, with the existing Codex CLI banner removed. Unknown or
+/// differently formatted information cannot establish a process replacement.
+pub(crate) fn comparable_runtime_version(kind: AdapterKind, value: &str) -> Option<&str> {
+    let value = value.trim();
+    let value = if kind == AdapterKind::CodexCli {
+        value.strip_prefix("codex-cli ").unwrap_or(value)
+    } else {
+        value
+    };
+    let value = value.strip_prefix('v').unwrap_or(value);
+    (value.len() <= 256
+        && value.as_bytes().first().is_some_and(u8::is_ascii_digit)
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b".-+_".contains(&byte)))
+    .then_some(value)
+}
 #[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
@@ -1383,6 +1441,17 @@ async fn bounded_version_command(
     };
     command.args(arguments).stdin(Stdio::null());
     search.configure_tokio_command(kind, &mut command);
+    // A captured launch environment replaces this read's search environment.
+    // Without one, keep the supplied snapshot (including an unsaved draft),
+    // never fall back to the process-global active configuration.
+    let _ = LAUNCH_ENVIRONMENT.try_with(|snapshot| {
+        if let Some(values) = snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.values.as_ref())
+        {
+            crate::member_environment::configure_values(&mut command, values);
+        }
+    });
     let output = run_bounded_command(
         &mut command,
         ProbeCommandLimits {

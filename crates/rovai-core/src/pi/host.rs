@@ -2006,13 +2006,14 @@ impl PiRpcRuntimeAdapter {
                     ),
                 },
                 move || async move {
-                    let spawn_runtime = prepare_cold(spawn_runtime).await?;
+                    let mut spawn_runtime = prepare_cold(spawn_runtime).await?;
                     let spawn_executable = PathBuf::from(&spawn_runtime.executable_path);
                     let spawn_environment = rovai_core::member_environment::resolve_for_launch(
                         spawn_environment_source,
                         spawn_runtime.environment.clone(),
                     )
                     .await?;
+                    spawn_runtime.environment = spawn_environment.clone();
                     let host = PiHost::spawn(PiHostLaunch {
                         environment: spawn_environment.as_ref(),
                         executable: &spawn_executable,
