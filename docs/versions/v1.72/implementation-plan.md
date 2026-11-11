@@ -50,6 +50,25 @@ last_updated: 2026-11-11
   生产 Electron 自动验收继续使用独立 `userData`／Skill 目录、受控传输，不启动 Core 或模型；
   复用原中英文／五主题／三尺寸矩阵与 200% 检查，30 组连续消息操作栏均位于正文下方，保留 62 张截图。
   本轮 Thread 附件证据目录为 `Thread-Fork-Review-Fixes`；真实模型及 Windows 原生验收边界不变。
+- 收尾检查：默认 `pnpm test:rust:pr` 为 workspace 484 passed / 1 ignored；完整 `TZ=UTC pnpm test`
+  为 3274 Vitest passed / 2 skipped、377 Node passed / 2 skipped。导出 3 项、导航／启动 2 项、
+  `docs:test`、`docs:check`、以 `92ff101a7de0485bb4e74750946eea4b3949f0b7` 为目标 base 的 `docs:check:ci`
+  与 `cargo fmt --all --check` 均通过。生产修补提交 `df004718e1b7784da142f646d14232c466c945fe` 已推送原 PR。
+- `pnpm test:rust:extended` 未通过：下列 8 项迁移 owner 失败；扩展运行中的 3 个分叉 owner 均通过。
+  在独立源码 checkout 的最新 `main@92ff101a7` 使用相同 feature、同名 owner 定向复现相同失败。
+  本 PR 相对该 main 未改动 `db.rs`、`test_support.rs` 或 Core Cargo 配置，没有通过放宽断言、跳过测试或修改迁移来消除失败。
+  最小复现命令为 `cargo test -p rovai-core --features extended-tests --lib <完整 owner 名称> -- --exact`。
+
+| 基线失败 owner | 实际失败边界 |
+| --- | --- |
+| `db::tests::current_migration_state_admission_matrix` | 当前版本未满足显式升级来源断言 |
+| `db::tests::database_contract_preflight_admits_current_and_rejects_future_store` | 当前迁移状态与旧预期不一致 |
+| `db::tests::legacy_feishu_migration_marker_collision_reconciles_without_quarantine` | 删除旧回执后的当前库准入断言 |
+| `db::tests::v95_invalidates_native_session_context_and_nonterminal_runs` | 旧 Session／非终态迁移断言 |
+| `db::tests::v103_adds_trae_delivery_without_overriding_custom_skill_assignments` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
+| `db::tests::v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
+| `db::tests::v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
+| `db::tests::v107_adds_grok_catalog_and_preserves_runtime_and_skill_rows` | 旧 Runtime group 闭集与当前 fixture 不兼容 |
 
 
 ## Kilo 官方 ACP（2026-11-08，Preview 实施）
