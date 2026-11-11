@@ -672,6 +672,18 @@ fn minimax_message_bindings(
     Ok(bindings)
 }
 
+fn native_workspace_matches(native: &str, workspace: &str) -> bool {
+    // ACP runtimes can record a Win32 path while the Core retains its verbatim form.
+    #[cfg(windows)]
+    {
+        dunce::simplified(Path::new(native)) == dunce::simplified(Path::new(workspace))
+    }
+    #[cfg(not(windows))]
+    {
+        native == workspace
+    }
+}
+
 fn minimax_session_path(root: &Path, workspace: &str, session_id: &str) -> Result<PathBuf> {
     anyhow::ensure!(
         safe_identity(session_id),
@@ -682,16 +694,8 @@ fn minimax_session_path(root: &Path, workspace: &str, session_id: &str) -> Resul
         "SELECT workspace_dir,parent_session_id,history_relative_dir FROM local_runtime_sessions WHERE session_id=?1",
         [session_id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
     )?;
-    // ACP uses Win32 paths while the Core freezes canonical verbatim paths.
-    // Compare their equivalent lexical representations without admitting a
-    // different workspace or weakening the exact root-Session identity check.
-    #[cfg(windows)]
-    let same_workspace =
-        dunce::simplified(Path::new(&cwd)) == dunce::simplified(Path::new(workspace));
-    #[cfg(not(windows))]
-    let same_workspace = cwd == workspace;
     anyhow::ensure!(
-        same_workspace && parent.is_none(),
+        native_workspace_matches(&cwd, workspace) && parent.is_none(),
         "MiniMax root Session does not match"
     );
     anyhow::ensure!(
@@ -920,7 +924,7 @@ impl OpenCodeUsageReader {
             [&self.session_id],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
         )?;
-        if directory != self.workspace || parent.is_some() {
+        if !native_workspace_matches(&directory, &self.workspace) || parent.is_some() {
             bail!("native Usage root Session does not match");
         }
         Ok(())
@@ -2878,10 +2882,21 @@ mod tests {
                 run["expectedSessionProjection"][0]["usedTokens"].as_i64()
             );
         }
-        let mut kilo =
-            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+        #[cfg(windows)]
+        let kilo_workspace = {
+            database
+                .execute(
+                    "UPDATE session SET directory=?1",
+                    ["C:/workspace/项目 空格"],
+                )
                 .unwrap();
-        kilo.kind = AdapterKind::KiloCli;
+            Path::new(r"\\?\C:\workspace\项目 空格")
+        };
+        #[cfg(not(windows))]
+        let kilo_workspace = Path::new("/workspace");
+        let mut kilo = NativeUsageReader::for_kilo_prompt(&path, kilo_workspace, "session-1")
+            .expect("the Kilo root Session uses the same workspace as the Core");
+        assert!(NativeUsageReader::for_kilo_prompt(&path, kilo_workspace, "child").is_none());
         insert("kilo-call", "session-1", Some(7));
         database
             .execute(
@@ -2892,6 +2907,8 @@ mod tests {
         let observed = kilo.poll();
         assert_eq!(observed.len(), 2);
         assert!(observed[0].source_identity.starts_with("kilo-native:"));
+        assert_eq!(observed[0].usage.fields.input_tokens, Some(12));
+        assert_eq!(observed[0].usage.fields.output_tokens, Some(11));
         assert_eq!(observed[0].usage.cost.as_ref().unwrap().amount, "0.0042");
         assert_eq!(observed[0].usage.cost.as_ref().unwrap().currency, "USD");
         assert!(
@@ -2906,6 +2923,11 @@ mod tests {
             .unwrap();
         assert!(next.poll().is_empty());
         assert!(next.disabled);
+        insert("changed-workspace-call", "session-1", Some(8));
+        assert!(
+            kilo.poll().is_empty(),
+            "a different workspace must be rejected"
+        );
         drop(database);
         fs::remove_dir_all(root).unwrap();
     }

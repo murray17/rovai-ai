@@ -18,6 +18,7 @@ last_updated: 2026-11-08
 具体门禁、Golden Flows 和未测范围集中在[实施记录](kilo-acp-implementation.md)。
 初始范围见 [D76](decisions.md#v1-72-d76)。当前开放范围见 [平台准入](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)，
 Linux x64 的真实模型和 ACP 结果见[目标机验收](../../research/kilo-runtime/README.md#linux-x64-目标机验收)。
+Windows x64 资格及 Sub2API 复验见[目标机验收](../../research/kilo-runtime/README.md#windows-x64-目标机验收)。
 
 2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正，以及 Steer 接续可行性见[复核记录](kilo-acp-review-fixes.md)。
 

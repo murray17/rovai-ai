@@ -85,9 +85,10 @@ instructions 的局部有序追加不重排原生规则；用户插件与 pure �
 模型完整目录复用 MiniMax 的临时 Session 逐模型非生成查询，收集各模型实际提供的 effort；
 普通健康检查不遍历模型，也不覆盖已有完整目录及其成功时间。没有新缓存、参数推断或选择器组件。
 启动、权限、原生来源和数值口径见 [Runtime Launch v83](../contracts/runtime-launch-and-verification-v83.md)。
-macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 NotQualified。开放范围见
+macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 Qualified。开放范围见
 [macOS 准入](../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)和
-[Linux 准入](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)。
+[Linux 准入](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)及
+[Windows 资格](../contracts/runtime-platform-admission-v2.md#kilo-windows-x64-qualification)。
 理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
 
 <a id="command-code-研究接入边界"></a>

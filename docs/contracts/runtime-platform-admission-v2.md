@@ -4,7 +4,7 @@ name: Runtime Platform Admission
 version: v2
 status: accepted
 source_version: v1.39
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # Runtime Platform Admission v2
@@ -193,5 +193,14 @@ Renderer 不增加平台白名单或实验标签，机器安装、原生认证�
 2026-11-10，维护者在 Linux x64 实测后确认开放。`kilo-cli × linux-x64` 为
 `preview / reasonCode=runtime_platform.qualification_evidence_missing`，`evidenceRevision=null`。
 Core 允许发现、检查、安装配置、成员选择和普通执行，并执行常规的安装、认证、版本、模型和能力检查。
-Windows x64 为 `not_qualified`。实测范围和决定见 [Linux x64 验收](../research/kilo-runtime/README.md#linux-x64-目标机验收)
+实测范围和决定见 [Linux x64 验收](../research/kilo-runtime/README.md#linux-x64-目标机验收)
 与 [V1.72-D83](../versions/v1.72/decisions.md#v1-72-d83)。
+
+## Kilo Windows x64 qualification
+
+2026-11-11，维护者授权通过 Sub2API 完成真实模型测试并在验收通过后提交 Windows 资格。
+`kilo-cli × windows-x64` 为 `qualified / reasonCode=null`，`evidenceRevision` 绑定独立的
+[Windows x64 验收记录](../../qualification/runtime-platform/windows-x64-kilo-v1.json)的 SHA-256。
+Core 允许常规发现、检查、安装配置、成员选择和执行，并执行现有的机器安装、原生认证、版本、模型和能力检查。
+目标机与用量采样范围见 [Windows x64 验收](../research/kilo-runtime/README.md#windows-x64-目标机验收)与
+[V1.72-D84](../versions/v1.72/decisions.md#v1-72-d84)。

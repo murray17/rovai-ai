@@ -38,6 +38,9 @@ pub const MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION: &str =
 pub const MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION: &str =
     "sha256:8e6eddd306b3e1d145767f0912facefe4cd255f1e5768e3f2369bc900a566426";
 
+pub const KILO_WINDOWS_X64_EVIDENCE_REVISION: &str =
+    "sha256:f7c5a470022b84599a7c910a832e591c7b54192137dfb75ab241aafd9806c041";
+
 pub const DSH_MACOS_ARM64_EVIDENCE_REVISION: &str =
     "sha256:017f63a62ceb33a8c03e881e9ace29b9710cb94006f87a2def529c6a31276394";
 pub const DSH_MACOS_X64_EVIDENCE_REVISION: &str =
@@ -216,6 +219,11 @@ mod tests {
     #[test]
     fn platform_evidence_revisions_bind_their_frozen_source_bytes() {
         for (revision, bytes) in [
+            (
+                KILO_WINDOWS_X64_EVIDENCE_REVISION,
+                include_bytes!("../../../qualification/runtime-platform/windows-x64-kilo-v1.json")
+                    .as_slice(),
+            ),
             (
                 MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION,
                 include_bytes!(
@@ -439,6 +447,15 @@ mod tests {
                     Some(MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION)
                 );
                 assert_eq!(admission.blocker_code(), None);
+            } else if runtime_kind == AdapterKind::KiloCli {
+                assert!(admission.is_qualified());
+                assert!(admission.allows_runtime_use());
+                assert_eq!(admission.reason_code(), None);
+                assert_eq!(
+                    admission.evidence_revision(),
+                    Some(KILO_WINDOWS_X64_EVIDENCE_REVISION)
+                );
+                assert_eq!(admission.blocker_code(), None);
             } else if runtime_kind == AdapterKind::Pi {
                 assert_eq!(
                     admission.status(),
@@ -492,7 +509,6 @@ mod tests {
                 runtime_kind,
                 AdapterKind::CursorAgent
                     | AdapterKind::ClineCli
-                    | AdapterKind::KiloCli
                     | AdapterKind::CommandCodeCli
                     | AdapterKind::MinimaxCodeCli
                     | AdapterKind::HermesCli
@@ -535,20 +551,11 @@ mod tests {
         let registry = AgentRuntimeAdapterRegistry::default();
         for platform in HostPlatformKey::ALL {
             let kilo = registry.platform_admission(AdapterKind::KiloCli, platform);
-            let preview = matches!(
-                platform,
-                HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64 | HostPlatformKey::LinuxX64
-            );
-            assert_eq!(
-                kilo.status(),
-                if preview {
-                    RuntimePlatformAdmissionStatus::Preview
-                } else {
-                    RuntimePlatformAdmissionStatus::NotQualified
-                }
-            );
-            assert!(kilo.evidence_revision().is_none());
-            assert_eq!(kilo.allows_runtime_use(), preview);
+            if platform != HostPlatformKey::WindowsX64 {
+                assert_eq!(kilo.status(), RuntimePlatformAdmissionStatus::Preview);
+                assert!(kilo.evidence_revision().is_none());
+                assert!(kilo.allows_runtime_use());
+            }
         }
         for platform in HostPlatformKey::ALL {
             let hermes = registry.platform_admission(AdapterKind::HermesCli, platform);

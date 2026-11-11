@@ -3,10 +3,22 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d84"></a>
+## V1.72-D84：Kilo Windows x64 目标机实测后通过资格
+
+- 状态：accepted
+- 日期：2026-11-11
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#kilo-windows-x64-qualification)。
+
+维护者授权以真实 Sub2API 测试验证 Windows x64，并要求验收通过后提交资格。
+Windows 实测覆盖原生认证、执行、会话恢复、审批、内置 CLI、取消和计划关停清理，修复了原生用量读库的路径比较。
+目标机证据覆盖正式准入要求，因此选择将 Windows x64 投影为 Qualified，并绑定平台专属证据。
+[Windows x64 验收](../../research/kilo-runtime/README.md#windows-x64-目标机验收)
 
 <a id="v1-72-d83"></a>
 ## V1.72-D83：Kilo Linux x64 目标机实测后开放 Preview

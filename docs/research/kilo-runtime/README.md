@@ -2,7 +2,7 @@
 document_type: research-record
 authority: non-normative-runtime-evidence
 status: implemented-preview
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # Kilo 原生 ACP 研究与实际探测
@@ -17,7 +17,7 @@ last_updated: 2026-11-10
 
 结论：采用官方 `kilo acp`，复用共享 ACP/Fleet；单 Binding Host 和原生 instructions 已用于产品实现，
 不增加压缩插件、独立进程池、配置镜像、二次审批或 SHA256 校验。
-当前 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 NotQualified。
+当前 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 Qualified。
 User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-kilo-acp.md)；
 后续 Core 实施、验证和当前缺失范围见[实施记录](../../versions/v1.72/kilo-acp-implementation.md)，
 七个真实 Core Run 的本地 Provider 结果见[Core evidence](core-smoke-7.8.27-macos-arm64.json)。
@@ -48,6 +48,28 @@ MCP 保存下一 Run 生效和普通取消 Warm 的当前范围见[简化记录]
 
 同一二进制与受控 Provider 跑完 40 个 Run，37 个成功、3 个按用例取消。覆盖热续接、冷恢复、权限审批、
 文件变更、MCP、运行中补充指令、取消后恢复、前台子代理和自动压缩。[ACP 验收脚本](../../../scripts/smoke-kilo-runtime.mjs)
+
+## Windows x64 目标机验收
+
+2026-11-11，在 Windows 10 Pro 22H2 x64（build 19045，NTFS）运行官方 Kilo 7.8.27。
+使用基于 `452349dae` 构建的 Core 和独立的 Core、Skill、MCP、工作目录及 Kilo 原生配置，
+由 Windows Debug 验收开关临时准入。实测归档见 [Windows x64 资格证据](../../../qualification/runtime-platform/windows-x64-kilo-v1.json)。
+
+原生 BYOK 配置通过 Sub2API 调用 `gpt-6`，4 个 Run 全部成功。验证了发现与版本、显式模型配置、
+原生单次审批、文件写入和回读、文件 Diff、内置 `rovai` CLI 的唯一公开消息、同 Host 热续接、
+计划关停后的精确 Session 恢复、项目 Skill 加载及两次所属进程树清理。线上用量按已观测调用记录，短轮仍可保持未知。
+
+同一 Core 和官方 CLI 用受控 Provider 完成 40 个 Run，其中 37 个成功，3 个按用例取消。
+复用 [Core smoke](../../../scripts/smoke-kilo-runtime.mjs) 的场景，验收驱动使用 Windows 可执行文件名、
+Git Bash、Windows 命名管道和本机 Python 解释器。覆盖逐模型参数、Bootstrap、MCP 保存与撤销、原生审批和拒绝、
+工具输出、运行中追加输入、取消后续接以及自动压缩和冷恢复。
+
+修复前，Core 保存的 Windows verbatim 路径与 Kilo 原生 SQLite 中的普通路径在字符串比较时不相等，
+用量读库无法建立根 Session 基线。复用已有 Windows 路径比较后，用量回归及其他工作目录和子会话拒绝断言通过。
+受控首次 Run 采到 200 个输入 token、40 个输出 token 和 50 个缓存读取 token。
+
+正式准入复跑关闭了 Debug 验收开关。Core 从 PATH 发现同一官方 CLI，读到 `qualified` 和对应证据摘要，
+完成成员配置、首次执行、热续接和用量采样。
 
 ## 基线与证据
 

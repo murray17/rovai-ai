@@ -31,10 +31,11 @@ use crate::{
         DSH_LINUX_X64_EVIDENCE_REVISION, DSH_MACOS_ARM64_EVIDENCE_REVISION,
         DSH_MACOS_X64_EVIDENCE_REVISION, DSH_WINDOWS_X64_EVIDENCE_REVISION,
         GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
-        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-        MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION, MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION,
-        MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION, PI_MACOS_ARM64_EVIDENCE_REVISION,
-        PI_MACOS_X64_EVIDENCE_REVISION, PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
+        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, KILO_WINDOWS_X64_EVIDENCE_REVISION,
+        MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION, MINIMAX_CODE_LINUX_X64_EVIDENCE_REVISION,
+        MINIMAX_CODE_MACOS_X64_EVIDENCE_REVISION, MINIMAX_CODE_WINDOWS_X64_EVIDENCE_REVISION,
+        PI_MACOS_ARM64_EVIDENCE_REVISION, PI_MACOS_X64_EVIDENCE_REVISION,
+        PI_WINDOWS_X64_EVIDENCE_REVISION, RuntimePlatformAdmission,
         RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
         ZCODE_MACOS_ARM64_EVIDENCE_REVISION, ZCODE_WINDOWS_X64_EVIDENCE_REVISION,
     },
@@ -824,17 +825,19 @@ impl AgentRuntimeAdapterRegistry {
             )
         };
         if kind == AdapterKind::KiloCli {
-            return if matches!(
-                platform,
-                HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64 | HostPlatformKey::LinuxX64
-            ) {
-                RuntimePlatformAdmission::preview(
+            return match platform {
+                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    KILO_WINDOWS_X64_EVIDENCE_REVISION,
+                ),
+                HostPlatformKey::MacosArm64
+                | HostPlatformKey::MacosX64
+                | HostPlatformKey::LinuxX64 => RuntimePlatformAdmission::preview(
                     kind,
                     platform,
                     RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-                )
-            } else {
-                unqualified()
+                ),
             };
         }
         if kind == AdapterKind::HermesCli {
