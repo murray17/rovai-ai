@@ -8,6 +8,7 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promise
 import { join, resolve, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { launchAcceptanceBrowser, pause } from './host-web-browser.mjs'
+import { admitElectronIntegrationTest } from './electron-sandbox-capability.mjs'
 
 const repo = resolve(import.meta.dirname, '../..')
 const chrome = process.env.ROVAI_TEST_CHROME ?? (process.platform === 'darwin'
@@ -17,14 +18,24 @@ const chrome = process.env.ROVAI_TEST_CHROME ?? (process.platform === 'darwin'
 const run = promisify(execFile)
 
 async function fixture(t, name) {
-  if (!await access(chrome).then(() => true, () => false)) {
+  const desktop = process.env.ROVAI_CODE_COPY_HOST === 'electron'
+  if (desktop && !admitElectronIntegrationTest(t)) return null
+  if (!desktop && !await access(chrome).then(() => true, () => false)) {
     t.skip('Chrome is not installed; code copy acceptance did not run')
     return null
   }
   const root = await mkdtemp(join(tmpdir(), 'rovai-code-copy-'))
   const out = process.env.ROVAI_CODE_COPY_OUTPUT ? join(process.env.ROVAI_CODE_COPY_OUTPUT, name) : join(root, 'evidence')
   await mkdir(out, { recursive: true })
-  const b = await launchAcceptanceBrowser({ executable: chrome, args: [
+  const profile = join(root, 'profile')
+  await mkdir(join(profile, 'managed-skill-library'), { recursive: true })
+  const blank = join(root, 'blank.html')
+  await writeFile(blank, '<!doctype html><title>Markdown acceptance</title>')
+  if (desktop) console.log(JSON.stringify({ channel: 'automatic_acceptance', userData: profile, skillLibraryRoot: join(profile, 'managed-skill-library'), core: false, runtime: false }))
+  const b = await launchAcceptanceBrowser({ executable: desktop ? (await import('electron')).default : chrome, args: desktop ? [
+    join(repo, 'scripts/fixtures/markdown-mermaid/main.cjs'), `--mermaid-page=${blank}`,
+    `--user-data-dir=${profile}`, '--remote-debugging-port=0'
+  ] : [
     '--headless=new', `--user-data-dir=${join(root, 'profile')}`, '--remote-debugging-port=0',
     '--no-first-run', '--no-default-browser-check', '--disable-background-networking',
     '--disable-crash-reporter', '--disable-breakpad', ...(process.platform === 'linux' ? ['--no-sandbox'] : []), 'about:blank'
@@ -207,7 +218,10 @@ test('production Markdown CJK emphasis synthesizes italics without changing plai
   }
   const evidence = []
   for (const theme of ['day', 'night', 'horizon', 'classic-red', 'ember']) {
-    await b.evaluate(`document.documentElement.dataset.theme=${JSON.stringify(theme)}; document.documentElement.style.fontSynthesis='none'`)
+    await b.evaluate(`__tableCopy.setTheme(${JSON.stringify(theme)}); document.documentElement.style.fontSynthesis='none'`)
+    const appearance = await b.evaluate('({id:document.documentElement.dataset.themeId,mode:document.documentElement.dataset.theme})')
+    assert.equal(appearance.id, theme)
+    assert.equal(appearance.mode, theme === 'night' || theme === 'ember' ? 'night' : 'day')
     await pause(100)
     const before = await inspect()
     const selectors = {
@@ -241,7 +255,7 @@ test('production Markdown CJK emphasis synthesizes italics without changing plai
       else assert.notEqual(pixels, baseline[name], `${theme}: ${name} must visibly differ when synthesis is allowed`)
     }
     await b.capture(join(out, `${theme}.png`))
-    evidence.push({ theme, surfaces: after, plainAndBoldPixelsUnchanged: true, chineseItalicPixelsChanged: true })
+    evidence.push({ theme, appearance, surfaces: after, plainAndBoldPixelsUnchanged: true, chineseItalicPixelsChanged: true })
   }
   // Incremental body updates and remounting retain the inherited font policy.
   await b.evaluate("__tableCopy.setSource('*中文斜')")
@@ -258,8 +272,15 @@ test('production Markdown CJK emphasis synthesizes italics without changing plai
   await b.wait('document.querySelector(".table-message em strong")?.textContent === "中文加粗斜体"')
   assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".table-message em")).fontStyle'), 'italic')
   assert.equal(await b.evaluate('getComputedStyle(document.querySelector(".table-message em")).fontSynthesisWeight'), 'none')
+  await b.send('DOM.enable')
+  await b.send('CSS.enable')
+  const { root: documentRoot } = await b.send('DOM.getDocument')
+  const { nodeId } = await b.send('DOM.querySelector', { nodeId: documentRoot.nodeId, selector: '.table-message em' })
+  const { fonts } = await b.send('CSS.getPlatformFontsForNode', { nodeId })
   assert.deepEqual(b.errors, [])
-  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: true, platform: process.platform, evidence }, null, 2))
+  const sourceCommit = (await run('git', ['rev-parse', 'HEAD'], { cwd: repo })).stdout.trim()
+  await writeFile(join(out, 'result.json'), JSON.stringify({ passed: true, platform: process.platform,
+    host: process.env.ROVAI_CODE_COPY_HOST === 'electron' ? 'electron' : 'chrome', sourceCommit, fonts, evidence }, null, 2))
 })
 
 test('published website code and request copy use the same corner interaction', { timeout: 180_000 }, async t => {
