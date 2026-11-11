@@ -384,7 +384,7 @@ mod tests {
                             assert_eq!(admission.reason_code(), None);
                             assert!(admission.evidence_revision().is_none());
                         }
-                        AdapterKind::CursorAgent | AdapterKind::ClineCli | AdapterKind::KiloCli => {
+                        AdapterKind::CursorAgent | AdapterKind::ClineCli => {
                             assert_eq!(
                                 admission.status(),
                                 RuntimePlatformAdmissionStatus::NotQualified
@@ -535,25 +535,20 @@ mod tests {
         let registry = AgentRuntimeAdapterRegistry::default();
         for platform in HostPlatformKey::ALL {
             let kilo = registry.platform_admission(AdapterKind::KiloCli, platform);
+            let preview = matches!(
+                platform,
+                HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64 | HostPlatformKey::LinuxX64
+            );
             assert_eq!(
                 kilo.status(),
-                if matches!(
-                    platform,
-                    HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64
-                ) {
+                if preview {
                     RuntimePlatformAdmissionStatus::Preview
                 } else {
                     RuntimePlatformAdmissionStatus::NotQualified
                 }
             );
             assert!(kilo.evidence_revision().is_none());
-            assert_eq!(
-                kilo.allows_runtime_use(),
-                matches!(
-                    platform,
-                    HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64
-                )
-            );
+            assert_eq!(kilo.allows_runtime_use(), preview);
         }
         for platform in HostPlatformKey::ALL {
             let hermes = registry.platform_admission(AdapterKind::HermesCli, platform);

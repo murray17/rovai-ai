@@ -17,7 +17,7 @@ last_updated: 2026-11-10
 
 结论：采用官方 `kilo acp`，复用共享 ACP/Fleet；单 Binding Host 和原生 instructions 已用于产品实现，
 不增加压缩插件、独立进程池、配置镜像、二次审批或 SHA256 校验。
-当前 macOS arm64/x64 为 Preview；Windows/Linux 保持 NotQualified，待独立目标机验收，不宣称 First-Class。
+当前 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 NotQualified。
 User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-kilo-acp.md)；
 后续 Core 实施、验证和当前缺失范围见[实施记录](../../versions/v1.72/kilo-acp-implementation.md)，
 七个真实 Core Run 的本地 Provider 结果见[Core evidence](core-smoke-7.8.27-macos-arm64.json)。
@@ -35,6 +35,19 @@ User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-ki
 该后续记录包含真实 sub2api 开发 App；下方基线表中的本地 Provider 范围仍只描述早期原生研究。
 阶段记录曾使用原生 config 回调覆盖产品权限；当前已移除该权限 Hook，完整继承原生规则与用户插件/pure，
 MCP 保存下一 Run 生效和普通取消 Warm 的当前范围见[简化记录](../../versions/v1.72/kilo-simplification.md)。
+
+## Linux x64 目标机验收
+
+2026-11-10，在 Ubuntu 24.04.5 LTS x86_64（glibc 2.39）运行官方 Kilo 7.8.27 Linux x64 二进制。
+测试使用隔离 Core、数据目录和 Kilo 原生配置。基线的产品检查返回 `runtime_platform_not_qualified`，
+验收构建在 Core 中临时开放 Linux Preview。[验收基线 b5e2e612d](https://github.com/murray17/rovai-ai/commit/b5e2e612d16b25f96fa5b2bee555cbebea594b17)
+
+真实对话验证了 Kilo 发现、队员配置和模型目录。显式选择 `sub2api/gpt-6.1-sol` 后，Run 成功，
+创建了 `kilo-verification.txt` 并发布一条会话回复。文件变更显示新增 1 行、删除 0 行。
+首轮触发验收驱动的 15 秒启动时限，等待 Core 就绪后复测通过。
+
+同一二进制与受控 Provider 跑完 40 个 Run，37 个成功、3 个按用例取消。覆盖热续接、冷恢复、权限审批、
+文件变更、MCP、运行中补充指令、取消后恢复、前台子代理和自动压缩。[ACP 验收脚本](../../../scripts/smoke-kilo-runtime.mjs)
 
 ## 基线与证据
 

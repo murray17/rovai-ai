@@ -185,6 +185,13 @@ Gateway 的受控验收、此前实现的真实 LLM 证据和未完成矩阵；�
 Renderer 不增加平台白名单或实验标签，机器安装、原生认证、版本、模型、Session 和能力检查仍照常生效。
 
 这项维护者授权的开放不声明 Intel 完整资格，也不把 arm64 的实跑证据转记为 Intel 验收。
-Windows x64 和 Linux x64 仍为 NotQualified，待各自目标机的独立验收结论更新。
 范围、验证和理由见 [Kilo 平台跟进](../versions/v1.72/kilo-simplification.md#apple-intel-开放user-sequence-61)与
-[V1.72-D82](../versions/v1.72/decisions.md#v1-72-d82)。
+[V1.72-D82](../versions/v1.72/decisions.md#v1-72-d82)。Linux x64 的范围见 [Kilo Linux Preview](#kilo-linux-preview)。
+
+## Kilo Linux Preview
+
+2026-11-10，维护者在 Linux x64 实测后确认开放。`kilo-cli × linux-x64` 为
+`preview / reasonCode=runtime_platform.qualification_evidence_missing`，`evidenceRevision=null`。
+Core 允许发现、检查、安装配置、成员选择和普通执行，并执行常规的安装、认证、版本、模型和能力检查。
+Windows x64 为 `not_qualified`。实测范围和决定见 [Linux x64 验收](../research/kilo-runtime/README.md#linux-x64-目标机验收)
+与 [V1.72-D83](../versions/v1.72/decisions.md#v1-72-d83)。

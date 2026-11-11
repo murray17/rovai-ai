@@ -8,6 +8,17 @@ last_updated: 2026-11-10
 
 # v1.72 版本决定
 
+<a id="v1-72-d83"></a>
+## V1.72-D83：Kilo Linux x64 目标机实测后开放 Preview
+
+- 状态：accepted
+- 日期：2026-11-10
+- 当前权威：[Runtime Platform Admission v2](../../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)。
+
+维护者在真实 Sub2API 请求和受控 ACP 用例通过后确认开放 Linux x64 Preview。
+实测覆盖 Linux x64 的发现、配置、会话、文件和取消等使用路径，现有 Core Preview 准入可直接承接。
+完整平台资格仍需独立证据。[Linux x64 验收](../../research/kilo-runtime/README.md#linux-x64-目标机验收)
+
 <a id="v1-72-d82"></a>
 ## V1.72-D82：Kilo Apple Intel 按维护者授权开放 Preview
 

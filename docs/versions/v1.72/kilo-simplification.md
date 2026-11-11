@@ -139,7 +139,7 @@ Core fixture `rovai-kilo-simplify-accept-41u1t04g` 完成 **40 个 Run：37 succ
 reason 保持 qualification_evidence_missing，evidenceRevision 为 null，不新增平台列表或校验机制。
 
 本次只确认准入投影和既有机器门禁，不宣称 Intel 目标机真实模型验收已完成。
-Linux/Windows 的目标机资格验收可基于本分支继续，当前两行保持 NotQualified，未借用 macOS 的结果。
+Apple Intel 开放时，Linux x64 和 Windows x64 均为 NotQualified。后续 Linux 结果见[目标机验收](../../research/kilo-runtime/README.md#linux-x64-目标机验收)。
 当前权威和理由见 [Platform Admission](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)与 [D82](decisions.md#v1-72-d82)。
 
 本次本机验证：
