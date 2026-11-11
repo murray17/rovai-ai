@@ -12,7 +12,7 @@ last_updated: 2026-11-11
 
 - Work item：Thread 分叉；Branch：`rovai/thread-fork`；Checkout：仓库主 checkout 的任务分支。
 - Base：`origin/main@3568dc1f8831eafadf937159f4cc61e146fe621d`；Governance：同一 PR 更新当前合同与 UI，无主线先行要求。
-- Status：实施与隔离验收完成，文档门禁与 PR 收口中。
+- Status：实施与隔离验收完成；[PR #1075](https://github.com/murray17/rovai-ai/pull/1075) 已推送，等待远端门禁与审核。
 - Core：`camp_fork.rs` 专用 immediate transaction，应用作用域回执、发布事实去重、白名单复制、引用重映射、
   历史附件转 Source Ref、关系初始化与提交后读取失效。普通创建准入未放宽；不产生投递、通知、未读或渠道外发。
 - Renderer：BusinessApp 共享前台状态；原请求与目标 ID 按现有 Profile/Host/Owner scope 保存；刷新读取回执。
@@ -30,7 +30,9 @@ last_updated: 2026-11-11
   `1040×700 / 1440×920 / 2560×1440`，30 组几何/菜单检查、62 张截图；消息菜单中文宽 113.27px、英文 163.36px，
   图标 16px、文字与图标中心差 0px。200%（英文绯夜）额外验证键盘菜单，触屏点击与 reduced motion 另验；
   顶部 loading 在侧栏折叠和窗口变化后继续按 App 居中。公开附件目录为 Thread-Fork-Acceptance（report.json 与五张代表截图）。
-- 正在执行：仅含提交文件的隔离源代码副本中的完整 Node/文档门禁及按实际 base 的 docs:check:ci。
+- 干净源码副本中的 `TZ=UTC pnpm test` 已通过：3274 Vitest 通过 / 2 跳过，后续 Node 矩阵 377 通过 / 2 跳过；
+  `docs:test`、`docs:check`、Skills 与 Electron admission 随同通过；`DOCS_BASE_REF=3568dc1f8831eafadf937159f4cc61e146fe621d pnpm docs:check:ci` 通过。
+  该副本只共享既有依赖缓存，显式关闭 pnpm 的自动重新安装检查，不跳过任何项目门禁。
 - 本机 `docs:check` 发现被 Git 忽略的既有 `docs/prototypes/` 草稿链接问题；保留这些并行素材，最终文档门禁将在仅含提交文件的隔离源代码副本执行，不改通用检查器或添加例外。
 - 未覆盖：真实 LLM/Runtime 调用、Windows 原生客户端与辅助技术。复制后普通 Context/投递由 Core fixture 验证，不引入分叉专用历史注入。
 
