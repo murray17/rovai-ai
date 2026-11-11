@@ -3491,7 +3491,7 @@ html[data-mobile-web="true"] .quick-chat-empty-unavailable > button { min-height
 .public-agent-message.is-group-continuation:not(.conversation-find-current-message):not(:focus-within:not(:has(:focus-within))) > :is(.message-author-avatar-trigger, .member-avatar) { visibility: hidden; }
 .public-agent-message.is-group-continuation:not(.conversation-find-current-message):not(:focus-within:not(:has(:focus-within))) > .message-body > .bubble-meta { display: none; }
 @media (min-width: 761px) and (pointer: fine) {
-  .public-agent-message.joins-next-message .public-message-readout > .agent-message-actions {
+  .public-agent-message.joins-next-message .public-message-readout > .agent-message-actions:not(.has-fork) {
     position: absolute;
     z-index: 4;
     top: 0;

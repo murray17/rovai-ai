@@ -194,7 +194,7 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
         .unwrap();
     let source_ref = json!([{"id":Uuid::new_v4().to_string(),"sourcePath":root.join("missing.txt"),"displayName":"missing.txt","kind":"file","mediaType":"text/plain","observedByteSize":12,"pastedTextPreview":"kept preview"}]).to_string();
     let content = json!([{"kind":"text","text":format!("[original]({first})")},{"kind":"current_user_mention","userId":"local_user"},{"kind":"member_mention","agentId":"agent_2"},{"kind":"thread_reference","threadId":source,"titleAtSend":"original"}]).to_string();
-    db.connection().execute("UPDATE camp_message SET structured_content_json=?2,body='snapshot',source_attachments_json=?3,reply_to_camp_message_id=?4,presentation_json='{}',recipient_presentation_json='{}',source_operation_id='old-operation' WHERE id=?1",params![anchor,content,source_ref,first]).unwrap();
+    db.connection().execute("UPDATE camp_message SET structured_content_json=?2,body='snapshot',source_attachments_json=?3,reply_to_camp_message_id=?4,presentation_json='{}',recipient_presentation_json='{}',source_operation_id='old-operation',addressed_agent_ids_json='[\"agent_2\"]',effective_recipient_ids_json='[\"agent_2\",\"agent_3\"]' WHERE id=?1",params![anchor,content,source_ref,first]).unwrap();
     db.connection()
         .execute(
             "UPDATE camp_message SET reply_to_camp_message_id=?2 WHERE id=?1",
@@ -444,6 +444,38 @@ fn fork_copies_published_snapshot_and_ordinary_sends_continue_its_history() {
             .unwrap()
             .contains("saved excerpt")
     );
+    // Frozen recipients are publication data. Reading copied history must not
+    // reconstruct them from text, today's roster, or addressed recipients alone.
+    let source_history = crate::camp_history::ThreadHistoryService
+        .read(
+            &mut db,
+            &crate::team_tool::AuthenticatedTeamToolRun {
+                camp_id: target.clone(),
+                agent_id: "agent_1".into(),
+                agent_run_id: runs[0].clone(),
+                execution_epoch: epoch,
+            },
+            &crate::camp_history::ThreadReadInput {
+                camp_id: Some(source.clone()),
+                message_id: Some(anchor.clone()),
+                thread: None,
+                before: None,
+                after: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+    let mentions = &source_history["items"][0]["mentions"];
+    assert_eq!(
+        mentions
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["agent_2", "agent_3", "user"]
+    );
+    assert_eq!(&history["items"][0]["mentions"], mentions);
     assert_ne!(
         sent.result.status,
         CommandResultStatus::Rejected,
@@ -488,6 +520,73 @@ fn fork_admission_preserves_empty_membership_and_rejects_unavailable_anchors() {
             )
             .unwrap()
     );
+    // Scheduled instructions are visible, formally published system messages.
+    // Both full and anchored copies must keep them and the reply edge, while
+    // hidden event/legacy-approval rows remain outside public history.
+    let scheduled = no_history.result.payload["threadId"].as_str().unwrap();
+    let instruction = message(&mut db, scheduled, 1, "local_user", true);
+    db.connection().execute("UPDATE camp_message SET author_type='system',author_id='scheduled-run',origin_kind='automation' WHERE id=?1", [&instruction]).unwrap();
+    let mut hidden = Vec::new();
+    for (seq, kind) in [(2, "a2a_event"), (3, "task_event")] {
+        let id = message(&mut db, scheduled, seq, "agent_1", true);
+        db.connection()
+            .execute(
+                "UPDATE camp_message SET presentation_json=?2 WHERE id=?1",
+                params![id, json!({"kind":kind}).to_string()],
+            )
+            .unwrap();
+        hidden.push(id);
+    }
+    let approval = message(&mut db, scheduled, 4, "local_user", true);
+    db.connection()
+        .execute(
+            "UPDATE camp_message SET author_type='system',author_id='approval' WHERE id=?1",
+            [&approval],
+        )
+        .unwrap();
+    let answer = message(&mut db, scheduled, 5, "agent_1", true);
+    db.connection()
+        .execute(
+            "UPDATE camp_message SET reply_to_camp_message_id=?2 WHERE id=?1",
+            params![answer, instruction],
+        )
+        .unwrap();
+    for (command_id, anchor) in [
+        ("scheduled-full", None),
+        ("scheduled-anchor", Some(answer.as_str())),
+    ] {
+        let copied = fork(&mut db, &root, command_id, scheduled, anchor);
+        let snapshot = crate::read_model::ReadModelService
+            .camp_snapshot(&mut db, copied.result.payload["threadId"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(
+            snapshot
+                .messages
+                .iter()
+                .map(|m| m.sequence)
+                .collect::<Vec<_>>(),
+            vec![1, 5]
+        );
+        assert_eq!(snapshot.messages[0].body, "history 1");
+        assert_eq!(
+            snapshot.messages[1].reply_to_camp_message_id.as_deref(),
+            Some(snapshot.messages[0].id.as_str())
+        );
+    }
+    for (i, id) in hidden.iter().chain([&instruction, &approval]).enumerate() {
+        assert_eq!(
+            fork(
+                &mut db,
+                &root,
+                &format!("hidden-anchor-{i}"),
+                scheduled,
+                Some(id)
+            )
+            .result
+            .code,
+            "camp.fork_anchor_unavailable"
+        );
+    }
     db.connection().execute("INSERT INTO mission(id,number,camp_id,title,description,status,tags_json,source_attachments_json,details_version,created_at,updated_at) VALUES('mission-fixture',1,?1,'Mission','description','not_started','[]','[]',1,'2020-01-01','2020-01-01')",[&source]).unwrap();
     assert_eq!(
         fork(&mut db, &root, "reject-mission", &source, None)

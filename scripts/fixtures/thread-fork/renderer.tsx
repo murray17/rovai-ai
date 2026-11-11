@@ -31,6 +31,8 @@ function seed(id: string, title: string) {
   Object.assign(value,{messages:[message(1,'用户先前消息','user'),message(2,'离队队员的已发布回复','agent'),message(3,'队员最后的已发布回复','agent')],
     agentRuns:[],messageDeliveries:[],executionEvidence:[],approvals:[],tasks:[],turns:[]})
   value.messages[1].authorId=agents[1].agentId
+  value.messages[2].authorId=agents[1].agentId
+  for(const item of value.messages.slice(1)) Object.assign(item,{threadTurnId:'fixture-turn',sourceAgentRunId:'fixture-run'})
   value.members[1].membershipStatus='left'
   threads.set(id,value)
 }

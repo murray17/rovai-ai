@@ -9,7 +9,10 @@ app.whenReady().then(async () => {
   const window = new BrowserWindow({ width: 1440, height: 920, useContentSize: true, show: false, webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } })
   const errors=[]
   window.webContents.on('console-message', (_event, _level, message) => { if(message.includes('Uncaught'))errors.push(message) })
-  const run = expression => window.webContents.executeJavaScript(expression, true)
+  const run = async expression => {
+    try { return await window.webContents.executeJavaScript(expression, true) }
+    catch (error) { throw new Error(`Renderer evaluation failed: ${expression}`, {cause:error}) }
+  }
   const wait = async expression => {
     for(let i=0;i<160;i++) { if(await run(expression))return;await pause(50) }
     throw new Error(`Timed out: ${expression}\n${await run('document.body.innerText.slice(-2500)')}`)
@@ -45,7 +48,28 @@ app.whenReady().then(async () => {
     assert.equal(await active(),'other');await open();await wait('(document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId??"").startsWith("copy-")')
     assert.equal(await count(),initialRequests+1)
     await row('source');await fork();await row('other');await row('source');await run('forkQA.release()');await wait('!!document.querySelector(".is-top-center .app-toast-action")')
-    assert.equal(await active(),'source');await dismiss()
+    assert.equal(await active(),'source')
+    // A known copy visited through the sidebar now has a cached preview. A
+    // failed full open must keep B displayed and retain the same recovery ID.
+    const cachedTarget=await run('[...forkQA.receipts.values()].at(-1).payload.threadId')
+    await wait(`!!document.querySelector('[data-thread-id="${cachedTarget}"] .camp-nav-open')`)
+    await row(cachedTarget);await wait(`document.querySelector('.camp-nav-open[aria-current=page]')?.closest('[data-thread-id]')?.dataset.threadId===${JSON.stringify(cachedTarget)}`)
+    await row('other');await wait('document.querySelector(".camp-nav-open[aria-current=page]")?.closest("[data-thread-id]")?.dataset.threadId==="other"')
+    const cachedAttempts=await count()
+    await run('forkQA.failOpen()');await open();await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")')
+    assert.equal(await active(),'other')
+    assert.equal(await run(`JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('rovai.thread-fork.v1:')))).threadId`),cachedTarget)
+    assert.equal(await count(),cachedAttempts)
+    // Ordinary sidebar navigation can still show a preview on failure. Being
+    // on that preview is not proof that the recovery target opened fully.
+    await row(cachedTarget);await wait(`document.querySelector('.camp-nav-open[aria-current=page]')?.closest('[data-thread-id]')?.dataset.threadId===${JSON.stringify(cachedTarget)}`)
+    const beforePreviewRetry=await run('forkQA.calls.filter(c=>c.method==="threads.open"||c.method==="threads.enter").length')
+    await open();await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")')
+    assert(await run('forkQA.calls.filter(c=>c.method==="threads.open"||c.method==="threads.enter").length')>beforePreviewRetry)
+    assert.equal(await run(`JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('rovai.thread-fork.v1:')))).threadId`),cachedTarget)
+    await run('forkQA.failOpen(false)');await open();await wait('!document.querySelector(".is-top-center")');assert.equal(await active(),cachedTarget);assert.equal(await count(),cachedAttempts)
+    assert.equal(await run('Object.keys(localStorage).filter(k=>k.startsWith("rovai.thread-fork.v1:")).length'),0)
+    await row('source')
     // A failed open retries only the saved target.
     await run('forkQA.failOpen()');await fork();await run('forkQA.release()');await wait('document.querySelector(".is-top-center")?.textContent.includes("暂时无法打开")')
     const attempts=await count();await open();assert.equal(await count(),attempts)
@@ -70,10 +94,13 @@ app.whenReady().then(async () => {
     for(const language of ['zh-CN','en'])for(const theme of ['day','night','horizon','classic-red','ember'])for(const size of [[1040,700],[1440,920],[2560,1440]]) {
       window.setContentSize(...size);await run(`forkQA.language(${JSON.stringify(language)});forkQA.theme(${JSON.stringify(theme)})`);await pause(80)
       assert.deepEqual(await run('[innerWidth,innerHeight]'),size)
+      await wait('!!document.querySelector(".public-agent-message.joins-next-message .message-actions.has-fork")')
+      const grouped=await run(`(()=>{const e=document.querySelector('.public-agent-message.joins-next-message'),a=e.querySelector('.message-actions.has-fork'),c=e.querySelector('[data-message-quote-body]'),s=getComputedStyle(a),r=a.getBoundingClientRect(),b=c.getBoundingClientRect();return {position:s.position,below:r.top>=b.bottom-1,visible:s.opacity==='1',transform:s.transform}})()`)
+      assert.equal(grouped.position,'static',JSON.stringify(grouped));assert(grouped.below&&grouped.visible,JSON.stringify(grouped))
       await menu()
       const measured=await run(`(()=>{const m=document.querySelector('.message-action-menu'),r=m.getBoundingClientRect(),items=[...m.querySelectorAll('[role=menuitem]')];return {labels:items.map(i=>i.textContent),width:r.width,inside:r.x>=0&&r.right<=innerWidth&&r.y>=0&&r.bottom<=innerHeight,minWidth:getComputedStyle(m).minWidth,items:items.map(i=>{const icon=i.querySelector('svg').getBoundingClientRect(),span=i.querySelector('span').getBoundingClientRect();return {icon:icon.width,delta:Math.abs(icon.y+icon.height/2-span.y-span.height/2)}})}})()`)
       assert.deepEqual(measured.labels,language==='en'?['Fork chat from here','Export']:['从此处分叉','导出']);assert(measured.inside);assert.equal(measured.minWidth,'0px');assert(measured.items.every(i=>i.icon===16&&i.delta<1),JSON.stringify(measured))
-      const name=`${language}-${theme}-${size.join('x')}.png`;await writeFile(join(output,name),(await window.webContents.capturePage()).toPNG());screenshots.push(name);geometry.push({language,theme,size,...measured});await key('Escape')
+      const name=`${language}-${theme}-${size.join('x')}.png`;await writeFile(join(output,name),(await window.webContents.capturePage()).toPNG());screenshots.push(name);geometry.push({language,theme,size,grouped,...measured});await key('Escape')
       await click('document.querySelector("[data-thread-id=source] .camp-menu-trigger")');await wait('!!document.querySelector(".sidebar-action-menu:not(.message-action-menu)")');await pause(140)
       const labels=await run('[...document.querySelectorAll(".sidebar-action-menu:not(.message-action-menu) [role=menuitem]")].map(e=>e.textContent.trim())')
       assert(labels.includes(language==='en'?'Fork':'分叉')&&labels.includes(language==='en'?'Export':'导出'))
@@ -98,7 +125,7 @@ app.whenReady().then(async () => {
     await writeFile(join(output,'loading-reduced-motion.png'),(await window.webContents.capturePage()).toPNG());screenshots.push('loading-reduced-motion.png')
     await run('forkQA.release()');await pause(100)
     assert.deepEqual(await run('forkQA.errors'),[]);assert.deepEqual(errors,[])
-    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,screenshots,verified:['editing during fork','empty copy Composer','source draft preserved','A→B','A→B→A','open-only retry','deleted target remains opening failure','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion']}
+    const report={ok:true,channel:'automatic_acceptance',adapter:'controlled transport; real BusinessApp/Composer/Radix/AppToast',userData:process.argv[3],core:false,runtime:false,geometry,screenshots,verified:['editing during fork','empty copy Composer','source draft preserved','A→B','A→B→A','cached target full-open failure preserves source and recovery','current cached preview retries full open','open-only retry','deleted target remains opening failure','async attachment save and newer navigation','draft save failure','lost response and refresh receipt','same-author grouped actions below message','five themes','Chinese/English','three window sizes','200% keyboard menu','native touch menu','App-centered loading across sidebar/resize','reduced motion']}
     await writeFile(join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({ok:true,output,verified:report.verified}));app.exit(0)
   }catch(error){console.error(error.stack??error);console.error(await run('JSON.stringify(forkQA.calls.slice(-12))').catch(()=>''));app.exit(1)}
 })

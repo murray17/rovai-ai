@@ -47,9 +47,14 @@ irrelevant. Later publications remain only in the source.
 
 - New Thread/message IDs; source project binding and directory; title truncated to 80 Unicode scalar values after
   reserving ` 副本`. The target is Active, Peer, and has an empty Composer. Ordinary creation admission is unchanged.
-- Published User, Agent and external-principal messages, historical display times, sequence order, body, independent
-  structured display/presentation, saved quotes and attachment display metadata. Deleted/internal rows are excluded;
-  withdrawn placeholders retain only their stored cleared content.
+- Published public messages, including User, Agent, external-principal and visible System messages such as scheduled
+  instructions; historical display times, sequence order, body, independent structured display/presentation, saved
+  quotes and attachment display metadata. Public visibility excludes `a2a_event` / `task_event` presentations and
+  legacy System messages authored by `approval`, in addition to deleted/unpublished rows. Hidden messages cannot be
+  anchors. Withdrawn placeholders retain only their stored cleared content.
+- Addressed and frozen effective recipients are preserved independently. Existing history reads derive `mentions`
+  from `effective_recipient_ids_json`, never from today's roster or by re-resolving the message. These publication
+  facts do not create new Delivery records.
 - Ordinary reply IDs map only inside the copied set. Explicit body links, Thread/Mission/file/task references and
   quote source snapshots keep their original targets. No recursive JSON ID substitution is permitted.
 - Effective active relations retain capability limits, including globally Away profiles. Leaving/Left or removed
@@ -88,5 +93,7 @@ never call `threads.fork`.
 
 Only completion during the same source-page visit may automatically navigate, through the existing leave guard.
 Visit and navigation ownership are checked again after async draft/attachment work. A→B and A→B→A suppress automatic
-navigation. Save/open failure preserves the target and offers only opening retry. The
+navigation. Save/open failure preserves the target and offers only opening retry. Fork opening does not commit a
+cached preview before the full projection succeeds. An already visible target counts as opened only with a full
+projection; a current preview must retry the full open. Recovery identifiers are cleared only after this confirmation. The
 [conversation UI contract](../ui/components/conversation-workspace.md#thread-分叉) owns presentation.

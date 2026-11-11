@@ -36,6 +36,21 @@ last_updated: 2026-11-11
 - 本机 `docs:check` 发现被 Git 忽略的既有 `docs/prototypes/` 草稿链接问题；保留这些并行素材，最终文档门禁将在仅含提交文件的隔离源代码副本执行，不改通用检查器或添加例外。
 - 未覆盖：真实 LLM/Runtime 调用、Windows 原生客户端与辅助技术。复制后普通 Context/投递由 Core fixture 验证，不引入分叉专用历史注入。
 
+### 合并前复核修正（2026-11-11）
+
+- 复核起点为 `12689bbe0b94ef85512db8256144eb4362c61850`，同步最新
+  `origin/main@92ff101a7de0485bb4e74750946eea4b3949f0b7`，保留并行中文斜体改动。
+- 复制集合与现有公屏可见性一致：保留定时任务正式发布的 System 指令，过滤内部事件和旧审批记录；
+  内部事件不能作为锚点。`effective_recipient_ids_json` 按原值复制，历史 `mentions` 与源一致，仍不创建 Delivery。
+- 分叉打开不提前提交缓存预览；已停在目标预览页时重新请求完整投影，确认完整打开后才清除恢复记录。
+  同作者连续分组的带分叉操作栏保持消息下方正常文档流。常驻三点菜单及分叉／导出交互保持已确认方案。
+- 扩展原有两个 Core owners，未新增 Rust 测试函数或数据库 fixture；修复前分别复现系统指令丢失、内部事件混入和冻结提及丢失。
+  隔离生产 Renderer fixture 复现缓存打开误报成功与顶部绝对定位，补充缓存目标失败、当前预览重试和连续消息几何断言。
+- 本轮已通过 `pnpm typecheck`、8 个 Vitest 文件共 60 项、Core 分叉 3 项和 `pnpm build:desktop`。
+  生产 Electron 自动验收继续使用独立 `userData`／Skill 目录、受控传输，不启动 Core 或模型；
+  复用原中英文／五主题／三尺寸矩阵与 200% 检查，30 组连续消息操作栏均位于正文下方，保留 62 张截图。
+  本轮 Thread 附件证据目录为 `Thread-Fork-Review-Fixes`；真实模型及 Windows 原生验收边界不变。
+
 
 ## Kilo 官方 ACP（2026-11-08，Preview 实施）
 

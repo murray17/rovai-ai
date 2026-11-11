@@ -65,6 +65,7 @@ struct Message {
     digest: String,
     address_mode: String,
     recipients: String,
+    effective_recipients: String,
     reply: Option<String>,
     presentation: Option<String>,
     recipient_presentation: String,
@@ -136,6 +137,7 @@ fn fork_in_tx(
         let sequence = tx.query_row(
             "SELECT sequence FROM camp_message m WHERE id=?1 AND camp_id=?2
              AND author_type='agent' AND tombstoned_at IS NULL AND recall_state<>'withdrawn'
+             AND COALESCE(json_extract(presentation_json,'$.kind'),'') NOT IN ('a2a_event','task_event')
              AND EXISTS(SELECT 1 FROM event_log e WHERE e.entity_type='camp_message'
                 AND e.entity_id=m.id AND e.event_type IN ('camp_message.sent','camp_message.public_a2a_sent')
                 AND e.global_sequence IS NOT NULL)",
@@ -152,13 +154,17 @@ fn fork_in_tx(
         None
     };
 
-    // EXISTS deduplicates the two publication facts without frontend pagination.
+    // Match public timeline visibility, including scheduled system instructions,
+    // while excluding internal events and legacy approval resolutions. EXISTS
+    // deduplicates the two publication facts without frontend pagination.
     let mut messages = tx.prepare(
         "SELECT id, sequence, author_type, author_id, body, structured_content_json,
-            content_digest, address_mode, addressed_agent_ids_json, reply_to_camp_message_id,
+            content_digest, address_mode, addressed_agent_ids_json, effective_recipient_ids_json, reply_to_camp_message_id,
             presentation_json, recipient_presentation_json, quotes_json, recall_state, created_at, updated_at
          FROM camp_message m WHERE camp_id=?1 AND tombstoned_at IS NULL
-            AND author_type IN ('user','agent','external_principal') AND (?2 IS NULL OR sequence<=?2)
+            AND (?2 IS NULL OR sequence<=?2)
+            AND COALESCE(json_extract(presentation_json,'$.kind'),'') NOT IN ('a2a_event','task_event')
+            AND NOT (author_type='system' AND author_id='approval')
             AND EXISTS(SELECT 1 FROM event_log e WHERE e.entity_type='camp_message'
                 AND e.entity_id=m.id AND e.event_type IN ('camp_message.sent','camp_message.public_a2a_sent')
                 AND e.global_sequence IS NOT NULL)
@@ -166,9 +172,9 @@ fn fork_in_tx(
     )?.query_map(params![source_id, cutoff], |r| Ok(Message {
         id:r.get(0)?, sequence:r.get(1)?, author_type:r.get(2)?, author_id:r.get(3)?,
         body:r.get(4)?, content:r.get(5)?, digest:r.get(6)?, address_mode:r.get(7)?,
-        recipients:r.get(8)?, reply:r.get(9)?, presentation:r.get(10)?,
-        recipient_presentation:r.get(11)?, quotes:r.get(12)?, recall:r.get(13)?,
-        created_at:r.get(14)?, updated_at:r.get(15)?, sources:Vec::new(),
+        recipients:r.get(8)?, effective_recipients:r.get(9)?, reply:r.get(10)?, presentation:r.get(11)?,
+        recipient_presentation:r.get(12)?, quotes:r.get(13)?, recall:r.get(14)?,
+        created_at:r.get(15)?, updated_at:r.get(16)?, sources:Vec::new(),
     }))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let members = tx
         .prepare(
@@ -193,6 +199,9 @@ fn fork_in_tx(
             historical_members.insert(message.author_id.clone());
         }
         historical_members.extend(serde_json::from_str::<Vec<String>>(&message.recipients)?);
+        historical_members.extend(serde_json::from_str::<Vec<String>>(
+            &message.effective_recipients,
+        )?);
         historical_members.extend(member_mention_ids(&serde_json::from_str::<
             StructuredThreadMessageContent,
         >(&message.content)?));
@@ -260,8 +269,8 @@ fn fork_in_tx(
         tx.execute(
             "INSERT INTO camp_message(id,camp_id,sequence,author_type,author_id,body,
                 structured_content_json,content_digest,address_mode,addressed_agent_ids_json,
-                origin_kind,recall_state,version,created_at,updated_at)
-             VALUES(?1,?2,?3,?4,?5,?6,'[]',?7,?8,?9,'system',?10,1,?11,?12)",
+                effective_recipient_ids_json,origin_kind,recall_state,version,created_at,updated_at)
+             VALUES(?1,?2,?3,?4,?5,?6,'[]',?7,?8,?9,?10,'system',?11,1,?12,?13)",
             params![
                 ids[&message.id],
                 target_id,
@@ -272,6 +281,7 @@ fn fork_in_tx(
                 message.digest,
                 message.address_mode,
                 message.recipients,
+                message.effective_recipients,
                 if message.recall == "withdrawn" {
                     "withdrawn"
                 } else {

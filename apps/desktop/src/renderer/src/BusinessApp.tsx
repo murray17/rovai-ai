@@ -1895,7 +1895,9 @@ export function BusinessApp({
       }
       setView('camp')
     }
-    if (previewSnapshot) {
+    // A preview commits navigation before the authoritative request finishes.
+    // Fork recovery must preserve the current page until full opening succeeds.
+    if (previewSnapshot && !options.stayOnOpenFailure) {
       commitThreadSurface(previewSnapshot, true)
     } else {
       campOpenFeedbackTimer.current = setTimeout(() => {
@@ -2005,17 +2007,21 @@ export function BusinessApp({
       const target = forkOperation.persistTarget()
       if (!target) return
       if (onlyIf && !onlyIf()) return
-      if (viewRef.current === 'camp' && activeThreadIdRef.current === target) {
+      const targetVisible = viewRef.current === 'camp' && activeThreadIdRef.current === target
+      if (targetVisible && campSnapshotRef.current?.thread.id === target && !campSnapshotEntryPreviewRef.current) {
         forkOperation.dismiss()
         setForkOpenFailed(false)
         return
       }
-      const opened = await desktopNavigation.push({ kind: 'camp', threadId: target }, {
+      const navigate = targetVisible && campSnapshotEntryPreviewRef.current
+        ? desktopNavigation.replace : desktopNavigation.push
+      const opened = await navigate({ kind: 'camp', threadId: target }, {
         campOptions: { reconcileDefaultLead: false, suppressErrors: true, stayOnOpenFailure: true }, onlyIf
       })
       const navigation = desktopNavigation.getSnapshot()
       const destination = navigation.entries[navigation.index]
-      if (opened && destination?.kind === 'camp' && destination.threadId === target) {
+      if (opened && destination?.kind === 'camp' && destination.threadId === target
+        && campSnapshotRef.current?.thread.id === target && !campSnapshotEntryPreviewRef.current) {
         if (forkOperation.getSnapshot().saved?.threadId === target) forkOperation.dismiss()
         setForkOpenFailed(false)
       } else if (!onlyIf || onlyIf()) setForkOpenFailed(true)
