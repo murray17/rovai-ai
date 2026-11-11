@@ -64,7 +64,7 @@ export function memberRuntimeConfigurationPresentation(
           : uiAttribute('推理强度'),
         value: typeof rawEffort === 'string' && rawEffort
           ? runtimeEffortValueLabel(rawEffort, effortDescriptor?.values ?? [], configuration.adapterKind)
-          : configuration.adapterKind === 'pi' ? uiAttribute('跟随 Pi 原生设置') : uiAttribute("跟随模型默认值")
+          : uiAttribute('跟随模型默认值')
       }
     : null
 
