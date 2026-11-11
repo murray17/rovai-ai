@@ -29,7 +29,8 @@
   color: var(--ink);
   background: var(--canvas);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
-  font-synthesis: none;
+  /* Allow synthetic italics for fonts without italic faces; keep synthetic bold disabled. */
+  font-synthesis: style;
   text-rendering: optimizeLegibility;
   --rail-width: 270px;
   --project-menu-slot: 24px;
