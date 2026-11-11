@@ -614,6 +614,24 @@ app.whenReady().then(async () => {
       assert.equal(await run('window.runtimeTest.catalogRequests.filter(request=>request.kind==="minimax-code-cli").some(request=>"dshSource" in request)'), false)
       await capture(`minimax-target-${page}`)
     }
+    for (const page of ['member', 'onboarding']) {
+      await run(`window.runtimeTest.reset(${JSON.stringify(page)}, 'normal')`); await settle()
+      await run('window.runtimeTest.switchKind("kilo-cli")'); await settle()
+      await click(modelTrigger); await search('vendor/model-0'); await key('Enter')
+      await click('button[aria-label^="推理强度，"]')
+      assert.deepEqual(await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).map(item=>item.textContent)'), ['Low', 'High', '跟随模型默认值'])
+      await key('Escape')
+      await click(modelTrigger); await search('vendor/model-1'); await key('Enter')
+      await click('button[aria-label^="推理强度，"]')
+      assert.deepEqual(await run('Array.from(document.querySelectorAll("[role=menuitemradio]")).map(item=>item.textContent)'), ['Medium', 'Max', '跟随模型默认值'])
+      await key('Home'); await key('Down'); await key('Enter')
+      assert.deepEqual((await draft()).model, { mode: 'explicit', modelId: 'vendor/model-1', options: { effort: 'max' } })
+      await capture(`kilo-${page}-model-options`)
+      await click(modelTrigger); await click('.runtime-picker-default [role=option]')
+      await click(modelTrigger); await search('vendor/model-2'); await key('Enter')
+      assert.deepEqual((await draft()).model.options, {})
+      assert.equal(await run('Boolean(document.querySelector("button[aria-label^=推理强度]"))'), false, 'A plain Kilo model must not inherit another model’s effort')
+    }
     console.log(JSON.stringify({ ok:true, checks:'preserved native options across both entry points, unlisted and absent effort, default and same-model no-op, expired draft retained after refresh and same-observation expiry, search by ID/case, IME, keyboard/Escape/Tab, fixed default, failure/rejected-empty cache retention, empty/pending, late catalog, disabled, Day/Night, 1040/1440/2560 and 200% zoom; DSH target-only options, late A after B, failed read preservation/retry, confirmed no options, refresh preserves saved max, absent default override; cache miss native read, strict target identity, delayed inline loading, cached no spinner, pending interactive, reduced motion, loading cleanup; open pending menu keeps animating, updates default-only and historical choices, and supports immediate selection; open reasoning menu updates survive late catalog and remain selectable' }))
     window.destroy(); app.quit()
   } catch (error) { console.error(error); await capture('failure'); app.exit(1) }

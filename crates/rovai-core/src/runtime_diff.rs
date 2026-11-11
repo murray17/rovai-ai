@@ -192,6 +192,10 @@ fn admit_candidate(
                 && source_event_kind == "session/update.tool_call_update.completed"
                 && semantic_kind == "minimax_file_patch"
         }
+        AdapterKind::KiloCli if semantic_kind == "kilo_file_patch" => {
+            protocol_family == "acp-v1"
+                && source_event_kind == "session/update.tool_call_update.completed"
+        }
         adapter if adapter.uses_acp() => {
             protocol_family == "acp-v1"
                 && source_event_kind == "session/update.tool_call_update.completed"
@@ -252,6 +256,14 @@ fn admit_candidate(
             .flatten()
             .or_else(|| normalize_reported_path_for_display(execution_root, raw_path))
             .ok_or("runtime_diff_path_invalid")?;
+        if adapter == AdapterKind::KiloCli
+            && raw_entries.len() == 1
+            && let Some(operation_path) = file_operation_path
+            && normalize_reported_path_for_display(execution_root, operation_path).as_deref()
+                != Some(source_path.as_str())
+        {
+            return Err("runtime_diff_path_mismatch");
+        }
         let change_kind = normalized_change_kind(raw, semantic_kind)?;
         let path = if adapter == AdapterKind::CodexCli && change_kind == "update" {
             move_path
@@ -268,7 +280,8 @@ fn admit_candidate(
             "codex_file_change_snapshot"
             | "pi_edit_patch"
             | "zcode_edit_patch"
-            | "minimax_file_patch" => {
+            | "minimax_file_patch"
+            | "kilo_file_patch" => {
                 let content = raw
                     .get("diff")
                     .and_then(Value::as_str)
@@ -276,11 +289,11 @@ fn admit_candidate(
                 if content.len() > MAX_SINGLE_DIFF_BYTES {
                     return Err("runtime_diff_item_limit");
                 }
-                let content = if semantic_kind == "minimax_file_patch" {
-                    if change_kind != "update" {
+                let content = if matches!(semantic_kind, "minimax_file_patch" | "kilo_file_patch") {
+                    if semantic_kind == "minimax_file_patch" && change_kind != "update" {
                         return Err("runtime_diff_change_kind_invalid");
                     }
-                    normalize_minimax_file_patch(content, &path, execution_root)?
+                    normalize_native_file_patch(content, &path, execution_root)?
                 } else if matches!(semantic_kind, "pi_edit_patch" | "zcode_edit_patch") {
                     if change_kind != "update" {
                         return Err("runtime_diff_change_kind_invalid");
@@ -290,6 +303,16 @@ fn admit_candidate(
                     content.to_string()
                 };
                 match change_kind.as_str() {
+                    _ if semantic_kind == "kilo_file_patch" => (
+                        content.clone(),
+                        serde_json::to_value(UnifiedDiffEvidenceEntry {
+                            semantics: "unified_diff_snapshot".to_string(),
+                            path: path.clone(),
+                            change_kind: change_kind.clone(),
+                            diff: content,
+                        })
+                        .map_err(|_| "runtime_diff_entries_invalid")?,
+                    ),
                     "add" => (
                         unified_diff_from_before_after(&path, None, &content),
                         serde_json::to_value(FullBeforeAfterEvidenceEntry {
@@ -387,6 +410,7 @@ fn admit_candidate(
                 | "pi_edit_patch"
                 | "zcode_edit_patch"
                 | "minimax_file_patch"
+                | "kilo_file_patch"
         ) {
             "unified_diff_snapshot".to_string()
         } else {
@@ -397,7 +421,7 @@ fn admit_candidate(
     })
 }
 
-fn normalize_minimax_file_patch(
+fn normalize_native_file_patch(
     patch: &str,
     normalized_path: &str,
     execution_root: &Path,
@@ -1270,6 +1294,45 @@ mod tests {
                     .is_err()
             );
         }
+        let mut kilo = mini(mini_patch);
+        kilo["runtimeDiff"]["adapterKind"] = json!("kilo-cli");
+        kilo["runtimeDiff"]["semanticKind"] = json!("kilo_file_patch");
+        let admitted = admit_runtime_diff(&kilo, Path::new("/repo"), Some("kilo-cli"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (admitted.entries[0].additions, admitted.entries[0].deletions),
+            (1, 1)
+        );
+        let relative = admitted.entries[0].path.clone();
+        for operation_path in [&relative, &format!("/repo/{relative}")] {
+            assert!(
+                admit_runtime_diff_with_file_operation_path(
+                    &kilo,
+                    Path::new("/repo"),
+                    Some("kilo-cli"),
+                    Some(operation_path),
+                )
+                .unwrap()
+                .is_ok()
+            );
+        }
+        assert_eq!(
+            admit_runtime_diff_with_file_operation_path(
+                &kilo,
+                Path::new("/repo"),
+                Some("kilo-cli"),
+                Some("src/different.txt"),
+            )
+            .unwrap(),
+            Err("runtime_diff_path_mismatch")
+        );
+        kilo["runtimeDiff"]["entries"][0]["path"] = json!("src/other.ts");
+        assert!(
+            admit_runtime_diff(&kilo, Path::new("/repo"), Some("kilo-cli"))
+                .unwrap()
+                .is_err()
+        );
         let mut false_complete = mini(mini_patch);
         false_complete["runtimeDiff"]["semanticKind"] = json!("complete_before_after");
         assert_eq!(

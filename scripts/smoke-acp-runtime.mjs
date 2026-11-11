@@ -119,6 +119,11 @@ try {
       token: 'ROVAI_CODEX_TWO_TURN_OK'
     },
     {
+      adapterKind: 'kilo-cli',
+      permissionValues: { permission: process.env.ROVAI_KILO_PERMISSION ?? 'ask' },
+      token: 'ROVAI_KILO_ACP_OK'
+    },
+    {
       adapterKind: 'opencode-cli',
       permissionValues: { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' },
       token: 'ROVAI_OPENCODE_ACP_OK'

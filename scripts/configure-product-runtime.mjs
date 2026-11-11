@@ -1,5 +1,5 @@
 export async function configureProductRuntime(request, adapterKind, agentIds) {
-  const allowsExecutionDeferredVerification = ['claude-code-cli', 'trae-cn-cli', 'opencode-cli', 'minimax-code-cli'].includes(adapterKind)
+  const allowsExecutionDeferredVerification = ['claude-code-cli', 'trae-cn-cli', 'opencode-cli', 'kilo-cli', 'minimax-code-cli'].includes(adapterKind)
   const acceptedSnapshotStates = allowsExecutionDeferredVerification
     ? ['ready', 'light_ready', 'installed_unverified'] : ['ready']
   for (const agentId of agentIds) {
@@ -59,7 +59,9 @@ export async function configureProductRuntime(request, adapterKind, agentIds) {
       && candidate.installationClass === 'managed_default'
       && candidate.authScope === 'default'
   )
-  if (!acceptedSnapshotStates.includes(installation?.snapshot?.probeStatus)) {
+  if (!installation || (installation.snapshot
+    ? !acceptedSnapshotStates.includes(installation.snapshot.probeStatus)
+    : !allowsExecutionDeferredVerification)) {
     throw new Error(`Managed Product Runtime is not ready: ${JSON.stringify({
       adapterKind,
       installation

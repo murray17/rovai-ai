@@ -1,0 +1,241 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-production-core-controlled-provider",
+  "recordedAt": "2026-11-10T11:00:03.047Z",
+  "baseline": "02629b36fa3b8e255bb0ff042bebb80695903aec",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "platform": "darwin-arm64",
+  "status": "passed",
+  "provider": "local-controlled",
+  "paidModelRerun": false,
+  "core": {
+    "fixture": "rovai-kilo-options-core-2qkmh3xk",
+    "runCount": 32,
+    "runs": [
+      {
+        "status": "cancelled",
+        "count": 2
+      },
+      {
+        "status": "succeeded",
+        "count": 30
+      }
+    ],
+    "inputs": [
+      {
+        "input_kind": "start",
+        "status": "accepted",
+        "count": 32
+      },
+      {
+        "input_kind": "steer",
+        "status": "accepted",
+        "count": 3
+      },
+      {
+        "input_kind": "steer",
+        "status": "delivery_unknown",
+        "count": 1
+      }
+    ],
+    "modelCatalog": {
+      "models": [
+        {
+          "id": "local/local-model",
+          "isDefault": true,
+          "options": [
+            {
+              "defaultValue": "low",
+              "key": "effort",
+              "label": "Effort",
+              "scope": "run",
+              "valueType": "enum",
+              "values": [
+                {
+                  "label": "Low",
+                  "value": "low"
+                },
+                {
+                  "label": "High",
+                  "value": "high"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "local/local-other",
+          "isDefault": false,
+          "options": [
+            {
+              "defaultValue": "medium",
+              "key": "effort",
+              "label": "Effort",
+              "scope": "run",
+              "valueType": "enum",
+              "values": [
+                {
+                  "label": "Medium",
+                  "value": "medium"
+                },
+                {
+                  "label": "Max",
+                  "value": "max"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "local/local-plain",
+          "isDefault": false,
+          "options": []
+        }
+      ],
+      "elapsedMs": 1754,
+      "modelCalls": 0
+    },
+    "modelOptionsExecution": [
+      {
+        "run": "5d280151-fae4-4d9d-8cb5-6050596d9d2c",
+        "modelId": "local/local-other",
+        "options": {
+          "effort": "max"
+        },
+        "providerTemperature": 0.9,
+        "nativeSelectionVerified": true
+      },
+      {
+        "run": "97a7519e-3dfa-4fd9-8902-ec919c1711c0",
+        "modelId": "local/local-plain",
+        "options": {},
+        "providerTemperature": null,
+        "nativeSelectionVerified": true
+      }
+    ],
+    "regressions": {
+      "firstWarmCold": true,
+      "foregroundSubagents": true,
+      "outputBudgetSurvivesReopen": true,
+      "nativePermissions": true,
+      "nodeAbsentFromPath": true,
+      "mcpSameAndDifferentCwd": true,
+      "relativeWriteDiff": true,
+      "threeSuccessfulSteers": true,
+      "cancelledPendingSteerRetiresHost": true,
+      "automaticThreshold": true,
+      "automaticOverflow": true,
+      "automaticColdResume": true
+    },
+    "ordinaryBootstrapRequests": 52,
+    "allOrdinaryBootstrapVerbatim": true,
+    "coreExitedCleanly": true,
+    "runtimeFilesCleaned": true
+  },
+  "picker": {
+    "fixture": "rovai-runtime-picker-kilo-options-a4br0fqq",
+    "entryPoints": [
+      "member",
+      "onboarding"
+    ],
+    "models": {
+      "vendor/model-0": [
+        "low",
+        "high"
+      ],
+      "vendor/model-1": [
+        "medium",
+        "max"
+      ],
+      "vendor/model-2": []
+    },
+    "selected": {
+      "modelId": "vendor/model-1",
+      "options": {
+        "effort": "max"
+      }
+    },
+    "integrationPassed": true,
+    "manualDevelopmentAppAcceptance": false
+  },
+  "rustOwners": {
+    "newTestFunctions": 0,
+    "projection": "grouped_acp_models_keep_opaque_provider_routes_and_reject_empty_catalogs",
+    "manager": "minimax_check_and_catalog_keep_their_intent_and_complete_options",
+    "cases": [
+      "MiniMax 2 models check first",
+      "MiniMax 8 models catalog first",
+      "Kilo 3 models check first with one unavailable candidate"
+    ],
+    "initialProjectionFailedBeforeFix": true,
+    "initialKiloHealthCompletenessFailedBeforeFix": true,
+    "ownersPassed": true
+  },
+  "qualification": "macos-arm64-preview-unchanged",
+  "limitations": [
+    "Variants are native configuration; no Provider-wide reasoning-level inference.",
+    "Controlled Provider execution does not establish paid model quality.",
+    "No new qualification for other platforms or versions."
+  ],
+  "validation": {
+    "rustWorkspace": {
+      "passed": 484,
+      "ignored": 1
+    },
+    "platformOwnersPassed": 5,
+    "typecheckPassed": true,
+    "desktopBuildPassed": true,
+    "documentationGatesPassed": true,
+    "renderer": {
+      "environment": "TZ=UTC",
+      "passed": 3193,
+      "skipped": 2,
+      "initialHonoluluFixedDateAssertionsFailed": 2
+    },
+    "node": {
+      "passed": 377,
+      "skipped": 2
+    },
+    "expandedCatalog": {
+      "passed": 44,
+      "failed": 6,
+      "ignored": 1,
+      "baseline": "02629b36fa3b8e255bb0ff042bebb80695903aec",
+      "baselineCases": [
+        {
+          "case": "codex",
+          "test": "application::tests::codex_catalog_waiters_share_refresh_without_satisfying_full_validation",
+          "exitCode": 101
+        },
+        {
+          "case": "pi",
+          "test": "application::tests::pi_catalog_observations_are_independent_of_health_and_fenced_by_identity",
+          "exitCode": 101
+        },
+        {
+          "case": "v104",
+          "test": "db::tests::v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills",
+          "exitCode": 101
+        },
+        {
+          "case": "v105",
+          "test": "db::tests::v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills",
+          "exitCode": 101
+        },
+        {
+          "case": "v107",
+          "test": "db::tests::v107_adds_grok_catalog_and_preserves_runtime_and_skill_rows",
+          "exitCode": 101
+        },
+        {
+          "case": "claude",
+          "test": "health::claude_catalog_tests::claude_catalog_prefers_list_models_and_falls_back_only_when_unsupported",
+          "exitCode": 0
+        }
+      ],
+      "claudeIsolatedCurrentPassed": true,
+      "baselineSourceAndBuildFixtureRemoved": true
+    }
+  }
+}

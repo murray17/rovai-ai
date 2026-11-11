@@ -329,19 +329,24 @@ describe('member runtime parameters', () => {
     expect(markup).toContain(`aria-label="${label}，${value}，推荐"`)
   })
 
-  it('renders CodeBuddy native thought levels and preserves a saved value when options are unavailable', () => {
-    const installation = runtimeInstallation('codebuddy-cli')
+  it.each([
+    ['codebuddy-cli', 'thought_level', '推理强度'],
+    ['kilo-cli', 'effort', '推理强度'],
+    ['minimax-code-cli', 'thinkingEffort', '思考强度']
+  ] as const)('renders %s native effort and preserves a saved value when options are unavailable', (kind, key, label) => {
+    const installation = runtimeInstallation(kind)
+    installation.snapshot!.models[0].options[0].key = key
     const draft = {
       ...draftFromDefaults(installation.memberRuntimeDefaults!),
-      model: { mode: 'explicit' as const, modelId: 'runtime/model', options: { thought_level: 'high' } }
+      model: { mode: 'explicit' as const, modelId: 'runtime/model', options: { [key]: 'high' } }
     }
     const render = () => renderToStaticMarkup(createElement(MemberRuntimeParameters, {
-      adapterKind: 'codebuddy-cli', installation, draft, disabled: false, onChange: () => undefined
+      adapterKind: kind, installation, draft, disabled: false, onChange: () => undefined
     }))
-    expect(render()).toContain('aria-label="推理强度，High"')
+    expect(render()).toContain(`aria-label="${label}，High"`)
     installation.snapshot!.models[0].options = []
     expect(render()).toContain('high')
-    expect(draft.model.options).toEqual({ thought_level: 'high' })
+    expect(draft.model.options).toEqual({ [key]: 'high' })
   })
 
   it('uses the common model default for Hermes and preserves native effort levels', () => {
@@ -396,6 +401,17 @@ describe('member runtime parameters', () => {
   })
 
   it('does not present an approval mode for native Pi tool execution', () => {
+    const kilo = runtimeInstallation('kilo-cli')
+    for (const values of [{}, { permission: 'deny' }]) {
+      const draft = draftFromDefaults(kilo.memberRuntimeDefaults!)
+      draft.permissions.values = values
+      const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
+        adapterKind: 'kilo-cli', installation: kilo, draft, disabled: false, onChange: () => undefined
+      }))
+      expect(markup).toContain('沿用 Kilo 原生权限')
+      expect(markup).not.toContain('aria-label="权限模式')
+      expect(draft.permissions.values).toEqual(values)
+    }
     const installation = runtimeInstallation('pi')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
       adapterKind: 'pi',
@@ -617,6 +633,7 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'cline-cli':
       return { mode: 'act', auto_approve: 'true' }
     case 'pi':
+    case 'kilo-cli':
       return {}
     case 'opencode-cli':
       return { permission: 'allow' }

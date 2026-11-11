@@ -422,6 +422,7 @@ fn runtime_display_name(runtime_kind: AdapterKind) -> &'static str {
         AdapterKind::CodexCli => "Codex CLI",
         AdapterKind::Pi => "Pi Coding Agent",
         AdapterKind::OpencodeCli => "OpenCode",
+        AdapterKind::KiloCli => "Kilo",
         AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",
         AdapterKind::KiroCli => "Kiro CLI",

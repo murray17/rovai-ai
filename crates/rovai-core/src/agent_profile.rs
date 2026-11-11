@@ -39,6 +39,7 @@ pub enum AdapterKind {
     CodexCli,
     Pi,
     OpencodeCli,
+    KiloCli,
     CopilotCli,
     ClaudeCodeCli,
     ClineCli,
@@ -102,10 +103,11 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::CodexCli,
         Self::Pi,
         Self::OpencodeCli,
+        Self::KiloCli,
         Self::CopilotCli,
         Self::ClaudeCodeCli,
         Self::ClineCli,
@@ -130,6 +132,7 @@ impl AdapterKind {
             Self::CodexCli => "codex-cli",
             Self::Pi => "pi",
             Self::OpencodeCli => "opencode-cli",
+            Self::KiloCli => "kilo-cli",
             Self::CopilotCli => "copilot-cli",
             Self::ClaudeCodeCli => "claude-code-cli",
             Self::ClineCli => "cline-cli",
@@ -155,6 +158,7 @@ impl AdapterKind {
             Self::CodexCli => "codex",
             Self::Pi => "pi",
             Self::OpencodeCli => "opencode",
+            Self::KiloCli => "kilo",
             Self::CopilotCli => "copilot",
             Self::ClaudeCodeCli => "claude",
             Self::ClineCli => "cline",
@@ -192,6 +196,7 @@ impl AdapterKind {
             Self::ZcodeApp => &["ZCode"],
             Self::CodexCli => &["codex"],
             Self::OpencodeCli => &["opencode"],
+            Self::KiloCli => &["kilo"],
             Self::CopilotCli => &["copilot"],
             Self::ClaudeCodeCli => &["claude"],
             Self::ClineCli => &["cline"],
@@ -210,6 +215,7 @@ impl AdapterKind {
             Self::CodexCli => "Codex CLI",
             Self::Pi => "Pi Coding Agent",
             Self::OpencodeCli => "OpenCode",
+            Self::KiloCli => "Kilo",
             Self::CopilotCli => "GitHub Copilot",
             Self::ClaudeCodeCli => "Claude Code",
             Self::ClineCli => "Cline",
@@ -241,6 +247,7 @@ impl AdapterKind {
         matches!(
             self,
             Self::OpencodeCli
+                | Self::KiloCli
                 | Self::CopilotCli
                 | Self::CommandCodeCli
                 | Self::ClineCli
@@ -264,6 +271,7 @@ impl AdapterKind {
             Self::CodexCli => "ROVAI_CODEX_BIN",
             Self::Pi => "ROVAI_PI_BIN",
             Self::OpencodeCli => "ROVAI_OPENCODE_BIN",
+            Self::KiloCli => "ROVAI_KILO_BIN",
             Self::CopilotCli => "ROVAI_COPILOT_BIN",
             Self::ClaudeCodeCli => "ROVAI_CLAUDE_CODE_BIN",
             Self::ClineCli => "ROVAI_CLINE_BIN",
@@ -284,6 +292,16 @@ impl AdapterKind {
         }
     }
 
+    /// ACP effort options that describe only the selected model. Health probes
+    /// cannot establish a complete catalog's freshness for these adapters.
+    pub const fn acp_selected_model_effort_key(self) -> Option<&'static str> {
+        match self {
+            Self::MinimaxCodeCli => Some("thinkingEffort"),
+            Self::KiloCli => Some("effort"),
+            _ => None,
+        }
+    }
+
     /// Freeze the public output boundary for each shipped adapter.
     ///
     /// Every shipped adapter requires an explicit `camp.message.send` call.
@@ -294,6 +312,7 @@ impl AdapterKind {
             Self::CodexCli
             | Self::Pi
             | Self::OpencodeCli
+            | Self::KiloCli
             | Self::CopilotCli
             | Self::CommandCodeCli
             | Self::ClineCli
@@ -322,6 +341,7 @@ impl AdapterKind {
             Self::CodexCli
             | Self::Pi
             | Self::OpencodeCli
+            | Self::KiloCli
             | Self::CopilotCli
             | Self::CommandCodeCli
             | Self::ClineCli
@@ -351,6 +371,7 @@ impl FromStr for AdapterKind {
             "codex-cli" => Ok(Self::CodexCli),
             "pi" => Ok(Self::Pi),
             "opencode-cli" => Ok(Self::OpencodeCli),
+            "kilo-cli" => Ok(Self::KiloCli),
             "copilot-cli" => Ok(Self::CopilotCli),
             "claude-code-cli" => Ok(Self::ClaudeCodeCli),
             "cline-cli" => Ok(Self::ClineCli),
@@ -3802,7 +3823,7 @@ impl AgentProfileService {
                     transaction,
                     &envelope.payload.installation_id,
                     snapshot,
-                    adapter_kind != AdapterKind::MinimaxCodeCli,
+                    adapter_kind.acp_selected_model_effort_key().is_none(),
                 )?;
                 if let (Some((executable_path, identity)), Some(executable_fingerprint)) = (
                     executable_identity.as_ref(),
@@ -4459,6 +4480,7 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         AdapterKind::ClaudeCodeCli => "claude-code-print-v1",
         AdapterKind::AntigravityApp => "antigravity-app-cli-v1",
         AdapterKind::OpencodeCli
+        | AdapterKind::KiloCli
         | AdapterKind::CopilotCli
         | AdapterKind::KiroCli
         | AdapterKind::QoderCli
@@ -4877,6 +4899,12 @@ fn resolve_frozen_runtime_binding_with_snapshot(
     let registry = AgentRuntimeAdapterRegistry::default();
     let permission_descriptors = registry.permission_options(adapter_kind);
     let mut validation_binding = binding.clone();
+    if adapter_kind == AdapterKind::KiloCli
+        && let Some(values) = validation_binding.permissions.values.as_object_mut()
+    {
+        // Retire only the former product permission; stored profiles/history stay intact.
+        values.remove("permission");
+    }
     validation_binding.model = ModelSelection::RuntimeDefault;
     if let ModelSelection::Explicit {
         model_id, options, ..
@@ -4918,7 +4946,7 @@ fn resolve_frozen_runtime_binding_with_snapshot(
             executable_fingerprint: &executable_fingerprint,
             protocols: &protocols,
             native_session_compatibility_key: native_session_compatibility_key.as_deref(),
-            permissions: &binding.permissions,
+            permissions: &validation_binding.permissions,
             permission_descriptors: &permission_descriptors,
         },
     ) {
@@ -4965,7 +4993,7 @@ fn resolve_frozen_runtime_binding_with_snapshot(
         capabilities,
         protocol_version: projection.protocol_version,
         model,
-        permissions: binding.permissions.clone(),
+        permissions: validation_binding.permissions,
         native_session_compatibility_key,
         binding_compatibility_digest: projection.binding_compatibility_digest,
         host_config_digest: projection.host_config_digest,
@@ -5484,6 +5512,9 @@ fn runtime_configuration_issue(
         return Ok(None);
     }
     for (key, value) in values {
+        if configuration.adapter_kind == AdapterKind::KiloCli && key == "permission" {
+            continue;
+        }
         let Some(descriptor) = descriptor_by_key.get(key.as_str()) else {
             return Ok(issue(
                 "runtime_permission_option_unknown",
@@ -5507,7 +5538,10 @@ fn runtime_configuration_issue(
         }
     }
     if let Some(missing) = descriptors.iter().find(|descriptor| {
-        descriptor.supported && descriptor.required && !values.contains_key(&descriptor.key)
+        !(configuration.adapter_kind == AdapterKind::KiloCli && descriptor.key == "permission")
+            && descriptor.supported
+            && descriptor.required
+            && !values.contains_key(&descriptor.key)
     }) {
         return Ok(issue(
             "runtime_permission_value_required",
@@ -5561,6 +5595,55 @@ fn model_options_preserve_native_intent_across_catalog_refresh() {
     assert!(
         issue.is_none(),
         "the Runtime owns acceptance of preserved options"
+    );
+    let mut legacy_kilo = binding.clone();
+    legacy_kilo.adapter_kind = AdapterKind::KiloCli;
+    legacy_kilo.permissions.adapter_kind = AdapterKind::KiloCli;
+    for value in ["allow", "ask", "deny"] {
+        legacy_kilo.permissions.values = json!({"permission":value});
+        assert!(
+            runtime_configuration_issue("[]", 1, "[]", &legacy_kilo)
+                .unwrap()
+                .is_none()
+        );
+    }
+    let cached_permission = serde_json::to_string(
+        &AgentRuntimeAdapterRegistry::default().permission_options(AdapterKind::OpencodeCli),
+    )
+    .unwrap();
+    legacy_kilo.permissions.values = json!({});
+    assert!(
+        runtime_configuration_issue("[]", 1, &cached_permission, &legacy_kilo)
+            .unwrap()
+            .is_none(),
+        "a cached retired required descriptor must not restore Kilo's product permission"
+    );
+    let mut other = legacy_kilo.clone();
+    other.adapter_kind = AdapterKind::OpencodeCli;
+    other.permissions.adapter_kind = AdapterKind::OpencodeCli;
+    assert_eq!(
+        runtime_configuration_issue("[]", 1, &cached_permission, &other)
+            .unwrap()
+            .unwrap()
+            .code,
+        "runtime_permission_value_required"
+    );
+    legacy_kilo.permissions.values = json!({"permission":"deny"});
+    legacy_kilo.permissions.values["unknown_product_permission"] = json!("allow");
+    assert_eq!(
+        runtime_configuration_issue("[]", 1, "[]", &legacy_kilo)
+            .unwrap()
+            .unwrap()
+            .code,
+        "runtime_permission_option_unknown"
+    );
+    legacy_kilo.permissions.values = json!("invalid");
+    assert_eq!(
+        runtime_configuration_issue("[]", 1, "[]", &legacy_kilo)
+            .unwrap()
+            .unwrap()
+            .code,
+        "runtime_permission_values_invalid"
     );
     let default = ModelSelection::Explicit {
         model_id: "gpt-next".into(),

@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "windows-x64-kilo-v1",
+  "capturedAt": "2026-11-11T08:09:13.600Z",
+  "platform": "windows-x64",
+  "qualifiedRuntimeKinds": [
+    "kilo-cli"
+  ],
+  "baseRevision": "452349dae70b96571f7ba803a5bcf92050f7e035",
+  "qualificationBasis": {
+    "type": "target-host-runtime-acceptance",
+    "report": "docs/research/kilo-runtime/README.md#windows-x64-目标机验收"
+  },
+  "targetHost": {
+    "os": "Windows 10 Pro",
+    "version": "10.0.19045",
+    "architecture": "x64",
+    "filesystem": "NTFS"
+  },
+  "runtimeEvidence": {
+    "version": "7.8.27",
+    "protocol": "acp-v1",
+    "launch": "kilo acp",
+    "releaseAsset": "kilo-windows-x64.zip",
+    "archiveSha256": "5d8fe8a8fcbff260ab50612f69721ef8544960c9317c97ce556698269b90d035",
+    "executableSha256": "e657cc27fcf4401886117f566f4ef186b1f9e3a362565eae949728d23025fc8a",
+    "authentication": "Kilo native BYOK configuration",
+    "provider": "Sub2API",
+    "apiFormat": "openai-responses",
+    "model": "gpt-6",
+    "discoverySource": "env"
+  },
+  "testedImplementationSha256": {
+    "crates/rovai-core/src/native_usage.rs": "d0df0d7f3efb372e2a410ec77ea9bdc574732144df809be9e2f74209f61376a0",
+    "crates/rovai-core/src/acp.rs": "8cad9bbddef7d30d47d49b92bd0ffa889ab6f16828cb0e695375780ed8d42cef"
+  },
+  "testedCoreSha256": "4d8ecf0d6ba75d70b30d5de0fffb16368b3f1959893a905681d6722e4a8f2d54",
+  "realModel": {
+    "summarySha256": "8e0cc2886c952413b3f56589ca6a905f348a4cb90417e1616ab81eb954e7d21d",
+    "harnessSha256": "91f847bfdf9ab5bf6fad7f5d98e34ee501d2e3bb5e860a7561e943d9768da772",
+    "cases": [
+      {
+        "name": "first",
+        "status": "succeeded",
+        "approvals": 1,
+        "publicMessages": 1
+      },
+      {
+        "name": "warm",
+        "status": "succeeded",
+        "approvals": 0,
+        "publicMessages": 1
+      },
+      {
+        "name": "cold",
+        "status": "succeeded",
+        "approvals": 0,
+        "publicMessages": 1
+      },
+      {
+        "name": "nativeSkill",
+        "status": "succeeded",
+        "approvals": 0,
+        "publicMessages": 1
+      }
+    ],
+    "firstRun": {
+      "builtinCli": true,
+      "fileDiff": {
+        "additions": 1,
+        "deletions": 0
+      }
+    },
+    "warmHostReused": true,
+    "exactColdResume": true,
+    "nativeProjectSkill": {
+      "completedCalls": 1
+    },
+    "plannedShutdowns": [
+      {
+        "controlledShutdownCyclePersisted": true,
+        "descendantsReaped": 2
+      },
+      {
+        "controlledShutdownCyclePersisted": true,
+        "descendantsReaped": 2
+      }
+    ],
+    "observedUsage": [
+      {
+        "promptInputTotalTokens": 32244,
+        "outputTokens": 196,
+        "cacheReadTokens": 21248,
+        "cacheWriteTokens": 0,
+        "inputOutputComplete": false
+      },
+      {
+        "promptInputTotalTokens": 11425,
+        "outputTokens": 56,
+        "cacheReadTokens": 10880,
+        "cacheWriteTokens": 0,
+        "inputOutputComplete": false
+      },
+      {
+        "promptInputTotalTokens": null,
+        "outputTokens": null,
+        "cacheReadTokens": null,
+        "cacheWriteTokens": null,
+        "inputOutputComplete": false
+      },
+      {
+        "promptInputTotalTokens": 12475,
+        "outputTokens": 48,
+        "cacheReadTokens": 11904,
+        "cacheWriteTokens": 0,
+        "inputOutputComplete": false
+      }
+    ]
+  },
+  "controlledProvider": {
+    "summarySha256": "77795201ac08e987f6a5c046e6919ba0d183638781412d3ea643bb5d3e69e410",
+    "harnessSha256": "063bc4e2245cd4b2d54ce17d4cfc61929ac0a0653639712d3d34776d7b7e5a7a",
+    "runs": {
+      "cancelled": 3,
+      "succeeded": 37
+    },
+    "checks": [
+      "bootstrap",
+      "modelCatalog",
+      "modelOptionsExecution",
+      "cold",
+      "mcp",
+      "approval",
+      "relativeWriteDiff",
+      "foregroundSubagents",
+      "commandOutput",
+      "commandOutputBudget",
+      "cancel",
+      "steer",
+      "cancellationLeases",
+      "automaticThreshold",
+      "automaticOverflow",
+      "automaticColdResume"
+    ],
+    "firstRunUsage": {
+      "promptInputTotalTokens": 200,
+      "outputTokens": 40,
+      "cacheReadTokens": 50,
+      "cacheWriteTokens": 0,
+      "inputOutputComplete": false
+    }
+  },
+  "scope": {
+    "qualification": "Kilo on Windows x64 through the Rovai Core product path",
+    "usage": "Native per-call observations are partial; short runs can retain unknown values.",
+    "model": "Real-model evidence uses the named Sub2API BYOK model. Protocol edge cases use the official Kilo CLI with a controlled Provider."
+  }
+}

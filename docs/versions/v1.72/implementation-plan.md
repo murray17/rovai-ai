@@ -8,6 +8,19 @@ last_updated: 2026-11-10
 
 # v1.72 实施与验收
 
+## Kilo 官方 ACP（2026-11-08，Preview 实施）
+
+分支 `rovai/kilo-acp`，worktree `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
+基线 `origin/main @ 958784f6e17fc32d8b2753d7f14fd6122dceea9d`。不迁移主 checkout 的其他工作。
+[R1](model-context-change-kilo-acp.md)已获 User sequence 4 确认，生产实现采用共享 ACP/Fleet、
+单 Binding Host、原生 instructions、权限/Session/CLI 与逐调用数值 owner；新增目录和 schema 173。
+官方 7.8.27 与本地 Provider 的原生探针及真实 Core 路径分别记账；
+具体门禁、Golden Flows 和未测范围集中在[实施记录](kilo-acp-implementation.md)。
+初始范围见 [D77](decisions.md#v1-72-d77)。当前开放范围见 [平台准入](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)，
+Linux x64 的真实模型和 ACP 结果见[目标机验收](../../research/kilo-runtime/README.md#linux-x64-目标机验收)。
+Windows x64 资格及 Sub2API 复验见[目标机验收](../../research/kilo-runtime/README.md#windows-x64-目标机验收)。
+
+2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正，以及 Steer 接续可行性见[复核记录](kilo-acp-review-fixes.md)。
 ## OpenCode Steer 局部接入（2026-11-10）
 
 - 分支 `rovai/opencode-steer`，基线 `13a4b8f96c71bc7866c749da5321a026d8f876b9`，独立 worktree

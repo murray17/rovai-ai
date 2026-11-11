@@ -23,6 +23,7 @@ const ADAPTER_KINDS = new Set<AdapterKind>([
   'codex-cli',
   'pi',
   'opencode-cli',
+  'kilo-cli',
   'copilot-cli',
   'claude-code-cli',
   'kiro-cli',

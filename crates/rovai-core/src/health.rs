@@ -1787,6 +1787,7 @@ async fn acp_probe_at(
     if !matches!(
         kind,
         AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -1994,7 +1995,7 @@ async fn acp_probe_at(
         kind,
         include_session,
         purpose,
-        catalog_requested && kind == AdapterKind::MinimaxCodeCli,
+        catalog_requested && kind.acp_selected_model_effort_key().is_some(),
         None,
         reported_version.as_deref(),
     )
@@ -2372,6 +2373,56 @@ async fn run_acp_probe_with_scope(
                         bail!("dsh_model_configuration_changed_during_preparation");
                     }
                 }
+            }
+            if kind == AdapterKind::KiloCli && catalog_only {
+                // Only a complete catalog request traverses model-specific options.
+                // ACP advertises thinking effort only for the selected model. Probe
+                // each native ID in this disposable Session; no inference or global
+                // provider change is involved. Restore its initial selection afterward.
+                let models =
+                    crate::agent_runtime_adapter::acp_model_catalog_for_adapter(kind, &session)?;
+                let original =
+                    crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&session);
+                let mut options = serde_json::Map::new();
+                let mut attempted_other_model = false;
+                for (index, model) in models.iter().enumerate() {
+                    if original.as_deref() == Some(model.id.as_str()) {
+                        options.insert(model.id.clone(), serde_json::to_value(&model.options)?);
+                        continue;
+                    }
+                    // A failed setter may already have changed native state.
+                    attempted_other_model = true;
+                    let id = 1000 + index as u64;
+                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
+                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":model.id}})).await?;
+                    // Native catalogs may include an unconfigured Provider or a
+                    // variant that this release cannot select. Its unavailable
+                    // options must not hide the working native default/catalog.
+                    let Ok(selected) = read_rpc_result(lines, id).await else {
+                        continue;
+                    };
+                    if crate::agent_runtime_adapter::acp_runtime_model_id_from_session(&selected)
+                        .as_deref()
+                        != Some(model.id.as_str())
+                    {
+                        continue;
+                    }
+                    let Some(chosen) = crate::agent_runtime_adapter::acp_model_catalog_for_adapter(
+                        kind, &selected,
+                    )
+                    .ok()
+                    .and_then(|models| models.into_iter().find(|entry| entry.id == model.id)) else {
+                        continue;
+                    };
+                    options.insert(model.id.clone(), serde_json::to_value(chosen.options)?);
+                }
+                if attempted_other_model && let Some(original) = original {
+                    let id = 1000 + models.len() as u64;
+                    write_json_line(stdin, &json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option",
+                        "params":{"sessionId":session["sessionId"], "configId":"model", "value":original}})).await?;
+                    let _ = read_rpc_result(lines, id).await;
+                }
+                session["_meta"]["rovaiModelOptions"] = Value::Object(options);
             }
             if let Some(context) = options_context {
                 anyhow::ensure!(
@@ -2848,6 +2899,7 @@ pub fn configure_acp_command(
     version: Option<&str>,
 ) -> Result<()> {
     match kind {
+        AdapterKind::KiloCli => crate::kilo::configure_command(command),
         AdapterKind::OpencodeCli => {
             crate::opencode_compat::Generation::require(version)?.configure_command(command);
         }
@@ -3142,6 +3194,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
     matches!(
         kind,
         AdapterKind::OpencodeCli
+            | AdapterKind::KiloCli
             | AdapterKind::CopilotCli
             | AdapterKind::KiroCli
             | AdapterKind::QoderCli
@@ -3766,6 +3819,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         return find_codex();
     }
     let (environment_keys, executable_name) = match kind {
+        AdapterKind::KiloCli => (&["ROVAI_KILO_BIN"][..], "kilo"),
         AdapterKind::OpencodeCli => (
             &[
                 "ROVAI_OPENCODE_BIN",

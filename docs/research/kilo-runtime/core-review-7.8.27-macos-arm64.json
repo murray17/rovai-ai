@@ -1,0 +1,344 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-local-provider-core",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "recordedAt": "2026-11-09T10:53:05.207239+00:00",
+  "paidModel": false,
+  "rendererVerified": false,
+  "pathsContainSpaces": true,
+  "root": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu",
+  "platform": "darwin-arm64",
+  "checks": {
+    "authentication": "unknown",
+    "bootstrapRuns": [
+      {
+        "run": "9ceff56b-9f17-43ea-a64f-33829a0faefe",
+        "requests": 3
+      },
+      {
+        "run": "b6240af2-eef5-46f1-8f17-1e6dfda6a971",
+        "requests": 1
+      },
+      {
+        "run": "49b41273-bf7c-4c09-97e7-69455ecd1631",
+        "requests": 2
+      },
+      {
+        "run": "001da372-9579-48d3-a7a9-a537ab29ffe3",
+        "requests": 2
+      },
+      {
+        "run": "24c9d498-c2c5-4d1d-90ac-9af7a5dfa367",
+        "requests": 2
+      },
+      {
+        "run": "e6704dc0-a91c-448f-b2c1-ed8f18af5ddf",
+        "requests": 1
+      },
+      {
+        "run": "3f9efdaf-5796-436c-9354-e1d0be41f770",
+        "requests": 2
+      },
+      {
+        "run": "aebec894-aac3-4cde-82ed-5578d69a2eba",
+        "requests": 2
+      },
+      {
+        "run": "e91f421b-3c56-46d9-b748-52027d31ee1e",
+        "requests": 2
+      },
+      {
+        "run": "35266527-baad-4843-b0e5-dc7cbc99ea91",
+        "requests": 2
+      },
+      {
+        "run": "da2f78a4-99c9-43ae-9d41-e440a6dd96c6",
+        "requests": 2
+      },
+      {
+        "run": "e889aab8-bbc5-4b2d-88f8-1fc1fa6e2f67",
+        "requests": 1
+      },
+      {
+        "run": "13903702-a9ba-4b19-9a0d-3bc9add54085",
+        "requests": 1
+      },
+      {
+        "run": "f5d48f6d-1a23-4475-bb3b-bb040f346aa4",
+        "requests": 1
+      }
+    ],
+    "commandOutput": {
+      "source": "runtime.action.payload.output",
+      "markerOccurrences": 1
+    },
+    "bootstrap": {
+      "bytes": 2830,
+      "nativeSystemVerbatim": true,
+      "userDynamicOnly": true
+    },
+    "firstAndWarm": {
+      "firstRun": "9ceff56b-9f17-43ea-a64f-33829a0faefe",
+      "warmRun": "b6240af2-eef5-46f1-8f17-1e6dfda6a971",
+      "host": "de592007-1115-4c28-9076-aa9c1ea3f274",
+      "session": "ses_e4012d4b4ffe3ImwPyj7wxbnPp"
+    },
+    "metrics": {
+      "runs": [
+        {
+          "agentRunId": "9ceff56b-9f17-43ea-a64f-33829a0faefe",
+          "cacheReadTokens": 50,
+          "cacheWriteTokens": 0,
+          "executionEpoch": 1,
+          "finalizedAt": "2026-11-09T10:49:31.121200+00:00",
+          "inputOutputComplete": false,
+          "lastObservedAt": "2026-11-09T10:49:22.558+00:00",
+          "outputTokens": 40,
+          "promptInputTotalTokens": 200
+        },
+        {
+          "agentRunId": "b6240af2-eef5-46f1-8f17-1e6dfda6a971",
+          "cacheReadTokens": null,
+          "cacheWriteTokens": null,
+          "executionEpoch": 1,
+          "finalizedAt": "2026-11-09T10:49:31.368923+00:00",
+          "inputOutputComplete": false,
+          "lastObservedAt": null,
+          "outputTokens": null,
+          "promptInputTotalTokens": null
+        }
+      ],
+      "schemaVersion": 1,
+      "sessions": [
+        {
+          "agentId": "agent_2",
+          "conversationId": "31131e7e-1476-4e81-8ce9-a07479b04fdc",
+          "dialectId": "acp-session-context-gauge-v1",
+          "modelKey": "local/local-model",
+          "nativeRatio": null,
+          "observedAt": "2026-11-09T10:49:31.360632+00:00",
+          "runtimeKind": "kilo-cli",
+          "sessionGeneration": 1,
+          "source": "runtime_event",
+          "usedTokens": 100,
+          "windowTokens": 32768
+        }
+      ]
+    },
+    "nativeUsageDatabase": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/member-data/kilo/custom.db",
+    "effort": "high",
+    "permissionFILE": "49b41273-bf7c-4c09-97e7-69455ecd1631",
+    "permissionINLINE": "001da372-9579-48d3-a7a9-a537ab29ffe3",
+    "permissionAGENT": "24c9d498-c2c5-4d1d-90ac-9af7a5dfa367",
+    "cold": {
+      "run": "e6704dc0-a91c-448f-b2c1-ed8f18af5ddf",
+      "host": "ea006b30-ff99-49b5-b130-5dfeb2b69e00",
+      "session": "ses_e4012d4b4ffe3ImwPyj7wxbnPp"
+    },
+    "mcp": {
+      "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+      "idleRetiredPid": 74569,
+      "busyRetiredPid": 74620,
+      "busyRun": "e91f421b-3c56-46d9-b748-52027d31ee1e",
+      "firstHost": "5da2a4f1-9c16-4889-bc37-97a25b593488",
+      "secondHost": "8fcd3339-216d-4d41-ae0c-c68e0d17bb86",
+      "restoredHost": "45fc1bfd-b3e0-4650-8d8b-a66827b7fe72"
+    },
+    "approval": {
+      "allowRun": "da2f78a4-99c9-43ae-9d41-e440a6dd96c6",
+      "denyRun": "e889aab8-bbc5-4b2d-88f8-1fc1fa6e2f67"
+    },
+    "savedDeny": "13903702-a9ba-4b19-9a0d-3bc9add54085",
+    "cancel": {
+      "run": "5beab902-3bd0-4e38-985c-2de71409834f",
+      "status": "cancelled",
+      "nextRun": "f5d48f6d-1a23-4475-bb3b-bb040f346aa4"
+    },
+    "bootstrapRequests": [
+      {
+        "index": 0,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 1,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 2,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 4,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 5,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 6,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 7,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 8,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 9,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 10,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 11,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 12,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 13,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 14,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 15,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 16,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 17,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 18,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 19,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 20,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 21,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 22,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 23,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 24,
+        "bytes": 2830,
+        "verbatim": true
+      },
+      {
+        "index": 25,
+        "bytes": 2830,
+        "verbatim": true
+      }
+    ],
+    "inheritedConfigExcluded": true,
+    "runtimeFilesCleaned": true,
+    "remainingOwnedProcesses": [],
+    "mcpStarts": [
+      {
+        "pid": 74569,
+        "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+        "source": "KILO_MCP_A"
+      },
+      {
+        "pid": 74620,
+        "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+        "source": "KILO_MCP_B"
+      },
+      {
+        "pid": 74646,
+        "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+        "source": "KILO_MCP_A"
+      },
+      {
+        "pid": 74663,
+        "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+        "source": "KILO_MCP_A"
+      },
+      {
+        "pid": 74690,
+        "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+        "source": "KILO_MCP_A"
+      },
+      {
+        "pid": 74736,
+        "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+        "source": "KILO_MCP_A"
+      },
+      {
+        "pid": 74817,
+        "cwd": "/private/var/folders/pm/zmpfxggd0glcm8vx3p3y3mmr0000gq/T/rovai-kilo-core-review space-fzJOTu/service",
+        "source": "KILO_MCP_A"
+      }
+    ]
+  },
+  "finishedRuns": [
+    "9ceff56b-9f17-43ea-a64f-33829a0faefe",
+    "b6240af2-eef5-46f1-8f17-1e6dfda6a971",
+    "49b41273-bf7c-4c09-97e7-69455ecd1631",
+    "001da372-9579-48d3-a7a9-a537ab29ffe3",
+    "24c9d498-c2c5-4d1d-90ac-9af7a5dfa367",
+    "e6704dc0-a91c-448f-b2c1-ed8f18af5ddf",
+    "3f9efdaf-5796-436c-9354-e1d0be41f770",
+    "aebec894-aac3-4cde-82ed-5578d69a2eba",
+    "e91f421b-3c56-46d9-b748-52027d31ee1e",
+    "35266527-baad-4843-b0e5-dc7cbc99ea91",
+    "da2f78a4-99c9-43ae-9d41-e440a6dd96c6",
+    "e889aab8-bbc5-4b2d-88f8-1fc1fa6e2f67",
+    "13903702-a9ba-4b19-9a0d-3bc9add54085",
+    "5beab902-3bd0-4e38-985c-2de71409834f",
+    "f5d48f6d-1a23-4475-bb3b-bb040f346aa4"
+  ],
+  "status": "passed"
+}

@@ -6,11 +6,36 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # Rovai-ai v1.72：Lark 独立渠道
 
+## Kilo 官方 ACP（2026-11-08，Preview）
+
+User sequence 4 确认 [R1 输入方案](model-context-change-kilo-acp.md)后，已新增独立 `kilo-cli`，
+复用共享 ACP/Fleet、原生 Session 与审批；一个 Binding 一个 Host，instructions 承载现有完整 Bootstrap。
+不增加 SHA256 校验、压缩插件或私有进程池。Migration 223 扩展闭集至 schema 173，现有 Runtime 输入保持。
+macOS arm64/x64 和 Linux x64 开放 Preview，Windows x64 为 Qualified。
+Apple Intel 的开放范围见 [D83](decisions.md#v1-72-d83)。Linux x64 的真实 Sub2API 与 ACP 结果见
+[目标机验收](../../research/kilo-runtime/README.md#linux-x64-目标机验收)与 [D84](decisions.md#v1-72-d84)。
+Windows x64 的真实 Sub2API、用量修复与准入证据见[目标机验收](../../research/kilo-runtime/README.md#windows-x64-目标机验收)
+和 [D85](decisions.md#v1-72-d85)。
+实现、Core/官方 CLI 验证及缺失范围见[实施记录](kilo-acp-implementation.md)，
+上游原生探测见[研究矩阵](../../research/kilo-runtime/README.md)，架构理由见 [D77](decisions.md#v1-72-d77)。
+
+2026-11-09 的原生配置顺序、Host/MCP、模型/目录与认证修正见[复核记录](kilo-acp-review-fixes.md)；
+原生禁后台、文件结果投影、Core Steer 与 sub2api 开发版验收见[后续实施记录](kilo-files-steer-verification.md)。
+无 Node 的 MCP、pure 回调、取消期限与文件/effort 投影收尾见[边界自检](kilo-boundary-fixes.md)。
+成功 Steer 后的常规 Host 复用及文件/cwd 对照见[复用记录](kilo-steer-reuse.md)。
+前台子代理工具展示补全、7.5 KiB 输出实测、Skills 验收状态与版本/平台判断说明见[补全记录](kilo-subagent-display.md)。
+自动阈值/overflow 压缩、逐模型 effort 原生查询及进程复用比较修正见[专项核对](kilo-auto-compaction-and-options.md)。
+逐模型 effort 已沿临时 Session 的非生成查询接通，包含完整目录／健康结果分离和两入口选择器；
+官方 Core 32 Run 的结果与权限直白解释见[接线记录](kilo-model-options.md)。
+MCP 保存下一轮生效、移除产品权限/Hook、普通取消确认后共用 Fleet Warm 的当前范围见
+[简化记录](kilo-simplification.md)、[Launch v84](../../contracts/runtime-launch-and-verification-v84.md)与 [D82](decisions.md#v1-72-d82)。
+先前记录中的权限 Hook、强制 pure=false 和取消必退役是阶段行为，不再描述当前接入。
+与最新主线的 Steer、MiniMax 按需参数查询及合同编号整合见[主线集成](kilo-simplification.md#主线集成user-sequence-66)。
 ## OpenCode Steer 局部接入（2026-11-10）
 
 按 User 确认接通 OpenCode 稳定 2.x 自 2.2.7 起的官方 ACP Steer，旧版继续普通排队。

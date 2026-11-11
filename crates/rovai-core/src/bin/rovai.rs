@@ -48,6 +48,17 @@ const COMPACTION_HOOK_ATTEMPTS: usize = 3;
 
 fn main() -> ExitCode {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.first().is_some_and(|arg| arg == "__mcp-stdio-cwd") {
+        // Native ACP has no stdio cwd field. This private mode needs neither
+        // Core IPC nor a separate scripting runtime; stdout stays MCP-only.
+        return match run_mcp_stdio_cwd(&args[1..]) {
+            Ok(code) => code,
+            Err(error) => {
+                eprintln!("MCP server startup failed: {error:#}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if args
         .first()
         .is_some_and(|arg| arg == "--prepare-windows-bootstrap-root")
@@ -87,6 +98,32 @@ fn main() -> ExitCode {
             print_safe_cli_error();
             ExitCode::from(2)
         }
+    }
+}
+
+fn run_mcp_stdio_cwd(args: &[String]) -> Result<ExitCode> {
+    let [cwd, executable, argv @ ..] = args else {
+        bail!("MCP cwd launcher requires a directory and executable");
+    };
+    env::set_current_dir(cwd).context("failed to enter the configured MCP working directory")?;
+    let mut command = std::process::Command::new(executable);
+    command.args(argv);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(command.exec()).context("failed to execute the configured MCP server")
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command
+            .status()
+            .context("failed to execute the configured MCP server")?;
+        std::process::exit(status.code().unwrap_or(1));
     }
 }
 

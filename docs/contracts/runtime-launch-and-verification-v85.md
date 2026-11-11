@@ -4,12 +4,12 @@ name: Runtime Launch and Verification
 version: v85
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # Runtime Launch and Verification v85
 
-继承 [v77](runtime-launch-and-verification-v77.md)。本版只增加本机安装版本按需刷新，以及有可靠版本基线的
+继承 [v84](runtime-launch-and-verification-v84.md)。本版只增加本机安装版本按需刷新，以及有可靠版本基线的
 Rovai 自有 Host 温和退出复用。检测按钮、模型目录、正式初始化、认证与会话接续各自的职责保持。
 不查询远端版本、不下载安装、不修改用户原生配置。
 

@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-production-core-controlled-provider",
+  "recordedAt": "2026-11-10T10:38:03.032Z",
+  "baseline": "0780ed59662b49f3bed6d33c0532efc88f7e7027",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "platform": "darwin-arm64",
+  "status": "passed",
+  "provider": "local-controlled",
+  "paidModelRerun": false,
+  "native": {
+    "fixture": "rovai-kilo-auto-native-pyc0bhmr",
+    "automaticThreshold": {
+      "stopReason": "end_turn",
+      "nativeSummaries": 1,
+      "reportedInput": 110000,
+      "contextWindow": 200000,
+      "thresholdPercent": 50,
+      "systemPreserved": true,
+      "summaryConsumed": true
+    },
+    "automaticOverflow": {
+      "stopReason": "end_turn",
+      "nativeSummaries": 1,
+      "providerRejectedOnce": true,
+      "systemPreserved": true
+    },
+    "modelOptions": {
+      "initial": [
+        "low",
+        "high"
+      ],
+      "other": [
+        "medium",
+        "max"
+      ],
+      "selectedMaximum": "max",
+      "restored": [
+        "low",
+        "high"
+      ],
+      "modelCalls": 0
+    },
+    "hostsClosed": true
+  },
+  "core": {
+    "fixture": "rovai-kilo-auto-verified-wt4w11rg",
+    "runCount": 30,
+    "runs": [
+      {
+        "status": "cancelled",
+        "count": 2
+      },
+      {
+        "status": "succeeded",
+        "count": 28
+      }
+    ],
+    "inputs": [
+      {
+        "input_kind": "start",
+        "status": "accepted",
+        "count": 30
+      },
+      {
+        "input_kind": "steer",
+        "status": "accepted",
+        "count": 3
+      },
+      {
+        "input_kind": "steer",
+        "status": "delivery_unknown",
+        "count": 1
+      }
+    ],
+    "automaticThreshold": {
+      "run": "e235dfdf-620f-4d63-bf90-5f3cc34527ac",
+      "seedRun": "4ddaad83-b800-4587-93ed-1dee20bb940f",
+      "session": "ses_e3af84f25ffex4MPEnZFTfp9LP",
+      "host": "608d3fbe-bd11-40d2-bd03-99aafae7c5ba",
+      "nativeSummaries": 1,
+      "reportedInput": 110000,
+      "contextWindow": 200000,
+      "thresholdPercent": 50,
+      "summaryConsumed": true,
+      "summaryNotPublished": true
+    },
+    "automaticOverflow": {
+      "run": "c64be9c3-d011-4e00-8fd8-9b99aba6628f",
+      "nativeSummaries": 1,
+      "providerRejectedOnce": true,
+      "summaryNotPublished": true
+    },
+    "automaticColdResume": {
+      "run": "0cffe6a7-ec6d-4596-98c0-e94bf864936b",
+      "session": "ses_e3af84f25ffex4MPEnZFTfp9LP",
+      "newHost": "657e861f-cc66-4cf5-ba0b-0abe60bb1fef",
+      "summaryRetained": true
+    },
+    "bootstrap": {
+      "ordinaryRequestsChecked": 50,
+      "allVerbatim": true
+    },
+    "nodeAbsentFromPath": true,
+    "inheritedPureTrue": true,
+    "runtimeFilesCleaned": true
+  },
+  "pidRegression": {
+    "owner": "trae_completed_run_enters_lru_and_reuses_the_same_host_session",
+    "heldChildLockOldPid": null,
+    "heldChildLockFixedPidRetained": true,
+    "newRustTestFunctions": 0
+  },
+  "failureComparisons": [
+    {
+      "fixture": "rovai-kilo-auto-core-z49baeoz",
+      "phase": "before-model-startup",
+      "error": "Runtime startup could not commit",
+      "singleCauseProvenByOriginalLog": false
+    },
+    {
+      "fixture": "rovai-kilo-auto-fixed-3xh43wzt",
+      "phase": "automatic-summary-provider-fixture",
+      "error": "No-tools summary incorrectly entered task fixture dispatch",
+      "fixtureFixed": true
+    }
+  ],
+  "scope": {
+    "productionModelInputsChanged": false,
+    "productionCompactionThresholdsChanged": false,
+    "modelCatalogDiscoveryChanged": false,
+    "permissionStrategyChanged": false,
+    "manualCompactUsed": false,
+    "nativeDatabaseDirectlyMutatedByProbe": false,
+    "realModelSummaryQualityEvaluated": false,
+    "admissionChanged": false,
+    "newQueuesOrRetryManagers": false
+  }
+}

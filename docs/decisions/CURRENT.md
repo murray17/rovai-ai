@@ -59,6 +59,12 @@ MiniMax 按需参数读取：[Runtime Launch v77](../contracts/runtime-launch-an
 CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contracts/runtime-launch-and-verification-v76.md)、
 [公开 Runtime failure](../architecture/runtime-catalog-boundaries.md#内部诊断与公开-runtime-failure)。
 
+- Kilo 官方 ACP：[Runtime Catalog](../architecture/runtime-catalog-boundaries.md#kilo-官方-acp)、[Launch v84](../contracts/runtime-launch-and-verification-v84.md)；单 Binding/instructions 见 [D77](../versions/v1.72/decisions.md#v1-72-d77)，原生配置合并修正见 [D78](../versions/v1.72/decisions.md#v1-72-d78)，前台策略、文件与 Steer 见 [D79](../versions/v1.72/decisions.md#v1-72-d79)，依赖/取消/投影边界收尾见 [D80](../versions/v1.72/decisions.md#v1-72-d80)，成功 Steer 复用见 [D81](../versions/v1.72/decisions.md#v1-72-d81)，原生权限／MCP／取消简化见 [D82](../versions/v1.72/decisions.md#v1-72-d82)，Apple Intel Preview 范围见 [Platform Admission](../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)与 [D83](../versions/v1.72/decisions.md#v1-72-d83)。
+  Linux x64 Preview 范围见 [Platform Admission](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)与
+  [D84](../versions/v1.72/decisions.md#v1-72-d84)。
+  Windows x64 资格见 [Platform Admission](../contracts/runtime-platform-admission-v2.md#kilo-windows-x64-qualification)与
+  [D85](../versions/v1.72/decisions.md#v1-72-d85)。
+
 ## Public Thread 消息与多输入 AgentRun
 
 - 原生成功与文字发布分离：[Runtime Launch v75](../contracts/runtime-launch-and-verification-v75.md)、
@@ -283,7 +289,7 @@ CodeBuddy 原生失败详情与 RunCard 展示：[Runtime Launch v76](../contrac
 
 ## 取消事务与 Runtime 清理
 
-- 当前规范：[Cancellation Settlement v2](../contracts/cancellation-settlement-v2.md)、[Accepted Input Recovery v8](../contracts/accepted-input-recovery-v8.md)、[Camp Membership v3](../contracts/camp-membership-v3.md)、[Channel Storage v3](../contracts/channel-storage-v3.md)和[Runtime 恢复与关闭](../architecture/foundational-invariants.md#runtime-recovery-shutdown)。
+- 当前规范：[Cancellation Settlement v2](../contracts/cancellation-settlement-v2.md)、[Accepted Input Recovery v9](../contracts/accepted-input-recovery-v9.md)、[Camp Membership v3](../contracts/camp-membership-v3.md)、[Channel Storage v3](../contracts/channel-storage-v3.md)和[Runtime 恢复与关闭](../architecture/foundational-invariants.md#runtime-recovery-shutdown)。
 - 理由：[V1.37-D02](../versions/v1.37/decisions.md#v1-37-d02)。
 
 

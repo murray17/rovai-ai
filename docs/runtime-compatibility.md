@@ -6,6 +6,109 @@ last_updated: 2026-11-10
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-11 Kilo Linux 与 Windows 目标机验收
+
+官方 **7.8.27** 在 Ubuntu 24.04.5 x64 和 Windows 10 Pro 22H2 x64 分别完成 Sub2API 真实模型与受控 ACP 验收。
+各自模型、场景和失败对照见 [Linux 记录](research/kilo-runtime/README.md#linux-x64-目标机验收)与
+[Windows 记录](research/kilo-runtime/README.md#windows-x64-目标机验收)；当前准入由
+[Platform Admission](contracts/runtime-platform-admission-v2.md#kilo-linux-preview)拥有，不把一端证据转记为另一端结果。
+
+## 2026-11-10 Kilo MCP、权限与普通取消简化
+
+官方 **7.8.27**、macOS arm64、生产 Core/CLI 与本地受控 Provider 完成 **40 个 Run（37 成功、3 主动取消）**。
+MCP 保存不主动关闭 Kilo Host，下一 Run 以最新投影决定复用/替换，A→B→A、忙时保存、禁用/删除及精确 Session 通过。
+产品权限档位、Hook 与 pure 覆盖已删除；原生 allow/ask/deny、用户插件、pure、旧成员窄兼容及 question 工具缺席均实跑。
+
+普通取消及 1/3 条用户插话的取消，其后继均复用同 Host/PID/native Session，并使用新 CLI 租约；
+原清理 ACK 为 reusable，耗时 **60/57/71 ms**，旧租约在 Core 明确拒绝，新租约实际发送成功。
+共享调度仍串行：三条用户插话中一条已提交、两条排队，取消后来源全部结算。
+原生探针另确认原始加三条已提交补充在 **14 ms** 内全部 cancelled，同 PID/Session 后继成功；不把它冒充三条公开 Core 并发派发。
+共享 owner 保留快速/1.75 秒/超时/不回包/断连/错误及迟到隔离；预算仍为 2/2.5/3 秒（Windows 总计 5 秒）。
+
+65 个普通模型请求逐字保留当前 Bootstrap，原模型/effort、自动压缩、文件 Diff、前台子代理、输出预算与无 Node cwd MCP 回归通过。
+没有新的付费模型验收，不提升 Preview、Skills 或跨平台资格。
+[实施与失败对照](versions/v1.72/kilo-simplification.md)、[白名单证据](research/kilo-runtime/simplification-7.8.27-macos-arm64.json)。
+
+## 2026-11-10 Kilo 逐模型 effort 接线
+
+官方 **7.8.27**、macOS arm64、生产 Core/CLI 使用本地受控 Provider 完成 **32 个 Run（30 成功、2 主动取消）**。
+完整目录复用 MiniMax 的临时 Session 非生成查询，分别取得 low/high、medium/max 与空选项；
+目录产生零个 Provider 生成请求，选择其他模型的 max 实际进入原生模型、variant、Provider 参数及冻结历史。
+普通健康结果不遍历模型，也不覆盖完整目录和成功时间；不可选候选不丢弃其他结果。
+实际选择器的队员／引导两入口通过，原文件、权限、无 Node MCP、Steer、输出预算和自动压缩矩阵继续通过。
+没有付费模型或新的真实开发 App 人工验收；平台资格保持。
+[实施与边界](versions/v1.72/kilo-model-options.md)、[白名单证据](research/kilo-runtime/model-options-7.8.27-macos-arm64.json)。
+
+## 2026-11-10 Kilo 自动压缩与逐模型选项
+
+官方 **7.8.27**、macOS arm64 原生及生产 Core/CLI 使用本地受控 Provider 完成原生自动阈值、
+Provider context_length_exceeded 后自动压缩/重试及 Core 重启原 Session 恢复。
+Core **30 个 Run：28 成功、2 主动取消**；阈值与 overflow 各产生一个原生 auto summary，
+后续普通请求逐字保留完整 Bootstrap，摘要只留在原生历史，未作为公开正文发布。
+阈值配置和 Provider Token 数由夹具控制，不是付费模型自然耗尽窗口或摘要质量验收。
+
+原生临时会话切换两模型分别得到 low/high 与 medium/max，设置 max、恢复原模型均成功，零生成调用。
+Kilo 可以查询其他模型选项；该轮 Rovai 目录尚未逐模型收集，后续接线见上节，不能把原缺口归为原生不支持。
+进程复用范围与 OpenCode/Codex 一致；本次另修共享 ACP 持 child 锁时 PID 读取丢失的竞态。
+权限、模型目录发现策略和平台资格不变，见[专项记录](versions/v1.72/kilo-auto-compaction-and-options.md)及
+[白名单证据](research/kilo-runtime/automatic-compaction-7.8.27-macos-arm64.json)。
+
+## 2026-11-10 Kilo 前台 task 展示与输出预算
+
+官方 **7.8.27**、macOS arm64、生产 Core/CLI 与本地受控 Provider 完成 **26 个 Run（24 成功、2 主动取消）**。
+前台 task 复用共享子代理工具行、任务参数与真实报告；同调用更新不增加步骤，未补采独立 child Session。
+短报告 115 字节未截断，长报告 7,680 字节及长命令 7,679 字节均截断并保持 UTF-8 完整；
+重开后预算仍生效，原生模型仍收到完整子代理报告。既有 Steer、权限/MCP/cwd 与文件矩阵继续通过。
+共享 command-view 的机器人图标和详情回归通过；本轮没有新的开发 App 人工点击或付费模型验收。
+[实施与解释](versions/v1.72/kilo-subagent-display.md)、[白名单证据](research/kilo-runtime/subagent-display-7.8.27-macos-arm64.json)。
+
+Skills 的 DocumentationOnly 是 Rovai 验收状态，不代表 Kilo 缺少原生 Skill。
+普通 Kilo 执行不按 7.8.27 精确锁版；Steer 仅接受稳定 7.x 且不低于 7.8.27，仍须满足协议与当前 Run 条件。
+这不是对所有 7.x 的实测声明；平台继续仅 macOS arm64 Preview，其他平台 NotQualified。
+
+## 2026-11-09 Kilo 成功 Steer 后常规复用
+
+Kilo 普通 `session/prompt` 的原请求与已提交补充请求共同收口为正常 end_turn 后，解除 Steer 退役标记，
+沿现有 Fleet 兼容/空闲检查复用 Host 与原 Session。失败、取消、未知和未收口不获得该成功解除。
+文件元数据映射与不同 cwd 的 MCP launcher 保持，问卷双入口按 User sequence 25 保持。
+原版本首轮成功插话的后继进程改变已有失败对照；连续三轮复用、CLI lease、取消后继的实际结果及范围
+见[验证记录](versions/v1.72/kilo-steer-reuse.md)。仍为 macOS arm64 Preview，不扩大版本或平台资格。
+
+## 2026-11-09 Kilo 依赖与边界自检
+
+官方 Kilo **7.8.27**、macOS arm64，生产 Core/CLI 在 PATH 无 Node、继承 `KILO_PURE=true` 的隔离环境
+完成 **19 个 Run（17 成功、2 主动取消）**。绝对 Python MCP 的不同 cwd 通过 bundled CLI 私有入口执行，
+相同 cwd 直接执行；子进程均确认找不到 Node，中文/空格入口与包含空字符串的 literal argv 保持。
+原生具体权限/ask/deny、MCP A→B→A、Steer/unknown/普通后继和运行文件清理继续通过。
+相对 `allowed.txt` 的 write 形成持久化一个 add、+1/−0；冻结 Kilo effort=high 正确展示。
+
+旧 Core 在无 Node 的同一 MCP 场景失败；正式 cleanup 的受控 1.75 秒延迟终态也先复现提前截断，
+修正为共享 2 秒 interrupt、2.5 秒 flush 与既有非 Windows 3 秒总预算后通过。
+重复的是 file-operation JSON 投影，未发生第二次磁盘写入；delete 留在 Diff，共同投影不再覆盖。
+本轮未重新调用真实付费模型，也未验证 Windows launcher 或真实 Command Code；Preview 范围保持。
+[实施与失败对照](versions/v1.72/kilo-boundary-fixes.md)、[白名单结果](research/kilo-runtime/boundaries-7.8.27-macos-arm64.json)。
+
+## 2026-11-09 Kilo 前台子代理、文件结果与 Steer
+
+macOS arm64、官方 Kilo **7.8.27** 的 `KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS=false`
+隐藏 task 的 background 参数并拒绝显式后台调用；前台子代理仍正常创建，范围与现有 Claude Code 策略一致。
+生产 Steer 使用同 Session 的普通 `session/prompt`，复用 Hermes 的多请求终态收口。
+共享 scheduler 仍按 Run 串行等回执；原生并发能力不等于多条用户 Steer 同时派发。
+
+隔离 Core 与本地 Provider 的 **19 个 Run** 完成：17 个 succeeded、2 个主动 cancelled。
+同 Run 更正、待回执时取消、unknown 不重发与取消后普通后继通过。
+初次取消后立即关闭 Host 曾使后继停在原生 snapshot 初始化；取消成功后沿现有 route 有界等待终态，
+再走共享进程清理，实际重跑后继成功。没有删除原生锁或创建替代 Session。
+
+`pnpm dev` 的独立数据/Skills/MCP/HOME/XDG 与 **sub2api/gpt-6.1-sol** 完成两轮真实 Run。
+首轮真实 UI 插话沿同一根 Run 被接受；第二轮 write 新建/覆盖和 apply_patch 修改完成，
+Files Changed 持久化为 **3 文件 +5/−3**，文件详情的红绿 hunk 在开发 App 中打开核对。
+该 GPT 原生选择 apply_patch，未提供 edit；原生 edit 由官方 CLI 与受控 Provider 独立实跑。
+文件投影消费原生成功结果，共用既有 patch normalizer；不把替换片段当作完整文件状态。
+
+范围仍是 macOS arm64 Preview，其他平台与版本未据此取得资格。实现、失败对照、简化取舍与
+[白名单机器证据](research/kilo-runtime/files-steer-7.8.27-macos-arm64.json)见
+[实施记录](versions/v1.72/kilo-files-steer-verification.md)。
 ## 2026-11-10 OpenCode Steer 资格与原生 Session 连续性
 
 OpenCode 官方 [v2.2.7 ACP](https://github.com/anomalyco/opencode/blob/v2.2.7/packages/cli/src/acp/turn.ts#L406-L423)

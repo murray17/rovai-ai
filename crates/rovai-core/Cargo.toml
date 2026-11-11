@@ -20,6 +20,7 @@ dunce = "1.0.5"
 getrandom = "0.3"
 gif = "0.14"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }
+indexmap = { version = "2", features = ["serde"] }
 json5 = "0.4"
 rusqlite = { version = "0.40.2", features = ["backup", "bundled", "functions"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

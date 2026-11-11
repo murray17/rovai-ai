@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { RuntimeModelSearch } from './RuntimeModelSearch'
 import { RuntimeParameterSelect } from './RuntimeParameterSelect'
+import { runtimeEffortOption } from './runtime-model-presentation'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -33,7 +34,7 @@ type RuntimeParameterProps = {
 }
 
 type ModelFieldsProps = RuntimeParameterProps & {
-  optionKey?: 'reasoning_effort' | 'effort' | 'thinking_level' | 'thinkingEffort' | 'thought_level'
+  optionKey?: ReturnType<typeof runtimeEffortOption>['key']
   optionLabel?: string
 }
 
@@ -206,6 +207,8 @@ function runtimeParametersFor(
       return <CodexRuntimeParameters {...props} />
     case 'pi':
       return <PiRuntimeParameters {...props} />
+    case 'kilo-cli':
+      return <div className="runtime-parameter-form">{modelFieldsFor('kilo-cli', props)}<p className="runtime-parameter-empty"><UiText zh="沿用 Kilo 原生权限" /></p></div>
     case 'opencode-cli':
       return <OpenCodeRuntimeParameters {...props} />
     case 'copilot-cli':
@@ -417,12 +420,10 @@ function modelFieldsFor(
 ): React.JSX.Element {
   switch (adapterKind) {
     case 'minimax-code-cli':
-      return <ModelFields {...props} optionKey="thinkingEffort" optionLabel={uiAttribute("思考强度")} />
     case 'command-code-cli':
     case 'claude-code-cli':
-      return <ModelFields {...props} optionKey="effort" optionLabel={uiAttribute("思考强度")} />
     case 'codebuddy-cli':
-      return <ModelFields {...props} optionKey="thought_level" optionLabel={uiAttribute("推理强度")} />
+    case 'kilo-cli':
     case 'codex-cli':
     case 'opencode-cli':
     case 'copilot-cli':
@@ -430,9 +431,10 @@ function modelFieldsFor(
     case 'qwen-code':
     case 'deepseek-harness':
     case 'hermes-cli':
-      return <ModelFields {...props} optionKey="reasoning_effort" optionLabel={uiAttribute("推理强度")} />
-    case 'pi':
-      return <ModelFields {...props} optionKey="thinking_level" optionLabel={uiAttribute('思考强度')} />
+    case 'pi': {
+      const { key, label } = runtimeEffortOption(adapterKind)
+      return <ModelFields {...props} optionKey={key} optionLabel={label} />
+    }
     case 'kiro-cli':
     case 'trae-cn-cli':
     case 'cursor-agent':

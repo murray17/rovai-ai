@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "validationKind": "official-cli-production-core-controlled-provider",
+  "recordedAt": "2026-11-10T08:57:59.587Z",
+  "baseline": "0ffb6fe460359c13deb05ac0e18c797ca355666c",
+  "runtimeVersion": "7.8.27",
+  "sourceCommit": "03a6f07d053cd7e6aa88fa1e258e93510335259f",
+  "platform": "darwin-arm64",
+  "fixture": "rovai-kilo-steer 复用-3u472auk",
+  "status": "passed",
+  "provider": "local-controlled",
+  "paidModelRerun": false,
+  "runCount": 23,
+  "runs": [
+    {
+      "status": "cancelled",
+      "count": 2
+    },
+    {
+      "status": "succeeded",
+      "count": 21
+    }
+  ],
+  "inputs": [
+    {
+      "input_kind": "start",
+      "status": "accepted",
+      "count": 23
+    },
+    {
+      "input_kind": "steer",
+      "status": "accepted",
+      "count": 3
+    },
+    {
+      "input_kind": "steer",
+      "status": "delivery_unknown",
+      "count": 1
+    }
+  ],
+  "steer": {
+    "run": "c7d97cc8-d1c8-4045-92fb-ef13192e354f",
+    "accepted": 3,
+    "sameRun": true,
+    "heldUntilAllRequests": true,
+    "warmReuseCycles": [
+      {
+        "cycle": 1,
+        "run": "c7d97cc8-d1c8-4045-92fb-ef13192e354f",
+        "nextRun": "be9c0d5c-32c9-4f29-b6e2-e7d8c3792abc",
+        "host": "55b8f766-0c5d-4fb6-bd18-49f2a7758dcc",
+        "session": "ses_e3b55b986ffe6y0MfqIzyad90j",
+        "cliMessageCommitted": true
+      },
+      {
+        "cycle": 2,
+        "run": "370d9fb7-eb73-435a-b00e-4e0c0325bf24",
+        "nextRun": "b3840e7e-5b78-4c85-9ebc-4000092c2070",
+        "host": "55b8f766-0c5d-4fb6-bd18-49f2a7758dcc",
+        "session": "ses_e3b55b986ffe6y0MfqIzyad90j",
+        "cliMessageCommitted": true
+      },
+      {
+        "cycle": 3,
+        "run": "df460cf9-5794-4d56-909a-2084dccd1bd0",
+        "nextRun": "db1074f5-1e63-4d05-9088-8abe003cc219",
+        "host": "55b8f766-0c5d-4fb6-bd18-49f2a7758dcc",
+        "session": "ses_e3b55b986ffe6y0MfqIzyad90j",
+        "cliMessageCommitted": true
+      }
+    ],
+    "cancelledWithPending": true,
+    "cancelledHostRetired": true
+  },
+  "cancelledPendingSteer": {
+    "run": "72894678-0285-4ada-8e5d-880322086998",
+    "host": "55b8f766-0c5d-4fb6-bd18-49f2a7758dcc",
+    "nextRun": "0344818b-6ac4-4c86-85b3-fee1b8bb2c43",
+    "nextHost": "39232984-dca8-4730-91e6-b4a08b466e88",
+    "oldHostRetired": true
+  },
+  "runtimeFilesCleaned": true,
+  "nodeAbsentFromPath": true,
+  "inheritedPureTrue": true,
+  "failureComparison": {
+    "fixture": "rovai-kilo-core-CX5RkK",
+    "firstSuccessfulSuccessorChangedHost": true
+  },
+  "scope": {
+    "admission": "macos-arm64-preview",
+    "otherAdaptersRetirementChanged": false,
+    "newRustTestFunctions": 0,
+    "newQueuesOrLifecycleManagers": false,
+    "questionPolicyChanged": false,
+    "allCancellationRacesProven": false
+  },
+  "gates": {
+    "cargoWorkspace": {
+      "passed": 484,
+      "ignored": 1
+    },
+    "activeInputExtendedOwner": "passed",
+    "frontend": {
+      "passed": 3193,
+      "skipped": 2
+    },
+    "node": {
+      "passed": 377,
+      "skipped": 2
+    },
+    "typecheck": "passed",
+    "desktopBuild": "passed",
+    "developmentLaunch": "passed",
+    "persistedDiffAndDraftPreserved": true,
+    "documentationTests": {
+      "passed": 10
+    },
+    "documentationCheck": "passed",
+    "documentationCiBase": "958784f6e17fc32d8b2753d7f14fd6122dceea9d",
+    "cargoFmt": "passed",
+    "nodeSyntax": "passed",
+    "gitDiffCheck": "passed"
+  }
+}

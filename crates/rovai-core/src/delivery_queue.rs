@@ -2979,6 +2979,7 @@ mod tests {
                         | crate::agent_profile::AdapterKind::ZcodeApp
                         | crate::agent_profile::AdapterKind::TraeCnCli
                         | crate::agent_profile::AdapterKind::OpencodeCli
+                        | crate::agent_profile::AdapterKind::KiloCli
                 )
             );
         }
@@ -4022,6 +4023,26 @@ mod tests {
             ("qwen-code", Some("0.18.4"), "acp-v1", None),
             ("minimax-code-cli", Some("0.6.12"), "acp-v1", None),
             ("hermes-cli", Some("0.22.4"), "acp-v1", None),
+            ("kilo-cli", Some("7.8.27"), "acp-v1", None),
+            ("kilo-cli", Some("7.9.0"), "acp-v1", None),
+            (
+                "kilo-cli",
+                Some("7.8.26"),
+                "acp-v1",
+                Some(R::VersionIncompatible),
+            ),
+            (
+                "kilo-cli",
+                Some("8.0.0"),
+                "acp-v1",
+                Some(R::VersionUnverified),
+            ),
+            (
+                "kilo-cli",
+                Some("7.9.0-beta.1"),
+                "acp-v1",
+                Some(R::VersionUnverified),
+            ),
             ("hermes-cli", Some("0.23.0"), "acp-v1", None),
             (
                 "hermes-cli",
