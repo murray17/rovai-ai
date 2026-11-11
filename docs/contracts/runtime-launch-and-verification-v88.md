@@ -1,15 +1,15 @@
 ---
 document_type: contract
 name: Runtime Launch and Verification
-version: v85
+version: v88
 status: accepted
 source_version: v1.72
 last_updated: 2026-11-11
 ---
 
-# Runtime Launch and Verification v85
+# Runtime Launch and Verification v88
 
-继承 [v84](runtime-launch-and-verification-v84.md)。本版只增加本机安装版本按需刷新，版本结果不参与 Host 生命周期。
+继承 [v87](runtime-launch-and-verification-v87.md)。本版只增加本机安装版本按需刷新，版本结果不参与 Host 生命周期。
 检测按钮、模型目录、正式初始化、认证与会话接续各自的职责保持。
 不查询远端版本、不下载安装、不修改用户原生配置。
 

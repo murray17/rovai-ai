@@ -1612,7 +1612,7 @@ User 已确认目录与文件共用候选及发送链路，模型只获得目录
 Run 正常执行后对实际安装按需、十分钟限频读取版本，失败只记日志；手动读取不受间隔限制，迟到结果不能覆盖新版本。
 版本只更新安装信息，不再触发 Host 退役、后继等待或占用拒绝；原有健康、取消、故障、配置失效与正常关闭规则保持。
 Pi 默认不设升级例外，使用隔离真实安装与模型核验原地升级后旧进程持续运行及冷启动接续。
-合同见 [Runtime Launch v85](../../contracts/runtime-launch-and-verification-v85.md)，
+合同见 [Runtime Launch v88](../../contracts/runtime-launch-and-verification-v88.md)，
 代码归属、Pi 结果及验证边界见[实施记录](implementation-plan.md#安装版本按需刷新与-host-生命周期解耦2026-11-11)。
 旧候选的 19 种真实模型验收及 Qwen/TRAE 首轮异常继续保留，不能作为当前版本驱动退役仍存在的证据。
 

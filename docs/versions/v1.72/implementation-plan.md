@@ -5035,7 +5035,7 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 ## 安装版本按需刷新与 Host 生命周期解耦（2026-11-11）
 
 User seq79 确认最终范围：保留实际目标的按需版本刷新，撤下 PR #1073 中所有版本驱动退役，不增加配置开关或 Pi 特例。
-合同为继承 v84 的 [Runtime Launch v85](../../contracts/runtime-launch-and-verification-v85.md)。
+合同为继承 v87 的 [Runtime Launch v88](../../contracts/runtime-launch-and-verification-v88.md)。
 
 - Core 保留原有 Check Manager、十分钟实际尝试间隔、手动共享与顺序围栏，成功和失败都计时；静态缓存不冒充实际读取。
   入口替换清理旧入口范围，切回相同路径也拒收原选择期间的迟到结果；不同有效环境保持各自归属。
