@@ -741,6 +741,11 @@ struct PendingSteerTarget {
     owner: AcpRuntimeOwner,
     session_id: String,
     prompt_id: String,
+    opencode_deadline: Option<tokio::time::Instant>,
+}
+
+fn opencode_steer_rejected(result: &Value) -> bool {
+    result["outcome"] == "promptRequired" && result["reason"] == "noRunningTurn"
 }
 
 const ACP_CLIENT_TERMINAL_DEFAULT_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -1471,6 +1476,7 @@ pub(crate) struct AcpHost {
     next_compaction_observation_sequence: AtomicU64,
     grok_acceptance_auto_compact_armed: AtomicBool,
     retire_after_steer: AtomicBool,
+    opencode_steering_changed: Notify,
     qwen_steering: Mutex<HashMap<String, QueuedSteeringInput>>,
     routes: RwLock<HashMap<String, AcpSessionRoute>>,
     late_context_owners: RwLock<HashMap<String, (AcpRuntimeOwner, Instant)>>,
@@ -2065,6 +2071,7 @@ impl AcpHost {
             next_compaction_observation_sequence: AtomicU64::new(1),
             grok_acceptance_auto_compact_armed: AtomicBool::new(false),
             retire_after_steer: AtomicBool::new(false),
+            opencode_steering_changed: Notify::new(),
             qwen_steering: Mutex::new(HashMap::new()),
             routes: RwLock::new(HashMap::new()),
             late_context_owners: RwLock::new(HashMap::new()),
@@ -2335,8 +2342,12 @@ impl AcpHost {
                         if message.get("method").is_none()
                             && let Some(id) = message.get("id").and_then(Value::as_u64)
                         {
-                            if let Some(pending) = host.pending.lock().await.remove(&id) {
+                            let pending = host.pending.lock().await.remove(&id);
+                            if let Some(pending) = pending {
                                 host.complete_pending(id, pending, message).await;
+                                if host.adapter_kind == AdapterKind::OpencodeCli {
+                                    host.opencode_steering_changed.notify_waiters();
+                                }
                             }
                             continue;
                         }
@@ -2684,6 +2695,7 @@ impl AcpHost {
                 let _ = sender.send(Err(anyhow::anyhow!("ACP Host exited")));
             }
         }
+        self.opencode_steering_changed.notify_waiters();
         for owner in self.owners().await {
             let _ = self
                 .incoming
@@ -2838,8 +2850,10 @@ impl AcpHost {
                     let active = self.routes.read().await.get(&target.session_id).is_some_and(|route|
                         route.owner == target.owner && !route.client_terminal_create_cancelled
                         && matches!(&route.phase, AcpSessionPhase::PromptActive(p) if p.prompt_id == target.prompt_id));
-                    let explicit_rejection = self.adapter_kind == AdapterKind::CodebuddyCli
-                        && message["result"]["steered"] == false;
+                    let explicit_rejection = (self.adapter_kind == AdapterKind::CodebuddyCli
+                        && message["result"]["steered"] == false)
+                        || (self.adapter_kind == AdapterKind::OpencodeCli
+                            && opencode_steer_rejected(&message["result"]));
                     if !active && response_error.is_none() && !explicit_rejection {
                         let _ = sender.send(Err(anyhow::anyhow!(
                             "ACP input response arrived after the target execution ended"
@@ -3345,6 +3359,7 @@ impl AcpHost {
         {
             route.client_terminal_create_cancelled = true;
         }
+        self.opencode_steering_changed.notify_waiters();
     }
 
     async fn release_client_terminals_for_session(
@@ -3649,7 +3664,7 @@ impl AcpHost {
                 // These active-input adapters need the initial native input
                 // acknowledged while work is running. Only prompt-scoped model
                 // or tool activity counts; catalog/history/user echoes do not.
-                if matches!(
+                if (matches!(
                     self.adapter_kind,
                     AdapterKind::CodebuddyCli
                         | AdapterKind::QwenCode
@@ -3659,7 +3674,14 @@ impl AcpHost {
                         | AdapterKind::MinimaxCodeCli
                         | AdapterKind::HermesCli
                         | AdapterKind::KiloCli
-                ) && !active_prompt.acceptance_emitted
+                ) || (self.adapter_kind == AdapterKind::OpencodeCli
+                    && rovai_core::steer::protocol_unavailable(
+                        "opencode-cli",
+                        self.launch_runtime.reported_version.as_deref(),
+                        &self.launch_runtime.protocol_version,
+                    )
+                    .is_none()))
+                    && !active_prompt.acceptance_emitted
                     && (matches!(
                         message
                             .pointer("/params/update/sessionUpdate")
@@ -5487,12 +5509,14 @@ impl AcpRuntime {
             }
         }
         if model_source == "explicit" && self.host.adapter_kind == AdapterKind::HermesCli {
-            anyhow::ensure!(
-                model_options
-                    .as_object()
-                    .is_some_and(|options| options.is_empty()),
-                "Hermes ACP does not support generic per-Session model options"
-            );
+            let initialize = self.host.initialize_result.read().await.clone();
+            let effort = crate::hermes::reasoning_effort(
+                model_options,
+                initialize
+                    .as_ref()
+                    .and_then(|value| value.pointer("/agentInfo/version"))
+                    .and_then(Value::as_str),
+            )?;
             // Compare native provider forms locally; pass a changed choice intact.
             let current = session_result
                 .as_ref()
@@ -5500,6 +5524,13 @@ impl AcpRuntime {
                 .and_then(Value::as_str);
             if !crate::hermes::model_selection_matches(model, current) {
                 self.set_model(&session_id, model).await?;
+            }
+            // Apply frozen intent after the model even when the model matched.
+            // Native errors use the existing preparation failure path. Replies
+            // are best-effort metadata, not an equality/activation gate.
+            if let Some(effort) = effort {
+                self.set_config_option(&session_id, "reasoning_effort", effort)
+                    .await?;
             }
         } else if model_source == "explicit" {
             if self.host.adapter_kind == AdapterKind::DeepseekHarness {
@@ -5946,6 +5977,23 @@ impl AcpRuntime {
         if !active {
             return Err(rovai_core::steer::ActiveInputNotAccepted.into());
         }
+        let opencode = self.adapter_kind() == AdapterKind::OpencodeCli;
+        if opencode
+            && self
+                .host
+                .initialize_result
+                .read()
+                .await
+                .as_ref()
+                .and_then(|result| {
+                    result
+                        .pointer("/_meta/steering/supported")
+                        .and_then(Value::as_bool)
+                })
+                != Some(true)
+        {
+            return Err(rovai_core::steer::ActiveInputNotAccepted.into());
+        }
         if self.adapter_kind() == AdapterKind::QwenCode {
             let (sender, receipt) = oneshot::channel();
             self.host.qwen_steering.lock().await.insert(
@@ -6006,7 +6054,7 @@ impl AcpRuntime {
                 json!({"sessionId":session,"text":text,"clientRequestId":input_id}),
             ),
             AdapterKind::GrokBuild => ("_x.ai/interject", json!({"sessionId":session,"text":text})),
-            AdapterKind::TraeCnCli => (
+            AdapterKind::TraeCnCli | AdapterKind::OpencodeCli => (
                 "_session/steering",
                 json!({"sessionId":session,"prompt":[{"type":"text","text":text}]}),
             ),
@@ -6053,6 +6101,7 @@ impl AcpRuntime {
                         owner: self.owner.clone(),
                         session_id: session.clone(),
                         prompt_id: expected_prompt.to_string(),
+                        opencode_deadline: None,
                     }
                 }),
             },
@@ -6060,36 +6109,68 @@ impl AcpRuntime {
         // Keep unknown and failed Steer on the existing retirement path. Kilo
         // clears this only after its complete successful aggregate terminal.
         self.host.retire_after_steer.store(true, Ordering::Release);
-        timeout(
+        let written = timeout(
             Duration::from_secs(10),
             self.host
                 .send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params})),
         )
         .await
-        .context("ACP active input write timed out")??;
+        .context("ACP active input write timed out")
+        .and_then(|result| result);
+        if let Err(error) = written {
+            if opencode {
+                self.host.pending.lock().await.remove(&id);
+                self.host.opencode_steering_changed.notify_waiters();
+            }
+            return Err(error);
+        }
+        let opencode_deadline = tokio::time::Instant::now() + Duration::from_secs(45);
+        if opencode
+            && let Some(PendingRpc::Response {
+                steer_target: Some(target),
+                ..
+            }) = self.host.pending.lock().await.get_mut(&id)
+        {
+            target.opencode_deadline = Some(opencode_deadline);
+        }
         drop(routes);
         drop(ingress);
-        // These are full prompts. Use the Run's cancellation/lifetime budget.
-        let result = if matches!(
-            self.adapter_kind(),
-            AdapterKind::HermesCli | AdapterKind::KiloCli
-        ) {
-            response
+        // A slash steer normally returns immediately, but its native fallback
+        // is a full prompt. Use the Run's existing cancellation/lifetime budget.
+        let result = async {
+            if matches!(
+                self.adapter_kind(),
+                AdapterKind::HermesCli | AdapterKind::KiloCli
+            ) {
+                response
+                    .await
+                    .context("ACP supplemental prompt disconnected")?
+            } else if opencode {
+                tokio::time::timeout_at(opencode_deadline, response)
+                    .await
+                    .context("ACP active input response timed out")?
+                    .context("ACP active input response disconnected")?
+            } else {
+                timeout(
+                    Duration::from_secs(if self.adapter_kind() == AdapterKind::ZcodeApp {
+                        600
+                    } else {
+                        45
+                    }),
+                    response,
+                )
                 .await
-                .context("ACP supplemental prompt disconnected")?
-        } else {
-            timeout(
-                Duration::from_secs(if self.adapter_kind() == AdapterKind::ZcodeApp {
-                    600
-                } else {
-                    45
-                }),
-                response,
-            )
-            .await
-            .context("ACP active input response timed out")?
-            .context("ACP active input response disconnected")?
-        };
+                .context("ACP active input response timed out")?
+                .context("ACP active input response disconnected")?
+            }
+        }
+        .await;
+        if opencode {
+            // This is a bounded in-flight request, not a receipt tracker. After
+            // its original deadline the input stays unknown and is never resent.
+            self.host.pending.lock().await.remove(&id);
+            self.host.opencode_steering_changed.notify_waiters();
+        }
         let result = match result {
             Err(error)
                 if self.adapter_kind() == AdapterKind::KiloCli
@@ -6188,6 +6269,14 @@ impl AcpRuntime {
         if self.adapter_kind() == AdapterKind::TraeCnCli && result["outcome"] != "injected" {
             bail!("TRAE did not confirm active input injection");
         }
+        if opencode {
+            if opencode_steer_rejected(&result) {
+                return Err(rovai_core::steer::ActiveInputNotAccepted.into());
+            }
+            if result["outcome"] != "injected" {
+                bail!("OpenCode did not confirm active input injection");
+            }
+        }
         if self.adapter_kind() == AdapterKind::CodebuddyCli {
             if codebuddy_legacy {
                 if result["stopReason"] != "end_turn" {
@@ -6204,6 +6293,58 @@ impl AcpRuntime {
             }
         }
         Ok(acp_prompt_id(&self.host.host_instance_id, id))
+    }
+
+    async fn finish_opencode_steering(&self) {
+        if self.adapter_kind() != AdapterKind::OpencodeCli {
+            return;
+        }
+        let Some(session) = self.session_id().await else {
+            return;
+        };
+        loop {
+            let changed = self.host.opencode_steering_changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let prompt = {
+                let routes = self.host.routes.read().await;
+                let Some(route) = routes.get(&session) else {
+                    return;
+                };
+                if route.owner != self.owner || route.client_terminal_create_cancelled {
+                    return;
+                }
+                let AcpSessionPhase::PromptCompleted(prompt) = &route.phase else {
+                    return;
+                };
+                prompt.prompt_id.clone()
+            };
+            let deadline = self
+                .host
+                .pending
+                .lock()
+                .await
+                .values()
+                .filter_map(|pending| {
+                    let PendingRpc::Response {
+                        steer_target: Some(target),
+                        ..
+                    } = pending
+                    else {
+                        return None;
+                    };
+                    (target.owner == self.owner
+                        && target.session_id == session
+                        && target.prompt_id == prompt)
+                        .then_some(target.opencode_deadline)
+                        .flatten()
+                })
+                .max();
+            let Some(deadline) = deadline else { return };
+            if !self.host.is_alive() || tokio::time::timeout_at(deadline, changed).await.is_err() {
+                return;
+            }
+        }
     }
 
     pub async fn install_compaction_observer(&self, lease: CompactionObserverLease) -> Result<()> {
@@ -7217,6 +7358,15 @@ impl AcpCliRuntimeAdapter {
         agent_run_id: &str,
         execution_epoch: i64,
     ) {
+        if self.kind == AdapterKind::OpencodeCli
+            && let Some(runtime) = self.get_agent_run(agent_run_id, execution_epoch).await
+        {
+            // PromptCompleted already closes Steer admission. Preserve the
+            // reader's terminal/receipt order before retiring this Host, using
+            // only the outstanding requests' original deadlines. Stop bypasses
+            // this wait and wakes it through the existing cancellation fence.
+            runtime.finish_opencode_steering().await;
+        }
         // Publish a quiescent Host before the durable terminal lets a successor
         // Run compete for it. Besides Kiro's process-scoped Session lock, warm
         // ACP Hosts retain a PromptCompleted route until detach; exposing the
@@ -13447,6 +13597,7 @@ while IFS= read -r ignored; do :; done
             (AdapterKind::MinimaxCodeCli, false),
             (AdapterKind::HermesCli, false),
             (AdapterKind::KiloCli, false),
+            (AdapterKind::OpencodeCli, false),
         ] {
             for (late, unsupported, bad_owner) in [
                 (false, false, false),
@@ -13459,13 +13610,19 @@ while IFS= read -r ignored; do :; done
                     && unsupported
                     && (!matches!(
                         kind,
-                        AdapterKind::CodebuddyCli | AdapterKind::HermesCli | AdapterKind::KiloCli
+                        AdapterKind::CodebuddyCli
+                            | AdapterKind::HermesCli
+                            | AdapterKind::KiloCli
+                            | AdapterKind::OpencodeCli
                     ) || legacy)
                 {
                     continue;
                 }
                 if bad_owner
-                    && (!matches!(kind, AdapterKind::CodebuddyCli | AdapterKind::KiroCli) || legacy)
+                    && (!matches!(
+                        kind,
+                        AdapterKind::CodebuddyCli | AdapterKind::KiroCli | AdapterKind::OpencodeCli
+                    ) || legacy)
                 {
                     continue;
                 }
@@ -13478,6 +13635,7 @@ while IFS= read -r ignored; do :; done
                             | AdapterKind::MinimaxCodeCli
                             | AdapterKind::HermesCli
                             | AdapterKind::KiloCli
+                            | AdapterKind::OpencodeCli
                     ) || legacy)
                 {
                     continue;
@@ -13497,7 +13655,9 @@ while IFS= read -r ignored; do :; done
                     r#"{"mode":"steered","turnId":"turn-1"}"#
                 } else if kind == AdapterKind::GrokBuild {
                     r#"{"result":{"status":"queued"}}"#
-                } else if kind == AdapterKind::TraeCnCli {
+                } else if kind == AdapterKind::OpencodeCli && bad_owner {
+                    r#"{"outcome":"promptRequired","reason":"unexpected"}"#
+                } else if matches!(kind, AdapterKind::TraeCnCli | AdapterKind::OpencodeCli) {
                     r#"{"outcome":"injected"}"#
                 } else {
                     r#"{"stopReason":"end_turn"}"#
@@ -13524,6 +13684,15 @@ printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'"#
                 let supplement = if unsupported && kind == AdapterKind::CodebuddyCli {
                     let rejection = format!(
                         "printf '%s\\n' '{{\"id\":{supplement_request},\"result\":{{\"steered\":false,\"reason\":\"idle\"}}}}'"
+                    );
+                    if late {
+                        format!("{terminal}\n{rejection}")
+                    } else {
+                        format!("{rejection}\nIFS= read -r finish || exit 1\n{terminal}")
+                    }
+                } else if unsupported && kind == AdapterKind::OpencodeCli {
+                    let rejection = format!(
+                        "printf '%s\\n' '{{\"id\":{supplement_request},\"result\":{{\"outcome\":\"promptRequired\",\"reason\":\"noRunningTurn\"}}}}'"
                     );
                     if late {
                         format!("{terminal}\n{rejection}")
@@ -13581,12 +13750,17 @@ IFS= read -r finish || exit 1
                         "printf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"id\":{supplement_request},\"result\":{response}}}'\nIFS= read -r finish || exit 1\n{terminal}"
                     )
                 };
+                let agent_version = if kind == AdapterKind::OpencodeCli {
+                    "2.2.7"
+                } else {
+                    "0.22.4"
+                };
                 make_executable(
                     &executable,
                     &format!(
                         r#"#!/bin/sh
 IFS= read -r initialize || exit 1
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentInfo":{{"version":"0.22.4"}},"agentCapabilities":{{}},"authMethods":[{{"id":"cached_token","name":"Cached token"}}]}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentInfo":{{"version":"{agent_version}"}},"agentCapabilities":{{}},"_meta":{{"steering":{{"supported":true}}}},"authMethods":[{{"id":"cached_token","name":"Cached token"}}]}}}}'
 {authentication}
 IFS= read -r original || exit 1
 IFS= read -r supplemental || exit 1
@@ -13606,8 +13780,11 @@ while IFS= read -r ignored; do :; done
                 if kind == AdapterKind::KiloCli {
                     frozen.reported_version = Some("7.8.27".into());
                 }
+                if kind == AdapterKind::OpencodeCli {
+                    frozen.reported_version = Some("2.2.7".into());
+                }
                 frozen.permissions = serde_json::from_value(json!({"adapterKind":kind.as_str(),"schemaVersion":1,
-                    "values": if kind == AdapterKind::QwenCode { json!({"approval_mode":"yolo"}) } else if kind == AdapterKind::KiroCli { json!({"trust_all_tools":"on"}) } else if kind == AdapterKind::HermesCli { json!({"permission_mode":"dont_ask"}) } else if kind == AdapterKind::KiloCli { json!({"permission":"allow"}) } else { json!({"permission_mode":"bypassPermissions"}) }})).unwrap();
+                    "values": if kind == AdapterKind::QwenCode { json!({"approval_mode":"yolo"}) } else if kind == AdapterKind::KiroCli { json!({"trust_all_tools":"on"}) } else if kind == AdapterKind::HermesCli { json!({"permission_mode":"dont_ask"}) } else if matches!(kind, AdapterKind::OpencodeCli | AdapterKind::KiloCli) { json!({"permission":"allow"}) } else { json!({"permission_mode":"bypassPermissions"}) }})).unwrap();
                 let workspace =
                     AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().into());
                 let (incoming, mut receiver) = mpsc::unbounded_channel();
@@ -13647,6 +13824,25 @@ while IFS= read -r ignored; do :; done
                 );
                 *runtime.session_id.write().await = Some("session-steer".into());
                 let prompt = runtime.start_prompt("initial", "ORIGINAL").await.unwrap();
+                if kind == AdapterKind::OpencodeCli {
+                    for capability in [Value::Null, json!(false), json!("true")] {
+                        host.initialize_result.write().await.as_mut().unwrap()["_meta"]["steering"]
+                            ["supported"] = capability;
+                        assert!(
+                            runtime
+                                .steer(&prompt, "no-capability", "NEVER")
+                                .await
+                                .unwrap_err()
+                                .is::<rovai_core::steer::ActiveInputNotAccepted>()
+                        );
+                        assert!(
+                            !requests.exists(),
+                            "unadvertised extensions must not cross stdin"
+                        );
+                    }
+                    host.initialize_result.write().await.as_mut().unwrap()["_meta"]["steering"]["supported"] =
+                        json!(true);
+                }
                 for update in [
                     json!({"sessionUpdate":"available_commands_update","availableCommands":[]}),
                     json!({"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"ORIGINAL"}}),
@@ -13736,6 +13932,17 @@ while IFS= read -r ignored; do :; done
                         assert_eq!(requests[1]["method"], "session/prompt");
                     }
                 }
+                if kind == AdapterKind::OpencodeCli {
+                    let request: Value =
+                        serde_json::from_str(std::fs::read_to_string(&requests).unwrap().trim())
+                            .unwrap();
+                    assert_eq!(request["method"], "_session/steering");
+                    assert_eq!(
+                        request["params"],
+                        json!({"sessionId":"session-steer","prompt":[{"type":"text","text":"STEER"}]})
+                    );
+                    assert_eq!(request["id"], supplement_request);
+                }
                 if unsupported {
                     assert!(
                         result
@@ -13803,7 +14010,11 @@ while IFS= read -r ignored; do :; done
                         "a retired Host cannot wait for the reusable-Host cancellation fence"
                     );
                 }
-                if kind == AdapterKind::KiroCli && !late && !unsupported && !bad_owner {
+                if matches!(kind, AdapterKind::KiroCli | AdapterKind::OpencodeCli)
+                    && !late
+                    && !unsupported
+                    && !bad_owner
+                {
                     // Consume both reader events before polling the receipt. A
                     // scheduler delay must not turn ACK -> terminal into the
                     // same outcome as terminal -> ACK.
@@ -13830,9 +14041,14 @@ while IFS= read -r ignored; do :; done
                                 owner: runtime.owner.clone(),
                                 session_id: "session-steer".into(),
                                 prompt_id: prepared.prompt_id,
+                                opencode_deadline: None,
                             }),
                         };
-                        let ack = json!({"id":999,"result":{"queued":true}});
+                        let ack = if kind == AdapterKind::OpencodeCli {
+                            json!({"id":999,"result":{"outcome":"injected"}})
+                        } else {
+                            json!({"id":999,"result":{"queued":true}})
+                        };
                         let end =
                             json!({"id":prepared.request_id,"result":{"stopReason":"end_turn"}});
                         if ack_first {
@@ -13850,7 +14066,15 @@ while IFS= read -r ignored; do :; done
                         ));
                         let result = receipt.await.unwrap();
                         if ack_first {
-                            assert_eq!(result.unwrap()["queued"], true);
+                            let result = result.unwrap();
+                            assert_eq!(
+                                if kind == AdapterKind::OpencodeCli {
+                                    result["outcome"] == "injected"
+                                } else {
+                                    result["queued"] == true
+                                },
+                                true
+                            );
                         } else {
                             assert!(
                                 !result
@@ -13859,6 +14083,90 @@ while IFS= read -r ignored; do :; done
                                 "a late response cannot prove that the input was never submitted"
                             );
                         }
+                    }
+                }
+                if kind == AdapterKind::OpencodeCli && !late && !unsupported && !bad_owner {
+                    // Completed Prompt admission is closed while already-sent
+                    // RPCs retain only their original bounded receipt window.
+                    for finish in ["receipt", "deadline", "stop"] {
+                        let prompt_id = match &host.routes.read().await["session-steer"].phase {
+                            AcpSessionPhase::PromptCompleted(prompt) => prompt.prompt_id.clone(),
+                            _ => panic!("original Prompt must already be complete"),
+                        };
+                        let (sender, receipt) = oneshot::channel();
+                        host.pending.lock().await.insert(
+                            999,
+                            PendingRpc::Response {
+                                method: "_session/steering".into(),
+                                sender,
+                                steer_target: Some(PendingSteerTarget {
+                                    owner: runtime.owner.clone(),
+                                    session_id: "session-steer".into(),
+                                    prompt_id,
+                                    opencode_deadline: Some(
+                                        tokio::time::Instant::now()
+                                            + if finish == "deadline" {
+                                                Duration::from_millis(20)
+                                            } else {
+                                                Duration::from_secs(45)
+                                            },
+                                    ),
+                                }),
+                            },
+                        );
+                        let waiter = tokio::spawn({
+                            let runtime = runtime.clone();
+                            async move { runtime.finish_opencode_steering().await }
+                        });
+                        tokio::task::yield_now().await;
+                        assert!(
+                            !waiter.is_finished(),
+                            "natural release cannot discard an in-flight request"
+                        );
+                        if finish == "receipt" {
+                            let pending = host.pending.lock().await.remove(&999).unwrap();
+                            host.complete_pending(999, pending,
+                                json!({"id":999,"result":{"outcome":"promptRequired","reason":"noRunningTurn"}})).await;
+                            host.opencode_steering_changed.notify_waiters();
+                            assert!(opencode_steer_rejected(&receipt.await.unwrap().unwrap()));
+                        } else if finish == "stop" {
+                            let cancelling = tokio::spawn({
+                                let runtime = runtime.clone();
+                                async move {
+                                    runtime
+                                        .cancel_until(
+                                            tokio::time::Instant::now() + Duration::from_secs(2),
+                                        )
+                                        .await
+                                }
+                            });
+                            timeout(Duration::from_secs(1), async {
+                                while !host.routes.read().await["session-steer"]
+                                    .client_terminal_create_cancelled
+                                {
+                                    tokio::task::yield_now().await;
+                                }
+                            })
+                            .await
+                            .unwrap();
+                            assert!(
+                                !cancelling.is_finished(),
+                                "cancellation still owns the pending native request"
+                            );
+                            let pending = host.pending.lock().await.remove(&999).unwrap();
+                            host.complete_pending(999, pending,
+                                json!({"id":999,"result":{"outcome":"promptRequired","reason":"noRunningTurn"}})).await;
+                            timeout(Duration::from_secs(1), cancelling)
+                                .await
+                                .unwrap()
+                                .unwrap()
+                                .unwrap();
+                        }
+                        timeout(Duration::from_secs(1), waiter)
+                            .await
+                            .unwrap()
+                            .unwrap();
+                        host.pending.lock().await.remove(&999);
                     }
                 }
                 if matches!(kind, AdapterKind::HermesCli | AdapterKind::KiloCli)
@@ -14672,7 +14980,89 @@ for line in sys.stdin:
                     Some("session/set_mode"),
                     vec!["session/set_mode"],
                 ),
+                (
+                    "effort-high",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-none",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-default",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-model-default",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-no-echo",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-deferred",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    None,
+                    vec!["session/set_config_option"],
+                ),
+                (
+                    "effort-switch",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/other",
+                    None,
+                    vec!["session/set_model", "session/set_config_option"],
+                ),
+                (
+                    "effort-refused",
+                    "explicit",
+                    Some("provider-a/model"),
+                    Some("dont_ask"),
+                    "provider-a/model",
+                    Some("session/set_config_option"),
+                    vec!["session/set_config_option"],
+                ),
             ] {
+                let effort = match case {
+                    "effort-none" => Some("none"),
+                    "effort-default" => Some("default"),
+                    "effort-model-default" => None,
+                    value if value.starts_with("effort-") => Some("high"),
+                    _ => None,
+                };
+                let model_options = effort
+                    .map(|value| json!({"reasoning_effort":value}))
+                    .unwrap_or(json!({}));
                 let root = std::env::temp_dir()
                     .join(format!("rovai-hermes-model-{}", uuid::Uuid::new_v4()));
                 std::fs::create_dir_all(&root).unwrap();
@@ -14692,7 +15082,7 @@ for line in sys.stdin:
                 std::fs::write(
                     executable.with_extension("json"),
                     serde_json::to_vec(&json!({
-                        "session": session, "failure":failure,
+                        "session": session, "failure":failure, "case":case, "version":if case.starts_with("effort-") { "0.23.0" } else { "0.22.4" },
                     }))
                     .unwrap(),
                 )
@@ -14718,9 +15108,11 @@ for line in sys.stdin:
     if method == config['failure']:
         response['error'] = {'code':-32602, 'message':'native configuration refused'}
     elif method == 'initialize':
-        response['result'] = {'protocolVersion':1,'agentInfo':{'version':'0.22.4'},'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
+        response['result'] = {'protocolVersion':1,'agentInfo':{'version':config['version']},'agentCapabilities':{'sessionCapabilities':{'resume':{}}}}
     elif method in ('session/new', 'session/resume'):
         response['result'] = config['session']
+    elif method == 'session/set_config_option':
+        response['result'] = {} if config['case'] == 'effort-no-echo' else {'configOptions':[{'id':'reasoning_effort','currentValue':'low' if config['case'] == 'effort-deferred' else 'medium' if params['value'] == 'default' else params['value']}]}
     elif method == 'session/prompt':
         response['result'] = {'stopReason':'end_turn'}
     elif method in ('session/set_model', 'session/set_mode', 'audit/terminal-barrier'):
@@ -14780,7 +15172,7 @@ for line in sys.stdin:
                         },
                         source,
                         target,
-                        &json!({}),
+                        &model_options,
                         &BTreeMap::new(),
                     )
                     .await;
@@ -14826,6 +15218,13 @@ for line in sys.stdin:
                 for request in &requests {
                     if request["method"] == "session/set_model" {
                         assert_eq!(request["params"]["modelId"], target);
+                    }
+                    if request["method"] == "session/set_config_option" {
+                        assert_eq!(request["params"]["configId"], "reasoning_effort");
+                        assert_eq!(
+                            request["params"]["value"].as_str(),
+                            Some(effort.unwrap_or("default"))
+                        );
                     }
                     if request["method"] == "session/set_mode" {
                         assert_eq!(request["params"]["modeId"], "dont_ask");
@@ -16754,6 +17153,22 @@ while IFS= read -r ignored; do :; done
             can_resume: true,
             can_load_history: true,
         };
+        // A retired OpenCode Host does not retire its Native Session. A cold
+        // successor uses the existing restore capability with that exact ID.
+        for (capabilities, expected) in [
+            (resume_and_load, AcpSessionContinuation::Resume),
+            (load_only, AcpSessionContinuation::HistoryRestore),
+        ] {
+            assert_eq!(
+                select_acp_session_continuation(
+                    AdapterKind::OpencodeCli,
+                    false,
+                    Some("opencode-steered-session"),
+                    capabilities,
+                ),
+                expected
+            );
+        }
 
         assert_eq!(
             select_acp_session_continuation(

@@ -10,7 +10,7 @@ last_updated: 2026-11-08
 User sequence 4 确认 [R1](model-context-change-kilo-acp.md)后，在 `rovai/kilo-acp` 实施。
 worktree 为 `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
 编码基线为 `958784f6e17fc32d8b2753d7f14fd6122dceea9d`。
-初次实施按 [D76](decisions.md#v1-72-d76)开放 macOS arm64 Preview；本记录不声明 First-Class。
+初次实施按 [D77](decisions.md#v1-72-d77)开放 macOS arm64 Preview；本记录不声明 First-Class。
 当前平台范围见 [Platform Admission](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)。
 
 本页保留 `1eef483cb` 的初轮实现与验收范围；后续原生语义修正、逐 Run Bootstrap 与 Steer 调查见[复核记录](kilo-acp-review-fixes.md)。
@@ -27,7 +27,7 @@ worktree 为 `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-kilo-acp`，
 - Settings、成员 Runtime、模型/权限、引导与监控目录增加 Kilo 和官方图标，沿现有视觉与控件。
 - Migration 223 将 schema 172 升到 173，仅扩展 Runtime/Skill 闭集；不重写旧 Binding、Run 或输入。
 
-规范见 [Launch v77](../../contracts/runtime-launch-and-verification-v77.md)，
+规范见 [Launch v78](../../contracts/runtime-launch-and-verification-v78.md)，
 原生上游与实施前矩阵见[研究记录](../../research/kilo-runtime/README.md)。
 
 ## 验证口径

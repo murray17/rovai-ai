@@ -9,8 +9,8 @@ last_updated: 2026-11-09
 
 在原 `rovai/kilo-acp` worktree 修正提交 `1eef483cb` 的语义漏项，不另建执行框架。
 User sequence 7 提供源码审查，sequence 8 追加 Steer 可行性问题；每项均对照官方 7.8.27 固定源码与现有 owner。
-本轮复核当时规范为 [Launch v78](../../contracts/runtime-launch-and-verification-v78.md)，理由见 [D77](decisions.md#v1-72-d77)。
-本记录保留复核时点；后续 [Launch v79](../../contracts/runtime-launch-and-verification-v79.md) 已接通 Core Steer，
+本轮复核当时规范为 [Launch v79](../../contracts/runtime-launch-and-verification-v79.md)，理由见 [D78](decisions.md#v1-72-d78)。
+本记录保留复核时点；后续 [Launch v80](../../contracts/runtime-launch-and-verification-v80.md) 已接通 Core Steer，
 真实 sub2api 开发 App 和取消恢复结果见[后续实施记录](kilo-files-steer-verification.md)。
 B/P 及其冻结、预算、formatter、证据版本保持已确认 R1；没有新增 SHA256、压缩观察器或进程池。
 

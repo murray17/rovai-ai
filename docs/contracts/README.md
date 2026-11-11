@@ -177,13 +177,14 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Open Projection v10（渠道分支历史）](camp-open-projection-channel-v10.md) | v9 保留；Camp/Navigation 增加可选 channelSource，原始 title 不变；合并时保留原文以区分同号合同 |
 | [Camp Open Projection v9（历史）](camp-open-projection-v9.md) | v8 保留；Snapshot 34/Open 5 增加可选 member.fast，仅查询安全缓存 |
 | [Native Interactions v1（当前）](native-interactions-v1.md) | Pi 四类对话、共用待处理区域、原路回答及运行内去重／期限／停止边界 |
-| [Runtime Launch and Verification v83（当前）](runtime-launch-and-verification-v83.md) | Kilo MCP 下一 Run 生效、原生权限继承及共享取消 Warm／回收；原输入与平台资格保持 |
-| [Runtime Launch and Verification v82（历史）](runtime-launch-and-verification-v82.md) | Kilo 逐模型 effort 复用 MiniMax 非生成目录收集与健康／完整目录分离；不改执行或权限 |
-| [Runtime Launch and Verification v81（历史）](runtime-launch-and-verification-v81.md) | Kilo 成功 Steer 全部收口后沿普通 Fleet 复用 Host；失败、取消与未收口维持原清理 |
-| [Runtime Launch and Verification v80（历史）](runtime-launch-and-verification-v80.md) | Kilo 回调前提、无隐式 Node 的共享 MCP cwd、统一取消期限、路径/投影与 effort 展示 |
-| [Runtime Launch and Verification v79（历史）](runtime-launch-and-verification-v79.md) | Kilo 原生禁后台、同 Run Steer 多请求收口、write/edit/apply_patch 结果投影；B/P 不变 |
-| [Runtime Launch and Verification v78（历史）](runtime-launch-and-verification-v78.md) | Kilo 原生配置保序/最终默认权限、MCP cwd/退役、effort、DB/Skills 来源与认证投影 |
-| [Runtime Launch and Verification v77（历史）](runtime-launch-and-verification-v77.md) | Kilo 独立官方 ACP、单 Binding Host、原生 instructions、逐消息数值观察与 macOS arm64 Preview |
+| [Runtime Launch and Verification v84（当前）](runtime-launch-and-verification-v84.md) | Kilo MCP 下一 Run 生效、原生权限继承及共享取消 Warm／回收；原输入与平台资格保持 |
+| [Runtime Launch and Verification v83（历史）](runtime-launch-and-verification-v83.md) | Kilo 逐模型 effort 复用 MiniMax 非生成目录收集与健康／完整目录分离；不改执行或权限 |
+| [Runtime Launch and Verification v82（历史）](runtime-launch-and-verification-v82.md) | Kilo 成功 Steer 全部收口后沿普通 Fleet 复用 Host；失败、取消与未收口维持原清理 |
+| [Runtime Launch and Verification v81（历史）](runtime-launch-and-verification-v81.md) | Kilo 回调前提、无隐式 Node 的共享 MCP cwd、统一取消期限、路径/投影与 effort 展示 |
+| [Runtime Launch and Verification v80（历史）](runtime-launch-and-verification-v80.md) | Kilo 原生禁后台、同 Run Steer 多请求收口、write/edit/apply_patch 结果投影；B/P 不变 |
+| [Runtime Launch and Verification v79（历史）](runtime-launch-and-verification-v79.md) | Kilo 原生配置保序/最终默认权限、MCP cwd/退役、effort、DB/Skills 来源与认证投影 |
+| [Runtime Launch and Verification v78（历史）](runtime-launch-and-verification-v78.md) | Kilo 独立官方 ACP、单 Binding Host、原生 instructions、逐消息数值观察与 macOS arm64 Preview |
+| [Runtime Launch and Verification v77（历史）](runtime-launch-and-verification-v77.md) | MiniMax 目录零选模、目标参数读取与逐模型观测；复用现有缓存和界面请求 |
 | [Runtime Launch and Verification v76（历史）](runtime-launch-and-verification-v76.md) | CodeBuddy refusal 原生错误详情解析，复用共享脱敏、公开 failure 与 RunCard 展示 |
 | [Runtime Launch and Verification v75（历史）](runtime-launch-and-verification-v75.md) | 全 Runtime 按有效原生成功完成，允许空最终文字；局部问卷取消不覆盖后续成功 |
 | [Runtime Launch and Verification v74（历史）](runtime-launch-and-verification-v74.md) | 共享模型目录归一化、失败保留配置与缓存、原生 Runtime 接受显式配置；继承 PATH 与环境规则 |
@@ -431,7 +432,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Execution Evaluation v3（历史）](execution-evaluation-v3.md) | 继承通用质量与双轨报告，适配当前 return lineage 与历史账本 |
 | [Execution Evaluation v2（历史）](execution-evaluation-v2.md) | 通用质量三维度、协作分项统计、关键 Gate、离线报告与分析完成记录 |
 | [Execution Evaluation v1（历史）](execution-evaluation-v1.md) | Gate 分流、冻结版本、真实规则与 Judge、有限迭代、每日统计与可比较趋势 |
-| [User Automation v6（当前）](user-automation-v6.md) | Owner 绑定无时间上限 Weekly；继承用户运输、Trace、宿主清理与 Agent 防误调用 |
+| [User Automation v7（当前）](user-automation-v7.md) | 成员代发、Delivery-first 成功回执、缺省预算兼容及 Trial 写入前拒绝；继承用户运输与 Agent 防误调用 |
+| [User Automation v6（历史）](user-automation-v6.md) | Owner 绑定无时间上限 Weekly；继承用户运输、Trace、宿主清理与 Agent 防误调用 |
 | [User Automation v5（历史）](user-automation-v5.md) | Agent CLI 防误调用、删除 Runtime OS denial；继承用户运输、Trace、评测宿主和平台准入 |
 | [User Automation v4（历史）](user-automation-v4.md) | 继承 v3；开发者评测 CLI、宿主执行与按 AutomationRun 去重的定时绑定 |
 | [User Automation v3（历史）](user-automation-v3.md) | 继承 v2；受限只读 Trace 导出与 Host 日报准备配置，不授予 Agent 用户级 IPC |
@@ -631,7 +633,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Gather v3（历史）](gather-v3.md) | v2 lifecycle/limits 不变；Completion Input 使用 `agent_v1` request/captured 投影、projected digest 与 schema v3 |
 | [Gather v2（历史）](gather-v2.md) | v1 lifecycle 加当前代最后 captured result、独立回传限额、完整 request 与 completion input v2 |
 | [Gather v1（历史）](gather-v1.md) | GatherRecord/Item、Default Lead 接受、持久 capture/Barrier、completion snapshot/FIFO 与旧 capture budget/input v1 |
-| [Message Delivery v18（当前）](message-delivery-v18.md) | Pi／Kiro／ZCode 入队即确认接收，消费与工具边界独立 |
+| [Message Delivery v19（当前）](message-delivery-v19.md) | OpenCode 2.2.7／2.x ACP Steer、精确拒绝、有界收尾及原生 Session 连续性 |
+| [Message Delivery v18（历史）](message-delivery-v18.md) | Pi／Kiro／ZCode 入队即确认接收，消费与工具边界独立 |
 | [Message Delivery v17（历史）](message-delivery-v17.md) | Claude 受管执行内回执、启动期待插话与终态独立结算 |
 | [Message Delivery v16（历史）](message-delivery-v16.md) | Core 统一 Steer 版本资格、TRAE CN、接收语义与未知不重发 |
 | [Message Delivery v15（历史）](message-delivery-v15.md) | Kiro 与 ZCode 插话 |

@@ -528,7 +528,7 @@ fn persist(
         common.commit(&transaction)?;
     }
     if invalidate || common.is_some_and(|edit| edit.changed) {
-        transaction.execute("UPDATE adapter_capability_snapshot SET stale_at=COALESCE(stale_at, datetime('now')), authentication_status='unknown', probe_status='installed_unverified', last_error='runtime_startup_configuration_changed' WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind=?1 AND installation_class='managed_default')", [kind.as_str()])?;
+        transaction.execute("UPDATE adapter_capability_snapshot SET stale_at=COALESCE(stale_at, datetime('now')), model_catalog_succeeded_at=NULL, authentication_status='unknown', probe_status='installed_unverified', last_error='runtime_startup_configuration_changed' WHERE installation_id IN (SELECT id FROM adapter_installation WHERE adapter_kind=?1 AND installation_class='managed_default')", [kind.as_str()])?;
         if invalidate {
             transaction.execute("UPDATE adapter_installation SET generation=generation+1, version=version+1, updated_at=datetime('now') WHERE adapter_kind=?1 AND installation_class='managed_default'", [kind.as_str()])?;
         }

@@ -1,31 +1,35 @@
-# Rovai AI v0.5.10
+# Rovai AI v0.5.11
 
 <!-- lang:zh-CN -->
 
-本次更新支持直接回答 Pi 发起的原生提问，在会话里引用项目文件和文件夹，以及按需开启执行台自动展开。
+感谢 @NorethSea 在 PR #1020 中加入本地自动化指定发送队员的功能，也感谢其在 Issue #1041 中反馈删除队员后无法保存工具箱设置的问题。感谢 @arschlochnop 在 Issue #1050 中提供 macOS 下 Shell 启动信息干扰智能体检测的复现步骤。
 
-感谢 @liangxyz（#706）和 @caoshuisi（#1012）反馈 Pi 提问无法作答的问题，也感谢 @NorethSea 提交 Hermes Profile 修复（#1018）。
-
-- 【功能】**支持直接回答 Pi 的原生提问。** 确认、选择、单行输入和多行编辑会出现在公屏或单聊的「待处理」区域，回答会送回当前执行。飞书、Lark 和钉钉也支持通过卡片作答，提交后可在原卡片回看问题和回答摘要。
-- 【功能】**项目会话支持引用文件和文件夹。** 在公屏输入 `@` 后可从「文件」页选择，也可从项目文件树或文件预览插入引用。引用可以单独发送，队员可按路径读取。点击历史消息中的引用可预览文件或在文件树中定位目录。
-- 【功能】**可设置是否自动打开执行台。** 开关位于「设置 → 通用 → 会话」，默认关闭。开启后，桌面端和宽屏网页会在发送消息或进入有队员正在执行的会话时自动展开执行台。手机端通过执行入口手动打开。
-- 【交互】**调整项目文件的排序和引用显示。** 文件树和 `@` 候选中的文件、文件夹统一按名称排序。消息正文和 Markdown 导出中的文件链接使用短名称，输入框里的引用可打开、重选或移除。
-- 【修复】**切回会话时恢复上次选中的执行标签。** 在同一窗口返回原会话，会恢复之前选中的队员或总览。手动收起底部执行详情后，数据刷新也会保持收起。
-- 【修复】**Hermes 会按配置的 Profile 启动。** 可在队员的环境变量中设置 `HERMES_PROFILE`，让不同队员使用各自的 Hermes 配置。
-- 【界面】**修正手机网页的消息头和会话顶栏。** 队员头像与姓名垂直对齐，隐藏顶栏中占位的桌面文件控件，解决「…」菜单被遮挡的问题。
+- 【功能】**`@` 队员时可以按智能体名称、简称或前缀搜索。** 例如输入 `@com` 可找到使用 Command Code 的队员，当前会话的队员优先显示。公屏、会话草稿和使命描述都支持。
+- 【功能】**Pi 有问题等待回答时会在应用内提醒。** 浏览其他会话或页面时也能收到提示。点击可定位到原公屏或单聊里的问题，开关位于「设置 → 提醒 → 待审批与回答」。
+- 【功能】**Hermes 支持按队员设置推理强度。** 可选择 Hermes 提供的档位，切回「跟随模型默认值」时会清除之前设定的强度。
+- 【功能】**本地自动化支持指定发送队员。** 桌面版运行时，脚本可在 `rovai app thread send` 中用 `--sender-agent-id` 指定消息署名，用 `--agent-id` 指定接收队员。发送受理后会返回消息和投递编号。
+- 【交互】**模型选择器增加手动刷新。** 点击搜索框旁的按钮可重新读取模型列表。打开队员参数设置时按需加载，读取失败时保留已选模型和上次成功读取的列表。
+- 【修复】**智能体检测会重新读取本机版本。** 「检查状态」和「重新检测」只检查安装入口并读取版本，模型列表在打开配置时单独加载。版本查询时限调整为 15 秒，备用安装检查失败时会保留当前入口。
+- 【修复】**修复 macOS 下 Shell 启动输出干扰智能体检测的问题。** Shell 的启动信息没有换行时，也能正确读取 PATH。
+- 【修复】**修复网页端的队员操作和头像加载。** 队员菜单中的「暂时离队」和「归队」恢复可用。头像遇到临时加载错误会自动重试，断线恢复后也会重新加载失败的头像。
+- 【修复】**修复删除队员后无法保存工具箱设置的问题。** 删除队员时会清理其 Skill 分配，已有的残留记录会在保存对应 Skill 时一并清理。
+- 【修复】**HTML 预览减少布局提示误报。** 浏览器原生布局提示会从诊断记录中过滤，辅助诊断限制只在已有的详情里显示。脚本和资源错误照常提示。
+- 【界面】**统一应用内的蓝色标识。** 启动页、导航、关于与更新、网页登录等页面采用相同标识，并调整了无可用队员时「前往队员」和「查看智能体」的按钮样式。
 
 ---
 
 <!-- lang:en -->
 
-This release adds in-place replies to Pi prompts, project file and folder references in conversations, and an option to open the execution desk automatically.
+Thanks to @NorethSea for adding teammate senders to local automation in PR #1020 and reporting that Toolbox settings could not be saved after deleting a teammate in Issue #1041. Thanks to @arschlochnop for the detailed reproduction of the macOS shell startup output problem in Issue #1050.
 
-Thanks to @liangxyz (#706) and @caoshuisi (#1012) for reporting Pi prompts that could not be answered, and to @NorethSea for the Hermes profile fix (#1018).
-
-- [Feature] **Answer Pi's native prompts directly.** Confirmations, choices, single-line input, and multi-line edits appear in the Pending area of the public conversation or Single Chat. Answers go back to the current run. Feishu, Lark, and DingTalk support answering through cards, which show a preview of the question and answer after submission.
-- [Feature] **Reference project files and folders in conversations.** Use the Files tab in the `@` menu, the project file tree, or a file preview to insert a reference. Send references on their own or with text. Click a reference in a past message to preview the file or locate the folder in the tree.
-- [Feature] **Choose whether the execution desk opens automatically.** The setting is off by default under Settings → General → Conversation. Enable it on desktop or wide-screen web to open the desk after sending a message or when entering a conversation with an active run. On phones, open the desk from the execution control.
-- [UX] **Sort project files and folders by name and simplify reference labels.** The file tree and `@` results sort both together. Messages and Markdown exports show short link labels. Open, reselect, or remove a reference from the composer.
-- [Fix] **Restore the last execution tab when returning to a conversation.** Within the same window, returning to a conversation restores the selected teammate or the overview. Manually closed bottom execution details stay closed when data refreshes.
-- [Fix] **Start Hermes with the configured profile.** Set `HERMES_PROFILE` in a teammate's environment so different teammates can use their own Hermes profiles.
-- [UI] **Fix alignment and header controls on mobile web.** Teammate avatars align with their names. Desktop file controls are hidden in the mobile header so they no longer cover the more menu.
+- [Feature] **Find teammates by Agent name when using `@`.** Search by product name, abbreviation, or prefix. For example, `@com` finds teammates using Command Code. Teammates in the current conversation appear first. Search works in public conversations, drafts, and Mission descriptions.
+- [Feature] **Get an in-app reminder when Pi is waiting for an answer.** Select the reminder to jump to the question in its original public conversation or Single Chat. The setting is under Settings → Notifications → Approvals and answers.
+- [Feature] **Set Hermes reasoning effort per teammate.** Choose from the options Hermes exposes. Select Follow model default to clear the previous override.
+- [Feature] **Send a local automation message under a teammate's name.** While Desktop is running, use `--sender-agent-id` with `rovai app thread send` to choose the sender and `--agent-id` to choose the recipient. Accepted sends return the message and delivery IDs.
+- [Interaction] **Refresh the model list from the model picker.** The refresh button sits beside search. Model options load when the relevant teammate settings are opened. If a read fails, the saved selection and last successful list stay available.
+- [Fix] **Agent checks read the installed version again.** Check status and Rescan find the installed entry and read its version. Version reads have a 15-second limit. A failed check of an alternate installation preserves the selected entry.
+- [Fix] **Correct macOS Agent detection when shell startup output has no newline.** Rovai can read PATH when startup text runs into the detection output.
+- [Fix] **Restore Web teammate actions and avatar loading.** The teammate menu supports Away and Rejoin again. Failed avatar loads retry after temporary errors and when the connection recovers.
+- [Fix] **Restore Toolbox saves after a teammate is removed.** Removing a teammate clears their Skill assignments. Saving an affected Skill also clears any older stale assignments.
+- [Fix] **Keep HTML preview diagnostics focused on page errors.** Native browser layout notices are filtered from the diagnostic records, and auxiliary diagnostic limits stay out of the toolbar. Script and resource errors still appear.
+- [UI] **Use a consistent blue mark across the app.** The startup screen, navigation, About and Updates, and Web sign-in share the same mark. The actions shown when no teammates are available have also been adjusted.

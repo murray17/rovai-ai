@@ -48,6 +48,45 @@ describe('message model identity', () => {
       .toEqual({ label, value: 'High' })
     expect(messageRuntimeModelPresentation({ ...record, adapterKind }, native)?.effort)
       .toEqual({ label, value: 'High' })
+    const unlisted = { ...configuration, model: {
+      mode: 'explicit' as const, modelId: 'unlisted-model', options: { [effortKey]: 'future' }
+    } }
+    expect(memberRuntimeConfigurationPresentation(unlisted, null).effort)
+      .toEqual({ label, value: 'future' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind, reasoningEffort: 'future' }, null)?.effort)
+      .toEqual({ label, value: 'future' })
+    expect(memberRuntimeConfigurationPresentation({
+      ...configuration, model: { mode: 'explicit', modelId: 'old-model', options: {} }
+    }, native).effort).toEqual({ label, value: '跟随模型默认值' })
+    expect(messageRuntimeModelPresentation({ ...record, adapterKind, reasoningEffort: null }, native)?.effort).toBeNull()
+  })
+
+  it('uses the common default label in member summaries and Hermes history', () => {
+    const hermes = {...installation, adapterKind: 'hermes-cli'} as AdapterInstallation
+    expect(messageRuntimeModelPresentation({...record, adapterKind: 'hermes-cli', reasoningEffort: 'default'}, hermes)?.effort?.value)
+      .toBe('跟随模型默认值')
+    expect(messageRuntimeModelPresentation({...record, adapterKind: 'hermes-cli', reasoningEffort: null}, hermes)?.effort)
+      .toBeNull()
+    const configuration: Parameters<typeof memberRuntimeConfigurationPresentation>[0] = {
+      adapterKind: 'hermes-cli', model: {mode: 'explicit', modelId: 'old-model', options: {}},
+      permissions: {adapterKind: 'hermes-cli', schemaVersion: 1, values: {}}
+    }
+    expect(memberRuntimeConfigurationPresentation(configuration, hermes).effort?.value).toBe('跟随模型默认值')
+    configuration.model = {mode: 'explicit', modelId: 'old-model', options: {reasoning_effort: 'default'}}
+    expect(memberRuntimeConfigurationPresentation(configuration, null).effort?.value).toBe('跟随模型默认值')
+
+    const pi: AdapterInstallation = {
+      ...installation, adapterKind: 'pi', snapshot: {
+        ...installation.snapshot!, models: [{
+          ...installation.snapshot!.models[0],
+          options: [{ ...installation.snapshot!.models[0].options[0], key: 'thinking_level' }]
+        }]
+      }
+    }
+    expect(memberRuntimeConfigurationPresentation({
+      ...configuration, adapterKind: 'pi',
+      model: { mode: 'explicit', modelId: 'old-model', options: {} }
+    }, pi).effort?.value).toBe('跟随模型默认值')
   })
 
   it('keeps an unknown record, Agent defaults and an unspecified effort distinct', () => {

@@ -4,46 +4,65 @@ name: Runtime Launch and Verification
 version: v78
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-09
+last_updated: 2026-11-08
 ---
 
 # Runtime Launch and Verification v78
 
-继承 [v77](runtime-launch-and-verification-v77.md)，补齐 Kilo 的原生配置、来源与生命周期语义。
-[已确认 R1](../versions/v1.72/model-context-change-kilo-acp.md)的 B/P、输入位置、预算、formatter 和证据版本保持。
+继承 [v77](runtime-launch-and-verification-v77.md) 的现有 Runtime 行为；
+本版增加独立的 Kilo 官方 ACP 接入。输入位置按[已确认 R1](../versions/v1.72/model-context-change-kilo-acp.md)。
 
-## Kilo 原生配置与权限
+## Kilo 身份、原生来源与启动
 
-Kilo inline 配置的所有对象保留原始键顺序，包括嵌套 permission pattern 与 Agent 规则；
-不启用全 workspace 的 JSON preserve-order，不把原生权限转换成另一套 Core 决策。
-原生文件、inline、`KILO_PERMISSION` 与用户插件仍由 Kilo 加载、合并。
+稳定 identity 为 `kilo-cli`，正常发现 `kilo`，显式入口变量为 `ROVAI_KILO_BIN`。
+正式进程只使用所选官方 CLI 的 `acp`，不借用 OpenCode 的版本判断、认证、Provider 或配置目录。
+Kilo 自身版本与 ACP initialize 结果作为观察，不建立固定版本或二进制 checksum 白名单。
 
-当前 Kilo 合并会保留较早对象的键位置；仅把新增 wildcard 放在 inline 开头，不能保证文件中的具体规则继续生效。
-因此 Host 私有目录追加一个无依赖的原生 `config` 回调：在原生合并及用户配置回调完成后，将成员保存的
-wildcard `allow / ask / deny` 放在具体规则之前，并固定 question 为 deny；其余规则及相对顺序保持。
-用户 Agent 自己的规则继续按原生语义生效。该回调只设置原生配置，没有工具、审批、压缩、模型输入或握手逻辑。
-Bootstrap 仍只通过 v77 instructions 文件进入普通模型请求；不注册压缩观察插件。
+进程创建前设置 `KILO_CLIENT=acp`、关闭原生自动升级并禁用未承接的 question 工具。
+Rovai 保留用户原生 HOME、XDG、项目配置与认证；不创建配置镜像或写全局配置。
+模型默认值来自该 CLI；显式模型保留原 ID，交由真实 Session 选择结果决定是否接受。
 
-## Host 与 MCP
+权限字段 `permission` 使用原生 `allow / ask / deny`，新队员默认 allow；
+保存的较窄选择保留。只覆盖原生 wildcard，保留工具及自定义 Agent 的原生规则，
+不宣称 deny 是 Core 路径沙箱。剩余原生审批原样进入现有审批 owner，不能因 wildcard allow 自动放行。
+取消与迟到请求复用既有 Run/Prompt/epoch 生命周期；不叠加文件授权或路径 containment。
 
-实际 affected-members 的 MCP mutation 同时 invalidates Kilo 的共享 Fleet Host：idle 立即停止，
-busy 保持本轮并在正常收口后停止。相同 Binding 的不兼容进程先沿共享退役入口回收，再创建替代 Host。
-恢复保留完整原生 Session ID；A → B → A 不能再次领取已退役的旧 A。
+## Host、Session 与 Bootstrap
 
-ACP stdio 没有 cwd 字段。Kilo 与 Command Code 共用现有 argv launcher，仅在显式 MCP cwd 与 Session cwd
-不同时改变 Server 子进程工作目录；参数保持字面值。Command Code 的专用 placeholder 转义不应用于 Kilo。
-不新增进程池、配置镜像或 MCP 生命周期服务。
+Kilo 使用共享 RuntimeFleet，一个成员的一个 Native Binding 对应一台 resident Host。
+健康空闲且进程兼容时 warm 复用；不同 Binding 不共享同一 Host。
+MCP 由共享 projection 通过 ACP `mcpServers` 交付，原生配置继续按原生规则合并。
+真实分配变化复用既有 invalidation，在正常 Run 边界退役旧 Host，再携带保存的完整 nativeSessionId 恢复；
+不在共享 cwd 中用空 MCP 列表假装撤销，也不另建 Kilo 进程池或锁。
 
-## 模型、认证与原生来源
+恢复优先使用原生广告的 exact resume；仅在广告 load 时使用共享 replay quarantine。
+未知错误不解释为“历史不存在”，accepted/unknown 输入不自动重放。
+升级程序、Host 退役或 Bootstrap 更新不能单独使合法原生 ID 失效。
 
-- Kilo 原生思考选项 ID 为 `effort`。目录、UI、持久化与 `session/set_config_option` 使用相同 ID；
-  选项仅归属实际广告它的当前模型，不复制到未观察的模型，不把旧 `reasoning_effort` 猜成 alias。
-- initialize/session-new 只证明连接及目录可用。无模型凭据验证证据时，authentication 保持 `unknown`；
-  不能由非生成探测升级为 authenticated。既有执行准入与延迟验证保持。
-- numeric reader 从实际 Host 的冻结启动环境解析 `KILO_DB`：绝对路径直接使用，相对路径基于原生 Kilo data 根，
-  缺省为 data 根下 kilo.db；`:memory:` 没有磁盘观察来源，保持未知，不回退猜测 Session 累计值。
-- Kilo 原生 Skills 静态候选包括默认 XDG config/kilo、Home 的 `.kilo`/`.kilocode`，以及追加的
-  `KILO_CONFIG_DIR`；这些目录的 `skill`、`skills` 均保留。项目对应目录及 `.agents`/`.claude` 来源复用共享扫描、去重与缓存。
+Core 在 Host 私有目录保持一个 instructions 文件 F，通过进程级 `KILO_CONFIG_CONTENT.instructions`
+追加路径，保留用户其他配置和原生 instructions。每 Run 在普通 P 发送前写入该 Run 已冻结的完整 B。
+原生普通生成会读取 F；采用 `managed_system_prompt` 与 `native_system_prompt_preserved`。
+不加压缩插件、正文 hash、nonce、装载握手或第二份输入账本。
+写入失败按现有准备失败处理；原生 `session/prompt` 的 user 正文只有 P。
+冻结、预算、版本与证据均服从 R1 和共享 Context owner；其他 Adapter 保持。
 
-macOS arm64 Preview 范围保持。真实版本与验证边界见[复核记录](../versions/v1.72/kilo-acp-review-fixes.md)。
-Steer 的原生研究不自动开放 Core active-input，见[Steer 证据](../research/kilo-runtime/steer-7.8.27.md)。
+## 活动与数值观察
+
+公开工具生命周期、输出 snapshot、原生终态和 Missing-Send 复用共享 ACP owner。
+空 end_turn 合法；thinking 不成为公开正文。工具名未有精确字段时，title 仅为展示提示，
+不得据此推导工具身份或私有内容。
+
+Kilo ACP PromptResult 只有最后一步 usage；不把它当整 Run 统计。
+复用现有 SQLite numeric reader，从 Kilo 自己的 `XDG_DATA_HOME/kilo/kilo.db`
+（缺省使用其原生 data 根）读取当前根 Session 的已完成新消息。
+Prompt 前建立 baseline，以原生消息 ID 去重；只选择数值、模型和消息身份，不读取正文/parts。
+input/cache/output/reasoning 保持原生互斥桶，output 加入独立 reasoning 一次；
+逐消息 USD cost 作为原生 reported cost，不能把 Session 累计费用全额重复归入新 Run。
+context occupancy 是 Session gauge，不作为消费量。历史、重发和 cold baseline 不重复累计。
+
+## 平台与验证边界
+
+macOS arm64 以既有 Preview 准入开放主动使用；其余平台为 NotQualified。
+Preview 不等同完整 qualification，不生成虚构的 evidence revision 或 SHA256 资格材料。
+准入理由见 [D77](../versions/v1.72/decisions.md#v1-72-d77)；
+实际版本、矩阵与缺失范围见[Kilo 研究/验证](../research/kilo-runtime/README.md)。

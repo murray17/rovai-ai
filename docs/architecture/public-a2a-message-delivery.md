@@ -3,7 +3,7 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-delivery-and-agent-run-boundaries
 status: accepted
-last_updated: 2026-11-05
+last_updated: 2026-11-10
 ---
 
 # Public Thread Message、Delivery 与 AgentRun
@@ -163,8 +163,8 @@ Core 在发布时捕获可用的目标 Run／epoch，Scheduler 复用既有 work
 共同 DynamicInputContext Builder 和 Formatter 只读本次来源，新输入读取最新动态事实；启动内容、
 执行配置、Bootstrap 和已物化输入保持冻结。Manifest 可以一 Run 多条，ACK、恢复和历史 fence 关联
 精确 Manifest。正常结束时可证明未提交的来源回普通队列；未知不重放，取消不自动启动后继。
-当前支持 Codex、Claude Code、Pi、CodeBuddy、Qwen Code、MiniMax Code、Grok Build、Kiro CLI、ZCode、TRAE CLI CN、Hermes，运输和回执见
-[Message Delivery v18](../contracts/message-delivery-v18.md)。Qwen 只通过原生拉取回调投递；
+当前支持 Codex、Claude Code、Pi、CodeBuddy、Qwen Code、MiniMax Code、Grok Build、Kiro CLI、ZCode、TRAE CLI CN、Hermes、OpenCode，运输和回执见
+[Message Delivery v19](../contracts/message-delivery-v19.md)。Qwen 只通过原生拉取回调投递；
 CodeBuddy 的补充响应不结束原 Run。Pi 的精确 RPC queued 响应确认接收，不等待消费。
 CodeBuddy/Grok 缺少原生 turn 参数，以 Run/epoch/Session fence 和执行后 Host 回收限制迟到输入；
 Pi 的原生未消费队列同样不能带入后继 Host。上下文、消息正文和逐队员 Delivery 保持共同路径。
@@ -177,6 +177,11 @@ Kiro 以当前 Prompt 的逐请求 queued 回执确认，ZCode 以原 Turn 的�
 普通任务资格独立；未知版本或不满足回执要求时普通排队，未知投递结果不重发。accepted 的共同展示
 为“运行时已接收”，不等同模型消费或业务完成。TRAE 使用 `_session/steering` 的 injected 回执，
 原 Prompt 仍拥有终态，使用过插话的 Host 回收。
+
+OpenCode 稳定 2.x 自 2.2.7 起以官方 ACP `_session/steering` 接入同一路径，Host 还须声明能力。
+Host 收尾回收与 Session 恢复分开；正常插话后的后继 Run 按既有兼容性尽可能继续原 Native Session。
+原生已接收输入可能留给同 Session 的后续执行消费，不承诺严格原生同轮；Rovai 保留回执且不重发 accepted／unknown 输入。
+自然结束仅在在途请求原有期限内收尾；Stop 不等待 ACK。精确回执与连续性边界见当前 Delivery 合同。
 
 Claude 复用 Stream JSON 和既有输入编号关联回显，允许确认跨越内部 result；接收不承诺原生同轮。
 回执不决定 Run 生命周期，可靠结束后未确认输入单独保持未知，不重发、不阻塞收尾。

@@ -9,7 +9,7 @@ last_updated: 2026-11-09
 
 User sequence 25 质疑正常 Steer 后无条件退役的必要性，并要求解释文件转换、MCP cwd 与其他接入的关系；
 问卷关闭双入口明确保持。在原 `rovai/kilo-acp` worktree、基线 `0ffb6fe460359c13deb05ac0e18c797ca355666c` 实施。
-当前语义见 [Launch v81](../../contracts/runtime-launch-and-verification-v81.md)，理由见 [D80](decisions.md#v1-72-d80)。
+当前语义见 [Launch v82](../../contracts/runtime-launch-and-verification-v82.md)，理由见 [D81](decisions.md#v1-72-d81)。
 
 ## 最小改动
 

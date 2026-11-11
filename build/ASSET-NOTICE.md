@@ -18,3 +18,9 @@ artwork.
 
 This first-party provenance statement does not grant rights in unrelated
 third-party trademarks, characters, people, or source material.
+
+The [in-app mark](../apps/desktop/src/renderer/src/assets/rovai-mark.svg) derives
+its star and horizon geometry from `icon.svg`. It omits the charcoal carrier and
+uses the horizon's Steel blue for both paths. Appearance thumbnails embed the
+same transparent vector artwork. The packaged application icon remains the
+original rendition above.

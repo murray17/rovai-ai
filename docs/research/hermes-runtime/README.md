@@ -1,10 +1,55 @@
 ---
 document_type: research-note
 authority: non-normative
-last_updated: 2026-10-28
+last_updated: 2026-11-09
 ---
 
 # Hermes 接入与验证
+
+## 通用默认交互（2026-11-09）
+
+按 User 修正，强度菜单、队员摘要与已有历史默认值统一使用“跟随模型默认值”，不再提供省略／恢复两个
+用户选项。通用表单清除强度字段后，Hermes 适配器在支持该接口的原生 Session 准备阶段发送 `default`，
+避免继续沿用上一轮强度。`none` 与原生具体档位仍原样传递；已知旧 ACP 的无字段普通执行保留。
+原生读取、setter、回显与错误处理保持现有范围。现行规则由 [Hermes 合同](../../contracts/hermes-managed-runtime-v1.md#模型权限skills-与-mcp)拥有。
+
+本次以未修改的官方 0.23.0 验证：受控 Provider 11 个 Run、真实 gpt-6.1-sol 6 个 Run、
+原生延后设置 2 个 Run；另用 0.22.4 验证 2 个兼容 Run，共 21 个 Run，含 2 次预期拒绝。
+真实模型的 20 次主请求均捕获到预期强度；同 Session 冷恢复后，清除 `high` 字段确实下发
+`default`，Provider 回到测试 Profile 的 `low`，没有残留旧覆盖。配置文件未被修改。
+脱敏版本、调用顺序与请求参数见[通用默认验收记录](reasoning-default-2026-11-09.json)。
+控件、摘要和历史投影测试通过；本次没有重跑桌面交互，也未更新日常安装版。
+
+## 官方 ACP 思考强度（2026-11-08）
+
+本节保留初版实现与验收记录；其中省略／恢复的界面区分已由上节的通用默认交互取代。
+
+生产仅接通现有成员模型选项的 `reasoning_effort` 保存与官方 ACP 下发。模型设置后发送冻结值；
+缺字段不覆盖，`none` 与 `default` 分别保留原生关闭与恢复默认语义。共享 setter 的响应处理保持
+尽力而为，不检查回显相等，不新增确认 RPC、历史观测、状态机或跨 Run 缓存。
+原生档位进入已有参数控件，Session 作用域；恢复默认仍是同一选项的普通原生值。
+已知 0.22.4/0.22.5 ACP 空 ACK 不构成支持：有覆盖在 prompt 前失败，无覆盖仍可执行。
+当前规则见[Hermes 合同](../../contracts/hermes-managed-runtime-v1.md#模型权限skills-与-mcp)。
+
+验收入口：
+
+```sh
+node scripts/smoke-hermes-reasoning-effort.mjs /absolute/official-source /absolute/prepared-python
+node scripts/smoke-hermes-reasoning-effort.mjs /absolute/official-source /absolute/prepared-python --real-model
+node scripts/smoke-hermes-reasoning-effort.mjs /absolute/legacy-source /absolute/prepared-python --legacy
+node scripts/smoke-hermes-reasoning-effort.mjs /absolute/official-source /absolute/prepared-python --deferred
+```
+
+`--gateway-source=/absolute/legacy-source` 仅在夹具中预先启动旧 Gateway，验证新 ACP 的混合版本路径。
+每次使用独立用户 Home、原生 Profile/Gateway、Core data/Skill Library/MCP 和正常固定 CLI 入口。
+官方源码保持干净，安装身份由官方 stamp 生成脚本按实际 tag 创建；没有覆盖日常原生配置。
+测试 observer 只记录方法、Session、reasoning 字段及回显；Provider 捕获和真实请求转发只属于测试。
+缺回显／旧值回显由既有 ACP 协议进程 owner 覆盖，不把合成回包称作官方原生行为。
+0.23.0 与 0.22.6 各 9 个 Run、新 ACP／旧 0.22.4 Gateway 9 个 Run、旧 ACP 2 个 Run、
+真实 gpt-6.1-sol 4 个 Run、原生延后应用 2 个 Run 均按预期通过（35 个 Run，含 4 次预期拒绝）。
+真实请求字节原样转发，14 次主模型调用均捕获预期强度；恢复默认后的 low 来自测试 Profile 配置。
+版本、结果与真实 Provider 参数见[脱敏验收记录](reasoning-effort-2026-11-08.json)。
+
 
 当前接入是 User sequence 56/60 确认的官方 ACP、原生 Home、原生 Session 定位。
 CLI 单次业务请求由 Core 查现有 Conversation/活动 Run/lease，不增加表或模型参数。

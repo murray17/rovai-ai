@@ -90,6 +90,8 @@ pub enum Operation {
     MemberReorder,
     #[serde(rename = "runtime.subsystems.retry")]
     SubsystemRetry,
+    #[serde(rename = "nativeInteractions.notifications")]
+    NativeInteractionNotifications,
     #[serde(rename = "notifications.inbox")]
     NotificationInbox,
     #[serde(rename = "notifications.changesSince")]
@@ -495,6 +497,7 @@ impl Operation {
             Self::MemberRemove => "members.remove",
             Self::MemberReorder => "members.reorder",
             Self::SubsystemRetry => "runtime.subsystems.retry",
+            Self::NativeInteractionNotifications => "nativeInteractions.notifications",
             Self::NotificationInbox => "notifications.inbox",
             Self::NotificationChanges => "notifications.changesSince",
             Self::NotificationThreadInterruptions => "notifications.threadInterruptions",

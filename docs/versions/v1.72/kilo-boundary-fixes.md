@@ -8,8 +8,8 @@ last_updated: 2026-11-09
 # Kilo ACP 边界自检与收尾
 
 User sequence 19 要求复查 `2e8abb455a4e8d4f79fcfc30a74b8c6c53e2b4ad`，重点为隐式 Node 依赖和重复文件处理。
-在原 `rovai/kilo-acp` worktree 修正以下已确认问题；该阶段规范为 [Launch v80](../../contracts/runtime-launch-and-verification-v80.md)，
-取舍见 [D79](decisions.md#v1-72-d79)。没有重构接入框架。后续成功 Steer 复用与当前入口见[复用记录](kilo-steer-reuse.md)。
+在原 `rovai/kilo-acp` worktree 修正以下已确认问题；该阶段规范为 [Launch v81](../../contracts/runtime-launch-and-verification-v81.md)，
+取舍见 [D80](decisions.md#v1-72-d80)。没有重构接入框架。后续成功 Steer 复用与当前入口见[复用记录](kilo-steer-reuse.md)。
 
 ## 确认的问题与最小修正
 

@@ -289,8 +289,7 @@ try{
   result.checks.modelCatalog={models:modelOptions,elapsedMs:Date.now()-catalogStarted,modelCalls:0}
   const installation=(await core.request('runtime.installations.list')).find(installation=>installation.adapterKind==='kilo-cli')
   assert.equal(installation.snapshot.authenticationStatus,'unknown','A non-generating ACP handshake does not validate credentials')
-  assert(installation.snapshot.capabilities.includes('context.charter.managed_system_prompt'))
-  assert(!installation.snapshot.capabilities.includes('context.charter.first_payload'))
+  assert.equal(installation.snapshot.probeStatus,'installed_unverified','Catalog success must not promote a deferred availability check')
   result.checks.authentication='unknown'
   const workspace=await core.request('workspaces.inspect',{path:project})
   const first=await createConfiguredCampAndSend(core.request.bind(core),{commandId:crypto.randomUUID(),workspace,memberAgentIds:['agent_2'],defaultLeadAgentId:'agent_2',address:{mode:'explicit',agentIds:['agent_2']},body:'CORE_FIRST_CLI',purpose:'Kilo first Run and bundled CLI'})
@@ -306,6 +305,8 @@ try{
   assert(calls.every(call=>!call.tools?.some(tool=>tool.function.name==='question')),'Unclaimed native questionnaire must remain disabled')
   const system=firstCall.messages.filter(m=>m.role==='system').map(m=>m.content).join('\n')
   const user=firstCall.messages.filter(m=>m.role==='user').at(-1).content
+  // The catalog leaves availability unverified. Prove delivery from native
+  // model input, rather than expecting a deep-probe flag on that light snapshot.
   assert(system.includes('[SESSION_CHARTER]')&&system.includes('[MEMBER_IDENTITY]'),'Full Bootstrap belongs to native system')
   const instructionsPath=system.match(/Instructions from: (.+\/bootstrap\.md)\n/)?.[1]
   assert(instructionsPath,'The native instruction source must identify the Host file')

@@ -1610,15 +1610,12 @@ impl CodexCliAdapterPolicy {
         observation: CodexProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         let ready = observation.probe_status == "ready";
-        let models = if ready {
-            observation
-                .raw_model_catalog
-                .as_ref()
-                .and_then(|catalog| codex_models(catalog).ok())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        // A native catalog remains valid evidence even if a later schema check fails.
+        let models = observation
+            .raw_model_catalog
+            .as_ref()
+            .and_then(|catalog| codex_models(catalog).ok())
+            .unwrap_or_default();
         let mut capabilities = observation.capabilities;
         for capability in [
             "model.list",
@@ -2905,11 +2902,11 @@ pub fn acp_model_catalog_for_adapter(
     session_result: &Value,
 ) -> Result<Vec<ModelDescriptor>> {
     let mut models = acp_model_catalog_from_session(session_result)?;
-    if let Some(effort_key) = adapter_kind.acp_selected_model_effort_key() {
+    if adapter_kind == AdapterKind::KiloCli {
         let current = acp_runtime_model_id_from_session(session_result);
         let effort = session_result["configOptions"]
             .as_array()
-            .and_then(|options| options.iter().find(|option| option["id"] == effort_key))
+            .and_then(|options| options.iter().find(|option| option["id"] == "effort"))
             .and_then(acp_model_option);
         for model in &mut models {
             // These ACP agents advertise effort for the selected model only.
@@ -2929,6 +2926,43 @@ pub fn acp_model_catalog_for_adapter(
                 Vec::new()
             };
         }
+    }
+    if adapter_kind == AdapterKind::HermesCli {
+        for option in models.iter_mut().flat_map(|model| &mut model.options) {
+            option.scope = RuntimeOptionScope::Session;
+            option.default_value = None;
+        }
+    }
+    if adapter_kind == AdapterKind::MinimaxCodeCli {
+        let observation = minimax_model_options_from_session(session_result).ok();
+        for model in &mut models {
+            model.options.clear();
+            let metadata = model.runtime_metadata.get_or_insert_with(|| json!({}));
+            metadata["modelOptionsContext"] =
+                session_result["_meta"]["rovaiModelOptionsContext"].clone();
+            if let Some((current, options)) = &observation
+                && current == &model.id
+            {
+                model.options = options.clone();
+                metadata["modelOptionsResolved"] = json!(true);
+                metadata["modelOptionsObservedAt"] =
+                    session_result["_meta"]["rovaiModelOptionsObservedAt"].clone();
+            } else {
+                metadata["modelOptionsResolved"] = json!(false);
+            }
+            if let Some(default) = session_result.pointer("/_meta/rovaiCatalogDefaultModel") {
+                model.is_default = default.as_str() == Some(model.id.as_str());
+            }
+        }
+    }
+
+    if adapter_kind == AdapterKind::MinimaxCodeCli {
+        models.sort_by(|left, right| {
+            right
+                .is_default
+                .cmp(&left.is_default)
+                .then_with(|| left.display_name.cmp(&right.display_name))
+        });
     }
 
     if matches!(
@@ -3065,6 +3099,111 @@ pub fn acp_model_catalog_for_adapter(
 
 /// A model switch returns the complete option state. Never retain the previous
 /// model's reasoning option when the response omits it.
+/// A complete native configuration is different from a lossy catalog parse.
+/// Missing effort is valid; malformed effort or contradictory identity is not.
+pub(crate) fn minimax_model_id_from_session(session: &Value) -> Result<String> {
+    let config = session
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .context("MiniMax options response did not return configOptions")?;
+    let models = config
+        .iter()
+        .filter(|option| option["id"] == "model")
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        models.len() == 1,
+        "MiniMax options response must identify exactly one model"
+    );
+    anyhow::ensure!(
+        config
+            .iter()
+            .all(|option| option.is_object()
+                && option["id"].as_str().is_some_and(|id| !id.is_empty())),
+        "MiniMax configOptions were malformed"
+    );
+    let current = models[0]["currentValue"]
+        .as_str()
+        .filter(|id| !id.trim().is_empty())
+        .context("MiniMax options response did not identify its current model")?;
+    if let Some(reported) = session.pointer("/models/currentModelId") {
+        anyhow::ensure!(
+            reported.as_str() == Some(current),
+            "MiniMax options response contained contradictory model identities"
+        );
+    }
+    Ok(current.to_owned())
+}
+
+pub(crate) fn minimax_model_options_from_session(
+    session: &Value,
+) -> Result<(String, Vec<ModelOptionDescriptor>)> {
+    let current = minimax_model_id_from_session(session)?;
+    let config = session["configOptions"].as_array().unwrap();
+    let efforts = config
+        .iter()
+        .filter(|option| option["id"] == "thinkingEffort")
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        efforts.len() <= 1,
+        "MiniMax options response contained duplicate thinkingEffort"
+    );
+    let mut options = Vec::new();
+    if let Some(effort) = efforts.first() {
+        anyhow::ensure!(
+            effort["type"] == "select",
+            "MiniMax thinkingEffort was not a select option"
+        );
+        let values = effort["options"]
+            .as_array()
+            .context("MiniMax thinkingEffort options were malformed")?;
+        anyhow::ensure!(
+            values.iter().all(|value| value
+                .get("value")
+                .or_else(|| value.get("id"))
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())),
+            "MiniMax thinkingEffort values were malformed"
+        );
+        anyhow::ensure!(
+            effort.get("currentValue").is_none_or(Value::is_string),
+            "MiniMax thinkingEffort current value was malformed"
+        );
+        options.extend(acp_model_option(effort));
+    }
+    Ok((current.to_owned(), options))
+}
+
+pub(crate) fn minimax_model_config_after_selection(
+    previous: &Value,
+    response: &Value,
+    requested: &str,
+) -> Result<Value> {
+    let (current, _) = minimax_model_options_from_session(response)?;
+    anyhow::ensure!(
+        current == requested,
+        "MiniMax did not confirm the requested model {requested}"
+    );
+    let mut session = previous.clone();
+    // Keep the initial directory, replace the entire selected configuration.
+    session["configOptions"] = response["configOptions"].clone();
+    let available = previous
+        .pointer("/models/availableModels")
+        .and_then(Value::as_array)
+        .filter(|models| !models.is_empty())
+        .cloned()
+        .or_else(|| {
+            previous["configOptions"]
+                .as_array()?
+                .iter()
+                .find(|option| option["id"] == "model")?["options"]
+                .as_array()
+                .cloned()
+        })
+        .context("MiniMax initial Session did not return a model directory")?;
+    session["models"] = json!({"currentModelId":current, "availableModels":available});
+    Ok(session)
+}
+
 pub fn dsh_model_config_after_selection(
     previous: &Value,
     response: &Value,
@@ -4102,6 +4241,13 @@ mod tests {
                 "normalization is idempotent"
             );
         }
+        let hermes = acp_model_catalog_for_adapter(AdapterKind::HermesCli, &acp).unwrap();
+        for option in hermes.iter().flat_map(|model| &model.options) {
+            assert_eq!(option.scope, RuntimeOptionScope::Session);
+            assert_eq!(option.default_value, None);
+            assert!(!option.values.iter().any(|choice| choice.value == "default"));
+            assert!(option.values.iter().any(|choice| choice.value == "high"));
+        }
         let auto = catalogs[0].iter().find(|model| model.id == "auto").unwrap();
         assert_eq!(auto.display_name, "Auto");
         assert_eq!(
@@ -4274,6 +4420,49 @@ mod tests {
             models[1].options.is_empty(),
             "effort must not leak across models"
         );
+        let mut empty = mini.clone();
+        empty["configOptions"][0]["currentValue"] = json!("m:provider:other:v:fast");
+        empty["configOptions"].as_array_mut().unwrap().pop();
+        let replaced =
+            minimax_model_config_after_selection(&mini, &empty, "m:provider:other:v:fast").unwrap();
+        let without_effort =
+            acp_model_catalog_for_adapter(AdapterKind::MinimaxCodeCli, &replaced).unwrap();
+        let chosen = without_effort
+            .iter()
+            .find(|model| model.id == "m:provider:other:v:fast")
+            .unwrap();
+        assert!(chosen.options.is_empty());
+        assert_eq!(
+            chosen.runtime_metadata.as_ref().unwrap()["modelOptionsResolved"],
+            true
+        );
+        for bad in [
+            json!({}),
+            json!({"configOptions":null}),
+            json!({"configOptions":[]}),
+            json!({"configOptions":[{"id":"model","currentValue":"other"}]}),
+            json!({"models":{"currentModelId":"other"},"configOptions":mini["configOptions"]}),
+            json!({"configOptions":[mini["configOptions"][0],{"id":"thinkingEffort","type":"select","options":[{"value":42}]}]}),
+            json!({"configOptions":[mini["configOptions"][0],{"id":"thinkingEffort","type":"select"}]}),
+        ] {
+            assert!(
+                minimax_model_config_after_selection(&mini, &bad, "m:provider:model:u").is_err(),
+                "{bad}"
+            );
+        }
+        let mut explicit_empty = mini.clone();
+        explicit_empty["configOptions"][1]["options"] = json!([]);
+        let (_, empty_options) = minimax_model_options_from_session(&explicit_empty).unwrap();
+        assert!(empty_options.is_empty());
+        let mut malformed = mini.clone();
+        malformed["configOptions"][1]["options"] = json!(false);
+        let malformed =
+            acp_model_catalog_for_adapter(AdapterKind::MinimaxCodeCli, &malformed).unwrap();
+        assert!(
+            malformed.iter().all(
+                |model| model.runtime_metadata.as_ref().unwrap()["modelOptionsResolved"] != true
+            )
+        );
         let kilo = json!({"configOptions":[
             {"id":"model","type":"select","currentValue":"local/variant-model","options":[{"value":"local/variant-model","name":"Variant model"},{"value":"local/plain","name":"Plain"}]},
             {"id":"effort","category":"thought_level","type":"select","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}
@@ -4284,10 +4473,7 @@ mod tests {
             models[1].options.is_empty(),
             "Kilo effort is advertised only for its selected model"
         );
-        for (kind, mut session, key) in [
-            (AdapterKind::MinimaxCodeCli, mini, "thinkingEffort"),
-            (AdapterKind::KiloCli, kilo, "effort"),
-        ] {
+        for (kind, mut session, key) in [(AdapterKind::KiloCli, kilo, "effort")] {
             let entries = session["configOptions"][0]["options"]
                 .as_array_mut()
                 .unwrap();

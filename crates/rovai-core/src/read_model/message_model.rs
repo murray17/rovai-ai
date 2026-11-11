@@ -145,10 +145,24 @@ mod tests {
             ),
             (
                 "minimax-code-cli",
-                json!({"source":"explicit","modelId":"native/model","options":{"thinkingEffort":"high","reasoning_effort":"wrong-option"}}),
+                json!({"source":"explicit","modelId":"minimax-model","options":{"thinkingEffort":"high","reasoning_effort":"wrong-option"}}),
                 None,
-                Some("native/model"),
+                Some("minimax-model"),
                 Some("high"),
+            ),
+            (
+                "minimax-code-cli",
+                json!({"source":"explicit","modelId":"minimax-model","options":{"thinkingEffort":"future"}}),
+                None,
+                Some("minimax-model"),
+                Some("future"),
+            ),
+            (
+                "minimax-code-cli",
+                json!({"source":"explicit","modelId":"minimax-model","options":{"reasoning_effort":"wrong-option"}}),
+                None,
+                Some("minimax-model"),
+                None,
             ),
             (
                 "codex-cli",

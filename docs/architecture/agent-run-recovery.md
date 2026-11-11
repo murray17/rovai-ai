@@ -88,6 +88,11 @@ Run 可以先进入失败或取消终态；当前 Core 仍精确持有该 Run/ep
 不能阻止原会话、原成员或原 Runtime 的新任务。历史进程只做启动后一次有界维护；异常记录和旧 ACK 原样保留，
 不进入当前任务清理重试，不因放行新任务而宣称旧执行已停止，也不自动重投旧输入。
 
+OpenCode Steer 的接收事实与 Session 连续性见
+[Message Delivery v19](../contracts/message-delivery-v19.md#native-session-连续性与原生消费边界)。
+Host 按现有规则收尾回收，正常后继 Run 在兼容且可恢复时继续原 Native Session；Steer 回执不触发专属换 Session。
+原生已接收输入可能在结束边界留到同 Session 后续执行消费，Rovai 保留原回执且不自动重发。
+
 ## 5. 精确 Stop
 
 用户 Stop 只接受 `agentRunId + version`，以 CAS 停止精确 Run。目标已终态或版本变化时返回

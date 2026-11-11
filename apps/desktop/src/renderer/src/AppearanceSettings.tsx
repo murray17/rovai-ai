@@ -1,3 +1,4 @@
+import { RovaiBrandMark } from './RovaiBrandMark'
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import type { AppearancePreferences, AppearanceSnapshot } from '@contracts'
 import { APPEARANCE_ZOOM_OPTIONS, DEFAULT_APPEARANCE, MAX_READING_FONT_SIZE, MIN_READING_FONT_SIZE, appearancePreferencesEqual, resolveThemeId } from '../../shared/appearance'
@@ -29,10 +30,6 @@ function Icon({ name }: { name: 'check' | 'reset' | 'minus' | 'plus' | 'arrow' |
     code: 'm8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16'
   }
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true"><path d={paths[name]} /></svg>
-}
-
-function BrandMark(): React.JSX.Element {
-  return <svg className="sample-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 13.16 7.3 17.76 8.84 13.16 10.38 12 15.68 10.84 10.38 6.24 8.84 10.84 7.3Z" fill="currentColor"/><path d="M3 20.96Q12 15.96 21 20.96" fill="none" stroke="currentColor" strokeWidth="2.08" strokeLinecap="round"/></svg>
 }
 
 function SizeSetting({ kind, value, disabled, onChange }: {
@@ -174,7 +171,7 @@ export function AppearanceSettings({ appearance, disabled, platform = 'darwin', 
       </div><div className="preview" aria-label={uiAttribute("文字阅读预览")}>
         <div className="preview-heading"><span><UiText zh={"阅读预览"} /></span><div className="preview-tabs" role="tablist" aria-label={uiAttribute("预览内容")}>{previews.map((kind, index) => <button key={kind} ref={(node) => { tabs.current[index] = node }} type="button" role="tab" id={`appearance-tab-${kind}`} aria-controls={`appearance-preview-${kind}`} aria-selected={preview === kind} tabIndex={preview === kind ? 0 : -1} onClick={() => setPreview(kind)} onKeyDown={(event) => switchPreview(event, index)}>{uiAttribute(previewLabels[kind])}</button>)}</div></div>
         <div className="preview-panel preview-conversation" role="tabpanel" id="appearance-preview-chat" aria-labelledby="appearance-tab-chat" tabIndex={0} hidden={preview !== 'chat'}>
-          <div className="sample-messages"><div className="sample-user"><div className="sample-meta"><span><UiText zh={"你"} /></span><span>09:41</span></div><p><UiText zh={"帮我梳理一下这个项目。"} /></p></div><div className="sample-agent"><div className="sample-meta"><BrandMark/><strong><UiText zh={"队员"} /></strong><span>09:42</span></div><p><UiText zh={"我会先查看目录结构，再整理关键模块。"} /></p><p><UiText zh={"从 "} /><code className="inline-code">README.md</code><UiText zh={" 开始，确认项目的入口与运行方式。"} /></p></div></div>
+          <div className="sample-messages"><div className="sample-user"><div className="sample-meta"><span><UiText zh={"你"} /></span><span>09:41</span></div><p><UiText zh={"帮我梳理一下这个项目。"} /></p></div><div className="sample-agent"><div className="sample-meta"><RovaiBrandMark className="sample-mark"/><strong><UiText zh={"队员"} /></strong><span>09:42</span></div><p><UiText zh={"我会先查看目录结构，再整理关键模块。"} /></p><p><UiText zh={"从 "} /><code className="inline-code">README.md</code><UiText zh={" 开始，确认项目的入口与运行方式。"} /></p></div></div>
           <div className="sample-composer" aria-label={uiAttribute("输入框字号示例")}><span><UiText zh={"继续聊聊这个项目…"} /></span><Icon name="arrow"/></div>
         </div>
         <div className="preview-panel" role="tabpanel" id="appearance-preview-document" aria-labelledby="appearance-tab-document" tabIndex={0} hidden={preview !== 'document'}><article className="document-sample"><h3><UiText zh={"开始协作"} /></h3><p><UiText zh={"在 Thread 中与队员一起完成任务。阅读过程，查看结果，随时补充新的想法。"} /></p><h4><UiText zh={"查看项目结构"} /></h4><p><UiText zh={"先阅读 "} /><code className="inline-code">README.md</code><UiText zh={"，再确认目录与入口。"} /></p><pre><code>{'pnpm install\npnpm dev'}</code></pre><table className="sample-table"><caption className="sr-only"><UiText zh={"示例目录说明"} /></caption><tbody><tr><td>apps/desktop</td><td><UiText zh={"桌面应用"} /></td></tr><tr><td>packages</td><td><UiText zh={"共享模块"} /></td></tr></tbody></table></article></div>

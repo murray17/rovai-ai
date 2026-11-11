@@ -9,42 +9,41 @@ last_updated: 2026-11-09
 
 # Runtime Launch and Verification v79
 
-继承 [v78](runtime-launch-and-verification-v78.md)，接通 Kilo 原生前台策略、Steer 与文件结果投影。
-已确认 Kilo R1 的 B/P、Formatter、Manifest、Bootstrap 与投递证据版本保持。
+继承 [v78](runtime-launch-and-verification-v78.md)，补齐 Kilo 的原生配置、来源与生命周期语义。
+[已确认 R1](../versions/v1.72/model-context-change-kilo-acp.md)的 B/P、输入位置、预算、formatter 和证据版本保持。
 
-## 原生后台子代理
+## Kilo 原生配置与权限
 
-最终 Kilo 启动环境固定 `KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS=false`。
-该原生开关隐藏 task 的 background 参数并拒绝显式后台调用，前台原生子代理仍可用。
-沿共享 Host compatibility 的 `nativeBackgroundPolicy=disabled-v1` 退役旧策略 Host，精确 Session 恢复不变。
-不追加 Charter、不重写 task schema，不在 Core 模拟后台执行策略。
+Kilo inline 配置的所有对象保留原始键顺序，包括嵌套 permission pattern 与 Agent 规则；
+不启用全 workspace 的 JSON preserve-order，不把原生权限转换成另一套 Core 决策。
+原生文件、inline、`KILO_PERMISSION` 与用户插件仍由 Kilo 加载、合并。
 
-## 同 Run Steer
+当前 Kilo 合并会保留较早对象的键位置；仅把新增 wildcard 放在 inline 开头，不能保证文件中的具体规则继续生效。
+因此 Host 私有目录追加一个无依赖的原生 `config` 回调：在原生合并及用户配置回调完成后，将成员保存的
+wildcard `allow / ask / deny` 放在具体规则之前，并固定 question 为 deny；其余规则及相对顺序保持。
+用户 Agent 自己的规则继续按原生语义生效。该回调只设置原生配置，没有工具、审批、压缩、模型输入或握手逻辑。
+Bootstrap 仍只通过 v78 instructions 文件进入普通模型请求；不注册压缩观察插件。
 
-ACP v1、Kilo 7.8.27 起的 7.x 使用同一 Session 的普通 `session/prompt`；该门槛是本次实现边界，
-不是最早原生支持版本或所有 7.x 均已验收的声明。
-只有相关 RPC 的 `end_turn` 证明这条输入已被接受；断线、超时或缺失终态保持 unknown，不自动重放。
-标准明确的无效请求、方法或参数错误保留未接受语义。
+## Host 与 MCP
 
-复用 Hermes 已有的并发 prompt 收口：原请求与已提交的补充请求全部返回后才能结束 Run、释放 CLI lease。
-补充请求失败不能被原请求的成功覆盖；取消沿共享 Run/epoch/Prompt fence 与进程清理。
-Kilo 取消通知成功后，沿当前 route 最多等待 2 秒让已提交 prompt 返回终态，再进入既有进程清理；
-原生未及时结束时仍按原清理流程收口，不删除其私有 turn/snapshot 文件。
-普通模型/工具活动用于确认首条输入，catalog/history/user echo 不作为接受证据。
-不增加 Kilo 队列、Session、轮询读取器或后台完成唤醒。
-输入提交仍按共享 scheduler 的 Run 内顺序执行；等待完整 RPC 回执期间，后续输入保持既有待投递/收口回队列语义。
+实际 affected-members 的 MCP mutation 同时 invalidates Kilo 的共享 Fleet Host：idle 立即停止，
+busy 保持本轮并在正常收口后停止。相同 Binding 的不兼容进程先沿共享退役入口回收，再创建替代 Host。
+恢复保留完整原生 Session ID；A → B → A 不能再次领取已退役的旧 A。
 
-## 原生文件结果
+ACP stdio 没有 cwd 字段。Kilo 与 Command Code 共用现有 argv launcher，仅在显式 MCP cwd 与 Session cwd
+不同时改变 Server 子进程工作目录；参数保持字面值。Command Code 的专用 placeholder 转义不应用于 Kilo。
+不新增进程池、配置镜像或 MCP 生命周期服务。
 
-Kilo 的模型原生选择 edit 或 apply_patch；GPT 模型可能只暴露 apply_patch，Rovai 不伪装工具名。
-成功终态的 `rawOutput.metadata.filediff`（write/edit）和 `metadata.files[]`（apply_patch）
-进入 `runtimeDiff.semanticKind=kilo_file_patch`，复用已有原生 unified patch 解析、路径与预算处理。
-单文件结果可形成同 Activity 的 file-operation；多文件逐条形成 Diff entry。
-write 的原生 Boolean exists 区分 add/update，已有空文件为 update。
+## 模型、认证与原生来源
 
-只消费已完成、未截断的原生结果，不读取磁盘重建前态；edit 的 oldString/newString 及标准 Diff
-可能只是替换片段，不作为完整文件 before/after。缺少合格结果时保留既有路径/文本展示。
-文件内容、增删计数与恢复重建沿共享 projection；不新增 Renderer Runtime 分支、classifier 或数据库迁移。
+- Kilo 原生思考选项 ID 为 `effort`。目录、UI、持久化与 `session/set_config_option` 使用相同 ID；
+  选项仅归属实际广告它的当前模型，不复制到未观察的模型，不把旧 `reasoning_effort` 猜成 alias。
+- initialize/session-new 只证明连接及目录可用。无模型凭据验证证据时，authentication 保持 `unknown`；
+  不能由非生成探测升级为 authenticated。既有执行准入与延迟验证保持。
+- numeric reader 从实际 Host 的冻结启动环境解析 `KILO_DB`：绝对路径直接使用，相对路径基于原生 Kilo data 根，
+  缺省为 data 根下 kilo.db；`:memory:` 没有磁盘观察来源，保持未知，不回退猜测 Session 累计值。
+- Kilo 原生 Skills 静态候选包括默认 XDG config/kilo、Home 的 `.kilo`/`.kilocode`，以及追加的
+  `KILO_CONFIG_DIR`；这些目录的 `skill`、`skills` 均保留。项目对应目录及 `.agents`/`.claude` 来源复用共享扫描、去重与缓存。
 
-平台仍为 macOS arm64 Preview，其他平台 NotQualified。
-验证证据与范围见[实施记录](../versions/v1.72/kilo-files-steer-verification.md)。
+macOS arm64 Preview 范围保持。真实版本与验证边界见[复核记录](../versions/v1.72/kilo-acp-review-fixes.md)。
+Steer 的原生研究不自动开放 Core active-input，见[Steer 证据](../research/kilo-runtime/steer-7.8.27.md)。

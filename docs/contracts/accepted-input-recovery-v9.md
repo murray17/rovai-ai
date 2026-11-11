@@ -57,5 +57,5 @@ ZCode 的专用 cancel fence 与后台所有权保持；Hermes 的 Gateway 不�
 不证明共享 Gateway 或其原生执行已停止。Claude one-shot、Codex 和 Pi 的生命周期保持。
 
 没有新增取消状态机、队列、清理管理器或持久状态字段。Kilo 具体配置见
-[Runtime Launch v83](runtime-launch-and-verification-v83.md)，理由见
-[V1.72-D81](../versions/v1.72/decisions.md#v1-72-d81)。
+[Runtime Launch v84](runtime-launch-and-verification-v84.md)，理由见
+[V1.72-D82](../versions/v1.72/decisions.md#v1-72-d82)。

@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import * as Popover from '@radix-ui/react-popover'
 import type { ModelDescriptor } from '@contracts'
-import { RuntimePickerCheck, RuntimePickerChevron } from './RuntimeParameterSelect'
+import { RuntimePickerCheck, RuntimePickerChevron, CatalogRefreshButton } from './RuntimeParameterSelect'
 import { UiText, uiAttribute } from './interface-language'
 
 const DEFAULT_MODEL = 'runtime_default'
 const normalize = (text: string): string => text.normalize('NFKC').trim().toLocaleLowerCase()
 
-export function RuntimeModelSearch({ open, onOpenChange, models, value, label, disabled, loading, failed, notice, onRetry, onSelect }: {
+export function RuntimeModelSearch({ open, onOpenChange, models, value, label, disabled, loading, onRefresh, onSelect }: {
   open: boolean
   onOpenChange(open: boolean): void
   models: ModelDescriptor[]
@@ -15,9 +15,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
   label: string
   disabled: boolean
   loading: boolean
-  failed: boolean
-  notice: string | null
-  onRetry(): void
+  onRefresh?(): void
   onSelect(value: string): void
 }): React.JSX.Element {
   const id = useId()
@@ -28,6 +26,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
   const composing = useRef(false)
   const tabDismissed = useRef(false)
   const [query, setQuery] = useState('')
+  const [navigationStep, setNavigationStep] = useState(0)
   const [activeId, setActiveId] = useState(value)
   const isManual = value !== DEFAULT_MODEL && !models.some(model => model.id === value)
   const showManual = isManual && normalize(value).includes(normalize(query))
@@ -62,6 +61,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
       event.preventDefault()
       const index = enabled.indexOf(active ?? '')
       setActiveId(enabled[(index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length])
+      setNavigationStep(step => step + 1)
     } else if (event.key === 'Enter' && event.target === search.current) {
       event.preventDefault()
       if (active) choose(active)
@@ -94,7 +94,7 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
     else if (row.offsetTop + row.offsetHeight > container.scrollTop + container.clientHeight) {
       container.scrollTop = row.offsetTop + row.offsetHeight - container.clientHeight
     }
-  }, [activeIndex, open, query])
+  }, [navigationStep, open, query])
 
   return <Popover.Root open={open} onOpenChange={changeOpen}>
     <Popover.Trigger asChild>
@@ -116,23 +116,22 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
       }} onKeyDown={handleKey}>
       <div className="runtime-model-search">
         <svg aria-hidden="true" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input ref={search} role="combobox" aria-label={uiAttribute("搜索模型或输入 ID")} aria-expanded={open}
+        <input ref={search} role="combobox" aria-label={uiAttribute("搜索模型或输入自定义 ID")} aria-expanded={open}
           aria-controls={`${id}-list`} aria-autocomplete="list" aria-activedescendant={activeDescendant}
-          placeholder={uiAttribute("搜索模型或输入 ID…")} value={query}
+          placeholder={uiAttribute("搜索模型 / 自定义 ID")} value={query}
           spellCheck={false} autoComplete="off" autoCapitalize="none" autoCorrect="off"
           onCompositionStart={() => { composing.current = true }} onCompositionEnd={() => { composing.current = false }}
           onChange={event => { setQuery(event.target.value); setActiveId('') }} />
-        {query && <button className="runtime-model-search-clear" type="button" aria-label={uiAttribute("清除模型搜索")}
+        <div className="runtime-model-search-actions"><button className={`runtime-model-search-clear${query ? '' : ' is-empty'}`} tabIndex={query ? 0 : -1} aria-hidden={!query || undefined} type="button" aria-label={uiAttribute("清除模型搜索")}
           onClick={() => { setQuery(''); setActiveId(value); search.current?.focus() }}>
           <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M4 12l8-8" /></svg>
-        </button>}
+        </button>
+        <CatalogRefreshButton loading={loading} disabled={disabled} onRefresh={onRefresh} label="刷新模型列表" busyLabel="正在刷新模型列表" />
+        </div>
       </div>
-      {notice && <div className="runtime-model-picker-notice" role="status">
-        <span>{notice}</span>
-        <button type="button" className="runtime-model-picker-retry" disabled={disabled} onClick={onRetry}><UiText zh={"重试"} /></button>
-      </div>}
-      <div id={`${id}-list`} role="listbox" aria-label={uiAttribute("模型")} className="runtime-picker-options">
+      <div id={`${id}-list`} role="listbox" aria-label={uiAttribute("模型")} aria-busy={loading || undefined} className="runtime-picker-options">
         <div ref={scroll} className="runtime-picker-scroll">
+          {loading && models.length === 0 && <p className="catalog-cold-loading" role="status"><UiText zh="正在读取可选项…" /></p>}
           {showManual && <button type="button" tabIndex={-1} role="option" aria-selected="true"
             id={`${id}-option-0`} data-option-index={0} data-manual-current
             className="runtime-model-picker-item" data-highlighted={active === value ? '' : undefined} title={value}
@@ -151,17 +150,19 @@ export function RuntimeModelSearch({ open, onOpenChange, models, value, label, d
             </span>
             <span className="runtime-model-picker-check">{value === model.id && <RuntimePickerCheck />}</span>
           </button>)}
-          {canSpecify && <button type="button" tabIndex={-1} role="option" aria-selected="false" data-specify-candidate
-            id={`${id}-option-${filtered.length + Number(showManual)}`} data-option-index={filtered.length + Number(showManual)}
-            className="runtime-model-picker-item runtime-model-specify" data-highlighted={active === candidate ? '' : undefined}
-            title={uiAttribute("使用模型 {0}", candidate)} aria-label={uiAttribute("使用模型 {0}", candidate)}
-            onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(candidate)} onClick={() => choose(candidate)}>
-            <span className="runtime-model-specify-copy"><span><UiText zh="使用" /></span><code>{candidate}</code></span>
-          </button>}
-          {!filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
-            {query ? uiAttribute("没有匹配的模型，请尝试其他名称或 ID。") : loading ? uiAttribute("正在获取模型列表…") : failed ? uiAttribute("模型列表尚未核对。") : uiAttribute("当前没有可选的固定模型。")}
+          {query && !filtered.length && !showManual && !canSpecify && <p className="runtime-model-picker-empty" role="status">
+            {uiAttribute("没有匹配的模型，请尝试其他名称或 ID。")}
           </p>}
         </div>
+          {canSpecify && <div className="runtime-model-custom-action"><button type="button" tabIndex={-1} role="option" aria-selected="false" data-specify-candidate
+            id={`${id}-option-${filtered.length + Number(showManual)}`} data-option-index={filtered.length + Number(showManual)}
+            className="runtime-model-picker-item runtime-model-specify" data-highlighted={active === candidate ? '' : undefined}
+            title={uiAttribute("使用此模型 ID：{0}", candidate)} aria-label={uiAttribute("使用此模型 ID：{0}", candidate)}
+            onMouseDown={event => event.preventDefault()} onPointerMove={() => setActiveId(candidate)} onClick={() => choose(candidate)}>
+            <svg className="runtime-model-specify-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="m5 4-4 4 4 4m6-8 4 4-4 4M9.5 2l-3 12" /></svg>
+            <span className="runtime-model-specify-copy"><strong><UiText zh="使用此模型 ID" /></strong><code>{candidate}</code></span>
+            <svg className="runtime-model-specify-arrow" aria-hidden="true" viewBox="0 0 16 16"><path d="M3 8h10m-4-4 4 4-4 4" /></svg>
+          </button></div>}
         <div className="runtime-picker-default">
           <button type="button" tabIndex={-1} role="option" aria-selected={value === DEFAULT_MODEL}
             id={`${id}-option-${resultIds.length}`} className="runtime-model-picker-item"

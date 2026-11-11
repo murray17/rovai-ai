@@ -1,7 +1,8 @@
 import { createElement } from 'react'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { RuntimeParameterSelect } from './RuntimeParameterSelect'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -15,15 +16,24 @@ import {
   displayableInstallationModels,
   explicitSelection,
   liveCatalogIsAtLeastAsRecent,
-  modelCatalogStatusCopy,
   runtimeDraftForMember,
   runtimeModelSelectionAvailable,
-  runtimeEditorInstallation
+  runtimeEditorInstallation,
+  runtimeModelCatalogIsFresh
 } from './MemberRuntimeParameters'
 
 const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
+vi.mock('./RuntimeParameterSelect', { spy: true })
+
 describe('runtime model catalog source', () => {
+  it('checks the existing freshness deadline at access time even when status still says fresh', () => {
+    const cache = { ...runtimeInstallation('codex-cli').modelCatalog, status: 'fresh' as const, revalidateAfter: '2026-11-09T12:01:00Z' }
+    expect(runtimeModelCatalogIsFresh(cache, Date.parse('2026-11-09T12:00:59Z'))).toBe(true)
+    expect(runtimeModelCatalogIsFresh(cache, Date.parse('2026-11-09T12:01:00Z'))).toBe(false)
+    expect(runtimeModelCatalogIsFresh({ ...cache, status: 'expired' }, Date.parse('2026-11-09T12:00:59Z'))).toBe(false)
+    expect(runtimeModelCatalogIsFresh({ ...cache, revalidateAfter: null })).toBe(false)
+  })
   it('keeps expired same-environment history displayable without accepting invalidated history', () => {
     const installation = runtimeInstallation('codex-cli')
     installation.modelCatalog.status = 'expired'
@@ -32,7 +42,9 @@ describe('runtime model catalog source', () => {
     expect(displayableInstallationModels(installation)).toEqual([])
     installation.modelCatalog.status = 'expired'
     installation.snapshot!.probeStatus = 'light_ready'
-    expect(displayableInstallationModels(installation)).toEqual([])
+    expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
+    installation.snapshot!.staleAt = 'historical-health-failure'
+    expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
     installation.adapterKind = 'pi'
     installation.snapshot!.staleAt = 'old-health-invalidation'
     expect(displayableInstallationModels(installation)).toEqual(installation.snapshot!.models)
@@ -135,22 +147,6 @@ describe('explicit model changes', () => {
 })
 
 describe('member runtime parameters', () => {
-  it('presents a superseded refresh as a temporary Runtime update, not a failure', () => {
-    const cache = runtimeInstallation('copilot-cli').modelCatalog
-
-    expect(modelCatalogStatusCopy(cache, {
-      loading: false,
-      refreshFailed: false,
-      servingCachedModels: true,
-      refreshStatus: 'deferred'
-    })).toBe('运行环境正在更新，继续显示上次成功结果')
-    expect(modelCatalogStatusCopy(cache, {
-      loading: false,
-      refreshFailed: false,
-      servingCachedModels: false,
-      refreshStatus: 'deferred'
-    })).toBe('运行环境正在更新，稍后重新获取')
-  })
 
   it('keeps onboarding limited to model fields while permissions come from adapter defaults', () => {
     const installation = runtimeInstallation('codex-cli')
@@ -306,9 +302,6 @@ describe('member runtime parameters', () => {
     }))
 
     expect(markup).toContain('Runtime Model')
-    expect(modelCatalogStatusCopy(installation.modelCatalog, {
-      loading: false, refreshFailed: true, servingCachedModels: true, refreshStatus: 'failed'
-    })).toBe('模型与参数尚未核对，已保留上次结果。')
   })
 
   it.each([
@@ -352,8 +345,59 @@ describe('member runtime parameters', () => {
     }))
     expect(render()).toContain(`aria-label="${label}，High"`)
     installation.snapshot!.models[0].options = []
-    expect(render()).toContain('尚未核对 · high')
+    expect(render()).toContain('high')
     expect(draft.model.options).toEqual({ [key]: 'high' })
+  })
+
+  it('uses the common model default for Hermes and preserves native effort levels', () => {
+    const installation = runtimeInstallation('hermes-cli')
+    installation.snapshot!.models[0].options[0].values = ['high', 'none', 'default'].map(value => ({value, label: value}))
+    for (const [value, label] of [['', '跟随模型默认值'], ['high', 'high'], ['none', 'none'], ['default', '跟随模型默认值']] as const) {
+      const model = {mode: 'explicit' as const, modelId: 'runtime/model', options: value ? {reasoning_effort: value} : {}}
+      const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+        adapterKind: 'hermes-cli', installation, model, disabled: false, onChange: () => undefined
+      }))
+      expect(markup).toContain(`aria-label="推理强度，${label}"`)
+      const changed = explicitSelection({...installation.snapshot!.models[0], id: 'other', options: []}, model)
+      expect(changed.mode === 'explicit' && changed.options).toEqual(model.options)
+    }
+    installation.snapshot!.models[0].options = []
+    const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+      adapterKind: 'hermes-cli', installation, disabled: false, onChange: () => undefined,
+      model: {mode: 'explicit', modelId: 'runtime/model', options: {reasoning_effort: 'future'}}
+    }))
+    expect(markup).toContain('future')
+  })
+
+  it('keeps one common Hermes default with or without a model catalog', () => {
+    for (const catalog of ['missing-model', 'empty', 'native-reset'] as const) {
+      const installation = runtimeInstallation('hermes-cli')
+      installation.snapshot!.models[0].options[0].values = ['high', 'default', 'default']
+        .map(value => ({ value, label: value }))
+      if (catalog === 'empty') installation.snapshot!.models = []
+      for (const value of ['high', 'default']) {
+        vi.mocked(RuntimeParameterSelect).mockClear()
+        const model = {
+          mode: 'explicit' as const,
+          modelId: catalog === 'native-reset' ? 'runtime/model' : 'custom:manual:unlisted',
+          options: { reasoning_effort: value }
+        }
+        const onChange = vi.fn()
+        const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+          adapterKind: 'hermes-cli', installation, model, disabled: false, onChange
+        }))
+        const [field] = vi.mocked(RuntimeParameterSelect).mock.calls.at(-1)!
+        expect(field.choices.map(choice => choice.value)).not.toContain('default')
+        expect(field.defaultChoice).toEqual({ value: '', label: '跟随模型默认值' })
+        expect(markup).toContain(value === 'default'
+          ? 'aria-label="推理强度，跟随模型默认值"'
+          : catalog === 'native-reset' ? 'aria-label="推理强度，high"' : 'high')
+        expect(onChange).not.toHaveBeenCalled()
+        field.onChange(field.defaultChoice!.value)
+        expect(onChange).toHaveBeenLastCalledWith({ ...model, options: {} })
+        expect(model.options).toEqual({ reasoning_effort: value })
+      }
+    }
   })
 
   it('does not present an approval mode for native Pi tool execution', () => {
@@ -382,12 +426,12 @@ describe('member runtime parameters', () => {
     expect(markup).not.toContain('审批模式')
     expect(markup).not.toContain('partial_managed')
     for (const [state, values, value, expected] of [
-      ['known', ['off', 'high'], '', '跟随 Pi 原生设置'],
+      ['known', ['off', 'high'], '', '跟随模型默认值'],
       ['known', ['off'], '', null],
       ['known', [], '', null],
       ['unknown', [], '', null],
-      ['unknown', [], 'max', '尚未核对 · max'],
-      ['known', ['off'], 'high', '尚未核对 · high'],
+      ['unknown', [], 'max', 'max'],
+      ['known', ['off'], 'high', 'high'],
     ] as const) {
       const model = installation.snapshot!.models[0]
       model.runtimeMetadata = { piThinkingSchemaVersion: 1, piThinkingState: state }

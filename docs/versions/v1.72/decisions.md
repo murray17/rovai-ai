@@ -8,8 +8,8 @@ last_updated: 2026-11-11
 
 # v1.72 版本决定
 
-<a id="v1-72-d84"></a>
-## V1.72-D84：Kilo Windows x64 目标机实测后通过资格
+<a id="v1-72-d85"></a>
+## V1.72-D85：Kilo Windows x64 目标机实测后通过资格
 
 - 状态：accepted
 - 日期：2026-11-11
@@ -20,8 +20,8 @@ Windows 实测覆盖原生认证、执行、会话恢复、审批、内置 CLI�
 目标机证据覆盖正式准入要求，因此选择将 Windows x64 投影为 Qualified，并绑定平台专属证据。
 [Windows x64 验收](../../research/kilo-runtime/README.md#windows-x64-目标机验收)
 
-<a id="v1-72-d83"></a>
-## V1.72-D83：Kilo Linux x64 目标机实测后开放 Preview
+<a id="v1-72-d84"></a>
+## V1.72-D84：Kilo Linux x64 目标机实测后开放 Preview
 
 - 状态：accepted
 - 日期：2026-11-10
@@ -31,8 +31,8 @@ Windows 实测覆盖原生认证、执行、会话恢复、审批、内置 CLI�
 实测覆盖 Linux x64 的发现、配置、会话、文件和取消等使用路径，现有 Core Preview 准入可直接承接。
 完整平台资格仍需独立证据。[Linux x64 验收](../../research/kilo-runtime/README.md#linux-x64-目标机验收)
 
-<a id="v1-72-d82"></a>
-## V1.72-D82：Kilo Apple Intel 按维护者授权开放 Preview
+<a id="v1-72-d83"></a>
+## V1.72-D83：Kilo Apple Intel 按维护者授权开放 Preview
 
 - 状态：accepted
 - 日期：2026-11-10
@@ -42,15 +42,15 @@ Windows 实测覆盖原生认证、执行、会话恢复、审批、内置 CLI�
 选择复用原有 macOS arm64 Preview，让 macOS x64 沿共享 Admission 开放；不等待完整资格闭合才允许使用，
 也不将维护者的开放请求解释为已完成 Intel 目标机验收。保留 null evidence 和缺少资格证据的 reason，
 不增加 Renderer 平台名单、安装特例或证据校验机制。Windows/Linux 继续由各自目标机验收决定资格。
-此选择更新 D76 最初只开放 arm64 的范围；原生权限、模型输入、会话、进程复用和版本门槛保持。
+此选择更新 D77 最初只开放 arm64 的范围；原生权限、模型输入、会话、进程复用和版本门槛保持。
 
-<a id="v1-72-d81"></a>
-## V1.72-D81：Kilo 继承原生权限，MCP 下一轮生效，取消沿共享释放
+<a id="v1-72-d82"></a>
+## V1.72-D82：Kilo 继承原生权限，MCP 下一轮生效，取消沿共享释放
 
 - 状态：accepted
 - 日期：2026-11-10
 - 授权：User sequence 48 给定三项简化行为、公共预算、旧配置兼容和真实 Warm 验收要求。
-- 当前权威：[Launch v83](../../contracts/runtime-launch-and-verification-v83.md)、[Accepted Input Recovery v9](../../contracts/accepted-input-recovery-v9.md)。
+- 当前权威：[Launch v84](../../contracts/runtime-launch-and-verification-v84.md)、[Accepted Input Recovery v9](../../contracts/accepted-input-recovery-v9.md)。
 
 MCP 保存只提交配置，Kilo 的下一次获取继续通过现有兼容性判断替换不兼容 Host 并精确恢复 Session；
 不再在保存时主动退役。Command Code 策略保持，不引入 dirty 标记、版本计数或延迟队列。
@@ -58,23 +58,23 @@ MCP 保存只提交配置，Kilo 的下一次获取继续通过现有兼容性�
 移除 Kilo 产品权限档位及其原生 config Hook，权限完全由 Kilo 自己加载与判断；
 保留原生 Approval 转交、有序追加 instructions、问卷与后台子代理的独立原生开关。
 仅兼容退役的旧 permission 字段，新执行忽略它，其他未知配置仍拒绝，历史 Run 不重写。
-这取代 D77/D79 中为产品权限覆盖保留 Hook 和强制关闭 pure 的选择；有序配置仍用于保持继承规则。
+这取代 D78/D80 中为产品权限覆盖保留 Hook 和强制关闭 pure 的选择；有序配置仍用于保持继承规则。
 
 普通取消复用已有 ACP pending RPC、Run/epoch、Session/prompt 与补充请求汇合；
 在原公共期限内确认原始及补充请求收尾、排空 ingress、解除授权后，沿 Fleet 既有检查决定 Warm 或回收。
 原清理回执保留实际 Reusable/Reaped 结果到 durable ACK，避免缺失 handle 冒充成功或旧 cleanup 停止后继。
 不新建取消状态机或 Kilo 复用管理器；超时、异常、显式停止与现有所有权例外保持。
-这只放宽 D80 原先仍退役的已确认普通取消，不改未知/失败的回收要求。
+这只放宽 D81 原先仍退役的已确认普通取消，不改未知/失败的回收要求。
 
 基线差异、失败对照、官方 Core 的同 Host/PID/Session 与新租约证据见[实施记录](kilo-simplification.md)。
 
-<a id="v1-72-d80"></a>
-## V1.72-D80：Kilo 成功 Steer 后沿常规 Fleet 复用
+<a id="v1-72-d81"></a>
+## V1.72-D81：Kilo 成功 Steer 后沿常规 Fleet 复用
 
 - 状态：accepted
 - 日期：2026-11-09
 - 授权：User sequence 25 质疑常规 Steer 后额外退役，要求简洁接入；问卷双入口明确保持。
-- 当前权威：[Launch v81](../../contracts/runtime-launch-and-verification-v81.md)。
+- 当前权威：[Launch v82](../../contracts/runtime-launch-and-verification-v82.md)。
 
 现有原请求/补充请求汇合已经明确全部 RPC 的成功终态；没有证据证明 Kilo 在此时仍必须重启。
 选择只在该汇合正常成功后解除 Steer 退役标记，沿现有 detach、兼容性与 Fleet quiescence 复用。
@@ -83,13 +83,13 @@ MCP 保存只提交配置，Kilo 的下一次获取继续通过现有兼容性�
 文件转换继续复用共享 Diff，MCP cwd 只在不同目录时保留用户配置；问卷关闭策略不调整。
 实际失败对照、连续复用与边界见[实施记录](kilo-steer-reuse.md)。
 
-<a id="v1-72-d79"></a>
-## V1.72-D79：Kilo 边界修复收回共享入口
+<a id="v1-72-d80"></a>
+## V1.72-D80：Kilo 边界修复收回共享入口
 
 - 状态：accepted
 - 日期：2026-11-09
 - 授权：User sequence 19 要求自检隐式 Node 与重复文件处理；沿已授权的简洁 ACP 接入收尾。
-- 当前权威：[Launch v80](../../contracts/runtime-launch-and-verification-v80.md)。
+- 当前权威：[Launch v81](../../contracts/runtime-launch-and-verification-v81.md)。
 
 不同 cwd 的 MCP 依赖裸 Node，会使独立 Kilo 与 Python MCP 无法运行；复用现有 bundled CLI 的绝对入口，
 用私有启动模式进入 cwd 后执行原程序，删除共享 Node wrapper。相同 cwd 与 HTTP 路径保持，
@@ -102,12 +102,12 @@ MCP 保存只提交配置，Kilo 的下一次获取继续通过现有兼容性�
 不以简化为由删除语义差异，也不新增框架、schema、迁移、加载握手或校验层。
 失败对照、严格无 Node 的官方 CLI/Core 结果及平台边界见[收尾记录](kilo-boundary-fixes.md)。
 
-<a id="v1-72-d78"></a>
-## V1.72-D78：Kilo 使用原生禁后台与共享 Steer、文件投影
+<a id="v1-72-d79"></a>
+## V1.72-D79：Kilo 使用原生禁后台与共享 Steer、文件投影
 
 - 状态：accepted
 - 日期：2026-11-09
-- 当前权威：[Launch v79](../../contracts/runtime-launch-and-verification-v79.md)。
+- 当前权威：[Launch v80](../../contracts/runtime-launch-and-verification-v80.md)。
 
 官方 7.8.27 提供与 Claude 当前范围一致的后台子代理 opt-out，直接注入原生环境，保留前台调用。
 同 Session 的并发 prompt 具备接续基础，但每个 RPC 独立结束，故复用 Hermes 的多请求 Run 收口，
@@ -117,12 +117,12 @@ MCP 保存只提交配置，Kilo 的下一次获取继续通过现有兼容性�
 保留原生配置保序和 Host/MCP 生命周期的必要接线；B/P 与证据版本不变，平台资格仍为 Preview。
 实际结果和未验收范围见[实施记录](kilo-files-steer-verification.md)。
 
-<a id="v1-72-d77"></a>
-## V1.72-D77：Kilo 在原生合并后保持默认权限与具体规则顺序
+<a id="v1-72-d78"></a>
+## V1.72-D78：Kilo 在原生合并后保持默认权限与具体规则顺序
 
 - 状态：accepted
 - 日期：2026-11-09
-- 当前权威：[Launch v78](../../contracts/runtime-launch-and-verification-v78.md)。
+- 当前权威：[Launch v79](../../contracts/runtime-launch-and-verification-v79.md)。
 
 源码及官方 CLI 复现证明，serde_json 排序会改变最后匹配的权限结果；即使 inline 保序，
 原生跨文件深合并也可能把新增 wildcard 排在已有具体规则之后。继承的 KILO_PERMISSION 还拥有更晚优先级。
@@ -132,13 +132,13 @@ MCP 保存只提交配置，Kilo 的下一次获取继续通过现有兼容性�
 其他修正只补齐共享退役/argv cwd、原生 effort/DB/Skills 来源及诚实的认证投影。
 macOS arm64 Preview 范围保持；Steer 只有原生接续研究证据，Core active-input 仍关闭。
 
-<a id="v1-72-d76"></a>
-## V1.72-D76：Kilo 使用原生 ACP、单 Binding Host 与 instructions
+<a id="v1-72-d77"></a>
+## V1.72-D77：Kilo 使用原生 ACP、单 Binding Host 与 instructions
 
 - 状态：accepted
 - 日期：2026-11-08
 - 授权：User 初次要求 ACP 接入、架构简洁且不增加 SHA256，sequence 4 确认已展示的 R1 后开始实施。
-- 当前权威：[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#kilo-官方-acp)、[Runtime Launch v77](../../contracts/runtime-launch-and-verification-v77.md)。
+- 当前权威：[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md#kilo-官方-acp)、[Runtime Launch v78](../../contracts/runtime-launch-and-verification-v78.md)。
 
 Kilo 与 OpenCode 同属 ACP，但版本、认证和原生目录独立；将两者当作一个 Adapter 会形成不可接受的持久身份与配置耦合。
 原生 backend 的 MCP 按 directory 共享，空 Session 配置不能撤销旧工具；已实测的 instructions reader
@@ -1709,3 +1709,19 @@ Desktop 与 Web 复用 Rust Host 的来源重验、内容摘要和同目录替�
 可逆相对路径定位；保留当前工作根与代次、实际访问边界和资源释放，不增加索引、快照协议或登记表淘汰。
 此选择替代 D73 中的非稳定 offset 分页。纯读取事件不应让缓存失效；过滤事件种类，不加另一层调度。
 源码/预览切换属于阅读能力，不能依赖可编辑草稿或项目目录来源；只读文件仍只读。
+
+
+<a id="v1-72-d76"></a>
+## V1.72-D76：MiniMax 目录与逐模型参数按需读取
+
+- 状态：accepted
+- 日期：2026-11-10
+- 授权：User 批复按评审后的 MiniMax 方案在独立 worktree 实现。
+- 当前权威：[Runtime Launch v77](../../contracts/runtime-launch-and-verification-v77.md)、[目录边界](../../architecture/runtime-catalog-boundaries.md#minimax-按目标参数发现)。
+
+原完整目录遍历全部模型，目录延迟与单模型故障因模型数放大。选择沿用 DSH 目标寻址、Core 原缓存、
+事务合并与 Renderer 请求管理；MiniMax 保留原生 thinkingEffort，不引入来源、模型准备、第二套缓存或执行预检。
+目录完整性只描述列表，参数完整性由每个模型的成功观测描述；未知与确认空明确区分。
+
+保留同 Runtime 串行，不扩大探测并发。原生配置身份只服务发现，不改变正式 Host 复用或业务参数校验。
+真实 CLI 的隔离会话验收先于删除尾部恢复，允许原生初始化自有状态，禁止把临时选模当作用户默认值。

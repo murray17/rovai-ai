@@ -4,65 +4,56 @@ name: Runtime Launch and Verification
 version: v77
 status: accepted
 source_version: v1.72
-last_updated: 2026-11-08
+last_updated: 2026-11-10
 ---
 
 # Runtime Launch and Verification v77
 
-继承 [v76](runtime-launch-and-verification-v76.md) 的现有 Runtime 行为；
-本版增加独立的 Kilo 官方 ACP 接入。输入位置按[已确认 R1](../versions/v1.72/model-context-change-kilo-acp.md)。
+继承 [v76](runtime-launch-and-verification-v76.md)。本版将 MiniMax 参数发现接入现有按目标读取流程，
+替代继承链中 MiniMax 完整目录逐模型扫描／恢复的要求。正式执行、权限、MCP、业务 Session 与保存准入不变。
 
-## Kilo 身份、原生来源与启动
+## MiniMax 目录与目标参数
 
-稳定 identity 为 `kilo-cli`，正常发现 `kilo`，显式入口变量为 `ROVAI_KILO_BIN`。
-正式进程只使用所选官方 CLI 的 `acp`，不借用 OpenCode 的版本判断、认证、Provider 或配置目录。
-Kilo 自身版本与 ACP initialize 结果作为观察，不建立固定版本或二进制 checksum 白名单。
+`runtime.modelCatalog.open` 的 `modelId`、`cacheOnly` 与 `forceRefresh` 同时支持 DSH 和 MiniMax。
+`dshSource` 只属于 DSH；MiniMax 目标携带它时拒绝，不借来源字段寻址或建立缓存身份。
+无目标的 MiniMax 目录只执行 ACP initialize 与 session/new，选模 RPC 与业务 Prompt 均为零；
+模型数不增加选模次数。可以记录初始当前模型已完整返回的参数，其余模型保持未确认。
+目录成功表示取得模型列表，不表示所有模型参数均已读取；完整健康检查仍保留原有目录时间和内容策略。
 
-进程创建前设置 `KILO_CLIENT=acp`、关闭原生自动升级并禁用未承接的 question 工具。
-Rovai 保留用户原生 HOME、XDG、项目配置与认证；不创建配置镜像或写全局配置。
-模型默认值来自该 CLI；显式模型保留原 ID，交由真实 Session 选择结果决定是否接受。
+目标缓存有效则直接返回；`cacheOnly=true` 始终优先，只校验本地身份、不启动 Runtime。
+缺失或过期时进入既有有界 Check Manager。MiniMax 使用临时 cwd 与原生配置，不经过 DSH 模型准备、
+来源校验或参数映射。初始当前模型就是目标时不选模，否则只选择一次目标；不扫描其他模型、不尾部切回。
+临时选择不成为目录默认项，默认标记来自初始 Session；不得改写队员或用户默认配置。
 
-权限字段 `permission` 使用原生 `allow / ask / deny`，新队员默认 allow；
-保存的较窄选择保留。只覆盖原生 wildcard，保留工具及自定义 Agent 的原生规则，
-不宣称 deny 是 Core 路径沙箱。剩余原生审批原样进入现有审批 owner，不能因 wildcard allow 自动放行。
-取消与迟到请求复用既有 Run/Prompt/epoch 生命周期；不叠加文件授权或路径 containment。
+成功参数响应必须明确提供 configOptions 数组及唯一的 model.currentValue。若同时提供
+models.currentModelId，两个身份必须一致，且目标查询必须等于请求的精确原生 ID（含 variant）。
+选模响应完整替换目标配置观测，模型列表保留初始目录。缺少必要身份／配置、身份矛盾、超时或原生拒绝均失败。
+原生 thinkingEffort 键与值原样保留；合法完整配置中缺席该字段或明确空选项可确认无档位。
+该字段存在但类型、候选数组或值损坏时不得生成成功空观测；其他 ACP 适配器保留原有宽容目录解析。
 
-## Host、Session 与 Bootstrap
+## 观测身份与合并
 
-Kilo 使用共享 RuntimeFleet，一个成员的一个 Native Binding 对应一台 resident Host。
-健康空闲且进程兼容时 warm 复用；不同 Binding 不共享同一 Host。
-MCP 由共享 projection 通过 ACP `mcpServers` 交付，原生配置继续按原生规则合并。
-真实分配变化复用既有 invalidation，在正常 Run 边界退役旧 Host，再携带保存的完整 nativeSessionId 恢复；
-不在共享 cwd 中用空 MCP 列表假装撤销，也不另建 Kilo 进程池或锁。
+Core 仍是唯一参数观测存储。MiniMax 在既有 model_catalog_json 的 runtimeMetadata 中保存
+modelOptionsResolved、modelOptionsContext、modelOptionsObservedAt；DSH 保留既有 dshOptions* 与来源字段。
+缺少成功观测信息的旧 MiniMax 缓存可展示，不作为有效目标确认。确认无选项也有成功时间，新鲜期同为 60 秒；
+目录新鲜度与逐模型参数时间分别判断，缓存命中与失败不延长成功时间。
 
-恢复优先使用原生广告的 exact resume；仅在广告 load 时使用共享 replay quarantine。
-未知错误不解释为“历史不存在”，accepted/unknown 输入不自动重放。
-升级程序、Host 退役或 Bootstrap 更新不能单独使合法原生 ID 失效。
+MiniMax 上下文绑定实际程序／环境、原生数据目录、config.yaml 及 auth JSON。
+按原生 MINIMAX_DATA_DIR、MAVIS_DATA_DIR、HOME／USERPROFILE 优先级确定目录；相对数据目录归临时 cwd，
+不能建立可复用观测，查询返回失败。只读有界文件摘要，不投影凭据或复制配置；Session 数据、日志、锁文件、目录下载缓存和
+随机探测 cwd 不进入身份。探测前后及发布前重新验证，与已有安装／配置失效共同约束写回。
+原生首次初始化可能补写自己的配置／目录，变化期间的旧身份结果不能冒充新身份成功；不删除或回滚原生初始化状态。
 
-Core 在 Host 私有目录保持一个 instructions 文件 F，通过进程级 `KILO_CONFIG_CONTENT.instructions`
-追加路径，保留用户其他配置和原生 instructions。每 Run 在普通 P 发送前写入该 Run 已冻结的完整 B。
-原生普通生成会读取 F；采用 `managed_system_prompt` 与 `native_system_prompt_preserved`。
-不加压缩插件、正文 hash、nonce、装载握手或第二份输入账本。
-写入失败按现有准备失败处理；原生 `session/prompt` 的 user 正文只有 P。
-冻结、预算、版本与证据均服从 R1 和共享 Context owner；其他 Adapter 保持。
+基础目录、目标与完整检查使用同一事务内逐模型合并：同身份的未读取条目不覆盖已确认结果；
+真实较新的该模型观测才替换旧结果与成功时间，不携带其他模型的新时间，不复活新目录已移除的模型。
+目标失败保留旧目录、参数、用户选择及健康状态，只向对应请求返回失败，不缓存成无档位。
+同身份同目标请求去重，不同目标分别排队；沿用同一 Runtime 串行和全局并发上限，不增加预取或后台扫描。
 
-## 活动与数值观察
+## 界面与执行
 
-公开工具生命周期、输出 snapshot、原生终态和 Missing-Send 复用共享 ACP owner。
-空 end_turn 合法；thinking 不成为公开正文。工具名未有精确字段时，title 仅为展示提示，
-不得据此推导工具身份或私有内容。
-
-Kilo ACP PromptResult 只有最后一步 usage；不把它当整 Run 统计。
-复用现有 SQLite numeric reader，从 Kilo 自己的 `XDG_DATA_HOME/kilo/kilo.db`
-（缺省使用其原生 data 根）读取当前根 Session 的已完成新消息。
-Prompt 前建立 baseline，以原生消息 ID 去重；只选择数值、模型和消息身份，不读取正文/parts。
-input/cache/output/reasoning 保持原生互斥桶，output 加入独立 reasoning 一次；
-逐消息 USD cost 作为原生 reported cost，不能把 Session 累计费用全额重复归入新 Run。
-context occupancy 是 Session gauge，不作为消费量。历史、重发和 cold baseline 不重复累计。
-
-## 平台与验证边界
-
-macOS arm64 以既有 Preview 准入开放主动使用；其余平台为 NotQualified。
-Preview 不等同完整 qualification，不生成虚构的 evidence revision 或 SHA256 资格材料。
-准入理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)；
-实际版本、矩阵与缺失范围见[Kilo 研究/验证](../research/kilo-runtime/README.md)。
+两个选择控件继续共用 ensureCatalog、在途请求和代次隔离。具体模型先读 Core 缓存、必要时补读；
+用户再次展开目标控件时仍由 Core 核对参数新鲜度，不以较新的目录时间推迟目标校验；
+运行时默认不追加显式目标读取。迟到 A 的结果可进入 Core，不能覆盖已选择 B 的展示或草稿。
+加载／失败保留已存强度；发现只更新候选，不填入原生当前值、不删除未枚举覆盖值、不静默降档。
+确认无档位且没有显式值时隐藏控件。模型菜单刷新先强刷目录，再按现有缓存语义补读当前目标。
+正式发送消息没有目录或参数预探测，原有原生执行与错误处理不变。

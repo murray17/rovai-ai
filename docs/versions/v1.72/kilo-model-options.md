@@ -10,7 +10,7 @@ last_updated: 2026-11-10
 User sequence 43/44 要求接通其他模型的推理强度。基线为 `02629b36fa3b8e255bb0ff042bebb80695903aec`，
 继续使用 `rovai/kilo-acp` worktree。此前[原生核对](kilo-auto-compaction-and-options.md#模型选项原生能力与当前目录范围)
 已经证明官方 Kilo 可以返回其他模型的选项；本次补的是 Rovai 的目录发现，权限和模型输入保持。
-当前可测试语义见 [Launch v82](../../contracts/runtime-launch-and-verification-v82.md)。
+当前可测试语义见 [Launch v83](../../contracts/runtime-launch-and-verification-v83.md)。
 
 ## 实现范围
 

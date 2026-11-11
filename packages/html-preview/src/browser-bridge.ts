@@ -84,6 +84,13 @@ export function previewBrowserBridge(config: PreviewBridgeConfig, createIndex: t
   }
   addEventListener('error', (event: Event) => {
     if (event instanceof ErrorEvent) {
+      const message = event.message.trim().replace(/\.$/u, '')
+      // Native layout notifications in Electron have a null exception value.
+      // Author exceptions carry a value; author-dispatched events are untrusted.
+      const layout = event.isTrusted && event.error === null
+        && (message === 'ResizeObserver loop completed with undelivered notifications' || message === 'ResizeObserver loop limit exceeded')
+      // Keep the native event and browser diagnostics intact; omit only our report.
+      if (layout) return
       report('script', event.message || '脚本错误（浏览器未提供跨域详情）', event.filename || null, event.lineno || null, event.colno || null, event.error?.stack)
     } else if (event.target instanceof Element) {
       const target = event.target as HTMLImageElement & HTMLLinkElement

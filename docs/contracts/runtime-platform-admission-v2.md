@@ -186,7 +186,7 @@ Renderer 不增加平台白名单或实验标签，机器安装、原生认证�
 
 这项维护者授权的开放不声明 Intel 完整资格，也不把 arm64 的实跑证据转记为 Intel 验收。
 范围、验证和理由见 [Kilo 平台跟进](../versions/v1.72/kilo-simplification.md#apple-intel-开放user-sequence-61)与
-[V1.72-D82](../versions/v1.72/decisions.md#v1-72-d82)。Linux x64 的范围见 [Kilo Linux Preview](#kilo-linux-preview)。
+[V1.72-D83](../versions/v1.72/decisions.md#v1-72-d83)。Linux x64 的范围见 [Kilo Linux Preview](#kilo-linux-preview)。
 
 ## Kilo Linux Preview
 
@@ -194,7 +194,7 @@ Renderer 不增加平台白名单或实验标签，机器安装、原生认证�
 `preview / reasonCode=runtime_platform.qualification_evidence_missing`，`evidenceRevision=null`。
 Core 允许发现、检查、安装配置、成员选择和普通执行，并执行常规的安装、认证、版本、模型和能力检查。
 实测范围和决定见 [Linux x64 验收](../research/kilo-runtime/README.md#linux-x64-目标机验收)
-与 [V1.72-D83](../versions/v1.72/decisions.md#v1-72-d83)。
+与 [V1.72-D84](../versions/v1.72/decisions.md#v1-72-d84)。
 
 ## Kilo Windows x64 qualification
 
@@ -203,4 +203,4 @@ Core 允许发现、检查、安装配置、成员选择和普通执行，并执
 [Windows x64 验收记录](../../qualification/runtime-platform/windows-x64-kilo-v1.json)的 SHA-256。
 Core 允许常规发现、检查、安装配置、成员选择和执行，并执行现有的机器安装、原生认证、版本、模型和能力检查。
 目标机与用量采样范围见 [Windows x64 验收](../research/kilo-runtime/README.md#windows-x64-目标机验收)与
-[V1.72-D84](../versions/v1.72/decisions.md#v1-72-d84)。
+[V1.72-D85](../versions/v1.72/decisions.md#v1-72-d85)。

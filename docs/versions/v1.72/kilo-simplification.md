@@ -3,15 +3,15 @@ document_type: implementation-record
 version: v1.72
 status: complete
 authority: implementation-evidence
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 ---
 
 # Kilo 接入简化
 
 User sequence 48 的三项收敛，基线为 `83a853ee8f854ae19e70559c12e5297b09218a7b`，
 沿用独立 worktree 与 `rovai/kilo-acp` 分支。当前合同为
-[Launch v83](../../contracts/runtime-launch-and-verification-v83.md)及
-[Accepted Input Recovery v9](../../contracts/accepted-input-recovery-v9.md)，取舍见 [D81](decisions.md#v1-72-d81)。
+[Launch v84](../../contracts/runtime-launch-and-verification-v84.md)及
+[Accepted Input Recovery v9](../../contracts/accepted-input-recovery-v9.md)，取舍见 [D82](decisions.md#v1-72-d82)。
 
 ## 基线差异
 
@@ -140,7 +140,7 @@ reason 保持 qualification_evidence_missing，evidenceRevision 为 null，不�
 
 本次只确认准入投影和既有机器门禁，不宣称 Intel 目标机真实模型验收已完成。
 Apple Intel 开放时，Linux x64 和 Windows x64 均为 NotQualified。后续 Linux 结果见[目标机验收](../../research/kilo-runtime/README.md#linux-x64-目标机验收)。
-当前权威和理由见 [Platform Admission](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)与 [D82](decisions.md#v1-72-d82)。
+当前权威和理由见 [Platform Admission](../../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)与 [D83](decisions.md#v1-72-d83)。
 
 本次本机验证：
 
@@ -148,3 +148,33 @@ Apple Intel 开放时，Linux x64 和 Windows x64 均为 NotQualified。后续 L
 - `cargo test --workspace -- --test-threads=4`：484 passed、1 ignored、0 failed。
 - `cargo fmt --all -- --check`、`git diff --check`、`pnpm docs:test`（10 passed）、`pnpm docs:check` 和
   `DOCS_BASE_REF=958784f6e17fc32d8b2753d7f14fd6122dceea9d pnpm docs:check:ci` 通过。
+
+## 主线集成（User sequence 66）
+
+将验收分支 `02a8aeb736e936dc8a417ae46725d39a1df100cf` 与主线
+`cb1c027e4a94e5eee1b457428ef7ccbdfb8ba69a` 合并。保留主线 OpenCode Steer 的在途请求期限和释放等待，
+以及 Hermes 当前 effort 默认展示；Kilo 继续沿共享多请求终态和取消释放，不增加生命周期分支。
+
+MiniMax 使用主线的目录零选模与目标参数按需读取；Kilo 保留已验收的完整目录逐模型查询。
+既有目录 owner 同时覆盖两种行为：MiniMax 不发目录 setter，Kilo 的单模型不恢复、失败 setter 仍恢复，
+并保留主线目标查询的超时、错误、并发和配置变化用例。未新增独立 Rust 测试函数。
+
+为避开主线已经占用的编号，Kilo Launch 合同顺延为 v78–v84，版本决定顺延为 D77–D85；
+主线 MiniMax v77／D76 与原始目标机 JSON 证据保持。当前平台状态仍为 Windows x64 Qualified，
+Linux x64 与 macOS arm64/x64 Preview。
+
+本轮验证：
+
+- `CARGO_BUILD_JOBS=4 RUST_TEST_THREADS=4 pnpm test:rust:pr`：最终完整 workspace 484 passed、1 ignored。
+- 原目录/目标参数 owner（`slow-tests`）与取消总期限 owner 各 1 passed；ACP 模型投影 1、active-input 3、平台矩阵 5、原生用量 3 passed。
+- `pnpm typecheck`、`TZ=UTC pnpm test`（Vitest 3,269 passed/2 skipped，Node 主套件 377 passed/2 skipped）、
+  `pnpm test:runtime-model-picker` 与 `pnpm build:desktop` 通过。
+- 合并后的 Core 与官方 Kilo 7.8.27 完成 40 Run：37 succeeded、3 按用例 cancelled；65 次普通模型请求保留完整 Bootstrap，
+  取消回执为 reusable、旧 CLI 租约被拒绝，运行文件清理完成。[白名单结果](../../research/kilo-runtime/main-integration-7.8.27-macos-arm64.json)。
+  此轮使用本机受控 Provider；Linux/Windows 的真实模型证据仍按各自原始记录解释。
+
+失败对照与收敛：目录 owner 先复现 Kilo 普通健康结果被误记为 Fresh，补齐两处共同的完整目录判断后通过。
+OpenCode 原测试适配共享取消 API，并在同一 owner 内保留停止/回包/期限场景、补齐取消仍等待原生在途请求的断言。
+旧 smoke 对安装 Snapshot 能力标记的假设不再适用主线的目录/健康分离；现在明确核对目录阶段 installed_unverified，
+Bootstrap 仍由每次真实模型请求的 system 和 user 内容逐字验证，不要求业务执行重写机器检查 Snapshot。
+初次夹具选择 `/tmp` 被 Electron 预检或 Runtime Files Root 清理门拒绝；改用系统 TMPDIR 的新目录后完整复跑通过，未放宽目录或清理检查。

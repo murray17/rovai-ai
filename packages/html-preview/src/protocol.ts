@@ -8,7 +8,7 @@ export interface HtmlPreviewDescriptor {
   sandboxedDocument?: string
 }
 
-export type HtmlPreviewDiagnosticKind = 'script' | 'promise' | 'resource' | 'policy' | 'document' | 'channel'
+export type HtmlPreviewDiagnosticKind = 'script' | 'promise' | 'resource' | 'policy' | 'document' | 'channel' | 'layout'
 export interface HtmlPreviewDiagnostic {
   previewId: string
   generation: string
@@ -29,7 +29,7 @@ export function parseHtmlPreviewDiagnostic(value: unknown, preview: Pick<HtmlPre
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const item = value as Record<string, unknown>
   if (item.previewId !== preview.previewId || item.generation !== preview.generation
-    || !['script', 'promise', 'resource', 'policy', 'document', 'channel'].includes(String(item.kind))
+    || !['script', 'promise', 'resource', 'policy', 'document', 'channel', 'layout'].includes(String(item.kind))
     || typeof item.message !== 'string' || !item.message || item.message.length > 2000
     || !(item.resourceUrl === null || (typeof item.resourceUrl === 'string' && item.resourceUrl.length <= 2048))
     || !(item.stack === null || (typeof item.stack === 'string' && item.stack.length <= 8000))

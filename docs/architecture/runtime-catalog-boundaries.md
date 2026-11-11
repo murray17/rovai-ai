@@ -82,14 +82,14 @@ instructions 的局部有序追加不重排原生规则；用户插件与 pure �
 不同 cwd 的 MCP 复用 bundled CLI 的私有 cwd 启动模式，不引入 PATH Node 依赖；取消使用共享绝对阶段期限。
 成功 Steer 与已确认完整收尾的普通取消沿共享 Fleet 复用；异常、未知、超时及显式退役继续回收。
 共享 release outcome 区分旧 Run 隔离与进程已回收，不以缺少 handle 写 cleanup ACK。
-模型完整目录复用 MiniMax 的临时 Session 逐模型非生成查询，收集各模型实际提供的 effort；
+Kilo 完整目录使用临时 Session 逐模型做非生成查询，收集各模型实际提供的 effort；
 普通健康检查不遍历模型，也不覆盖已有完整目录及其成功时间。没有新缓存、参数推断或选择器组件。
-启动、权限、原生来源和数值口径见 [Runtime Launch v83](../contracts/runtime-launch-and-verification-v83.md)。
+启动、权限、原生来源和数值口径见 [Runtime Launch v84](../contracts/runtime-launch-and-verification-v84.md)。
 macOS arm64/x64 和 Linux x64 为 Preview，Windows x64 为 Qualified。开放范围见
 [macOS 准入](../contracts/runtime-platform-admission-v2.md#kilo-macos-preview)和
 [Linux 准入](../contracts/runtime-platform-admission-v2.md#kilo-linux-preview)及
 [Windows 资格](../contracts/runtime-platform-admission-v2.md#kilo-windows-x64-qualification)。
-理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
+理由见 [D77](../versions/v1.72/decisions.md#v1-72-d77)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
 
 <a id="command-code-研究接入边界"></a>
 ## Command Code ACP 实施边界
@@ -269,7 +269,7 @@ Windows 沿用 Registry／PATH 规则；只采集 PATH，失败仍走既有回�
 精确范围见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md)。
 
 启动只静态解析入口、检查平台与执行条件、保存同次稳定的 fingerprint/file identity，不运行 Runtime。
-手动 rescan 保留未知或变化程序的有界版本补读，不执行认证或协议深检；单项检查只检查选中的 Runtime。
+手动 rescan 对每种 Runtime 本轮选中的入口重新有界读取版本，不执行认证或协议深检；单项检查只检查选中的 Runtime。
 发现安装即可保存配置并尝试运行，版本未知不影响普通运行准入。
 安装记录不伪造 Ready、认证或能力；旧健康证据只供主动诊断和模型 Picker 参考，已知版本的展示复用单独判断。
 
@@ -324,8 +324,21 @@ Thread Fast service 拥有可空偏好、保存绑定代次与 Run 冻结。活�
 ## 模型目录缓存与执行事实
 
 模型目录只服务 Picker 和主动诊断，沿用既有 60 秒/24 小时缓存及身份失效规则，不新增缓存或 LKG。
-打开 Picker 才按需使用既有有界 Check Manager 刷新；页面打开、Runtime 切换及默认模型任务均不触发目录刷新。
-历史目录可用于展示，不能证明当前 executable 支持某个模型，也不能形成运行授权。
+当前可见参数页进入时按需使用既有有界 Check Manager 读取；有效目录直接复用，隐藏页与普通任务不读取。
+模型与强度共用一份临时加载状态和请求；成功、失败、空结果和 Pi unknown 均结束本次自动尝试。
+Codex、Claude、CodeBuddy 和 Pi 复用同次目录响应的参数信息，不追加独立强度读取。
+目录时间、metadata、保存状态及共享安装投影更新不自行重试，重入、真实身份或目标变化及用户重试才发起后继读取。
+页面进入和打开列表时核对现有 `revalidateAfter`；同一观察的共享缓存状态优先于本地旧状态，成功读取后到期可在再次打开时刷新。
+目录请求只与同用途请求合并，不升级为完整检查；首次或失效时不回退完整检查，普通访问排在主动检查之后时先复查缓存。
+模型菜单的固定刷新入口通过现有 `runtime.modelCatalog.open` 可选 `forceRefresh=true` 表达显式读取意图；
+该临时标记传入既有请求、队列与 worker，绕过普通目录与 DSH 目标的新鲜缓存短路。
+未启动的同目标目录请求可合并并升级为强刷；worker 启动后意图固定，后加入的强刷不能并入可能只返回缓存的普通任务，
+也不能在目标归并时重新折入该任务，而应留在现有队列。已启动的强刷可供同目标强刷及普通目录请求复用。
+刷新不预先清缓存、不增加健康证据；DSH 的 `cacheOnly=true` 始终仅返回本地结果。
+DSH 模型菜单的刷新先以不带 `modelId` 的请求读取完整目录，再由原目标入口按其缓存补齐已选模型参数；
+自动目标加载保留 `cacheOnly` 预读，手动刷新不做这次预读。目录成功先供选择器使用，后续参数失败不丢弃该目录。
+目录存储、成功时间与 TTL 保持，仍按当前安装／入口／配置归属失效；原生目录必需的初始化与认证仍保留。
+同身份的过期目录可用于展示，不能证明当前 executable 支持某个模型，也不能形成运行授权。
 刷新只写明确取得的目录证据；失败保留有效缓存及原诊断记录，不推进目录成功时间；Superseded 不提交错误身份的结果。
 共享 Adapter 层合并重复模型 ID 和选项，逐条忽略无法表示的目录数据，保留其余有效条目。没有默认项或
 当前模型不在候选列表中不否定原生 Session 可用性；单个 Provider／模型的补充异常不丢弃整个目录。
@@ -334,13 +347,29 @@ Core 原子保存显式模型和选项的精确意图及静态权限配置；过
 真实 Host 负责原生握手和选项传递，不静默替换或忽略。全部 Adapter 将明确模型 ID 与显式选项交给
 原生 Runtime 判定；不能因目录缺失、未枚举 ID／参数／值或 setter 未回显目录拒绝执行。
 冻结和模型切换保留用户显式选项，不从目录补入默认值或自动删除覆盖值。原生错误继续沿用现有错误路径，
-不新增日志。界面读取失败显示“尚未核对”，保留当前选择及有效缓存。规则见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md)。
+保留现有日志中的读取结果与写回诊断。界面直接显示已存值；目录读取失败或 deferred 静默保留同身份已有列表。
+首次无目录时显示原生默认项、已保存值及手工模型 ID 输入，不补造模型或强度清单；保留原有重试按钮，不显示加载说明、目录错误或环境更新文字。
+目录的读取、写回和缓存时间独立于健康 Ready；同身份版本补写不删除目录，完整诊断后续失败不丢弃已取得的目录，
+目录成功也不建立健康证据或增加保存、执行门槛。规则见 [Runtime Launch v74](../contracts/runtime-launch-and-verification-v74.md)。
+健康 `stale_at` 不参与目录有效性；真正的程序、安装配置或有效环境变化，在现有事务里清除
+`model_catalog_succeeded_at`。同身份健康失败不清除它，同身份静态快照补写保留已有成功目录。
+搜索环境 generation 是进程内代次；启动时重新记录数字不使目录失效。共享输入实际变化由
+`same_inputs` 判断，清理仅在该变更分支执行；启动配置保存仍按 Runtime 定向失效。
 默认模型不依赖目录，内部 sentinel 只用于审计和冻结，不向原生 Runtime 发送。
 
 成员配置只拥有模型策略，不拥有某次 Run 的实际模型。使用 `runtime_default` 时，Core 只能从当前
 Thread/Session 的 Runtime-native 结构化字段记录首个实际模型，并按 AgentRun execution epoch、default-only、
 write-once 持久化；catalog default、请求模型、冻结 sentinel、Usage 或自由文本都不能补推。无观测时 Read
 Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime failure；该事实也不反向改写配置或 catalog。
+
+### MiniMax 按目标参数发现
+
+MiniMax 基础目录只读取初始 Session，选模与业务 Prompt 均为零；用户选择具体模型时复用 DSH 的目标缓存、
+共享 Check Manager、请求去重与界面代次隔离，不引入 DSH 来源或参数语义。原生 `thinkingEffort` 按精确模型 ID
+观测，区分未读取、有选项与确认无选项。临时选模最多一次，初始已是目标则为零；目录默认始终保留初始观测。
+参数成功观测在既有目录 metadata 逐模型合并，绑定 MiniMax 原生配置、安装与实际环境身份；
+原生初始化状态保留，失败不更新成功时间或影响安装健康。正式执行与保存不增加发现门槛。
+字段、完整响应判据及身份输入由 [Runtime Launch v77](../contracts/runtime-launch-and-verification-v77.md)拥有。
 
 ### Claude Code 原生模型目录
 
@@ -753,16 +782,17 @@ DSH 已读取能力累计保存在原有 SQLite 模型目录 metadata 中：`dsh
 同一目标、上下文的并发请求进入既有检查队列合并；发布前重新检查环境、配置与安装身份。
 
 目标请求可附带 `cacheOnly: true`，只做本地指纹校验并返回缓存，不启动 DSH；`not_required` 表示
-该目标仍新鲜，`deferred` 表示需要重新读取。Renderer 在具体模型选择、参数页重入及窗口重新获得焦点时
-先校验缓存，再按需静默异步读取；不设扫描计时器，`runtime_default` 不发起能力请求。
+该目标仍新鲜，`deferred` 表示需要重新读取。Renderer 在具体模型选择与参数页重入时，
+通过共享加载入口先校验缓存，再按需异步读取；不依赖健康 Ready 或追加完整检查，不设扫描计时器，`runtime_default` 不发起目标能力请求。
+`cacheOnly` 返回后、启动原生补读前，仍核对当前页面、目标和请求代次；已经离开的目标不追加读取。
 过期但上下文匹配的历史选项立即展示；上下文失配时保留历史但不视为已确认能力。读取不阻塞选择或保存，
-不显示独立加载提示；确认无档位且无显式旧值时隐藏控件。失败保留选择与历史并提供重试。
+候选区沿用共享加载状态；确认无档位且无显式旧值时隐藏控件。读取失败静默保留选择与历史，保留原有重试按钮。
 用户在等待期间修改或保存了草稿后，迟到结果只更新能力，不再清理该选择。
 
 执行先核验模型/来源及参数结构，选中目标，替换 Session 的完整 `configOptions`，再以该响应
 校验用户显式强度，最后提交正文。明确但不受支持的强度在正文前报错，说明模型、所选值与可选值，
 不降级、不换路由或创建 Session 重试。切换响应省略强度选项时清除旧缓存。DSH 冻结配置不从目录
-填入默认值；“模型默认”表示删除 override，且不发送额外强度设置。复用 Session 仍执行原生选模，
+填入默认值；“跟随模型默认值”表示删除 override，且不发送额外强度设置。复用 Session 仍执行原生选模，
 由 DSH 恢复目标模型的原生默认。其他 ACP Adapter 的参数语义保持。
 用户主动切换模型可在确认能力后清除不适用的草稿值，目录刷新不改写已保存选择；读取失败保留
 已有选择并支持重试。映射和模型配置表达式继续由 DSH 解释，不新增 YAML 档位解析或固定映射表。
@@ -852,6 +882,11 @@ output 与 reasoning。缺失字段与 cost 保持 unknown，不从占用或模�
 
 
 ## MiniMax Code ACP 实施边界
+
+目录刷新在一个临时 Session 中逐模型补齐强度并恢复初始选择，不操作任务 Session，也不增加目标查询接口。
+有效目录直接复用；两个下拉共用本轮刷新。明确的模型不可选响应只跳过该模型的选项；
+会话、方法、内部错误及未知 RPC 错误使整轮失败。
+断连、进程退出、协议错误或整轮超时使本次刷新失败，保留同身份的旧目录，不提交未完成结果。
 
 `minimax-code-cli` 对应独立的 `@minimax-ai/code` / `mcode acp`。沿用共享 ACP Host、Fleet、
 精确 Session continuation、Run 冻结、审批、Action、Usage 和 Built-in CLI，不新增进程池或上下文副本。

@@ -7,6 +7,10 @@ last_updated: 2026-11-11
 
 # Kilo 原生 ACP 研究与实际探测
 
+与最新主线整合后的本机受控 40 Run、模型目录/健康分离和回归门禁见
+[主线集成](../../versions/v1.72/kilo-simplification.md#主线集成user-sequence-66)及
+[白名单结果](main-integration-7.8.27-macos-arm64.json)。该轮不改写下述跨平台真实模型证据。
+
 当前 MCP 保存、原生权限和共享取消 Warm 的简化，含官方 Core 40 Run、同 PID 后继、新租约、
 原生四 RPC 取消与失败对照，见[简化记录](../../versions/v1.72/kilo-simplification.md)和
 [白名单证据](simplification-7.8.27-macos-arm64.json)。该批实测限 macOS arm64，当前开放范围见

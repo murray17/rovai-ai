@@ -31802,6 +31802,8 @@ impl Database {
     ) -> Result<()> {
         let generation =
             i64::try_from(generation).context("Runtime Search Environment generation overflow")?;
+        // This process-local counter is recorded at startup as well. A numeric
+        // difference alone does not establish any change to catalog inputs.
         self.connection.execute(
             r#"
             INSERT INTO runtime_search_environment_state(

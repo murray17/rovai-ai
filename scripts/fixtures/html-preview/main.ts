@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { access, writeFile, readFile } from 'node:fs/promises'
+import { access, writeFile, readFile, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { FilePreviewFrameNavigation } from '../../../apps/desktop/src/main/file-preview/file-preview-navigation'
 import { FilePreviewService } from '../../../apps/desktop/src/main/file-preview/file-preview-service'
@@ -7,6 +7,7 @@ import { navigationAcceptance } from './navigation'
 import { feedbackAcceptance } from './feedback'
 import { lifecycleAcceptance } from './lifecycle'
 import { policyAcceptance } from './policy'
+import { layoutAcceptance } from './layout'
 
 const [renderer, userData, root, preload] = process.argv.slice(2)
 app.setPath('userData', userData)
@@ -43,12 +44,17 @@ app.whenReady().then(async () => {
     await service.closeAll(); window.destroy(); app.exit(cases.every(result => result.ok) ? 0 : 1); return
   }
   if (process.env.ROVAI_HTML_PREVIEW_SCENARIO === 'lifecycle') {
-    const cases = await lifecycleAcceptance(window, userData)
+    const cases = await lifecycleAcceptance(window, userData, root)
     console.log(JSON.stringify({ htmlPreviewAcceptance: true, ok: cases.every(result => result.ok), cases, errors }))
     await service.closeAll(); window.destroy(); app.exit(cases.every(result => result.ok) ? 0 : 1); return
   }
   if (process.env.ROVAI_HTML_PREVIEW_SCENARIO === 'policy') {
     const cases = await policyAcceptance(window, userData, root)
+    console.log(JSON.stringify({ htmlPreviewAcceptance: true, ok: cases.every(result => result.ok), cases, errors }))
+    await service.closeAll(); window.destroy(); app.exit(cases.every(result => result.ok) ? 0 : 1); return
+  }
+  if (process.env.ROVAI_HTML_PREVIEW_SCENARIO === 'layout') {
+    const cases = await layoutAcceptance(window, userData, root)
     console.log(JSON.stringify({ htmlPreviewAcceptance: true, ok: cases.every(result => result.ok), cases, errors }))
     await service.closeAll(); window.destroy(); app.exit(cases.every(result => result.ok) ? 0 : 1); return
   }
@@ -178,6 +184,8 @@ app.whenReady().then(async () => {
   await run(`window.previewAcceptance.activate(window.previewAcceptance.tabs.find(tab=>tab.file?.fileName==='history.html').id)`)
   for(let count=0;count<100 && !await run(`window.previewAcceptance.activeTab?.file?.fileName==='history.html'`);count++) await new Promise(resolve=>setTimeout(resolve,20))
   const previousOrigin = new URL(historyFrame.url).origin
+  // Same-version refreshes retain the page; a changed fixture exercises replacement.
+  await appendFile(join(root, 'history.html'), '\n<!-- refreshed generation fixture -->\n')
   await run('window.previewAcceptance.reload(window.previewAcceptance.activeTabId)')
   let freshFrame: Electron.WebFrameMain | undefined
   for(let count=0;count<100;count++) {

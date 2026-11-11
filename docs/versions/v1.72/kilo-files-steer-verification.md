@@ -9,7 +9,7 @@ last_updated: 2026-11-09
 
 User sequence 14/15 要求检查类似 Claude 的子代理禁用方式、使用 sub2api 打开开发版验证文件操作，
 接通具备原生基础的 Steer，并简化接入。继续使用原 `rovai/kilo-acp` worktree。
-该阶段规范为 [Launch v79](../../contracts/runtime-launch-and-verification-v79.md)；后续边界与当前入口见[收尾记录](kilo-boundary-fixes.md)。
+该阶段规范为 [Launch v80](../../contracts/runtime-launch-and-verification-v80.md)；后续边界与当前入口见[收尾记录](kilo-boundary-fixes.md)。
 
 ## 实现取舍与复杂度复核
 
