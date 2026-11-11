@@ -198,6 +198,7 @@ pub(crate) struct FakeRuntimeProcessHost {
     shutdown_calls: std::sync::atomic::AtomicUsize,
     zcode_background: AtomicBool,
     quiescent: AtomicBool,
+    healthy: AtomicBool,
     version_baseline: Option<(RuntimeVersionTarget, String)>,
 }
 
@@ -211,6 +212,7 @@ pub(crate) fn fake_runtime_process_host(process_id: impl Into<String>) -> Runtim
         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
         zcode_background: AtomicBool::new(false),
         quiescent: AtomicBool::new(true),
+        healthy: AtomicBool::new(true),
         version_baseline: None,
     }))
 }
@@ -271,7 +273,10 @@ impl RuntimeProcessHost {
             Self::Acp(host) => host.is_alive(),
             Self::Pi(host) => host.is_alive(),
             #[cfg(all(test, feature = "extended-tests"))]
-            Self::Fake(host) => !host.reaped.load(std::sync::atomic::Ordering::Acquire),
+            Self::Fake(host) => {
+                host.healthy.load(Ordering::Acquire)
+                    && !host.reaped.load(std::sync::atomic::Ordering::Acquire)
+            }
         }
     }
 
@@ -291,7 +296,8 @@ impl RuntimeProcessHost {
             Self::Pi(host) => host.is_quiescent().await,
             #[cfg(all(test, feature = "extended-tests"))]
             Self::Fake(host) => {
-                host.quiescent.load(Ordering::Acquire)
+                host.healthy.load(Ordering::Acquire)
+                    && host.quiescent.load(Ordering::Acquire)
                     && !host.reaped.load(std::sync::atomic::Ordering::Acquire)
             }
         }
@@ -1739,7 +1745,9 @@ impl AgentRuntimeFleetManager {
                         }) {
                             continue;
                         }
-                        if !quiescent {
+                        // Quiescence also requires a live transport. A dead
+                        // Host needs confirmed cleanup, not an occupancy error.
+                        if !quiescent && host.is_healthy() {
                             bail!("Runtime Native Session still has active work");
                         }
                         state.plan_stop(&process_id)
@@ -2849,6 +2857,7 @@ mod tests {
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
             quiescent: AtomicBool::new(true),
+            healthy: AtomicBool::new(true),
             version_baseline: None,
         });
         let mut state = fleet.state.lock().await;
@@ -3297,6 +3306,7 @@ mod tests {
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
             quiescent: AtomicBool::new(true),
+            healthy: AtomicBool::new(true),
             version_baseline: None,
         });
         let acquire = {
@@ -3415,6 +3425,7 @@ mod tests {
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
             quiescent: AtomicBool::new(true),
+            healthy: AtomicBool::new(true),
             version_baseline: None,
         });
         let acquire = {
@@ -3488,6 +3499,7 @@ mod tests {
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
             quiescent: AtomicBool::new(true),
+            healthy: AtomicBool::new(true),
             version_baseline: None,
         });
         let acquire = {
@@ -3632,6 +3644,7 @@ mod tests {
                         shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
                         zcode_background: AtomicBool::new(false),
                         quiescent: AtomicBool::new(true),
+                        healthy: AtomicBool::new(true),
                         version_baseline: None,
                     }))
                 });
@@ -3837,6 +3850,7 @@ mod tests {
             shutdown_calls: std::sync::atomic::AtomicUsize::new(0),
             zcode_background: AtomicBool::new(false),
             quiescent: AtomicBool::new(true),
+            healthy: AtomicBool::new(true),
             version_baseline: None,
         });
         fleet
@@ -4107,9 +4121,16 @@ mod tests {
 
         // Freeze the real mark -> quiescence -> plan_stop gap without relying
         // on scheduler timing. The reap gate then owns the native-lock boundary.
-        for (kind, reaped) in [AdapterKind::CodexCli, AdapterKind::OpencodeCli]
+        for (kind, reaped, healthy, background) in [AdapterKind::CodexCli, AdapterKind::OpencodeCli]
             .into_iter()
-            .flat_map(|kind| [true, false].map(|reaped| (kind, reaped)))
+            .flat_map(|kind| {
+                [true, false].into_iter().flat_map(move |reaped| {
+                    // A dead transport may still own descendants or stale background
+                    // bookkeeping. Liveness must not stand in for confirmed cleanup.
+                    [(true, false), (false, false), (false, true)]
+                        .map(move |(healthy, background)| (kind, reaped, healthy, background))
+                })
+            })
         {
             let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
             let request = |run| {
@@ -4135,6 +4156,10 @@ mod tests {
             fleet
                 .release("old", 1, FleetReleaseDisposition::Reusable)
                 .await;
+            if let RuntimeProcessHost::Fake(host) = &old {
+                host.healthy.store(healthy, Ordering::Release);
+                host.zcode_background.store(background, Ordering::Release);
+            }
             {
                 let mut state = fleet.state.lock().await;
                 let entry = state.processes.get_mut(&lease.process_id).unwrap();
@@ -4154,20 +4179,28 @@ mod tests {
                 let old = old.clone();
                 let spawn_count = spawn_count.clone();
                 move || async move {
-                    assert!(
-                        !old.is_healthy(),
-                        "native writer must be reaped before resume"
-                    );
+                    if let RuntimeProcessHost::Fake(host) = &old {
+                        assert!(
+                            host.reaped.load(Ordering::Acquire),
+                            "even a dead native writer must finish cleanup before resume"
+                        );
+                    }
                     spawn_count.fetch_add(1, Ordering::SeqCst);
                     Ok(fake_host("version-window-new"))
                 }
             }));
             std::future::poll_fn(|cx| {
-                assert!(next.as_mut().poll(cx).is_pending());
+                assert!(
+                    next.as_mut().poll(cx).is_pending(),
+                    "marked Host must enter cleanup (healthy={healthy}, background={background})"
+                );
                 std::task::Poll::Ready(())
             })
             .await;
             assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
+            tokio::time::timeout(Duration::from_millis(100), stop_entered.notified())
+                .await
+                .expect("acquire must start cleanup without waiting for a sweep");
 
             let mut unrelated = request("unrelated-session");
             unrelated.compatibility.reuse_scope.session_id = Some("native-session-b".into());
@@ -4186,7 +4219,6 @@ mod tests {
 
             let stop = fleet.state.lock().await.plan_stop(&lease.process_id);
             let stop = fleet.dispatch_stop_plan(stop);
-            stop_entered.notified().await;
             std::future::poll_fn(|cx| {
                 assert!(next.as_mut().poll(cx).is_pending());
                 std::task::Poll::Ready(())
@@ -4206,7 +4238,12 @@ mod tests {
                     "Runtime Host could not release its native Session lock"
                 );
                 assert_eq!(spawn_count.load(Ordering::SeqCst), 0);
-                assert!(old.is_healthy());
+                if let RuntimeProcessHost::Fake(host) = &old {
+                    assert!(
+                        !host.reaped.load(Ordering::Acquire),
+                        "failed cleanup must retain ownership even for a dead transport"
+                    );
+                }
                 stop_release.add_permits(1);
             }
             fleet.shutdown_all().await;
