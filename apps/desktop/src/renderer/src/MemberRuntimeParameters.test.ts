@@ -410,7 +410,7 @@ describe('member runtime parameters', () => {
     expect(markup).not.toContain('审批模式')
     expect(markup).not.toContain('partial_managed')
     for (const [state, values, value, expected] of [
-      ['known', ['off', 'high'], '', '跟随 Pi 原生设置'],
+      ['known', ['off', 'high'], '', '跟随模型默认值'],
       ['known', ['off'], '', null],
       ['known', [], '', null],
       ['unknown', [], '', null],

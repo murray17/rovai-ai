@@ -618,8 +618,7 @@ function ModelFields({
       label={optionLabel ?? option?.label ?? optionKey} value={optionValue}
       disabled={disabled} onChange={setOption}
       onOpen={() => ensureCatalog(false, true)} loading={supportsTargetOptions && loading}
-      defaultChoice={{ value: '', label: isPi ? uiAttribute('跟随 Pi 原生设置')
-        : isDsh ? uiAttribute('模型默认') : uiAttribute('跟随模型默认值') }}
+      defaultChoice={{ value: '', label: uiAttribute('跟随模型默认值') }}
       choices={[
         ...(missing ? [{ value: optionValue, label: optionValue }] : []),
         ...optionChoices.map(choice => ({ ...choice, disabled: supportsTargetOptions && !optionsKnown }))

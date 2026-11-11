@@ -45,7 +45,7 @@ describe('message model identity', () => {
       .toEqual({ label: '推理强度', value: 'High' })
   })
 
-  it('uses the common Hermes default label in member summaries and history', () => {
+  it('uses the common default label in member summaries and Hermes history', () => {
     const hermes = {...installation, adapterKind: 'hermes-cli'} as AdapterInstallation
     expect(messageRuntimeModelPresentation({...record, adapterKind: 'hermes-cli', reasoningEffort: 'default'}, hermes)?.effort?.value)
       .toBe('跟随模型默认值')
@@ -58,6 +58,19 @@ describe('message model identity', () => {
     expect(memberRuntimeConfigurationPresentation(configuration, hermes).effort?.value).toBe('跟随模型默认值')
     configuration.model = {mode: 'explicit', modelId: 'old-model', options: {reasoning_effort: 'default'}}
     expect(memberRuntimeConfigurationPresentation(configuration, null).effort?.value).toBe('跟随模型默认值')
+
+    const pi: AdapterInstallation = {
+      ...installation, adapterKind: 'pi', snapshot: {
+        ...installation.snapshot!, models: [{
+          ...installation.snapshot!.models[0],
+          options: [{ ...installation.snapshot!.models[0].options[0], key: 'thinking_level' }]
+        }]
+      }
+    }
+    expect(memberRuntimeConfigurationPresentation({
+      ...configuration, adapterKind: 'pi',
+      model: { mode: 'explicit', modelId: 'old-model', options: {} }
+    }, pi).effort?.value).toBe('跟随模型默认值')
   })
 
   it('keeps an unknown record, Agent defaults and an unspecified effort distinct', () => {
