@@ -54,7 +54,7 @@ use crate::{
 
 #[cfg(unix)]
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
-pub const RUNTIME_VERSION_TIMEOUT: Duration = Duration::from_secs(15);
+pub const RUNTIME_VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
