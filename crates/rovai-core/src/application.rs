@@ -2238,24 +2238,38 @@ struct RuntimeCheckActivity {
     running: bool,
 }
 
-#[derive(Default)]
 struct RuntimeVersionReadOrder {
+    scope_id: uuid::Uuid,
     next: u64,
     accepted: u64,
     attempted_at: Option<tokio::time::Instant>,
-    read_by_runs: HashSet<String>,
+}
+
+impl Default for RuntimeVersionReadOrder {
+    fn default() -> Self {
+        Self {
+            scope_id: uuid::Uuid::new_v4(),
+            next: 0,
+            accepted: 0,
+            attempted_at: None,
+        }
+    }
 }
 
 #[derive(Default)]
 struct RuntimeCheckState {
     activity: BTreeMap<AdapterKind, RuntimeCheckActivity>,
+    published_search_generation: u64,
     version_reads:
         HashMap<rovai_core::runtime_discovery::RuntimeVersionTarget, RuntimeVersionReadOrder>,
+    // Actual reads in an active Run remain facts even when its entry is replaced.
+    version_read_runs: HashSet<(String, AdapterKind, String, String)>,
 }
 
 #[derive(Clone)]
 struct RuntimeVersionReadAttempt {
     target: rovai_core::runtime_discovery::RuntimeVersionTarget,
+    scope_id: uuid::Uuid,
     sequence: u64,
     baselines: Vec<runtime_fleet::RuntimeHostVersionBaseline>,
     publish_failure: bool,
@@ -3768,6 +3782,7 @@ impl Core {
             let saved = managed.get(&kind).cloned();
             let version_state = self.runtime_check_activity.clone();
             let fleet = self.runtime_fleet.clone();
+            let version_database = self.database.clone();
             let handle = tasks.spawn(async move {
                 let worker_search = search.clone();
                 let (mut observation, verified, expected) =
@@ -3905,8 +3920,10 @@ impl Core {
                             runtime_check_environment::begin_version_read(
                                 &version_state,
                                 &fleet,
+                                &version_database,
                                 target,
-                                None,
+                                search.generation(),
+                                &expected,
                             )
                             .await
                             .ok()?,
@@ -4082,6 +4099,14 @@ impl Core {
                 if let Some(attempt) = &mut version_attempt {
                     read_state.rebind_version_read(attempt, &id);
                 }
+                read_state.replace_version_entry(
+                    observation.runtime_kind,
+                    current
+                        .as_ref()
+                        .map(|(id, _, path)| (id.as_str(), path.as_str())),
+                    &id,
+                    observation.executable_path.as_deref().unwrap(),
+                );
                 let cached_current = if observation.version_probe_succeeded.is_none() {
                     let version: Option<String> = database.connection().query_row(
                         "SELECT NULLIF(TRIM(reported_version), '') FROM adapter_capability_snapshot
@@ -4250,6 +4275,7 @@ impl Core {
             if !runtime_installation_revision_matches(&database, kind, expected)? {
                 return Ok(None);
             }
+            let previous = runtime_check_target_in_database(&database, kind)?;
             let id = AgentProfileService::default().commit_discovered_managed_installation(
                 &mut database,
                 DiscoveredManagedInstallation {
@@ -4268,6 +4294,17 @@ impl Core {
                 [&id],
                 |row| row.get(0),
             )?;
+            self.runtime_check_activity
+                .write()
+                .await
+                .replace_version_entry(
+                    kind,
+                    previous
+                        .as_ref()
+                        .map(|target| (target.id.as_str(), target.executable_path.as_str())),
+                    &id,
+                    &executable_path.to_string_lossy(),
+                );
             (id, version)
         };
         let target_ack = check_context
@@ -5288,6 +5325,17 @@ impl Core {
             let committed = service
                 .managed_installation(&database, kind, "default")?
                 .context("Catalog installation disappeared")?;
+            self.runtime_check_activity
+                .write()
+                .await
+                .replace_version_entry(
+                    kind,
+                    current
+                        .as_ref()
+                        .map(|target| (target.id.as_str(), target.executable_path.as_str())),
+                    &committed.id,
+                    &committed.executable_path,
+                );
             let target_ack = if let Some(context) = check_context.as_mut() {
                 context.publish_target(
                     self,
@@ -5768,8 +5816,10 @@ impl Core {
                         let mut version_attempt = runtime_check_environment::begin_version_read(
                             &self.runtime_check_activity,
                             &self.runtime_fleet,
+                            &self.database,
                             version_target,
-                            None,
+                            search.generation(),
+                            &commit_target,
                         )
                         .await?;
                         let version_read =
@@ -5821,12 +5871,21 @@ impl Core {
                             }
                             if selected_candidate && let Ok(version) = &version_read {
                                 let service = AgentProfileService::default();
+                                let previous = runtime_check_target_in_database(&database, kind)?;
                                 let id = service.commit_discovered_runtime_entry(
                                     &mut database,
                                     entry,
                                     commit_target.as_ref().map(|(id, _)| id.as_str()),
                                 )?;
                                 version_state.rebind_version_read(&mut version_attempt, &id);
+                                version_state.replace_version_entry(
+                                    kind,
+                                    previous.as_ref().map(|target| {
+                                        (target.id.as_str(), target.executable_path.as_str())
+                                    }),
+                                    &id,
+                                    &canonical.to_string_lossy(),
+                                );
                                 commit_target = runtime_installation_revision(&database, kind)?;
                                 if let Some(context) = check_context.as_mut() {
                                     target_ack = context.publish_target(
@@ -17425,11 +17484,24 @@ impl Core {
                             == observation.search_generation,
                         "Runtime search environment changed during entry resolution; retry this run"
                     );
-                    AgentProfileService::default().commit_discovered_runtime_entry(
-                        &mut *self.database.lock().await,
+                    let mut database = self.database.lock().await;
+                    let previous = runtime_check_target_in_database(&database, kind)?;
+                    let id = AgentProfileService::default().commit_discovered_runtime_entry(
+                        &mut database,
                         verified,
                         Some(&installation.id),
                     )?;
+                    self.runtime_check_activity
+                        .write()
+                        .await
+                        .replace_version_entry(
+                            kind,
+                            previous.as_ref().map(|target| {
+                                (target.id.as_str(), target.executable_path.as_str())
+                            }),
+                            &id,
+                            observation.executable_path.as_deref().unwrap(),
+                        );
                     return Ok::<(), anyhow::Error>(());
                 }
                 if attempt == 0 {
@@ -30089,6 +30161,7 @@ mod tests {
             environment_digest: "environment-a".into(),
         };
         let now = tokio::time::Instant::now();
+        let scope_id = uuid::Uuid::new_v4();
         for (order, expected) in [
             ([1, 2, 1], [true, true, false]),
             ([2, 1, 2], [true, false, true]),
@@ -30098,10 +30171,10 @@ mod tests {
             state.version_reads.insert(
                 target.clone(),
                 RuntimeVersionReadOrder {
+                    scope_id,
                     next: 2,
                     accepted: 0,
                     attempted_at: Some(now),
-                    read_by_runs: HashSet::new(),
                 },
             );
             assert!(!state.automatic_version_is_due_at(&target, now + Duration::from_secs(599)));
@@ -30110,6 +30183,7 @@ mod tests {
                 assert_eq!(
                     state.accept_version_read(&RuntimeVersionReadAttempt {
                         target: target.clone(),
+                        scope_id,
                         sequence,
                         baselines: vec![],
                         publish_failure: true,
@@ -30130,14 +30204,15 @@ mod tests {
         state.version_reads.insert(
             provisional.clone(),
             RuntimeVersionReadOrder {
+                scope_id,
                 next: 2,
                 accepted: 2,
                 attempted_at: Some(now),
-                read_by_runs: HashSet::from(["launch-a".to_owned()]),
             },
         );
         let mut attempt = RuntimeVersionReadAttempt {
             target: provisional.clone(),
+            scope_id,
             sequence: 2,
             baselines: vec![],
             publish_failure: true,
@@ -30146,17 +30221,70 @@ mod tests {
         assert_eq!(attempt.target, target);
         assert!(!state.version_reads.contains_key(&provisional));
         assert!(!state.automatic_version_is_due_at(&target, now));
-        assert!(
-            state.version_reads[&target]
-                .read_by_runs
-                .contains("launch-a")
-        );
         assert!(!state.accept_version_read(&RuntimeVersionReadAttempt {
-            target,
+            target: target.clone(),
+            scope_id,
             sequence: 1,
             baselines: vec![],
             publish_failure: true,
         }));
+
+        // Replacing the selected entry removes all old environments, while an
+        // unchanged observation preserves the current entry's distinct scopes.
+        let mut environment = target.clone();
+        environment.environment_digest = "environment-b".into();
+        state
+            .version_reads
+            .insert(environment.clone(), RuntimeVersionReadOrder::default());
+        state.replace_version_entry(
+            target.kind,
+            Some((&target.installation_id, &target.executable_path)),
+            &target.installation_id,
+            &target.executable_path,
+        );
+        assert_eq!(state.version_reads.len(), 2);
+        let mut replacement = target.clone();
+        replacement.executable_path = "/fixture/new-codex".into();
+        state
+            .version_reads
+            .insert(replacement.clone(), RuntimeVersionReadOrder::default());
+        state.version_read_runs.insert((
+            "launch-a".into(),
+            target.kind,
+            target.installation_id.clone(),
+            target.executable_path.clone(),
+        ));
+        state.replace_version_entry(
+            target.kind,
+            Some((&target.installation_id, &target.executable_path)),
+            &replacement.installation_id,
+            &replacement.executable_path,
+        );
+        assert_eq!(state.version_reads.len(), 1);
+        assert!(state.version_reads.contains_key(&replacement));
+        assert_eq!(
+            state.version_read_runs.len(),
+            1,
+            "entry cleanup preserves the active Run's actual-read fact"
+        );
+        assert!(!state.accept_version_read(&attempt));
+        // A -> B -> A gets a new scope, even with the same path and sequence.
+        state.replace_version_entry(
+            target.kind,
+            Some((&replacement.installation_id, &replacement.executable_path)),
+            &target.installation_id,
+            &target.executable_path,
+        );
+        state
+            .version_reads
+            .insert(target.clone(), RuntimeVersionReadOrder::default());
+        assert!(!state.accept_version_read(&attempt));
+        let current_scope = state.version_reads[&target].scope_id;
+        assert!(state.accept_version_read(&RuntimeVersionReadAttempt {
+            scope_id: current_scope,
+            ..attempt
+        }));
+        assert_eq!(state.version_reads.len(), 1);
     }
 
     #[test]

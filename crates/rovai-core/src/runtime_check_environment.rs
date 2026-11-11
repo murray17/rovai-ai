@@ -33,7 +33,7 @@ impl RuntimeCheckState {
         let Some(read) = self.version_reads.get_mut(&attempt.target) else {
             return false;
         };
-        if attempt.sequence < read.accepted {
+        if attempt.scope_id != read.scope_id || attempt.sequence < read.accepted {
             return false;
         }
         read.accepted = attempt.sequence;
@@ -52,14 +52,25 @@ impl RuntimeCheckState {
             return;
         };
         attempt.target.installation_id = installation_id.to_owned();
-        let current = self
-            .version_reads
-            .entry(attempt.target.clone())
-            .or_default();
-        current.next = current.next.max(previous.next);
-        current.accepted = current.accepted.max(previous.accepted);
-        current.attempted_at = current.attempted_at.max(previous.attempted_at);
-        current.read_by_runs.extend(previous.read_by_runs);
+        self.version_reads.insert(attempt.target.clone(), previous);
+    }
+
+    /// Only an authoritative entry replacement removes scopes. An unchanged
+    /// passive observation must not discard another in-flight discovery.
+    pub(super) fn replace_version_entry(
+        &mut self,
+        kind: AdapterKind,
+        previous: Option<(&str, &str)>,
+        installation_id: &str,
+        path: &str,
+    ) {
+        if previous == Some((installation_id, path)) {
+            return;
+        }
+        self.version_reads.retain(|target, _| {
+            target.kind != kind
+                || (target.installation_id == installation_id && target.executable_path == path)
+        });
     }
 }
 
@@ -115,25 +126,31 @@ pub(super) async fn version_target(
 pub(super) async fn begin_version_read(
     state: &RwLock<RuntimeCheckState>,
     fleet: &crate::runtime_fleet::AgentRuntimeFleetManager,
+    database: &tokio::sync::Mutex<super::Database>,
     target: RuntimeVersionTarget,
-    run_id: Option<&str>,
+    search_generation: u64,
+    expected: &Option<(String, i64)>,
 ) -> Result<RuntimeVersionReadAttempt> {
-    let sequence = {
+    let (scope_id, sequence) = {
+        let database = database.lock().await;
         let mut state = state.write().await;
+        anyhow::ensure!(
+            search_generation >= state.published_search_generation
+                && super::runtime_installation_revision_matches(&database, target.kind, expected)?,
+            "runtime_version_result_superseded"
+        );
         let read = state.version_reads.entry(target.clone()).or_default();
         read.next = read
             .next
             .checked_add(1)
             .context("Runtime version read sequence exhausted")?;
         read.attempted_at = Some(tokio::time::Instant::now());
-        if let Some(run_id) = run_id {
-            read.read_by_runs.insert(run_id.to_owned());
-        }
-        read.next
+        (read.scope_id, read.next)
     };
     let baselines = fleet.version_baselines(&target).await;
     Ok(RuntimeVersionReadAttempt {
         target,
+        scope_id,
         sequence,
         baselines,
         publish_failure: true,
@@ -175,15 +192,11 @@ pub(crate) type TestSearchCapture = Arc<dyn Fn(u64) -> RuntimeSearchEnvironment 
 
 impl Core {
     pub(super) async fn clear_run_version_read(&self, run_id: &str) {
-        for read in self
-            .runtime_check_activity
+        self.runtime_check_activity
             .write()
             .await
-            .version_reads
-            .values_mut()
-        {
-            read.read_by_runs.remove(run_id);
-        }
+            .version_read_runs
+            .retain(|(id, ..)| id != run_id);
     }
     /// Bookkeeping around an existing formal-launch read, never a new preflight.
     /// Cached versions bypass this function entirely.
@@ -197,6 +210,18 @@ impl Core {
     where
         F: std::future::Future<Output = Result<String>>,
     {
+        if let Some(run_id) = run_id {
+            self.runtime_check_activity
+                .write()
+                .await
+                .version_read_runs
+                .insert((
+                    run_id.to_owned(),
+                    runtime.adapter_kind,
+                    runtime.installation_id.clone(),
+                    runtime.executable_path.clone(),
+                ));
+        }
         let attempt = async {
             let target = version_target(
                 runtime.adapter_kind,
@@ -206,11 +231,28 @@ impl Core {
                 runtime.environment.clone(),
             )
             .await?;
+            let expected = {
+                let database = self.database.lock().await;
+                let current: bool = database.connection().query_row(
+                    "SELECT EXISTS(SELECT 1 FROM adapter_installation
+                     WHERE id=?1 AND generation=?2 AND executable_path=?3)",
+                    rusqlite::params![
+                        runtime.installation_id,
+                        runtime.installation_generation,
+                        runtime.executable_path
+                    ],
+                    |row| row.get(0),
+                )?;
+                anyhow::ensure!(current, "runtime_version_result_superseded");
+                super::runtime_installation_revision(&database, runtime.adapter_kind)?
+            };
             begin_version_read(
                 &self.runtime_check_activity,
                 &self.runtime_fleet,
+                &self.database,
                 target,
-                run_id,
+                search.generation(),
+                &expected,
             )
             .await
         }
@@ -245,14 +287,26 @@ impl Core {
                     let service = crate::agent_profile::AgentProfileService::default();
                     let mut state = self.runtime_check_activity.write().await;
                     (|| -> Result<bool> {
+                        let same_installation: bool = database.connection().query_row(
+                            "SELECT EXISTS(SELECT 1 FROM adapter_installation
+                             WHERE id=?1 AND generation=?2 AND executable_path=?3)",
+                            rusqlite::params![
+                                runtime.installation_id,
+                                runtime.installation_generation,
+                                runtime.executable_path
+                            ],
+                            |row| row.get(0),
+                        )?;
                         let current = service.recorded_executable_identity(
                             &database,
                             &runtime.installation_id,
                             &runtime.executable_path,
                         )?;
-                        if !current.is_some_and(|(fingerprint, _)| {
-                            fingerprint == runtime.executable_fingerprint
-                        }) || !state.accept_version_read(&attempt)
+                        if !same_installation
+                            || !current.is_some_and(|(fingerprint, _)| {
+                                fingerprint == runtime.executable_fingerprint
+                            })
+                            || !state.accept_version_read(&attempt)
                         {
                             return Ok(false);
                         }
@@ -317,12 +371,17 @@ impl Core {
             return;
         };
         let mut read_in_this_run = false;
-        for (scope, read) in &mut state.version_reads {
-            let consumed = read.read_by_runs.remove(run_id);
-            read_in_this_run |= consumed
-                && scope.installation_id == target.installation_id
-                && scope.executable_path == target.executable_path;
-        }
+        state
+            .version_read_runs
+            .retain(|(id, kind, installation, path)| {
+                if id != run_id {
+                    return true;
+                }
+                read_in_this_run |= *kind == target.kind
+                    && *installation == target.installation_id
+                    && *path == target.executable_path;
+                false
+            });
         if read_in_this_run {
             return;
         }
@@ -398,8 +457,10 @@ impl Core {
         let attempt = begin_version_read(
             &self.runtime_check_activity,
             &self.runtime_fleet,
+            &self.database,
             target,
-            None,
+            search.generation(),
+            &Some((installation.id.clone(), installation.version)),
         )
         .await?;
         // Once admitted, this is an actual fixed-entry attempt, including
@@ -521,6 +582,10 @@ impl Core {
             search.activate_for_runtime_commands();
             self.native_skill_discovery.invalidate_cache();
         }
+        self.runtime_check_activity
+            .write()
+            .await
+            .published_search_generation = generation;
         *self.runtime_search_environment.write().await = search.clone();
         Ok(search)
     }

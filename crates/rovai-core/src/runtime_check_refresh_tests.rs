@@ -2531,7 +2531,12 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
         let state = fixture.core.runtime_check_activity.read().await;
         let read = &state.version_reads[&target];
         assert_eq!((read.next, read.accepted, read.attempted_at), state_before);
-        assert!(!read.read_by_runs.contains("launch-read"));
+        assert!(
+            !state
+                .version_read_runs
+                .iter()
+                .any(|(run_id, ..)| run_id == "launch-read")
+        );
     }
     std::fs::write(&version, "codex-cli 2.0.0").unwrap();
     let draft = saved_configuration.clone();
@@ -2653,6 +2658,130 @@ async fn manual_rescan_reads_versions_and_discards_replaced_version_responses() 
     );
     assert_eq!(fixture.public_state().await, before_missing);
     std::fs::rename(&temporarily_missing, &program).unwrap();
+
+    // Replacing the saved entry immediately forgets its interval, without
+    // forgetting an active Run's actual read. Returning to A creates a new
+    // scope; a read from A's previous selection cannot commit or mark Hosts.
+    let old_search = fixture.core.runtime_search_environment.read().await.clone();
+    let old_expected = crate::application::runtime_installation_revision(
+        &*fixture.core.database.lock().await,
+        KIND,
+    )
+    .unwrap();
+    let (reading, read_started) = oneshot::channel();
+    let (finish, held) = oneshot::channel();
+    let late = {
+        let core = fixture.core.clone();
+        let runtime = runtime.clone();
+        let search = old_search.clone();
+        tokio::spawn(async move {
+            core.observe_launch_version(&runtime, &search, Some("switch-in-flight"), async {
+                reading.send(()).unwrap();
+                held.await.unwrap();
+                Ok("codex-cli 0.5.0".to_owned())
+            })
+            .await
+        })
+    };
+    read_started.await.unwrap();
+    let old_scope = fixture
+        .core
+        .runtime_check_activity
+        .read()
+        .await
+        .version_reads[&target]
+        .scope_id;
+    let replacement = fixture.program("replacement", "4.0.0", false);
+    let revision = fixture.settings().await["revision"].as_u64().unwrap();
+    fixture
+        .save(revision, &configuration(Some(&replacement)))
+        .await;
+    {
+        let state = fixture.core.runtime_check_activity.read().await;
+        assert!(!state.version_reads.keys().any(|target| target.kind == KIND));
+        assert!(
+            state
+                .version_read_runs
+                .iter()
+                .any(|(run_id, ..)| run_id == "switch-in-flight")
+        );
+    }
+    assert!(
+        begin_version_read(
+            &fixture.core.runtime_check_activity,
+            &fixture.core.runtime_fleet,
+            &fixture.core.database,
+            target.clone(),
+            old_search.generation(),
+            &old_expected,
+        )
+        .await
+        .is_err(),
+        "an old worker cannot recreate the removed scope"
+    );
+    let revision = fixture.settings().await["revision"].as_u64().unwrap();
+    fixture.save(revision, &saved_configuration).await;
+    assert_eq!(
+        fixture
+            .core
+            .await_runtime_check(
+                KIND,
+                RuntimeLaunchPurpose::DiscoveryVersion,
+                RuntimeCheckTrigger::UserCheck,
+            )
+            .await
+            .unwrap(),
+        RuntimeCheckOutcome::Ready
+    );
+    let calls_after_return = count();
+    let current_target = {
+        let mut state = fixture.core.runtime_check_activity.write().await;
+        let scopes: Vec<_> = state
+            .version_reads
+            .keys()
+            .filter(|target| target.kind == KIND)
+            .cloned()
+            .collect();
+        assert_eq!(
+            scopes.len(),
+            1,
+            "only the current entry remains after A -> B -> A"
+        );
+        let current_target = scopes[0].clone();
+        let current = state.version_reads.get_mut(&current_target).unwrap();
+        assert_ne!(current.scope_id, old_scope);
+        current.attempted_at = Some(tokio::time::Instant::now() - Duration::from_secs(601));
+        current_target
+    };
+    finish.send(()).unwrap();
+    assert_eq!(late.await.unwrap().unwrap(), "codex-cli 0.5.0");
+    assert_eq!(fixture.health().await["reportedVersion"], "codex-cli 3.0.0");
+    let before = fixture
+        .core
+        .runtime_check_activity
+        .read()
+        .await
+        .version_reads[&current_target]
+        .next;
+    fixture
+        .core
+        .enqueue_automatic_version_refresh(&runtime, "switch-in-flight");
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(
+        fixture
+            .core
+            .runtime_check_activity
+            .read()
+            .await
+            .version_reads[&current_target]
+            .next,
+        before
+    );
+    assert_eq!(
+        count(),
+        calls_after_return,
+        "entry cleanup cannot add a second version query to the same Run"
+    );
     fixture.core.runtime_fleet.shutdown_all().await;
     fixture.close().await;
 }

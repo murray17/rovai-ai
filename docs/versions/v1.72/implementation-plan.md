@@ -5040,6 +5040,8 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 
 - `runtime_check_environment.rs` 在现有检查状态锁中保存每个实际目标的尝试时间、读取顺序与临时 Run 读取事实。
   十分钟间隔只限制自动尝试；命令失败和实际入口读取失败也计时，缓存命中不计时。Run hook 非等待提交；已有启动实际读过则不追加。
+  正式入口替换和程序路径保存清理旧入口记录；注册时复核既有安装修订与已发布搜索代次，防止旧 Worker 重建废弃记录。
+  记录实例标识隔离 A→B→A 的迟到提交；活跃 Run 的实际读取事实独立保留到原有收尾，不新增锁、任务、表或缓存服务。
 - `application.rs` 保留整体并行重扫和原有正式启动版本调用，在实际读取前后登记；版本提交与 Fleet 标记同在原有
   search/安装提交围栏内完成。晚到旧读取与被动缓存均不能覆盖同身份已接纳的新版本。自动 Worker 沿现有完成通道返回结果；
   只有存在手动等待者时才投影失败，纯自动失败保持原公开状态和健康记录。
@@ -5056,9 +5058,10 @@ macOS arm64 日常安装使用专用打包/验签门和非终止安装交接；�
 
 不新增 Rust 测试函数或平行夹具，扩展既有 owners：
 
-- `runtime_check_activity_has_two_slots_and_one_terminal_owner`：读取顺序、599/600 秒边界、安装/环境隔离及首次安装重绑定。
+- `runtime_check_activity_has_two_slots_and_one_terminal_owner`：读取顺序、599/600 秒边界、安装/环境隔离、首次安装重绑定及入口替换/切回的记录隔离。
 - `manual_rescan_reads_versions_and_discards_replaced_version_responses`：私有 Core/DB、现有 Manager 和不可变受控 CLI，
   覆盖 V1 晚于 V2 提交、被动旧缓存、自动失败及入口不可读的限频/静默、手动共享失败、已有启动失败不追加、草稿隔离及自动成功保存。
+  另覆盖保存新路径后立即清理旧记录、旧 Worker 不得重建、切回后迟到结果不写入，以及清理不导致同一 Run 追加版本命令。
 - `failure_retirement_cannot_be_reversed_by_late_success_or_touch_a_successor` 与
   `shutdown_retires_an_inflight_start_before_it_can_commit`：保留原硬退役断言，增加温和空闲/忙碌/原生后台矩阵、
   降级、相同/未知版本、新 Host 排除及已接纳 Starting 不取消。
@@ -5077,6 +5080,10 @@ cargo test -p rovai-core --features slow-tests --lib -- runtime_check_environmen
 相关 48 项通过；关键边界修改后还单独补跑了其中 2 项，覆盖实际目标、失败限频和精确启动环境。`cargo test --workspace`
 再次为 484 passed、1 ignored；`TZ=UTC pnpm test` 的 Vitest 为 3269 passed、2 skipped，Node 矩阵通过。
 `pnpm typecheck`、`pnpm build:desktop`、Core/CLI 构建、`cargo check --workspace`、格式与三项文档门禁通过。
+
+入口记录清理补充后，相关 11 项通过，最终启动记录校验调整后重点 2 项复验通过；默认 workspace 再次
+484 passed、1 ignored。新增 Rust 测试函数为零，格式与三项文档门禁通过。此次未重跑前端、隔离 Core smoke
+或整套扩展回归，上述前端与 smoke 结果属于补充前的同一 PR；完整扩展层的已知失败仍按下文记账。
 
 同步 Kilo 后再次运行独立隔离 Core，使用不可变受控 Hermes 脚本，五个场景通过：单项实际读取、较旧整体重扫晚返回不覆盖 V2、
 草稿不写正式版本、手动失败保留历史且反馈一致、整体重扫恢复后清除旧版本错误。
