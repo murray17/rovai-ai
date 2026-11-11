@@ -54,12 +54,14 @@ export function memberRuntimeConfigurationPresentation(
   const effortKey = configuration.adapterKind === 'claude-code-cli'
     ? 'effort'
     : configuration.adapterKind === 'pi' ? 'thinking_level'
-      : configuration.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
+      : configuration.adapterKind === 'minimax-code-cli' ? 'thinkingEffort'
+        : configuration.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
   const effortDescriptor = modelDescriptor?.options.find((option) => option.key === effortKey) ?? null
   const rawEffort = modelSelection.options[effortKey]
   const effort = effortDescriptor || typeof rawEffort === 'string'
     ? {
         label: configuration.adapterKind === 'claude-code-cli' || configuration.adapterKind === 'pi'
+          || configuration.adapterKind === 'minimax-code-cli'
           ? uiAttribute('思考强度')
           : uiAttribute('推理强度'),
         value: typeof rawEffort === 'string' && rawEffort
@@ -96,12 +98,14 @@ export function messageRuntimeModelPresentation(
     : null
   const effortKey = model.adapterKind === 'claude-code-cli' ? 'effort'
     : model.adapterKind === 'pi' ? 'thinking_level'
-      : model.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
+      : model.adapterKind === 'minimax-code-cli' ? 'thinkingEffort'
+        : model.adapterKind === 'codebuddy-cli' ? 'thought_level' : 'reasoning_effort'
   const choices = descriptor?.options.find(option => option.key === effortKey)?.values ?? []
   return {
     model: descriptor?.displayName.trim() || model.modelId || uiAttribute('智能体默认'),
     effort: model.reasoningEffort ? {
-      label: model.adapterKind === 'claude-code-cli' || model.adapterKind === 'pi' ? uiAttribute('思考强度') : uiAttribute('推理强度'),
+      label: model.adapterKind === 'claude-code-cli' || model.adapterKind === 'pi' || model.adapterKind === 'minimax-code-cli'
+        ? uiAttribute('思考强度') : uiAttribute('推理强度'),
       value: runtimeEffortValueLabel(model.reasoningEffort, choices, model.adapterKind)
     } : null
   }

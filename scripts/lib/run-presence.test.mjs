@@ -126,6 +126,8 @@ try {
   for (const [record,summary,field] of [
     [{adapterKind:'claude-code-cli',modelId:'claude-run-model',reasoningEffort:'max'},'claude-run-model · max','思考强度max'],
     [{adapterKind:'pi',modelId:'pi-run-model',reasoningEffort:'medium'},'pi-run-model · medium','思考强度medium'],
+    [{adapterKind:'minimax-code-cli',modelId:'minimax-run-model',reasoningEffort:'high'},'minimax-run-model · high','思考强度high'],
+    [{adapterKind:'minimax-code-cli',modelId:'minimax-run-model',reasoningEffort:null},'minimax-run-model','模型minimax-run-model'],
     [{adapterKind:'codex-cli',modelId:null,reasoningEffort:null},'智能体默认','模型智能体默认'],
     [{adapterKind:'codex-cli',modelId:'observed-model',reasoningEffort:null},'observed-model','模型observed-model'],
     [{modelId:'legacy-observed'},'legacy-observed','模型legacy-observed'],
@@ -136,6 +138,7 @@ try {
     await b.click(modelTrigger); await settle()
     if (field) assert.ok((await modelFields()).includes(field))
     else assert.equal(await b.evaluate('document.querySelector(".thread-model-unrecorded").textContent'),'模型未记录')
+    if (record?.adapterKind === 'minimax-code-cli' && record.reasoningEffort) await b.capture(join(out,'minimax-run-model-card.png'))
     await b.key('Escape'); await settle()
   }
   for (const [membership,presence] of [['active','removed'],['left','present']]) {
