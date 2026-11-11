@@ -36,6 +36,9 @@ MCP 保存下一轮生效、移除产品权限/Hook、普通取消确认后共�
 [简化记录](kilo-simplification.md)、[Launch v84](../../contracts/runtime-launch-and-verification-v84.md)与 [D82](decisions.md#v1-72-d82)。
 先前记录中的权限 Hook、强制 pure=false 和取消必退役是阶段行为，不再描述当前接入。
 与最新主线的 Steer、MiniMax 按需参数查询及合同编号整合见[主线集成](kilo-simplification.md#主线集成user-sequence-66)。
+官方 CLI 批量 variants 的原生实测及与 ACP 的目录/时序差异见[批量探测](kilo-bulk-models-probe.md)；
+本轮未替换生产采集路径，未改变平台资格。
+
 ## OpenCode Steer 局部接入（2026-11-10）
 
 按 User 确认接通 OpenCode 稳定 2.x 自 2.2.7 起的官方 ACP Steer，旧版继续普通排队。

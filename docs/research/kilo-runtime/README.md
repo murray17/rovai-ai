@@ -7,6 +7,10 @@ last_updated: 2026-11-11
 
 # Kilo 原生 ACP 研究与实际探测
 
+官方 `models --verbose` 批量档位路线的真实 CLI/ACP 对照、模型过滤差集与计时见
+[批量探测记录](../../versions/v1.72/kilo-bulk-models-probe.md)和
+[白名单结果](bulk-models-7.8.27-macos-arm64.json)。该轮只做研究，未替换生产目录采集路径。
+
 与最新主线整合后的本机受控 40 Run、模型目录/健康分离和回归门禁见
 [主线集成](../../versions/v1.72/kilo-simplification.md#主线集成user-sequence-66)及
 [白名单结果](main-integration-7.8.27-macos-arm64.json)。该轮不改写下述跨平台真实模型证据。
