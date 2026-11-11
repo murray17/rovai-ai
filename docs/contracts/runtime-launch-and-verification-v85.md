@@ -46,6 +46,7 @@ Run 已选定实际安装与 Host、进入正常执行流程后，可以向现�
 当前 Codex 从 initialize 的 server userAgent 读取构建版本；OpenCode 从已有 initialize 的 agentInfo.version
 读取，且必须已有正常冷接续能力、没有已知存储代际冲突。其他来源不明的 Host 保持未知，不因安装行更新而退役。
 比较仅对适配器已知的有效版本信息作等值判断，保留原有显示形式及 ACP 版本校验。
+Codex/OpenCode 的已知 CLI 前缀只在等值比较时去除（如 `codex-cli 0.167.0`、`opencode v2.2.7`），不改写版本行。
 
 退役只匹配读取开始时捕获的目标、Fleet 进程记录与不可变 Host 实例，且其旧版本与新观测不同。
 不以“所有版本不等于结果的 Host”为关闭条件。较晚启动的新 Host、其他安装和环境均不属于旧基线集合。

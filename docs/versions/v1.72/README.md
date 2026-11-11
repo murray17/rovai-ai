@@ -1613,6 +1613,8 @@ Run 正常执行后对实际安装按需、十分钟限频读取版本；旧结�
 后续复用，保留当前启动、Run 与已知原生后台工作，后继沿既有冷启动接续。未知基线及 Hermes 共享 Gateway 不自动换代。
 合同见 [Runtime Launch v85](../../contracts/runtime-launch-and-verification-v85.md)，
 代码归属与验证边界见[实施记录](implementation-plan.md#安装版本按需刷新与-host-温和换代2026-11-10)。
+真实模型验收覆盖 19 种已开放 Runtime，另 2 种保持准入阻断；OpenCode 已知 CLI 前缀导致未换代的遗漏已补修。
+Qwen/TRAE 首轮偶发异常及补跑结果均保留，具体版本和适用限制见[兼容性记录](../../runtime-compatibility.md#2026-11-11-按需版本刷新与真实模型验收)。
 
 
 ## MiniMax 参数按需读取（2026-11-10）

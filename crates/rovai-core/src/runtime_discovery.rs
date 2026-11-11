@@ -96,14 +96,14 @@ impl RuntimeVersionTarget {
     }
 }
 
-/// Equality only, with the existing Codex CLI banner removed. Unknown or
+/// Equality only, with the existing Codex/OpenCode CLI banners removed. Unknown or
 /// differently formatted information cannot establish a process replacement.
 pub(crate) fn comparable_runtime_version(kind: AdapterKind, value: &str) -> Option<&str> {
     let value = value.trim();
-    let value = if kind == AdapterKind::CodexCli {
-        value.strip_prefix("codex-cli ").unwrap_or(value)
-    } else {
-        value
+    let value = match kind {
+        AdapterKind::CodexCli => value.strip_prefix("codex-cli ").unwrap_or(value),
+        AdapterKind::OpencodeCli => value.strip_prefix("opencode ").unwrap_or(value),
+        _ => value,
     };
     let value = value.strip_prefix('v').unwrap_or(value);
     (value.len() <= 256

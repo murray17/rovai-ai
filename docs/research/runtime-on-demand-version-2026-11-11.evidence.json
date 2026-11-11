@@ -1,0 +1,339 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-11",
+  "platform": "macOS arm64",
+  "sourceParent": "cd96c777fef7ca174600cbe7a33b6b47f22e5a84",
+  "testedChanges": "OpenCode banner normalization in comparable_runtime_version; no other production behavior changed in this acceptance follow-up",
+  "sourceDigests": {
+    "crates/rovai-core/src/runtime_discovery.rs": "11e70defd48eb4e74ca914d77b016c39c4f086c4c87da63f22a946948b2f30d6"
+  },
+  "fixedCoreSha256": "f369c20e152fa5df44b34575b1aa05d525db8ddeb28cfe49a308df8970795aa6",
+  "summary": {
+    "catalog": 21,
+    "realModelRuntimes": 19,
+    "passedWithoutFunctionalAnomaly": 17,
+    "passedOnRepeatWithOriginalFailureRetained": 2,
+    "productExcluded": 2,
+    "successfulFinalValidationAgentRuns": 79,
+    "actualNativeUpgradePairs": 4
+  },
+  "runtimes": [
+    {
+      "runtimeKind": "codex-cli",
+      "status": "passed",
+      "version": "codex-cli 0.167.0",
+      "successfulRealModelRuns": 5,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true,
+      "actualNativeUpgrade": {
+        "from": "codex-cli 0.166.0",
+        "to": "codex-cli 0.167.0",
+        "extraAutomaticVersionCommands": 1,
+        "hostLaunchesAfterChange": 1
+      }
+    },
+    {
+      "runtimeKind": "pi",
+      "status": "passed",
+      "version": "1.1.0",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "opencode-cli",
+      "status": "passed",
+      "version": "opencode v2.2.7",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true,
+      "actualNativeUpgrade": {
+        "from": "opencode v2.2.6",
+        "to": "opencode v2.2.7",
+        "extraAutomaticVersionCommands": 1,
+        "hostLaunchesAfterChange": 1
+      }
+    },
+    {
+      "runtimeKind": "kilo-cli",
+      "status": "passed",
+      "version": "7.8.27",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "copilot-cli",
+      "status": "passed",
+      "version": "GitHub Copilot CLI 1.0.105.",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "claude-code-cli",
+      "status": "passed",
+      "version": "2.1.311 (Claude Code)",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "cline-cli",
+      "status": "excluded_by_product",
+      "version": null,
+      "successfulRealModelRuns": 0,
+      "nativeSessionAndNonceSurviveColdRestart": null,
+      "versionFailureDoesNotBreakRun": null,
+      "versionFailureKeepsVersion": null,
+      "versionRecovery": null,
+      "productExclusionVerified": true
+    },
+    {
+      "runtimeKind": "command-code-cli",
+      "status": "passed",
+      "version": "1.88.5",
+      "successfulRealModelRuns": 5,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true,
+      "actualNativeUpgrade": {
+        "from": "1.88.0",
+        "to": "1.88.5",
+        "extraAutomaticVersionCommands": 1,
+        "hostLaunchesAfterChange": 0
+      }
+    },
+    {
+      "runtimeKind": "kiro-cli",
+      "status": "passed",
+      "version": "kiro-cli 2.37.1",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "qoder-cli",
+      "status": "passed",
+      "version": "1.1.81",
+      "successfulRealModelRuns": 5,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true,
+      "actualNativeUpgrade": {
+        "from": "1.1.76",
+        "to": "1.1.81",
+        "extraAutomaticVersionCommands": 1,
+        "hostLaunchesAfterChange": 0
+      }
+    },
+    {
+      "runtimeKind": "codebuddy-cli",
+      "status": "passed",
+      "version": "2.180.0",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "qwen-code",
+      "status": "passed_after_repeat",
+      "version": "0.26.9",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "trae-cn-cli",
+      "status": "passed_after_repeat",
+      "version": "traecli 0.209.1",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "cursor-agent",
+      "status": "excluded_by_product",
+      "version": null,
+      "successfulRealModelRuns": 0,
+      "nativeSessionAndNonceSurviveColdRestart": null,
+      "versionFailureDoesNotBreakRun": null,
+      "versionFailureKeepsVersion": null,
+      "versionRecovery": null,
+      "productExclusionVerified": true
+    },
+    {
+      "runtimeKind": "kimi-code-cli",
+      "status": "passed",
+      "version": "2.5.2",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "minimax-code-cli",
+      "status": "passed",
+      "version": "0.6.12",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "hermes-cli",
+      "status": "passed",
+      "version": "Hermes Agent v0.23.0 (2026.9.24) · stable · local 2bd378ed1b8d",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "grok-build",
+      "status": "passed",
+      "version": "grok 1.0.77 (50ca579fa996)",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "deepseek-harness",
+      "status": "passed",
+      "version": "0.2.1-alpha.1",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "zcode-app",
+      "status": "passed",
+      "version": "0.17.1",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    },
+    {
+      "runtimeKind": "antigravity-app",
+      "status": "passed",
+      "version": "1.5.5",
+      "successfulRealModelRuns": 4,
+      "nativeSessionAndNonceSurviveColdRestart": true,
+      "versionFailureDoesNotBreakRun": true,
+      "versionFailureKeepsVersion": true,
+      "versionRecovery": true
+    }
+  ],
+  "findings": [
+    {
+      "runtime": "opencode-cli",
+      "classification": "confirmed_feature_defect_fixed",
+      "observed": "2.2.6 -> 2.2.7 installed version updated, but old Warm Host was reused; 0 replacement launches before fix",
+      "cause": "Known opencode v CLI banner was not normalized for equality against the trustworthy process baseline",
+      "fixedProof": "Real background read observes 2.2.7 while a real LLM tool is still running; that work completes, next Run starts one new Host, nonce and Native Session survive; native failure and cold restart also pass",
+      "regression": "Existing Fleet owner fails before fix and passes after; no new Rust test functions"
+    },
+    {
+      "runtime": "qwen-code",
+      "classification": "unresolved_single_failure_repeat_passed",
+      "observed": "One follow-up after version-command failure timed out; private Core log reports an agent_message_chunk received with no active prompt",
+      "controls": "Fresh control without version-failure injection passed all 4 Runs; repeating original version-failure and cold-auto case also passed 4 Runs",
+      "conclusion": "Original failure retained; insufficient evidence to assign cause to the new version query or declare the intermittent protocol issue fixed"
+    },
+    {
+      "runtime": "trae-cn-cli",
+      "classification": "unresolved_single_failure_repeat_passed",
+      "observed": "One cold restart kept the native Session ID but the real model could not recall the nonce",
+      "controls": "Control with cold automatic query suppressed passed; repeating original case with cold automatic query enabled also passed",
+      "conclusion": "Original context-loss evidence retained; no consistent causal attribution or fix claimed"
+    },
+    {
+      "runtime": "antigravity-app",
+      "classification": "fixture_login_context_mismatch_resolved",
+      "observed": "Copied private login context failed authentication; this was not proof the user terminal was logged out",
+      "matchedVersionControl": "Same fixed native 1.5.5 binary fails with copied private context and passes with terminal native Home",
+      "proof": "Terminal native login context passes 4 real LLM Runs, version-failure continuation and cold Session/nonce recovery; isolated Core data, Skills, MCP and workspace retained"
+    }
+  ],
+  "setupLimits": [
+    "Cline and Cursor Agent remain blocked by current platform admission; no bypass and no LLM calls for them.",
+    "Command Code original executable was absent. Official 1.88.0 and 1.88.5 NPM packages were installed only in test directories. Their declared semantic-conventions dependency was fixed to compatible 1.30.0 in the private dependency tree after default resolution caused an ESM export error. No global install was changed.",
+    "Copilot reused an existing GitHub CLI credential only in the private test environment; Kiro copied native auth state and reused official static runtime components. Initial incomplete-copy failures are retained.",
+    "Hermes used a private data Home and copied committed dependency environment; its shared Gateway is not evidence of Warm Host retirement.",
+    "ZCode kept its official App entry and adapter command construction. A private Node shim failed only version commands, delegating actual protocol and model execution to the installed Node and official resources.",
+    "Antigravity used the terminal native login context and a fixed private CLI copy. Only test conversations/workspaces were used; daily Electron/Core data were not used.",
+    "Except the patched OpenCode case and final ZCode/Antigravity acceptance, native cases ran on cd96c777f. The production follow-up changes only OpenCode banner recognition.",
+    "Provider API-request totals, token cost, all-platform qualification, every model and guaranteed first-Run-after-upgrade are not claimed.",
+    "The whole extended Rust suite was not rerun. Previously documented baseline failures remain; default workspace and focused Rust owners passed.",
+    "After native acceptance, the existing macOS compatibility-register digest is refreshed for this documentation entry. Admission flags and Runtime execution rules are unchanged; native binary hashes above identify the tested frozen builds."
+  ],
+  "rustValidation": {
+    "focusedAfterFix": 12,
+    "defaultWorkspacePassed": 484,
+    "defaultWorkspaceIgnored": 1,
+    "newTestFunctions": 0
+  },
+  "officialPackageProvenance": [
+    {
+      "tag": "v2.2.7",
+      "url": "https://github.com/anomalyco/opencode/releases/download/v2.2.7/opencode-darwin-arm64.zip",
+      "sha256": "sha256:811c42be9cad489ea8c411ead49e06f691deee4957ba9a0a56a159a7d6c1abdc",
+      "publishedDigest": "sha256:811c42be9cad489ea8c411ead49e06f691deee4957ba9a0a56a159a7d6c1abdc"
+    },
+    {
+      "package": "@openai/codex",
+      "versions": [
+        "0.166.0",
+        "0.167.0"
+      ],
+      "source": "official npm package plus installed official CLI"
+    },
+    {
+      "package": "command-code",
+      "versions": [
+        "1.88.0",
+        "1.88.5"
+      ],
+      "source": "official npm registry; isolated compatible dependency pin disclosed above"
+    },
+    {
+      "package": "qoder-cli",
+      "versions": [
+        "1.1.76",
+        "1.1.81"
+      ],
+      "source": "existing installed official version copies"
+    }
+  ]
+}

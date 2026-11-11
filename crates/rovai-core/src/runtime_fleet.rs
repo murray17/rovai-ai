@@ -4036,13 +4036,24 @@ mod tests {
         assert!(next.host.is_healthy());
         fleet.shutdown_all().await;
 
-        for (idle, background) in [(true, false), (false, false), (true, true), (false, true)] {
+        for (idle, background, kind) in [(true, false), (false, false), (true, true), (false, true)]
+            .into_iter()
+            .flat_map(|(idle, background)| {
+                [AdapterKind::TraeCnCli, AdapterKind::OpencodeCli]
+                    .map(|kind| (idle, background, kind))
+            })
+        {
             let fleet = AgentRuntimeFleetManager::new(Default::default());
             let target = RuntimeVersionTarget {
-                kind: AdapterKind::TraeCnCli,
+                kind,
                 installation_id: "installation-a".into(),
                 executable_path: "/fixture/codex".into(),
                 environment_digest: "environment-a".into(),
+            };
+            let request = |run, camp| {
+                let mut value = acquire_request(run, camp);
+                value.adapter_kind = kind;
+                value
             };
             let mut old = fake_host("version-old");
             if let RuntimeProcessHost::Fake(host) = &mut old {
@@ -4050,7 +4061,7 @@ mod tests {
                     Some((target.clone(), "2.0.0".into()));
                 host.zcode_background.store(background, Ordering::Release);
             }
-            let current = acquire_request("version-current", "version-camp");
+            let current = request("version-current", "version-camp");
             fleet
                 .acquire(current.clone(), {
                     let old = old.clone();
@@ -4076,7 +4087,7 @@ mod tests {
                     Some((target.clone(), "3.0.0".into()));
             }
             fleet
-                .acquire(acquire_request("version-successor", "other-camp"), {
+                .acquire(request("version-successor", "other-camp"), {
                     let successor = successor.clone();
                     || async move { Ok(successor) }
                 })
@@ -4084,14 +4095,14 @@ mod tests {
                 .unwrap();
             let unknown = fake_host("version-unknown");
             fleet
-                .acquire(acquire_request("version-unknown", "unknown-camp"), {
+                .acquire(request("version-unknown", "unknown-camp"), {
                     let unknown = unknown.clone();
                     || async move { Ok(unknown) }
                 })
                 .await
                 .unwrap();
 
-            for same_or_unknown in ["2.0.0", "", "version unavailable"] {
+            for same_or_unknown in ["2.0.0", "opencode v2.0.0", "", "version unavailable"] {
                 fleet
                     .retire_changed_versions(&target, &baselines, same_or_unknown)
                     .await;
@@ -4106,10 +4117,19 @@ mod tests {
                         .all(|entry| !entry.retire_after_version_change)
                 );
             }
-            // Downgrade is a change too. Marking never waits for this Run.
+            // Known banners must not hide a change; downgrade is a change too.
+            // Marking never waits for this Run.
             tokio::time::timeout(
                 Duration::from_millis(100),
-                fleet.retire_changed_versions(&target, &baselines, "1.0.0"),
+                fleet.retire_changed_versions(
+                    &target,
+                    &baselines,
+                    if kind == AdapterKind::OpencodeCli {
+                        "opencode v2.0.1"
+                    } else {
+                        "1.0.0"
+                    },
+                ),
             )
             .await
             .unwrap();
@@ -4141,7 +4161,7 @@ mod tests {
                 );
             }
             let replaced = fleet
-                .acquire(acquire_request("version-next", "version-camp"), || async {
+                .acquire(request("version-next", "version-camp"), || async {
                     Ok(fake_host("version-replacement"))
                 })
                 .await
