@@ -16,6 +16,7 @@
 | [MiniMax Code](https://agent.minimax.io/docs/cli/quick-start)（[v0.4.13 起](#minimax-code)） | `mcode` |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` |
 | [OpenCode](https://opencode.ai/docs/) | `opencode` |
+| [Kilo CLI](https://kilo.ai/docs/code-with-ai/platforms/cli) | `kilo` |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | `copilot` |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | `kiro-cli` |
 | [Qoder CLI](https://docs.qoder.com/cli/quick-start) | `qodercli` |
@@ -153,6 +154,32 @@ custom_provider:
 | `M3.1-Flash-Preview · thinking` | 提供 `default / low / medium / high / xhigh / max` |
 
 “支持思考”不等于“支持强度选择”。官方模型目录会更新，以当前具体条目返回的选项为准；不要为没有分级能力的模型手工补出档位。[官方模型目录定义](https://github.com/MiniMax-AI/minimax-code/blob/main/packages/config/src/minimax-model-catalog.ts)
+
+## Kilo：模型与思考强度配置 {#kilo}
+
+以下以 Kilo CLI **7.8.27** 为例；在 Rovai 中使用时，需安装能够选择 Kilo 的版本。
+先在 Kilo 中接通 Provider 和模型。运行 `kilo debug paths` 查看配置目录，编辑其中的 `kilo.jsonc`
+（通常为 `~/.config/kilo/kilo.jsonc`）。
+
+对 Sub2API 等自定义服务，在已有的 `provider.<Provider 键>.models.<模型 ID>` 下合并以下字段，保留原有连接信息和其他模型字段：
+
+```json
+{
+  "options": { "reasoningEffort": "high" },
+  "variants": {
+    "low": { "reasoningEffort": "low" },
+    "medium": { "reasoningEffort": "medium" },
+    "high": { "reasoningEffort": "high" },
+    "xhigh": { "reasoningEffort": "xhigh" }
+  }
+}
+```
+
+`options.reasoningEffort` 是模型默认值；`variants` 的键是可选档位，内部字段是对应的原生参数。
+只填写该模型和 API 实际支持的档位；原生已提供档位的模型不需要复制配置。
+保存后，在 Rovai 打开模型列表刷新，选择具体模型、思考强度并保存。“跟随模型默认值”不增加强度覆盖。
+
+[Kilo 自定义模型说明](https://kilo.ai/docs/code-with-ai/agents/custom-models)
 
 ## 接入新智能体 {#adding-agents}
 

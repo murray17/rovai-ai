@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -830,12 +831,20 @@ fn open_native_file(root: &Path, file_path: &Path) -> Result<Option<File>> {
     Ok(Some(file))
 }
 
+const SQLITE_USAGE_CURSOR_QUERY: &str = "SELECT rowid,id FROM message ORDER BY rowid DESC LIMIT 1";
+// The native Session/time index would scan old history for a rowid predicate.
+// Seek the primary rowid tree instead; no native database indexes are changed.
+const SQLITE_USAGE_CANDIDATES_QUERY: &str = "SELECT id,time_created FROM message NOT INDEXED
+    WHERE rowid>?1 AND rowid<=?2 AND session_id=?3 ORDER BY rowid LIMIT ?4";
+
 pub(crate) struct OpenCodeUsageReader {
     kind: AdapterKind,
     path: PathBuf,
     workspace: String,
     session_id: String,
     file_identity: FileIdentity,
+    cursor: Option<(i64, String)>,
+    pending: BTreeSet<(i64, String)>,
     seen: BTreeSet<String>,
     disabled: bool,
 }
@@ -881,23 +890,23 @@ impl OpenCodeUsageReader {
             workspace,
             session_id,
             file_identity: FileIdentity::from_metadata(&metadata),
+            cursor: None,
+            pending: BTreeSet::new(),
             seen: BTreeSet::new(),
             disabled: false,
         };
         let database = reader.open()?;
         reader.validate_session(&database)?;
-        let mut query = database.prepare("SELECT id FROM message WHERE session_id=?1 LIMIT ?2")?;
-        let ids = query.query_map(
-            rusqlite::params![reader.session_id, (MAX_IDENTITIES + 1) as i64],
-            |row| row.get::<_, String>(0),
-        )?;
-        for id in ids {
-            reader.seen.insert(id?);
-        }
-        if reader.seen.len() > MAX_IDENTITIES {
-            bail!("native Usage baseline exceeds identity bound");
-        }
+        reader.cursor = Self::latest_message(&database)?;
         Ok(reader)
+    }
+
+    fn latest_message(database: &rusqlite::Connection) -> Result<Option<(i64, String)>> {
+        Ok(database
+            .query_row(SQLITE_USAGE_CURSOR_QUERY, [], |row| {
+                Ok((row.get(0)?, row.get::<_, String>(1)?))
+            })
+            .optional()?)
     }
 
     fn open(&self) -> Result<rusqlite::Connection> {
@@ -944,49 +953,93 @@ impl OpenCodeUsageReader {
     }
 
     fn poll_checked(&mut self) -> Result<Vec<NativeUsageObservation>> {
-        let database = self.open()?;
+        let mut connection = self.open()?;
+        let database = connection.transaction()?;
         self.validate_session(&database)?;
+        if let Some((rowid, id)) = &self.cursor {
+            let current = database
+                .query_row("SELECT id FROM message WHERE rowid=?1", [rowid], |row| {
+                    row.get::<_, String>(0)
+                })
+                .optional()?;
+            // SQLite may reuse or renumber rowids after deletion/VACUUM. Never
+            // resume a physical cursor whose message identity no longer agrees.
+            if current.as_ref() != Some(id) {
+                bail!("native Usage database cursor continuity lost");
+            }
+        }
+        let next_cursor = Self::latest_message(&database)?;
+        let mut candidates = database.prepare(SQLITE_USAGE_CANDIDATES_QUERY)?;
+        let ids = candidates.query_map(
+            rusqlite::params![
+                self.cursor.as_ref().map_or(0, |cursor| cursor.0),
+                next_cursor.as_ref().map_or(0, |cursor| cursor.0),
+                self.session_id,
+                (MAX_IDENTITIES + 1) as i64,
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+        )?;
+        for row in ids {
+            let (id, created) = row?;
+            if !safe_identity(&id) {
+                bail!("native Usage message identity is invalid");
+            }
+            if !self.seen.contains(&id) {
+                self.pending.insert((created, id));
+            }
+            if self.pending.len() > MAX_IDENTITIES {
+                bail!("native Usage pending identities exceed bound");
+            }
+        }
+        self.cursor = next_cursor;
         // Only metadata scalars leave SQLite. Native parts and message bodies
         // are never selected into Core memory or its public Evidence channel.
+        // Incomplete candidates stay pending by ID while discovery advances.
         let mut query = database.prepare(
             "SELECT id,
             CASE WHEN json_type(data,'$.tokens.input')='integer' THEN json_extract(data,'$.tokens.input') END, CASE WHEN json_type(data,'$.tokens.output')='integer' THEN json_extract(data,'$.tokens.output') END,
             CASE WHEN json_type(data,'$.tokens.reasoning')='integer' THEN json_extract(data,'$.tokens.reasoning') END, CASE WHEN json_type(data,'$.tokens.cache.read')='integer' THEN json_extract(data,'$.tokens.cache.read') END,
-            CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, json_extract(data,'$.time.completed'), CASE WHEN json_type(data,'$.providerID')='text' THEN json_extract(data,'$.providerID') END, CASE WHEN json_type(data,'$.modelID')='text' THEN json_extract(data,'$.modelID') END,
-            CASE WHEN json_type(data,'$.cost') IN ('integer','real') THEN json_extract(data,'$.cost') END
-            FROM message WHERE session_id=?1 AND json_valid(data)
-                AND json_extract(data,'$.role')='assistant'
-                AND json_type(data,'$.time.completed')='integer'
-                AND (json_type(data,'$.error') IS NULL OR json_type(data,'$.error')='null')
-            ORDER BY time_created,id LIMIT ?2",
-        )?;
-        let rows = query.query_map(
-            rusqlite::params![self.session_id, (MAX_IDENTITIES + 1) as i64],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    RuntimeUsageFields {
-                        input_tokens: row.get(1)?,
-                        output_tokens: row.get(2)?,
-                        reasoning_output_tokens: row.get(3)?,
-                        cache_read_input_tokens: row.get(4)?,
-                        cache_write_input_tokens: row.get(5)?,
-                        ..Default::default()
-                    },
-                    row.get::<_, Option<i64>>(6)?,
-                    row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<f64>>(9)?,
-                ))
-            },
+            CASE WHEN json_type(data,'$.tokens.cache.write')='integer' THEN json_extract(data,'$.tokens.cache.write') END, CASE WHEN json_type(data,'$.time.completed')='integer' THEN json_extract(data,'$.time.completed') END, CASE WHEN json_type(data,'$.providerID')='text' THEN json_extract(data,'$.providerID') END, CASE WHEN json_type(data,'$.modelID')='text' THEN json_extract(data,'$.modelID') END,
+            CASE WHEN json_type(data,'$.cost') IN ('integer','real') THEN json_extract(data,'$.cost') END, json_extract(data,'$.role')
+            FROM message WHERE session_id=?1 AND id=?2 AND json_valid(data)
+                AND json_type(data,'$.role')='text'
+                AND (json_extract(data,'$.role')<>'assistant' OR
+                    (json_type(data,'$.time.completed')='integer'
+                    AND (json_type(data,'$.error') IS NULL OR json_type(data,'$.error')='null')))",
         )?;
         let mut result = Vec::new();
-        for row in rows {
-            let (id, mut fields, time, provider, model, cost) = row?;
+        for (created, id) in std::mem::take(&mut self.pending) {
             if self.seen.contains(&id) {
                 continue;
             }
-            if self.seen.len() >= MAX_IDENTITIES || !safe_identity(&id) {
+            let row = query
+                .query_row(rusqlite::params![self.session_id, id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        RuntimeUsageFields {
+                            input_tokens: row.get(1)?,
+                            output_tokens: row.get(2)?,
+                            reasoning_output_tokens: row.get(3)?,
+                            cache_read_input_tokens: row.get(4)?,
+                            cache_write_input_tokens: row.get(5)?,
+                            ..Default::default()
+                        },
+                        row.get::<_, Option<i64>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<f64>>(9)?,
+                        row.get::<_, String>(10)?,
+                    ))
+                })
+                .optional()?;
+            let Some((id, mut fields, time, provider, model, cost, role)) = row else {
+                self.pending.insert((created, id));
+                continue;
+            };
+            if role != "assistant" {
+                continue;
+            }
+            if self.seen.len() >= MAX_IDENTITIES {
                 self.disabled = true;
                 break;
             }
@@ -2681,10 +2734,40 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let root = fs::canonicalize(root).unwrap();
         let path = root.join("opencode.db");
+        println!("native SQLite Usage fixture: {}", root.display());
         let database = rusqlite::Connection::open(&path).unwrap();
         database.execute_batch("CREATE TABLE session(id TEXT PRIMARY KEY,directory TEXT,parent_id TEXT);
             CREATE TABLE message(id TEXT PRIMARY KEY,session_id TEXT,time_created INTEGER,data TEXT);
+            CREATE INDEX message_session_time_created_id_idx ON message(session_id,time_created,id);
             INSERT INTO session VALUES('session-1','/workspace',NULL),('child','/workspace','session-1');").unwrap();
+        let history_usage = json!({"role":"assistant","time":{"completed":0},
+            "tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}},
+            "content":"NATIVE_PRIVATE_CANARY"})
+        .to_string();
+        let mut fresh =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        assert!(fresh.cursor.is_none());
+        assert!(fresh.poll().is_empty());
+        database
+            .execute(
+                "INSERT INTO message VALUES('first-call','session-1',0,?1)",
+                [&history_usage],
+            )
+            .unwrap();
+        assert_eq!(
+            fresh.poll().len(),
+            2,
+            "an empty database can begin observing"
+        );
+        assert!(fresh.poll().is_empty());
+        // Long immutable history must neither consume this Run's identity budget
+        // nor be decoded again when a later assistant message completes.
+        database.execute(
+            "WITH RECURSIVE history(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<32768)
+            INSERT INTO message SELECT 'history-'||n,'session-1',0,?1 FROM history",
+            [&history_usage],
+        ).unwrap();
         let insert = |id: &str, session: &str, completed: Option<i64>| {
             database
                 .execute(
@@ -2703,6 +2786,10 @@ mod tests {
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
                 .unwrap();
         assert!(
+            reader.seen.is_empty(),
+            "history is not copied into this Run"
+        );
+        assert!(
             OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "child".into())
                 .is_err()
         );
@@ -2714,6 +2801,43 @@ mod tests {
         insert("child-call", "child", Some(2));
         insert("new-pending", "session-1", None);
         insert("new-call", "session-1", Some(3));
+        // Check the actual production discovery statements with the official
+        // Session/time index present. A Session-index history walk would visit
+        // 32,768 old entries; a physical suffix seek only visits new rows.
+        {
+            let mut cursor_query = database.prepare(SQLITE_USAGE_CURSOR_QUERY).unwrap();
+            let upper = cursor_query
+                .query_row([], |row| row.get::<_, i64>(0))
+                .unwrap();
+            let cursor_steps = cursor_query.get_status(rusqlite::StatementStatus::VmStep);
+            assert!(
+                cursor_steps < 64,
+                "baseline scanned history: {cursor_steps}"
+            );
+            let mut discovery = database.prepare(SQLITE_USAGE_CANDIDATES_QUERY).unwrap();
+            let discovered = discovery
+                .query_map(
+                    rusqlite::params![
+                        reader.cursor.as_ref().unwrap().0,
+                        upper,
+                        "session-1",
+                        (MAX_IDENTITIES + 1) as i64
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(discovered, ["new-pending", "new-call"]);
+            let discovery_steps = discovery.get_status(rusqlite::StatementStatus::VmStep);
+            assert!(
+                discovery_steps < 256,
+                "discovery scanned history: {discovery_steps}"
+            );
+            println!(
+                "native SQLite Usage VM steps: cursor={cursor_steps}, discovery={discovery_steps}, history=32768"
+            );
+        }
         let observations = reader.poll();
         assert_eq!(observations.len(), 2);
         assert_eq!(observations[1].usage.fields.context_used_tokens, Some(32));
@@ -2761,6 +2885,47 @@ mod tests {
         assert!(
             reader.poll().is_empty(),
             "failed calls' initialized zeros are not Usage or Context"
+        );
+        // A retry can fill the same row after an error; advancing discovery
+        // past it must not lose its later successful numeric result.
+        database.execute("UPDATE message SET data=json_remove(json_set(data,'$.tokens.input',7),'$.error') WHERE id='failed-empty'", []).unwrap();
+        let retried = reader.poll();
+        assert_eq!(retried.len(), 2);
+        assert_eq!(retried[0].usage.fields.input_tokens, Some(7));
+        assert!(reader.poll().is_empty());
+        database
+            .execute(
+                "INSERT INTO message VALUES('deferred-fields','session-1',1,'{}')",
+                [],
+            )
+            .unwrap();
+        assert!(reader.poll().is_empty());
+        database
+            .execute(
+                "UPDATE message SET data=?1 WHERE id='deferred-fields'",
+                [json!({
+                    "role":"assistant","time":{"completed":5},
+                    "tokens":{"input":3,"output":2,"reasoning":0,"cache":{"read":0,"write":0}}
+                })
+                .to_string()],
+            )
+            .unwrap();
+        assert_eq!(
+            reader.poll().len(),
+            2,
+            "late metadata must stay pending by ID"
+        );
+        assert!(reader.poll().is_empty());
+        database
+            .execute(
+                "INSERT INTO message VALUES('user-record','session-1',1,'{\"role\":\"user\"}')",
+                [],
+            )
+            .unwrap();
+        assert!(reader.poll().is_empty());
+        assert!(
+            reader.pending.is_empty(),
+            "non-assistant rows leave the candidate budget"
         );
         database.execute("INSERT INTO message VALUES('sparse','session-1',6,?1)",
             [json!({"role":"assistant","time":{"completed":6},"tokens":{"input":"100","output":9,"reasoning":2,"cache":{"read":0}}}).to_string()]).unwrap();
@@ -2915,6 +3080,29 @@ mod tests {
             kilo.poll().is_empty(),
             "Kilo native message IDs must deduplicate cost as well as tokens"
         );
+        let mut replaced = OpenCodeUsageReader::baseline(
+            path.clone(),
+            kilo_workspace.to_str().unwrap().to_string(),
+            "session-1".into(),
+        )
+        .unwrap();
+        database
+            .execute("DELETE FROM message WHERE id='kilo-call'", [])
+            .unwrap();
+        insert("rowid-replacement", "session-1", Some(8));
+        assert_eq!(
+            replaced.cursor.as_ref().unwrap().0,
+            OpenCodeUsageReader::latest_message(&database)
+                .unwrap()
+                .unwrap()
+                .0,
+            "the native table reuses the deleted highest rowid",
+        );
+        assert!(replaced.poll().is_empty());
+        assert!(
+            replaced.disabled,
+            "a replaced cursor cannot claim new usage"
+        );
         database
             .execute(
                 "UPDATE session SET directory='/changed' WHERE id='session-1'",
@@ -2927,6 +3115,25 @@ mod tests {
         assert!(
             kilo.poll().is_empty(),
             "a different workspace must be rejected"
+        );
+        database
+            .execute(
+                "UPDATE session SET directory='/workspace' WHERE id='session-1'",
+                [],
+            )
+            .unwrap();
+        let mut bounded =
+            OpenCodeUsageReader::baseline(path.clone(), "/workspace".into(), "session-1".into())
+                .unwrap();
+        database.execute(
+            "WITH RECURSIVE pending(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM pending WHERE n<?1)
+            INSERT INTO message SELECT 'pending-'||n,'session-1',1,'{\"role\":\"assistant\"}' FROM pending",
+            [(MAX_IDENTITIES + 1) as i64],
+        ).unwrap();
+        assert!(bounded.poll().is_empty());
+        assert!(
+            bounded.disabled,
+            "the bound applies to current candidates, not history"
         );
         drop(database);
         fs::remove_dir_all(root).unwrap();

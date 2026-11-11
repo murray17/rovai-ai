@@ -158,8 +158,12 @@ cargo test -p rovai-core --lib --features extended-tests runtime_catalog_migrati
 Kilo 扩展现有 Adapter 默认值/闭集、Context 投递、平台准入、原生配置及数值 owners，不新增 Rust 测试函数。
 `runtime_catalog_migrations_preserve_rows_and_roll_back_with_their_receipts` 同时覆盖 migration 223/schema 172→173
 七个闭集表、触发器、行保留与事务失败回滚；旧 fixture 的 downgrade/upgrade 链延伸到当前 marker。
-`opencode_detector_plugin_is_additive_to_runtime_config` 增加 Kilo 原生 JSON5 保序、权限/plugin/pure 保留及 instructions 追加与去重，不再生成权限回调；
-`opencode_metadata_excludes_old_pending_child_and_repeated_calls` 增加 Kilo 消息计费与重复 poll 去重。
+`opencode_detector_plugin_is_additive_to_runtime_config` 覆盖 Kilo 原生 JSON5 保序、配置规则/plugin/pure 保留及 instructions 追加与去重；
+正式执行环境固定默认 allow，共用协议/健康入口保留继承的 `KILO_PERMISSION`，不生成权限回调；
+`opencode_metadata_excludes_old_pending_child_and_repeated_calls` 同时拥有 Kilo/OpenCode V1 的 SQLite
+物理 cursor、32,768 条历史、延迟完成/重试、冷 baseline、只读查询工作量、候选预算及 Kilo 计费去重；
+Session/cwd、子会话、稀疏数值与原生格式 witnesses 保留。大历史与真实索引必须使用 SQLite fixture，
+不以纯 JSON parser 或 wall-clock 耗时断言替代；本项不新增 Rust 测试函数。
 最小定向入口为：
 
 ```sh
@@ -350,13 +354,16 @@ CodeBuddy 的逐模型/旧 Session 档位扩展 `grouped_acp_models_keep_opaque_
 `cargo test -p rovai-core --lib read_model::message_model::`；Windows 额外运行
 `cargo test -p rovai-core --lib windows_command_shim_content_changes_compatibility_fingerprint`。
 
-`runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_complete_options`
+`runtime_check_environment::tests::minimax_check_and_catalog_keep_their_intent_and_target_options`
 拥有 MiniMax/Kilo 的健康／完整目录分离边界：普通检查不随模型数切换、pending/active 同意图合并、首次
 目录回退、完整目录时间保留与失效后部分结果不参与参数过滤。原 Codex 失败夹具没有模型参数和目录成功
 写入，不能覆盖此回归，因此复用它的私有 Core/DB/Check Manager fixture 增加一个有真实协议进程的 owner；
-单纯测合并谓词无法证明第一次目录回退或持久化成功时间。表中 2／8 个模型分别执行检查先到／目录先到，
-MiniMax/Kilo 的单模型用例验证未尝试切换时零 setter；Kilo 的双模型用例验证原生先改状态再报错，仍须恢复初始模型。
-Kilo 的 3 模型用例另含一个不可选候选；不同重复请求用于证明合并与完整目录幂等，不是性能统计。最小命令：
+单纯测合并谓词无法证明第一次目录回退或持久化成功时间。MiniMax 3／8 个模型与 Kilo 1／2／3 个模型分别执行检查先到／目录先到。
+Kilo 完整目录改由一次官方 CLI 命令取得，原扫描和失败后恢复断言随被替代流程退役；同一 owner
+改验零目录 ACP/setter、超过 64 KiB 的完整读取、无 variants/无默认推断、坏格式/空输出/非零退出
+保留同一 LKG 和成功时间，失败也不回退扫描。纯解析扩展 grouped ACP catalog owner，覆盖 CRLF、
+完整模型路由、中文/嵌套对象、原生档位顺序和私有元数据不投影。不同重复请求用于证明意图合并与目录幂等，
+不是性能统计，不增加 Rust test 函数。最小命令：
 `cargo test -p rovai-core --features slow-tests --lib minimax_check_and_catalog`。
 
 其余扩展既有 health、Pi Host、ZCode transport、Adapter 和 Renderer 参数 owner。Grok 旧的“恢复必须执行

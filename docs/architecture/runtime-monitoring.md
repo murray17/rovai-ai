@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-monitoring
 authority: runtime-usage-metering-and-read-boundaries
 status: accepted
-last_updated: 2026-10-18
+last_updated: 2026-11-11
 ---
 
 # Runtime Monitoring 架构
@@ -74,12 +74,16 @@ ACP `usage_update.cost` 的 Session 累计不进入 Run summary。Codex 完整 b
 ### 本地原生数值来源与 Context
 
 CodeBuddy、Kimi Code、Qoder 与 TRAE 使用当前 workspace／Session 下的 JSONL cursor；OpenCode V1
-使用只读 SQLite 中的根 Session assistant 元数据，读取根与所选 Runtime 的有效环境一致。
+与 Kilo 共用只读 SQLite 根 Session assistant 元数据 reader，读取根与所选 Runtime 的有效环境一致。
 OpenCode V2 停用 V1 reader，使用本轮终态 usage，缺响应时保持缺失；不能从两个来源重复累计。
 代际选择数据语义，不形成补丁版本白名单。prompt 启动时发起后台历史 offset 与身份 baseline 初始化；
 发送不等待初始化，晚建立的 baseline 可以漏掉早期统计。之后最多每 4 秒读取、buffer、落盘；
 Run 结算不等待 Flush，也不进行 400ms 尾读。跨越完成边界的原生日志读取结果丢弃，避免后继用量
 归到旧 Run。本地 journal 贡献显示部分统计。原生磁盘读取不持有 Core Database Mutex。部分行等待完整换行；文件换代、缺口、超限停止采集且不重扫历史。
+
+SQLite baseline 只冻结当前物理行游标，不复制 Session 历史身份。轮询在一致读快照中向前发现新记录，
+未完成候选按精确消息 ID 继续查询，已计账记录不再提取数值。候选与去重预算限本轮，不由历史长度耗尽；
+原 Session/cwd/文件连续性检查保留，物理游标身份失配时停止该 reader，不重扫或认领历史。
 
 MiniMax 的终态补采另冻结本轮显示消息 ID 与工具调用 ID，只接纳显式 canonical/turn 映射或精确
 结构化 toolCall 身份。压缩可以替换 active history；终态 reader 验证同一根 Session 后，在既有时间

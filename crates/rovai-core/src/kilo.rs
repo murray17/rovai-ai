@@ -8,9 +8,79 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::process::Command;
 
-use crate::{agent_profile::AdapterKind, runtime_discovery::runtime_environment_variable};
+use crate::{
+    agent_profile::{
+        AdapterKind, ModelDescriptor, ModelOptionDescriptor, RuntimeOptionScope, ValueChoice,
+    },
+    agent_runtime_adapter::normalize_model_catalog,
+    runtime_discovery::runtime_environment_variable,
+};
 
 pub(crate) const BOOTSTRAP_FILE: &str = "bootstrap.md";
+
+/// Official `kilo models --verbose`: an opaque provider/model ID line followed
+/// by one JSON object. Keep only directory fields, never native provider metadata.
+pub(crate) fn model_catalog(output: &[u8]) -> Result<Vec<ModelDescriptor>> {
+    #[derive(Deserialize)]
+    struct NativeModel {
+        name: Option<String>,
+        #[serde(default)]
+        variants: IndexMap<String, serde::de::IgnoredAny>,
+    }
+
+    let mut remaining = std::str::from_utf8(output).context("Kilo model catalog is not UTF-8")?;
+    let mut models = Vec::new();
+    while !remaining.trim().is_empty() {
+        let (id, body) = remaining
+            .trim_start()
+            .split_once('\n')
+            .context("Kilo model catalog is missing model metadata")?;
+        let id = id.trim_end_matches('\r');
+        anyhow::ensure!(
+            id.contains('/'),
+            "Kilo model catalog is missing a provider/model ID"
+        );
+        let mut objects = serde_json::Deserializer::from_str(body).into_iter::<NativeModel>();
+        let native = objects
+            .next()
+            .context("Kilo model catalog is missing a model object")?
+            .context("Kilo model catalog contains invalid model metadata")?;
+        remaining = &body[objects.byte_offset()..];
+        let values = native
+            .variants
+            .into_keys()
+            .map(|value| ValueChoice {
+                label: value.clone(),
+                value,
+            })
+            .collect::<Vec<_>>();
+        models.push(ModelDescriptor {
+            id: id.to_owned(),
+            display_name: native.name.unwrap_or_else(|| id.to_owned()),
+            description: None,
+            runtime_metadata: None,
+            // The directory does not report a Session's current model or effort.
+            is_default: false,
+            hidden: false,
+            deprecated: false,
+            options: if values.is_empty() {
+                Vec::new()
+            } else {
+                vec![ModelOptionDescriptor {
+                    key: "effort".into(),
+                    label: "Effort".into(),
+                    value_type: "enum".into(),
+                    values,
+                    default_value: None,
+                    scope: RuntimeOptionScope::Run,
+                }]
+            },
+        });
+    }
+    let models = normalize_model_catalog(models);
+    anyhow::ensure!(!models.is_empty(), "Kilo model catalog is empty");
+    Ok(models)
+}
 
 /// Applied result patches from Kilo's native write/edit and apply_patch tools.
 /// Header/path validation and rendering remain in the shared Diff projection.
@@ -104,8 +174,12 @@ pub(crate) fn database_path(
 }
 
 pub(crate) fn configure_command(command: &mut Command) {
+    command.arg("acp");
+    configure_environment(command);
+}
+
+pub(crate) fn configure_environment(command: &mut Command) {
     command
-        .arg("acp")
         .env("KILO_CLIENT", "acp")
         .env("KILO_DISABLE_AUTOUPDATE", "1")
         .env("KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "false")
@@ -130,5 +204,6 @@ pub(crate) fn configure_execution(command: &mut Command, bootstrap_file: &Path) 
     };
     config.append_instruction(bootstrap_file)?;
     command.env("KILO_CONFIG_CONTENT", serde_json::to_string(&config)?);
+    command.env("KILO_PERMISSION", r#"{"*":"allow"}"#);
     Ok(())
 }

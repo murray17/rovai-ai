@@ -38,12 +38,22 @@ Windows x64 的真实 Sub2API、用量修复与准入证据见[目标机验收](
 成功 Steer 后的常规 Host 复用及文件/cwd 对照见[复用记录](kilo-steer-reuse.md)。
 前台子代理工具展示补全、7.5 KiB 输出实测、Skills 验收状态与版本/平台判断说明见[补全记录](kilo-subagent-display.md)。
 自动阈值/overflow 压缩、逐模型 effort 原生查询及进程复用比较修正见[专项核对](kilo-auto-compaction-and-options.md)。
-逐模型 effort 已沿临时 Session 的非生成查询接通，包含完整目录／健康结果分离和两入口选择器；
-官方 Core 32 Run 的结果与权限直白解释见[接线记录](kilo-model-options.md)。
+早期逐模型 effort 接线、完整目录／健康结果分离和两入口选择器的官方 Core 32 Run 见
+[阶段记录](kilo-model-options.md)；当前目录已改为下述单次官方 CLI，实际执行仍用 ACP。
 MCP 保存下一轮生效、移除产品权限/Hook、普通取消确认后共用 Fleet Warm 的当前范围见
 [简化记录](kilo-simplification.md)、[Launch v84](../../contracts/runtime-launch-and-verification-v84.md)与 [D82](decisions.md#v1-72-d82)。
 先前记录中的权限 Hook、强制 pure=false 和取消必退役是阶段行为，不再描述当前接入。
 与最新主线的 Steer、MiniMax 按需参数查询及合同编号整合见[主线集成](kilo-simplification.md#主线集成user-sequence-66)。
+官方 CLI 批量 variants 的原生实测、目录/时序差异与 User sequence 75 的生产切换见
+[批量目录记录](kilo-bulk-models-probe.md)，当前合同为 [Launch v87](../../contracts/runtime-launch-and-verification-v87.md)。
+移除逐模型扫描，只投影原生名称、ID 和档位；保留健康／完整目录分离、共享缓存和 ACP 执行，不改变平台资格。
+User sequence 86 随后仅在正式执行进程启动时固定默认 allow，具体权限继续原生裁决；
+现有帮助文案与内部合同同步，官网不新增权限说明，见[实施记录](kilo-bulk-models-probe.md#user-sequence-86执行进程默认-allow)。
+User sequence 88 再移除权限只读行及帮助，模型/思考强度和执行默认保持，见[界面收尾](kilo-bulk-models-probe.md#user-sequence-88移除权限只读行)。
+
+Kilo/OpenCode V1 共用 SQLite 用量 reader 的历史重复读取及身份预算收口见
+[增量读取记录](native-sqlite-usage-incremental.md)；OpenCode V2 的终态数值路径保持。
+
 ## OpenCode Steer 局部接入（2026-11-10）
 
 按 User 确认接通 OpenCode 稳定 2.x 自 2.2.7 起的官方 ACP Steer，旧版继续普通排队。
