@@ -184,7 +184,17 @@ try {
   const multi=await send(['agent_1','agent_2','agent_3'],'隔离多队员要求：每人把文本 MIXED_成功 原样写入自己的文件。agent_1 的文件是 mixed-codex.txt；agent_2 是 mixed-opencode.txt；agent_3 是 mixed-idle.txt。文件正文只包含 MIXED_成功，不写姓名或说明。各自只写自己的文件，用 rovai send --public-only 报告，并在最终回复中再次输出 MIXED_成功。','steer')
   await wait(()=>inputs(runs().find(r=>r.agent_id==='agent_1'&&r.status==='running').id).some(i=>i.input_kind==='steer'&&i.dispatch_started_at),'mixed steer dispatched')
   const route=deliveries(multi)
-  assert.equal(route[0].requested_mode,'steer');assert.equal(route[1].requested_mode,busyPeer.canSteer?'steer':'start');assert.equal(route[1].status,busyPeer.canSteer?'claimed':'waiting');assert.equal(route[2].requested_mode,'start')
+  assert.equal(route[0].requested_mode,'steer')
+  assert.equal(route[1].requested_mode,busyPeer.canSteer?'steer':'start')
+  if(busyPeer.canSteer) {
+    assert.equal(route[1].claimed_agent_run_id,busyPeer.id)
+    // The native ACK may settle this Delivery while we wait for the other peer.
+    assert.ok(['claimed','settled'].includes(route[1].status),`unexpected Steer Delivery status: ${route[1].status}`)
+    if(route[1].status==='settled')assert.ok(inputs(busyPeer.id).some(i=>i.source_delivery_id===route[1].id&&i.input_kind==='steer'&&i.status==='accepted'),'settled Steer must have an accepted input on the target Run')
+  } else {
+    assert.equal(route[1].status,'waiting')
+  }
+  assert.equal(route[2].requested_mode,'start')
   await wait(()=>exists('mixed-idle.txt'),'idle independent start')
   await writeFile(join(project,'mixed-codex.release'),'release');await writeFile(join(project,'mixed-opencode.release'),'release')
   for(const name of ['mixed-codex.txt','mixed-opencode.txt'])await wait(()=>exists(name),name)
