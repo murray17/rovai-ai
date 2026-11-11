@@ -4888,6 +4888,12 @@ fn resolve_frozen_runtime_binding_with_snapshot(
     let registry = AgentRuntimeAdapterRegistry::default();
     let permission_descriptors = registry.permission_options(adapter_kind);
     let mut validation_binding = binding.clone();
+    if adapter_kind == AdapterKind::KiloCli
+        && let Some(values) = validation_binding.permissions.values.as_object_mut()
+    {
+        // Retire only the former product permission; stored profiles/history stay intact.
+        values.remove("permission");
+    }
     validation_binding.model = ModelSelection::RuntimeDefault;
     if let ModelSelection::Explicit {
         model_id, options, ..
@@ -4929,7 +4935,7 @@ fn resolve_frozen_runtime_binding_with_snapshot(
             executable_fingerprint: &executable_fingerprint,
             protocols: &protocols,
             native_session_compatibility_key: native_session_compatibility_key.as_deref(),
-            permissions: &binding.permissions,
+            permissions: &validation_binding.permissions,
             permission_descriptors: &permission_descriptors,
         },
     ) {
@@ -4976,7 +4982,7 @@ fn resolve_frozen_runtime_binding_with_snapshot(
         capabilities,
         protocol_version: projection.protocol_version,
         model,
-        permissions: binding.permissions.clone(),
+        permissions: validation_binding.permissions,
         native_session_compatibility_key,
         binding_compatibility_digest: projection.binding_compatibility_digest,
         host_config_digest: projection.host_config_digest,
@@ -5495,6 +5501,9 @@ fn runtime_configuration_issue(
         return Ok(None);
     }
     for (key, value) in values {
+        if configuration.adapter_kind == AdapterKind::KiloCli && key == "permission" {
+            continue;
+        }
         let Some(descriptor) = descriptor_by_key.get(key.as_str()) else {
             return Ok(issue(
                 "runtime_permission_option_unknown",
@@ -5518,7 +5527,10 @@ fn runtime_configuration_issue(
         }
     }
     if let Some(missing) = descriptors.iter().find(|descriptor| {
-        descriptor.supported && descriptor.required && !values.contains_key(&descriptor.key)
+        !(configuration.adapter_kind == AdapterKind::KiloCli && descriptor.key == "permission")
+            && descriptor.supported
+            && descriptor.required
+            && !values.contains_key(&descriptor.key)
     }) {
         return Ok(issue(
             "runtime_permission_value_required",
@@ -5572,6 +5584,55 @@ fn model_options_preserve_native_intent_across_catalog_refresh() {
     assert!(
         issue.is_none(),
         "the Runtime owns acceptance of preserved options"
+    );
+    let mut legacy_kilo = binding.clone();
+    legacy_kilo.adapter_kind = AdapterKind::KiloCli;
+    legacy_kilo.permissions.adapter_kind = AdapterKind::KiloCli;
+    for value in ["allow", "ask", "deny"] {
+        legacy_kilo.permissions.values = json!({"permission":value});
+        assert!(
+            runtime_configuration_issue("[]", 1, "[]", &legacy_kilo)
+                .unwrap()
+                .is_none()
+        );
+    }
+    let cached_permission = serde_json::to_string(
+        &AgentRuntimeAdapterRegistry::default().permission_options(AdapterKind::OpencodeCli),
+    )
+    .unwrap();
+    legacy_kilo.permissions.values = json!({});
+    assert!(
+        runtime_configuration_issue("[]", 1, &cached_permission, &legacy_kilo)
+            .unwrap()
+            .is_none(),
+        "a cached retired required descriptor must not restore Kilo's product permission"
+    );
+    let mut other = legacy_kilo.clone();
+    other.adapter_kind = AdapterKind::OpencodeCli;
+    other.permissions.adapter_kind = AdapterKind::OpencodeCli;
+    assert_eq!(
+        runtime_configuration_issue("[]", 1, &cached_permission, &other)
+            .unwrap()
+            .unwrap()
+            .code,
+        "runtime_permission_value_required"
+    );
+    legacy_kilo.permissions.values = json!({"permission":"deny"});
+    legacy_kilo.permissions.values["unknown_product_permission"] = json!("allow");
+    assert_eq!(
+        runtime_configuration_issue("[]", 1, "[]", &legacy_kilo)
+            .unwrap()
+            .unwrap()
+            .code,
+        "runtime_permission_option_unknown"
+    );
+    legacy_kilo.permissions.values = json!("invalid");
+    assert_eq!(
+        runtime_configuration_issue("[]", 1, "[]", &legacy_kilo)
+            .unwrap()
+            .unwrap()
+            .code,
+        "runtime_permission_values_invalid"
     );
     let default = ModelSelection::Explicit {
         model_id: "gpt-next".into(),

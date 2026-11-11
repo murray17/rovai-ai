@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-10-29
+last_updated: 2026-11-10
 ---
 
 # 当前基础架构不变量
@@ -326,6 +326,7 @@ last_updated: 2026-10-29
 - 新输入的恢复验证冻结 Manifest attachment receipt 的 closed shape/digest，再独立验证 admitted Runtime Files Root identity、精确 Thread root containment 与当前 Thread-root Auth Receipt；不要求 legacy View ready、append-only successor 或 generation 匹配。路径和历史 payload 不重新解析、探测或改写。Migration 99/100 的旧非终态输入按 delivery/action evidence 诚实终结，历史 Manifest/Blob/Auth Receipt/ACK 保留但不可再 dispatch。
 - Cancellation 在业务事务内把精确目标 Run 结算为 cancelled；Stop 使用 `agentRunId + version` CAS，不暂停 `(ThreadId, AgentId)` lane、不取消 waiting Delivery，也不能命中 successor。未发送 Input 为 not_accepted；accepted/delivery_unknown 与可能已执行的 Action 证据保留，原输入禁止自动重发。User 可主动授权新的续做执行；不提供“用户确认后强制放行”入口。
 - Run 业务终态不证明旧执行已经停止。当前 Core 仍精确持有 Run/epoch 且 Adapter cleanup/isolation 未确认时，后继 Delivery 保持 waiting，并临时阻止相同 execution root 的冲突 dispatch。工作区准备、消息领取、共享 root 与执行入口共用此判断；历史缺 ACK、不可读或身份未知不构成活跃冲突。前代进程只在 ready 后尝试一次有界后台清理，不阻断工作区或 Runtime，不补写旧 ACK，不重投旧输入。当前任务停止和退出仍如实确认。
+- 常驻 ACP 确认普通取消收尾后可通过共享 Fleet 进入 Warm；其 Reusable ACK 只证明旧 Run 隔离与授权解除，不冒充进程退出。超时、异常、显式退役与退出继续回收；证明与所有权范围见 [Accepted Input Recovery v9](../contracts/accepted-input-recovery-v9.md)。
 - 计划关闭保留 protocolVersion 3/report 和既有 writer/route barrier；public Composer 不再有持久 Draft 前置 fence。持久化 cycle 后先统一结算业务，barrier 后补齐再完成 cycle，Runtime 清理只影响清理事实与 deadline。未知外部效果保留，不伪造 Runtime outcome。
 - Diagnostics 是严格只读、最小化数据的 Core view；修复必须是用户显式选择的独立动作。导出集中脱敏，不能把 secret、完整路径、模型输入或 Runtime 原始输出作为便利诊断数据。
 

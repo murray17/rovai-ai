@@ -1002,14 +1002,14 @@ impl AgentRuntimeAdapterRegistry {
                 "sandbox_mode": "danger-full-access",
                 "approval_policy": "never",
             }),
-            AdapterKind::Pi => json!({}),
+            AdapterKind::Pi | AdapterKind::KiloCli => json!({}),
             AdapterKind::ZcodeApp => json!({"permission_mode": "yolo"}),
             AdapterKind::ClineCli => json!({"mode":"act", "auto_approve":"true"}),
             AdapterKind::CommandCodeCli => json!({"permission_mode":"bypass"}),
             AdapterKind::DeepseekHarness => {
                 json!({"sandbox_mode":"danger-full-access", "approval_policy":"never"})
             }
-            AdapterKind::OpencodeCli | AdapterKind::KiloCli => json!({
+            AdapterKind::OpencodeCli => json!({
                 "permission": "allow",
             }),
             AdapterKind::CopilotCli => json!({
@@ -1217,7 +1217,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::DeepseekHarness => {
                 acp_capability_snapshot(observation, dsh_permission_options())
             }
-            AdapterKind::KiloCli => acp_capability_snapshot(observation, kilo_permission_options()),
+            AdapterKind::KiloCli => acp_capability_snapshot(observation, Vec::new()),
             AdapterKind::OpencodeCli => self.opencode_cli.capability_snapshot(observation),
             AdapterKind::CopilotCli => self.copilot_cli.capability_snapshot(observation),
             AdapterKind::QoderCli => {
@@ -1267,7 +1267,7 @@ impl AgentRuntimeAdapterRegistry {
         match kind {
             AdapterKind::CodexCli => codex_permission_options(),
             AdapterKind::Pi => pi_permission_options(),
-            AdapterKind::KiloCli => kilo_permission_options(),
+            AdapterKind::KiloCli => Vec::new(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
@@ -3224,28 +3224,6 @@ fn opencode_permission_options() -> Vec<PermissionOptionDescriptor> {
     }]
 }
 
-fn kilo_permission_options() -> Vec<PermissionOptionDescriptor> {
-    vec![PermissionOptionDescriptor {
-        key: "permission".into(),
-        label: "permission".into(),
-        description:
-            "Kilo native default permission; native agent and tool-specific rules remain in effect."
-                .into(),
-        value_type: "enum".into(),
-        choices: vec![
-            choice("allow", "allow"),
-            choice("ask", "ask"),
-            choice("deny", "deny"),
-        ],
-        recommended_value: json!("ask"),
-        scope: RuntimeOptionScope::Host,
-        risk: "elevated".into(),
-        supported: true,
-        required: true,
-        unsupported_reason: None,
-    }]
-}
-
 fn copilot_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "allow_all".to_string(),
@@ -4030,7 +4008,7 @@ mod tests {
             ),
             (AdapterKind::Pi, json!({})),
             (AdapterKind::OpencodeCli, json!({"permission": "allow"})),
-            (AdapterKind::KiloCli, json!({"permission": "allow"})),
+            (AdapterKind::KiloCli, json!({})),
             (AdapterKind::CopilotCli, json!({"allow_all": "on"})),
             (
                 AdapterKind::ClaudeCodeCli,

@@ -24,9 +24,12 @@ const bootstrap = join(root, 'bootstrap.txt')
 await writeFile(bootstrap, '[SESSION_CHARTER]\nBOOTSTRAP_A_92c1\n[/SESSION_CHARTER]\n')
 const calls = [], hosts = [], evidence = { platform:process.platform+'-'+process.arch, checks:{} }
 let enterSteer, releaseSteer
+let enterCancel, releaseCancel
 let overflowInjected=false
 const steerEntered = new Promise(resolve => { enterSteer = resolve })
 const steerGate = new Promise(resolve => { releaseSteer = resolve })
+const cancelEntered = new Promise(resolve => { enterCancel = resolve })
+const cancelGate = new Promise(resolve => { releaseCancel = resolve })
 const provider = createServer(async (req,res)=>{
   let text=''
   for await (const chunk of req) text+=chunk
@@ -62,6 +65,7 @@ const provider = createServer(async (req,res)=>{
     if(tool){delta={role:'assistant',tool_calls:[{index:0,id:'call_kilo_mcp_'+calls.length,type:'function',function:{name:tool.function.name,arguments:'{"text":"NATIVE_MCP_MARKER"}'}}]};finish='tool_calls'}
   }
   if (content?.includes('STEER_ACTIVE') && body.tools?.length) { enterSteer(); await steerGate }
+  if (content?.includes('STEER_CANCEL_ACTIVE') && body.tools?.length) { enterCancel(); await cancelGate }
   if (res.destroyed) return
   const base={id:'chatcmpl-fixture-'+calls.length,object:'chat.completion.chunk',created:1,model:'local-model'}
   res.writeHead(200,{'content-type':'text/event-stream'})
@@ -115,6 +119,7 @@ async function open(){
     try{process.platform==='win32'?child.kill('SIGKILL'):process.kill(-child.pid,'SIGKILL')}catch(e){if(e.code!=='ESRCH')throw e}
   }
   const host={pid:child.pid,frames,
+    notify(method,params){child.stdin.write(JSON.stringify({jsonrpc:'2.0',method,params})+'\n')},
     rpc(method,params={}){
       return new Promise((resolve,reject)=>{
         const rid=++id,timer=setTimeout(()=>{pending.delete(rid);reject(new Error('Timeout '+method+' '+stderr.slice(-1500)))},45000)
@@ -247,6 +252,27 @@ try{
     outcomes:outcomes.map(outcome=>outcome.status==='fulfilled'?{status:'fulfilled',result:outcome.value.result}:{status:'rejected',error:outcome.reason.message,rpcError:outcome.reason.rpcError}),
     modelCalls:requests.length,correctionReachedModel:requests.some(request=>JSON.stringify(request.messages).includes('STEER_CORRECTION')),
     frames:hosts.at(-1).frames.slice(offset).map(frame=>({id:frame.id,method:frame.method,stopReason:frame.result?.stopReason,sessionId:frame.params?.sessionId,update:frame.params?.update?.sessionUpdate}))}
+  const cancelling=await host.rpc('session/new',{cwd:project,mcpServers:[]})
+  const originalCancel=host.prompt(cancelling.sessionId,'STEER_CANCEL_ACTIVE original request')
+  originalCancel.catch(()=>{})
+  await Promise.race([cancelEntered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Cancel provider entry deadline')),10000))])
+  const supplements=[1,2,3].map(index=>host.prompt(cancelling.sessionId,'STEER_CANCEL_CORRECTION_'+index))
+  for(const supplement of supplements)supplement.catch(()=>{})
+  const cancelDb=new DatabaseSync(join(root,'data','kilo','kilo.db'),{readOnly:true})
+  try {
+    const deadline=Date.now()+5000
+    while(Date.now()<deadline&&cancelDb.prepare("SELECT count(*) AS n FROM part WHERE session_id=? AND json_extract(data,'$.text') LIKE 'STEER_CANCEL_CORRECTION_%'").get(cancelling.sessionId).n<3)await new Promise(resolve=>setTimeout(resolve,25))
+    assert.equal(cancelDb.prepare("SELECT count(*) AS n FROM part WHERE session_id=? AND json_extract(data,'$.text') LIKE 'STEER_CANCEL_CORRECTION_%'").get(cancelling.sessionId).n,3,'All three native supplements must actually enter the same Session before cancellation')
+  } finally {cancelDb.close()}
+  const cancelStarted=Date.now()
+  host.notify('session/cancel',{sessionId:cancelling.sessionId});releaseCancel()
+  const cancelled=await Promise.all([originalCancel,...supplements])
+  assert(cancelled.every(outcome=>['end_turn','cancelled'].includes(outcome.result.stopReason)))
+  const elapsedMs=Date.now()-cancelStarted
+  assert(elapsedMs<2000,'Native prompt finalizers must fit the unchanged Core interrupt window')
+  const successor=await host.prompt(cancelling.sessionId,'AFTER_CANCEL_MULTI')
+  assert.equal(successor.result.stopReason,'end_turn')
+  evidence.checks.cancelledMultiplePrompts={sessionId:cancelling.sessionId,pid:host.pid,submittedSupplements:3,settledRequests:cancelled.length,stopReasons:cancelled.map(outcome=>outcome.result.stopReason),elapsedMs,sameHostSuccessor:true}
   try{await host.rpc('session/resume',{sessionId:'ses_missing_0123456789',cwd:project,mcpServers:[]});evidence.checks.unknownSessionRejected=false}catch(e){assert(e.rpcError,'Missing Session must return a native RPC error');evidence.checks.unknownSessionRejected={message:e.message,error:e.rpcError}}
   assert(evidence.checks.unknownSessionRejected!==false,'Unknown Session must not silently become a new one')
   const files=await host.rpc('session/new',{cwd:project,mcpServers:[]})
@@ -275,6 +301,7 @@ try{
   throw error
 }finally{
   releaseSteer()
+  releaseCancel()
   evidence.hostPids=hosts.map(h=>h.pid)
   evidence.cleanup=await Promise.allSettled(hosts.map(h=>h.close()))
   provider.closeAllConnections();await new Promise(r=>provider.close(r))

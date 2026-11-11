@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v2
 status: accepted
 source_version: v1.58
-last_updated: 2026-10-29
+last_updated: 2026-11-10
 ---
 
 # Managed Runtime Process v2
@@ -15,6 +15,10 @@ Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。
 [V1.28-D11](../versions/v1.28/decisions.md#v1-28-d11)。ACP Terminal derived child 的最终请求上下文解析理由见
 [V1.39-D08](../versions/v1.39/decisions.md#v1-39-d08)；旧 Pi MCP bridge 对普通 capture 的 portable command 扩展已由
 [V1.39-D09](../versions/v1.39/decisions.md#v1-39-d09)撤销。
+
+本合同的 stop/reap 证明用于实际进程回收。常驻 ACP 的普通取消若已通过全部原生收尾和 Fleet 复用检查，
+可以解除旧 Run 而保持 Host 存活，具体证明由 [Accepted Input Recovery v9](accepted-input-recovery-v9.md)拥有；
+Reusable 不等于进程退出，不删除该 Host 的管理记录和文件，也不替代 shutdown 的回收要求。
 
 ## 1. Module interface
 

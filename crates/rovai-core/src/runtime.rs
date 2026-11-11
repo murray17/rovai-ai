@@ -527,6 +527,7 @@ pub struct AgentRunCancellationCandidate {
     pub status: String,
     pub wait_reason: Option<String>,
     pub adapter_kind: String,
+    pub cancel_reason_code: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1419,7 +1420,7 @@ impl ExecutionRuntimeService {
                    agent_run.version, agent_run.execution_epoch, agent_run.status,
                    agent_run.wait_reason, COALESCE(agent_run.runtime_adapter_kind, ''),
                    camp.project_binding_kind, camp.project_path,
-                   COALESCE(
+                   agent_run.cancel_reason_code, COALESCE(
                        json_extract(agent_run.workspace_json, '$.executionRoot'),
                        camp.project_path
                    )
@@ -1451,7 +1452,8 @@ impl ExecutionRuntimeService {
                     adapter_kind: row.get(7)?,
                     project_binding_kind: row.get(8)?,
                     project_path: row.get(9)?,
-                    execution_root: row.get(10)?,
+                    cancel_reason_code: row.get(10)?,
+                    execution_root: row.get(11)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?)

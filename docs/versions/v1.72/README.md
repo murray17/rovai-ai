@@ -28,6 +28,9 @@ macOS arm64 开放主动使用的 Preview，其他平台 NotQualified；完整 F
 自动阈值/overflow 压缩、逐模型 effort 原生查询及进程复用比较修正见[专项核对](kilo-auto-compaction-and-options.md)。
 逐模型 effort 已沿 MiniMax 的共同非生成流程接通，包含完整目录／健康结果分离和两入口选择器；
 官方 Core 32 Run 的结果与权限直白解释见[接线记录](kilo-model-options.md)。
+MCP 保存下一轮生效、移除产品权限/Hook、普通取消确认后共用 Fleet Warm 的当前范围见
+[简化记录](kilo-simplification.md)、[Launch v83](../../contracts/runtime-launch-and-verification-v83.md)与 [D81](decisions.md#v1-72-d81)。
+先前记录中的权限 Hook、强制 pure=false 和取消必退役是阶段行为，不再描述当前接入。
 
 ## 执行台自动打开偏好（2026-11-08）
 

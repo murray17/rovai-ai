@@ -20,6 +20,7 @@ function fixture(kind: AdapterKind, empty: boolean, generation: number, expired 
     memberRuntimeDefaults: { adapterKind: kind, model: { mode: 'runtime_default' }, permissions: { adapterKind: kind, schemaVersion: 1, values: kind === 'codex-cli' ? { sandbox_mode: 'safe', approval_policy: 'never' } : { permission_mode: 'safe' } } },
     lastProbeAttempt: null
   } as AdapterInstallation
+  if (kind === 'kilo-cli') { installation.snapshot!.permissionOptions = []; installation.memberRuntimeDefaults!.permissions.values = {} }
   if (kind === 'kilo-cli') for (const [index, model] of installation.snapshot!.models.entries()) {
     model.options = index === 2 ? [] : [{ key: 'effort', label: 'Effort', valueType: 'enum', scope: 'session', defaultValue: index === 0 ? 'high' : 'medium',
       values: (index === 0 ? ['low', 'high'] : ['medium', 'max']).map(value => ({ value, label: value[0].toUpperCase() + value.slice(1) })) }]

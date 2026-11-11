@@ -7,6 +7,10 @@ last_updated: 2026-11-10
 
 # Kilo 原生 ACP 研究与实际探测
 
+当前 MCP 保存、原生权限和共享取消 Warm 的简化，含官方 Core 40 Run、同 PID 后继、新租约、
+原生四 RPC 取消与失败对照，见[简化记录](../../versions/v1.72/kilo-simplification.md)和
+[白名单证据](simplification-7.8.27-macos-arm64.json)。平台仍为 macOS arm64 Preview。
+
 自动阈值/overflow 压缩及逐模型 effort 查询的新验证见[专项核对](../../versions/v1.72/kilo-auto-compaction-and-options.md)。
 下方早期手动压缩记录不替代自动验收；模型目录当前实现范围与原生可查询能力分别记录。
 
@@ -28,7 +32,8 @@ User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-ki
 早期修正见[复核记录](../../versions/v1.72/kilo-acp-review-fixes.md)；
 后续禁后台、文件与 Core Steer 见[实施记录](../../versions/v1.72/kilo-files-steer-verification.md)。
 该后续记录包含真实 sub2api 开发 App；下方基线表中的本地 Provider 范围仍只描述早期原生研究。
-早期“无插件”只描述初次实现。当前追加原生 config 回调用于保持配置合并语义，不参与压缩或 B/P 投递。
+阶段记录曾使用原生 config 回调覆盖产品权限；当前已移除该权限 Hook，完整继承原生规则与用户插件/pure，
+MCP 保存下一 Run 生效和普通取消 Warm 的当前范围见[简化记录](../../versions/v1.72/kilo-simplification.md)。
 
 ## 基线与证据
 
@@ -60,7 +65,7 @@ User sequence 4 已确认 [Kilo R1](../../versions/v1.72/model-context-change-ki
 这不是引入第二套隔离系统的理由：现有
 `AcpRuntimeManager::ensure_agent_run` 已用 camp/member/native Binding 兼容键获得共享 Fleet Host。
 Kilo 明确采用一个 Native Binding 一个 Host，不实现额外跨 Binding 多 Session 复用。
-MCP Assignment 真实变化沿既有 invalidation 退役进程，之后精确恢复旧 nativeSessionId。
+MCP 保存不主动退役；下一 Run 获取时，真实不兼容配置沿既有机制替换 Host，之后精确恢复旧 nativeSessionId。
 名称冲突/投影沿现有 PreparedMcpProjection；native 同名优先级还需生产链路复验。
 
 ### Bootstrap 与压缩

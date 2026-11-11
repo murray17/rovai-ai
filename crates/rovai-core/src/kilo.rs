@@ -2,7 +2,7 @@
 //! stay in the shared ACP/Fleet implementation.
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -44,25 +44,20 @@ enum ConfigValue {
 }
 
 impl ConfigValue {
-    fn append_path(&mut self, key: &str, path: &Path) -> Result<()> {
+    fn append_instruction(&mut self, path: &Path) -> Result<()> {
         let Self::Object(config) = self else {
             anyhow::bail!("Kilo config must be an object")
         };
         let Self::Array(paths) = config
-            .entry(key.into())
+            .entry("instructions".into())
             .or_insert_with(|| Self::Array(Vec::new()))
         else {
-            anyhow::bail!("Kilo {key} must be an array")
+            anyhow::bail!("Kilo instructions must be an array")
         };
-        let path = if key == "plugin" {
-            url::Url::from_file_path(path)
-                .map_err(|_| anyhow::anyhow!("Kilo plugin path must be absolute"))?
-                .to_string()
-        } else {
-            path.to_str()
-                .context("Kilo config path is not UTF-8")?
-                .to_owned()
-        };
+        let path = path
+            .to_str()
+            .context("Kilo config path is not UTF-8")?
+            .to_owned();
         if !paths
             .iter()
             .any(|item| matches!(item, Self::Scalar(Value::String(value)) if value == &path))
@@ -117,15 +112,7 @@ pub(crate) fn configure_command(command: &mut Command) {
         .env("KILO_ENABLE_QUESTION_TOOL", "false");
 }
 
-pub(crate) fn configure_execution(
-    command: &mut Command,
-    permission: &str,
-    bootstrap_file: &Path,
-) -> Result<()> {
-    ensure!(
-        matches!(permission, "allow" | "ask" | "deny"),
-        "Kilo permission must be allow, ask or deny"
-    );
+pub(crate) fn configure_execution(command: &mut Command, bootstrap_file: &Path) -> Result<()> {
     let inherited = command
         .as_std()
         .get_envs()
@@ -141,21 +128,7 @@ pub(crate) fn configure_execution(
         }
         None => ConfigValue::Object(IndexMap::new()),
     };
-    let plugin = bootstrap_file
-        .parent()
-        .context("Kilo Host directory missing")?
-        .join("config.mjs");
-    std::fs::write(
-        &plugin,
-        include_str!("kilo/config.mjs")
-            .replace("__ROVAI_PERMISSION__", &serde_json::to_string(permission)?),
-    )
-    .context("failed to write Kilo native config hook")?;
-    config.append_path("instructions", bootstrap_file)?;
-    config.append_path("plugin", &plugin)?;
-    // Saved permissions require this native config hook during execution.
-    command
-        .env("KILO_CONFIG_CONTENT", serde_json::to_string(&config)?)
-        .env("KILO_PURE", "false");
+    config.append_instruction(bootstrap_file)?;
+    command.env("KILO_CONFIG_CONTENT", serde_json::to_string(&config)?);
     Ok(())
 }

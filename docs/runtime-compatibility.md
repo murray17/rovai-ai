@@ -6,6 +6,22 @@ last_updated: 2026-11-10
 
 # Agent Runtime 兼容性清单
 
+## 2026-11-10 Kilo MCP、权限与普通取消简化
+
+官方 **7.8.27**、macOS arm64、生产 Core/CLI 与本地受控 Provider 完成 **40 个 Run（37 成功、3 主动取消）**。
+MCP 保存不主动关闭 Kilo Host，下一 Run 以最新投影决定复用/替换，A→B→A、忙时保存、禁用/删除及精确 Session 通过。
+产品权限档位、Hook 与 pure 覆盖已删除；原生 allow/ask/deny、用户插件、pure、旧成员窄兼容及 question 工具缺席均实跑。
+
+普通取消及 1/3 条用户插话的取消，其后继均复用同 Host/PID/native Session，并使用新 CLI 租约；
+原清理 ACK 为 reusable，耗时 **60/57/71 ms**，旧租约在 Core 明确拒绝，新租约实际发送成功。
+共享调度仍串行：三条用户插话中一条已提交、两条排队，取消后来源全部结算。
+原生探针另确认原始加三条已提交补充在 **14 ms** 内全部 cancelled，同 PID/Session 后继成功；不把它冒充三条公开 Core 并发派发。
+共享 owner 保留快速/1.75 秒/超时/不回包/断连/错误及迟到隔离；预算仍为 2/2.5/3 秒（Windows 总计 5 秒）。
+
+65 个普通模型请求逐字保留当前 Bootstrap，原模型/effort、自动压缩、文件 Diff、前台子代理、输出预算与无 Node cwd MCP 回归通过。
+没有新的付费模型验收，不提升 Preview、Skills 或跨平台资格。
+[实施与失败对照](versions/v1.72/kilo-simplification.md)、[白名单证据](research/kilo-runtime/simplification-7.8.27-macos-arm64.json)。
+
 ## 2026-11-10 Kilo 逐模型 effort 接线
 
 官方 **7.8.27**、macOS arm64、生产 Core/CLI 使用本地受控 Provider 完成 **32 个 Run（30 成功、2 主动取消）**。

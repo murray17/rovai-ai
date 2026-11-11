@@ -61,7 +61,7 @@ use crate::{
     native_usage::{NativeContextModel, NativeUsageObservation, NativeUsageReader},
     runtime_fleet::{
         AgentRuntimeFleetManager, FleetAcquireRequest, FleetReleaseDisposition,
-        RuntimeCompatibilityKey, RuntimeProcessHost,
+        FleetReleaseOutcome, RuntimeCompatibilityKey, RuntimeProcessHost,
     },
     runtime_mcp::{
         EphemeralMcpConfigFile, external_acp_server, write_ephemeral_additive_mcp_config,
@@ -2756,7 +2756,10 @@ impl AcpHost {
                             );
                             if !rejected
                                 && message["result"]["stopReason"] != "end_turn"
-                                && progress.supplement_failure.is_none()
+                                && (progress.supplement_failure.is_none()
+                                    || progress.supplement_failure.as_ref().is_some_and(
+                                        |failure| failure["result"]["stopReason"] == "cancelled",
+                                    ))
                             {
                                 progress.supplement_failure = Some(message.clone());
                             }
@@ -2765,8 +2768,10 @@ impl AcpHost {
                         }
                         if progress.pending_steers == 0 {
                             progress.original_terminal.take().map(|(id, mut original)| {
-                                if original["result"]["stopReason"] == "end_turn"
-                                    && let Some(failure) = progress.supplement_failure.take()
+                                if matches!(
+                                    original["result"]["stopReason"].as_str(),
+                                    Some("end_turn" | "cancelled")
+                                ) && let Some(failure) = progress.supplement_failure.take()
                                 {
                                     original = failure;
                                     original["id"] = json!(id);
@@ -2787,7 +2792,10 @@ impl AcpHost {
                 }
                 if let Some((id, message)) = terminal {
                     if self.adapter_kind == AdapterKind::KiloCli
-                        && message["result"]["stopReason"] == "end_turn"
+                        && matches!(
+                            message["result"]["stopReason"].as_str(),
+                            Some("end_turn" | "cancelled")
+                        )
                     {
                         // Normal aggregate completion permits the shared
                         // detach and Fleet quiescence checks to reuse this Host.
@@ -2937,7 +2945,9 @@ impl AcpHost {
                     }
                     let should_emit_input_disposition = !active_prompt.acceptance_emitted;
                     active_prompt.acceptance_emitted = true;
-                    let active_prompt = active_prompt.clone();
+                    let mut active_prompt = active_prompt.clone();
+                    // Preserve the native terminal in the existing progress record.
+                    active_prompt.prompt_progress.original_terminal = Some((id, message.clone()));
                     route.phase = AcpSessionPhase::PromptCompleted(active_prompt.clone());
                     route.sequence = route.sequence.saturating_add(
                         if self.adapter_kind == AdapterKind::ClineCli
@@ -6252,20 +6262,59 @@ impl AcpRuntime {
             self.host
                 .release_client_terminals_for_session(&session_id, &self.owner)
                 .await;
-            if self.adapter_kind() == AdapterKind::KiloCli && cancellation.is_ok() {
+            if cancellation.is_ok()
+                && !matches!(
+                    self.adapter_kind(),
+                    AdapterKind::ZcodeApp | AdapterKind::HermesCli
+                )
+            {
                 // Native turn/snapshot finalizers share the cleanup owner's
                 // interrupt deadline; no independent inner duration.
-                while self.host.is_alive()
-                    && self
-                        .host
-                        .routes
-                        .read()
-                        .await
-                        .get(&session_id)
-                        .is_some_and(|route| {
-                            matches!(route.phase, AcpSessionPhase::PromptActive(_))
-                        })
-                {
+                loop {
+                    ensure!(self.host.is_alive(), "ACP Host exited during cancellation");
+                    let active = {
+                        let routes = self.host.routes.read().await;
+                        let route = routes
+                            .get(&session_id)
+                            .filter(|route| route.owner == self.owner)
+                            .context("ACP cancellation lost its Session route")?;
+                        match &route.phase {
+                            AcpSessionPhase::PromptActive(_) => true,
+                            AcpSessionPhase::PromptCompleted(prompt) => {
+                                ensure!(
+                                    prompt
+                                        .prompt_progress
+                                        .original_terminal
+                                        .as_ref()
+                                        .is_some_and(|(_, message)| matches!(
+                                            message["result"]["stopReason"].as_str(),
+                                            Some("end_turn" | "cancelled")
+                                        )),
+                                    "ACP cancellation ended without a confirmed native terminal"
+                                );
+                                false
+                            }
+                            AcpSessionPhase::Ready => false,
+                            _ => bail!("ACP cancellation Session is not settled"),
+                        }
+                    };
+                    let pending =
+                        self.host
+                            .pending
+                            .lock()
+                            .await
+                            .values()
+                            .any(|request| match request {
+                                PendingRpc::Prompt { owner, .. } => owner == &self.owner,
+                                PendingRpc::Response {
+                                    steer_target: Some(target),
+                                    ..
+                                } => target.owner == self.owner,
+                                _ => false,
+                            });
+                    if !active && !pending {
+                        break;
+                    }
                     tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             }
@@ -7135,7 +7184,11 @@ impl AcpCliRuntimeAdapter {
             .await
     }
 
-    pub async fn complete_agent_run(&self, agent_run_id: &str, execution_epoch: i64) {
+    pub async fn complete_agent_run(
+        &self,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> FleetReleaseOutcome {
         let runtime = {
             let mut runtimes = self.runtimes.lock().await;
             if runtimes
@@ -7151,12 +7204,12 @@ impl AcpCliRuntimeAdapter {
             runtime.detach().await;
         }
         self.fleet
-            .release(
+            .release_with_outcome(
                 agent_run_id,
                 execution_epoch,
                 completed_run_release_disposition(self.kind),
             )
-            .await;
+            .await
     }
 
     pub async fn prepare_agent_run_terminal_visibility(
@@ -7558,10 +7611,6 @@ fn configure_runtime_command(
             crate::kilo::configure_command(command);
             crate::kilo::configure_execution(
                 command,
-                values
-                    .get("permission")
-                    .and_then(Value::as_str)
-                    .context("Kilo permission is missing")?,
                 &private_config_root
                     .context("Kilo private Host directory missing")?
                     .join(crate::kilo::BOOTSTRAP_FILE),
@@ -10242,20 +10291,26 @@ mod compaction_detector_tests {
             }
         }
         // Kilo uses its own config namespace and the native instructions reader.
-        // The final native config hook only restores native rule/default order.
+        // Only instructions are appended; native rules, plugins and pure mode stay native.
         let root =
             std::env::temp_dir().join(format!("rovai-kilo-config-{} 空格", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
-        for mode in ["allow", "ask", "deny"] {
+        for pure in ["true", "false"] {
             let mut command = Command::new("/selected/kilo");
-            command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:{'git *':'allow','* --force':'deny'}},agent:{custom:{permission:{bash:{'git *':'allow','* --force':'deny'}}}},instructions:['native.md'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
+            command.env("KILO_CONFIG_CONTENT", "{model:'native/model',permission:{bash:{'git *':'allow','* --force':'deny'}},agent:{custom:{permission:{bash:{'git *':'allow','* --force':'deny'}}}},instructions:['native.md'],plugin:['file:///native/plugin.mjs'],mcp:{native:{type:'remote',url:'http://localhost'}}}");
             command.env("KILO_PERMISSION", r#"{"*":"allow","edit":"ask"}"#);
-            command.env("KILO_PURE", "true");
+            command.env("KILO_PURE", pure);
             crate::kilo::configure_command(&mut command);
             let file = root.join("kilo bootstrap 中文.md");
-            crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
-            crate::kilo::configure_execution(&mut command, mode, &file).unwrap();
-            for key in ["KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "KILO_PURE"] {
+            crate::kilo::configure_execution(&mut command, &file).unwrap();
+            crate::kilo::configure_execution(&mut command, &file).unwrap();
+            for (key, expected) in [
+                ("KILO_EXPERIMENTAL_BACKGROUND_SUBAGENTS", "false"),
+                ("KILO_PURE", pure),
+                ("KILO_PERMISSION", r#"{"*":"allow","edit":"ask"}"#),
+                ("KILO_CLIENT", "acp"),
+                ("KILO_ENABLE_QUESTION_TOOL", "false"),
+            ] {
                 assert_eq!(
                     command
                         .as_std()
@@ -10264,8 +10319,8 @@ mod compaction_detector_tests {
                         .unwrap()
                         .1
                         .unwrap(),
-                    "false",
-                    "the required Kilo config hook must remain enabled"
+                    expected,
+                    "native permission/plugin controls must not be overridden"
                 );
             }
             let content = command
@@ -10294,21 +10349,17 @@ mod compaction_detector_tests {
                 config["instructions"],
                 json!(["native.md", file.to_str().unwrap()])
             );
-            assert_eq!(config["plugin"].as_array().unwrap().len(), 1);
-            assert_eq!(
-                url::Url::parse(config["plugin"][0].as_str().unwrap())
-                    .unwrap()
-                    .to_file_path()
-                    .unwrap(),
-                root.join("config.mjs")
-            );
-            let hook = std::fs::read_to_string(root.join("config.mjs")).unwrap();
-            assert!(hook.contains(&format!("'*': \"{mode}\"")));
+            assert_eq!(config["plugin"], json!(["file:///native/plugin.mjs"]));
+            assert!(!root.join("config.mjs").exists());
+            assert!(config["permission"].get("*").is_none());
+            assert!(config["permission"].get("question").is_none());
             assert!(config["mcp"]["native"].is_object());
-            assert!(!automatically_allows_permission_requests(
-                AdapterKind::KiloCli,
-                &json!({"permission":mode})
-            ));
+            for retired in ["allow", "ask", "deny"] {
+                assert!(!automatically_allows_permission_requests(
+                    AdapterKind::KiloCli,
+                    &json!({"permission":retired})
+                ));
+            }
             for (configured, expected) in [
                 (None, Some(root.join("data/kilo/kilo.db"))),
                 (Some("custom.db"), Some(root.join("data/kilo/custom.db"))),
@@ -12062,10 +12113,14 @@ done
             .unwrap()
             .parse::<i32>()
             .unwrap();
-        runtime
+        let cancellation = runtime
             .cancel_until(tokio::time::Instant::now() + Duration::from_secs(2))
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(
+            cancellation.to_string().contains("deadline"),
+            "releasing client terminals alone cannot confirm the native prompt"
+        );
 
         assert!(
             host.client_terminal_bridge
@@ -13813,17 +13868,19 @@ while IFS= read -r ignored; do :; done
                     // Reuse this transport owner for the aggregate terminal:
                     // two already-submitted inputs must both settle, in either
                     // ordering relative to the original terminal.
-                    for (original_first, reply, accepted, rejected) in [
+                    for (original_first, reply, accepted, rejected, earlier_cancelled) in [
                         (
                             true,
                             json!({"result":{"stopReason":"end_turn"}}),
                             true,
+                            false,
                             false,
                         ),
                         (
                             false,
                             json!({"result":{"stopReason":"end_turn"}}),
                             true,
+                            false,
                             false,
                         ),
                         (
@@ -13831,10 +13888,12 @@ while IFS= read -r ignored; do :; done
                             json!({"error":{"code":-32603,"message":"native failure","data":{"details":"admitted_turn_failed"}}}),
                             true,
                             false,
+                            false,
                         ),
                         (
                             true,
                             json!({"error":{"code":-32603,"message":"connection lost"}}),
+                            false,
                             false,
                             false,
                         ),
@@ -13843,14 +13902,26 @@ while IFS= read -r ignored; do :; done
                             json!({"error":{"code":-32602,"message":"invalid input"}}),
                             false,
                             true,
+                            false,
                         ),
                         (
                             true,
                             json!({"result":{"stopReason":"cancelled"}}),
                             false,
                             false,
+                            false,
+                        ),
+                        (
+                            true,
+                            json!({"error":{"code":-32603,"message":"failure after cancellation"}}),
+                            false,
+                            false,
+                            true,
                         ),
                     ] {
+                        if earlier_cancelled && kind != AdapterKind::KiloCli {
+                            continue;
+                        }
                         let accepted = accepted
                             && (kind == AdapterKind::HermesCli || reply.get("error").is_none());
                         host.bind_session("session-steer", &runtime.owner, AcpSessionPhase::Ready)
@@ -13919,8 +13990,8 @@ while IFS= read -r ignored; do :; done
                             .await
                             .remove(&prepared.request_id)
                             .unwrap();
-                        let end =
-                            json!({"id":prepared.request_id,"result":{"stopReason":"end_turn"}});
+                        let end = json!({"id":prepared.request_id,"result":{"stopReason":
+                            if earlier_cancelled { "cancelled" } else { "end_turn" }}});
                         let mut original = Some(original);
                         if original_first {
                             host.complete_pending(
@@ -13940,7 +14011,8 @@ while IFS= read -r ignored; do :; done
                             let id = prepared.request_id + index + 1;
                             let pending = host.pending.lock().await.remove(&id).unwrap();
                             let message = if index == 0 {
-                                json!({"result":{"stopReason":"end_turn"}})
+                                json!({"result":{"stopReason":
+                                    if earlier_cancelled { "cancelled" } else { "end_turn" }}})
                             } else {
                                 reply.clone()
                             };
@@ -13975,7 +14047,7 @@ while IFS= read -r ignored; do :; done
                         }
                         let first = waiters.pop().unwrap().await.unwrap();
                         if kind == AdapterKind::KiloCli
-                            && reply["result"]["stopReason"] == "cancelled"
+                            && (reply["result"]["stopReason"] == "cancelled" || earlier_cancelled)
                         {
                             assert!(
                                 !first
@@ -13997,8 +14069,12 @@ while IFS= read -r ignored; do :; done
                         if kind == AdapterKind::KiloCli {
                             assert_eq!(
                                 host.retire_after_steer.load(Ordering::Acquire),
-                                !rejected && reply["result"]["stopReason"] != "end_turn",
-                                "only successful aggregate completion permits warm Kilo reuse"
+                                !rejected
+                                    && !matches!(
+                                        reply["result"]["stopReason"].as_str(),
+                                        Some("end_turn" | "cancelled")
+                                    ),
+                                "all native requests must settle normally or cancel before warm Kilo reuse"
                             );
                         }
                         if rejected || reply["result"]["stopReason"] == "end_turn" {

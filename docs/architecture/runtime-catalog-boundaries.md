@@ -69,19 +69,22 @@ Command Code 在 macOS arm64/x64、Windows x64 与 Linux x64 均为 Preview。�
 
 Kilo 是独立的官方 ACP 产品身份，复用共享 Host/Fleet/Binding 与现有原生审批。
 进程复用范围与 OpenCode/Codex 一样按 Thread、成员、原生绑定及配置匹配，不跨这些归属共享进程。
-每个成员的 Native Binding 使用自己的 resident Host，MCP 实际更新在既有生命周期边界退役进程，
+每个成员的 Native Binding 使用自己的 resident Host；MCP 保存只提交配置，下一 Run 获取时按最新投影核对兼容性，
+不兼容才清理旧 Host 并创建替代进程，
 原生会话仍以保存的精确 ID 恢复；不增加 Kilo 私有池、配置镜像或原生历史管理。
 Bootstrap 复用 managed-system 通道，经原生 instructions reader 读取共享冻结正文；
 无需压缩插件或校验握手。监控复用逐消息 numeric reader，原生配置、认证和数据继续归 Kilo 自己拥有。
-原生最终 config 回调只保持默认权限与具体规则顺序，不参与审批或 Bootstrap。
+权限完全继承 Kilo 原生配置；Rovai 不提供产品档位或权限 Hook，共享 Approval 只转交原生请求与用户选择。
+instructions 的局部有序追加不重排原生规则；用户插件与 pure 模式保留。
 原生环境关闭后台子代理，前台保留；Steer 复用共享多请求收口；文件结果进入既有 Diff 投影。
 前台 task 通过共享 normalizer 进入既有子代理工具展示，参数与真实报告沿普通详情和输出预算；
 不补采独立子会话工具，遵循 [Surface v58](../contracts/run-process-detail-surface-v58.md)。
 不同 cwd 的 MCP 复用 bundled CLI 的私有 cwd 启动模式，不引入 PATH Node 依赖；取消使用共享绝对阶段期限。
-成功 Steer 在原请求与补充请求全部收口后沿普通 Fleet 复用 Host；失败/取消保持原清理。
+成功 Steer 与已确认完整收尾的普通取消沿共享 Fleet 复用；异常、未知、超时及显式退役继续回收。
+共享 release outcome 区分旧 Run 隔离与进程已回收，不以缺少 handle 写 cleanup ACK。
 模型完整目录复用 MiniMax 的临时 Session 逐模型非生成查询，收集各模型实际提供的 effort；
 普通健康检查不遍历模型，也不覆盖已有完整目录及其成功时间。没有新缓存、参数推断或选择器组件。
-启动、权限、原生来源和数值口径见 [Runtime Launch v82](../contracts/runtime-launch-and-verification-v82.md)。
+启动、权限、原生来源和数值口径见 [Runtime Launch v83](../contracts/runtime-launch-and-verification-v83.md)。
 macOS arm64 当前为 Preview，其他平台 NotQualified；不由编译或原生握手宣称完整资格。
 理由见 [D76](../versions/v1.72/decisions.md#v1-72-d76)，实测边界见[研究与验证](../research/kilo-runtime/README.md)。
 

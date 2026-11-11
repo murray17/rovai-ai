@@ -3,10 +3,34 @@ document_type: version-decisions
 version: v1.72
 authority: decision-rationale
 lifecycle: current
-last_updated: 2026-11-09
+last_updated: 2026-11-10
 ---
 
 # v1.72 版本决定
+
+<a id="v1-72-d81"></a>
+## V1.72-D81：Kilo 继承原生权限，MCP 下一轮生效，取消沿共享释放
+
+- 状态：accepted
+- 日期：2026-11-10
+- 授权：User sequence 48 给定三项简化行为、公共预算、旧配置兼容和真实 Warm 验收要求。
+- 当前权威：[Launch v83](../../contracts/runtime-launch-and-verification-v83.md)、[Accepted Input Recovery v9](../../contracts/accepted-input-recovery-v9.md)。
+
+MCP 保存只提交配置，Kilo 的下一次获取继续通过现有兼容性判断替换不兼容 Host 并精确恢复 Session；
+不再在保存时主动退役。Command Code 策略保持，不引入 dirty 标记、版本计数或延迟队列。
+
+移除 Kilo 产品权限档位及其原生 config Hook，权限完全由 Kilo 自己加载与判断；
+保留原生 Approval 转交、有序追加 instructions、问卷与后台子代理的独立原生开关。
+仅兼容退役的旧 permission 字段，新执行忽略它，其他未知配置仍拒绝，历史 Run 不重写。
+这取代 D77/D79 中为产品权限覆盖保留 Hook 和强制关闭 pure 的选择；有序配置仍用于保持继承规则。
+
+普通取消复用已有 ACP pending RPC、Run/epoch、Session/prompt 与补充请求汇合；
+在原公共期限内确认原始及补充请求收尾、排空 ingress、解除授权后，沿 Fleet 既有检查决定 Warm 或回收。
+原清理回执保留实际 Reusable/Reaped 结果到 durable ACK，避免缺失 handle 冒充成功或旧 cleanup 停止后继。
+不新建取消状态机或 Kilo 复用管理器；超时、异常、显式停止与现有所有权例外保持。
+这只放宽 D80 原先仍退役的已确认普通取消，不改未知/失败的回收要求。
+
+基线差异、失败对照、官方 Core 的同 Host/PID/Session 与新租约证据见[实施记录](kilo-simplification.md)。
 
 <a id="v1-72-d80"></a>
 ## V1.72-D80：Kilo 成功 Steer 后沿常规 Fleet 复用

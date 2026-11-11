@@ -352,6 +352,17 @@ describe('member runtime parameters', () => {
   })
 
   it('does not present an approval mode for native Pi tool execution', () => {
+    const kilo = runtimeInstallation('kilo-cli')
+    for (const values of [{}, { permission: 'deny' }]) {
+      const draft = draftFromDefaults(kilo.memberRuntimeDefaults!)
+      draft.permissions.values = values
+      const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
+        adapterKind: 'kilo-cli', installation: kilo, draft, disabled: false, onChange: () => undefined
+      }))
+      expect(markup).toContain('沿用 Kilo 原生权限')
+      expect(markup).not.toContain('aria-label="权限模式')
+      expect(draft.permissions.values).toEqual(values)
+    }
     const installation = runtimeInstallation('pi')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
       adapterKind: 'pi',
@@ -573,9 +584,9 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'cline-cli':
       return { mode: 'act', auto_approve: 'true' }
     case 'pi':
+    case 'kilo-cli':
       return {}
     case 'opencode-cli':
-    case 'kilo-cli':
       return { permission: 'allow' }
     case 'copilot-cli':
       return { allow_all: 'on' }

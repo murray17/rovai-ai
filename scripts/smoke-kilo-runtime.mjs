@@ -3,9 +3,10 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { createServer } from 'node:http'
+import { createConnection } from 'node:net'
 import { DatabaseSync } from 'node:sqlite'
 import { createInterface } from 'node:readline'
-import { copyFile, mkdtemp, mkdir, realpath, readFile, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, realpath, readFile, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
@@ -33,6 +34,49 @@ let enterBusy, releaseBusy
 const busyEntered = new Promise(resolve=>{enterBusy=resolve})
 const busyGate = new Promise(resolve=>{releaseBusy=resolve})
 const bootstrapChecks=[]
+const leaseSnapshots=new Map(),staleLeaseChecks=[]
+async function currentCliContext() {
+  const directory=join(data,'runtime','builtin-tools')
+  const contexts=[]
+  for(const id of await readdir(directory)) {
+    const context=await readFile(join(directory,id,'context.json'),'utf8').then(JSON.parse).catch(error=>error.code==='ENOENT'?null:Promise.reject(error))
+    if(context?.lease)contexts.push(context)
+  }
+  assert.equal(contexts.length,1,'Exactly one member Run must own an active CLI lease')
+  return contexts[0]
+}
+async function observeCancellationLease(content) {
+  const marker=['CORE_AFTER_STEER_CANCEL_1','CORE_AFTER_STEER_CANCEL_3','CORE_STEER_CANCEL_FIRST_1','CORE_STEER_CANCEL_FIRST_3','CORE_AFTER_STOP','CORE_CANCEL'].find(marker=>content?.includes(marker))
+  if(!marker||leaseSnapshots.has(marker))return
+  const context=await currentCliContext();leaseSnapshots.set(marker,context)
+  const previous=marker==='CORE_AFTER_STOP'?'CORE_CANCEL':marker.startsWith('CORE_AFTER_STEER_CANCEL_')?marker.replace('CORE_AFTER_STEER_CANCEL_','CORE_STEER_CANCEL_FIRST_'):null
+  if(!previous)return
+  const old=leaseSnapshots.get(previous);assert(old)
+  assert.equal(context.processId,old.processId,'Cancellation must preserve the actual CLI process context')
+  assert.notEqual(context.lease.leaseId,old.lease.leaseId)
+  assert(context.lease.leaseGeneration>old.lease.leaseGeneration)
+  const stale=join(root,'evidence','stale-lease-context.json')
+  await writeFile(stale,JSON.stringify(old),{mode:0o600})
+  // The public CLI deliberately redacts early transport/authentication errors.
+  // Verify the exact lease rejection at the owned Core IPC boundary as well.
+  const response=await new Promise((resolve,reject)=>{
+    const socket=createConnection(old.coreEndpoint.path)
+    socket.setTimeout(10000,()=>socket.destroy(new Error('Stale lease IPC deadline')))
+    socket.once('error',reject)
+    socket.once('connect',()=>socket.write(JSON.stringify({ipcProtocolVersion:old.ipcProtocolVersion,processId:old.processId,processToken:old.processToken,leaseId:old.lease.leaseId,leaseGeneration:old.lease.leaseGeneration,leaseToken:old.lease.leaseToken,kind:'invoke',request_id:crypto.randomUUID(),operation:'thread.message.send',input:{body:'OLD_LEASE_MUST_NOT_PUBLISH',publicOnly:true}})+'\n'))
+    createInterface({input:socket}).once('line',line=>{socket.destroy();resolve(JSON.parse(line))})
+  })
+  assert.equal(response.error?.code,'builtin_tool.run_not_bound')
+  const rejected=await new Promise((resolve,reject)=>{
+    const child=spawn(join(binaries,'rovai'),['send','--public-only','--body','OLD_LEASE_MUST_NOT_PUBLISH'],{cwd:project,env:{...environment,ROVAI_CLI_CONTEXT:stale},stdio:['ignore','pipe','pipe']})
+    let stdout='',stderr=''
+    child.stdout.on('data',chunk=>stdout+=chunk);child.stderr.on('data',chunk=>stderr+=chunk)
+    child.once('error',reject);child.once('close',status=>resolve({status,stdout,stderr}))
+  })
+  assert.notEqual(rejected.status,0,'The old lease must not publish')
+  assert.equal(JSON.parse(rejected.stdout).error.code,'builtin_tool.cli_error')
+  staleLeaseChecks.push({marker,oldGeneration:old.lease.leaseGeneration,newGeneration:context.lease.leaseGeneration,oldLeaseRejected:true,rejectionCode:response.error.code})
+}
 const calls = [], events = [], result = { root, platform:process.platform+'-'+process.arch, checks:{} }
 let steerControl
 let overflowInjected=false
@@ -52,6 +96,7 @@ async function serve(req,res) {
   const content=typeof message?.content==='string'?message.content:JSON.stringify(message?.content)
   const childPrompt=Array.isArray(message?.content)?message.content.find(part=>part.type==='text')?.text:content
   const child=/^KILO_CHILD_(SHORT|LONG)$/.exec(childPrompt??'')
+  if(body.tools?.length&&!child)await observeCancellationLease(content)
   const source=nativeSystem.match(/Instructions from: (.+\/bootstrap\.md)\n/)?.[1]
   if(body.tools?.length&&!child) {
     const frozen=source?await readFile(source,'utf8'):''
@@ -79,7 +124,7 @@ async function serve(req,res) {
     assert(body.tools?.some(tool=>tool.function.name==='task'),'Native foreground task must remain available')
     const size=content.includes('CORE_TASK_LONG')?'LONG':'SHORT'
     delta={role:'assistant',tool_calls:[{index:0,id:'call_task_'+calls.length,type:'function',function:{name:'task',arguments:JSON.stringify({description:'Read native child report',subagent_type:'general',prompt:'KILO_CHILD_'+size})}}]};finish='tool_calls'
-  } else if(body.tools?.length && body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_MCP')) {
+  } else if(body.tools?.length && body.messages.at(-1)?.role!=='tool' && content?.includes('CORE_MCP')&&!content.includes('CORE_MCP_ABSENT')) {
     const tool=body.tools?.find(tool=>tool.function.name.includes('kilo_review')&&tool.function.name.endsWith('echo'))
     assert(tool,'Assigned MCP tool must be visible')
     delta={role:'assistant',tool_calls:[{index:0,id:'call_mcp_'+calls.length,type:'function',function:{name:tool.function.name,arguments:'{"text":"CORE_MCP_MARKER"}'}}]};finish='tool_calls'
@@ -91,6 +136,7 @@ async function serve(req,res) {
     if(content?.includes('CORE_FIRST_CLI')) command="printf KILO_CORE_STDOUT; rovai send --public-only --body KILO_CORE_CLI"
     else if(content?.includes('CORE_LONG_COMMAND')) command='cat '+quote(longCommandFile)
     else if(content?.includes('CORE_AFTER_STEER_CLI_')) command='rovai send --public-only --body KILO_WARM_CLI_'+content.match(/CORE_AFTER_STEER_CLI_(\d+)/)[1]
+    else if(content?.includes('CORE_AFTER_STOP')||content?.includes('CORE_AFTER_STEER_CANCEL')) command='rovai send --public-only --body KILO_CANCEL_WARM_CLI'
     else if(content?.includes('CORE_PERMISSION_')) {
       const label=content.match(/CORE_PERMISSION_(FILE|INLINE|AGENT)/)[1]
       command='printf KILO_'+label+'_BLOCKED > '+quote(join(project,label.toLowerCase()+'-blocked.txt'))
@@ -115,13 +161,15 @@ async function serve(req,res) {
 }
 await new Promise(r=>provider.listen(0,'127.0.0.1',r))
 await mkdir(join(root,'config','kilo'))
-await writeFile(join(root,'config','kilo','kilo.json'),JSON.stringify({permission:{bash:{'printf *':'allow','* KILO_FILE_BLOCKED*':'deny'}}}))
+await writeFile(join(root,'config','kilo','kilo.json'),JSON.stringify({permission:{'*':'allow',bash:{'printf *':'allow','* KILO_FILE_BLOCKED*':'deny'}}}))
+const pluginFile=join(root,'user-plugin.mjs'),pluginLog=join(root,'evidence','user-plugin.jsonl')
+await writeFile(pluginFile,`import { appendFile } from 'node:fs/promises'; export default async () => ({ config: async config => { await appendFile(${JSON.stringify(pluginLog)}, JSON.stringify({ pure:process.env.KILO_PURE,permission:config.permission })+String.fromCharCode(10)) } });`)
 await writeFile(join(root,'canary.txt'),'INHERITED_KILO_CONFIG_CANARY')
 await writeFile(join(root,'canary.json'),JSON.stringify({instructions:[join(root,'canary.txt')]}))
 process.env.KILO_CONFIG=join(root,'canary.json')
 process.env.KILO_CONFIG_DIR=join(root,'inherited-config')
 process.env.KILO_DB=':memory:'
-const config={permission:{bash:{'printf *':'allow','* KILO_INLINE_BLOCKED*':'deny'}},
+const config={plugin:[new URL('file://'+pluginFile).href],permission:{bash:{'printf *':'allow','* KILO_INLINE_BLOCKED*':'deny'}},
   agent:{build:{permission:{bash:{'printf KILO_AGENT*':'allow','* KILO_AGENT_BLOCKED*':'deny'}}}},autoupdate:false,share:'disabled',enabled_providers:['local'],model:'local/local-model',small_model:'local/local-model',compaction:{auto:true,threshold_percent:50},
   provider:{local:{name:'Local smoke',npm:'@ai-sdk/openai-compatible',env:[],options:{apiKey:'fixture-key',baseURL:'http://127.0.0.1:'+provider.address().port+'/v1'},
     models:{
@@ -219,7 +267,7 @@ try{
   const profile = await core.request('members.get',{agentId:'agent_2'})
   const configured = await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{
     agentId:'agent_2',expectedVersion:profile.version,adapterKind:'kilo-cli',
-    model:{mode:'explicit',modelId:'local/local-model',options:{effort:'high'}},permissions:profile.runtimeConfiguration.permissions,
+    model:{mode:'explicit',modelId:'local/local-model',options:{effort:'high'}},permissions:{...profile.runtimeConfiguration.permissions,values:{permission:'deny'}},
     environment:{expectedRevision:0,json:JSON.stringify({XDG_DATA_HOME:join(root,'member-data'),KILO_DB:'custom.db',KILO_PERMISSION:JSON.stringify({'*':'allow'})})}
   }})
   assert.equal(configured.status,'applied',JSON.stringify(configured))
@@ -264,11 +312,16 @@ try{
   const bootstrap=await readFile(instructionsPath,'utf8')
   assert(system.includes('Instructions from: '+instructionsPath+'\n'+bootstrap),'The model must receive the entire Bootstrap file verbatim')
   result.checks.bootstrap={bytes:Buffer.byteLength(bootstrap),nativeSystemVerbatim:true,userDynamicOnly:true}
+  assert.equal(await readFile(pluginLog,'utf8').catch(error=>error.code==='ENOENT'?null:Promise.reject(error)),null,'Inherited KILO_PURE=true must keep native user plugins disabled')
+  assert.equal(await readFile(join(instructionsPath,'..','config.mjs'),'utf8').catch(error=>error.code==='ENOENT'||error.code==='ENOTDIR'?null:Promise.reject(error)),null,'Rovai must not create a Kilo permission hook')
   assert(!JSON.stringify(user).includes('[SESSION_CHARTER]'),'Ordinary user input must contain only Dynamic Context')
   const b=await settle(await send('CORE_WARM'))
   assert.equal(a.started.hostInstanceId,b.started.hostInstanceId,'Warm input must reuse the resident Host')
   assert.equal(a.started.nativeThreadId,b.started.nativeThreadId,'Warm input must retain the exact native Session')
   result.checks.firstAndWarm={firstRun:a.run.id,warmRun:b.run.id,host:a.started.hostInstanceId,session:a.started.nativeThreadId}
+  const legacyMember=await core.request('members.get',{agentId:'agent_2'})
+  assert.equal(legacyMember.runtimeConfiguration.permissions.values.permission,'deny','Legacy member field remains readable')
+  result.checks.legacyPermission={stored:'deny',firstRunSucceeded:true,nativeDefaultAllowedCli:true}
   result.checks.metrics=await core.request('monitoring.execution',{campId:threadId,agentRunIds:[a.run.id,b.run.id]})
   const sampled=result.checks.metrics.runs.find(r=>r.agentRunId===a.run.id)
   assert(sampled?.promptInputTotalTokens>0&&sampled.outputTokens>0,'The shared sampler must observe native per-call counters')
@@ -398,10 +451,19 @@ for line in sys.stdin:
   assert.equal(childA.cwd,join(root,'service'),'MCP explicit cwd must survive ACP projection')
   assert.equal(childA.node,null,'The actual MCP child must also have no Node in PATH')
   assert.deepEqual(childA.args,literalArgs,'The bundled launcher must preserve literal argv without Node or a shell')
+  // Saving B then A without execution leaves the original idle A Host intact.
+  for(const source of ['KILO_MCP_B','KILO_MCP_A']) {
+    mutation=await core.request('mcp.servers.update',{expectedConfigDigest:mcp.configDigest,serverId,definitionJson:definition(source)})
+    assert.equal(mutation.status,'ok');mcp=mutation.config
+    assert(alive(childA.pid),'Saving an idle MCP configuration must not stop its Host or child')
+  }
+  const unchangedMcp=await settle(await send('CORE_MCP_A_UNCHANGED'))
+  assert.equal(unchangedMcp.started.hostInstanceId,aMcp.started.hostInstanceId,'A -> B -> A without execution must reuse A')
   mutation=await core.request('mcp.servers.update',{expectedConfigDigest:mcp.configDigest,serverId,definitionJson:definition('KILO_MCP_B',project)})
   assert.equal(mutation.status,'ok',JSON.stringify(mutation));mcp=mutation.config
-  await dead(childA.pid)
+  assert(alive(childA.pid),'Saving B must not wait for the idle A Host to exit')
   const bMcp=await settle(await send('CORE_MCP_B'))
+  await dead(childA.pid)
   const childB=(await starts()).at(-1)
   assert.equal(childB.source,'KILO_MCP_B')
   assert.equal(childB.cwd,project,'Same-cwd MCP must start directly without a launcher')
@@ -410,23 +472,43 @@ for line in sys.stdin:
   const active=await send('CORE_MCP_BUSY')
   await Promise.race([busyEntered,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Busy MCP model gate timeout')),10000))])
   mutation=await core.request('mcp.servers.update',{expectedConfigDigest:mcp.configDigest,serverId,definitionJson:definition('KILO_MCP_A')})
-  assert.equal(mutation.status,'ok',JSON.stringify(mutation))
+  assert.equal(mutation.status,'ok',JSON.stringify(mutation));mcp=mutation.config
   assert(alive(childB.pid),'Busy Host must retain its native child until Run settlement')
   releaseBusy()
   const busy=await settle(active)
-  await dead(childB.pid)
+  assert(alive(childB.pid),'Finishing the frozen B Run must leave B idle until the next acquire')
   const restored=await settle(await send('CORE_MCP_A_RESTORED'))
+  await dead(childB.pid)
   assert.notEqual(restored.started.hostInstanceId,aMcp.started.hostInstanceId,'A -> B -> A must not reclaim the retired A Host')
   assert.notEqual(restored.started.hostInstanceId,bMcp.started.hostInstanceId)
   assert.equal(restored.started.nativeThreadId,a.started.nativeThreadId)
   assert.equal((await starts()).at(-1).source,'KILO_MCP_A')
-  result.checks.mcp={cwd:childA.cwd,sameCwd:childB.cwd,literalArgsPreserved:true,nodeAbsentInChild:true,idleRetiredPid:childA.pid,busyRetiredPid:childB.pid,busyRun:busy.run.id,firstHost:aMcp.started.hostInstanceId,secondHost:bMcp.started.hostInstanceId,restoredHost:restored.started.hostInstanceId}
-  const setPermission=async(permission)=>{
-    const current=await core.request('members.get',{agentId:'agent_2'})
-    const receipt=await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{agentId:'agent_2',expectedVersion:current.version,adapterKind:'kilo-cli',model:current.runtimeConfiguration.model,permissions:{...current.runtimeConfiguration.permissions,values:{permission}}}})
-    assert.equal(receipt.status,'applied',JSON.stringify(receipt))
+  for(const [method,params] of [['mcp.servers.setEnabled',{enabled:false}],['mcp.servers.setEnabled',{enabled:true,acknowledgeHighRisk:true}],['mcp.servers.delete',{}]]) {
+    const previous=(await starts()).at(-1),offset=calls.length
+    mutation=await core.request(method,{expectedConfigDigest:mcp.configDigest,serverId,...params})
+    assert.equal(mutation.status,'ok');mcp=mutation.config
+    if(params.enabled!==true)assert(alive(previous.pid),'Disable/delete must only save the new configuration')
+    const present=params.enabled===true
+    const done=await settle(await send(present?'CORE_MCP_A_REENABLED':'CORE_MCP_ABSENT_'+method))
+    assert.equal(done.started.nativeThreadId,a.started.nativeThreadId)
+    assert(calls.slice(offset).filter(call=>call.tools?.length).every(call=>call.tools.some(tool=>tool.function.name.includes('kilo_review'))===present),'Disabled or deleted MCP tools must not remain visible')
+    if(!present)await dead(previous.pid)
   }
-  await setPermission('ask')
+  result.checks.mcp={cwd:childA.cwd,sameCwd:childB.cwd,literalArgsPreserved:true,nodeAbsentInChild:true,savesKeepIdleHost:true,saveABAReusesOriginal:true,disabledAndDeletedToolsAbsent:true,idleRetiredPid:childA.pid,busyRetiredPid:childB.pid,busyRun:busy.run.id,firstHost:aMcp.started.hostInstanceId,secondHost:bMcp.started.hostInstanceId,restoredHost:restored.started.hostInstanceId}
+  const setNativeEnvironment=async(patch)=>{
+    const current=await core.request('members.get',{agentId:'agent_2'})
+    const saved=await core.request('member.runtimeEnvironment.get',{memberId:'agent_2',adapterKind:'kilo-cli'})
+    const receipt=await core.request('members.runtime.set',{commandId:crypto.randomUUID(),command:{agentId:'agent_2',expectedVersion:current.version,adapterKind:'kilo-cli',model:current.runtimeConfiguration.model,permissions:current.runtimeConfiguration.permissions,environment:{expectedRevision:saved.revision,json:JSON.stringify({...saved.environment,...patch})}}})
+    assert.equal(receipt.status,'applied',JSON.stringify(receipt))
+    // Environment edits follow the existing cold-spawn contract, independently
+    // of MCP's next-Run compatibility rule. Do not expect a Warm CLI to reread env.
+    await core.close();core=await openCore();await core.request('health.check')
+  }
+  const setNativePermission=async(edit)=>{
+    const saved=await core.request('member.runtimeEnvironment.get',{memberId:'agent_2',adapterKind:'kilo-cli'})
+    await setNativeEnvironment({KILO_PERMISSION:JSON.stringify({...JSON.parse(saved.environment.KILO_PERMISSION),edit})})
+  }
+  await setNativePermission('ask')
   approvalDecision='allow_once'
   const allowed=await settle(await send('CORE_WRITE_ALLOW'))
   assert.equal(await readFile(join(project,'allowed.txt'),'utf8'),'KILO_WRITE_OK')
@@ -452,13 +534,21 @@ for line in sys.stdin:
   assert.equal(allowed.started.nativeThreadId,c.started.nativeThreadId,'Permission Host replacement must keep native Session')
   assert.equal(denied.started.nativeThreadId,c.started.nativeThreadId)
   result.checks.approval={allowRun:allowed.run.id,denyRun:denied.run.id}
-  await setPermission('deny')
+  await setNativePermission('deny')
   const denyOffset=calls.length
   const savedDeny=await settle(await send('CORE_WRITE_DENY_SAVED'))
-  assert(calls.slice(denyOffset).filter(call=>call.tools?.length).every(call=>!call.tools.some(tool=>tool.function.name==='write')),'Saved native deny must override the inherited allow wildcard')
+  assert(calls.slice(denyOffset).filter(call=>call.tools?.length).every(call=>!call.tools.some(tool=>tool.function.name==='write')),'The native edit=deny rule must govern native tool availability')
   assert.equal(await readFile(join(project,'denied.txt'),'utf8').catch(error=>error.code==='ENOENT'?null:Promise.reject(error)),null)
   result.checks.savedDeny=savedDeny.run.id
-  await setPermission('allow')
+  await setNativePermission('allow')
+  await setNativeEnvironment({KILO_PURE:'false'})
+  const withPlugin=await settle(await send('CORE_NATIVE_USER_PLUGIN'))
+  const pluginRecords=(await readFile(pluginLog,'utf8')).trim().split('\n').map(JSON.parse)
+  assert(pluginRecords.length>0&&pluginRecords.every(record=>record.pure==='false'),'Native user plugins must execute when native pure mode permits them')
+  await setNativeEnvironment({KILO_PURE:'true'})
+  const pureRun=await settle(await send('CORE_NATIVE_PURE'))
+  assert.equal((await readFile(pluginLog,'utf8')).trim().split('\n').length,pluginRecords.length,'Rovai must not override native pure mode to load plugins')
+  result.checks.nativePermissions={allowRun:withPlugin.run.id,askAllowRun:allowed.run.id,askDenyRun:denied.run.id,nativeDenyRun:savedDeny.run.id,pureRun:pureRun.run.id,userPluginInvoked:true,purePreserved:true,noRovaiPermissionHook:true}
   const cancelReceipt=await send('CORE_CANCEL')
   const cancelDeadline=Date.now()+30000
   let cancelling
@@ -470,6 +560,9 @@ for line in sys.stdin:
     await delay()
   }
   assert(cancelling&&await readFile(startedFile,'utf8')==='STARTED','Native delayed command must start before cancel')
+  const cancelStart=events.find(event=>event.method==='agent_run.started'&&event.params?.agentRunId===cancelling.id).params
+  const cancelOwner=JSON.parse(await readFile(join(data,'runtime-fleet','owners',cancelStart.hostInstanceId+'.json'),'utf8'))
+  const cancelStarted=Date.now()
   const cancelled=await core.request('agentRuns.cancel',{commandId:crypto.randomUUID(),command:{threadId,agentRunId:cancelling.id,expectedVersion:cancelling.version}})
   assert.notEqual(cancelled.status,'rejected',JSON.stringify(cancelled))
   const cancelledRun=await waitForRun(threadId,(cancelReceipt.commandResult??cancelReceipt).payload.threadMessageId)
@@ -478,7 +571,14 @@ for line in sys.stdin:
   await new Promise(r=>setTimeout(r,5500))
   assert.equal(await readFile(lateFile,'utf8').catch(e=>e.code==='ENOENT'?null:Promise.reject(e)),null,'Cancelled tool must not leave a delayed file effect')
   const afterCancel=await settle(await send('CORE_AFTER_STOP'))
-  result.checks.cancel={run:cancelledRun.run.id,status:cancelledRun.run.status,nextRun:afterCancel.run.id}
+  const afterOwner=JSON.parse(await readFile(join(data,'runtime-fleet','owners',afterCancel.started.hostInstanceId+'.json'),'utf8'))
+  assert.equal(afterCancel.started.hostInstanceId,cancelStart.hostInstanceId,'Confirmed ordinary cancellation must reuse its Host')
+  assert.equal(afterCancel.started.nativeThreadId,cancelStart.nativeThreadId)
+  assert.equal(afterOwner.pid,cancelOwner.pid)
+  const cancelAck=events.find(event=>event.method==='agent_run.runtime_cleanup_completed'&&event.params?.agentRunId===cancelledRun.run.id)
+  assert.equal(cancelAck?.params.hostDisposition,'reusable','Cleanup must report isolation without claiming process exit')
+  assert(!afterCancel.snapshot.messages.some(message=>message.body==='OLD_LEASE_MUST_NOT_PUBLISH'))
+  result.checks.cancel={run:cancelledRun.run.id,status:cancelledRun.run.status,nextRun:afterCancel.run.id,host:afterCancel.started.hostInstanceId,pid:afterOwner.pid,session:afterCancel.started.nativeThreadId,oldEpoch:cancelledRun.run.executionEpoch,newRunEpoch:afterCancel.run.executionEpoch,cleanupDisposition:cancelAck.params.hostDisposition,elapsedThroughSuccessorMs:Date.now()-cancelStarted}
   const ledger=new DatabaseSync(join(data,'rovai.sqlite'),{readOnly:true})
   const native=new DatabaseSync(nativeDatabase,{readOnly:true})
   const until=async check=>{const deadline=Date.now()+30000;while(Date.now()<deadline){if(check())return;await delay()}throw Error('Steer intake/receipt deadline')}
@@ -514,19 +614,42 @@ for line in sys.stdin:
       previousHost=next.started.hostInstanceId
     }
     result.checks.steer={run:warmCycles[0].run,accepted:warmCycles.length,sameRun:true,heldUntilAllRequests:true,warmReuseCycles:warmCycles}
-    const cancellation=armSteer(), cancelFirst=await send('CORE_STEER_CANCEL_FIRST')
-    await Promise.race([cancellation.entered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Steer cancel provider deadline')),30000))]);const target=await activeSteerRun()
-    assert.equal((await steer(target,'CORE_STEER_CANCEL_CORRECTION')).commandResult.status,'accepted')
-    await until(()=>native.prepare("SELECT count(*) AS n FROM part WHERE json_extract(data,'$.text') LIKE '%CORE_STEER_CANCEL_CORRECTION%'").get().n>0)
-    const snapshot=await core.request('camps.snapshot',{threadId}), current=snapshot.agentRuns.find(r=>r.id===target.id)
-    await core.request('agentRuns.cancel',{commandId:crypto.randomUUID(),command:{threadId,agentRunId:target.id,expectedVersion:current.version}})
-    cancellation.release();steerControl=null
-    const cancelled=await waitForRun(threadId,(cancelFirst.commandResult??cancelFirst).payload.threadMessageId)
-    assert.equal(cancelled.run.status,'cancelled');result.finishedRuns.push(cancelled.run.id)
-    const afterSteerCancel=await settle(await send('CORE_AFTER_STEER_CANCEL'))
-    assert.notEqual(afterSteerCancel.started.hostInstanceId,events.find(event=>event.method==='agent_run.started'&&event.params?.agentRunId===cancelled.run.id)?.params.hostInstanceId,'Cancelled pending Steer must still stop its Host')
+    const cancellationCycles=[]
+    for(const supplements of [1,3]) {
+      const cancellation=armSteer(), cancelFirst=await send('CORE_STEER_CANCEL_FIRST_'+supplements)
+      await Promise.race([cancellation.entered,new Promise((_,reject)=>setTimeout(()=>reject(Error('Steer cancel provider deadline')),30000))]);const target=await activeSteerRun()
+      const original=events.find(event=>event.method==='agent_run.started'&&event.params?.agentRunId===target.id).params
+      const owner=JSON.parse(await readFile(join(data,'runtime-fleet','owners',original.hostInstanceId+'.json'),'utf8'))
+      for(let index=0;index<supplements;index++) {
+        const correction='CORE_STEER_CANCEL_CORRECTION_'+supplements+'_'+index
+        assert.equal((await steer(target,correction)).commandResult.status,'accepted')
+      }
+      await until(()=>native.prepare("SELECT count(*) AS n FROM part WHERE json_extract(data,'$.text') LIKE ?").get('%CORE_STEER_CANCEL_CORRECTION_'+supplements+'_0%').n>0)
+      const submitted=ledger.prepare("SELECT count(*) AS n FROM runtime_input_delivery WHERE agent_run_id=? AND input_kind='steer' AND dispatch_started_at IS NOT NULL").get(target.id).n
+      assert.equal(submitted,1,'The existing scheduler waits for a full prompt receipt before dispatching the next Steer')
+      const snapshot=await core.request('camps.snapshot',{threadId}),current=snapshot.agentRuns.find(run=>run.id===target.id)
+      await core.request('agentRuns.cancel',{commandId:crypto.randomUUID(),command:{threadId,agentRunId:target.id,expectedVersion:current.version}})
+      cancellation.release();steerControl=null
+      const cancelled=await waitForRun(threadId,(cancelFirst.commandResult??cancelFirst).payload.threadMessageId)
+      assert.equal(cancelled.run.status,'cancelled');result.finishedRuns.push(cancelled.run.id)
+      const next=await settle(await send('CORE_AFTER_STEER_CANCEL_'+supplements))
+      const after=JSON.parse(await readFile(join(data,'runtime-fleet','owners',next.started.hostInstanceId+'.json'),'utf8'))
+      assert.equal(next.started.hostInstanceId,original.hostInstanceId,'All submitted Steer requests must settle before a real warm successor')
+      assert.equal(next.started.nativeThreadId,original.nativeThreadId)
+      assert.equal(after.pid,owner.pid)
+      const ack=events.find(event=>event.method==='agent_run.runtime_cleanup_completed'&&event.params?.agentRunId===target.id)
+      assert.equal(ack?.params.hostDisposition,'reusable')
+      assert(!next.snapshot.messages.some(message=>message.body==='OLD_LEASE_MUST_NOT_PUBLISH'))
+      const receipts=ledger.prepare("SELECT status FROM camp_message_delivery WHERE claimed_agent_run_id=? AND requested_mode='steer'").all(target.id)
+      assert.equal(receipts.length,supplements)
+      assert(receipts.every(receipt=>['failed','cancelled'].includes(receipt.status)),'Cancellation must settle queued sources without submitting them to a successor')
+      cancellationCycles.push({supplements,submittedNativeSupplements:submitted,queuedBeforeCancel:supplements-submitted,sourceReceiptsSettled:receipts.length,run:target.id,nextRun:next.run.id,host:next.started.hostInstanceId,pid:after.pid,session:next.started.nativeThreadId,oldEpoch:target.executionEpoch,newRunEpoch:next.run.executionEpoch,cleanupDisposition:ack.params.hostDisposition,successorCliCommitted:true})
+    }
     result.checks.steer.cancelledWithPending=true
-    result.checks.steer.cancelledHostRetired=true
+    result.checks.steer.cancelledHostReused=true
+    result.checks.steer.cancelledWarmCycles=cancellationCycles
+    assert.equal(staleLeaseChecks.length,3)
+    result.checks.cancellationLeases=staleLeaseChecks
   } finally {steerControl?.release();ledger.close();native.close()}
   const automaticDatabase=new DatabaseSync(nativeDatabase,{readOnly:true})
   let autoSession, autoHost
