@@ -93,6 +93,13 @@ last_updated: 2026-11-11
 - 生产 BusinessApp／ThreadWorkspace 的隔离 Electron 验收通过：实际选文定位聚焦副本消息，无来源选文保留文字与作者。
   复用原主题／尺寸和导航恢复矩阵，增加一张引用气泡截图；传输为受控 fixture，Core 数据边界由上述事务 owner 验证。
   类型检查通过；真实模型和 Windows 原生验收边界保持原记录。
+- 本轮收窄提交为 `d41481d25fc006f143fbb382720f85c0d78ada28`，已推送原 PR，远端
+  [CI / gate](https://github.com/murray17/rovai-ai/actions/runs/43043673679) 通过。
+  `pnpm build:desktop`、完整 `TZ=UTC pnpm test`（3274 Vitest passed / 2 skipped、377 Node passed / 2 skipped）、
+  默认 Rust workspace（484 passed / 1 ignored）、导出 3 项、引用交互 1 项、格式检查及按目标 base 的文档门禁通过。
+  Thread 附件目录 `Thread-Fork-Cleanup` 只保留新增引用定位图和验证记录；主题矩阵复用原 fixture 的几何断言。
+- 本轮完整扩展回归为 Core lib 1026 passed / 12 failed / 8 ignored，分叉 3 项均通过；失败名称集合与前述
+  已在 `main@92ff101a7` 隔离复现的 12 项完全一致。Core lib 失败后未继续其余 workspace 扩展 target。
 
 ## Kilo 官方 ACP（2026-11-08，Preview 实施）
 
