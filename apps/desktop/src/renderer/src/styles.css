@@ -1023,6 +1023,11 @@ html[data-rovai-platform="win32"] .bootstrap-shell-brand { padding-left: 20px; }
 .error-banner small { margin-top: 4px; color: var(--danger); font-size: 11px; }
 .app-toast { position: fixed; z-index: 120; right: 22px; bottom: 22px; display: flex; max-width: min(420px, calc(100vw - 44px)); align-items: center; gap: 12px; padding: 10px 12px 10px 14px; border: 1px solid var(--line-strong); border-radius: 9px; color: var(--ink); background: var(--surface); box-shadow: 0 12px 32px color-mix(in srgb, var(--ink) 18%, transparent); }
 .app-toast.is-danger { border-color: color-mix(in srgb, var(--danger) 55%, var(--line-strong)); color: var(--danger); background: color-mix(in srgb, var(--surface) 82%, var(--danger-soft)); }
+.app-toast.is-top-center { position: absolute; top: 10px; bottom: auto; left: 50%; right: auto; transform: translateX(-50%); max-width: calc(100% - 32px); z-index: 150; }
+.app-toast-spinner { width: 16px; height: 16px; flex: 0 0 16px; stroke: currentColor; stroke-width: 1.7; animation: app-toast-spin 850ms linear infinite; }
+.app-toast-spinner circle { opacity: .2; }
+@keyframes app-toast-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .app-toast-spinner { animation: none; } }
 .page-zoom-indicator { position: fixed; z-index: 230; top: 62px; left: 50%; display: inline-flex; min-height: 34px; align-items: baseline; gap: 8px; padding: 7px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-float); pointer-events: none; transform: translateX(-50%); animation: page-zoom-indicator-in 140ms cubic-bezier(.16, 1, .3, 1) both; }
 .page-zoom-indicator span { color: var(--muted); font-size: 11px; line-height: 1.3; }
 .page-zoom-indicator strong { font: 720 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
@@ -3680,6 +3685,12 @@ html[data-mobile-web="true"] .quick-chat-empty-unavailable > button { min-height
   pointer-events: auto;
   transform: translateY(0);
 }
+.message-actions.has-fork { opacity: 1; pointer-events: auto; transform: none; }
+.message-more-button { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; padding: 0; border: 0; border-radius: 6px; color: var(--faint); background: transparent; font: inherit; font-size: 18px; cursor: pointer; }
+.message-more-button:hover, .message-more-button[data-state="open"] { color: var(--ink); background: var(--surface-hover); }
+.message-action-menu { width: max-content; min-width: 0; }
+.message-action-menu .sidebar-action-menu-item { display: flex; align-items: center; gap: 8px; line-height: 20px; }
+.message-action-menu .sidebar-action-menu-item > svg { width: 16px; height: 16px; flex: 0 0 16px; }
 .message-action-time {
   display: inline-flex;
   flex: none;

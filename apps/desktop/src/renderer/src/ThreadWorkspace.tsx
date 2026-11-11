@@ -1,9 +1,10 @@
 import { RovaiBrandMark } from './RovaiBrandMark'
+import { ForkIcon } from './ForkIcon'
 import { InlineProjectFileReference } from './InlineProjectFileReference'
 import { projectFileLink } from './project-file-reference'
 import { interactionDraft, saveInteractionDraft, retainInteractionDrafts, type InteractionDraftScope } from './native-interaction-drafts'
 import type { NativeInteractionView, NativeInteractionAnswer, NativeInteractionResult } from '@contracts'
-import { MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
+import { ExportGlyph, MessageExportDialog, MessageSelectButton, MessageSelectionDock, useMessageExport } from './MessageExport'
 import { campMessageAuthorLabel, createMessageExportEntry, type MessageExportEntry } from './message-export'
 import { nativeSkillCatalogNotices } from './native-skill-diagnostics'
 import { InlineThreadReference } from './ThreadReferencePreview'
@@ -1666,6 +1667,8 @@ export function ThreadWorkspace({
   busy,
   onSend,
   onWithdrawMessage,
+  onForkMessage,
+  forkBusy = false,
   reeditStore,
   onReconcileDelivery,
   onPendingDraftPersisted,
@@ -1731,6 +1734,8 @@ export function ThreadWorkspace({
   busy: boolean
   onSend(draft: ThreadComposerDraftView, deliveryMode?: 'start' | 'steer', steerTargets?: Array<{agentRunId: string; executionEpoch: number}>): Promise<ThreadMessageSendReceipt | void>
   onWithdrawMessage?(message: ThreadMessageView): Promise<void>
+  onForkMessage?(message: ThreadMessageView): void
+  forkBusy?: boolean
   reeditStore?: MessageReeditStore
   onReconcileDelivery?(deliveryId: string): Promise<string>
   onPendingDraftPersisted?(): void
@@ -2923,6 +2928,13 @@ export function ThreadWorkspace({
       await attachmentPreparationQueue.current
       const flushed = await composerHandle?.flush()
       const draft = flushed?.draft ?? await draftCoordinator.waitForIdle()
+      if (activationStateRef.current === 'active' && !memberCreationRef.current) {
+        // Autosave reports errors without rejecting the edit. Leaving must retry
+        // that same snapshot and fail before unmounting if storage is still full.
+        const storage = window.localStorage
+        if (!storage) throw new Error('Local draft storage is unavailable')
+        saveLocalThreadComposerDraft(draft, storage)
+      }
       if (activationStateRef.current === 'pending' && !memberCreationRef.current) {
         // Attachment-only changes do not dirty Lexical. Retry the existing
         // presence/save acknowledgement before allowing this editor to leave.
@@ -6011,6 +6023,8 @@ export function ThreadWorkspace({
                                     className={`agent-message-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                                     onReply={handleReply}
                                     onCopy={handleCopy}
+                                    onFork={!snapshot.thread.missionId && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
+                                    forkBusy={forkBusy}
                                     onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                                   />
                                 )}
@@ -6072,6 +6086,8 @@ export function ThreadWorkspace({
                           className={`agent-message-output-actions${campMessage.id === latestAgentMessageId ? ' is-persistent' : ''}`}
                           onReply={handleReply}
                           onCopy={handleCopy}
+                          onFork={!snapshot.thread.missionId && campMessage.authorType === 'agent' && !campMessage.withdrawn && !campMessage.id.startsWith('optimistic:') && onForkMessage ? () => onForkMessage(campMessage) : undefined}
+                          forkBusy={forkBusy}
                           onSelect={messageExport.eligible.some(m => m.id === campMessage.id) ? () => messageExport.start(campMessage.id) : undefined}
                         />
                       </div>
@@ -10212,7 +10228,7 @@ function MessageSurface({
   )
 }
 
-function MessageActions({
+export function MessageActions({
   timestamp,
   timeAfter = false,
   copied,
@@ -10221,6 +10237,8 @@ function MessageActions({
   onCopy,
   onSelect,
   onWithdraw,
+  onFork,
+  forkBusy = false,
   withdrawing = false
 }: {
   timestamp?: React.ReactNode
@@ -10231,11 +10249,13 @@ function MessageActions({
   onCopy(): void
   onSelect?(): void
   onWithdraw?(): void
+  onFork?(): void
+  forkBusy?: boolean
   withdrawing?: boolean
 }): JSX.Element {
   return (
     <div
-      className={`message-actions${copied ? ' copied' : ''}${className ? ` ${className}` : ''}`}
+      className={`message-actions${copied ? ' copied' : ''}${onFork ? ' has-fork' : ''}${className ? ` ${className}` : ''}`}
       role="group"
       aria-label={uiAttribute("消息操作")}
     >
@@ -10270,7 +10290,13 @@ function MessageActions({
           <MessageReplyIcon />
         </button>
       )}
-      {onSelect && <MessageSelectButton onSelect={onSelect} />}
+      {onFork ? <DropdownMenu.Root modal={false}>
+        <DropdownMenu.Trigger asChild><button className="message-more-button" type="button" title={uiAttribute('更多消息操作')} aria-label={uiAttribute('更多消息操作')}>···</button></DropdownMenu.Trigger>
+        <DropdownMenu.Portal><DropdownMenu.Content className="sidebar-action-menu message-action-menu" align="start" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => event.preventDefault()} loop>
+          <DropdownMenu.Item className="sidebar-action-menu-item" disabled={forkBusy} onSelect={onFork}><ForkIcon /><span>{uiAttribute('从此处分叉')}</span></DropdownMenu.Item>
+          {onSelect && <DropdownMenu.Item className="sidebar-action-menu-item" onSelect={onSelect}><ExportGlyph /><span>{uiAttribute('导出')}</span></DropdownMenu.Item>}
+        </DropdownMenu.Content></DropdownMenu.Portal>
+      </DropdownMenu.Root> : onSelect && <MessageSelectButton onSelect={onSelect} />}
       {timeAfter && timestamp}
     </div>
   )

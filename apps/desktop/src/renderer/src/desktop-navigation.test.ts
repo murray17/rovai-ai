@@ -5,6 +5,31 @@ const thread = (threadId: string): NavigationTarget => ({ kind: 'camp', threadId
 const create = () => createDesktopNavigation(async (_target, transaction) => { transaction.commit() })
 
 describe('window navigation history', () => {
+  it('fences fork completion by page visit across A→B→A and pending leave guards', async () => {
+    let release: (() => void) | undefined
+    const navigation = createDesktopNavigation(async (_target, transaction) => {
+      if (release) await new Promise<void>(resolve => { release = resolve })
+      if (!transaction.isCurrent()) return
+      transaction.commit()
+      const visit = navigation.captureVisit()
+      transaction.commit() // preview → full is still the same visit
+      expect(visit.isSameVisit()).toBe(true)
+    })
+    navigation.reset(thread('A'))
+    const first = navigation.captureVisit()
+    await navigation.push(thread('B'))
+    expect(first.isSameVisit()).toBe(false)
+    await navigation.back()
+    expect(first.isSameVisit()).toBe(false)
+    const returned = navigation.captureVisit()
+    release = () => undefined
+    const waiting = navigation.push(thread('copy'))
+    expect(returned.isCurrent()).toBe(false)
+    expect(returned.isSameVisit()).toBe(true)
+    release!()
+    await waiting
+    expect(returned.isSameVisit()).toBe(false)
+  })
   it('keeps one initial page and only ignores the current destination', async () => {
     const navigation = create()
     navigation.reset(thread('A'))
